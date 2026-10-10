@@ -427,6 +427,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.flush_leaving_draft(cx);
+        // A reply aimed at this chat from another one survives the draft
+        // restore below ("Reply in Another Chat").
+        let carried_reply = self
+            .pending_reply
+            .clone()
+            .filter(|reply| reply.target_chat == Some(chat_id));
         // Choosing a chat from the list ends the peek at it.
         self.forum_chats_peek = false;
         // Phase B4: the TTL picker belongs to the previous chat.
@@ -434,7 +440,7 @@ impl QuillApp {
         if self
             .pending_reply
             .as_ref()
-            .is_some_and(|reply| reply.chat_id != chat_id)
+            .is_some_and(|reply| !reply.belongs_to(chat_id))
         {
             self.pending_reply = None;
         }
@@ -500,6 +506,9 @@ impl QuillApp {
             session.open_chat(chat_id);
         }
         self.restore_open_draft(window, cx);
+        if carried_reply.is_some() {
+            self.pending_reply = carried_reply;
+        }
         let text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&text);
         // Telegram Desktop's info column follows the open chat.

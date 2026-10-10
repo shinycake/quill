@@ -609,6 +609,10 @@ pub struct QuillApp {
     pub(super) drag_select_from: Option<(ChatId, MessageId)>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
     pub(super) forward_picker_open: bool,
+    /// "Reply in Another Chat": the chat chooser for the composer's reply.
+    pub(super) reply_elsewhere_open: bool,
+    /// "Update Quote": the picker for the part of the message to quote.
+    pub(super) reply_quote_open: bool,
     /// Destinations ticked in the share box.
     pub(super) share_selection: quill::share_box::ShareSelection,
     /// The share box's optional comment, sent before the forwards.

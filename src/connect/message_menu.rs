@@ -438,6 +438,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// The message menu's emoji pack footer: fetch the pack's title once
+    /// (`getStickerSet`); the answer lands in `Session::emoji_pack_titles`.
+    pub fn fetch_emoji_pack_title(&mut self, set_id: i64) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active()
+            || set_id == 0
+            || self.session.emoji_pack_titles.contains_key(&set_id)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::EmojiPackTitle { set_id }, None);
+        match self.sender.send_json(&get_sticker_set(extra, set_id)) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
     /// A custom emoji was tapped: look up its pack's title
     /// (`getStickerSet`); the answer lands in
     /// `Session::custom_emoji_preview`.

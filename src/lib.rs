@@ -87,6 +87,7 @@ pub mod profile_forms;
 pub mod proxy;
 pub mod quit_guard;
 pub mod reaction_who;
+pub mod reply_options;
 pub mod request_share;
 pub mod rich;
 pub mod row_fx;

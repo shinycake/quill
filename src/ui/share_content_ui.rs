@@ -67,14 +67,10 @@ impl QuillApp {
 
     /// The composer's reply (with its quote), carried by the share like by
     /// any other send.
-    fn share_reply(&self) -> Option<SendReply> {
-        self.pending_reply.as_ref().map(|reply| SendReply {
-            message_id: reply.message_id,
-            quote: reply
-                .quote
-                .as_ref()
-                .map(|quote| (quote.text.clone(), quote.position)),
-        })
+    fn share_reply(&self, chat_id: ChatId) -> Option<SendReply> {
+        self.pending_reply
+            .as_ref()
+            .and_then(|reply| reply.send_target(chat_id))
     }
 
     /// Send the picked address-book entry as a contact card.
@@ -97,7 +93,7 @@ impl QuillApp {
         else {
             return;
         };
-        let reply_to = self.share_reply();
+        let reply_to = self.share_reply(chat_id);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share_content_dialog = None;
@@ -127,7 +123,7 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
-        let reply_to = self.share_reply();
+        let reply_to = self.share_reply(chat_id);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.status_note = "sending dice needs a live connection (demo)".into();
@@ -175,7 +171,7 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
-        let reply_to = self.share_reply();
+        let reply_to = self.share_reply(chat_id);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share_content_dialog = None;

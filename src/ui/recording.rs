@@ -429,16 +429,8 @@ impl QuillApp {
     /// to the open chat.
     pub(super) fn recording_send_reply(&self) -> Option<quill::telegram::SendReply> {
         let reply = self.pending_reply.as_ref()?;
-        self.live
-            .as_ref()
-            .filter(|live| live.driver.session.open_chat == Some(reply.chat_id))?;
-        Some(quill::telegram::SendReply {
-            message_id: reply.message_id,
-            quote: reply
-                .quote
-                .as_ref()
-                .map(|quote| (quote.text.clone(), quote.position)),
-        })
+        let open = self.live.as_ref()?.driver.session.open_chat?;
+        reply.send_target(open)
     }
 
     /// MED2: send the finished recording, whichever mode is active.

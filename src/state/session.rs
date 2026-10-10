@@ -157,6 +157,9 @@ pub struct Session {
     pub sticker_set_view: Option<StickerSetView>,
     /// The pack of the custom emoji the user just tapped in a message.
     pub custom_emoji_preview: Option<CustomEmojiPreview>,
+    /// Titles of the emoji packs a message uses, by set id, for the menu's
+    /// "This message contains emoji from X pack" footer.
+    pub emoji_pack_titles: HashMap<i64, String>,
     /// One-shot result of an admin moderation call from the delete box
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
@@ -1322,6 +1325,7 @@ impl Session {
             wanted_reactor_tab: None,
             sticker_set_view: None,
             custom_emoji_preview: None,
+            emoji_pack_titles: HashMap::new(),
             message_action_note: None,
             ownership: OwnershipState::default(),
             basic_group_own: HashMap::new(),
