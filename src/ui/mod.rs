@@ -87,6 +87,8 @@ mod auth_ui;
 mod bot_pending;
 mod bot_stream;
 mod bots;
+mod bots_extras;
+mod bots_extras_demo;
 mod bubble_header;
 mod bubble_header_demo;
 mod call_panel;
@@ -226,6 +228,7 @@ mod shell;
 mod shortcuts;
 mod showcase_demo;
 mod signin_ui;
+mod spell_dictionaries;
 #[cfg(target_os = "macos")]
 mod spellcheck_mac;
 mod spellcheck_ui;

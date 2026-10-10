@@ -141,6 +141,7 @@ pub use requests::*;
 pub use saved_types::*;
 pub use search_types::*;
 pub use session::*;
+pub use session_chat_caps::FastButtonTarget;
 pub(crate) use session_chat_search::history_message;
 pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;

@@ -132,6 +132,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Game and add-bot links open a picker over the current view; the
+        // bot's own chat stays closed (tdesktop shows a box, not the chat).
+        if matches!(
+            action,
+            DeepLinkAction::ShareGame { .. } | DeepLinkAction::AddBot { .. }
+        ) && self.run_bot_link(chat_id, action, cx)
+        {
+            return;
+        }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live

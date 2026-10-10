@@ -203,14 +203,21 @@ fn aff_charset(aff: &[u8]) -> Option<String> {
         .find_map(|l| l.trim().strip_prefix("SET ").map(|s| s.trim().to_string()))
 }
 
+/// Parses a dictionary from the bytes of its `.aff` and `.dic` files.
+/// `None` when either is not valid Hunspell data (also used to vet a
+/// download before it is installed).
+pub fn parse_dictionary(aff_bytes: &[u8], dic_bytes: &[u8]) -> Option<spellbook::Dictionary> {
+    let charset = aff_charset(aff_bytes);
+    let aff = decode_text(aff_bytes, charset.as_deref())?;
+    let dic = decode_text(dic_bytes, charset.as_deref())?;
+    spellbook::Dictionary::new(&aff, &dic).ok()
+}
+
 /// Loads one dictionary from disk. `None` when unreadable or unparsable.
 pub fn load_dictionary(file: &DictionaryFile) -> Option<spellbook::Dictionary> {
     let aff_bytes = std::fs::read(&file.aff).ok()?;
     let dic_bytes = std::fs::read(&file.dic).ok()?;
-    let charset = aff_charset(&aff_bytes);
-    let aff = decode_text(&aff_bytes, charset.as_deref())?;
-    let dic = decode_text(&dic_bytes, charset.as_deref())?;
-    spellbook::Dictionary::new(&aff, &dic).ok()
+    parse_dictionary(&aff_bytes, &dic_bytes)
 }
 
 struct Entry {

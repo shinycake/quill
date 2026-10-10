@@ -117,7 +117,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -710,6 +710,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — bot chat with / command menu".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyBotExtras => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — bot extras (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyBotProfile => (
@@ -1490,6 +1496,18 @@ impl QuillApp {
             }
         })
         .detach();
+        let dict_filter_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Filter languages")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        cx.subscribe(&dict_filter_input, |_this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
         let gif_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search GIFs")
@@ -2217,6 +2235,8 @@ impl QuillApp {
             // codex:spellcheck-native: platform engine + persisted app words.
             spellchecker,
             spell_info,
+            dict_manager: Default::default(),
+            dict_filter_input,
             spell_misspellings: Vec::new(),
             spell_checked_text: String::new(),
             spell_task: None,
@@ -2521,6 +2541,7 @@ impl QuillApp {
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
+        app.demo_setup_bot_extras(demo, window, cx);
         app.demo_setup_proxy(demo, window, cx);
         app.demo_setup_profile_panels(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
@@ -2680,6 +2701,24 @@ impl QuillApp {
             }
             let handled = edit_app
                 .update(cx, |this, cx| this.try_edit_last_message(window, cx))
+                .unwrap_or(false);
+            if handled {
+                cx.stop_propagation();
+            }
+        })
+        .detach();
+        // Fast buttons mode: keys 1 to 9 in an empty composer press the
+        // last message's inline buttons (tdesktop `setupFastButtonMode`).
+        let fast_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, window, cx| {
+            let keystroke = &event.keystroke;
+            let Some(index) =
+                quill::fast_buttons::index_for_key(&keystroke.key, keystroke.modifiers.modified())
+            else {
+                return;
+            };
+            let handled = fast_app
+                .update(cx, |this, cx| this.try_fast_button(index, window, cx))
                 .unwrap_or(false);
             if handled {
                 cx.stop_propagation();
