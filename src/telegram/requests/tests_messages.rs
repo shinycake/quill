@@ -965,3 +965,18 @@ fn link_choice_index_past_the_end_pins_the_last_link() {
     );
     assert_eq!(choice.chosen_url("no links"), "");
 }
+
+#[test]
+fn stop_live_location_sends_a_null_location() {
+    let json = stop_live_location(RequestId(4), ChatId(7), MessageId(9));
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "editMessageLiveLocation");
+    assert_eq!(v["chat_id"], 7);
+    assert_eq!(v["message_id"], 9);
+    assert!(v["location"].is_null());
+    assert!(v["reply_markup"].is_null());
+    let schema = include_str!("../../../schema/td_api.tl");
+    assert!(schema.contains(
+        "editMessageLiveLocation chat_id:int53 message_id:int53 reply_markup:ReplyMarkup location:liveLocation = Message;"
+    ));
+}
