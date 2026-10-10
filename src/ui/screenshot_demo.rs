@@ -140,6 +140,10 @@ pub enum ScreenshotDemo {
     ReadyChatlistSuggestionsPhone,
     /// Chat-list rows: video chat badge and emoji status on rows.
     ReadyChatBadges,
+    /// The "Export chat history" options box.
+    ReadyChatExport,
+    /// Appearance box: tray icon, start in tray, close behavior, quit warning.
+    ReadyWindowSettings,
     /// Chat-list rows: the folder editor's chat sections.
     ReadyFoldersChats,
     /// Chat-list rows: the folder editor's chat picker with search.

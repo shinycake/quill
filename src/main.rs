@@ -325,6 +325,7 @@ fn ui_main(args: &[String]) {
 
     let credentials = quill::credentials::load();
     let appearance = ui::QuillApp::load_appearance();
+    quill::tray::set_tray_enabled(appearance.show_tray_icon);
     let start_in_tray =
         args.iter().any(|arg| arg == "--start-minimized") || appearance.start_in_tray;
     let application = quill_application(appearance.interface_scale_pct).with_assets(QuillAssets);
@@ -532,13 +533,31 @@ fn install_main_window_tray(
         }
     }
     quill::notify_focus::warm();
-    #[cfg(target_os = "macos")]
-    window.on_window_should_close(cx, |_, cx| {
-        if quill::tray::tray_available() {
-            cx.hide();
-            false
-        } else {
-            true
+    // The title-bar close button: "Run in the background" hides the app
+    // (macOS) or minimizes the window (Linux/Windows, where GPUI cannot hide
+    // a window), otherwise the window closes.
+    window.on_window_should_close(cx, {
+        let view = view.downgrade();
+        move |window, cx| {
+            use quill::tray::{CloseOutcome, close_outcome};
+            let background = view
+                .update(cx, |this, _| this.minimize_to_tray())
+                .unwrap_or(false);
+            match close_outcome(
+                background,
+                quill::tray::tray_available(),
+                cfg!(target_os = "macos"),
+            ) {
+                CloseOutcome::Quit => true,
+                CloseOutcome::HideApp => {
+                    cx.hide();
+                    false
+                }
+                CloseOutcome::Minimize => {
+                    window.minimize_window();
+                    false
+                }
+            }
         }
     });
     // parity:platform-tray-icon — system tray icon with
@@ -722,6 +741,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-channels-admin", ReadyChannelsAdmin),
         ("ready-chat-avatars", ReadyChatAvatars),
         ("ready-chat-badges", ReadyChatBadges),
+        ("ready-chat-export", ReadyChatExport),
         ("ready-chat-header", ReadyChatHeader),
         ("ready-chat-list", ReadyChatListMenu),
         ("ready-chat-list-2", ReadyChatList),
@@ -947,6 +967,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-voice", ReadyVoice),
         ("ready-voice-pause", ReadyVoicePause),
         ("ready-web-sessions", ReadyWebSessions),
+        ("ready-window-settings", ReadyWindowSettings),
         ("wait-code", WaitCode),
         ("wait-code-firebase", WaitCodeFirebase),
         ("wait-code-flash", WaitCodeFlash),
@@ -1154,6 +1175,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             ".quill-ready-ready-chatlist-suggestions-phone"
         }
         ScreenshotDemo::ReadyChatBadges => ".quill-ready-ready-chat-badges",
+        ScreenshotDemo::ReadyChatExport => ".quill-ready-ready-chat-export",
+        ScreenshotDemo::ReadyWindowSettings => ".quill-ready-ready-window-settings",
         ScreenshotDemo::ReadyFoldersChats => ".quill-ready-ready-folders-chats",
         ScreenshotDemo::ReadyFoldersChatPicker => ".quill-ready-ready-folders-chat-picker",
         ScreenshotDemo::ReadyFoldersToast => ".quill-ready-ready-folders-toast",

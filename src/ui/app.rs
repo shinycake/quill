@@ -712,6 +712,9 @@ pub struct QuillApp {
     /// and whether Settings is waiting for the next key to bind.
     pub(super) group_call_ptt: quill::calls::ptt::PushToTalk,
     pub(super) ptt_clock: Instant,
+    /// Cmd+Q hold detection (`macWarnBeforeQuit`) and its clock origin.
+    pub(super) quit_guard: quill::quit_guard::QuitGuard,
+    pub(super) quit_clock: Instant,
     pub(super) ptt_capture: bool,
     /// System-wide push-to-talk hook, live only while joined with PTT on.
     pub(super) global_ptt: quill::calls::ptt_global::PlatformController,
@@ -1147,6 +1150,10 @@ pub struct QuillApp {
     pub(super) folder_limit_box: Option<quill::folder_limits::FolderLimitKind>,
     /// The Archive menu's "How does it work?" box is open.
     pub(super) archive_hint_open: bool,
+    /// Screenshot demo: the Appearance box shows only the window and tray switches.
+    pub(super) window_settings_screenshot: bool,
+    /// The "Export chat history" box.
+    pub(super) chat_export_dialog: Option<super::chat_export_ui::ChatExportDraft>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

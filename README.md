@@ -558,8 +558,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Transfer ownership with password confirmation <!-- parity:admin-transfer-ownership -->
 - [x] Pick a new owner when leaving as owner <!-- parity:admin-new-owner-on-leave -->
 - [ ] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
-- [ ] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
-- [ ] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
+- [x] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
+- [x] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
 - [x] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
 - [ ] Boosts list, boost link, boost features table and unrestrict-by-boosts setting <!-- parity:admin-boosts-list -->
 - [ ] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
@@ -1081,14 +1081,14 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
 - [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip <!-- parity:data-proxy-extras -->
-- [ ] Try IPv6 option <!-- parity:data-ipv6 -->
+- [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [ ] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [ ] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
 - [ ] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
 - [ ] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
 - [ ] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
-- [ ] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
-- [ ] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
+- [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
+- [x] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
 - [ ] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
 - [ ] Hardware decoding and renderer toggles (blocked: tdesktop-specific renderer options do not apply to GPUI) <!-- parity:data-hw-decode -->
 
@@ -1128,7 +1128,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
 - [x] Ctrl+Up and Ctrl+Down reply to the previous or next message <!-- parity:platform-shortcut-reply-nav -->
 - [x] Ctrl+O opens the attach picker <!-- parity:platform-shortcut-attach -->
-- [ ] Ctrl+L locks the app <!-- parity:platform-shortcut-lock -->
+- [x] Ctrl+L locks the app <!-- parity:platform-shortcut-lock -->
 - [x] Ctrl+PageUp and Ctrl+PageDown switch chats; Ctrl+Alt+Home and End jump to the first or last chat <!-- parity:platform-shortcut-chat-nav -->
 - [x] Ctrl+1 to 8 open pinned chats, Ctrl+0 Saved Messages, Ctrl+9 Archive, Ctrl+J Contacts <!-- parity:platform-shortcut-pinned -->
 - [x] Ctrl+Shift+Up and Down switch folders <!-- parity:platform-shortcut-folders -->

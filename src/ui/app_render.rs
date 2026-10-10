@@ -322,6 +322,23 @@ impl Render for QuillApp {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
             }))
             .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
+                #[cfg(target_os = "macos")]
+                {
+                    use quill::quit_guard::QuitDecision;
+                    let now = u64::try_from(this.quit_clock.elapsed().as_millis()).unwrap_or(0);
+                    match this
+                        .quit_guard
+                        .press(now, this.appearance.mac_warn_before_quit)
+                    {
+                        QuitDecision::Warn => {
+                            this.status_note = quill::quit_guard::WARNING.to_string();
+                            cx.notify();
+                            return;
+                        }
+                        QuitDecision::Holding => return,
+                        QuitDecision::Quit => {}
+                    }
+                }
                 let _ = this;
                 window.remove_window();
                 cx.quit();
@@ -329,17 +346,22 @@ impl Render for QuillApp {
             // kit Phase 7: window-chrome actions behind the File / Window /
             // View / Help menus (same dispatch path as the key bindings).
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                let _ = this;
-                #[cfg(target_os = "macos")]
-                if quill::tray::tray_available() {
-                    cx.hide();
-                    return;
+                use quill::tray::{CloseOutcome, close_outcome};
+                match close_outcome(
+                    this.appearance.minimize_to_tray,
+                    quill::tray::tray_available(),
+                    cfg!(target_os = "macos"),
+                ) {
+                    CloseOutcome::HideApp => cx.hide(),
+                    CloseOutcome::Minimize => window.minimize_window(),
+                    CloseOutcome::Quit => {
+                        window.remove_window();
+                        // macOS keeps a windowless app alive for its menu
+                        // bar; elsewhere closing the only window quits.
+                        #[cfg(not(target_os = "macos"))]
+                        cx.quit();
+                    }
                 }
-                window.remove_window();
-                // macOS keeps a windowless app alive for its menu bar;
-                // elsewhere closing the only window quits.
-                #[cfg(not(target_os = "macos"))]
-                cx.quit();
             }))
             .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
                 #[cfg(target_os = "macos")]
@@ -1118,12 +1140,13 @@ fn status_note_is_toast(note: &str) -> bool {
         "limit",
         "will send when",
     ];
-    const CONFIRMATION: [&str; 6] = [
+    const CONFIRMATION: [&str; 7] = [
         "copied",
         "saved to",
         "exported",
         "downloaded",
         "link",
+        "hold ",
         "archived",
     ];
     FAILURE
