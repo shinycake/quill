@@ -943,6 +943,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — block user confirm".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyNotifyOs | ScreenshotDemo::ReadyFolderBadges => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — notification settings and folder counters (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyFolders => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

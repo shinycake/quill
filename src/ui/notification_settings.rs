@@ -68,6 +68,29 @@ pub(super) enum ReactionSourceKind {
 /// (`getSavedNotificationSounds` answer), all three scope defaults
 /// (`getScopeNotificationSettings` answers, correlated via
 /// `request_for_scope`), and chat 11 on a custom saved sound.
+/// `ReadyNotifyOs` / `ReadyFolderBadges` fixture: unread-chat totals for the
+/// main list and the two demo folders. "Work" has only muted unread chats,
+/// "News" a mix, so the tabs show both badge colors.
+pub(super) fn apply_ready_folder_badges(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    for (list, all, unmuted) in [
+        (r#"{"@type":"chatListMain"}"#, 12, 4),
+        (r#"{"@type":"chatListFolder","chat_folder_id":1}"#, 5, 0),
+        (r#"{"@type":"chatListFolder","chat_folder_id":2}"#, 3, 2),
+    ] {
+        let json = format!(
+            r#"{{"@type":"updateUnreadChatCount","chat_list":{list},"total_count":30,"unread_count":{all},"unread_unmuted_count":{unmuted},"marked_as_unread_count":0,"marked_as_unread_unmuted_count":0}}"#
+        );
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 pub(super) fn apply_ready_notification_sound(
     session: &mut Session,
     sink: &Arc<MemorySink>,
@@ -262,6 +285,8 @@ impl QuillApp {
             // sounds") — the client-side toggle gating
             // `Session::notification_sound_for`.
             body = body.child(this.desktop_notifications_section(cx));
+            body = body.child(this.attention_section(cx));
+            body = body.child(this.events_section(cx));
             body = body.child(this.inapp_sounds_section(cx));
             let footer = div().flex().justify_end().gap_2().children([
                 Button::new("reset-all-notif-settings")
@@ -385,12 +410,108 @@ impl QuillApp {
             ))
             .child(self.badge_switch_row(
                 cx,
+                "include-muted-folders",
+                "Include muted chats in folder counters",
+                prefs.include_muted_folders,
+                |p, on| p.include_muted_folders = on,
+            ))
+            .child(self.badge_switch_row(
+                cx,
                 "count-messages",
                 "Count unread messages (off: count chats)",
                 prefs.count_messages,
                 |p, on| p.count_messages = on,
             ))
             .into_any_element()
+    }
+
+    /// tdesktop "Bounce the Dock icon" / "Flash the taskbar icon" / "Draw
+    /// attention to the window" (`flashBounceNotify`), stored with the other
+    /// per-account counter preferences.
+    pub(super) fn attention_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let on = self
+            .session()
+            .map(|s| s.badge_prefs)
+            .unwrap_or_default()
+            .flash_bounce;
+        let label = quill::notify_focus::attention_label();
+        div()
+            .id("attention-section")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(div().font_semibold().text_sm().child(label))
+            .child(
+                Switch::new("attention-toggle")
+                    .checked(on)
+                    .accessibility_label(label)
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_badge_pref(|p| p.flash_bounce = on, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// tdesktop "Events": "Contact joined Telegram" is the account-wide
+    /// TDLib option `disable_contact_registered_notifications`. Pinned
+    /// messages follow the per-chat-type switches above (TDLib keeps that
+    /// choice per scope, not once for the app).
+    pub(super) fn events_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let on = self
+            .session()
+            .is_none_or(|s| !s.disable_contact_registered_notifications);
+        div()
+            .id("events-section")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(div().font_semibold().text_sm().child("Events"))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Contact joined Telegram"),
+                    )
+                    .child(
+                        Switch::new("contact-joined-toggle")
+                            .checked(on)
+                            .accessibility_label("Contact joined Telegram")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_contact_joined_notifications(on, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// `setOption(disable_contact_registered_notifications)`. Live: TDLib
+    /// answers with `updateOption`. Demo: flips the fixture.
+    pub(super) fn set_contact_joined_notifications(&mut self, on: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.set_contact_joined_notifications(on) {
+                self.status_note = format!("couldn’t change the setting: {err:?}");
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.disable_contact_registered_notifications = !on;
+        }
+        cx.notify();
     }
 
     /// Parity slice: in-app notification sounds (tdesktop "Play sounds")

@@ -3,7 +3,7 @@
 //! "Tabs appearance" choice (text, icons, both).
 
 use super::app::{ChatListFilter, QuillApp};
-use super::chat_theme::accent;
+use super::chat_theme::{accent, accent_strong, text_on_fill};
 use super::folder_glyphs::folder_glyph;
 use super::pressable::PressableDiv;
 use gpui_kit::assets::IconName;
@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::folder_icons::{FolderTabsMode, FolderTabsView};
+use quill::state::FolderBadge;
 
 /// Column width (tdesktop `windowFiltersWidth` is 72px; the topic column
 /// uses 68px with the same name width).
@@ -35,6 +36,8 @@ pub(super) struct FolderSlot {
     pub kind: FolderSlotKind,
     pub name: String,
     pub glyph: IconName,
+    /// Unread chats in this folder (tdesktop `setUnreadCount`).
+    pub badge: Option<FolderBadge>,
 }
 
 /// The slots for a folder list `(id, name, icon name)`.
@@ -43,23 +46,27 @@ pub(super) fn build_slots(folders: &[(i32, String, String)]) -> Vec<FolderSlot> 
         kind: FolderSlotKind::All,
         name: "All".into(),
         glyph: folder_glyph("All"),
+        badge: None,
     }];
     for (id, name, icon) in folders {
         slots.push(FolderSlot {
             kind: FolderSlotKind::Folder(*id),
             name: name.clone(),
             glyph: folder_glyph(icon),
+            badge: None,
         });
     }
     slots.push(FolderSlot {
         kind: FolderSlotKind::Unread,
         name: "Unread".into(),
         glyph: folder_glyph("Unread"),
+        badge: None,
     });
     slots.push(FolderSlot {
         kind: FolderSlotKind::Archived,
         name: "Archived".into(),
         glyph: IconName::Archive,
+        badge: None,
     });
     slots
 }
@@ -79,6 +86,38 @@ pub(super) fn selected_slot(
     slots.iter().position(|s| s.kind == wanted).unwrap_or(0)
 }
 
+/// The unread-chats counter on a folder tab: accent when something unmuted
+/// is unread, muted gray when every counted chat is muted.
+fn folder_badge_pill(badge: FolderBadge, cx: &App) -> AnyElement {
+    let bg = if badge.muted {
+        cx.theme().muted_foreground.opacity(0.55)
+    } else {
+        Hsla::from(accent_strong())
+    };
+    let label = if badge.count > 999 {
+        format!("{}K", badge.count / 1000)
+    } else {
+        badge.count.to_string()
+    };
+    div()
+        .id(("folder-badge", badge.count as usize))
+        .flex_none()
+        .h(px(16.))
+        .min_w(px(16.))
+        .px(px(4.))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(bg)
+        .text_color(text_on_fill())
+        .text_size(px(10.))
+        .font_semibold()
+        .aria_label(format!("{} unread chats", badge.count))
+        .child(label)
+        .into_any_element()
+}
+
 impl QuillApp {
     pub(super) fn folder_slots(&self) -> Vec<FolderSlot> {
         let folders: Vec<(i32, String, String)> = self
@@ -90,7 +129,19 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        build_slots(&folders)
+        let mut slots = build_slots(&folders);
+        if let Some(session) = self.session() {
+            let include_muted = session.badge_prefs.include_muted_folders;
+            for slot in &mut slots {
+                let pair = match slot.kind {
+                    FolderSlotKind::All => session.unread_totals.main.chats,
+                    FolderSlotKind::Folder(id) => session.folder_unread_chats.get(&id).copied(),
+                    FolderSlotKind::Unread | FolderSlotKind::Archived => None,
+                };
+                slot.badge = pair.and_then(|pair| pair.folder_badge(include_muted));
+            }
+        }
+        slots
     }
 
     /// Whether the folders sit in a column left of the chat list.
@@ -165,6 +216,9 @@ impl QuillApp {
                 ),
                 _ => tab,
             };
+            if let Some(badge) = slot.badge {
+                tab = tab.suffix(folder_badge_pill(badge, cx));
+            }
             // Right-click: Edit / Mark as read / Remove (the All tab:
             // Mark all as read / Edit folders).
             let menu_folder = match slot.kind {
@@ -285,6 +339,15 @@ impl QuillApp {
                                 .text_ellipsis()
                                 .text_color(color)
                                 .child(name),
+                        )
+                    })
+                    .when_some(slot.badge, |this, badge| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top(px(2.))
+                                .right(px(6.))
+                                .child(folder_badge_pill(badge, cx)),
                         )
                     })
                     .when(active, |this| {
