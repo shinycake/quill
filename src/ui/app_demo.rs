@@ -676,6 +676,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — member moderation (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyLinksBoosts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — admin links, boosts and usernames (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyGroupAdminSettings => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2436,6 +2443,7 @@ impl QuillApp {
             invite_link_dialog: None,
             invite_link_details: None,
             revoked_links_open: false,
+            invite_link_qr: None,
             admin_dialog: None,
             create_chat_dialog: None,
             member_dialog: None,
@@ -2603,6 +2611,7 @@ impl QuillApp {
         app.demo_setup_updates_sync(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
+        app.demo_setup_links_boosts(demo, cx);
         app.demo_setup_admin_extras(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);

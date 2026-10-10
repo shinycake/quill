@@ -1,0 +1,3 @@
+# admin links and usernames; the boosts list is partial and not claimed
+parity:admin-multi-usernames
+parity:admin-invite-link-admin

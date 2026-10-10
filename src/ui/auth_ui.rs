@@ -193,19 +193,25 @@ impl QuillApp {
         {
             return Some(image.clone());
         }
-        let code = qrcode::QrCode::new(link.as_bytes()).ok()?;
-        // Grayscale is unchanged by the R<->B swap `video_render_image`
-        // applies to color frames, so no channel fixup is needed.
-        let luma = code
-            .render::<image::Luma<u8>>()
-            .quiet_zone(true)
-            .module_dimensions(6, 6)
-            .build();
-        let rgba = image::DynamicImage::ImageLuma8(luma).into_rgba8();
-        let rendered = Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
-            rgba,
-        )])));
+        let rendered = render_qr_image(link)?;
         self.qr_login_cache = Some((link.to_string(), rendered.clone()));
         Some(rendered)
     }
+}
+
+/// Render `link` as a QR bitmap with a quiet zone. `None` for text the
+/// QR format can't hold.
+pub(super) fn render_qr_image(link: &str) -> Option<Arc<RenderImage>> {
+    let code = qrcode::QrCode::new(link.as_bytes()).ok()?;
+    // Grayscale is unchanged by the R<->B swap `video_render_image`
+    // applies to color frames, so no channel fixup is needed.
+    let luma = code
+        .render::<image::Luma<u8>>()
+        .quiet_zone(true)
+        .module_dimensions(6, 6)
+        .build();
+    let rgba = image::DynamicImage::ImageLuma8(luma).into_rgba8();
+    Some(Arc::new(RenderImage::new(SmallVec::from_buf([
+        image::Frame::new(rgba),
+    ]))))
 }
