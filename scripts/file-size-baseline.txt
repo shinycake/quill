@@ -1,22 +1,7 @@
 # Files over the 1,000-line limit when scripts/check-file-size.sh started.
 # They may shrink but not grow; remove a line once its file is under the
 # limit. See docs/contributing/structure.md.
-1540 crates/ntgcalls-sys/src/lib.rs
-1280 src/calls/engine/ntgcalls.rs
-1203 src/connect/calls.rs
-1036 src/connect/chat_list.rs
-1029 src/connect/core.rs
-1558 src/connect/group_calls.rs
-1854 src/connect/groups.rs
-1613 src/connect/messages.rs
-1305 src/connect/moderation.rs
-1305 src/connect/search.rs
-1345 src/connect/settings.rs
-1215 src/connect/stories.rs
 1273 src/main.rs
-1158 src/rich.rs
-1435 src/service_text.rs
-1624 src/settings.rs
 1265 src/state/session.rs
 1162 src/telegram/requests/groups.rs
 1185 src/telegram/requests/messages.rs
