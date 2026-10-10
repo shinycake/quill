@@ -1,3 +1,0 @@
-# admin extras: full matches only
-parity:admin-title-counter
-parity:admin-gigagroup-copy
