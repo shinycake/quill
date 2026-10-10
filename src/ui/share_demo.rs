@@ -2,7 +2,7 @@
 //! (English fixtures, injected updates, no live Telegram).
 
 use super::app::QuillApp;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::composer::ForwardDraft;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -49,38 +49,51 @@ fn apply_send_as_options(session: &mut Session, sink: &Arc<MemorySink>, seq: &At
     }
 }
 
+register_demos![
+    // B4: the share box with two destinations ticked and a comment.
+    DemoSpec::chats(
+        "ready-share-box",
+        "screenshot demo — share box, forward bar and send as (injected)"
+    )
+    .setup(|app, window, cx| app.demo_setup_share(ShareDemo::ShareBox, window, cx)),
+    // B4: the forward bar above the destination chat's composer.
+    DemoSpec::chats(
+        "ready-forward-bar",
+        "screenshot demo — share box, forward bar and send as (injected)"
+    )
+    .setup(|app, window, cx| app.demo_setup_share(ShareDemo::ForwardBar, window, cx)),
+    // B4: the composer's "send as" identity list.
+    DemoSpec::chats(
+        "ready-send-as",
+        "screenshot demo — share box, forward bar and send as (injected)"
+    )
+    .setup(|app, window, cx| app.demo_setup_share(ShareDemo::SendAs, window, cx)),
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShareDemo {
+    ShareBox,
+    ForwardBar,
+    SendAs,
+}
+
 impl QuillApp {
-    pub(super) fn demo_setup_share(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !matches!(
-            demo,
-            Some(
-                ScreenshotDemo::ReadyShareBox
-                    | ScreenshotDemo::ReadyForwardBar
-                    | ScreenshotDemo::ReadySendAs
-            )
-        ) {
-            return;
-        }
+    fn demo_setup_share(&mut self, demo: ShareDemo, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_share(session, &self.demo_sink, &self.demo_seq);
-            if matches!(demo, Some(ScreenshotDemo::ReadySendAs)) {
+            if matches!(demo, ShareDemo::SendAs) {
                 apply_send_as_options(session, &self.demo_sink, &self.demo_seq);
                 session.open_chat(ChatId(22));
             }
-            if matches!(demo, Some(ScreenshotDemo::ReadyForwardBar)) {
+            if matches!(demo, ShareDemo::ForwardBar) {
                 session.open_chat(ChatId(21));
             }
         }
         let mut draft =
             ForwardDraft::from_message(ChatId(11), MessageId(101), false).expect("forward 101");
         match demo {
-            Some(ScreenshotDemo::ReadyShareBox) => {
+            ShareDemo::ShareBox => {
                 draft.toggle(ChatId(11), MessageId(103), false);
                 self.pending_forward = Some(draft);
                 self.forward_picker_open = true;
@@ -91,7 +104,7 @@ impl QuillApp {
                 });
                 self.status_note = "screenshot demo — share box (two chats ticked)".into();
             }
-            Some(ScreenshotDemo::ReadyForwardBar) => {
+            ShareDemo::ForwardBar => {
                 self.pending_forward = Some(draft);
                 self.forward_bar_dest = Some(ChatId(21));
                 self.composer.update(cx, |input, cx| {
@@ -100,11 +113,10 @@ impl QuillApp {
                 });
                 self.status_note = "screenshot demo — forward bar in the destination".into();
             }
-            Some(ScreenshotDemo::ReadySendAs) => {
+            ShareDemo::SendAs => {
                 self.send_as_open = true;
                 self.status_note = "screenshot demo — send as".into();
             }
-            _ => {}
         }
     }
 }

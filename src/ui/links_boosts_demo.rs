@@ -6,7 +6,7 @@
 use super::app::QuillApp;
 use super::auth_ui::render_qr_image;
 use super::dialogs::GroupSettingsView;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
@@ -206,17 +206,21 @@ fn seed_link_requests(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomi
     );
 }
 
+register_demos![
+    // Admin links, boosts and usernames
+    // (`QUILL_DEMO_LINKS_BOOSTS=usernames|boosts|gifts|admin-links|
+    // link-requests|qr`; injected data, no live Telegram).
+    DemoSpec::chats(
+        "ready-links-boosts",
+        "screenshot demo — admin links, boosts and usernames (injected, no live Telegram)",
+    )
+    .setup(|app, _, cx| app.demo_setup_links_boosts(cx)),
+];
+
 impl QuillApp {
     /// `QUILL_DEMO_LINKS_BOOSTS=usernames|boosts|gifts|admin-links|
     /// link-requests|qr` (default `usernames`).
-    pub(super) fn demo_setup_links_boosts(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        cx: &mut Context<Self>,
-    ) {
-        if demo != Some(ScreenshotDemo::ReadyLinksBoosts) {
-            return;
-        }
+    fn demo_setup_links_boosts(&mut self, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_LINKS_BOOSTS").unwrap_or_else(|_| "usernames".into());
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);

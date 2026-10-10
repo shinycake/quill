@@ -952,3 +952,12 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// B7: group and channel settings (topics, history, reactions, ...).
+    GroupSettings => DialogSpec::new(
+        4900,
+        |app| app.group_settings_dialog.is_some(),
+        QuillApp::build_group_settings_dialog,
+    ),
+}

@@ -858,3 +858,11 @@ impl QuillApp {
         cx.notify();
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    GroupCallStart => DialogSpec::new(
+        400,
+        |app| app.group_call_start_dialog.is_some(),
+        QuillApp::build_group_call_start_dialog,
+    ),
+}

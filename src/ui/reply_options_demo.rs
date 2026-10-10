@@ -2,13 +2,16 @@
 //! "Reply in Another Chat", the quote picker and a reply carried into
 //! another chat (injected through the reducer, no live Telegram).
 
+use super::app::QuillApp;
+use super::screenshot_demo::{DemoSpec, register_demos};
+use gpui_kit::*;
 use quill::composer::{ComposerReplyTo, QuoteSelection};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The group the message lives in and the chat the reply may go to.
 pub(super) const SOURCE_CHAT: ChatId = ChatId(16);
@@ -73,4 +76,60 @@ pub(super) fn reply_with_quote() -> ComposerReplyTo {
 /// The reply carried into Sam's chat.
 pub(super) fn reply_in_target() -> ComposerReplyTo {
     reply_with_quote().into_chat(TARGET_CHAT)
+}
+
+register_demos![
+    // The chat chooser behind "Reply in Another Chat".
+    DemoSpec::chats(
+        "ready-reply-elsewhere",
+        "screenshot demo — choosing a chat for a reply (injected)"
+    )
+    .setup(|app, window, cx| app.demo_reply_options(ReplyDemo::Elsewhere, window, cx)),
+    // A reply carried into another chat, quote and source chat in its bar.
+    DemoSpec::chats(
+        "ready-reply-external",
+        "screenshot demo — a reply carried into another chat (injected)"
+    )
+    .setup(|app, window, cx| app.demo_reply_options(ReplyDemo::External, window, cx)),
+    // The quote picker opened from the reply bar.
+    DemoSpec::chats(
+        "ready-reply-quote",
+        "screenshot demo — picking the part to quote (injected)"
+    )
+    .setup(|app, window, cx| app.demo_reply_options(ReplyDemo::Quote, window, cx)),
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReplyDemo {
+    Elsewhere,
+    External,
+    Quote,
+}
+
+impl QuillApp {
+    fn demo_reply_options(&mut self, demo: ReplyDemo, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+        apply_ready_reply_elsewhere(session, &self.demo_sink, &self.demo_seq);
+        match demo {
+            ReplyDemo::Elsewhere => {
+                self.pending_reply = Some(reply_to_choose());
+                self.reply_elsewhere_open = true;
+            }
+            ReplyDemo::Quote => {
+                self.pending_reply = Some(reply_with_quote());
+                self.reply_quote_open = true;
+            }
+            ReplyDemo::External => {
+                session.open_chat(TARGET_CHAT);
+                self.pending_reply = Some(reply_in_target());
+                self.composer.update(cx, |input, cx| {
+                    input.set_value("I will send them tonight.", window, cx);
+                    input.focus(window, cx);
+                });
+            }
+        }
+    }
 }

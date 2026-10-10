@@ -1240,3 +1240,23 @@ impl QuillApp {
         panel.into_any_element()
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    FolderEditor => DialogSpec::new(
+        1700,
+        |app| app.folder_editor.is_some(),
+        QuillApp::build_folder_editor_dialog,
+    ),
+
+    FolderDelete => DialogSpec::new(
+        1800,
+        |app| app.folder_delete_confirm.is_some(),
+        QuillApp::build_folder_delete_dialog,
+    ),
+
+    FolderManage => DialogSpec::new(
+        2300,
+        |app| app.folder_manage_open,
+        QuillApp::build_folder_manage_dialog,
+    ),
+}

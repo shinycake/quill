@@ -635,6 +635,15 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    /// Slice A9: account lifecycle (delete account + self-destruct TTL).
+    AccountLifecycle => DialogSpec::new(
+        6700,
+        |app| app.account_lifecycle.open,
+        QuillApp::build_account_lifecycle_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

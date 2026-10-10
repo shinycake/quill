@@ -2,8 +2,11 @@
 //! Media paging (injected through the real reducers, no live Telegram).
 
 use super::app::QuillApp;
-use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
-use super::screenshot_demo::ScreenshotDemo;
+use super::demo::{
+    demo_file_json, demo_media_allowlist, demo_thumb_png_path, seed_ready_custom_emoji_session,
+    seed_ready_media_session,
+};
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -92,13 +95,41 @@ fn apply_viewer_extras(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atom
     }
 }
 
+register_demos![
+    // A GIF looping in the viewer, with a custom emoji in its caption.
+    DemoSpec::ready(
+        "ready-viewer-gif",
+        seed_ready_custom_emoji_session,
+        "screenshot demo — viewer GIF loop / Shared Media paging"
+    )
+    .setup(|app, _, cx| app.demo_setup_viewer_extras(ViewerDemo::Gif, cx)),
+    // A playing video in the viewer with a formatted caption, the saved
+    // toast and the open speed dial.
+    DemoSpec::ready(
+        "ready-viewer-extras",
+        seed_ready_media_session,
+        "screenshot demo — in-viewer video playback"
+    )
+    .setup(|app, _, cx| app.demo_setup_viewer_extras(ViewerDemo::Extras, cx)),
+    // The viewer paging over the Shared Media panel's photos.
+    DemoSpec::ready(
+        "ready-viewer-shared",
+        seed_ready_custom_emoji_session,
+        "screenshot demo — viewer GIF loop / Shared Media paging"
+    )
+    .setup(|app, _, cx| app.demo_setup_viewer_extras(ViewerDemo::Shared, cx)),
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ViewerDemo {
+    Gif,
+    Extras,
+    Shared,
+}
+
 impl QuillApp {
-    pub(super) fn demo_setup_viewer_extras(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        cx: &mut Context<Self>,
-    ) {
-        if demo == Some(ScreenshotDemo::ReadyViewerGif) {
+    fn demo_setup_viewer_extras(&mut self, demo: ViewerDemo, cx: &mut Context<Self>) {
+        if demo == ViewerDemo::Gif {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_viewer_gif(session, &self.demo_sink, &self.demo_seq);
@@ -130,7 +161,7 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — GIF looping in the viewer".into();
         }
-        if demo == Some(ScreenshotDemo::ReadyViewerExtras) {
+        if demo == ViewerDemo::Extras {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_viewer_extras(session, &self.demo_sink, &self.demo_seq);
@@ -176,7 +207,7 @@ impl QuillApp {
                 std::env::var_os("QUILL_DEMO_NO_DIAL").is_none();
             self.status_note = "screenshot demo — viewer extras".into();
         }
-        if demo == Some(ScreenshotDemo::ReadyViewerShared) {
+        if demo == ViewerDemo::Shared {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_viewer_shared(session, &self.demo_sink, &self.demo_seq);

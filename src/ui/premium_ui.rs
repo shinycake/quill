@@ -992,3 +992,26 @@ pub(super) fn gift_card_element(
         })
         .into_any_element()
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Stars balance and transaction history.
+    Stars => DialogSpec::new(
+        3800,
+        |app| app.session().is_some_and(|s| s.hub.stars_open),
+        QuillApp::build_stars_dialog,
+    ),
+
+    /// Received gifts of a user or channel.
+    ReceivedGifts => DialogSpec::new(
+        3900,
+        |app| app.session().is_some_and(|s| s.hub.gifts_open),
+        QuillApp::build_gifts_dialog,
+    ),
+
+    /// Read-only Premium features explainer.
+    PremiumFeatures => DialogSpec::new(
+        4000,
+        |app| app.session().is_some_and(|s| s.hub.premium_open),
+        QuillApp::build_premium_dialog,
+    ),
+}

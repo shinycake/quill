@@ -9,6 +9,7 @@ use super::demo::{
 };
 use super::menu_states::MessageMenuState;
 use super::message_menu_ui::{MessageMenuPage, ModerationOffer};
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -665,9 +666,24 @@ fn chosen_card(name: &str) -> bool {
     name == "card-number"
 }
 
+register_demos![
+    // The message context menu over every kind of message (injected, no
+    // live Telegram). `QUILL_DEMO_MENU` picks the scenario: photo,
+    // document, downloading, video, gif, sticker, audio, audio-save-to,
+    // voice-private, uploading, group, group-audience, channel,
+    // protected, report-pick, report-sub, report-text, report-done,
+    // sticker-set, moderate.
+    DemoSpec::ready(
+        "ready-message-menu",
+        seed_ready_message_menu_session,
+        "screenshot demo — message menu"
+    )
+    .setup(QuillApp::demo_setup_message_menu),
+];
+
 impl QuillApp {
     /// Open the menu (or dialog) of the scenario `QUILL_DEMO_MENU` names.
-    pub(super) fn demo_setup_message_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_setup_message_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let chosen = scenario(&scenario_name());
         let (chat_id, message_id) = (ChatId(chosen.chat_id), MessageId(chosen.message_id));
         match chosen.dialog {

@@ -584,3 +584,12 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// "Open this link?" for a hidden or look-alike message link.
+    OpenLink => DialogSpec::new(
+        3300,
+        |app| app.open_link_confirm.is_some(),
+        QuillApp::build_open_link_dialog,
+    ),
+}

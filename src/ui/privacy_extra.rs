@@ -963,6 +963,16 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    /// B13: the warning before opening an executable, unknown or
+    /// IP-revealing file.
+    FileOpenConfirm => DialogSpec::new(
+        3400,
+        |app| app.privacy_ui.file_open.is_some(),
+        QuillApp::build_file_open_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     use super::new_chat_privacy_value;
@@ -1023,7 +1033,12 @@ mod dispatch_tests {
         let slot_in = slot.clone();
         let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
             let view = cx.new(|cx| {
-                QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::ReadyPrivacy))
+                QuillApp::new_with_demo(
+                    window,
+                    cx,
+                    None,
+                    Some(ScreenshotDemo::named("ready-privacy")),
+                )
             });
             *slot_in.borrow_mut() = Some(view.clone());
             let shell = cx.new(|_| QuillShell::new(view));
