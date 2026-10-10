@@ -37,6 +37,11 @@ pub enum PrivacySettingKey {
     /// B13: `userPrivacySettingAutosaveGifts` (tdesktop "Gifts": who can
     /// display gifts on the profile).
     AutosaveGifts,
+    /// `userPrivacySettingAllowCalls` (tdesktop "Calls": who can call me).
+    AllowCalls,
+    /// `userPrivacySettingAllowPeerToPeerCalls` (tdesktop "Peer-to-peer in
+    /// calls").
+    PeerToPeer,
 }
 
 impl PrivacySettingKey {
@@ -61,6 +66,8 @@ impl PrivacySettingKey {
                 "userPrivacySettingAllowPrivateVoiceAndVideoNoteMessages"
             }
             PrivacySettingKey::AutosaveGifts => "userPrivacySettingAutosaveGifts",
+            PrivacySettingKey::AllowCalls => "userPrivacySettingAllowCalls",
+            PrivacySettingKey::PeerToPeer => "userPrivacySettingAllowPeerToPeerCalls",
         }
     }
 
@@ -78,14 +85,15 @@ impl PrivacySettingKey {
             PrivacySettingKey::AllowFindingByPhoneNumber => "Who can find me by my number",
             PrivacySettingKey::AllowVoiceMessages => "Voice Messages",
             PrivacySettingKey::AutosaveGifts => "Gifts",
+            PrivacySettingKey::AllowCalls => "Who can call me",
+            PrivacySettingKey::PeerToPeer => "Peer-to-peer calls",
         }
     }
 
-    /// Every rule key the screen fetches and keeps in sync. The call
-    /// settings (`userPrivacySettingAllowCalls`,
-    /// `userPrivacySettingAllowPeerToPeerCalls`) keep their Phase C2i
-    /// plumbing and are edited separately.
-    pub const fn all() -> [PrivacySettingKey; 11] {
+    /// Every rule key the screen fetches and keeps in sync. The two call
+    /// settings also feed the older `call_privacy_*` fields (see
+    /// `Session::mirror_call_privacy`).
+    pub const fn all() -> [PrivacySettingKey; 13] {
         [
             PrivacySettingKey::ShowStatus,
             PrivacySettingKey::ShowPhoneNumber,
@@ -98,6 +106,8 @@ impl PrivacySettingKey {
             PrivacySettingKey::AllowFindingByPhoneNumber,
             PrivacySettingKey::AllowVoiceMessages,
             PrivacySettingKey::AutosaveGifts,
+            PrivacySettingKey::AllowCalls,
+            PrivacySettingKey::PeerToPeer,
         ]
     }
 
@@ -117,8 +127,10 @@ impl PrivacySettingKey {
 
     /// Rows of the "Who can contact me" block (the call rows and the
     /// new-chat row sit between them in the UI).
-    pub const fn contact_rows() -> [PrivacySettingKey; 2] {
+    pub const fn contact_rows() -> [PrivacySettingKey; 4] {
         [
+            PrivacySettingKey::AllowCalls,
+            PrivacySettingKey::PeerToPeer,
             PrivacySettingKey::AllowVoiceMessages,
             PrivacySettingKey::AllowChatInvites,
         ]
@@ -140,6 +152,8 @@ impl PrivacySettingKey {
             PrivacySettingKey::AllowFindingByPhoneNumber => "Who can find me by my number",
             PrivacySettingKey::AllowVoiceMessages => "Who can send me voice messages",
             PrivacySettingKey::AutosaveGifts => "Who can display gifts on my profile",
+            PrivacySettingKey::AllowCalls => "Who can call me",
+            PrivacySettingKey::PeerToPeer => "Use peer-to-peer with",
         }
     }
 
@@ -164,6 +178,12 @@ impl PrivacySettingKey {
             }
             PrivacySettingKey::AllowVoiceMessages => {
                 "These users will or will not be able to send voice and video messages to you regardless of the settings above."
+            }
+            PrivacySettingKey::AllowCalls => {
+                "These users will or will not be able to call you regardless of the settings above."
+            }
+            PrivacySettingKey::PeerToPeer => {
+                "Peer-to-peer in calls will or will not be used with these users regardless of the settings above."
             }
             _ => "Add users or groups to override the settings above.",
         }
@@ -349,6 +369,26 @@ pub fn hide_check_password_suggestion(extra: RequestId) -> String {
     .to_string()
 }
 
+/// `hideSuggestedAction` (schema 1.8.67, :13365) for a parameterless
+/// suggested action, by constructor name.
+pub fn hide_suggested_action(extra: RequestId, action: &str) -> String {
+    json!({
+        "@type": "hideSuggestedAction",
+        "@extra": extra.as_extra(),
+        "action": {"@type": action},
+    })
+    .to_string()
+}
+
+/// `hideContactCloseBirthdays = Ok` (schema 1.8.67, :13368).
+pub fn hide_contact_close_birthdays(extra: RequestId) -> String {
+    json!({
+        "@type": "hideContactCloseBirthdays",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// B13: `getNetworkStatistics` (schema 1.8.67, :15808). `only_current`
 /// false = everything since the last reset.
 pub fn get_network_statistics(extra: RequestId) -> String {
@@ -518,6 +558,16 @@ mod b13_tests {
         let v = parse(set_inactive_session_ttl(RequestId(4), 90));
         assert_eq!(v["@type"], "setInactiveSessionTtl");
         assert_eq!(v["inactive_session_ttl_days"], 90);
+        let v = parse(hide_suggested_action(
+            RequestId(7),
+            "suggestedActionSetProfilePhoto",
+        ));
+        assert_eq!(v["@type"], "hideSuggestedAction");
+        assert_eq!(v["action"]["@type"], "suggestedActionSetProfilePhoto");
+        assert_eq!(
+            parse(hide_contact_close_birthdays(RequestId(8)))["@type"],
+            "hideContactCloseBirthdays"
+        );
         let v = parse(get_network_statistics(RequestId(5)));
         assert_eq!(v["@type"], "getNetworkStatistics");
         assert_eq!(v["only_current"], false);

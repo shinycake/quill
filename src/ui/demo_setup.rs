@@ -697,6 +697,19 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — non-member channel".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatHeader)) {
+            let variant = std::env::var("QUILL_DEMO_HEADER").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::chat_header_demo::apply_ready_chat_header(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &variant,
+                );
+            }
+            self.status_note = "screenshot demo — chat header".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyTopBars)) {
             let variant = std::env::var("QUILL_DEMO_BAR").unwrap_or_default();
             if let Some(session) = self.demo_session.as_mut() {
@@ -1198,6 +1211,7 @@ impl QuillApp {
         }
         self.demo_setup_folder_followups(demo, window, cx);
         self.demo_setup_chatlist_rows(demo, window, cx);
+        self.demo_setup_chatlist_global(demo, window, cx);
         // Parity slice: manage dialog over the same folder fixture.
         if matches!(demo, Some(ScreenshotDemo::ReadyFoldersManage)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -1914,6 +1928,22 @@ impl QuillApp {
                 "screenshot demo — group voice chat invite picker (injected, no live Telegram)"
                     .into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallStage)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_polish(session, &self.demo_sink, &self.demo_seq);
+                self.demo_group_frames = demo_group_video_frames();
+                self.demo_local_frame = Some(demo_video_frame(true));
+            }
+            // Zed's camera, pinned and shown across the window.
+            self.group_call_pin.toggle(quill::calls::tile_pin::TileKey {
+                participant: quill::telegram::envelope::MessageSender::User { user_id: 41 },
+                screen: false,
+            });
+            self.demo_group_stage = true;
+            self.status_note =
+                "screenshot demo — full-screen pinned stream (injected, no live Telegram)".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallPolish)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -1995,7 +2025,11 @@ impl QuillApp {
         // setting, and the blocked list (no live Telegram).
         if matches!(
             demo,
-            Some(ScreenshotDemo::ReadyPrivacy | ScreenshotDemo::ReadyPrivacyGifts)
+            Some(
+                ScreenshotDemo::ReadyPrivacy
+                    | ScreenshotDemo::ReadyPrivacyGifts
+                    | ScreenshotDemo::ReadyPrivacyCalls
+            )
         ) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -2007,8 +2041,24 @@ impl QuillApp {
                     quill::telegram::requests_privacy::PrivacySettingKey::AutosaveGifts,
                 ));
             }
+            if matches!(demo, Some(ScreenshotDemo::ReadyPrivacyCalls)) {
+                self.privacy_editor = Some(PrivacyEditorTarget::Rule(
+                    quill::telegram::requests_privacy::PrivacySettingKey::AllowCalls,
+                ));
+            }
             self.status_note =
                 "screenshot demo — privacy settings (injected, no live Telegram)".into();
+        }
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadySettingsHelp | ScreenshotDemo::ReadyAskQuestion)
+        ) {
+            self.settings_open = true;
+            if matches!(demo, Some(ScreenshotDemo::ReadyAskQuestion)) {
+                self.settings_page = Some(super::settings_account_ui::ASK_QUESTION_PAGE);
+            }
+            self.status_note =
+                "screenshot demo — settings help (injected, no live Telegram)".into();
         }
         // B13: session details view and the file-open warning.
         if matches!(demo, Some(ScreenshotDemo::ReadySessionDetails)) {

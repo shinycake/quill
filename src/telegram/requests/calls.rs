@@ -187,6 +187,18 @@ pub fn send_call_log(extra: RequestId, call_id: i32, log_path: &str) -> String {
     .to_string()
 }
 
+/// `deleteAllCallMessages revoke:Bool = Ok` (TDLib 1.8.67,
+/// `schema/td_api.tl:12348`): deletes all call messages; `revoke` also
+/// removes them for the other side.
+pub fn delete_all_call_messages(extra: RequestId, revoke: bool) -> String {
+    json!({
+        "@type": "deleteAllCallMessages",
+        "@extra": extra.as_extra(),
+        "revoke": revoke,
+    })
+    .to_string()
+}
+
 /// Phase C2i: `searchCallMessages` (TDLib 1.8.67,
 /// `schema/td_api.tl:11903`): "Searches for call and group call
 /// messages. Returns the results in reverse chronological order".

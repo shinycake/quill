@@ -9,9 +9,9 @@ use crate::state::RequestPurpose;
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
     CallPrivacySetting, PrivacyWho, accept_call_with_protocol, create_call_with_protocol,
-    discard_call as discard_call_request, get_user_privacy_setting_rules, search_call_messages,
-    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
-    set_user_privacy_setting_rules,
+    delete_all_call_messages, discard_call as discard_call_request, get_user_privacy_setting_rules,
+    search_call_messages, send_call_debug_information, send_call_log, send_call_rating_detail,
+    send_call_signaling_data, set_user_privacy_setting_rules,
 };
 use std::sync::Arc;
 
@@ -1043,6 +1043,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.recent_calls_offset.clear();
         self.session.recent_calls_error = false;
         self.fetch_call_history_page()
+    }
+
+    /// "Clear all" on the Calls list: `deleteAllCallMessages`. The cached
+    /// list empties when TDLib answers `ok`, never before. `Ok(None)`:
+    /// nothing to clear, or a clear already in flight.
+    pub fn clear_call_history(
+        &mut self,
+        revoke: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !crate::chatlist_calls::can_clear(
+            self.session.recent_calls.len(),
+            self.session.recent_calls_clearing,
+        ) {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteAllCallMessages, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&delete_all_call_messages(extra, revoke))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.recent_calls_clearing = true;
+        Ok(Some(extra))
     }
 
     /// Phase C2i: next `searchCallMessages` page, continuing from the

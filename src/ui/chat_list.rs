@@ -27,6 +27,7 @@ use quill::telegram::envelope::{
     AuthorizationState, ChatKind, ChatNotificationSettings, MUTE_FOREVER,
 };
 use quill::telegram::requests::ArchiveChatListSettings;
+use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -853,8 +854,10 @@ impl QuillApp {
             if let Err(err) = live.driver.fetch_call_history() {
                 self.status_note = format!("call history request failed: {err:?}");
             }
-            if let Err(err) = live.driver.fetch_call_privacy() {
-                self.status_note = format!("call privacy request failed: {err:?}");
+            for key in [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer] {
+                if let Err(err) = live.driver.fetch_privacy_rules(key) {
+                    self.status_note = format!("call privacy request failed: {err:?}");
+                }
             }
             // Slice S4: the call-settings "Use less data for calls"
             // toggle reads the TDLib-backed per-network settings —
@@ -1280,14 +1283,7 @@ impl QuillApp {
             }
             PaneMode::Ready => {
                 if self.contacts_tab_open {
-                    list = list.child(
-                        div()
-                            .id("contacts-scroll")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .child(self.contacts_list(cx)),
-                    );
+                    list = list.child(self.contacts_panel(cx));
                 } else if self.calls_tab_open {
                     list = list.child(
                         div()
@@ -1300,6 +1296,7 @@ impl QuillApp {
                 } else {
                     // Searching spans every chat: the folder tabs step aside.
                     if !self.search_is_open() {
+                        list = list.children(self.suggestion_card(cx));
                         list = list.child(self.folder_tabs_with_community_banner(cx));
                         // A shared folder whose owner added chats.
                         list = list.children(self.folder_new_chats_bar(cx));

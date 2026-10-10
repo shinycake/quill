@@ -149,6 +149,8 @@ pub enum DialogKind {
     FolderLimit,
     /// The Archive menu's "How does it work?" box.
     ArchiveHint,
+    /// "Clear all" on the Calls list.
+    ClearCalls,
     CallConfirm,
     /// Swap prompt: incoming call while another call is active.
     CallSwap,
@@ -274,6 +276,7 @@ impl QuillShell {
             DialogKind::FolderNewChats => app.folder_new_chats_dialog.is_some(),
             DialogKind::FolderLimit => app.folder_limit_box.is_some(),
             DialogKind::ArchiveHint => app.archive_hint_open,
+            DialogKind::ClearCalls => app.global.clear_calls_open,
             DialogKind::CallConfirm => app.call_confirm.is_some(),
             DialogKind::CallSwap => app.session().is_some_and(|s| s.call_swap_pending.is_some()),
             DialogKind::NotificationDefaults => app.notification_defaults_open,
@@ -351,6 +354,7 @@ impl QuillShell {
             DialogKind::FolderNewChats => QuillApp::build_folder_new_chats_dialog,
             DialogKind::FolderLimit => QuillApp::build_folder_limit_dialog,
             DialogKind::ArchiveHint => QuillApp::build_archive_hint_dialog,
+            DialogKind::ClearCalls => QuillApp::build_clear_calls_dialog,
             DialogKind::CallConfirm => QuillApp::build_call_confirm_dialog,
             DialogKind::CallSwap => QuillApp::build_call_swap_dialog,
             DialogKind::NotificationDefaults => QuillApp::build_notification_defaults_dialog,
@@ -406,6 +410,7 @@ impl QuillShell {
         DialogKind::CallSwap,
         DialogKind::FolderLimit,
         DialogKind::ArchiveHint,
+        DialogKind::ClearCalls,
         DialogKind::FolderEditor,
         DialogKind::FolderDelete,
         DialogKind::FolderShare,

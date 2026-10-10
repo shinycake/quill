@@ -317,18 +317,18 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Business bot manage bar <!-- parity:chrome-business-bot-bar -->
 - [ ] Pin message from the pinned bar and hide-all confirmation wording <!-- parity:chrome-pinned-bar-confirm -->
 - [x] Top "now playing" bar for voice and music with play, prev, next, speed and close <!-- parity:chrome-now-playing-bar -->
-- [ ] Emoji status and premium badge beside the chat title <!-- parity:chrome-header-status -->
-- [ ] Restricted, Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
+- [x] Emoji status and premium badge beside the chat title <!-- parity:chrome-header-status -->
+- [x] Restricted, Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
 - [ ] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
 - [x] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
 - [x] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
 - [x] Per-chat wallpaper and chat themes <!-- parity:chrome-chat-wallpaper -->
 - [ ] "What can this bot do?" intro in an empty bot chat <!-- parity:chrome-bot-intro -->
-- [ ] Composer state buttons: Unblock, Start, Join, Apply to join, Mute and Unmute (partial: Join and Mute exist; Unblock and Apply to join unverified) <!-- parity:chrome-composer-states -->
+- [x] Composer state buttons: Unblock, Start, Join, Apply to join, Mute and Unmute (partial: Join and Mute exist; Unblock and Apply to join unverified) <!-- parity:chrome-composer-states -->
 - [ ] "Discuss" and "Direct messages" buttons in the channel bottom bar <!-- parity:chrome-discuss-buttons -->
-- [ ] Middle-click autoscroll in history <!-- parity:chrome-middle-click-scroll -->
+- [x] Middle-click autoscroll in history <!-- parity:chrome-middle-click-scroll -->
 - [x] PageUp, PageDown, Home and End scroll the history <!-- parity:chrome-page-keys -->
-- [ ] Window title shows the chat name or unread count <!-- parity:chrome-window-title -->
+- [x] Window title shows the chat name or unread count <!-- parity:chrome-window-title -->
 
 ### Chat list
 
@@ -388,11 +388,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Chat row menu extras: view profile, open in new window, mark mentions or reactions or poll votes read, export chat, report with reasons <!-- parity:chatlist-row-menu-extras -->
 - [x] Active video chat badge on group avatars in the list <!-- parity:chatlist-call-badge -->
 - [x] Emoji status next to names in chat rows <!-- parity:chatlist-emoji-status -->
-- [ ] Suggestions block: birthdays, set a photo, check phone or password, Premium <!-- parity:chatlist-suggestions -->
-- [ ] Story strip context menu: Hide stories, View profile, Mute <!-- parity:chatlist-stories-menu -->
-- [ ] Contacts: sort by last seen, Invite friends, search <!-- parity:chatlist-contacts-extras -->
+- [x] Suggestions block: birthdays, set a photo, check phone or password, Premium <!-- parity:chatlist-suggestions -->
+- [x] Story strip context menu: Hide stories, View profile, Mute <!-- parity:chatlist-stories-menu -->
+- [x] Contacts: sort by last seen, Invite friends, search <!-- parity:chatlist-contacts-extras -->
 - [ ] Alphabetical section index bar on long peer lists (contacts, add members) <!-- parity:chatlist-contacts-index -->
-- [ ] Clear all call history from the Calls list <!-- parity:chatlist-clear-calls -->
+- [x] Clear all call history from the Calls list <!-- parity:chatlist-clear-calls -->
 - [x] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
 - [ ] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
 - [x] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
@@ -566,9 +566,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Monetization, revenue and earnings sections (deferred: low impact) <!-- parity:admin-monetization -->
 - [ ] Channel direct messages settings and paid-message price <!-- parity:admin-direct-messages -->
 - [ ] Auto-translate channel and sponsored-messages toggles <!-- parity:admin-auto-translate -->
-- [ ] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
+- [x] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
 - [ ] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
-- [ ] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
+- [x] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
 - [ ] Recent actions: server-side admin filter, export and explainer <!-- parity:admin-log-extras -->
 - [ ] Typed confirmation before deleting a large group or channel <!-- parity:admin-delete-confirm-typing -->
 
@@ -733,7 +733,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Push-to-talk with a shortcut and release delay <!-- parity:calls-push-to-talk -->
 - [ ] Noise suppression toggle in group calls <!-- parity:calls-noise-suppression -->
 - [x] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
-- [ ] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
+- [x] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
 - [ ] Screen source chooser with window and screen thumbnails <!-- parity:calls-screen-source-chooser -->
 - [ ] Pause screen sharing <!-- parity:calls-screen-share-pause -->
 - [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls <!-- parity:calls-conference -->
@@ -742,7 +742,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Battery-low and microphone-off indicators for the other person <!-- parity:calls-peer-indicators -->
 - [ ] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
 - [ ] Watch channel live streams (RTMP) (deferred: low impact) <!-- parity:calls-rtmp-viewing -->
-- [ ] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
+- [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
 - [ ] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 
 ### Stickers, emoji & GIFs
@@ -1014,7 +1014,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 ### Settings: account & profile
 
 - [x] Set or remove your birthday and open birthday privacy <!-- parity:settings-birthday -->
-- [ ] Contacts with upcoming birthdays list and birthday privacy row in Settings > Privacy <!-- parity:settings-birthday-contacts -->
+- [x] Contacts with upcoming birthdays list and birthday privacy row in Settings > Privacy <!-- parity:settings-birthday-contacts -->
 - [x] Large emoji: send a lone emoji as a big glyph, with a Chat settings toggle <!-- parity:settings-large-emoji -->
 - [ ] "Pull to next channel" chat setting <!-- parity:settings-pull-next-channel -->
 - [ ] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
@@ -1024,14 +1024,14 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Profile music (saved music) management <!-- parity:settings-profile-music -->
 - [ ] Choose the main profile tab <!-- parity:settings-main-profile-tab -->
 - [ ] Phone number display and "Is this still your number?" suggestion <!-- parity:settings-phone-suggestion -->
-- [ ] Ask a Question, FAQ, Features and Privacy Policy links <!-- parity:settings-support-links -->
-- [ ] Version and changelog in the Settings footer <!-- parity:settings-version-footer -->
+- [x] Ask a Question, FAQ, Features and Privacy Policy links <!-- parity:settings-support-links -->
+- [x] Version and changelog in the Settings footer <!-- parity:settings-version-footer -->
 
 ### Settings: privacy & security
 
 - [x] More privacy settings: bio, date of birth, voice messages, gifts, who can message me, saved music, find me by phone <!-- parity:settings-privacy-extra-keys -->
 - [x] Privacy rule types: Premium users, bots and chat members in exceptions <!-- parity:settings-privacy-rule-types -->
-- [ ] Editable call privacy exceptions <!-- parity:settings-privacy-call-exceptions -->
+- [x] Editable call privacy exceptions <!-- parity:settings-privacy-call-exceptions -->
 - [x] Local passcode with auto-lock, lock screen and biometric unlock <!-- parity:settings-passcode -->
 - [x] Enter the recovery email confirmation code <!-- parity:settings-recovery-email-code -->
 - [x] Forgot password in Settings and password reset with a waiting period <!-- parity:settings-password-reset -->
@@ -1045,7 +1045,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
 - [ ] Passkeys (blocked: Telegram only allows passkeys in its signed apps) <!-- parity:settings-passkeys -->
-- [ ] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
+- [x] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
 
 ### Settings: notifications
 
