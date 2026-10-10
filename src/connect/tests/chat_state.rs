@@ -1152,3 +1152,74 @@ fn view_messages_reports_only_what_is_shown() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn clear_call_history_empties_the_list_only_on_ok() {
+    // "Clear all" on the Calls list: `deleteAllCallMessages` goes out with
+    // the revoke flag, the cached list stays until TDLib answers `ok`,
+    // and a refusal keeps it and reports the error.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    let ingest = |driver: &mut ConnectDriver<Arc<ViewCtlSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+
+    // Nothing to clear: nothing is sent.
+    assert!(driver.clear_call_history(false).expect("idle").is_none());
+
+    let page = driver.fetch_call_history().expect("history page");
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"foundMessages","@extra":"{}","total_count":1,"messages":[{{"id":901,"chat_id":7,"is_outgoing":false,"date":1790000000,"content":{{"@type":"messageCall","unique_id":901,"is_video":false,"discard_reason":{{"@type":"callDiscardReasonMissed"}},"duration":0}}}}],"next_offset":""}}"#,
+            page.0
+        ),
+    );
+    assert_eq!(driver.session.recent_calls.len(), 1);
+
+    let sent = driver.clear_call_history(true).expect("send").expect("id");
+    let request = recorder
+        .snapshot()
+        .into_iter()
+        .find(|j| j.contains("\"deleteAllCallMessages\""))
+        .expect("deleteAllCallMessages sent");
+    assert!(request.contains("\"revoke\":true"));
+    assert_eq!(driver.session.recent_calls.len(), 1, "kept until ok");
+    assert!(driver.session.recent_calls_clearing);
+    assert!(
+        driver.clear_call_history(true).expect("again").is_none(),
+        "one clear in flight at a time"
+    );
+
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"FAILED"}}"#,
+            sent.0
+        ),
+    );
+    assert_eq!(driver.session.recent_calls.len(), 1);
+    assert!(!driver.session.recent_calls_clearing);
+    assert_eq!(
+        driver.session.chat_action_error.as_deref(),
+        Some("could not clear the call history (error 500)")
+    );
+
+    let sent = driver.clear_call_history(false).expect("send").expect("id");
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent.0),
+    );
+    assert!(driver.session.recent_calls.is_empty());
+    assert!(!driver.session.recent_calls_clearing);
+    let _ = std::fs::remove_dir_all(&dir);
+}

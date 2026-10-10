@@ -151,6 +151,8 @@ pub enum DialogKind {
     ArchiveHint,
     /// The "Export chat history" options box.
     ChatExport,
+    /// "Clear all" on the Calls list.
+    ClearCalls,
     CallConfirm,
     /// Swap prompt: incoming call while another call is active.
     CallSwap,
@@ -277,6 +279,7 @@ impl QuillShell {
             DialogKind::FolderLimit => app.folder_limit_box.is_some(),
             DialogKind::ArchiveHint => app.archive_hint_open,
             DialogKind::ChatExport => app.chat_export_dialog.is_some(),
+            DialogKind::ClearCalls => app.global.clear_calls_open,
             DialogKind::CallConfirm => app.call_confirm.is_some(),
             DialogKind::CallSwap => app.session().is_some_and(|s| s.call_swap_pending.is_some()),
             DialogKind::NotificationDefaults => app.notification_defaults_open,
@@ -355,6 +358,7 @@ impl QuillShell {
             DialogKind::FolderLimit => QuillApp::build_folder_limit_dialog,
             DialogKind::ArchiveHint => QuillApp::build_archive_hint_dialog,
             DialogKind::ChatExport => QuillApp::build_chat_export_dialog,
+            DialogKind::ClearCalls => QuillApp::build_clear_calls_dialog,
             DialogKind::CallConfirm => QuillApp::build_call_confirm_dialog,
             DialogKind::CallSwap => QuillApp::build_call_swap_dialog,
             DialogKind::NotificationDefaults => QuillApp::build_notification_defaults_dialog,
@@ -411,6 +415,7 @@ impl QuillShell {
         DialogKind::FolderLimit,
         DialogKind::ArchiveHint,
         DialogKind::ChatExport,
+        DialogKind::ClearCalls,
         DialogKind::FolderEditor,
         DialogKind::FolderDelete,
         DialogKind::FolderShare,

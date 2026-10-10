@@ -697,6 +697,19 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — non-member channel".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatHeader)) {
+            let variant = std::env::var("QUILL_DEMO_HEADER").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::chat_header_demo::apply_ready_chat_header(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &variant,
+                );
+            }
+            self.status_note = "screenshot demo — chat header".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyTopBars)) {
             let variant = std::env::var("QUILL_DEMO_BAR").unwrap_or_default();
             if let Some(session) = self.demo_session.as_mut() {
@@ -1198,6 +1211,7 @@ impl QuillApp {
         }
         self.demo_setup_folder_followups(demo, window, cx);
         self.demo_setup_chatlist_rows(demo, window, cx);
+        self.demo_setup_chatlist_global(demo, window, cx);
         // Parity slice: manage dialog over the same folder fixture.
         if matches!(demo, Some(ScreenshotDemo::ReadyFoldersManage)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -1907,6 +1921,22 @@ impl QuillApp {
                 "screenshot demo — group voice chat invite picker (injected, no live Telegram)"
                     .into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallStage)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_polish(session, &self.demo_sink, &self.demo_seq);
+                self.demo_group_frames = demo_group_video_frames();
+                self.demo_local_frame = Some(demo_video_frame(true));
+            }
+            // Zed's camera, pinned and shown across the window.
+            self.group_call_pin.toggle(quill::calls::tile_pin::TileKey {
+                participant: quill::telegram::envelope::MessageSender::User { user_id: 41 },
+                screen: false,
+            });
+            self.demo_group_stage = true;
+            self.status_note =
+                "screenshot demo — full-screen pinned stream (injected, no live Telegram)".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallPolish)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -2293,6 +2323,32 @@ impl QuillApp {
                 );
             }
             self.status_note = "screenshot demo — comments and threads".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyForumThreadStories)) {
+            let view = std::env::var("QUILL_DEMO_FTS_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::forum_thread_stories_demo::apply_ready_forum_thread_stories(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            match view.as_str() {
+                "thread" => self.thread_info_open = true,
+                "stats" => {
+                    self.open_story_viewer(ChatId(11), 5, cx);
+                    self.story_stats_open = true;
+                }
+                "search" => {
+                    self.search_input.update(cx, |input, cx| {
+                        input.set_value("#sunset", window, cx);
+                    });
+                }
+                _ => self.topic_info_open = true,
+            }
+            self.status_note = "screenshot demo — topic info, story statistics and search".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyForumsSaved)) {
             let view = std::env::var("QUILL_DEMO_FORUMS_SAVED_VIEW").unwrap_or_default();

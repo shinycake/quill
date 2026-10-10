@@ -63,6 +63,16 @@ fn call_request_shapes() {
 }
 
 #[test]
+fn delete_all_call_messages_shape_matches_1_8_67() {
+    // `deleteAllCallMessages revoke:Bool = Ok` (schema line 12348).
+    let v: serde_json::Value =
+        serde_json::from_str(&delete_all_call_messages(RequestId(12), true)).unwrap();
+    assert_eq!(v["@type"], "deleteAllCallMessages");
+    assert_eq!(v["@extra"], "12");
+    assert_eq!(v["revoke"], true);
+}
+
+#[test]
 fn call_history_and_settings_shapes_match_1_8_67() {
     // Phase C2i: `searchCallMessages offset:string limit:int32
     // only_missed:Bool = FoundMessages` (schema 1.8.67 line 11903).

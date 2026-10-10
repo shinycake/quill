@@ -369,6 +369,26 @@ pub fn hide_check_password_suggestion(extra: RequestId) -> String {
     .to_string()
 }
 
+/// `hideSuggestedAction` (schema 1.8.67, :13365) for a parameterless
+/// suggested action, by constructor name.
+pub fn hide_suggested_action(extra: RequestId, action: &str) -> String {
+    json!({
+        "@type": "hideSuggestedAction",
+        "@extra": extra.as_extra(),
+        "action": {"@type": action},
+    })
+    .to_string()
+}
+
+/// `hideContactCloseBirthdays = Ok` (schema 1.8.67, :13368).
+pub fn hide_contact_close_birthdays(extra: RequestId) -> String {
+    json!({
+        "@type": "hideContactCloseBirthdays",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// B13: `getNetworkStatistics` (schema 1.8.67, :15808). `only_current`
 /// false = everything since the last reset.
 pub fn get_network_statistics(extra: RequestId) -> String {
@@ -538,6 +558,16 @@ mod b13_tests {
         let v = parse(set_inactive_session_ttl(RequestId(4), 90));
         assert_eq!(v["@type"], "setInactiveSessionTtl");
         assert_eq!(v["inactive_session_ttl_days"], 90);
+        let v = parse(hide_suggested_action(
+            RequestId(7),
+            "suggestedActionSetProfilePhoto",
+        ));
+        assert_eq!(v["@type"], "hideSuggestedAction");
+        assert_eq!(v["action"]["@type"], "suggestedActionSetProfilePhoto");
+        assert_eq!(
+            parse(hide_contact_close_birthdays(RequestId(8)))["@type"],
+            "hideContactCloseBirthdays"
+        );
         let v = parse(get_network_statistics(RequestId(5)));
         assert_eq!(v["@type"], "getNetworkStatistics");
         assert_eq!(v["only_current"], false);

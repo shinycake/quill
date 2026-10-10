@@ -708,6 +708,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-chat-avatars", ReadyChatAvatars),
         ("ready-chat-badges", ReadyChatBadges),
         ("ready-chat-export", ReadyChatExport),
+        ("ready-chat-header", ReadyChatHeader),
         ("ready-chat-list", ReadyChatListMenu),
         ("ready-chat-list-2", ReadyChatList),
         ("ready-chat-list-3", ReadyChatList3),
@@ -718,6 +719,15 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-chat-rows", ReadyChatRows),
         ("ready-chat-theme", ReadyChatTheme),
         ("ready-chat-ttl", ReadyChatTtl),
+        ("ready-chatlist-birthdays", ReadyChatlistBirthdays),
+        ("ready-chatlist-calls-clear", ReadyChatlistCallsClear),
+        ("ready-chatlist-contacts-index", ReadyChatlistContactsIndex),
+        ("ready-chatlist-stories-menu", ReadyChatlistStoriesMenu),
+        ("ready-chatlist-suggestions", ReadyChatlistSuggestions),
+        (
+            "ready-chatlist-suggestions-phone",
+            ReadyChatlistSuggestionsPhone,
+        ),
         ("ready-chats", ReadyChats),
         ("ready-chats-composer", ReadyChatsComposer),
         ("ready-code-language", ReadyCodeLanguage),
@@ -758,6 +768,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-folders-tag-color", ReadyFoldersTagColor),
         ("ready-folders-tags", ReadyFoldersTags),
         ("ready-folders-toast", ReadyFoldersToast),
+        ("ready-forum-thread-stories", ReadyForumThreadStories),
         ("ready-forum-topics", ReadyForumTopics),
         ("ready-forums-saved", ReadyForumsSaved),
         ("ready-forward", ReadyForward),
@@ -775,6 +786,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-group-call-manage", ReadyGroupCallManage),
         ("ready-group-call-polish", ReadyGroupCallPolish),
         ("ready-group-call-scheduled", ReadyGroupCallScheduled),
+        ("ready-group-call-stage", ReadyGroupCallStage),
         ("ready-group-info-edit", ReadyGroupInfoEdit),
         ("ready-group-manage", ReadyGroupManage),
         ("ready-groups2", ReadyGroups2),
@@ -1106,6 +1118,14 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyChatListSearch => ".quill-ready-ready-chat-list-search",
         ScreenshotDemo::ReadyArchiveRow => ".quill-ready-ready-archive-row",
         ScreenshotDemo::ReadyArchiveHint => ".quill-ready-ready-archive-hint",
+        ScreenshotDemo::ReadyChatlistContactsIndex => ".quill-ready-ready-chatlist-contacts-index",
+        ScreenshotDemo::ReadyChatlistBirthdays => ".quill-ready-ready-chatlist-birthdays",
+        ScreenshotDemo::ReadyChatlistCallsClear => ".quill-ready-ready-chatlist-calls-clear",
+        ScreenshotDemo::ReadyChatlistStoriesMenu => ".quill-ready-ready-chatlist-stories-menu",
+        ScreenshotDemo::ReadyChatlistSuggestions => ".quill-ready-ready-chatlist-suggestions",
+        ScreenshotDemo::ReadyChatlistSuggestionsPhone => {
+            ".quill-ready-ready-chatlist-suggestions-phone"
+        }
         ScreenshotDemo::ReadyChatBadges => ".quill-ready-ready-chat-badges",
         ScreenshotDemo::ReadyChatExport => ".quill-ready-ready-chat-export",
         ScreenshotDemo::ReadyWindowSettings => ".quill-ready-ready-window-settings",
@@ -1122,6 +1142,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyStoriesCollapsed => ".quill-ready-ready-stories-collapsed",
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
+        ScreenshotDemo::ReadyChatHeader => ".quill-ready-ready-chat-header",
         ScreenshotDemo::ReadyChatRows => ".quill-ready-ready-chat-rows",
         ScreenshotDemo::ReadyJoinBar => ".quill-ready-ready-join-bar",
         ScreenshotDemo::ReadyTopBars => ".quill-ready-ready-top-bars",
@@ -1180,6 +1201,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyRtlPolish => ".quill-ready-ready-rtl-polish",
         ScreenshotDemo::ReadyServiceMessages => ".quill-ready-ready-service-messages",
         ScreenshotDemo::ReadyThreads => ".quill-ready-ready-threads",
+        ScreenshotDemo::ReadyForumThreadStories => ".quill-ready-ready-forum-thread-stories",
         ScreenshotDemo::ReadyForumsSaved => ".quill-ready-ready-forums-saved",
         ScreenshotDemo::ReadyBubbleHeaders => ".quill-ready-ready-bubble-headers",
         ScreenshotDemo::ReadyRenderingLeftovers => ".quill-ready-ready-rendering-leftovers",
@@ -1288,6 +1310,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyGroupCallManage => ".quill-ready-ready-group-call-manage",
         ScreenshotDemo::ReadyGroupCallScheduled => ".quill-ready-ready-group-call-scheduled",
         ScreenshotDemo::ReadyGroupCallPolish => ".quill-ready-ready-group-call-polish",
+        ScreenshotDemo::ReadyGroupCallStage => ".quill-ready-ready-group-call-stage",
         ScreenshotDemo::ReadyGroupCallJoinAs => ".quill-ready-ready-group-call-join-as",
         ScreenshotDemo::ReadyCallsSettings => ".quill-ready-ready-calls-settings",
         ScreenshotDemo::ReadyPrivacy => ".quill-ready-ready-privacy",
@@ -1451,6 +1474,61 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 cx.background_executor()
                                     .timer(Duration::from_millis(ms))
                                     .await;
+                            }
+                            continue;
+                        }
+                        // `mid:x,y` clicks the middle button (press, short
+                        // pause, release), to start middle-click autoscroll.
+                        if let Some(at) = point.strip_prefix("mid:") {
+                            if let Some((x, y)) = at.split_once(',')
+                                && let (Ok(x), Ok(y)) =
+                                    (x.trim().parse::<f32>(), y.trim().parse::<f32>())
+                            {
+                                use gpui_kit::gpui::{
+                                    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+                                    MouseUpEvent, PlatformInput, point, px,
+                                };
+                                let position = point(px(x), px(y));
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        window.dispatch_event(
+                                            PlatformInput::MouseMove(MouseMoveEvent {
+                                                position,
+                                                pressed_button: None,
+                                                modifiers: Modifiers::default(),
+                                            }),
+                                            cx,
+                                        );
+                                        window.dispatch_event(
+                                            PlatformInput::MouseDown(MouseDownEvent {
+                                                button: MouseButton::Middle,
+                                                position,
+                                                modifiers: Modifiers::default(),
+                                                click_count: 1,
+                                                first_mouse: false,
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
+                                cx.background_executor()
+                                    .timer(Duration::from_millis(60))
+                                    .await;
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        window.dispatch_event(
+                                            PlatformInput::MouseUp(MouseUpEvent {
+                                                button: MouseButton::Middle,
+                                                position,
+                                                modifiers: Modifiers::default(),
+                                                click_count: 1,
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
                             }
                             continue;
                         }

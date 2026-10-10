@@ -173,6 +173,21 @@ impl Session {
                     );
                 }
             }
+            Some(
+                purpose @ (RequestPurpose::GetStoryStatistics
+                | RequestPurpose::GetStoryPublicForwards),
+            ) => {
+                if let Some(pending) = pending {
+                    self.fail_story_insights(
+                        pending,
+                        purpose,
+                        format!("Could not load statistics: {}", error_reason(&err)),
+                    );
+                }
+            }
+            Some(RequestPurpose::SearchPublicStories) => {
+                self.fail_story_search(format!("Could not search stories: {}", error_reason(&err)));
+            }
             // The message menu's Report flow and audience lists.
             Some(RequestPurpose::ReportMessages) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
@@ -598,6 +613,10 @@ impl Session {
             Some(RequestPurpose::SearchCallMessages) => {
                 self.recent_calls_loading = false;
                 self.recent_calls_error = true;
+            }
+            Some(RequestPurpose::DeleteAllCallMessages) => {
+                self.recent_calls_clearing = false;
+                self.chat_action_error = Some(crate::chatlist_calls::clear_failed(err.code));
             }
             Some(RequestPurpose::GetCallPrivacyRules { .. }) => {
                 self.privacy_roundtrip_done();
@@ -1386,7 +1405,9 @@ impl Session {
                 | RequestPurpose::SetContactJoinedNotifications
                 | RequestPurpose::GetNetworkStatistics
                 | RequestPurpose::ResetNetworkStatistics
-                | RequestPurpose::CheckRememberedPassword),
+                | RequestPurpose::CheckRememberedPassword
+                | RequestPurpose::HideSuggestedAction { .. }
+                | RequestPurpose::HideContactCloseBirthdays),
             ) => self.apply_privacy_data_error(purpose, &err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;

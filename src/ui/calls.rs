@@ -1301,8 +1301,7 @@ impl QuillApp {
     /// Recent calls; preferences live in Settings.
     pub(super) fn calls_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut list = div().id("calls-list").flex().flex_col().gap_1().px_1();
-        list = list.child(div().text_sm().font_semibold().px_1().child("Recent calls"));
-        let (entries, loading, failed, has_more) = self
+        let (entries, loading, failed, has_more, clearing) = self
             .session()
             .map(|session| {
                 (
@@ -1310,9 +1309,29 @@ impl QuillApp {
                     session.recent_calls_loading,
                     session.recent_calls_error,
                     !session.recent_calls_offset.is_empty(),
+                    session.recent_calls_clearing,
                 )
             })
             .unwrap_or_default();
+        list = list.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(div().text_sm().font_semibold().px_1().child("Recent calls"))
+                .when(
+                    quill::chatlist_calls::can_clear(entries.len(), clearing),
+                    |this| {
+                        this.child(
+                            Button::new("calls-clear-all")
+                                .label(quill::chatlist_calls::CLEAR_ALL_LABEL)
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| this.open_clear_calls(cx))),
+                        )
+                    },
+                ),
+        );
         if failed {
             list = list
                 .child(

@@ -691,6 +691,7 @@ impl QuillApp {
         for (chat_id, action) in clicks {
             self.run_notification_action(chat_id, action, window, cx);
         }
+        self.flush_call_notifications(window, cx);
         // Notifications whose chat was read elsewhere (or removed by TDLib)
         // are withdrawn from the OS notification center.
         let clears: Vec<ChatId> = self
@@ -756,6 +757,126 @@ impl QuillApp {
             .unwrap_or_default();
         for path in plays {
             self.notification_sounds.play(NotificationSound::File(path));
+        }
+    }
+
+    /// Incoming-call notifications: answer the picks, then announce a new
+    /// ringing call when no Quill window is in front, and withdraw the
+    /// notification once the call stops ringing.
+    fn flush_call_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picks: Vec<(i32, quill::notify_call::CallNotificationAction)> = self
+            .call_notify_clicks
+            .lock()
+            .map(|mut guard| std::mem::take(&mut *guard))
+            .unwrap_or_default();
+        let ringing = self.session().and_then(|s| {
+            let call = s.active_call.as_ref()?;
+            (matches!(
+                call.state,
+                quill::telegram::envelope::CallState::Pending { .. }
+            ) && !call.is_outgoing)
+                .then_some((call.id, call.user_id, call.is_video))
+        });
+        for (call_id, action) in picks {
+            // A stale pick (the call already ended or was answered) is
+            // ignored: accepting must never act on a different call.
+            if ringing.map(|r| r.0) != Some(call_id) {
+                continue;
+            }
+            match action {
+                quill::notify_call::CallNotificationAction::Accept => self.accept_incoming_call(cx),
+                quill::notify_call::CallNotificationAction::Decline => self.hang_up_call(cx),
+                quill::notify_call::CallNotificationAction::Open => {
+                    self.call_window_closed_by_user = None;
+                    cx.activate(true);
+                    window.activate_window();
+                    if let Some(handle) = self.call_window {
+                        let _ = handle.update(cx, |_, window, _| window.activate_window());
+                    }
+                }
+            }
+        }
+        let Some((call_id, user_id, is_video)) = ringing else {
+            // Not ringing any more: take the toast down (macOS and Windows;
+            // a Linux `notify-send` toast expires on its own).
+            if let Some(call_id) = self.call_notified.take()
+                && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
+            {
+                let account = self
+                    .session()
+                    .map(|s| s.account.0.clone())
+                    .unwrap_or_else(|| "primary".to_string());
+                cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
+                    &account, call_id,
+                ));
+            }
+            return;
+        };
+        let caller = self.call_peer_name(user_id);
+        let Some(notification) =
+            quill::notify_call::decide_call_notify(&quill::notify_call::CallNotifyInput {
+                call_id,
+                caller: &caller,
+                is_video,
+                app_active: cx.active_window().is_some(),
+                last_notified: self.call_notified,
+                locked: self.passcode_ui.locked,
+            })
+        else {
+            return;
+        };
+        self.call_notified = Some(call_id);
+        self.spawn_call_notification(notification, cx);
+    }
+
+    fn spawn_call_notification(
+        &mut self,
+        notification: quill::notify_call::CallNotification,
+        cx: &mut Context<Self>,
+    ) {
+        if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
+            let account = self
+                .session()
+                .map(|s| s.account.0.as_str())
+                .unwrap_or("primary");
+            cx.show_system_notification(SystemNotification {
+                tag: quill::notify_call::call_notification_tag(account, notification.call_id)
+                    .into(),
+                title: notification.title.clone().into(),
+                body: notification.body.clone().into(),
+                actions: quill::notify_call::call_buttons(&notification)
+                    .into_iter()
+                    .map(|(id, label)| SystemNotificationAction {
+                        id: id.into(),
+                        label: label.into(),
+                    })
+                    .collect(),
+            });
+            return;
+        }
+        let Some(command) = quill::notify_call::build_call_command(&notification) else {
+            return;
+        };
+        if self.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS {
+            self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+            return;
+        }
+        let clicks = self.call_notify_clicks.clone();
+        let inflight = self.notify_inflight.clone();
+        let call_id = notification.call_id;
+        let spawn = std::thread::Builder::new()
+            .name("quill-call-notify".to_string())
+            .spawn(move || {
+                let action = quill::notify_call::run_call_command(&command);
+                inflight.fetch_sub(1, Ordering::SeqCst);
+                if let Some(action) = action
+                    && let Ok(mut guard) = clicks.lock()
+                {
+                    guard.push((call_id, action));
+                }
+            });
+        if spawn.is_err() {
+            self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
         }
     }
 

@@ -239,6 +239,9 @@ impl Session {
             topic.is_general = info.is_general;
             topic.is_closed = info.is_closed;
             topic.is_hidden = info.is_hidden;
+            topic.creation_date = info.creation_date;
+            topic.creator = info.creator;
+            topic.is_outgoing = info.is_outgoing;
             return;
         }
         let order = topics.iter().map(|t| t.order).max().unwrap_or(0) + 1;
@@ -259,6 +262,9 @@ impl Session {
             notification_settings: Default::default(),
             unread_mention_count: 0,
             unread_reaction_count: 0,
+            creation_date: info.creation_date,
+            creator: info.creator,
+            is_outgoing: info.is_outgoing,
         });
     }
 
