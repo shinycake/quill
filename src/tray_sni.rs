@@ -162,6 +162,17 @@ impl TrayState {
         matches!(&self.phase, Phase::Ready { handle, .. } if !handle.is_closed())
     }
 
+    /// "Show tray icon" turned off: unregister the item and stay idle. The
+    /// next `poll` after the switch comes back on registers again.
+    pub fn hide(&mut self) {
+        if let Phase::Ready { handle, .. } = &self.phase {
+            let _ = handle.shutdown();
+        }
+        if !matches!(self.phase, Phase::Idle(_)) {
+            self.phase = Phase::Idle(Instant::now());
+        }
+    }
+
     /// Whether a registration attempt is still in flight. The window-start
     /// logic polls this to tell "no tray host" (reveal the window) from
     /// "tray still registering" without blocking the UI thread.

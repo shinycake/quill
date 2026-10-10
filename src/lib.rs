@@ -83,6 +83,7 @@ pub mod presence;
 pub mod privacy;
 pub mod profile_forms;
 pub mod proxy;
+pub mod quit_guard;
 pub mod reaction_who;
 pub mod request_share;
 pub mod rich;

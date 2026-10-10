@@ -480,32 +480,6 @@ impl QuillApp {
         self.with_selection_bar(chat_id, header, cx)
     }
 
-    /// `parity:platform-chat-export` — start exporting a chat's history.
-    /// The driver pages `getChatHistory` in the background; completion (or
-    /// failure) surfaces as a status note from `poll_live`.
-    pub(super) fn start_chat_export(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let title = self
-            .session()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .map(|c| c.title.clone())
-            .unwrap_or_else(|| "chat".to_string());
-        let protected = self
-            .session()
-            .is_some_and(|s| s.chat_has_protected_content(chat_id));
-        let started = self
-            .live
-            .as_mut()
-            .is_some_and(|live| live.driver.start_chat_export(chat_id, title).is_ok());
-        self.status_note = if started {
-            "Exporting chat history…".into()
-        } else if protected {
-            "This chat's content is protected and can't be exported.".into()
-        } else {
-            "Could not start the export (another export is running).".into()
-        };
-        cx.notify();
-    }
-
     /// Whether the open chat shows a composer at all.
     pub(super) fn composer_available(&self, mode: PaneMode) -> bool {
         match mode {

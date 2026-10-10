@@ -329,6 +329,8 @@ pub(super) fn demo_seed_for(
         ),
         ScreenshotDemo::ReadyArchiveHint
         | ScreenshotDemo::ReadyChatBadges
+        | ScreenshotDemo::ReadyChatExport
+        | ScreenshotDemo::ReadyWindowSettings
         | ScreenshotDemo::ReadyFoldersChats
         | ScreenshotDemo::ReadyFoldersChatPicker
         | ScreenshotDemo::ReadyFoldersToast => (
@@ -2411,6 +2413,8 @@ impl QuillApp {
             group_call_chat_shown: false,
             group_call_ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
+            quit_guard: Default::default(),
+            quit_clock: std::time::Instant::now(),
             ptt_capture: false,
             global_ptt: Default::default(),
             global_ptt_polling: false,
@@ -2562,6 +2566,8 @@ impl QuillApp {
             folder_new_chats_dialog: None,
             folder_limit_box: None,
             archive_hint_open: false,
+            window_settings_screenshot: false,
+            chat_export_dialog: None,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,
