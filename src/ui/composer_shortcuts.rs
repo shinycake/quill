@@ -5,8 +5,9 @@
 //! plain-text paste.
 
 use super::actions::{
-    ComposerEditLink, ComposerPastePlain, FormatBlockQuote, FormatBold, FormatClear, FormatItalic,
-    FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline,
+    ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, FormatBlockQuote, FormatBold,
+    FormatClear, FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough,
+    FormatUnderline,
 };
 use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas};
@@ -29,6 +30,22 @@ pub(super) struct ComposerLinkDialog {
     /// The text in that range, to detect a draft that changed meanwhile.
     selected: String,
     input: Entity<TextareaState>,
+}
+
+/// The "Code Language" box (tdesktop `EditCodeLanguageBox`): one field,
+/// empty for auto-detect, for the fenced block the caret was in.
+pub(super) struct CodeLanguageDialog {
+    /// Where the block was when the box opened, to notice a changed draft.
+    block: Range<usize>,
+    input: Entity<TextareaState>,
+    error: Option<&'static str>,
+}
+
+impl CodeLanguageDialog {
+    /// The box's field, for demo fixtures.
+    pub(super) fn input_for_demo(&self) -> &Entity<TextareaState> {
+        &self.input
+    }
 }
 
 /// The chord for a shortcut as shown in menus: "⌘B" on macOS, "Ctrl+B"
@@ -213,6 +230,164 @@ impl QuillApp {
         )
     }
 
+    /// Open the "Code Language" box for the block under the caret.
+    pub(super) fn open_code_language_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self.composer.read(cx).value().to_string();
+        let caret = self.composer.read(cx).selected_range().start;
+        let Some(fence) = quill::code_language::fence_at(&text, caret) else {
+            self.status_note = "Put the cursor inside a code block first.".into();
+            cx.notify();
+            return;
+        };
+        let current = fence.current(&text).to_string();
+        let input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder("Auto-Detect")
+                .auto_grow(1, 1)
+                .submit_on_enter(true);
+            state.set_value(&current, window, cx);
+            state
+        });
+        cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
+            if matches!(event, InputEvent::PressEnter { .. }) {
+                this.apply_code_language(window, cx);
+            }
+        })
+        .detach();
+        input.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
+        self.composer_code_language = Some(CodeLanguageDialog {
+            block: fence.block,
+            input,
+            error: None,
+        });
+        cx.notify();
+    }
+
+    pub(super) fn close_code_language_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.composer_code_language.take().is_some() {
+            self.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+            cx.notify();
+        }
+    }
+
+    /// Save: rewrite the language after the block's opening fence.
+    fn apply_code_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = self.composer_code_language.as_ref() else {
+            return;
+        };
+        let typed = dialog.input.read(cx).value().to_string();
+        let block = dialog.block.clone();
+        let text = self.composer.read(cx).value().to_string();
+        let fence =
+            quill::code_language::fence_at(&text, block.start).filter(|fence| fence.block == block);
+        let Some(fence) = fence else {
+            // The draft changed under the box; do not edit the wrong block.
+            self.close_code_language_dialog(window, cx);
+            self.status_note = "The text changed. Open Code Language again.".into();
+            cx.notify();
+            return;
+        };
+        match quill::code_language::with_language(&text, &fence, &typed) {
+            Ok((new_text, new_block)) => {
+                self.close_code_language_dialog(window, cx);
+                self.composer.update(cx, |input, cx| {
+                    input.set_value(&new_text, window, cx);
+                    input.set_selected_range(new_block.end..new_block.end, cx);
+                    input.focus(window, cx);
+                });
+            }
+            Err(error) => {
+                if let Some(dialog) = self.composer_code_language.as_mut() {
+                    dialog.error = Some(error.note());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The box, above the composer input row.
+    pub(super) fn code_language_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.composer_code_language.as_ref()?;
+        let typed = dialog.input.read(cx).value().chars().count();
+        let over = typed > quill::code_language::CODE_LANGUAGE_LIMIT;
+        Some(
+            div()
+                .id("composer-code-language")
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_3()
+                .rounded_md()
+                .border_1()
+                .border_color(accent())
+                .bg(bg_canvas())
+                .child(div().text_sm().font_semibold().child("Code Language"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Language for syntax highlighting."),
+                )
+                .child(Textarea::new(&dialog.input).aria_label("Code language"))
+                .child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .text_xs()
+                        .child(
+                            div()
+                                .text_color(cx.theme().danger)
+                                .child(dialog.error.unwrap_or("")),
+                        )
+                        .child(
+                            div()
+                                .text_color(if over {
+                                    cx.theme().danger
+                                } else {
+                                    cx.theme().muted_foreground
+                                })
+                                .child(format!(
+                                    "{typed}/{}",
+                                    quill::code_language::CODE_LANGUAGE_LIMIT
+                                )),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("composer-code-language-save")
+                                .label("Save")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.apply_code_language(window, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("composer-code-language-cancel")
+                                .label("Cancel")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_code_language_dialog(window, cx);
+                                })),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// Cmd/Ctrl+Shift+V: insert the clipboard's text only. Unlike the plain
     /// paste, images and copied files never become attachments, and
     /// Windows line endings are normalized.
@@ -235,7 +410,11 @@ impl QuillApp {
     /// The "Formatting" group of the composer's right-click menu. Items need
     /// a selection (tdesktop disables them without one); each dispatches the
     /// same action as its chord, so the menu and the shortcut cannot drift.
-    pub(super) fn formatting_menu_items(menu: NativeMenu, has_selection: bool) -> NativeMenu {
+    pub(super) fn formatting_menu_items(
+        menu: NativeMenu,
+        has_selection: bool,
+        in_code_block: bool,
+    ) -> NativeMenu {
         let item = |label: &str, shortcut: ComposerShortcut, action: Box<dyn Action>| {
             (labelled(label, shortcut), action)
         };
@@ -278,6 +457,11 @@ impl QuillApp {
                 labelled("Create link", ComposerShortcut::EditLink),
                 !has_selection,
                 Box::new(ComposerEditLink),
+            )
+            .menu_with_disabled(
+                "Code Language…",
+                !in_code_block,
+                Box::new(ComposerEditCodeLanguage),
             )
             .menu(
                 labelled("Clear formatting", ComposerShortcut::ClearFormatting),

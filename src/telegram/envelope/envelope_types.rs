@@ -911,6 +911,8 @@ pub enum EnvelopePayload {
         name: String,
         /// `stickerSet.is_installed`: the set is in the user's collection.
         is_installed: bool,
+        /// `stickerSet.sticker_type` is `stickerTypeCustomEmoji`.
+        is_custom_emoji: bool,
         stickers: Vec<StickerItem>,
         files: Vec<ParsedFile>,
     },
@@ -1434,6 +1436,11 @@ pub enum EnvelopePayload {
         message_id: i64,
         media_timestamp: Option<i32>,
         thread_id: Option<i64>,
+    },
+    /// `chatBoostLinkInfo` — the `getChatBoostLinkInfo` answer. `chat_id` is
+    /// 0 when the link does not name a channel the account can see.
+    ChatBoostLinkInfo {
+        chat_id: i64,
     },
     /// Phase D3a: `chatInviteLinks` (TDLib 1.8.67, line 2630) — the
     /// response of `getChatInviteLinks` / `revokeChatInviteLink`.

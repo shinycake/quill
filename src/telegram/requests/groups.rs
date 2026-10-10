@@ -790,6 +790,17 @@ pub fn get_chat_boost_status(extra: RequestId, chat_id: ChatId) -> String {
     .to_string()
 }
 
+/// `getChatBoostLinkInfo url:string = ChatBoostLinkInfo;`
+/// (`schema/td_api.tl`): the channel a boost link points to.
+pub fn get_chat_boost_link_info(extra: RequestId, url: &str) -> String {
+    json!({
+        "@type": "getChatBoostLinkInfo",
+        "@extra": extra.as_extra(),
+        "url": url,
+    })
+    .to_string()
+}
+
 /// Slice G2: `getAvailableChatBoostSlots` (TDLib 1.8.67,
 /// `schema/td_api.tl:13914`): "Returns the list of available chat boost
 /// slots for the current user".

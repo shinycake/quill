@@ -143,6 +143,7 @@ impl QuillApp {
         if !matches!(auth, AuthorizationState::WaitCode { .. }) {
             self.signin.editing_phone = false;
         }
+        self.apply_login_code_link(&auth, window, cx);
         let phone_screen = matches!(auth, AuthorizationState::WaitPhoneNumber)
             || (self.signin.editing_phone && matches!(auth, AuthorizationState::WaitCode { .. }));
         if phone_screen
@@ -164,6 +165,39 @@ impl QuillApp {
                 });
             }
         }
+    }
+
+    /// A `tg://login?code=` link that arrives while the code step is up
+    /// fills the field and sends the code once it is complete (tdesktop
+    /// `CodeWidget::setHandleLoginCode`). On any other step the link waits;
+    /// once signed in it gets the "already signed in" answer.
+    fn apply_login_code_link(
+        &mut self,
+        auth: &AuthorizationState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let AuthorizationState::WaitCode { code_length, .. } = auth else {
+            return;
+        };
+        let Some(code) = self
+            .pending_deep_link
+            .as_deref()
+            .and_then(quill::deep_link_types::login_code_from_link)
+        else {
+            return;
+        };
+        self.pending_deep_link = None;
+        let complete = code_length
+            .and_then(|len| usize::try_from(len).ok())
+            .is_some_and(|len| len == code.len());
+        cx.defer_in(window, move |this, window, cx| {
+            this.code_input
+                .update(cx, |input, cx| input.set_value(code, window, cx));
+            if complete {
+                this.submit_code(window, cx);
+            }
+        });
     }
 
     /// The phone field changed: re-group the digits, refresh the country.
