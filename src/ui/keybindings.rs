@@ -110,7 +110,7 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "focus-composer",
         label: "Focus composer",
-        defaults: &["cmd-l", "ctrl-l"],
+        defaults: &["cmd-shift-l", "ctrl-shift-l"],
     },
     RebindableAction {
         id: "next-chat",
@@ -325,10 +325,10 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-,", OpenSettings, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("ctrl-w", CloseWindow, None),
-        // Local passcode. tdesktop uses Ctrl/Cmd+L, which Quill already
-        // gives to "Focus composer", so lock takes the Shift variant.
-        KeyBinding::new("cmd-shift-l", LockApp, None),
-        KeyBinding::new("ctrl-shift-l", LockApp, None),
+        // Local passcode: Ctrl/Cmd+L as in tdesktop (Focus composer moved to
+        // the Shift variant).
+        KeyBinding::new("cmd-l", LockApp, None),
+        KeyBinding::new("ctrl-l", LockApp, None),
         KeyBinding::new("cmd-m", MinimizeWindow, None),
         KeyBinding::new("ctrl-m", MinimizeWindow, None),
         KeyBinding::new("f11", ToggleFullscreen, None),
@@ -702,8 +702,8 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("ctrl-q", "Quit Quill", "General", QuitApp),
         // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
         // minimize; F11 / Cmd+Ctrl+F fullscreen).
-        row("cmd-shift-l", "Lock Quill", "General", LockApp),
-        row("ctrl-shift-l", "Lock Quill", "General", LockApp),
+        row("cmd-l", "Lock Quill", "General", LockApp),
+        row("ctrl-l", "Lock Quill", "General", LockApp),
         row("cmd-w", "Close window", "General", CloseWindow),
         row("ctrl-w", "Close window", "General", CloseWindow),
         row("cmd-m", "Minimize window", "General", MinimizeWindow),
@@ -719,13 +719,13 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("cmd-alt-1", "Focus chat list", "Navigation", FocusSidebar),
         row("ctrl-alt-1", "Focus chat list", "Navigation", FocusSidebar),
         row(
-            "cmd-l",
+            "cmd-shift-l",
             "Focus message composer",
             "Navigation",
             FocusComposer,
         ),
         row(
-            "ctrl-l",
+            "ctrl-shift-l",
             "Focus message composer",
             "Navigation",
             FocusComposer,
@@ -1125,6 +1125,19 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_l_locks_and_shift_variant_focuses_the_composer() {
+        let lock = super::LockApp.name();
+        let mut chords: Vec<String> = default_bindings()
+            .iter()
+            .filter(|binding| binding.action().name() == lock)
+            .map(|binding| binding.keystrokes()[0].inner().unparse())
+            .collect();
+        chords.sort();
+        assert_eq!(chords, ["cmd-l", "ctrl-l"]);
+        assert!(keybinding_for("focus-composer", "ctrl-shift-l").is_some());
+    }
+
+    #[test]
     fn appearance_dismiss_clears_capture_and_error() {
         let mut open = true;
         let mut capture = Some("focus-composer".to_string());
@@ -1192,13 +1205,13 @@ mod tests {
 
     #[test]
     fn keybinding_for_valid_id_and_keystroke() {
-        assert!(keybinding_for("focus-composer", "ctrl-l").is_some());
+        assert!(keybinding_for("focus-composer", "ctrl-shift-l").is_some());
         assert!(keybinding_for("cancel-search", "escape").is_some());
     }
 
     #[test]
     fn keybinding_for_unknown_id_is_none() {
-        assert!(keybinding_for("nope", "ctrl-l").is_none());
+        assert!(keybinding_for("nope", "ctrl-shift-l").is_none());
     }
 
     #[test]
@@ -1253,16 +1266,19 @@ mod tests {
 
     #[test]
     fn rebindable_conflict_blocks_a_shared_live_chord() {
-        // ctrl-l is still Focus composer's live default.
+        // ctrl-shift-l is still Focus composer's live default.
         assert_eq!(
-            keybinding_conflict("open-search", "ctrl-l", &[]),
+            keybinding_conflict("open-search", "ctrl-shift-l", &[]),
             Some(KeybindingConflict::Rebindable {
                 other_label: "Focus composer",
             })
         );
-        // Moving Focus composer off ctrl-l frees it. The new chord is taken.
+        // Moving Focus composer off ctrl-shift-l frees it. The new chord is taken.
         let moved = vec![custom("focus-composer", "ctrl-alt-9")];
-        assert_eq!(keybinding_conflict("open-search", "ctrl-l", &moved), None);
+        assert_eq!(
+            keybinding_conflict("open-search", "ctrl-shift-l", &moved),
+            None
+        );
         assert_eq!(
             keybinding_conflict("open-search", "ctrl-alt-9", &moved),
             Some(KeybindingConflict::Rebindable {
@@ -1270,7 +1286,10 @@ mod tests {
             })
         );
         // An action may keep its own default.
-        assert_eq!(keybinding_conflict("focus-composer", "ctrl-l", &[]), None);
+        assert_eq!(
+            keybinding_conflict("focus-composer", "ctrl-shift-l", &[]),
+            None
+        );
         assert_eq!(
             keybinding_conflict("open-search", "not-a-keystroke-%%%", &[]),
             Some(KeybindingConflict::Invalid)

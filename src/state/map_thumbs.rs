@@ -13,6 +13,10 @@ pub const MAP_THUMB_HEIGHT: i32 = 180;
 /// `getMapThumbnailFile.scale` (1..=3): 2 keeps the tile sharp on Retina.
 pub const MAP_THUMB_SCALE: i32 = 2;
 
+/// Most places remembered in `files` / `asked`; past it both restart empty
+/// and the open chat asks again for the tiles it still shows.
+pub const MAP_THUMB_CAP: usize = 1024;
+
 /// Where a thumbnail is for: the rounded coordinates (about 11 cm).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MapKey {
@@ -55,6 +59,10 @@ impl MapThumbs {
 
     /// Remember that request `extra` asks for `key`'s tile.
     pub fn expect(&mut self, extra: RequestId, key: MapKey) {
+        if self.asked.len() >= MAP_THUMB_CAP && !self.asked.contains(&key) {
+            self.asked.clear();
+            self.files.clear();
+        }
         self.asked.insert(key);
         self.awaiting.insert(extra.0, key);
     }
@@ -133,5 +141,30 @@ impl Session {
             }
         }
         ids
+    }
+}
+
+#[cfg(test)]
+mod cap_tests {
+    use super::{MAP_THUMB_CAP, MapKey, MapThumbs};
+    use crate::state::RequestId;
+
+    fn key(n: i64) -> MapKey {
+        MapKey {
+            lat_e6: n,
+            lon_e6: n,
+        }
+    }
+
+    #[test]
+    fn places_are_bounded() {
+        let mut thumbs = MapThumbs::default();
+        for n in 0..(MAP_THUMB_CAP as i64 * 3) {
+            thumbs.expect(RequestId(n as u64), key(n));
+            thumbs.answered(RequestId(n as u64), n as i32);
+            assert!(thumbs.asked.len() <= MAP_THUMB_CAP);
+            assert!(thumbs.files.len() <= MAP_THUMB_CAP);
+        }
+        assert!(thumbs.has_asked(&key(MAP_THUMB_CAP as i64 * 3 - 1)));
     }
 }

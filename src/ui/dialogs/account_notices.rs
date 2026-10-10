@@ -34,6 +34,8 @@ pub(crate) enum AccountNotice {
     Terms,
     Service,
     LoginPrevented,
+    Frozen,
+    AgeVerify,
 }
 
 const TERMS_SORRY: &str = "We're very sorry, but this means we must part ways here. Unlike others, we don't use your data for ad targeting or other commercial purposes. Telegram only stores the information it needs to function as a secure and feature-rich cloud service. You can adjust how we use your data in Privacy & Security settings.\n\nBut if you're generally not OK with Telegram's modest requirements, it won't be possible for us to provide you with this service. You can delete your account now \u{2014} or look around some more and delete it later if you feel you're not happy with the way we use your data.";
@@ -51,6 +53,10 @@ impl QuillApp {
             Some(AccountNotice::Service)
         } else if self.login_prevented.is_some() {
             Some(AccountNotice::LoginPrevented)
+        } else if self.freeze_info_open && session.sync.freeze.is_some() {
+            Some(AccountNotice::Frozen)
+        } else if self.age_verify_open && session.sync.age_verification.is_some() {
+            Some(AccountNotice::AgeVerify)
         } else {
             None
         }
@@ -170,6 +176,8 @@ impl QuillApp {
                         }
                     }
                     Some(AccountNotice::LoginPrevented) => this.login_prevented = None,
+                    Some(AccountNotice::Frozen) => this.freeze_info_open = false,
+                    Some(AccountNotice::AgeVerify) => this.age_verify_open = false,
                     _ => {}
                 }
                 cx.notify();
@@ -180,6 +188,8 @@ impl QuillApp {
                 Some(AccountNotice::Terms) => this.terms_dialog_parts(cx),
                 Some(AccountNotice::Service) => this.service_dialog_parts(cx),
                 Some(AccountNotice::LoginPrevented) => this.prevented_dialog_parts(cx),
+                Some(AccountNotice::Frozen) => this.frozen_dialog_parts(cx),
+                Some(AccountNotice::AgeVerify) => this.age_verify_dialog_parts(cx),
                 None => (
                     "".into(),
                     div().into_any_element(),

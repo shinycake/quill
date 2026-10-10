@@ -213,6 +213,17 @@ impl QuillApp {
                             })),
                     ),
             );
+        if let Some(summary) = session.sync.download_summary(format_bytes) {
+            panel = panel.child(
+                div()
+                    .id("downloads-summary")
+                    .px_3()
+                    .pt_2()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(summary),
+            );
+        }
         if active.is_empty() && recent.is_empty() {
             panel = panel.child(
                 div()

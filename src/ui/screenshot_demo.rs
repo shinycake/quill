@@ -12,6 +12,14 @@ pub enum ScreenshotDemo {
     WaitPhoneFormatted,
     /// Sign-in polish: code step with the resend countdown and "Wrong number?".
     WaitCodeResend,
+    /// Code step for `authenticationCodeTypeFirebase*` (official apps only).
+    WaitCodeFirebase,
+    /// Code step for `authenticationCodeTypeFlashCall`.
+    WaitCodeFlash,
+    /// Code step for `authenticationCodeTypeFragment` with "Open Fragment".
+    WaitCodeFragment,
+    /// Code step for `authenticationCodeTypeMissedCall`.
+    WaitCodeMissed,
     /// Sign-in polish: tdesktop's banned-number box (with Help).
     WaitPhoneBanned,
     WaitPassword,
@@ -132,6 +140,10 @@ pub enum ScreenshotDemo {
     ReadyChatlistSuggestionsPhone,
     /// Chat-list rows: video chat badge and emoji status on rows.
     ReadyChatBadges,
+    /// The "Export chat history" options box.
+    ReadyChatExport,
+    /// Appearance box: tray icon, start in tray, close behavior, quit warning.
+    ReadyWindowSettings,
     /// Chat-list rows: the folder editor's chat sections.
     ReadyFoldersChats,
     /// Chat-list rows: the folder editor's chat picker with search.
@@ -199,6 +211,12 @@ pub enum ScreenshotDemo {
     ReadyDropZones,
     /// Composer core: the "Code Language" box over a fenced block.
     ReadyCodeLanguage,
+    /// Composer leftovers: a group that restricts the viewer replaces the
+    /// composer with the reason (`QUILL_DEMO_RESTRICTION`).
+    ReadyRestrictedComposer,
+    /// Composer leftovers: a paused voice recording with its preview and
+    /// the Play once switch.
+    ReadyVoicePause,
     /// Composer core: a dragged folder offers its files or one archive.
     ReadyDropFolder,
     /// MED4: embedded-player + album `linkPreview` cards in bubbles
@@ -337,6 +355,10 @@ pub enum ScreenshotDemo {
     /// button), `botInfo` with a menu button and a privacy-policy URL,
     /// and a loaded `getBotSimilarBots` answer (Slice B2).
     ReadyBotProfile,
+    /// Bot extras demo (injected, no live Telegram): fast buttons mode,
+    /// adding a bot to a group or channel, verification badges, sharing
+    /// a game and owned bots; the mode comes from `QUILL_DEMO_BOTEXTRAS`.
+    ReadyBotExtras,
     /// Text-entity demo (injected, no live Telegram): a message with mixed
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
@@ -375,6 +397,10 @@ pub enum ScreenshotDemo {
     /// and public story search (injected, no live Telegram):
     /// `QUILL_DEMO_FTS_VIEW=topic|thread|stats|search` (default `topic`).
     ReadyForumThreadStories,
+    /// The forum topic column next to the chat list, a topic with replies and
+    /// its thread (injected, no live Telegram):
+    /// `QUILL_DEMO_FORUM_COLUMN_VIEW=topics|topic|thread` (default `topics`).
+    ReadyForumColumn,
     /// Forums and Saved Messages sublists (injected, no live Telegram):
     /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
     /// sublist list, one sublist, a tag filter, or the forum topic editor
@@ -399,6 +425,9 @@ pub enum ScreenshotDemo {
     /// settings. `QUILL_DEMO_TRANSLATE_VIEW=bar|translated|box|rtl|selection|chooser|settings|skip`
     /// (default `bar`).
     ReadyTranslate,
+    /// Account-level sync updates (`QUILL_DEMO_SYNC=frozen|live|speech|age|
+    /// downloads`; injected data, no live Telegram).
+    ReadyUpdatesSync,
     /// A bot chat whose reply keyboard comes from `updateChatReplyMarkup`
     /// (message outside the window), with request buttons and the share
     /// dialogs. `QUILL_DEMO_KEYBOARD_VIEW=keyboard|hidden|phone|users|chat|confirm`.
@@ -649,6 +678,9 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Appearance cluster: system accent, font family and the Battery and
+    /// animations switches.
+    ReadyAppearancePower,
     /// Appearance slice: Appearance with Telegram wallpapers and interface scale.
     ReadyAppearanceWallpapers,
     /// Per-chat theme and wallpaper picker open over a private chat.
@@ -663,6 +695,9 @@ pub enum ScreenshotDemo {
     ReadySpellcheckPanel,
     /// Appearance dialog with the Spelling / Check spelling row visible.
     ReadySpellcheckToggle,
+    /// Appearance → Spelling with the Manage dictionaries list open
+    /// (fixture rows: enabled, installed, downloading 42%, failed, available).
+    ReadyDictionaries,
     /// Slice `parity:platform-custom-keybindings`: the Appearance dialog
     /// open on the Keyboard shortcuts section (injected, no live Telegram).
     ReadyKeybindings,
@@ -857,6 +892,10 @@ pub enum ScreenshotDemo {
     /// (`QUILL_DEMO_GROUP_ADMIN=group|channel|basic|reactions|discussion|
     /// linked|confirm`; injected data, no live Telegram).
     ReadyGroupAdminSettings,
+    /// Admin links, boosts and usernames
+    /// (`QUILL_DEMO_LINKS_BOOSTS=usernames|boosts|gifts|admin-links|
+    /// link-requests|qr`; injected data, no live Telegram).
+    ReadyLinksBoosts,
     /// Slice A5: like `ReadyProfileEdit`, but the username field holds a
     /// freshly-checked value with a seeded `checkChatUsernameResultOk`
     /// verdict — intended for a taller capture

@@ -349,20 +349,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let can_stop = self
+        let running_share = self
             .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
-            .filter(|message| !message.pending && message.id.0 > 0)
-            .is_some_and(|message| match &message.content {
-                crate::telegram::envelope::MessageContent::Location(location) => {
-                    location.live.is_some_and(|live| {
-                        live.can_stop_at(message.is_outgoing, crate::local_time::now_unix())
-                    })
-                }
-                _ => false,
-            });
+            .sync
+            .live_shares_at(crate::local_time::now_unix())
+            .any(|share| share.chat_id == chat_id && share.message_id == message_id);
+        let can_stop = running_share
+            || self
+                .session
+                .histories
+                .get(&chat_id.0)
+                .and_then(|history| history.messages.get(&message_id.0))
+                .filter(|message| !message.pending && message.id.0 > 0)
+                .is_some_and(|message| match &message.content {
+                    crate::telegram::envelope::MessageContent::Location(location) => {
+                        location.live.is_some_and(|live| {
+                            live.can_stop_at(message.is_outgoing, crate::local_time::now_unix())
+                        })
+                    }
+                    _ => false,
+                });
         if !can_stop {
             return Err(ConnectSendError::InvalidRequest);
         }

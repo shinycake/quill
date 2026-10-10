@@ -41,6 +41,7 @@ impl Render for QuillApp {
         }
         self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
+        self.sync_speech_trial_hint(cx);
         self.sync_window_title(window);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
@@ -55,6 +56,9 @@ impl Render for QuillApp {
             .borrow_mut()
             .frame_start(history_drawn, window.scale_factor());
         let active = window.is_window_active() || super::frame_clock::assume_active();
+        // The forum's topic list is a column of its own (tdesktop shows it
+        // where the chat list was).
+        let forum_column = self.forum_column_layout(window);
         if self.window_active.replace(active) != active {
             self.inline_videos.borrow_mut().set_window_active(active);
         }
@@ -321,6 +325,23 @@ impl Render for QuillApp {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
             }))
             .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
+                #[cfg(target_os = "macos")]
+                {
+                    use quill::quit_guard::QuitDecision;
+                    let now = u64::try_from(this.quit_clock.elapsed().as_millis()).unwrap_or(0);
+                    match this
+                        .quit_guard
+                        .press(now, this.appearance.mac_warn_before_quit)
+                    {
+                        QuitDecision::Warn => {
+                            this.status_note = quill::quit_guard::WARNING.to_string();
+                            cx.notify();
+                            return;
+                        }
+                        QuitDecision::Holding => return,
+                        QuitDecision::Quit => {}
+                    }
+                }
                 let _ = this;
                 window.remove_window();
                 cx.quit();
@@ -328,17 +349,22 @@ impl Render for QuillApp {
             // kit Phase 7: window-chrome actions behind the File / Window /
             // View / Help menus (same dispatch path as the key bindings).
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                let _ = this;
-                #[cfg(target_os = "macos")]
-                if quill::tray::tray_available() {
-                    cx.hide();
-                    return;
+                use quill::tray::{CloseOutcome, close_outcome};
+                match close_outcome(
+                    this.appearance.minimize_to_tray,
+                    quill::tray::tray_available(),
+                    cfg!(target_os = "macos"),
+                ) {
+                    CloseOutcome::HideApp => cx.hide(),
+                    CloseOutcome::Minimize => window.minimize_window(),
+                    CloseOutcome::Quit => {
+                        window.remove_window();
+                        // macOS keeps a windowless app alive for its menu
+                        // bar; elsewhere closing the only window quits.
+                        #[cfg(not(target_os = "macos"))]
+                        cx.quit();
+                    }
                 }
-                window.remove_window();
-                // macOS keeps a windowless app alive for its menu bar;
-                // elsewhere closing the only window quits.
-                #[cfg(not(target_os = "macos"))]
-                cx.quit();
             }))
             .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
                 #[cfg(target_os = "macos")]
@@ -701,6 +727,8 @@ impl Render for QuillApp {
                 self.search_is_open(),
                 cx,
             ))
+            .children(self.frozen_banner(cx))
+            .children(self.live_share_strip(cx))
             .children(self.unconfirmed_login_banner(cx))
             .when(
                 matches!(
@@ -786,7 +814,9 @@ impl Render for QuillApp {
                             // Ready: the chat list and the conversation are
                             // cached slices, redrawn on their own (`app_slice`).
                             .map(|this| {
-                                if self.pane_mode() == super::app::PaneMode::Ready {
+                                if forum_column == quill::state::ForumColumn::Replacing {
+                                    this
+                                } else if self.pane_mode() == super::app::PaneMode::Ready {
                                     this.child(self.sidebar_slot())
                                 } else {
                                     this.child(self.sidebar(
@@ -799,7 +829,18 @@ impl Render for QuillApp {
                                     ))
                                 }
                             })
-                            .child(self.sidebar_resize_handle(cx))
+                            .when(
+                                forum_column != quill::state::ForumColumn::Replacing,
+                                |this| this.child(self.sidebar_resize_handle(cx)),
+                            )
+                            .when(forum_column != quill::state::ForumColumn::Hidden, |this| {
+                                let open = self.session().and_then(|s| s.open_chat);
+                                this.child(self.forum_column_view(
+                                    open,
+                                    forum_column == quill::state::ForumColumn::Replacing,
+                                    cx,
+                                ))
+                            })
                             .child(self.conversation_slot(cx))
                             // Phase 6: user / group info panel beside the conversation.
                             .when_some(self.info_panel(cx), |this, panel| this.child(panel))
@@ -1102,12 +1143,13 @@ fn status_note_is_toast(note: &str) -> bool {
         "limit",
         "will send when",
     ];
-    const CONFIRMATION: [&str; 6] = [
+    const CONFIRMATION: [&str; 7] = [
         "copied",
         "saved to",
         "exported",
         "downloaded",
         "link",
+        "hold ",
         "archived",
     ];
     FAILURE

@@ -90,9 +90,11 @@ mod session_chatlist;
 mod session_date_jump;
 mod session_files;
 mod session_forum;
+pub use session_forum::{FORUM_COLUMN_COLLAPSE_BELOW, FORUM_COLUMN_WIDTH, ForumColumn};
 mod session_forward;
 mod session_group_admin;
 mod session_history_window;
+mod session_links_boosts;
 mod session_members;
 mod session_message_menu;
 mod session_notifications;
@@ -109,6 +111,7 @@ mod session_share;
 mod session_sponsored;
 mod session_stickers;
 mod session_stories;
+pub use session_stories::STORY_CUSTOM_EMOJI_CAP;
 mod session_subsection_tabs;
 mod session_thread;
 mod session_translate;
@@ -118,6 +121,7 @@ mod sticker_gif_types;
 mod story_insights;
 mod story_types;
 mod thread_types;
+mod updates_sync;
 
 pub use account_notices::*;
 pub use call_types::*;
@@ -141,9 +145,11 @@ pub use requests::*;
 pub use saved_types::*;
 pub use search_types::*;
 pub use session::*;
+pub use session_chat_caps::FastButtonTarget;
 pub(crate) use session_chat_search::history_message;
 pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;
+pub use session_links_boosts::*;
 pub use session_message_menu::{
     Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
     StickerSetView, StickerSetViewStage, reaction_filter_key,
@@ -164,6 +170,7 @@ pub use sticker_gif_types::*;
 pub use story_insights::*;
 pub use story_types::*;
 pub use thread_types::*;
+pub use updates_sync::*;
 
 #[cfg(test)]
 mod tests;

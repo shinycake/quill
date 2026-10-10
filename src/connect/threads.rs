@@ -183,7 +183,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// lives in `chat_id`; any other request is returned untouched.
     pub(crate) fn thread_routed(&self, chat_id: ChatId, json: String) -> String {
         match self.session.thread_send_target(chat_id) {
-            Some((thread_id, _)) => route_into_thread(&json, thread_id),
+            Some((thread_id, _)) => {
+                route_into_thread(&json, thread_id, self.session.thread_forum_topic(chat_id))
+            }
             None => json,
         }
     }

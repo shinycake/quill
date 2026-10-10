@@ -119,6 +119,7 @@ fn the_comment_thread_counts_as_shown() {
         root_jump_serial: 0,
         needs_chat_switch: false,
         reading_started: false,
+        forum_topic_id: None,
     });
     let read = r#"{"@type":"updateChatReadInbox","chat_id":77,"last_read_inbox_message_id":5,"unread_count":0}"#;
     assert_eq!(need(&session, read), RedrawNeed::Now);

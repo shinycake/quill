@@ -1,3 +1,0 @@
-parity:profile-topic-info
-parity:stories-statistics
-parity:stories-search

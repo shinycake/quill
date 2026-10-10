@@ -821,6 +821,12 @@ impl QuillApp {
                         let subscription = link.subscription_pricing.clone();
                         let members_block =
                             self.invite_link_members_block(chat_id, &link.invite_link, cx);
+                        let requests_block =
+                            self.link_requests_block(chat_id, &link.invite_link, cx);
+                        let qr_block = self.invite_link_qr_block(chat_id, &link.invite_link, cx);
+                        let requests_link = link.invite_link.clone();
+                        let qr_link = link.invite_link.clone();
+                        let pending_requests = link.pending_join_request_count;
                         let mut row = div()
                             .id(("invite-link-row", index as u64))
                             .flex()
@@ -898,6 +904,32 @@ impl QuillApp {
                                             })),
                                     )
                                 })
+                                .when(pending_requests > 0, |actions| {
+                                    actions.child(
+                                        Button::new(format!("invite-link-requests-{index}"))
+                                            .label(
+                                                super::invite_admin_more_ui::requests_button_label(
+                                                    pending_requests,
+                                                ),
+                                            )
+                                            .ghost()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.toggle_link_requests(
+                                                    chat_id,
+                                                    &requests_link,
+                                                    cx,
+                                                );
+                                            })),
+                                    )
+                                })
+                                .child(
+                                    Button::new(format!("invite-link-qr-{index}"))
+                                        .label("QR code")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.toggle_invite_link_qr(chat_id, &qr_link, cx);
+                                        })),
+                                )
                                 .when(subscription.is_some(), |actions| {
                                     actions.child(
                                         Button::new(format!("invite-link-rename-{index}"))
@@ -924,6 +956,12 @@ impl QuillApp {
                                 ),
                         );
                         if let Some(block) = members_block {
+                            row = row.child(block);
+                        }
+                        if let Some(block) = requests_block {
+                            row = row.child(block);
+                        }
+                        if let Some(block) = qr_block {
                             row = row.child(block);
                         }
                         section = section.child(row);

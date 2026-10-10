@@ -2,6 +2,7 @@
 mod account_hygiene;
 mod admin_extras;
 mod ai_tools;
+mod auth_leftovers;
 mod bot_pending;
 mod bots;
 mod calls;
@@ -22,6 +23,7 @@ mod group_calls;
 mod groups;
 mod history_window;
 mod invite_admin;
+mod links_boosts;
 mod live_location;
 mod media_library;
 mod member_moderation;

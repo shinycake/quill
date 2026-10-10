@@ -837,3 +837,45 @@ impl Session {
         self.draft_dirty.remove(&chat_id.0);
     }
 }
+
+/// The message whose inline buttons the number keys press in fast buttons
+/// mode (tdesktop: the history's last message, and only when it carries an
+/// inline keyboard).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FastButtonTarget {
+    pub bot_id: i64,
+    pub message_id: MessageId,
+    /// Button count of each keyboard row.
+    pub row_lens: Vec<usize>,
+}
+
+impl Session {
+    /// Fast-button target of a bot chat: the newest loaded message when the
+    /// loaded window reaches the end of the chat and the message shows an
+    /// inline keyboard. `None` for other chats.
+    pub fn fast_button_target(&self, chat_id: ChatId) -> Option<FastButtonTarget> {
+        let bot_id = self.bot_user_id_for_chat(chat_id)?;
+        let history = self.histories.get(&chat_id.0)?;
+        if history.has_newer {
+            return None;
+        }
+        let message = history.messages.values().next_back()?;
+        let markup = message
+            .ephemeral
+            .as_ref()
+            .and_then(|ephemeral| ephemeral.reply_markup.as_ref())
+            .or(message.reply_markup.as_ref())?;
+        let crate::telegram::envelope::ReplyMarkup::InlineKeyboard(keyboard) = markup else {
+            return None;
+        };
+        let row_lens: Vec<usize> = keyboard.rows.iter().map(Vec::len).collect();
+        row_lens
+            .iter()
+            .any(|len| *len > 0)
+            .then_some(FastButtonTarget {
+                bot_id,
+                message_id: message.id,
+                row_lens,
+            })
+    }
+}

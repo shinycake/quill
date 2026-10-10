@@ -14,6 +14,7 @@
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::format_helpers::format_starts_in;
+use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu, PopupMenu, PopupMenuItem};
@@ -806,13 +807,13 @@ impl QuillApp {
                     .items_center()
                     .justify_center()
                     // The breathing halo (tdesktop's blobs).
-                    .child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .rounded_full()
-                            .bg(rgb(to))
-                            .with_animation(
+                    .child({
+                        let halo = div().absolute().inset_0().rounded_full().bg(rgb(to));
+                        // Battery and animations: a still halo.
+                        if quill::power_saving::on(quill::power_saving::Flag::Calls) {
+                            halo.opacity(0.24).into_any_element()
+                        } else {
+                            halo.with_animation(
                                 "group-mute-halo",
                                 Animation::new(Duration::from_millis(
                                     if state == MuteState::Live { 1100 } else { 2600 },
@@ -823,8 +824,10 @@ impl QuillApp {
                                     let reach = if state == MuteState::Live { 14. } else { 6. };
                                     halo.opacity(0.18 + 0.12 * delta).inset(px(-reach * delta))
                                 },
-                            ),
-                    )
+                            )
+                            .into_any_element()
+                        }
+                    })
                     .child(
                         div()
                             .size(px(84.))
@@ -1033,8 +1036,8 @@ impl QuillApp {
                         .items_center()
                         .justify_center()
                         .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
+                        .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            cx.stop_propagation();
                             this.toggle_group_call_self_mute(cx);
                         }))
                         .child(
@@ -1075,8 +1078,8 @@ impl QuillApp {
                         .items_center()
                         .justify_center()
                         .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
+                        .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            cx.stop_propagation();
                             this.leave_active_group_call(cx);
                         }))
                         .child(Icon::new(IconName::Close).with_size(px(18.))),

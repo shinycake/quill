@@ -20,6 +20,7 @@ mod group_admin;
 mod group_calls;
 mod groups;
 mod invite_admin;
+mod links_boosts;
 mod live;
 mod marketplace;
 mod media;

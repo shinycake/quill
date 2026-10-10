@@ -304,6 +304,9 @@ pub enum EnvelopePayload {
         /// `chat.view_as_topics` (schema 1.8.67, line 3627); `None` when the
         /// field is absent. Refreshed by `updateChatViewAsTopics`.
         view_as_topics: Option<bool>,
+        /// `chat.default_disable_notification` (schema line 3937); `None`
+        /// when absent. Refreshed by `updateChatDefaultDisableNotification`.
+        default_disable_notification: Option<bool>,
         /// `chat.background`: the chat's own wallpaper, if any.
         background: Option<ChatBackground>,
         /// `chat.theme` when it is an emoji theme.
@@ -408,6 +411,46 @@ pub enum EnvelopePayload {
     UpdateChatViewAsTopics {
         chat_id: ChatId,
         view_as_topics: bool,
+    },
+    /// `updateChatDefaultDisableNotification` (schema line 10942): the
+    /// chat's sends are silent unless the user turns that off.
+    UpdateChatDefaultDisableNotification {
+        chat_id: ChatId,
+        default_disable_notification: bool,
+    },
+    /// `updateFileDownloads` (schema line 11148): totals of the download list.
+    UpdateFileDownloads {
+        total_size: i64,
+        total_count: i32,
+        downloaded_size: i64,
+    },
+    /// `updateFileAddedToDownloads` (schema line 11151).
+    UpdateFileAddedToDownloads(Box<ParsedFileDownload>),
+    /// `updateFileRemovedFromDownloads` (schema line 11161).
+    UpdateFileRemovedFromDownloads {
+        file_id: i32,
+    },
+    /// `updateDiceEmojis` (schema line 11431).
+    UpdateDiceEmojis {
+        emojis: Vec<String>,
+    },
+    /// `updateFreezeState` (schema line 11347).
+    UpdateFreezeState(FreezeStateUpdate),
+    /// `updateSpeechRecognitionTrial` (schema line 11425).
+    UpdateSpeechRecognitionTrial(SpeechTrialUpdate),
+    /// `updateActiveLiveLocationMessages` (schema line 11386).
+    UpdateActiveLiveLocationMessages {
+        shares: Vec<ActiveLiveShare>,
+    },
+    /// `updateMessageLiveLocationViewed` (schema line 10837).
+    UpdateMessageLiveLocationViewed {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
+    /// `updateAgeVerificationParameters` (schema line 11351); `None` when
+    /// verification is not needed.
+    UpdateAgeVerificationParameters {
+        parameters: Option<AgeVerificationParams>,
     },
     /// `updateSavedMessagesTopic` (schema 1.8.67, line 10616): a Saved
     /// Messages sublist appeared or changed.
@@ -754,6 +797,8 @@ pub enum EnvelopePayload {
         /// 2746): the channel shows its messages translated for everyone.
         has_automatic_translation: bool,
         username: String,
+        /// `supergroup.usernames`: active/disabled/collectible lists.
+        usernames: SupergroupUsernames,
         /// `supergroup.member_count` — may be 0 until full info is known.
         member_count: i32,
         /// Phase A1: own `chatMemberStatus*` (`supergroup.status`, schema
@@ -1482,6 +1527,17 @@ pub enum EnvelopePayload {
     ChatJoinRequests {
         total_count: i32,
         requests: Vec<ParsedChatJoinRequest>,
+    },
+    /// `foundChatBoosts` — the `getChatBoosts` answer.
+    FoundChatBoosts {
+        total_count: i32,
+        boosts: Vec<ParsedChatBoost>,
+        next_offset: String,
+    },
+    /// `chatBoostLink` — the `getChatBoostLink` answer.
+    ChatBoostLink {
+        link: String,
+        is_public: bool,
     },
     /// B8: `chatInviteLinkCounts` — the `getChatInviteLinkCounts` answer.
     ChatInviteLinkCounts {

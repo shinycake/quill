@@ -6,6 +6,7 @@ impl Session {
     /// info, if the chat's topic list is already loaded.
     pub fn select_topic(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Option<ForumTopic> {
         self.open_topic = Some(forum_topic_id);
+        self.close_topic_thread_unless(Some(forum_topic_id));
         self.view_generation.bump();
         // Subsection tabs: rows seen in "All" were read as chat history;
         // seen again in the topic they are read as topic history
@@ -18,10 +19,50 @@ impl Session {
         self.open_topic_info(chat_id)
     }
 
+    /// Where the forum's topic list sits (tdesktop `Dialogs::Widget::showForum`
+    /// puts the topics where the chat list was). `window_width` is the
+    /// window's width in pixels; `peek_chats` is the user's "show the chat
+    /// list again" choice on a narrow window.
+    pub fn forum_column(&self, window_width: f32, peek_chats: bool) -> ForumColumn {
+        let Some(chat_id) = self.open_chat else {
+            return ForumColumn::Hidden;
+        };
+        let is_forum = self
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.is_forum_chat());
+        if !is_forum
+            || !self.chat_views_as_topics(chat_id)
+            || self.subsection_tabs_used_for(chat_id)
+        {
+            return ForumColumn::Hidden;
+        }
+        if window_width >= FORUM_COLUMN_COLLAPSE_BELOW {
+            ForumColumn::Beside
+        } else if peek_chats {
+            ForumColumn::Hidden
+        } else {
+            ForumColumn::Replacing
+        }
+    }
+
     /// Phase 5.1: leave the topic view, back to the forum's topic list.
     pub fn deselect_topic(&mut self) {
         self.open_topic = None;
+        self.close_topic_thread_unless(None);
         self.view_generation.bump();
+    }
+
+    /// A thread opened inside a forum topic belongs to that topic: leaving
+    /// the topic (or choosing another) closes it.
+    fn close_topic_thread_unless(&mut self, topic: Option<i32>) {
+        if self
+            .thread
+            .as_ref()
+            .is_some_and(|thread| thread.forum_topic_id.is_some() && thread.forum_topic_id != topic)
+        {
+            self.thread = None;
+        }
     }
 
     /// Phase 5.1: cached info for the open topic, if any.
@@ -187,4 +228,20 @@ impl Session {
         // unknown ids degrade poorly (no history, no title), so hide it.
         (linked != 0 && self.chats.contains_key(&linked)).then_some(linked)
     }
+}
+
+/// Below this window width the topic column takes the chat list's place.
+pub const FORUM_COLUMN_COLLAPSE_BELOW: f32 = 1100.;
+/// Width of the topic column.
+pub const FORUM_COLUMN_WIDTH: f32 = 280.;
+
+/// Layout of the forum topic list next to the conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForumColumn {
+    /// No forum column: the topics, if any, fill the conversation pane.
+    Hidden,
+    /// A second column between the chat list and the conversation.
+    Beside,
+    /// The chat list collapses and the topics take its place.
+    Replacing,
 }

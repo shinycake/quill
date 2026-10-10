@@ -480,32 +480,6 @@ impl QuillApp {
         self.with_selection_bar(chat_id, header, cx)
     }
 
-    /// `parity:platform-chat-export` — start exporting a chat's history.
-    /// The driver pages `getChatHistory` in the background; completion (or
-    /// failure) surfaces as a status note from `poll_live`.
-    pub(super) fn start_chat_export(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let title = self
-            .session()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .map(|c| c.title.clone())
-            .unwrap_or_else(|| "chat".to_string());
-        let protected = self
-            .session()
-            .is_some_and(|s| s.chat_has_protected_content(chat_id));
-        let started = self
-            .live
-            .as_mut()
-            .is_some_and(|live| live.driver.start_chat_export(chat_id, title).is_ok());
-        self.status_note = if started {
-            "Exporting chat history…".into()
-        } else if protected {
-            "This chat's content is protected and can't be exported.".into()
-        } else {
-            "Could not start the export (another export is running).".into()
-        };
-        cx.notify();
-    }
-
     /// Whether the open chat shows a composer at all.
     pub(super) fn composer_available(&self, mode: PaneMode) -> bool {
         match mode {
@@ -513,6 +487,10 @@ impl QuillApp {
             PaneMode::Connecting => false,
             PaneMode::Ready => {
                 let session = self.session();
+                // A frozen account is read-only everywhere.
+                if session.is_some_and(|s| s.is_frozen()) {
+                    return false;
+                }
                 let open = session.and_then(|s| s.open_chat);
                 let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
                 // Parity slice 4: posting into a forum topic is supported —
@@ -522,11 +500,18 @@ impl QuillApp {
                 // hidden.
                 let topic = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
                 let in_topic = session.is_some_and(|s| s.open_topic.is_some());
+                // A group that lets the viewer send nothing swaps the
+                // composer for the reason (`composer_restriction`).
+                let restricted = self.composer_restriction().is_some();
                 match (chat, topic) {
-                    (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
+                    (Some(c), Some(t)) => {
+                        c.can_post() && !t.is_closed && c.can_send_basic_messages && !restricted
+                    }
                     // Saved sublists and tag filters are read-only views.
                     (Some(_), None) if self.saved_readonly() => false,
-                    (Some(c), None) if !in_topic => c.can_post() && self.bottom_action().is_none(),
+                    (Some(c), None) if !in_topic => {
+                        c.can_post() && !restricted && self.bottom_action().is_none()
+                    }
                     // In a topic whose info hasn't loaded yet: hide the
                     // composer until it arrives (the note says "Loading
                     // topic…").
@@ -569,6 +554,14 @@ impl QuillApp {
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
             PaneMode::Connecting => Some("Sign in to send messages.".to_string()),
+            PaneMode::Ready
+                if composer.is_none() && self.session().is_some_and(|s| s.is_frozen()) =>
+            {
+                Some(
+                    "Your account is frozen and read-only. Open the banner at the top for details."
+                        .to_string(),
+                )
+            }
             PaneMode::Ready if composer.is_none() => {
                 let open = self.session().and_then(|s| s.open_chat);
                 let in_topic = self.session().is_some_and(|s| s.open_topic.is_some());
@@ -581,6 +574,8 @@ impl QuillApp {
                     // The join/leave footer replaces the plain note for
                     // channels; Saved sublists and tag filters need none.
                     None
+                } else if let Some(reason) = self.composer_restriction() {
+                    Some(reason)
                 } else if in_topic {
                     // Parity slice 4: closed topics and a missing send
                     // permission hide the composer with an explanatory note.
@@ -940,13 +935,18 @@ impl QuillApp {
                 )
             })
             .when_some(composer_note.filter(|_| part.bottom()), |this, note| {
+                // A rights restriction is centered like tdesktop's
+                // `TextErrorSendRestriction`; other notes stay left.
+                let centered = self.composer_restriction().is_some();
                 this.child(
                     div()
+                        .id("composer-note")
                         .p_3()
                         .border_t_1()
                         .border_color(cx.theme().border)
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
+                        .when(centered, |this| this.text_center())
                         .child(note),
                 )
             })
@@ -1182,8 +1182,19 @@ impl QuillApp {
                     && !tabs_used
                     && open.is_some_and(|id| session.is_some_and(|s| s.chat_views_as_topics(id)))
                 {
-                    // Phase 5.1: opening a forum supergroup shows its topics.
-                    self.forum_topics_pane(open, cx).into_any_element()
+                    // Phase 5.1: opening a forum supergroup shows its topics;
+                    // with the topic column on screen the pane only asks for
+                    // a choice.
+                    if self.forum_column_shown {
+                        pane_placeholder(
+                            "Choose a topic",
+                            "Pick a topic from the list to read and write in it.",
+                            cx,
+                        )
+                        .into_any_element()
+                    } else {
+                        self.forum_topics_pane(open, cx).into_any_element()
+                    }
                 } else if has_topics && open_topic.is_some() {
                     // Phase 5.1: per-topic history — same history component,
                     // fed from the topic history store (`searchChatMessages`
@@ -2148,8 +2159,13 @@ impl QuillApp {
                 // history.
                 let covered = !self.spoiler_revealed.contains(&key);
                 let fading = super::spoiler_fx::reveal_fade(key).is_some();
-                if spoiler && (fading || (covered && super::anim_layer::current().is_none())) {
-                    self.request_animation_tick(super::spoiler_fx::SPECKS_FPS, cx);
+                if spoiler
+                    && (fading
+                        || (covered
+                            && super::anim_layer::current().is_none()
+                            && !super::spoiler_fx::still()))
+                {
+                    self.request_animation_tick(30, cx);
                 }
                 let row = session_history_row(
                     message,
