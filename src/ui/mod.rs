@@ -71,6 +71,7 @@ pub(crate) use story_page::{StoryPage, apply_ready_story_albums};
 
 mod actions;
 mod activity_indicator;
+mod admin_extras_demo;
 mod app;
 mod app_demo;
 mod app_render;
@@ -110,6 +111,7 @@ mod composer_ui;
 mod connect_ui;
 mod contacts;
 mod conversation;
+mod custom_emoji_card;
 mod custom_keyboard;
 mod deep_link_routes;
 mod deep_links;

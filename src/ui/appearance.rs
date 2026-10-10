@@ -1338,7 +1338,7 @@ impl QuillApp {
     /// tdesktop "Suggest emoji replacements" (`suggestEmoji`, default on):
     /// the `:name` emoji popup in the composer.
     fn appearance_suggest_emoji_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let control = div()
+        let suggest = div()
             .flex()
             .items_center()
             .justify_between()
@@ -1365,7 +1365,41 @@ impl QuillApp {
                         this.set_chat_prefs(cx, |c| c.suggest_emoji = on);
                         this.sync_suggest_menu(cx);
                     })),
+            );
+        // tdesktop "Replace emoji automatically" (`replaceEmoji`).
+        let replace = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().text_sm().child("Replace emoji automatically"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Turn :-) and <3 into emoji as you type."),
+                    ),
             )
+            .child(
+                Switch::new("appearance-replace-emoji")
+                    .checked(self.chat_prefs.replace_emoji)
+                    .accessibility_label("Replace emoji automatically")
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_chat_prefs(cx, |c| c.replace_emoji = on);
+                    })),
+            );
+        let control = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(suggest)
+            .child(replace)
             .into_any_element();
         // tdesktop Chat settings "Large emoji": one to three emoji alone in
         // a message show as big glyphs (the history renderer reads the same

@@ -1,8 +1,9 @@
 use crate::ids::{ChatId, RequestId};
 use crate::telegram::requests::{
     add_contact, get_chat_similar_chats, get_groups_in_common, get_suitable_personal_chats,
-    get_user_profile_photos, send_contact, set_birthdate, set_personal_chat,
-    set_profile_photo_previous, set_user_note,
+    get_user_profile_photos, report_chat_photo, send_contact, set_birthdate, set_personal_chat,
+    set_profile_photo_previous, set_user_note, set_user_personal_profile_photo,
+    suggest_user_profile_photo,
 };
 use serde_json::Value;
 
@@ -95,4 +96,46 @@ fn send_contact_wraps_a_contact_in_input_message_contact() {
     assert_eq!(content["contact"]["@type"], "contact");
     assert_eq!(content["contact"]["phone_number"], "+15550131");
     assert_eq!(content["contact"]["user_id"], 31);
+}
+
+#[test]
+fn personal_photo_sets_a_static_local_file() {
+    let v = parse(&set_user_personal_profile_photo(
+        RequestId(14),
+        31,
+        Some("/tmp/a.jpg"),
+    ));
+    assert_eq!(v["@type"], "setUserPersonalProfilePhoto");
+    assert_eq!(v["user_id"], 31);
+    assert_eq!(v["photo"]["@type"], "inputChatPhotoStatic");
+    assert_eq!(v["photo"]["photo"]["@type"], "inputFileLocal");
+    assert_eq!(v["photo"]["photo"]["path"], "/tmp/a.jpg");
+}
+
+#[test]
+fn personal_photo_removal_sends_null() {
+    let v = parse(&set_user_personal_profile_photo(RequestId(15), 31, None));
+    assert!(v["photo"].is_null());
+}
+
+#[test]
+fn suggest_photo_sends_a_static_local_file() {
+    let v = parse(&suggest_user_profile_photo(RequestId(16), 31, "/tmp/b.png"));
+    assert_eq!(v["@type"], "suggestUserProfilePhoto");
+    assert_eq!(v["photo"]["photo"]["path"], "/tmp/b.png");
+}
+
+#[test]
+fn report_photo_carries_file_reason_and_text() {
+    let v = parse(&report_chat_photo(
+        RequestId(17),
+        31,
+        904,
+        "reportReasonSpam",
+        "",
+    ));
+    assert_eq!(v["@type"], "reportChatPhoto");
+    assert_eq!(v["chat_id"], 31);
+    assert_eq!(v["file_id"], 904);
+    assert_eq!(v["reason"]["@type"], "reportReasonSpam");
 }

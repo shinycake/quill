@@ -210,3 +210,74 @@ fn refused_profile_edits_surface_as_a_notice() {
         );
     }
 }
+
+#[test]
+fn user_full_info_keeps_unofficial_flag_and_personal_photo_first_in_gallery() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","uses_unofficial_app":true,"personal_photo":{},"bio":null,"bot_info":null}}"#,
+            extra.0,
+            photo_json(9500, 951, 952)
+        ),
+    );
+    let info = session.user_full_info(31).expect("full info cached");
+    assert!(info.extras.uses_unofficial_app);
+    assert_eq!(
+        info.extras.personal_photo.as_ref().map(|p| p.id),
+        Some(9500)
+    );
+    let extra = session.request_for_user(RequestPurpose::GetUserProfilePhotos, 31);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatPhotos","@extra":"{}","total_count":1,"photos":[{}]}}"#,
+            extra.0,
+            photo_json(9001, 911, 912)
+        ),
+    );
+    let (gallery, personal) = session.profile_gallery(31).expect("gallery loaded");
+    assert_eq!(personal, Some(9500));
+    assert_eq!(
+        gallery.iter().map(|p| p.id).collect::<Vec<_>>(),
+        [9500, 9001]
+    );
+    // The personal photo's files are cached for display.
+    assert!(session.files.contains_key(&952));
+}
+
+#[test]
+fn refused_report_and_personal_photo_surface_as_notices() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for (purpose, expected) in [
+        (
+            RequestPurpose::ReportChatPhoto,
+            "could not send the report (error 400)",
+        ),
+        (
+            RequestPurpose::SetUserPersonalPhoto,
+            "could not save the change (error 400)",
+        ),
+    ] {
+        session.chat_action_error = None;
+        let extra = session.request(purpose, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.chat_action_error.as_deref(), Some(expected));
+    }
+}

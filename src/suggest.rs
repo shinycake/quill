@@ -334,6 +334,21 @@ fn tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// The emoji whose full name or shortcode is exactly `query` (`rocket`,
+/// `slight_smile`), for `:name:` replacement in the composer.
+pub fn exact_emoji(query: &str) -> Option<&'static str> {
+    let wanted = tokens(query).join(" ");
+    if wanted.is_empty() {
+        return None;
+    }
+    index()
+        .iter()
+        .find(|item| {
+            item.name.to_lowercase() == wanted || item.words[item.name_words..].contains(&wanted)
+        })
+        .map(|item| item.emoji)
+}
+
 /// Emoji whose name (or shortcode) words start with every word of
 /// `query`, best first: an exact name or shortcode, then names starting
 /// with the query, then matches on the first word, then the rest —
