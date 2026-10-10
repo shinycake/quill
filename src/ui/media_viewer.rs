@@ -57,6 +57,8 @@ pub(super) struct ViewerExtra {
     pub inactive_paused: bool,
     /// B10: whose profile photos the viewer shows (`ViewerSource::Profile`).
     pub profile_user: Option<i64>,
+    /// The `chatPhoto.id` of the photo you set for that contact.
+    pub profile_personal: Option<i64>,
 }
 
 /// Screenshot-capture runs render a single frame: skip fades there so the
@@ -2069,7 +2071,11 @@ impl QuillApp {
             .any(|id| file_is_downloading(*id, &files, &downloading));
         let profile_view = self.media_viewer.source() == ViewerSource::Profile;
         let kind_label = if profile_view {
-            "Profile photo"
+            if self.viewer_extra.profile_personal == Some(item.message_id.0) {
+                "Photo set by you"
+            } else {
+                "Profile photo"
+            }
         } else {
             item.kind.label()
         };
@@ -2090,6 +2096,13 @@ impl QuillApp {
                 .profile_user
                 .zip(self.session().and_then(|s| s.my_user_id))
                 .is_some_and(|(shown, me)| shown == me);
+        // Reporting someone else's profile photo (`reportChatPhoto`).
+        let can_report = profile_view
+            && self
+                .viewer_extra
+                .profile_user
+                .zip(self.session().and_then(|s| s.my_user_id))
+                .is_some_and(|(shown, me)| shown != me);
         // MED1: album pin action for the header — only when the item is in
         // an album and the user may pin in this chat (rights-gated, TGX
         // `MessagePinAlbum` semantics: unpins when any member is pinned).
@@ -2260,6 +2273,7 @@ impl QuillApp {
             let menu_can_delete = can_delete;
             let menu_profile = profile_view;
             let menu_set_main = can_set_main;
+            let menu_can_report = can_report;
             let menu_playable = item.kind.is_playable();
             let menu_chat_source = self.media_viewer.source() == ViewerSource::Chat;
             // `photo.has_stickers` / `video.has_stickers`: stickers were
@@ -2354,6 +2368,11 @@ impl QuillApp {
                     if menu_set_main {
                         menu = menu.item(item("Set as Main Photo", |this, _, cx| {
                             this.set_viewer_photo_as_main(cx)
+                        }));
+                    }
+                    if menu_can_report {
+                        menu = menu.item(item("Report", |this, _, cx| {
+                            this.report_viewer_profile_photo(cx)
                         }));
                     }
                     if !menu_protected && !menu_profile {
@@ -2771,6 +2790,18 @@ impl QuillApp {
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.set_viewer_photo_as_main(cx);
+                            })),
+                        )
+                    })
+                    .when(can_report, |this| {
+                        this.child(
+                            icon_action(
+                                ("media-viewer-report", row_id),
+                                gpui_kit::assets::IconName::Flag,
+                                "Report",
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.report_viewer_profile_photo(cx);
                             })),
                         )
                     })

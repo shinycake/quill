@@ -1,0 +1,4 @@
+parity:profile-photo-gallery
+parity:profile-personal-photo
+parity:profile-unofficial-warning
+parity:settings-birthday

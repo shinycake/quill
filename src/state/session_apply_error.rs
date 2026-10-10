@@ -690,10 +690,15 @@ impl Session {
             Some(
                 RequestPurpose::SetBirthdate
                 | RequestPurpose::SetPersonalChat
-                | RequestPurpose::SetUserNote,
+                | RequestPurpose::SetUserNote
+                | RequestPurpose::SetUserPersonalPhoto,
             ) => {
                 self.chat_action_error =
                     Some(format!("could not save the change (error {})", err.code));
+            }
+            Some(RequestPurpose::ReportChatPhoto) => {
+                self.chat_action_error =
+                    Some(format!("could not send the report (error {})", err.code));
             }
             // B7: refused group admin changes were rolled back above; say
             // so instead of showing the old value as if nothing happened.
