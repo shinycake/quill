@@ -661,6 +661,18 @@ pub(super) fn demo_seed_for(
             "screenshot demo — group and channel settings (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyUpdatesSync => (
+            Some(
+                if super::updates_sync_demo::demo_sync_mode() == "downloads" {
+                    seed_ready_downloads_session
+                } else {
+                    seed_ready_chats_session
+                } as fn(Arc<MemorySink>) -> Session,
+            ),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — account sync updates (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyProfilePanels => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2174,6 +2186,10 @@ impl QuillApp {
             composer_self_destruct: None,
             composer_caption_above: false,
             composer_silent: false,
+            composer_loud_chat: None,
+            freeze_info_open: false,
+            age_verify_open: false,
+            age_verify_started: false,
             composer_preview_disabled: false,
             composer_preview_above: false,
             composer_preview_media: PreviewMediaSize::Auto,
@@ -2544,6 +2560,7 @@ impl QuillApp {
         app.demo_setup_bot_extras(demo, window, cx);
         app.demo_setup_proxy(demo, window, cx);
         app.demo_setup_profile_panels(demo, window, cx);
+        app.demo_setup_updates_sync(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
         app.demo_setup_admin_extras(demo, window, cx);

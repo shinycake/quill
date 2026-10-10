@@ -4,7 +4,7 @@ use crate::composer::SendOptions;
 use crate::ids::{ChatId, RequestId};
 use crate::state::RequestPurpose;
 use crate::telegram::requests::{
-    ContactShare, SendReply, send_contact_card, send_location, send_story_card,
+    ContactShare, SendReply, send_contact_card, send_dice, send_location, send_story_card,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -67,6 +67,26 @@ impl<S: JsonSender> ConnectDriver<S> {
                 reply_to.as_ref(),
                 options,
             )
+        })
+    }
+
+    /// `sendMessage` + `inputMessageDice` (the attach menu's Dice list). Only
+    /// emoji the server listed in `updateDiceEmojis` (or the built-in list
+    /// before it arrives) roll.
+    pub fn share_dice_to_chat(
+        &mut self,
+        chat_id: ChatId,
+        emoji: &str,
+        reply_to: Option<SendReply>,
+        options: &SendOptions,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.share_target_ok(chat_id)
+            || !self.session.sync.dice_menu().iter().any(|e| e == emoji)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.send_built(chat_id, |extra, topic_id| {
+            send_dice(extra, chat_id, topic_id, emoji, reply_to.as_ref(), options)
         })
     }
 

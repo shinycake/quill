@@ -44,6 +44,8 @@ mod shortcut_pack;
 mod story_areas;
 mod synthetic;
 mod updates;
+mod updates_sync_demo;
+mod updates_sync_ui;
 mod vanish;
 
 pub(crate) use account_lifecycle::*;

@@ -268,6 +268,15 @@ pub struct QuillApp {
     /// M1: silent-send toggle (`messageSendOptions.disable_notification`,
     /// schema 1.8.67 line 5934). Persists across sends until toggled.
     pub(super) composer_silent: bool,
+    /// The chat whose `default_disable_notification` the user turned off
+    /// for the composer ("Send with sound" in a chat that sends silently).
+    pub(super) composer_loud_chat: Option<i64>,
+    /// The frozen-account details dialog is open.
+    pub(super) freeze_info_open: bool,
+    /// The age verification prompt is open, and the user already started
+    /// the verification (so turning on 18+ content goes to the server).
+    pub(super) age_verify_open: bool,
+    pub(super) age_verify_started: bool,
     /// M1: link-preview toggle (`linkPreviewOptions.is_disabled`, schema
     /// 1.8.67 line 2237). Persists across sends; secret chats force it on.
     pub(super) composer_preview_disabled: bool,

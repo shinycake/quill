@@ -118,6 +118,7 @@ mod sticker_gif_types;
 mod story_insights;
 mod story_types;
 mod thread_types;
+mod updates_sync;
 
 pub use account_notices::*;
 pub use call_types::*;
@@ -165,6 +166,7 @@ pub use sticker_gif_types::*;
 pub use story_insights::*;
 pub use story_types::*;
 pub use thread_types::*;
+pub use updates_sync::*;
 
 #[cfg(test)]
 mod tests;

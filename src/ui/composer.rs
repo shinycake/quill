@@ -61,6 +61,11 @@ impl QuillApp {
                 cx.notify();
             }
             PaneMode::Ready => {
+                if self.session().is_some_and(|s| s.is_frozen()) {
+                    self.status_note = "Your account is frozen and can't send messages.".into();
+                    cx.notify();
+                    return;
+                }
                 if self.pending_edit.is_some() {
                     self.submit_edit(text, window, cx);
                     return;
@@ -719,10 +724,41 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Silent send as the next message will go: the manual toggle, or the
+    /// chat's `default_disable_notification` unless the user turned that
+    /// off for this chat.
+    pub(super) fn composer_effective_silent(&self) -> bool {
+        let chat = self.session().and_then(|s| s.open_chat).map(|c| c.0);
+        let chat_default =
+            chat.is_some_and(|id| self.session().is_some_and(|s| s.sync.is_default_silent(id)));
+        quill::state::effective_silent(
+            self.composer_silent,
+            chat_default,
+            chat.is_some() && self.composer_loud_chat == chat,
+        )
+    }
+
+    /// Flip silent send for the next message, keeping a chat default
+    /// from switching it back on.
+    pub(super) fn toggle_composer_silent(&mut self) {
+        let chat = self.session().and_then(|s| s.open_chat).map(|c| c.0);
+        let chat_default =
+            chat.is_some_and(|id| self.session().is_some_and(|s| s.sync.is_default_silent(id)));
+        if self.composer_effective_silent() {
+            self.composer_silent = false;
+            if chat_default {
+                self.composer_loud_chat = chat;
+            }
+        } else {
+            self.composer_silent = true;
+            self.composer_loud_chat = None;
+        }
+    }
+
     /// M1: the composer's `messageSendOptions` for the next send.
     pub(super) fn composer_send_options(&self) -> SendOptions {
         SendOptions {
-            disable_notification: self.composer_silent,
+            disable_notification: self.composer_effective_silent(),
             scheduling: self.composer_scheduling,
             link_preview_disabled: self.composer_preview_disabled,
             link_preview_above_text: self.composer_preview_above,
@@ -912,7 +948,7 @@ impl QuillApp {
         let (silent, preview_off, scheduled, kind) = {
             let app = app.read(cx);
             (
-                app.composer_silent,
+                app.composer_effective_silent(),
                 app.composer_preview_disabled,
                 !matches!(app.composer_scheduling, ComposerScheduling::None),
                 app.schedule_kind(),
@@ -926,7 +962,7 @@ impl QuillApp {
                 .checked(silent)
                 .on_click(move |_, _, cx| {
                     let _ = toggle_silent.update(cx, |this, cx| {
-                        this.composer_silent = !this.composer_silent;
+                        this.toggle_composer_silent();
                         cx.notify();
                     });
                 }),
@@ -979,7 +1015,7 @@ impl QuillApp {
             .px_1()
             .pb_1();
         let mut any = false;
-        if self.composer_silent {
+        if self.composer_effective_silent() {
             any = true;
             row = row.child(
                 chip("chip-silent", "Silent".into(), cx).child(
@@ -989,7 +1025,9 @@ impl QuillApp {
                         .ghost()
                         .accessibility_label("Send with sound")
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.composer_silent = false;
+                            if this.composer_effective_silent() {
+                                this.toggle_composer_silent();
+                            }
                             cx.notify();
                         })),
                 ),
