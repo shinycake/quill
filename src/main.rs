@@ -495,6 +495,7 @@ fn install_main_window_tray(
             quill::icon_badge::set_native_window(handle.hwnd.get());
         }
     }
+    quill::notify_focus::warm();
     #[cfg(target_os = "macos")]
     window.on_window_should_close(cx, |_, cx| {
         if quill::tray::tray_available() {
@@ -712,6 +713,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-emoji-packs", ReadyEmojiPacks),
         ("ready-emoji-panel", ReadyEmojiPanel),
         ("ready-file-open-confirm", ReadyFileOpenConfirm),
+        ("ready-folder-badges", ReadyFolderBadges),
         ("ready-folders", ReadyFolders),
         ("ready-folders-add-link", ReadyFoldersAddLink),
         ("ready-folders-delete", ReadyFoldersDelete),
@@ -768,6 +770,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-mute-custom", ReadyMuteCustom),
         ("ready-new-login", ReadyNewLogin),
         ("ready-notification-sound", ReadyNotificationSound),
+        ("ready-notify-os", ReadyNotifyOs),
         ("ready-offline", ReadyOffline),
         ("ready-offline-toast", ReadyOfflineToast),
         ("ready-passcode-create", ReadyPasscodeCreate),
@@ -1179,6 +1182,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyFoldersDelete => ".quill-ready-ready-folders-delete",
         ScreenshotDemo::ReadyChatAvatars => ".quill-ready-ready-chat-avatars",
         ScreenshotDemo::ReadyNotificationSound => ".quill-ready-ready-notification-sound",
+        ScreenshotDemo::ReadyNotifyOs => ".quill-ready-ready-notify-os",
+        ScreenshotDemo::ReadyFolderBadges => ".quill-ready-ready-folder-badges",
         ScreenshotDemo::ReadySlowMode => ".quill-ready-ready-slow-mode",
         ScreenshotDemo::ReadySecretChat => ".quill-ready-ready-secret-chat",
         ScreenshotDemo::ReadyPayments => ".quill-ready-ready-payments",

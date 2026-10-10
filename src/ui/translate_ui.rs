@@ -1045,15 +1045,14 @@ impl QuillApp {
     /// `toggleChatIsTranslatable` (the server flag, as in tdesktop); the
     /// demo keeps the choice locally.
     fn set_translate_bar_hidden(&mut self, chat_id: ChatId, hidden: bool, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            if live
+        if let Some(live) = self.live.as_mut()
+            && live
                 .driver
                 .toggle_chat_is_translatable(chat_id, !hidden)
                 .is_ok()
-            {
-                self.set_translate_prefs(cx, |p| p.set_bar_hidden(chat_id.0, false));
-                return;
-            }
+        {
+            self.set_translate_prefs(cx, |p| p.set_bar_hidden(chat_id.0, false));
+            return;
         }
         self.set_translate_prefs(cx, |p| p.set_bar_hidden(chat_id.0, hidden));
     }

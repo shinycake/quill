@@ -470,7 +470,11 @@ impl Session {
         // Phase 8.1: decide before upserting; the queue is drained by
         // the UI for OS dispatch. The sound decision is made at the
         // same moment (parity slice: notification sounds).
-        let notification = self.notification_for_new_message(&message);
+        let decision = self.notification_decision(&message);
+        if decision.is_some() && self.badge_prefs.flash_bounce {
+            self.pending_attention = true;
+        }
+        let notification = decision.filter(|_| self.desktop_notifications);
         let sound = notification.as_ref().and_then(|_| {
             self.chats
                 .get(&message.chat_id.0)

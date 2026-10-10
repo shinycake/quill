@@ -11,12 +11,12 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 670
+- MIT License: 631
 - Apache License 2.0: 41
 - ISC License: 22
 - Unicode License v3: 19
 - Mozilla Public License 2.0: 16
-- BSD 3-Clause "New" or "Revised" License: 11
+- BSD 3-Clause "New" or "Revised" License: 13
 - BSD Zero Clause License: 4
 - Creative Commons Zero v1.0 Universal: 3
 - zlib License: 3
@@ -2009,7 +2009,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### BSD 3-Clause "New" or "Revised" License
 
 Used by:
-- [rusty-opus 1.0.0](https://github.com/Remade-With-Rust/rusty-opus)
+- [rusty-opus 1.0.1](https://github.com/Remade-With-Rust/rusty-opus)
 
 ````text
 
@@ -2064,7 +2064,7 @@ https://datatracker.ietf.org/ipr/1526/
 ### BSD 3-Clause "New" or "Revised" License
 
 Used by:
-- [encoding_rs 0.8.41](https://github.com/hsivonen/encoding_rs)
+- [encoding_rs 0.8.42](https://github.com/hsivonen/encoding_rs)
 
 ````text
 // Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
@@ -2128,7 +2128,9 @@ pub(crate) static GB18030_2022_OVERRIDE_BYTES: [[u8; 2]; 18] = [
 
 Used by:
 - [tiny-skia-path 0.11.4](https://github.com/RazrFalcon/tiny-skia/tree/master/path)
+- [tiny-skia-path 0.12.0](https://github.com/linebender/tiny-skia/tree/master/path)
 - [tiny-skia 0.11.4](https://github.com/RazrFalcon/tiny-skia)
+- [tiny-skia 0.12.0](https://github.com/linebender/tiny-skia)
 
 ````text
 Copyright (c) 2011 Google Inc. All rights reserved.
@@ -2297,7 +2299,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 ### BSD 3-Clause "New" or "Revised" License
 
 Used by:
-- [encoding_rs 0.8.41](https://github.com/hsivonen/encoding_rs)
+- [encoding_rs 0.8.42](https://github.com/hsivonen/encoding_rs)
 
 ````text
 Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
@@ -3228,8 +3230,8 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ### ISC License
 
 Used by:
-- [libloading 0.7.4](https://github.com/nagisa/rust_libloading/)
 - [libloading 0.8.9](https://github.com/nagisa/rust_libloading/)
+- [libloading 0.9.0](https://github.com/nagisa/rust_libloading/)
 
 ````text
 Copyright © 2015, Simonas Kazlauskas
@@ -4192,7 +4194,6 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [lazy_static 1.5.0](https://github.com/rust-lang-nursery/lazy-static.rs)
 - [metal 0.33.0](https://github.com/gfx-rs/metal-rs)
 - [rayon-core 1.13.0](https://github.com/rayon-rs/rayon)
 - [rayon 1.12.0](https://github.com/rayon-rs/rayon)
@@ -4410,7 +4411,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [mio 1.2.3](https://github.com/tokio-rs/mio)
+- [mio 1.2.4](https://github.com/tokio-rs/mio)
 
 ````text
 Copyright (c) 2014 Carl Lerche and other MIO contributors
@@ -4549,7 +4550,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [uuid 1.26.1](https://github.com/uuid-rs/uuid)
+- [uuid 1.28.0](https://github.com/uuid-rs/uuid)
 
 ````text
 Copyright (c) 2014 The Rust Project Developers
@@ -4717,7 +4718,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [unicase 2.9.0](https://github.com/seanmonstar/unicase)
+- [unicase 2.10.0](https://github.com/seanmonstar/unicase)
 
 ````text
 Copyright (c) 2014-2026 Sean McArthur
@@ -4747,7 +4748,7 @@ THE SOFTWARE.
 
 Used by:
 - [coreaudio-rs 0.14.2](https://github.com/RustAudio/coreaudio-rs.git)
-- [either 1.18.0](https://github.com/rayon-rs/either)
+- [either 1.19.0](https://github.com/rayon-rs/either)
 - [itertools 0.11.0](https://github.com/rust-itertools/itertools)
 - [itertools 0.13.0](https://github.com/rust-itertools/itertools)
 - [itertools 0.14.0](https://github.com/rust-itertools/itertools)
@@ -4848,7 +4849,7 @@ THE SOFTWARE.
 
 Used by:
 - [new_debug_unreachable 1.0.6](https://github.com/mbrubeck/rust-debug-unreachable)
-- [ordered-float 5.4.0](https://github.com/reem/rust-ordered-float)
+- [ordered-float 5.5.0](https://github.com/reem/rust-ordered-float)
 
 ````text
 Copyright (c) 2015 Jonathan Reem
@@ -4986,10 +4987,9 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 - [gimli 0.32.3](https://github.com/gimli-rs/gimli)
-- [heck 0.4.1](https://github.com/withoutboats/heck)
 - [heck 0.5.0](https://github.com/withoutboats/heck)
 - [unicode-bidi 0.3.18](https://github.com/servo/unicode-bidi)
-- [unicode-id 0.3.6](https://github.com/Boshen/unicode-id)
+- [unicode-id 0.3.7](https://github.com/Boshen/unicode-id)
 - [unicode-properties 0.1.4](https://github.com/unicode-rs/unicode-properties)
 - [unicode-segmentation 1.13.3](https://github.com/unicode-rs/unicode-segmentation)
 - [unicode-width 0.2.2](https://github.com/unicode-rs/unicode-width)
@@ -6019,7 +6019,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [keyboard-types 0.7.0](https://github.com/pyfisch/keyboard-types)
+- [keyboard-types 0.8.3](https://github.com/rust-windowing/keyboard-types)
 
 ````text
 Copyright (c) 2017 Pyfisch
@@ -6452,7 +6452,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [smallvec 1.16.1](https://github.com/servo/rust-smallvec)
+- [smallvec 1.16.2](https://github.com/servo/rust-smallvec)
 
 ````text
 Copyright (c) 2018 The Servo Project Developers
@@ -6520,7 +6520,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [calloop 0.14.4](https://github.com/Smithay/calloop)
+- [calloop 0.14.5](https://github.com/Smithay/calloop)
 
 ````text
 Copyright (c) 2018 Victor Berger
@@ -6846,7 +6846,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [zeroize 1.9.0](https://github.com/RustCrypto/utils)
+- [zeroize 1.9.1](https://github.com/RustCrypto/utils)
 
 ````text
 Copyright (c) 2018-2026 The RustCrypto Project Developers
@@ -7047,7 +7047,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [font-types 0.12.5](https://github.com/googlefonts/fontations)
+- [font-types 0.12.6](https://github.com/googlefonts/fontations)
 - [read-fonts 0.41.0](https://github.com/googlefonts/fontations)
 - [skrifa 0.44.0](https://github.com/googlefonts/fontations)
 
@@ -8126,7 +8126,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [powerfmt 0.2.0](https://github.com/jhpratt/powerfmt)
+- [powerfmt 0.2.1](https://github.com/jhpratt/powerfmt)
 
 ````text
 Copyright (c) 2023 Jacob Pratt et al.
@@ -8424,12 +8424,10 @@ Used by:
 - [serde_spanned 0.6.9](https://github.com/toml-rs/toml)
 - [toml 0.8.23](https://github.com/toml-rs/toml)
 - [toml_datetime 0.6.11](https://github.com/toml-rs/toml)
-- [toml_datetime 1.1.1+spec-1.1.0](https://github.com/toml-rs/toml)
-- [toml_edit 0.19.15](https://github.com/toml-rs/toml)
-- [toml_edit 0.20.7](https://github.com/toml-rs/toml)
+- [toml_datetime 1.1.2+spec-1.1.0](https://github.com/toml-rs/toml)
 - [toml_edit 0.22.27](https://github.com/toml-rs/toml)
-- [toml_edit 0.25.15+spec-1.1.0](https://github.com/toml-rs/toml)
-- [toml_parser 1.1.3+spec-1.1.0](https://github.com/toml-rs/toml)
+- [toml_edit 0.25.17+spec-1.1.0](https://github.com/toml-rs/toml)
+- [toml_parser 1.1.5+spec-1.1.0](https://github.com/toml-rs/toml)
 - [toml_write 0.1.2](https://github.com/toml-rs/toml)
 
 ````text
@@ -8549,7 +8547,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [libc 0.2.189](https://github.com/rust-lang/libc)
+- [libc 0.2.190](https://github.com/rust-lang/libc)
 
 ````text
 Copyright (c) The Rust Project Developers
@@ -8669,8 +8667,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 Used by:
 - [resvg 0.45.1](https://github.com/linebender/resvg)
 - [resvg 0.46.0](https://github.com/linebender/resvg)
+- [resvg 0.48.1](https://github.com/linebender/resvg)
 - [usvg 0.45.1](https://github.com/linebender/resvg)
 - [usvg 0.46.0](https://github.com/linebender/resvg)
+- [usvg 0.48.1](https://github.com/linebender/resvg)
 
 ````text
 Copyright 2017 the Resvg Authors
@@ -8765,23 +8765,6 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
 OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
-- [multiversion-macros 0.9.0](https://github.com/calebzulawski/multiversion)
-- [multiversion 0.9.0](https://github.com/calebzulawski/multiversion)
-
-````text
-Copyright 2019 Caleb Zulawski
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ````
 
@@ -8933,8 +8916,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ### MIT License
 
 Used by:
-- [zerocopy-derive 0.8.57](https://github.com/google/zerocopy)
-- [zerocopy 0.8.57](https://github.com/google/zerocopy)
+- [zerocopy-derive 0.8.62](https://github.com/google/zerocopy)
+- [zerocopy 0.8.62](https://github.com/google/zerocopy)
 
 ````text
 Copyright 2023 The Fuchsia Authors
@@ -8969,7 +8952,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [encoding_rs 0.8.41](https://github.com/hsivonen/encoding_rs)
+- [encoding_rs 0.8.42](https://github.com/hsivonen/encoding_rs)
 - [multiversion_no_op 1.0.0](https://github.com/hsivonen/multiversion_no_op)
 - [utf8_iter 1.0.4](https://github.com/hsivonen/utf8_iter)
 
@@ -9120,36 +9103,6 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [field-offset 0.3.6](https://github.com/Diggsey/rust-field-offset)
-
-````text
-MIT License
-
-Copyright (c) 2016-2021 Diggory Blake, and other contributors.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
 - [precomputed-hash 0.1.1](https://github.com/emilio/precomputed-hash)
 
 ````text
@@ -9180,12 +9133,42 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [notify-rust 4.18.0](https://github.com/hoodie/notify-rust)
+- [notify-rust 4.18.2](https://github.com/hoodie/notify-rust)
 
 ````text
 MIT License
 
 Copyright (c) 2017 Hendrik Sollich
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+````
+
+### MIT License
+
+Used by:
+- [imagesize 0.15.0](https://github.com/Roughsketch/imagesize)
+
+````text
+MIT License
+
+Copyright (c) 2017 Maiddog
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -9216,37 +9199,6 @@ Used by:
 MIT License
 
 Copyright (c) 2017 Nikolai Vazquez
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
-- [libappindicator 0.9.0](https://crates.io/crates/libappindicator)
-
-````text
-MIT License
-
-Copyright (c) 2017-2021 qDot
-Copyright (c) 2021 Tauri Apps Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -9628,37 +9580,6 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [proc-macro-error-attr 1.0.4](https://gitlab.com/CreepySkeleton/proc-macro-error)
-- [proc-macro-error 1.0.4](https://gitlab.com/CreepySkeleton/proc-macro-error)
-
-````text
-MIT License
-
-Copyright (c) 2019-2020 CreepySkeleton
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
 - [ashpd 0.13.13](https://github.com/bilelmoussaoui/ashpd)
 
 ````text
@@ -9781,7 +9702,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [normpath 1.5.1](https://github.com/dylni/normpath)
+- [normpath 1.5.2](https://github.com/dylni/normpath)
 
 ````text
 MIT License
@@ -9872,7 +9793,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [rust-i18n 4.2.2](https://github.com/longbridge/rust-i18n)
+- [rust-i18n 4.2.4](https://github.com/longbridge/rust-i18n)
 
 ````text
 MIT License
@@ -10022,8 +9943,8 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [muda 0.17.2](https://github.com/tauri-apps/muda)
-- [tray-icon 0.21.3](https://github.com/tauri-apps/tray-icon)
+- [muda 0.21.2](https://github.com/tauri-apps/muda)
+- [tray-icon 0.26.1](https://github.com/tauri-apps/tray-icon)
 
 ````text
 MIT License
@@ -10348,7 +10269,6 @@ Used by:
 - [harfrust 0.5.2](https://github.com/harfbuzz/harfrust)
 - [leak 0.1.2](https://github.com/jmesmon/leak.git)
 - [leaky-cow 0.1.1](https://github.com/notriddle/rust-leaky-cow)
-- [libappindicator-sys 0.9.0](https://crates.io/crates/libappindicator-sys)
 - [libm 0.2.16](https://github.com/rust-lang/compiler-builtins)
 - [lyon 1.0.19](https://github.com/nical/lyon)
 - [lyon_algorithms 1.0.21](https://github.com/nical/lyon)
@@ -10382,42 +10302,34 @@ Used by:
 - [objc2-quartz-core 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-screen-capture-kit 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-user-notifications 0.3.2](https://github.com/madsmtm/objc2)
-- [objc2 0.5.2](https://github.com/madsmtm/objc2)
-- [objc2 0.6.4](https://github.com/madsmtm/objc2)
+- [objc2 0.5.3](https://github.com/madsmtm/objc2)
+- [objc2 0.6.5](https://github.com/madsmtm/objc2)
 - [opus-decoder 0.1.1](https://github.com/TadeuszWolfGang/Rusopus)
 - [pathfinder_geometry 0.5.1](https://github.com/servo/pathfinder)
 - [pathfinder_simd 0.5.6](https://github.com/servo/pathfinder)
 - [profiling-procmacros 1.0.18](https://github.com/aclysma/profiling)
 - [profiling 1.0.18](https://github.com/aclysma/profiling)
 - [pulp-wasm-simd-flag 0.1.1](https://github.com/sarah-quinones/pulp/)
-- [rust-i18n-macro 4.2.2](https://github.com/longbridge/rust-i18n)
-- [rust-i18n-support 4.2.2](https://github.com/longbridge/rust-i18n)
+- [rust-i18n-macro 4.2.4](https://github.com/longbridge/rust-i18n)
+- [rust-i18n-support 4.2.4](https://github.com/longbridge/rust-i18n)
 - [seahash 4.1.0](https://gitlab.redox-os.org/redox-os/seahash)
-- [siphasher 1.0.3](https://github.com/jedisct1/rust-siphash)
 - [svg_fmt 0.4.5](https://github.com/nical/rust_debug)
 - [taffy 0.13.0](https://github.com/DioxusLabs/taffy)
-- [tauri-winrt-notification 0.7.3](https://github.com/tauri-apps/winrt-notification)
-- [windows-collections 0.2.0](https://github.com/microsoft/windows-rs)
+- [tauri-winrt-notification 0.8.1](https://github.com/tauri-apps/winrt-notification)
 - [windows-collections 0.3.2](https://github.com/microsoft/windows-rs)
 - [windows-core 0.58.0](https://github.com/microsoft/windows-rs)
-- [windows-core 0.61.2](https://github.com/microsoft/windows-rs)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
-- [windows-future 0.2.1](https://github.com/microsoft/windows-rs)
 - [windows-future 0.3.2](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
-- [windows-link 0.1.3](https://github.com/microsoft/windows-rs)
 - [windows-link 0.2.1](https://github.com/microsoft/windows-rs)
-- [windows-numerics 0.2.0](https://github.com/microsoft/windows-rs)
 - [windows-numerics 0.3.1](https://github.com/microsoft/windows-rs)
 - [windows-registry 0.6.1](https://github.com/microsoft/windows-rs)
 - [windows-result 0.2.0](https://github.com/microsoft/windows-rs)
-- [windows-result 0.3.4](https://github.com/microsoft/windows-rs)
 - [windows-result 0.4.1](https://github.com/microsoft/windows-rs)
 - [windows-strings 0.1.0](https://github.com/microsoft/windows-rs)
-- [windows-strings 0.4.2](https://github.com/microsoft/windows-rs)
 - [windows-strings 0.5.1](https://github.com/microsoft/windows-rs)
 - [windows-sys 0.48.0](https://github.com/microsoft/windows-rs)
 - [windows-sys 0.60.2](https://github.com/microsoft/windows-rs)
@@ -10425,11 +10337,9 @@ Used by:
 - [windows-targets 0.48.5](https://github.com/microsoft/windows-rs)
 - [windows-targets 0.52.6](https://github.com/microsoft/windows-rs)
 - [windows-targets 0.53.5](https://github.com/microsoft/windows-rs)
-- [windows-threading 0.1.0](https://github.com/microsoft/windows-rs)
 - [windows-threading 0.2.1](https://github.com/microsoft/windows-rs)
 - [windows-version 0.1.7](https://github.com/microsoft/windows-rs)
 - [windows 0.58.0](https://github.com/microsoft/windows-rs)
-- [windows 0.61.3](https://github.com/microsoft/windows-rs)
 - [windows 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows_x86_64_gnu 0.48.5](https://github.com/microsoft/windows-rs)
 - [windows_x86_64_gnu 0.52.6](https://github.com/microsoft/windows-rs)
@@ -10876,7 +10786,6 @@ OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [async-recursion 1.1.1](https://github.com/dcchut/async-recursion)
 - [flume 0.12.0](https://github.com/zesterer/flume)
 - [rustc-hash 2.1.3](https://github.com/rust-lang/rustc-hash)
 
@@ -10933,9 +10842,10 @@ Used by:
 - [event-listener 5.4.2](https://github.com/smol-rs/event-listener)
 - [fastrand 2.5.0](https://github.com/smol-rs/fastrand)
 - [futures-lite 2.6.1](https://github.com/smol-rs/futures-lite)
-- [inventory 0.3.24](https://github.com/dtolnay/inventory)
+- [inventory 0.3.25](https://github.com/dtolnay/inventory)
 - [itoa 1.0.18](https://github.com/dtolnay/itoa)
 - [khronos-egl 6.0.0](https://github.com/timothee-haudebourg/khronos-egl)
+- [lazy_static 1.5.1](https://github.com/rust-lang-nursery/lazy-static.rs)
 - [linux-raw-sys 0.12.1](https://github.com/sunfishcode/linux-raw-sys)
 - [once_cell 1.21.4](https://github.com/matklad/once_cell)
 - [ordered-stream 0.2.0](https://github.com/danieldg/ordered-stream)
@@ -10947,8 +10857,6 @@ Used by:
 - [pin-project 1.1.13](https://github.com/taiki-e/pin-project)
 - [piper 0.2.5](https://github.com/smol-rs/piper)
 - [polling 3.11.0](https://github.com/smol-rs/polling)
-- [proc-macro-crate 1.3.1](https://github.com/bkchr/proc-macro-crate)
-- [proc-macro-crate 2.0.0](https://github.com/bkchr/proc-macro-crate)
 - [proc-macro-crate 3.5.0](https://github.com/bkchr/proc-macro-crate)
 - [proc-macro2 1.0.107](https://github.com/dtolnay/proc-macro2)
 - [quote 1.0.47](https://github.com/dtolnay/quote)
@@ -10968,15 +10876,14 @@ Used by:
 - [serde_repr 0.1.21](https://github.com/dtolnay/serde-repr)
 - [smol 2.0.2](https://github.com/smol-rs/smol)
 - [smol_str 0.3.6](https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str)
-- [syn 1.0.109](https://github.com/dtolnay/syn)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
 - [syn 3.0.6](https://github.com/dtolnay/syn)
 - [thiserror-impl 1.0.69](https://github.com/dtolnay/thiserror)
-- [thiserror-impl 2.0.20](https://github.com/dtolnay/thiserror)
+- [thiserror-impl 2.0.21](https://github.com/dtolnay/thiserror)
 - [thiserror 1.0.69](https://github.com/dtolnay/thiserror)
-- [thiserror 2.0.20](https://github.com/dtolnay/thiserror)
+- [thiserror 2.0.21](https://github.com/dtolnay/thiserror)
 - [typeid 1.0.3](https://github.com/dtolnay/typeid)
-- [unicode-ident 1.0.25](https://github.com/dtolnay/unicode-ident)
+- [unicode-ident 1.0.26](https://github.com/dtolnay/unicode-ident)
 - [utf-8 0.7.6](https://github.com/SimonSapin/rust-utf8)
 - [utf8-zero 0.8.1](https://github.com/algesten/utf8-zero)
 - [waker-fn 1.2.0](https://github.com/smol-rs/waker-fn)
@@ -11016,6 +10923,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
+- [async-recursion 1.2.0](https://github.com/dcchut/async-recursion)
 - [glow 0.17.0](https://github.com/grovesNL/glow)
 
 ````text
@@ -11079,7 +10987,6 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [winnow 0.5.40](https://github.com/winnow-rs/winnow)
 - [winnow 0.7.15](https://github.com/winnow-rs/winnow)
 - [winnow 1.0.4](https://github.com/winnow-rs/winnow)
 
@@ -11109,6 +11016,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Used by:
 - [raw-window-metal 1.1.0](https://github.com/rust-windowing/raw-window-metal)
+- [siphasher 1.0.4](https://github.com/jedisct1/rust-siphash)
 
 ````text
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -11128,51 +11036,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
-- [atk-sys 0.18.2](https://github.com/gtk-rs/gtk3-rs)
-- [atk 0.18.2](https://github.com/gtk-rs/gtk3-rs)
-- [cairo-rs 0.18.5](https://github.com/gtk-rs/gtk-rs-core)
-- [cairo-sys-rs 0.18.2](https://github.com/gtk-rs/gtk-rs-core)
-- [gdk-pixbuf-sys 0.18.0](https://github.com/gtk-rs/gtk-rs-core)
-- [gdk-pixbuf 0.18.5](https://github.com/gtk-rs/gtk-rs-core)
-- [gdk-sys 0.18.2](https://github.com/gtk-rs/gtk3-rs)
-- [gdk 0.18.2](https://github.com/gtk-rs/gtk3-rs)
-- [gio-sys 0.18.1](https://github.com/gtk-rs/gtk-rs-core)
-- [gio 0.18.4](https://github.com/gtk-rs/gtk-rs-core)
-- [glib-macros 0.18.5](https://github.com/gtk-rs/gtk-rs-core)
-- [glib-sys 0.18.1](https://github.com/gtk-rs/gtk-rs-core)
-- [glib 0.18.5](https://github.com/gtk-rs/gtk-rs-core)
-- [gobject-sys 0.18.0](https://github.com/gtk-rs/gtk-rs-core)
-- [gtk-sys 0.18.2](https://github.com/gtk-rs/gtk3-rs)
-- [gtk3-macros 0.18.2](https://github.com/gtk-rs/gtk3-rs)
-- [gtk 0.18.2](https://github.com/gtk-rs/gtk3-rs)
-- [pango-sys 0.18.0](https://github.com/gtk-rs/gtk-rs-core)
-- [pango 0.18.3](https://github.com/gtk-rs/gtk-rs-core)
-
-````text
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
 
 ````
 
@@ -11826,9 +11689,9 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [rust-embed-impl 8.12.0](https://pyrossh.dev/repos/rust-embed)
-- [rust-embed-utils 8.12.0](https://pyrossh.dev/repos/rust-embed)
-- [rust-embed 8.12.0](https://pyrossh.dev/repos/rust-embed)
+- [rust-embed-impl 8.13.0](https://pyrossh.dev/repos/rust-embed)
+- [rust-embed-utils 8.13.0](https://pyrossh.dev/repos/rust-embed)
+- [rust-embed 8.13.0](https://pyrossh.dev/repos/rust-embed)
 
 ````text
 The MIT License (MIT)
@@ -11859,8 +11722,8 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [async-compression 0.4.48](https://github.com/Nullus157/async-compression)
-- [compression-codecs 0.4.43](https://github.com/Nullus157/async-compression)
+- [async-compression 0.4.50](https://github.com/Nullus157/async-compression)
+- [compression-codecs 0.4.45](https://github.com/Nullus157/async-compression)
 - [compression-core 0.4.33](https://github.com/Nullus157/async-compression)
 
 ````text
@@ -13204,7 +13067,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 ### Unicode License v3
 
 Used by:
-- [unicode-ident 1.0.25](https://github.com/dtolnay/unicode-ident)
+- [unicode-ident 1.0.26](https://github.com/dtolnay/unicode-ident)
 
 ````text
 UNICODE LICENSE V3
@@ -13263,7 +13126,7 @@ Used by:
 - [potential_utf 0.1.6](https://github.com/unicode-org/icu4x)
 - [tinystr 0.8.4](https://github.com/unicode-org/icu4x)
 - [writeable 0.6.4](https://github.com/unicode-org/icu4x)
-- [yoke-derive 0.8.3](https://github.com/unicode-org/icu4x)
+- [yoke-derive 0.8.4](https://github.com/unicode-org/icu4x)
 - [yoke 0.8.3](https://github.com/unicode-org/icu4x)
 - [zerofrom-derive 0.1.8](https://github.com/unicode-org/icu4x)
 - [zerofrom 0.1.8](https://github.com/unicode-org/icu4x)

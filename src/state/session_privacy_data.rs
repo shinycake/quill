@@ -141,6 +141,12 @@ impl Session {
             RequestPurpose::SetSensitiveContent => {
                 data.error = Some(sessions_error_line("change the 18+ setting", err));
             }
+            RequestPurpose::SetContactJoinedNotifications => {
+                data.error = Some(sessions_error_line(
+                    "change the contact-joined notifications",
+                    err,
+                ));
+            }
             RequestPurpose::GetNetworkStatistics => {
                 data.network_loading = false;
                 data.error = Some(sessions_error_line("load the network usage", err));

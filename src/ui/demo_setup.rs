@@ -60,7 +60,7 @@ use super::message_text::{
     apply_ready_blockquote_expandable, apply_ready_caption_position, apply_ready_link_preview,
     apply_ready_preview_cards, apply_ready_text_entities,
 };
-use super::notification_settings::apply_ready_notification_sound;
+use super::notification_settings::{apply_ready_folder_badges, apply_ready_notification_sound};
 use super::payments::apply_ready_payments;
 use super::polls::apply_ready_poll;
 use super::profile::apply_ready_profile_edit;
@@ -1109,6 +1109,20 @@ impl QuillApp {
                 },
             });
             self.status_note = "screenshot demo — block user confirm".into();
+        }
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadyNotifyOs | ScreenshotDemo::ReadyFolderBadges)
+        ) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_folders(session, &self.demo_sink, &self.demo_seq);
+                apply_ready_folder_badges(session, &self.demo_sink, &self.demo_seq);
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyNotifyOs)) {
+                self.notification_defaults_open = true;
+            }
+            self.status_note = "screenshot demo — notification settings · folder counters".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyFolders)) {
             if let Some(session) = self.demo_session.as_mut() {

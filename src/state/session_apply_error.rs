@@ -1378,6 +1378,7 @@ impl Session {
                 | RequestPurpose::SetGiftSettings
                 | RequestPurpose::SetInactiveSessionTtl
                 | RequestPurpose::SetSensitiveContent
+                | RequestPurpose::SetContactJoinedNotifications
                 | RequestPurpose::GetNetworkStatistics
                 | RequestPurpose::ResetNetworkStatistics
                 | RequestPurpose::CheckRememberedPassword),
