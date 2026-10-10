@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.0 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
 // bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 //! A visual row whose offsets remain in source UTF-8 bytes.
 use super::bidi::{BidiLine, Fragment, clusters_from_glyphs, fragment_extent};
