@@ -87,19 +87,35 @@ pub struct LiveLocationState {
     pub expires_in: i32,
     pub heading: i32,
     pub proximity_alert_radius: i32,
+    /// Unix time `expires_in` was read at, so the remaining time keeps
+    /// counting down between updates from Telegram.
+    pub received_at: i64,
 }
 
 impl LiveLocationState {
-    /// Static status line; live re-rendering is out of this slice, so the
-    /// remaining time is a snapshot from `expires_in` at parse time.
-    pub fn status_label(&self) -> String {
+    /// Seconds of sharing left at `now` (0 once it ended or was stopped).
+    pub fn remaining_at(&self, now: i64) -> i32 {
         if self.expires_in <= 0 {
+            return 0;
+        }
+        let elapsed = (now - self.received_at).clamp(0, i64::from(i32::MAX));
+        (i64::from(self.expires_in) - elapsed).max(0) as i32
+    }
+
+    /// Only the sender can stop a live location that is still running
+    /// (`editMessageLiveLocation` with no location).
+    pub fn can_stop_at(&self, is_outgoing: bool, now: i64) -> bool {
+        is_outgoing && self.remaining_at(now) > 0
+    }
+
+    /// Status line for the card, with the remaining time counted from
+    /// `received_at` to `now`.
+    pub fn status_label_at(&self, now: i64) -> String {
+        let remaining = self.remaining_at(now);
+        if remaining <= 0 {
             return "Live location ended".into();
         }
-        let mut parts = vec![format!(
-            "Live · expires in {}",
-            duration_label(self.expires_in)
-        )];
+        let mut parts = vec![format!("Live · expires in {}", duration_label(remaining))];
         if self.heading > 0 {
             parts.push(format!("heading {}°", self.heading));
         }
@@ -110,6 +126,11 @@ impl LiveLocationState {
             ));
         }
         parts.join(" · ")
+    }
+
+    /// [`Self::status_label_at`] for the current time.
+    pub fn status_label(&self) -> String {
+        self.status_label_at(crate::local_time::now_unix())
     }
 }
 
@@ -181,6 +202,7 @@ pub(crate) fn parse_live_location_state(value: Option<&Value>) -> Option<LiveLoc
             .and_then(Value::as_i64)
             .unwrap_or(0)
             .sat_i32(),
+        received_at: crate::local_time::now_unix(),
     })
 }
 

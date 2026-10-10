@@ -1435,6 +1435,11 @@ pub enum EnvelopePayload {
         media_timestamp: Option<i32>,
         thread_id: Option<i64>,
     },
+    /// `chatBoostLinkInfo` — the `getChatBoostLinkInfo` answer. `chat_id` is
+    /// 0 when the link does not name a channel the account can see.
+    ChatBoostLinkInfo {
+        chat_id: i64,
+    },
     /// Phase D3a: `chatInviteLinks` (TDLib 1.8.67, line 2630) — the
     /// response of `getChatInviteLinks` / `revokeChatInviteLink`.
     /// Correlated to the chat by the request's `PendingRequest::chat_id`.

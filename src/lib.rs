@@ -111,6 +111,7 @@ pub mod updater;
 pub mod version;
 pub mod video;
 pub mod video_decode;
+pub mod viewer_extras;
 pub mod voice;
 #[cfg(feature = "ui")]
 pub mod voice_input;

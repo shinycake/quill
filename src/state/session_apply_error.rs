@@ -1928,6 +1928,10 @@ pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> S
             ..
         }) if not_found => "This message link is broken or the chat is not available.".to_string(),
         Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::BoostLink { .. },
+            ..
+        }) if not_found => "This boost link is broken.".to_string(),
+        Some(DeepLinkState::ResolvingChat {
             action: DeepLinkAction::JoinInvite { .. },
             ..
         }) if not_found => "This invite link is broken or has expired.".to_string(),

@@ -764,6 +764,26 @@ impl QuillApp {
             .and_then(|s| s.my_user_id.and_then(|me| s.user_full_info(me)))
             .and_then(|i| i.extras.birthdate)
             .map(|b| (b.day, b.month, b.year));
+        self.show_birthday_dialog(current, window, cx);
+    }
+
+    /// The suggested-birthday card's "View": the same form, filled with
+    /// the suggested date (tdesktop opens its edit box the same way).
+    pub(super) fn open_suggested_birthday(
+        &mut self,
+        parts: (u8, u8, Option<i32>),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_birthday_dialog(Some(parts), window, cx);
+    }
+
+    fn show_birthday_dialog(
+        &mut self,
+        current: Option<(u8, u8, Option<i32>)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let dialog = BirthdayDialog::new(window, cx, current);
         dialog
             .day_input

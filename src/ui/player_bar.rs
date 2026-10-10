@@ -330,7 +330,7 @@ impl QuillApp {
     }
 
     /// The bar, when a voice note or music file is active.
-    pub(super) fn player_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn player_bar(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = self.active_playback_id()?;
         let clock = self.playback_clock.as_ref()?;
         let kind = self.active_playback_kind();
@@ -359,7 +359,7 @@ impl QuillApp {
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.player.repeat, self.player.order);
         let muted = self.playback_volume < 0.01;
-        let speed = Self::speed_label(self.playback_speed);
+        let speed_dial = self.speed_dial("player-bar-speed", cx);
 
         let icon_button = |id: &'static str, icon: IconName, label: &'static str| {
             Button::new(id)
@@ -462,15 +462,7 @@ impl QuillApp {
                         .text_color(text_muted())
                         .child(time),
                 )
-                .child(
-                    Button::new("player-bar-speed")
-                        .label(speed)
-                        .ghost()
-                        .small()
-                        .tooltip("Playback speed")
-                        .accessibility_label("Playback speed")
-                        .on_click(cx.listener(|this, _, _, cx| this.cycle_playback_speed(cx))),
-                )
+                .child(speed_dial)
                 .child(
                     icon_button(
                         "player-bar-volume",
