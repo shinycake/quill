@@ -77,6 +77,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, _, cx| app.close_profile_modal(cx)
     ),
     layer!(
+        "composer-code-language",
+        |app| app.composer_code_language.is_some(),
+        |app, window, cx| app.close_code_language_dialog(window, cx)
+    ),
+    layer!(
         "composer-link-dialog",
         |app| app.composer_link_dialog.is_some(),
         |app, window, cx| app.close_composer_link_dialog(window, cx)

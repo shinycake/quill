@@ -1367,7 +1367,38 @@ impl QuillApp {
                     })),
             )
             .into_any_element();
-        self.appearance_section(cx, "Emoji", "", control)
+        // tdesktop Chat settings "Large emoji": one to three emoji alone in
+        // a message show as big glyphs (the history renderer reads the same
+        // `MediaPrefs::big_emoji`).
+        let large = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().text_sm().child("Large emoji"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Show a message of one to three emoji as big glyphs."),
+                    ),
+            )
+            .child(
+                Switch::new("appearance-large-emoji")
+                    .checked(self.session().is_none_or(|s| s.media_prefs.big_emoji))
+                    .accessibility_label("Large emoji")
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_media_pref(|prefs| prefs.big_emoji = on, cx)
+                    })),
+            );
+        let control = div().flex().flex_col().gap_2().child(large).child(control);
+        self.appearance_section(cx, "Emoji", "", control.into_any_element())
     }
 
     /// Slice parity:settings-language: the app language picker (the IETF
