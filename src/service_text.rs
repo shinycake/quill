@@ -1397,6 +1397,29 @@ impl ServiceNames for NoNames {
 /// Wording without any known names: the fallback of
 /// [`MessageContent::preview`] for callers that have no session. Chat-list
 /// rows built from a session use [`render`] with real names instead.
+/// The Day / Month / Year table of a suggested-birthday card
+/// (tdesktop `BirthdayTable`): the year column only shows when it is set.
+pub fn birthday_table(day: i32, month: i32, year: i32) -> Vec<(&'static str, String)> {
+    let mut rows = vec![
+        ("Day", day.to_string()),
+        (
+            "Month",
+            crate::local_time::month_name(month.clamp(1, 12) as u8).to_string(),
+        ),
+    ];
+    if year > 0 {
+        rows.push(("Year", year.to_string()));
+    }
+    rows
+}
+
+/// The date a suggested birthday card hands to the birthday form; `None`
+/// for a date the form would reject.
+pub fn birthday_form_parts(day: i32, month: i32, year: i32) -> Option<(u8, u8, Option<i32>)> {
+    let valid = (1..=31).contains(&day) && (1..=12).contains(&month);
+    valid.then(|| (day as u8, month as u8, (year > 0).then_some(year)))
+}
+
 pub fn action_preview(action: &ServiceAction) -> String {
     let ctx = ServiceCtx {
         actor: None,

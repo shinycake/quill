@@ -27,6 +27,26 @@ use quill::telegram::envelope::{
 use std::sync::Arc;
 use std::time::Instant;
 impl QuillApp {
+    /// "Stop sharing" on your own live location. The card flips to
+    /// "Live location ended" when Telegram confirms with the new content.
+    pub(super) fn stop_live_location(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = "Stopping a live location needs a live connection (demo)".into();
+            cx.notify();
+            return;
+        };
+        self.status_note = match live.driver.stop_live_location(chat_id, message_id) {
+            Ok(_) => "Stopped sharing your live location".into(),
+            Err(_) => "Couldn't stop sharing; try again.".into(),
+        };
+        cx.notify();
+    }
+
     /// Telegram Desktop's refusal for copying out of a protected chat;
     /// true when the chat is protected (and the note was shown).
     pub(super) fn refuse_protected_copy(

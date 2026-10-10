@@ -503,6 +503,22 @@ pub fn link_preview_options_value(choice: &LinkPreviewChoice, text: &str) -> Val
     }
 }
 
+/// `editMessageLiveLocation chat_id message_id reply_markup location:liveLocation`
+/// (schema/td_api.tl). A null `location` stops the live location: the
+/// message keeps its last position and its `expires_in` drops to 0.
+/// `reply_markup` is bots-only, so it stays null.
+pub fn stop_live_location(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "editMessageLiveLocation",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "reply_markup": Value::Null,
+        "location": Value::Null,
+    })
+    .to_string()
+}
+
 /// `editMessageText` (TDLib 1.8.67). `reply_markup` null — bots only.
 /// `input_message_content` must be `inputMessageText` (or `inputMessageRichMessage`).
 pub fn edit_message_text(

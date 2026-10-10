@@ -1088,6 +1088,12 @@ pub(super) fn session_history_row(
             message.id.0 as u64,
             &location.location,
             location.live.as_ref(),
+            location
+                .live
+                .is_some_and(|live| {
+                    live.can_stop_at(message.is_outgoing, quill::local_time::now_unix())
+                })
+                .then_some((message.chat_id, message.id)),
             map_tile_path(session, &location.location, files, media_roots),
             cx,
         )),

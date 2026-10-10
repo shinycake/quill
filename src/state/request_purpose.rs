@@ -257,6 +257,9 @@ pub enum RequestPurpose {
     /// B4: `stopPoll` (schema 1.8.67 line 12953). Response is `ok`; the
     /// poll closes via `updatePoll`.
     StopPoll,
+    /// `editMessageLiveLocation` with a null location (stop sharing). The
+    /// `message` answer is ignored; `updateMessageContent` carries the result.
+    StopLiveLocation,
     /// `unpinChatMessage`. Response is `ok`; pin via `updateMessageIsPinned`.
     UnpinChatMessage,
     /// M1: `unpinAllChatMessages`. Response is `ok`; pins clear via
