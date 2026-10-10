@@ -3,34 +3,58 @@
 
 use super::*;
 
-/// Display frame for a photo/GIF/video in a bubble: the media's aspect
-/// ratio fitted into at most 360×400 (and at least 120 on the short
-/// side), so pictures are never cropped to a fixed strip and the
-/// not-yet-downloaded placeholder already has the final size — the row
-/// keeps its height when the file arrives.
-pub(in crate::ui) fn media_frame(width: i32, height: i32) -> (Pixels, Pixels) {
-    const MAX_W: f32 = 360.;
-    const MAX_H: f32 = 400.;
-    const MIN_SIDE: f32 = 120.;
-    if width <= 0 || height <= 0 {
-        return (px(260.), px(180.));
-    }
-    let (w, h) = (width as f32, height as f32);
-    let scale = (MAX_W / w).min(MAX_H / h);
-    let (w, h) = (w * scale, h * scale);
-    // Very wide/tall media: keep a usable short side (cropped by Cover).
-    (px(w.max(MIN_SIDE)), px(h.max(MIN_SIDE)))
+/// What kind of picture a frame holds; each has its own box in Telegram
+/// Desktop (`maxMediaSize`, `maxGifSize`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::ui) enum MediaFrameKind {
+    Photo,
+    Video,
+    Gif,
 }
 
-/// Smallest content width of a media bubble (`historyPhotoBubbleMinWidth`).
-const MEDIA_BUBBLE_MIN_WIDTH: f32 = 100.;
+/// Display frame for a photo, video or GIF in a bubble, as Telegram
+/// Desktop sizes it (`quill::bubble_layout::photo_current` /
+/// `clip_current` at the bubble's widest): fitted into 430x430 (GIFs 320),
+/// never upscaled, at least 200 wide in a bubble and 100 on a side, a tall
+/// picture cropped to a square unless the crop would lose over a quarter.
+/// A not-yet-downloaded placeholder already has the final size, so the
+/// row keeps its height when the file arrives.
+pub(in crate::ui) fn media_frame(
+    kind: MediaFrameKind,
+    width: i32,
+    height: i32,
+) -> (Pixels, Pixels) {
+    use quill::bubble_layout::{
+        ClipKind, MAX_MEDIA_SIZE, MediaContext, Size, clip_current, photo_current,
+    };
+    let dims = Size::new(width, height);
+    let context = MediaContext {
+        has_bubble: true,
+        info_width: 0,
+        keyboard_width: 0,
+        caption_width: 0,
+    };
+    let size = match kind {
+        MediaFrameKind::Photo => photo_current(dims, context, MAX_MEDIA_SIZE),
+        MediaFrameKind::Video => clip_current(dims, ClipKind::Video, context, 0, MAX_MEDIA_SIZE),
+        MediaFrameKind::Gif => clip_current(dims, ClipKind::Gif, context, 0, MAX_MEDIA_SIZE),
+    };
+    (px(size.w as f32), px(size.h as f32))
+}
 
 /// Content width of a bubble led by media of `media` width: the media
 /// decides it (Telegram Desktop `Photo::countCurrentSize`), never less
-/// than the bubble minimum or the width the footer needs (`footer_min`,
-/// `minWidthForMedia`). Captions and reactions wrap to this width.
+/// than `historyPhotoBubbleMinWidth` or the width the time pill needs
+/// (`footer_min` plus its margins, `minWidthForMedia`). Captions and
+/// reactions wrap to this width.
 pub(in crate::ui) fn media_content_width(media: Pixels, footer_min: Pixels) -> Pixels {
-    media.max(footer_min).max(px(MEDIA_BUBBLE_MIN_WIDTH))
+    use quill::bubble_layout::{DATE_IMG_DELTA, DATE_IMG_PADDING_X, PHOTO_BUBBLE_MIN_WIDTH};
+    let pill = if footer_min > px(0.) {
+        footer_min + px((2 * (DATE_IMG_DELTA + DATE_IMG_PADDING_X)) as f32)
+    } else {
+        px(0.)
+    };
+    media.max(pill).max(px(PHOTO_BUBBLE_MIN_WIDTH as f32))
 }
 
 /// Outer bubble width for `content` width: a media-led bubble keeps only
@@ -56,10 +80,14 @@ pub(in crate::ui) fn single_media_width(
         MessageContent::Photo(photo) => photo
             .largest_size()
             .or_else(|| photo.thumb_size())
-            .map(|size| media_frame(size.width, size.height))
-            .unwrap_or_else(|| media_frame(0, 0)),
-        MessageContent::Video(video) => media_frame(video.width, video.height),
-        MessageContent::Animation(animation) => media_frame(animation.width, animation.height),
+            .map(|size| media_frame(MediaFrameKind::Photo, size.width, size.height))
+            .unwrap_or_else(|| media_frame(MediaFrameKind::Photo, 0, 0)),
+        MessageContent::Video(video) => {
+            media_frame(MediaFrameKind::Video, video.width, video.height)
+        }
+        MessageContent::Animation(animation) => {
+            media_frame(MediaFrameKind::Gif, animation.width, animation.height)
+        }
         _ => return None,
     };
     Some(w)
@@ -258,9 +286,10 @@ mod tests {
     fn media_decides_the_bubble_width() {
         // A wide photo is never widened by its caption or footer.
         assert_eq!(media_content_width(px(360.), px(120.)), px(360.));
-        // Tiny media keeps a usable minimum and room for the footer.
-        assert_eq!(media_content_width(px(40.), px(0.)), px(100.));
-        assert_eq!(media_content_width(px(100.), px(140.)), px(140.));
+        // Tiny media keeps `historyPhotoBubbleMinWidth` and room for the
+        // time pill with its margins (`minWidthForMedia`).
+        assert_eq!(media_content_width(px(40.), px(0.)), px(200.));
+        assert_eq!(media_content_width(px(100.), px(200.)), px(224.));
     }
 
     #[test]

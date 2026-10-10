@@ -1375,9 +1375,9 @@ pub(super) fn message_text_block(
     let row_id = msg_key.1;
     let font = if big_emoji && text.link_preview.is_none() {
         match quill::emoji_catalog::big_emoji_count_with_entities(&text.text, &text.entities) {
-            Some(1) => font.max(px(40.)),
-            Some(2) => font.max(px(36.)),
-            Some(3) => font.max(px(32.)),
+            // Telegram Desktop `largeEmojiSize`: the same size for one,
+            // two or three emoji.
+            Some(1..=3) => font.max(px(quill::bubble_layout::LARGE_EMOJI_SIZE as f32)),
             _ => font,
         }
     } else {

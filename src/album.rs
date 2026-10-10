@@ -9,12 +9,12 @@ use crate::telegram::envelope::MessageContent;
 /// Schema: at most 10 messages in one album.
 pub const ALBUM_MAX_ITEMS: usize = 10;
 
-/// tdesktop `st::historyGroupWidthMax` is larger; the chat pane fits this width.
-pub const ALBUM_MAX_WIDTH: i32 = 320;
-/// tdesktop `st::historyGroupWidthMin`.
-pub const ALBUM_MIN_WIDTH: i32 = 120;
+/// tdesktop `st::historyGroupWidthMax` (`maxMediaSize`).
+pub const ALBUM_MAX_WIDTH: i32 = crate::bubble_layout::GROUP_WIDTH_MAX;
+/// tdesktop `st::historyGroupWidthMin` (`minPhotoSize`).
+pub const ALBUM_MIN_WIDTH: i32 = crate::bubble_layout::GROUP_WIDTH_MIN;
 /// tdesktop `st::historyGroupSkip`.
-pub const ALBUM_SPACING: i32 = 2;
+pub const ALBUM_SPACING: i32 = crate::bubble_layout::GROUP_SKIP;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlbumRect {
