@@ -381,6 +381,10 @@ pub enum ScreenshotDemo {
     /// and public story search (injected, no live Telegram):
     /// `QUILL_DEMO_FTS_VIEW=topic|thread|stats|search` (default `topic`).
     ReadyForumThreadStories,
+    /// The forum topic column next to the chat list, a topic with replies and
+    /// its thread (injected, no live Telegram):
+    /// `QUILL_DEMO_FORUM_COLUMN_VIEW=topics|topic|thread` (default `topics`).
+    ReadyForumColumn,
     /// Forums and Saved Messages sublists (injected, no live Telegram):
     /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
     /// sublist list, one sublist, a tag filter, or the forum topic editor
