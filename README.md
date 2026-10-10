@@ -18,23 +18,16 @@ Quill is under active development. The [progress dashboard](https://shinycake.gi
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/readme-chat-dark.png" alt="Group chat in the dark theme: chat list with stories, archive row and badges; voice note, link preview and replies"/><br/><sub>Group chat · dark</sub></td>
-    <td><img src="docs/screenshots/readme-chat-light.png" alt="Group chat in the light theme with reactions, replies and colored sender names"/><br/><sub>Group chat · light</sub></td>
+    <td><img src="docs/screenshots/readme-chat-dark.png" alt="Group chat in the dark theme: chat list with stories and badges, a voice note, a link preview and replies"/><br/><sub>Group chat</sub></td>
+    <td><img src="docs/screenshots/readme-channel-photos.png" alt="Channel with photo posts, reactions and view counts in the light theme"/><br/><sub>Channels</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/readme-reactions-menu.png" alt="Reaction picker over the message context menu"/><br/><sub>Reactions and message menu</sub></td>
     <td><img src="docs/screenshots/readme-media-viewer.png" alt="Fullscreen media viewer with zoom, forward and download actions"/><br/><sub>Media viewer</sub></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/readme-reactions-menu.png" alt="Reaction picker over the message context menu"/><br/><sub>Reactions &amp; message menu</sub></td>
-    <td><img src="docs/screenshots/readme-polls.png" alt="Polls and a closed quiz with explanation"/><br/><sub>Polls &amp; quizzes</sub></td>
-    <td><img src="docs/screenshots/readme-player-bar.png" alt="Audio player bar above a private chat with music, a photo and reactions"/><br/><sub>Audio player bar</sub></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/readme-channel-photos.png" alt="Channel with photo posts, reactions and view counts"/><br/><sub>Channels</sub></td>
-    <td><img src="docs/screenshots/readme-appearance-dark.png" alt="Appearance settings: themes, accent colors, wallpapers"/><br/><sub>Appearance settings</sub></td>
-    <td><img src="docs/screenshots/readme-accent-light.png" alt="Private chat in the light theme with a purple accent color"/><br/><sub>Accent colors</sub></td>
   </tr>
 </table>
 
-Captured from a real GPUI window using demo fixtures (no live Telegram). The [full gallery](docs/screenshots/README.md) has 130+ captures covering auth, chats, media, calls, bots, settings, and more.
+Captured from a real Quill window using demo data, not a live Telegram account.
 
 ## What is Quill?
 
