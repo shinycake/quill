@@ -932,7 +932,14 @@ impl QuillApp {
                     this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
                 }))
         };
+        if matches!(self.profile_dialog, Some(ProfileDialog::AddBot { .. })) {
+            return self.add_bot_dialog_parts(cx);
+        }
+        if matches!(self.profile_dialog, Some(ProfileDialog::ShareGame { .. })) {
+            return self.share_game_dialog_parts(cx);
+        }
         match self.profile_dialog.as_ref()? {
+            ProfileDialog::AddBot { .. } | ProfileDialog::ShareGame { .. } => None,
             ProfileDialog::EditContact(dialog) => {
                 let user_id = dialog.user_id;
                 let (phone, show_share, name) = self

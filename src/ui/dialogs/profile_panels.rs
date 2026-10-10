@@ -50,6 +50,21 @@ pub enum ProfileDialog {
         user_id: i64,
         target: Option<i64>,
     },
+    /// Add the bot `bot_id` to a group or channel: the chat picker, then
+    /// (`target` set) the rights to grant or the confirmation.
+    /// Send the game `game_short_name` of `bot_id` to a chat (`target` is
+    /// the chosen chat awaiting the confirm step).
+    ShareGame {
+        bot_id: i64,
+        game_short_name: String,
+        target: Option<i64>,
+    },
+    AddBot {
+        bot_id: i64,
+        invite: quill::bot_invite::Invite,
+        target: Option<i64>,
+        rights: quill::telegram::envelope::ChatAdminRights,
+    },
 }
 
 impl EditContactDialog {

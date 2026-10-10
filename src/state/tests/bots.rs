@@ -387,3 +387,31 @@ fn bots_games_high_scores_answer_lands_in_panel() {
     assert_eq!(rows[0].score, 9000);
     assert_eq!(rows[1].position, 2);
 }
+
+#[test]
+fn fast_buttons_target_the_last_message_when_it_has_an_inline_keyboard() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateUser","user":{"id":21,"first_name":"Bot","type":{"@type":"userTypeBot","can_join_groups":true}}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+        r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"A","type":{"@type":"inlineKeyboardButtonTypeCallback","data":"YQ=="}},{"@type":"inlineKeyboardButton","text":"B","type":{"@type":"inlineKeyboardButtonTypeCallback","data":"Yg=="}}],[],[{"@type":"inlineKeyboardButton","text":"C","type":{"@type":"inlineKeyboardButtonTypeCallback","data":"Yw=="}}]]},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick","entities":[]}}}}"#,
+    ] {
+        apply_json(&mut session, &seq, &sink, json);
+    }
+    let target = session.fast_button_target(ChatId(21)).expect("target");
+    assert_eq!(target.bot_id, 21);
+    assert_eq!(target.message_id, MessageId(301));
+    assert_eq!(target.row_lens, vec![2, 0, 1]);
+
+    // A newer plain message takes the keys away.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+    );
+    assert_eq!(session.fast_button_target(ChatId(21)), None);
+    // Other chats never qualify.
+    assert_eq!(session.fast_button_target(ChatId(99)), None);
+}

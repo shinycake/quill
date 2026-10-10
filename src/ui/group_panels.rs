@@ -746,6 +746,9 @@ impl QuillApp {
         if let Some(actions) = self.profile_contact_actions(user_id, cx) {
             body = body.child(actions);
         }
+        if let Some(actions) = self.bot_profile_actions(user_id, cx) {
+            body = body.child(actions);
+        }
         // tdesktop's "Change colors" (`addThemeEdit`): the chat's theme and
         // wallpaper, for the private chat open right now.
         if !is_self

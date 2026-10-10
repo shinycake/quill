@@ -1182,7 +1182,14 @@ pub(super) fn session_history_row(
                 .into_any_element(),
         ),
     };
-    let keyboard = inline_keyboard(message, cx);
+    let fast_buttons = session.is_some_and(|session| {
+        session
+            .fast_button_target(message.chat_id)
+            .is_some_and(|target| {
+                target.message_id == message.id && quill::fast_buttons::is_enabled(target.bot_id)
+            })
+    });
+    let keyboard = inline_keyboard(message, fast_buttons, cx);
     // Phase B3: self-destruct timer badge (`message.self_destruct_type` /
     // `message.self_destruct_in`, schema 1.8.67 lines 3146–3147). The
     // countdown decays locally against `unix_ms_now()` (same pattern as
