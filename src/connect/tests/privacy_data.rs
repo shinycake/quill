@@ -285,3 +285,54 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
     assert!(!f.1.session.privacy_data.check_password_suggested);
     cleanup(f);
 }
+
+#[test]
+fn suggestions_follow_updates_and_hide_with_rollback() {
+    use crate::chatlist_suggestions::{ACTION_PHOTO, Suggestion};
+    let mut f = fixture();
+    ingest(
+        &mut f,
+        r#"{"@type":"updateSuggestedActions","added_actions":[{"@type":"suggestedActionSetProfilePhoto"},{"@type":"suggestedActionSetBirthdate"}],"removed_actions":[]}"#,
+    );
+    ingest(
+        &mut f,
+        r#"{"@type":"updateContactCloseBirthdays","close_birthday_users":[{"@type":"closeBirthdayUser","user_id":9,"birthdate":{"@type":"birthdate","day":14,"month":3,"year":1990}}]}"#,
+    );
+    let facts = &f.1.session.suggestions;
+    assert!(facts.actions.contains(ACTION_PHOTO));
+    assert_eq!(facts.close_birthdays.len(), 1);
+    assert_eq!(facts.close_birthdays[0].year, Some(1990));
+
+    // Hiding goes out as `hideSuggestedAction` and drops the action now.
+    f.1.hide_suggestion(&Suggestion::SetProfilePhoto).unwrap();
+    let request = last_request(&f);
+    assert_eq!(request["@type"], "hideSuggestedAction");
+    assert_eq!(request["action"]["@type"], "suggestedActionSetProfilePhoto");
+    assert!(!f.1.session.suggestions.actions.contains(ACTION_PHOTO));
+    // A refusal puts it back and says so.
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"NO"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert!(f.1.session.suggestions.actions.contains(ACTION_PHOTO));
+    assert_eq!(
+        f.1.session.chat_action_error.as_deref(),
+        Some("could not hide the suggestion (error 400)")
+    );
+
+    // Birthdays have their own request.
+    f.1.hide_suggestion(&Suggestion::Birthdays(vec![9]))
+        .unwrap();
+    assert_eq!(last_request(&f)["@type"], "hideContactCloseBirthdays");
+    assert!(f.1.session.suggestions.birthdays_hidden);
+    // A fresh list from TDLib shows them again.
+    ingest(
+        &mut f,
+        r#"{"@type":"updateContactCloseBirthdays","close_birthday_users":[]}"#,
+    );
+    assert!(!f.1.session.suggestions.birthdays_hidden);
+    cleanup(f);
+}

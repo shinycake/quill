@@ -75,6 +75,7 @@ impl Render for QuillApp {
         let menu_open = self.message_menu.is_some()
             || self.chat_menu.is_some()
             || self.archive_menu.is_some()
+            || self.global.story_menu.is_some()
             || self.folder_tab_menu.is_some();
         if menu_open && !self.context_menu_was_open {
             self.context_menu_previous_focus = window.focused(cx);
@@ -976,6 +977,9 @@ impl Render for QuillApp {
             // Slice CL1: right-click chat-row context menu.
             .when_some(self.chat_menu, |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
+            })
+            .when_some(self.global.story_menu, |this, (chat_id, position)| {
+                this.child(self.story_menu_overlay(chat_id, position, cx))
             })
             .when_some(self.archive_menu, |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))

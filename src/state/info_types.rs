@@ -421,6 +421,8 @@ pub struct ContactRow {
     pub status_text: String,
     pub is_online: bool,
     pub is_contact: bool,
+    /// Sort key of the last-seen order (`contacts_index::last_seen_rank`).
+    pub last_seen: i64,
 }
 
 /// `parity:platform-deep-links`: the actionable destination parsed out of

@@ -699,6 +699,15 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-chat-rows", ReadyChatRows),
         ("ready-chat-theme", ReadyChatTheme),
         ("ready-chat-ttl", ReadyChatTtl),
+        ("ready-chatlist-birthdays", ReadyChatlistBirthdays),
+        ("ready-chatlist-calls-clear", ReadyChatlistCallsClear),
+        ("ready-chatlist-contacts-index", ReadyChatlistContactsIndex),
+        ("ready-chatlist-stories-menu", ReadyChatlistStoriesMenu),
+        ("ready-chatlist-suggestions", ReadyChatlistSuggestions),
+        (
+            "ready-chatlist-suggestions-phone",
+            ReadyChatlistSuggestionsPhone,
+        ),
         ("ready-chats", ReadyChats),
         ("ready-chats-composer", ReadyChatsComposer),
         ("ready-code-language", ReadyCodeLanguage),
@@ -1086,6 +1095,14 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyChatListSearch => ".quill-ready-ready-chat-list-search",
         ScreenshotDemo::ReadyArchiveRow => ".quill-ready-ready-archive-row",
         ScreenshotDemo::ReadyArchiveHint => ".quill-ready-ready-archive-hint",
+        ScreenshotDemo::ReadyChatlistContactsIndex => ".quill-ready-ready-chatlist-contacts-index",
+        ScreenshotDemo::ReadyChatlistBirthdays => ".quill-ready-ready-chatlist-birthdays",
+        ScreenshotDemo::ReadyChatlistCallsClear => ".quill-ready-ready-chatlist-calls-clear",
+        ScreenshotDemo::ReadyChatlistStoriesMenu => ".quill-ready-ready-chatlist-stories-menu",
+        ScreenshotDemo::ReadyChatlistSuggestions => ".quill-ready-ready-chatlist-suggestions",
+        ScreenshotDemo::ReadyChatlistSuggestionsPhone => {
+            ".quill-ready-ready-chatlist-suggestions-phone"
+        }
         ScreenshotDemo::ReadyChatBadges => ".quill-ready-ready-chat-badges",
         ScreenshotDemo::ReadyFoldersChats => ".quill-ready-ready-folders-chats",
         ScreenshotDemo::ReadyFoldersChatPicker => ".quill-ready-ready-folders-chat-picker",
