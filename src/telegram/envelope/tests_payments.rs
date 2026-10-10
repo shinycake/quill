@@ -206,7 +206,7 @@ fn payment_recurring_star_subscriptions_parse() {
     // channel subscription, a bot subscription, and a next page
     // (schema 1.8.67, lines 1239/1246/1262/1269).
     let env = parse_envelope(
-            r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","amount":500,"nanostar_amount":0},"required_star_count":100,"next_offset":"50","subscriptions":[{"@type":"starSubscription","id":"sub1","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{"@type":"starSubscriptionPricing","period":2592000,"star_count":100},"type":{"@type":"starSubscriptionTypeChannel","can_reuse":true,"invite_link":"https://t.me/+abc"}},{"@type":"starSubscription","id":"sub2","chat_id":2,"expiration_date":1700000000,"is_canceled":true,"is_expiring":true,"pricing":{"@type":"starSubscriptionPricing","period":604800,"star_count":25},"type":{"@type":"starSubscriptionTypeBot","is_canceled_by_bot":false,"title":"My Bot","photo":null,"invoice_link":"https://t.me/$botinvoice"}}]}"#,
+            r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","star_count":500,"nanostar_count":0},"required_star_count":100,"next_offset":"50","subscriptions":[{"@type":"starSubscription","id":"sub1","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{"@type":"starSubscriptionPricing","period":2592000,"star_count":100},"type":{"@type":"starSubscriptionTypeChannel","can_reuse":true,"invite_link":"https://t.me/+abc"}},{"@type":"starSubscription","id":"sub2","chat_id":2,"expiration_date":1700000000,"is_canceled":true,"is_expiring":true,"pricing":{"@type":"starSubscriptionPricing","period":604800,"star_count":25},"type":{"@type":"starSubscriptionTypeBot","is_canceled_by_bot":false,"title":"My Bot","photo":null,"invoice_link":"https://t.me/$botinvoice"}}]}"#,
         )
         .unwrap();
     match env.payload {
@@ -259,7 +259,7 @@ fn payment_recurring_star_subscriptions_tolerate_gaps() {
     // pricing block instead drops that subscription (`parse_star_subscription`
     // uses `?` on the pricing parse; pricing is non-optional per the schema).
     let env = parse_envelope(
-            r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","amount":0,"nanostar_amount":0},"required_star_count":0,"next_offset":"","subscriptions":[{"@type":"starSubscription","id":"sub9","chat_id":3,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{"@type":"starSubscriptionPricing","period":0,"star_count":0},"type":{"@type":"starSubscriptionTypeFuture","x":1}}]}"#,
+            r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","star_count":0,"nanostar_count":0},"required_star_count":0,"next_offset":"","subscriptions":[{"@type":"starSubscription","id":"sub9","chat_id":3,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{"@type":"starSubscriptionPricing","period":0,"star_count":0},"type":{"@type":"starSubscriptionTypeFuture","x":1}}]}"#,
         )
         .unwrap();
     match env.payload {
@@ -309,4 +309,22 @@ fn paid_media_keeps_locked_previews_and_caption() {
     );
     assert_eq!(locked[1].duration, 12);
     assert!(locked[1].minithumbnail.is_none());
+}
+
+#[test]
+fn star_subscriptions_balance_uses_schema_star_count() {
+    // `starAmount star_count:int53 nanostar_count:int32` (schema:1232).
+    let json = r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","star_count":1234,"nanostar_count":500000000},"required_star_count":0,"next_offset":"","subscriptions":[]}"#;
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    let data = super::payments::parse_star_subscriptions(&value).unwrap();
+    assert_eq!(data.star_amount, 1234);
+    // A payload using the old, non-schema field name must not be read.
+    let wrong = r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","amount":9},"subscriptions":[]}"#;
+    let value: serde_json::Value = serde_json::from_str(wrong).unwrap();
+    assert_eq!(
+        super::payments::parse_star_subscriptions(&value)
+            .unwrap()
+            .star_amount,
+        0
+    );
 }
