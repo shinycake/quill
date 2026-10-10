@@ -294,7 +294,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
 - [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
 - [x] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
-- [ ] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->
+- [x] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->
 - [ ] Premium-only and paid-message gates ("charges N per message", "only accepts messages from contacts") <!-- parity:composer-paid-gates -->
 - [x] Show and hide button for bot reply keyboards <!-- parity:composer-bot-keyboard-toggle -->
 - [x] Reply keyboards update from the server outside the loaded history <!-- parity:composer-reply-markup-update -->
@@ -305,7 +305,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
 - [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
 - [x] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
-- [ ] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
+- [x] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
 - [ ] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
 
 ### Chat view chrome
