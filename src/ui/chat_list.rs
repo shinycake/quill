@@ -427,6 +427,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.flush_leaving_draft(cx);
+        // Choosing a chat from the list ends the peek at it.
+        self.forum_chats_peek = false;
         // Phase B4: the TTL picker belongs to the previous chat.
         self.ttl_picker_open = false;
         if self

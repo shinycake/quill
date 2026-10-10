@@ -288,7 +288,7 @@ fn voice_note_send_uses_input_file_local_and_recording_action() {
         bars: vec![31, 0, 1],
     };
     driver
-        .send_voice_note(&draft, "", Some(SendReply::plain(MessageId(4))))
+        .send_voice_note(&draft, "", Some(SendReply::plain(MessageId(4))), false)
         .unwrap();
     let sent = recorder
         .snapshot()
@@ -310,6 +310,50 @@ fn voice_note_send_uses_input_file_local_and_recording_action() {
     );
     assert_eq!(sent["input_message_content"]["caption"], Value::Null);
     assert_eq!(sent["reply_to"]["message_id"], 4);
+    assert_eq!(
+        sent["input_message_content"]["self_destruct_type"],
+        Value::Null,
+        "a normal note is not one-time"
+    );
+    // Play once in a private chat asks for an immediate self-destruct.
+    driver.send_voice_note(&draft, "", None, true).unwrap();
+    let once = recorder
+        .snapshot()
+        .into_iter()
+        .rev()
+        .find(|json| json.contains("inputMessageVoiceNote"))
+        .expect("send play-once voice");
+    let once: Value = serde_json::from_str(&once).unwrap();
+    assert_eq!(
+        once["input_message_content"]["self_destruct_type"]["@type"],
+        "messageSelfDestructTypeImmediately"
+    );
+    // A group refuses self-destruct, so the choice is dropped there.
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateNewChat","chat":{"id":-9,"title":"Team","type":{"@type":"chatTypeBasicGroup","basic_group_id":9},"unread_count":0}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver.select_chat(ChatId(-9)).unwrap();
+    driver.send_voice_note(&draft, "", None, true).unwrap();
+    let group = recorder
+        .snapshot()
+        .into_iter()
+        .rev()
+        .find(|json| json.contains("inputMessageVoiceNote"))
+        .expect("send group voice");
+    let group: Value = serde_json::from_str(&group).unwrap();
+    assert_eq!(group["chat_id"], -9);
+    assert_eq!(
+        group["input_message_content"]["self_destruct_type"],
+        Value::Null
+    );
+    driver.select_chat(ChatId(7)).unwrap();
     assert!(
         recorder
             .snapshot()

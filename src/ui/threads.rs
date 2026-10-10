@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use super::message_text::kit_avatar_element;
+use super::nested_click::SwallowPress;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -311,6 +312,8 @@ impl QuillApp {
                         .ghost()
                         .tooltip("Thread info")
                         .accessibility_label("Thread info")
+                        // Keep the root bar's own click (jump to the original) out of it.
+                        .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.thread_info_open = !this.thread_info_open;
                             cx.notify();

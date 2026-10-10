@@ -6,7 +6,12 @@ impl Session {
     /// Start resolving a thread (`getMessageThread`) for `message_id` of
     /// `chat_id`. Replaces any open thread.
     pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) {
-        self.thread = Some(ThreadView::resolving(chat_id, message_id));
+        let mut view = ThreadView::resolving(chat_id, message_id);
+        // A thread opened from inside a forum topic keeps that topic.
+        if self.open_chat == Some(chat_id) && self.chat_has_topics(chat_id) {
+            view.forum_topic_id = self.open_topic;
+        }
+        self.thread = Some(view);
         self.view_generation.bump();
     }
 
@@ -41,6 +46,11 @@ impl Session {
     pub fn thread_send_target(&self, chat_id: ChatId) -> Option<(i64, MessageId)> {
         let thread = self.thread_for_chat(chat_id)?;
         Some((thread.thread_id, MessageId(thread.thread_id)))
+    }
+
+    /// The forum topic the open thread in `chat_id` belongs to, if any.
+    pub fn thread_forum_topic(&self, chat_id: ChatId) -> Option<i32> {
+        self.thread_for_chat(chat_id)?.forum_topic_id
     }
 
     /// `getMessageThread` answered: fill the thread and queue the chat switch.

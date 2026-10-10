@@ -845,7 +845,10 @@ impl QuillApp {
         // built beyond the viewport (overdraw) hold still and do not ask
         // the frame clock for redraws.
         let file_id = item.file_id;
-        let animated = if on_screen {
+        let animated = if quill::power_saving::on(quill::power_saving::Flag::EmojiPanel) {
+            // Battery and animations: the emoji panel shows stills.
+            None
+        } else if on_screen {
             self.custom_emoji_image(file_id, item.format, cx)
         } else {
             self.custom_emoji_image_parked(file_id, item.format, cx)

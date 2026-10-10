@@ -2252,7 +2252,13 @@ impl QuillApp {
             if loops {
                 self.request_animation_tick(30, cx);
             } else {
-                window.request_animation_frame();
+                // Through the frame clock, not `request_animation_frame`
+                // (which redraws at the display refresh, 120 Hz on
+                // ProMotion, even behind other apps). The sound keeps
+                // playing in the background like tdesktop's, but the picture
+                // only needs a trickle there.
+                let fps = if self.window_active.get() { 60 } else { 10 };
+                self.request_media_tick(fps, cx);
             }
         } else if loops
             && !self.viewer_video_frames.is_empty()

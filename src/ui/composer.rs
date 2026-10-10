@@ -7,6 +7,7 @@ use super::actions::{
 use super::app::{PaneMode, QuillApp};
 use super::demo::demo_media_allowlist;
 use super::message_text::rich_block_element;
+use super::nested_click::SwallowPress;
 use super::scheduled::ScheduleTarget;
 use super::*;
 use gpui_kit::component::button::*;
@@ -23,6 +24,7 @@ use quill::composer::{
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::schedule::ScheduleKind;
+use quill::send_rights::SendKind;
 use quill::state::{Session, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatKind;
@@ -104,6 +106,15 @@ impl QuillApp {
                         return;
                     }
                     let attachments = self.pending_attachments.clone();
+                    // The viewer's own rights in a group: text needs the
+                    // basic right, each attachment its media right.
+                    if attachments.is_empty() {
+                        if !text.trim().is_empty() && self.deny_send(SendKind::Message, cx) {
+                            return;
+                        }
+                    } else if self.deny_attachments(attachments.iter().map(|a| a.kind), cx) {
+                        return;
+                    }
                     // Phase B3: self-destruct only leaves the composer on
                     // photo/video attachments; the driver additionally
                     // strips it for non-private chats (TDLib's 400 gate).
@@ -1080,9 +1091,9 @@ impl QuillApp {
                             .xsmall()
                             .ghost()
                             .accessibility_label("Send now")
+                            .swallow_press()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.composer_scheduling = ComposerScheduling::None;
-                                cx.stop_propagation();
                                 cx.notify();
                             })),
                     ),

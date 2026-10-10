@@ -10,8 +10,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "ui")]
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -146,6 +148,55 @@ pub(crate) fn capture_path(kind: &str, ext: &str) -> PathBuf {
     ))
 }
 
+/// Recording time that stops while paused.
+#[derive(Debug, Clone, Copy)]
+pub struct RunClock {
+    done: Duration,
+    since: Option<Instant>,
+}
+
+impl RunClock {
+    /// A clock that starts running at `now`.
+    pub fn started_at(now: Instant) -> Self {
+        Self {
+            done: Duration::ZERO,
+            since: Some(now),
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.since.is_some()
+    }
+
+    pub fn pause_at(&mut self, now: Instant) {
+        if let Some(since) = self.since.take() {
+            self.done += now.saturating_duration_since(since);
+        }
+    }
+
+    pub fn resume_at(&mut self, now: Instant) {
+        self.since.get_or_insert(now);
+    }
+
+    pub fn elapsed_at(&self, now: Instant) -> Duration {
+        self.done
+            + self
+                .since
+                .map_or(Duration::ZERO, |since| now.saturating_duration_since(since))
+    }
+}
+
+/// What the capture asks of its encoder thread.
+#[cfg(feature = "ui")]
+#[derive(Default)]
+struct Control {
+    /// The recording is paused: the thread drops audio, and flushes what it
+    /// has so the file can be played.
+    paused: AtomicBool,
+    /// The thread has flushed the file since the pause.
+    flushed: AtomicBool,
+}
+
 /// A running microphone capture: the cpal stream, the encoder thread it
 /// feeds, and how many samples have been encoded.
 #[cfg(feature = "ui")]
@@ -153,6 +204,7 @@ struct Live {
     mic: crate::voice_input::MicStream,
     worker: std::thread::JoinHandle<Result<u64, String>>,
     samples: Arc<std::sync::atomic::AtomicU64>,
+    control: Arc<Control>,
 }
 
 #[cfg(not(feature = "ui"))]
@@ -168,7 +220,7 @@ const NO_AUDIO_SECS: u64 = 3;
 /// live waveform.
 pub struct VoiceCapture {
     pub path: PathBuf,
-    started: Instant,
+    clock: RunClock,
     live: Option<Live>,
     /// Bars shown while recording (the waveform so far).
     pub bars: Vec<u8>,
@@ -198,12 +250,33 @@ impl VoiceCapture {
         };
         let levels = Arc::new(Mutex::new(Vec::new()));
         let samples = Arc::new(AtomicU64::new(0));
+        let control = Arc::new(Control::default());
         let worker = {
-            let (levels, samples) = (levels.clone(), samples.clone());
+            let (levels, samples, control) = (levels.clone(), samples.clone(), control.clone());
             std::thread::spawn(move || {
                 let mut sent = 0;
+                let mut paused = false;
                 // Ends when the stream (the only sender) is dropped.
-                while let Ok(chunk) = receiver.recv() {
+                loop {
+                    let chunk = match receiver.recv_timeout(Duration::from_millis(30)) {
+                        Ok(chunk) => Some(chunk),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
+                    let want = control.paused.load(Ordering::Acquire);
+                    if want != paused {
+                        paused = want;
+                        if paused {
+                            encoder.pause()?;
+                            control.flushed.store(true, Ordering::Release);
+                        } else {
+                            encoder.resume();
+                            control.flushed.store(false, Ordering::Release);
+                        }
+                    }
+                    let Some(chunk) = chunk.filter(|_| !paused) else {
+                        continue;
+                    };
                     encoder.push(&chunk)?;
                     samples.store(encoder.samples() as u64, Ordering::Relaxed);
                     if encoder.levels().len() > sent
@@ -220,11 +293,12 @@ impl VoiceCapture {
         };
         Ok(Self {
             path,
-            started: Instant::now(),
+            clock: RunClock::started_at(Instant::now()),
             live: Some(Live {
                 mic,
                 worker,
                 samples,
+                control,
             }),
             bars: Vec::new(),
             levels,
@@ -242,7 +316,7 @@ impl VoiceCapture {
     pub fn preview(path: PathBuf, seconds: i32, bars: Vec<u8>) -> Self {
         Self {
             path,
-            started: Instant::now(),
+            clock: RunClock::started_at(Instant::now()),
             live: None,
             bars,
             levels: Arc::default(),
@@ -255,10 +329,62 @@ impl VoiceCapture {
         if let Some(seconds) = self.fixed_seconds {
             return seconds;
         }
-        self.started
-            .elapsed()
+        self.clock
+            .elapsed_at(Instant::now())
             .as_secs()
             .min(u64::from(i32::MAX as u32)) as i32
+    }
+
+    /// Stop listening but keep what was recorded. The microphone is
+    /// released so the system indicator goes off; the file is made
+    /// playable for a preview.
+    pub fn pause(&mut self) {
+        if !self.clock.is_running() {
+            return;
+        }
+        self.clock.pause_at(Instant::now());
+        #[cfg(feature = "ui")]
+        if let Some(live) = &self.live {
+            use std::sync::atomic::Ordering;
+            live.control.paused.store(true, Ordering::Release);
+            live.mic.pause();
+        }
+    }
+
+    /// Carry on recording after a [`Self::pause`].
+    pub fn resume(&mut self) {
+        if self.clock.is_running() {
+            return;
+        }
+        self.clock.resume_at(Instant::now());
+        #[cfg(feature = "ui")]
+        if let Some(live) = &self.live {
+            use std::sync::atomic::Ordering;
+            live.control.paused.store(false, Ordering::Release);
+            live.mic.play();
+        }
+    }
+
+    pub fn is_paused(&self) -> bool {
+        !self.clock.is_running()
+    }
+
+    /// The recording so far, once a pause has made the file playable.
+    pub fn preview_path(&self) -> Option<&Path> {
+        if !self.is_paused() {
+            return None;
+        }
+        #[cfg(feature = "ui")]
+        if let Some(live) = &self.live {
+            use std::sync::atomic::Ordering;
+            return live
+                .control
+                .flushed
+                .load(Ordering::Acquire)
+                .then_some(self.path.as_path());
+        }
+        // A fixture has no encoder to wait for.
+        self.live.is_none().then_some(self.path.as_path())
     }
 
     /// Refresh the live bars from the levels heard so far.
@@ -279,7 +405,7 @@ impl VoiceCapture {
         let live = self.live.as_ref()?;
         let error = live.mic.error.lock().ok().and_then(|mut e| e.take());
         let reason = error.or_else(|| {
-            let idle = self.started.elapsed().as_secs() >= NO_AUDIO_SECS
+            let idle = self.clock.elapsed_at(Instant::now()).as_secs() >= NO_AUDIO_SECS
                 && live.samples.load(Ordering::Relaxed) == 0;
             idle.then(|| crate::media_tools::no_audio_message(false))
         })?;
@@ -301,7 +427,7 @@ impl VoiceCapture {
 
     /// Stop the encoder and keep the file when it holds audio.
     pub fn finish(mut self) -> Result<VoiceDraft, String> {
-        let wall = self.started.elapsed();
+        let wall = self.clock.elapsed_at(Instant::now());
         let samples = self.stop_live(true);
         let len = fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
         let encoded = match samples {
@@ -370,6 +496,75 @@ impl Drop for VoiceCapture {
     }
 }
 
+/// A control in the recording bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordControl {
+    /// Hands-free recording: Esc stops cancelling.
+    Lock,
+    /// Stop listening and keep what was said.
+    Pause,
+    /// Listen again after a pause.
+    Resume,
+    /// Play what was recorded so far (only while paused).
+    Preview,
+    /// "Play once": the recipient can listen a single time.
+    PlayOnce,
+    /// Throw the recording away.
+    Discard,
+    Send,
+}
+
+/// What the bar needs to know to choose its controls.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RecordBarFacts {
+    /// A round video message (it cannot be paused).
+    pub video: bool,
+    pub paused: bool,
+    /// Self-destructing messages exist only in private chats.
+    pub once_allowed: bool,
+}
+
+/// The bar's controls, left to right. Tdesktop swaps the lock for a pause
+/// button once locked and shows the play button on a paused recording;
+/// Quill keeps the lock beside them and puts the one-time switch before
+/// the delete button.
+pub fn record_controls(facts: RecordBarFacts) -> Vec<RecordControl> {
+    let mut controls = Vec::new();
+    if facts.video {
+        controls.push(RecordControl::Lock);
+    } else if facts.paused {
+        controls.push(RecordControl::Preview);
+        controls.push(RecordControl::Resume);
+    } else {
+        controls.push(RecordControl::Lock);
+        controls.push(RecordControl::Pause);
+    }
+    if facts.once_allowed {
+        controls.push(RecordControl::PlayOnce);
+    }
+    controls.push(RecordControl::Discard);
+    controls.push(RecordControl::Send);
+    controls
+}
+
+impl RecordControl {
+    /// Tooltip and accessible name (tdesktop `lng_record_*`).
+    pub fn label(self, active: bool) -> &'static str {
+        match self {
+            RecordControl::Lock if active => "Unlock recording",
+            RecordControl::Lock => "Lock recording",
+            RecordControl::Pause => "Pause recording",
+            RecordControl::Resume => "Resume recording",
+            RecordControl::Preview if active => "Pause playback",
+            RecordControl::Preview => "Play recording",
+            RecordControl::PlayOnce if active => "The recipient will be able to listen only once.",
+            RecordControl::PlayOnce => "Click to set this message to Play Once.",
+            RecordControl::Discard => "Delete recording",
+            RecordControl::Send => "Send recording",
+        }
+    }
+}
+
 /// True when `path` is an existing file (send-path check happens at the driver).
 pub fn voice_file_ready(path: &Path) -> bool {
     path.is_file()
@@ -400,6 +595,97 @@ mod tests {
         assert_eq!(collect_waveform(&[0, 0, 0], 100), vec![0, 0, 0]);
         assert_eq!(collect_waveform(&[255], 100), vec![17]);
         assert!(collect_waveform(&[], 100).is_empty());
+    }
+
+    #[test]
+    fn the_run_clock_skips_paused_time() {
+        let t0 = Instant::now();
+        let mut clock = RunClock::started_at(t0);
+        assert_eq!(
+            clock.elapsed_at(t0 + Duration::from_secs(3)),
+            Duration::from_secs(3)
+        );
+        clock.pause_at(t0 + Duration::from_secs(3));
+        assert!(!clock.is_running());
+        assert_eq!(
+            clock.elapsed_at(t0 + Duration::from_secs(60)),
+            Duration::from_secs(3)
+        );
+        // Pausing twice changes nothing.
+        clock.pause_at(t0 + Duration::from_secs(70));
+        clock.resume_at(t0 + Duration::from_secs(100));
+        assert!(clock.is_running());
+        assert_eq!(
+            clock.elapsed_at(t0 + Duration::from_secs(104)),
+            Duration::from_secs(7)
+        );
+        // Resuming twice keeps the first instant.
+        clock.resume_at(t0 + Duration::from_secs(102));
+        assert_eq!(
+            clock.elapsed_at(t0 + Duration::from_secs(104)),
+            Duration::from_secs(7)
+        );
+    }
+
+    #[test]
+    fn the_bar_offers_pause_while_recording_and_resume_when_paused() {
+        use RecordControl::*;
+        let live = RecordBarFacts::default();
+        assert_eq!(record_controls(live), vec![Lock, Pause, Discard, Send]);
+        let paused = RecordBarFacts {
+            paused: true,
+            ..live
+        };
+        assert_eq!(
+            record_controls(paused),
+            vec![Preview, Resume, Discard, Send]
+        );
+        // Play once only where self-destructing messages exist.
+        let private = RecordBarFacts {
+            once_allowed: true,
+            ..paused
+        };
+        assert_eq!(
+            record_controls(private),
+            vec![Preview, Resume, PlayOnce, Discard, Send]
+        );
+    }
+
+    #[test]
+    fn a_video_message_cannot_pause_or_preview() {
+        use RecordControl::*;
+        let video = RecordBarFacts {
+            video: true,
+            paused: true,
+            once_allowed: false,
+        };
+        assert_eq!(record_controls(video), vec![Lock, Discard, Send]);
+    }
+
+    #[test]
+    fn control_labels_follow_tdesktop() {
+        assert_eq!(RecordControl::Pause.label(false), "Pause recording");
+        assert_eq!(RecordControl::Resume.label(false), "Resume recording");
+        assert_eq!(RecordControl::Preview.label(false), "Play recording");
+        assert_eq!(RecordControl::Discard.label(false), "Delete recording");
+        assert_eq!(
+            RecordControl::PlayOnce.label(true),
+            "The recipient will be able to listen only once."
+        );
+    }
+
+    #[test]
+    fn a_fixture_pauses_and_previews_without_a_microphone() {
+        let path = PathBuf::from("/tmp/quill-fixture.ogg");
+        let mut capture = VoiceCapture::preview(path.clone(), 4, vec![1, 2]);
+        assert!(!capture.is_paused());
+        assert_eq!(capture.preview_path(), None);
+        capture.pause();
+        assert!(capture.is_paused());
+        assert_eq!(capture.preview_path(), Some(path.as_path()));
+        capture.resume();
+        assert!(!capture.is_paused());
+        assert_eq!(capture.preview_path(), None);
     }
 
     #[test]

@@ -3,6 +3,7 @@
 
 mod auth;
 mod backgrounds;
+mod boosts_usernames;
 mod bots;
 mod calls;
 mod chat_list;
@@ -69,6 +70,7 @@ mod users;
 
 pub use auth::*;
 pub use backgrounds::*;
+pub use boosts_usernames::*;
 pub use bots::*;
 pub use calls::*;
 pub use chat_list::*;

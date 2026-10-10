@@ -274,6 +274,9 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
+        if self.deny_send(quill::send_rights::SendKind::Gifs, cx) {
+            return;
+        }
         let reply = self
             .pending_reply
             .as_ref()
@@ -366,6 +369,9 @@ impl QuillApp {
         };
         // Phase A1: slow-mode gate applies to sticker sends too.
         if self.slow_mode_blocked(chat_id, cx) {
+            return;
+        }
+        if self.deny_send(quill::send_rights::SendKind::Stickers, cx) {
             return;
         }
         let reply = self

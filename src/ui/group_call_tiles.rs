@@ -7,6 +7,7 @@
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
+use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -255,10 +256,10 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                     .text_color(white())
                     .role(Role::Button)
                     .aria_label("Full screen")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.enter_group_call_stage(window, cx)
-                    }))
+                    .swallow_press()
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.enter_group_call_stage(window, cx)),
+                    )
                     .child(Icon::new(IconName::Maximize).with_size(px(14.))),
             )
         })

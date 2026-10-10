@@ -138,7 +138,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearancePower | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -329,6 +329,8 @@ pub(super) fn demo_seed_for(
         ),
         ScreenshotDemo::ReadyArchiveHint
         | ScreenshotDemo::ReadyChatBadges
+        | ScreenshotDemo::ReadyChatExport
+        | ScreenshotDemo::ReadyWindowSettings
         | ScreenshotDemo::ReadyFoldersChats
         | ScreenshotDemo::ReadyFoldersChatPicker
         | ScreenshotDemo::ReadyFoldersToast => (
@@ -416,7 +418,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sticker panel + sticker in history".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVoice => (
+        ScreenshotDemo::ReadyRestrictedComposer => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — restricted composer".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyVoice | ScreenshotDemo::ReadyVoicePause => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — voice record bar + history playback".into(),
@@ -682,6 +690,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — member moderation (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyLinksBoosts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — admin links, boosts and usernames (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyGroupAdminSettings => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -816,6 +831,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — comments and threads".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyForumColumn => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — forum topic column and topic threads".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyForumThreadStories => (
@@ -1502,6 +1523,7 @@ impl QuillApp {
         });
         let appearance_prefs = Self::load_appearance();
         let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
+        let font_picker = Self::new_font_picker(&appearance_prefs.font_family, window, cx);
         let emoji_status_hours_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Custom duration in hours")
@@ -2167,6 +2189,8 @@ impl QuillApp {
             story_stats_open: false,
             topic_info_open: false,
             thread_info_open: false,
+            forum_chats_peek: false,
+            forum_column_shown: false,
             story_report_open: false,
             story_report_text_input,
             story_page: None,
@@ -2309,7 +2333,11 @@ impl QuillApp {
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
             keybindings_screenshot: false,
+            appearance_power_screenshot: false,
             appearance_applied: None,
+            system_accent: None,
+            system_accent_probed: false,
+            font_picker,
             accent_picker,
             // codex:spellcheck-native: platform engine + persisted app words.
             spellchecker,
@@ -2390,6 +2418,8 @@ impl QuillApp {
             video_note_capture: None,
             record_locked: false,
             record_discard_confirm: false,
+            record_preview: None,
+            record_once: false,
             drop_paths: Vec::new(),
             drop_state: None,
             drop_preview: None,
@@ -2406,6 +2436,8 @@ impl QuillApp {
             group_call_chat_shown: false,
             group_call_ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
+            quit_guard: Default::default(),
+            quit_clock: std::time::Instant::now(),
             ptt_capture: false,
             global_ptt: Default::default(),
             global_ptt_polling: false,
@@ -2459,6 +2491,7 @@ impl QuillApp {
             invite_link_dialog: None,
             invite_link_details: None,
             revoked_links_open: false,
+            invite_link_qr: None,
             admin_dialog: None,
             create_chat_dialog: None,
             member_dialog: None,
@@ -2556,6 +2589,8 @@ impl QuillApp {
             folder_new_chats_dialog: None,
             folder_limit_box: None,
             archive_hint_open: false,
+            window_settings_screenshot: false,
+            chat_export_dialog: None,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,
@@ -2626,6 +2661,7 @@ impl QuillApp {
         app.demo_setup_updates_sync(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
+        app.demo_setup_links_boosts(demo, cx);
         app.demo_setup_admin_extras(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);
@@ -2894,6 +2930,9 @@ impl QuillApp {
         {
             app.appearance.interface_scale_pct = pct;
         }
+        if app.appearance.system_accent && demo.is_none() {
+            app.refresh_system_accent(cx);
+        }
         app.apply_appearance(cx);
         app.init_slices(cx);
         // Animations stop behind another app and resume on activation:
@@ -2902,6 +2941,12 @@ impl QuillApp {
             let active = window.is_window_active() || super::frame_clock::assume_active();
             this.window_active.set(active);
             this.inline_videos.borrow_mut().set_window_active(active);
+            // The system accent may have changed while another app was in
+            // front.
+            if active && this.appearance.system_accent {
+                this.refresh_system_accent(cx);
+                this.apply_appearance(cx);
+            }
             cx.notify();
         })
         .detach();
@@ -2948,7 +2993,12 @@ impl QuillApp {
                     .timer(Duration::from_secs(60))
                     .await;
                 let alive = this
-                    .update(cx, |this, cx| this.apply_appearance(cx))
+                    .update(cx, |this, cx| {
+                        if this.appearance.system_accent {
+                            this.refresh_system_accent(cx);
+                        }
+                        this.apply_appearance(cx)
+                    })
                     .is_ok();
                 if !alive {
                     break;
