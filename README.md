@@ -290,7 +290,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Share a contact card from a profile <!-- parity:composer-share-contact -->
 - [x] Create checklists <!-- parity:composer-checklist -->
 - [ ] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
-- [ ] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
+- [x] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
 - [ ] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
 - [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
 - [x] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
@@ -304,7 +304,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
 - [ ] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
 - [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
-- [ ] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
+- [x] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
 - [ ] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
 - [ ] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
 
@@ -399,11 +399,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Profiles & shared media
 
-- [ ] Profile photo gallery with Set as Main, report and "photo set by you" <!-- parity:profile-photo-gallery -->
+- [x] Profile photo gallery with Set as Main, report and "photo set by you" <!-- parity:profile-photo-gallery -->
 - [x] "Copy Mention" in the profile and user-info context menus <!-- parity:profile-copy-mention -->
 - [x] Edit contact and Share contact from a profile <!-- parity:profile-contact-actions -->
 - [x] Copy phone, name, username and link from profile rows <!-- parity:profile-copy-rows -->
-- [ ] Set or suggest a personal photo for a contact <!-- parity:profile-personal-photo -->
+- [x] Set or suggest a personal photo for a contact <!-- parity:profile-personal-photo -->
 - [x] Private notes about a user <!-- parity:profile-private-note -->
 - [x] Groups in common list <!-- parity:profile-groups-in-common -->
 - [x] Similar channels and bots list on a profile <!-- parity:profile-similar-channels -->
@@ -417,7 +417,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Add a bot to a group or channel as admin with chosen rights <!-- parity:profile-add-bot-to-group -->
 - [ ] Bot "Open App" main mini-app button <!-- parity:profile-bot-open-app -->
 - [ ] Profile action row: Message, Mute, Call, Video, Gift, More <!-- parity:profile-action-row -->
-- [ ] Unofficial-client warning on a profile <!-- parity:profile-unofficial-warning -->
+- [x] Unofficial-client warning on a profile <!-- parity:profile-unofficial-warning -->
 - [ ] Fragment number note in the phone context menu <!-- parity:profile-fragment-note -->
 - [ ] Topic and thread info panels <!-- parity:profile-topic-info -->
 
@@ -794,9 +794,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
 - [x] Group sticker/custom emoji pack selection and removal for eligible supergroups; current confirmed pack, installed choices, safe refusal and retry; live changes unverified <!-- parity:stickers-group-set -->
 - [x] Remove a single recent sticker or emoji, and reset recent emoji <!-- parity:stickers-remove-recent -->
-- [ ] Sticker set box: share link, copy link, report, archive <!-- parity:stickers-set-box-actions -->
-- [ ] Tapping a sticker in a chat opens its set <!-- parity:stickers-tap-opens-set -->
-- [ ] Tapping a custom emoji shows "This emoji is from X pack" with a View button <!-- parity:stickers-custom-emoji-toast -->
+- [x] Sticker set box: share link, copy link, report, archive <!-- parity:stickers-set-box-actions -->
+- [x] Tapping a sticker in a chat opens its set <!-- parity:stickers-tap-opens-set -->
+- [x] Tapping a custom emoji shows "This emoji is from X pack" with a View button <!-- parity:stickers-custom-emoji-toast -->
 - [ ] Masks tab and mask stickers <!-- parity:stickers-masks -->
 - [x] Emoji search by keyword in all languages <!-- parity:emoji-keyword-search -->
 - [ ] Emoji set style picker <!-- parity:emoji-set-style -->
@@ -805,7 +805,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Double-click-to-reply setting and reply or reaction corner buttons <!-- parity:reactions-corner-settings -->
 - [x] Reaction animation when you send a reaction <!-- parity:reactions-fly-animation -->
 - [ ] Send paid (star) reactions with toast and undo <!-- parity:reactions-paid-send -->
-- [ ] Who reacted: hover tooltip and full list per emoji <!-- parity:reactions-who-reacted -->
+- [x] Who reacted: hover tooltip and full list per emoji <!-- parity:reactions-who-reacted -->
 - [x] Reaction strip updates when available and default reactions change <!-- parity:reactions-live-updates -->
 - [ ] Sticker or emoji flies from the panel into the chat when sent <!-- parity:stickers-send-animation -->
 - [x] Recent, favorite and trending stickers update when changed on another device <!-- parity:stickers-live-updates -->
@@ -1013,9 +1013,9 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 ### Settings: account & profile
 
-- [ ] Set or remove your birthday and open birthday privacy <!-- parity:settings-birthday -->
+- [x] Set or remove your birthday and open birthday privacy <!-- parity:settings-birthday -->
 - [ ] Contacts with upcoming birthdays list and birthday privacy row in Settings > Privacy <!-- parity:settings-birthday-contacts -->
-- [ ] Large emoji: send a lone emoji as a big glyph, with a Chat settings toggle <!-- parity:settings-large-emoji -->
+- [x] Large emoji: send a lone emoji as a big glyph, with a Chat settings toggle <!-- parity:settings-large-emoji -->
 - [ ] "Pull to next channel" chat setting <!-- parity:settings-pull-next-channel -->
 - [ ] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
 - [ ] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->

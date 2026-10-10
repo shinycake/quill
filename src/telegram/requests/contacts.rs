@@ -11,6 +11,16 @@ pub fn get_me(extra: RequestId) -> String {
     .to_string()
 }
 
+/// `getSupportUser` (TDLib 1.8.68): the Telegram Support volunteer account
+/// that Settings > Ask a Question writes to. Response is `user`.
+pub fn get_support_user(extra: RequestId) -> String {
+    json!({
+        "@type": "getSupportUser",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// `getChatMember` for the current user in a channel (TDLib 1.8.67). Response
 /// is `chatMember`.
 pub fn get_chat_member(extra: RequestId, chat_id: ChatId, user_id: i64) -> String {

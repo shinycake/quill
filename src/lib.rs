@@ -3,23 +3,29 @@
 
 pub mod about;
 pub mod account_export;
+pub mod admin_extras;
 pub mod album;
 pub mod animation;
 pub mod auth;
 pub mod auto_delete;
+pub mod autoscroll;
 pub mod autostart;
 pub mod calls;
+pub mod chat_bottom_bar;
 pub mod chat_export;
 pub mod chat_swipe;
 pub mod chatlist_archive;
+pub mod chatlist_calls;
 pub mod chatlist_menu;
 pub mod chatlist_style;
+pub mod chatlist_suggestions;
 pub mod checklist;
 pub mod code_language;
 pub mod community_mode;
 pub mod composer;
 pub mod connect;
 pub mod connect_smoke;
+pub mod contacts_index;
 pub mod corner_buttons;
 pub mod credentials;
 pub mod data_settings;
@@ -46,6 +52,7 @@ pub mod link_handler;
 pub mod link_policy;
 pub mod local_path;
 pub mod local_time;
+pub mod main_menu;
 pub mod marketplace;
 pub mod media_session;
 pub mod media_tools;
@@ -83,6 +90,7 @@ pub mod service_text;
 #[cfg(test)]
 mod service_text_tests;
 pub mod settings;
+pub mod settings_account;
 pub mod share_box;
 pub mod signin;
 pub mod single_instance;
@@ -95,6 +103,7 @@ pub mod sticker_playback;
 pub mod sticker_set_box;
 pub mod sticker_suggest;
 pub mod storage_limits;
+pub mod stories_menu;
 pub mod stories_strip;
 pub mod story_composer;
 pub mod story_extras;
@@ -124,6 +133,7 @@ pub mod voice;
 pub mod voice_input;
 #[cfg(feature = "ui")]
 pub mod voice_opus;
+pub mod window_title;
 #[cfg(windows)]
 pub mod winreg;
 

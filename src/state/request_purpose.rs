@@ -599,6 +599,10 @@ pub enum RequestPurpose {
     GetMapThumbnailFile,
     /// `getMe`. Response is `user`; only the id is kept.
     GetMe,
+    /// `getSupportUser` (Settings > Ask a Question). Response is `user`;
+    /// the id is parked in `Session::support_user_ready` and the driver
+    /// opens the chat.
+    GetSupportUser,
     /// `getChatMember` for the current user in a channel. Response is
     /// `chatMember`; drives the composer gate and join/leave affordance.
     GetChatMember,
@@ -1132,6 +1136,11 @@ pub enum RequestPurpose {
     SetPersonalChat,
     /// B10: `setUserNote` (line 14553). Response is `ok`.
     SetUserNote,
+    /// `setUserPersonalProfilePhoto` / `suggestUserProfilePhoto`
+    /// (lines 14942, 14952). Response is `ok`; pending `user_id`.
+    SetUserPersonalPhoto,
+    /// `reportChatPhoto` (line 16107). Response is `ok`.
+    ReportChatPhoto,
     /// B10: `getUserProfilePhotos` (line 14591) for the profile photo
     /// gallery; pending `user_id`. Response is `chatPhotos`.
     GetUserProfilePhotos,
@@ -1399,6 +1408,9 @@ pub enum RequestPurpose {
     /// Phase C2i: `searchCallMessages`. Response is `foundMessages`;
     /// drives the Recent-calls tab.
     SearchCallMessages,
+    /// `deleteAllCallMessages` ("Clear all" on the Calls list). The
+    /// answer is `ok`; the cached list is emptied then.
+    DeleteAllCallMessages,
     /// Phase C2i: `getUserPrivacySettingRules`. Response is
     /// `userPrivacySettingRules`; `setting` selects which of the two
     /// call privacy settings is fetched.
@@ -1448,6 +1460,13 @@ pub enum RequestPurpose {
     CheckRememberedPassword,
     /// B13: `hideSuggestedAction(suggestedActionCheckPassword)`.
     HideCheckPasswordSuggestion,
+    /// `hideSuggestedAction` for another chat-list suggestion. Response
+    /// is `ok`; the update that follows removes the action.
+    HideSuggestedAction {
+        action: &'static str,
+    },
+    /// `hideContactCloseBirthdays`. Response is `ok`.
+    HideContactCloseBirthdays,
     /// Slice S3: `getReadDatePrivacySettings`. Response is
     /// `readDatePrivacySettings`.
     GetReadDatePrivacy,

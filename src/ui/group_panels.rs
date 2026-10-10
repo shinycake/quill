@@ -310,8 +310,7 @@ impl QuillApp {
         }
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin
-        // filter resets whenever the panel target changes.
-        self.event_log_admin_filter = None;
+        // filter lives in the session and follows the chat.
         if self.event_log_search.is_none() {
             self.event_log_search = Some(cx.new(|cx| {
                 TextareaState::new(window, cx)
@@ -737,6 +736,9 @@ impl QuillApp {
         }
         if any_tile {
             body = body.child(tiles);
+        }
+        if let Some(warning) = self.unofficial_client_warning(user_id, cx) {
+            body = body.child(warning);
         }
         // Details: value over label, left-aligned like a contact card.
         // Rows copy on tap and in the right-click menu (B10).

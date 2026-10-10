@@ -293,46 +293,73 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Contacts list for the Contacts tab: loading / error / empty /
-    /// rows. A tap opens the user info panel.
-    pub(super) fn contacts_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows: Vec<ContactRow> = self.session().map(|s| s.contact_rows()).unwrap_or_default();
+    /// Contacts list for the Contacts tab: loading / error / empty / rows
+    /// under their section headers. A tap opens the user info panel. The
+    /// items are direct children of the scroll container, at the fixed
+    /// heights `quill::contacts_index` uses for the index bar.
+    pub(super) fn contacts_list(
+        &self,
+        items: Vec<quill::contacts_index::ListItem>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        use quill::contacts_index::{HEADER_HEIGHT, ListItem, ROW_HEIGHT};
         let failed = self.session().is_some_and(|s| s.contacts_error);
         let loading = self.session().is_some_and(|s| s.contacts.is_none()) && !failed;
-        let mut list = div().id("contacts-list").flex().flex_col().gap_1();
+        let note = |text: &'static str, cx: &mut Context<Self>| {
+            div()
+                .px_2()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(text)
+        };
+        let mut list = div().id("contacts-list").flex().flex_col();
         if failed {
-            list = list
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Couldn’t load contacts."),
-                )
-                .child(
-                    Button::new("contacts-retry")
-                        .label("Retry")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.retry_contacts(cx);
-                        })),
-                );
+            list = list.child(note("Couldn’t load contacts.", cx)).child(
+                Button::new("contacts-retry")
+                    .label("Retry")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.retry_contacts(cx);
+                    })),
+            );
         } else if loading {
-            list = list.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Loading contacts…"),
-            );
-        } else if rows.is_empty() {
-            list = list.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No contacts yet."),
-            );
+            list = list.child(note("Loading contacts…", cx));
+        } else if items.is_empty() {
+            let searching = !self
+                .global
+                .contacts_search
+                .read(cx)
+                .value()
+                .trim()
+                .is_empty();
+            list = list.child(note(
+                if searching {
+                    "No contacts found"
+                } else {
+                    "No contacts yet."
+                },
+                cx,
+            ));
         } else {
-            for row in rows {
-                list = list.child(self.contact_row(&row, cx));
+            for item in items {
+                list = list.child(match item {
+                    ListItem::Header(letter) => div()
+                        .h(px(HEADER_HEIGHT))
+                        .px_2()
+                        .flex()
+                        .items_end()
+                        .pb_1()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().primary)
+                        .child(letter.to_string())
+                        .into_any_element(),
+                    ListItem::Contact(row) => div()
+                        .h(px(ROW_HEIGHT))
+                        .py(px(2.))
+                        .child(self.contact_row(&row, cx))
+                        .into_any_element(),
+                });
             }
         }
         list
@@ -460,8 +487,10 @@ impl QuillApp {
             .is_some_and(|user| !user.is_bot && user.status.is_online());
         div()
             .id(("contact-row", user_id as u64))
+            .h_full()
             .px_2()
-            .py_2()
+            .flex()
+            .items_center()
             .rounded_md()
             .role(gpui_kit::Role::Button)
             .aria_label(format!("{} · {}", name, status))

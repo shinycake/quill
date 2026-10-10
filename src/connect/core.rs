@@ -632,6 +632,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = created_chat {
             let _ = self.select_chat(chat_id);
         }
+        // Settings > Ask a Question: the support account arrived; open
+        // (or create) the private chat with it.
+        if let Some(user_id) = self.session.support_user_ready.take() {
+            let _ = self.create_private_chat_for(user_id);
+        }
         // Slice (communities backend core): resolve a just-created
         // community id into its full-info pack. `let _` on purpose: the
         // community is already in the model; a failed send must not

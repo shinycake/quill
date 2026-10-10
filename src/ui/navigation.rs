@@ -13,6 +13,10 @@ use quill::telegram::envelope::ChatKind;
 #[derive(Clone, Copy)]
 pub(super) enum NavigationAction {
     Saved,
+    MyProfile,
+    Contacts,
+    Calls,
+    NightMode,
     Secret,
     Downloads,
     Group,
@@ -107,6 +111,21 @@ impl QuillApp {
             NavigationAction::NewStory => self.open_story_composer(window, cx),
             NavigationAction::Saved => {
                 self.open_saved_messages(window, cx);
+            }
+            NavigationAction::MyProfile => {
+                if let Some(me) = self.session().and_then(|s| s.my_user_id) {
+                    self.open_user_panel(me, window, cx);
+                }
+            }
+            NavigationAction::Contacts => self.open_contacts_tab(cx),
+            NavigationAction::Calls => self.open_calls_tab(cx),
+            NavigationAction::NightMode => {
+                let dark = self.night_mode_on();
+                let (theme, auto_night) = quill::main_menu::night_mode_toggle(dark);
+                self.set_appearance(cx, |a| {
+                    a.theme = theme;
+                    a.auto_night = auto_night;
+                });
             }
             NavigationAction::Secret => {
                 self.new_secret_picker_open = !self.new_secret_picker_open;
@@ -449,8 +468,18 @@ impl QuillApp {
             })
             .into_any_element()
     }
+    /// Whether a dark theme is in effect (the Night Mode switch).
+    pub(super) fn night_mode_on(&self) -> bool {
+        quill::main_menu::night_mode_on(
+            self.appearance_applied
+                .map(|(mode, ..)| mode == gpui_kit::component::theme::ThemeMode::Dark),
+            self.appearance.theme,
+        )
+    }
+
     pub(super) fn main_navigation_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.entity().downgrade();
+        let night = self.night_mode_on();
         // tdesktop `archiveInMainMenu`: the archive lives here instead of
         // on top of the chat list while there is something archived.
         let archive_in_menu = quill::chatlist_archive::show_in_main_menu(
@@ -473,6 +502,9 @@ impl QuillApp {
             })
             .dropdown_menu(move |mut menu, _, _| {
                 for (label, action) in [
+                    ("My Profile", NavigationAction::MyProfile),
+                    ("Contacts", NavigationAction::Contacts),
+                    ("Calls", NavigationAction::Calls),
                     ("Saved Messages", NavigationAction::Saved),
                     ("Archived chats", NavigationAction::Archive),
                     ("Move archive to chat list", NavigationAction::ArchiveToList),
@@ -485,7 +517,9 @@ impl QuillApp {
                     ("New community", NavigationAction::CommunityCreate),
                     ("Downloads", NavigationAction::Downloads),
                     ("Mark all as read", NavigationAction::MarkRead),
+                    ("Accounts", NavigationAction::Accounts),
                     ("Settings", NavigationAction::Settings),
+                    ("Night Mode", NavigationAction::NightMode),
                 ] {
                     if matches!(
                         action,
@@ -495,7 +529,11 @@ impl QuillApp {
                         continue;
                     }
                     let owner = owner.clone();
-                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                    let mut item = PopupMenuItem::new(label);
+                    if matches!(action, NavigationAction::NightMode) {
+                        item = item.checked(night);
+                    }
+                    menu = menu.item(item.on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| this.navigate(action, window, cx));
                     }));
                 }
@@ -555,6 +593,9 @@ impl QuillApp {
                                         .into_any_element(),
                                     "Contacts" => this.contacts_settings_section(cx),
                                     "Privacy and security" => this.privacy_settings_navigation(cx),
+                                    super::settings_account_ui::ASK_QUESTION_PAGE => {
+                                        this.ask_question_page(cx)
+                                    }
                                     _ => this.call_settings_section(cx).into_any_element(),
                                 })
                                 .into_any_element()
@@ -600,7 +641,9 @@ impl QuillApp {
                                 }),
                         );
                     }
-                    content.child(list)
+                    content
+                        .child(list)
+                        .child(app_c.update(cx, |this, cx| this.settings_help_footer(cx)))
                 },
             ))
     }

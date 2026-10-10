@@ -118,6 +118,18 @@ pub enum ScreenshotDemo {
     ReadyArchiveRow,
     /// Chat-list rows: the Archive's "How does it work?" box.
     ReadyArchiveHint,
+    /// Contacts by name with section headers and the index bar.
+    ReadyChatlistContactsIndex,
+    /// Calls list with the Clear calls confirm box.
+    ReadyChatlistCallsClear,
+    /// Stories strip with a tile's right-click menu.
+    ReadyChatlistStoriesMenu,
+    /// Settings > Contacts with the birthday list.
+    ReadyChatlistBirthdays,
+    /// Suggestions block: a contact's birthday.
+    ReadyChatlistSuggestions,
+    /// Suggestions block: "Is {phone} still your number?".
+    ReadyChatlistSuggestionsPhone,
     /// Chat-list rows: video chat badge and emoji status on rows.
     ReadyChatBadges,
     /// Chat-list rows: the folder editor's chat sections.
@@ -158,6 +170,9 @@ pub enum ScreenshotDemo {
     /// Premium / SCAM / FAKE title badges, online dot (injected, no live
     /// Telegram).
     ReadyChatRows,
+    /// Chat header badges and the bars that replace the composer
+    /// (`QUILL_DEMO_HEADER=<variant>`; see `chat_header_demo`).
+    ReadyChatHeader,
     /// Non-member public channel opened from search: the bottom bar must
     /// resolve to "Join channel" (injected, no live Telegram).
     ReadyJoinBar,
@@ -260,6 +275,9 @@ pub enum ScreenshotDemo {
     /// loaded `chatEvents` fixture covering the handled action types, so
     /// the info panel's "Recent actions" section renders directly.
     ReadyAdminLog,
+    /// Admin extras (`QUILL_DEMO_ADMIN_EXTRAS=log|title|broadcast|warning|
+    /// delete`; injected data, no live Telegram).
+    ReadyAdminExtras,
     /// Slice G2: channel-management surface (no live TDLib): like
     /// `ReadyAdminLog` (demo channel id 13, viewer 777 is an admin), plus
     /// signature flags (`sign_messages` on, `show_message_sender` off),
@@ -754,6 +772,14 @@ pub enum ScreenshotDemo {
     /// B13: the Gifts privacy editor — who can show gifts, the gift icon
     /// switch and the accepted gift types (injected, no live Telegram).
     ReadyPrivacyGifts,
+    /// Who can call me: the editor with its Always/Never allow lists
+    /// (injected, no live Telegram).
+    ReadyPrivacyCalls,
+    /// Settings with the help rows and the version footer (injected, no
+    /// live Telegram).
+    ReadySettingsHelp,
+    /// Settings > Ask a Question (injected, no live Telegram).
+    ReadyAskQuestion,
     /// B13: the session details view (application, system, IP address,
     /// location) with Terminate (injected, no live Telegram).
     ReadySessionDetails,

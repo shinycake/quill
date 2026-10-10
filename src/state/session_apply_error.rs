@@ -599,6 +599,10 @@ impl Session {
                 self.recent_calls_loading = false;
                 self.recent_calls_error = true;
             }
+            Some(RequestPurpose::DeleteAllCallMessages) => {
+                self.recent_calls_clearing = false;
+                self.chat_action_error = Some(crate::chatlist_calls::clear_failed(err.code));
+            }
             Some(RequestPurpose::GetCallPrivacyRules { .. }) => {
                 self.privacy_roundtrip_done();
                 self.call_privacy_error = true;
@@ -690,10 +694,15 @@ impl Session {
             Some(
                 RequestPurpose::SetBirthdate
                 | RequestPurpose::SetPersonalChat
-                | RequestPurpose::SetUserNote,
+                | RequestPurpose::SetUserNote
+                | RequestPurpose::SetUserPersonalPhoto,
             ) => {
                 self.chat_action_error =
                     Some(format!("could not save the change (error {})", err.code));
+            }
+            Some(RequestPurpose::ReportChatPhoto) => {
+                self.chat_action_error =
+                    Some(format!("could not send the report (error {})", err.code));
             }
             // B7: refused group admin changes were rolled back above; say
             // so instead of showing the old value as if nothing happened.
@@ -1381,7 +1390,9 @@ impl Session {
                 | RequestPurpose::SetContactJoinedNotifications
                 | RequestPurpose::GetNetworkStatistics
                 | RequestPurpose::ResetNetworkStatistics
-                | RequestPurpose::CheckRememberedPassword),
+                | RequestPurpose::CheckRememberedPassword
+                | RequestPurpose::HideSuggestedAction { .. }
+                | RequestPurpose::HideContactCloseBirthdays),
             ) => self.apply_privacy_data_error(purpose, &err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;
