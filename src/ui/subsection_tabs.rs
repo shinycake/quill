@@ -402,6 +402,11 @@ impl QuillApp {
                     }
                 };
                 let mut menu = menu;
+                menu = menu.item(
+                    PopupMenuItem::new("Topic info")
+                        .icon(IconName::Info)
+                        .on_click(act(TopicMenuAction::Info)),
+                );
                 if unread {
                     menu = menu.item(
                         PopupMenuItem::new("Mark as read")
@@ -515,6 +520,14 @@ impl QuillApp {
         };
         if let Some(forum) = forum {
             self.forum_topic_action(chat_id, topic_id, forum, cx);
+            return;
+        }
+        if action == TopicMenuAction::Info {
+            if self.session().and_then(|s| s.open_topic) != Some(topic_id) {
+                self.select_topic_ui(topic_id, cx);
+            }
+            self.topic_info_open = true;
+            cx.notify();
             return;
         }
         if action == TopicMenuAction::Delete {
@@ -713,6 +726,7 @@ pub(super) fn with_left_column(column: Option<AnyElement>, history: AnyElement) 
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum TopicMenuAction {
+    Info,
     MarkRead,
     Pin,
     Unpin,

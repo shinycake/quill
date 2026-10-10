@@ -979,6 +979,18 @@ pub enum EnvelopePayload {
     StoryInteractions {
         interactions: StoryInteractionsView,
     },
+    /// `storyStatistics` — the `getStoryStatistics` answer.
+    StoryStatistics {
+        statistics: StoryStatisticsView,
+    },
+    /// `publicForwards` — a page of `getStoryPublicForwards`.
+    PublicForwards {
+        forwards: PublicForwardsView,
+    },
+    /// `foundStories` — a page of the `searchPublicStoriesBy*` family.
+    FoundStories {
+        found: FoundStoriesView,
+    },
     /// Phase 9.5: `updateStoryStealthMode` — stealth-mode state changed.
     UpdateStoryStealthMode {
         active_until_date: i32,

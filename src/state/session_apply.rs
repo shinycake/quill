@@ -1629,6 +1629,25 @@ impl Session {
                     self.accept_story_interactions(pending, interactions);
                 }
             }
+            EnvelopePayload::StoryStatistics { statistics } => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetStoryStatistics
+                {
+                    self.accept_story_statistics(pending, statistics);
+                }
+            }
+            EnvelopePayload::PublicForwards { forwards } => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetStoryPublicForwards
+                {
+                    self.accept_public_forwards(pending, forwards);
+                }
+            }
+            EnvelopePayload::FoundStories { found } => {
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::SearchPublicStories) {
+                    self.accept_found_stories(found);
+                }
+            }
             EnvelopePayload::ReportStoryResult(result) => {
                 // Phase 9.5: a `reportStory` answer — honored only for the
                 // viewer's own report flow.

@@ -1752,6 +1752,15 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .unwrap_or(false),
             },
         )),
+        "storyStatistics" => Ok(EnvelopePayload::StoryStatistics {
+            statistics: parse_story_statistics(&value)?,
+        }),
+        "publicForwards" => Ok(EnvelopePayload::PublicForwards {
+            forwards: parse_public_forwards(&value),
+        }),
+        "foundStories" => Ok(EnvelopePayload::FoundStories {
+            found: parse_found_stories(&value),
+        }),
         "storyInteractions" => Ok(EnvelopePayload::StoryInteractions {
             interactions: parse_story_interactions(&value),
         }),

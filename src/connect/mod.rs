@@ -45,6 +45,7 @@ mod share;
 mod share_content;
 mod stickers;
 mod stories;
+mod story_insights;
 mod subsection_tabs;
 mod threads;
 mod translate;
