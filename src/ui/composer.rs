@@ -1298,6 +1298,29 @@ impl QuillApp {
         );
     }
 
+    /// "Reply with timecode": reply to the playing voice message and drop
+    /// the player's position into the composer.
+    pub(super) fn reply_with_timecode(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(position) = self.playback_clock.as_ref().map(|c| c.elapsed_secs()) else {
+            return;
+        };
+        let timecode = quill::message_menu::timecode_text(position);
+        self.begin_reply_from_message(chat_id, message_id, window, cx);
+        self.composer.update(cx, |input, cx| {
+            let value = input.value().to_string();
+            let cursor = input.selected_range().start.min(value.len());
+            let before = value.get(..cursor).unwrap_or(&value);
+            let insertion = quill::message_menu::timecode_insertion(before, &timecode);
+            input.insert(insertion, window, cx);
+        });
+    }
+
     /// M1: unpin every pinned message in the chat (`unpinAllChatMessages`,
     /// TDLib 1.8.67, `schema/td_api.tl:13565`) — the pinned-bar "Unpin
     /// all" action.

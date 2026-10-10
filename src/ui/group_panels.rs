@@ -5,10 +5,12 @@ use super::chat_row::initials_avatar;
 use super::chat_row::{chat_avatar, compact_count};
 use super::pressable::PressableDiv;
 use super::pressable::action_row;
+use super::profile_panels::{CopyAction, copy_menu};
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -951,11 +953,34 @@ impl QuillApp {
                             }),
                     )
                     .when_some(username, |this, name| {
+                        // tdesktop's username row: click copies, the
+                        // right-click menu offers Copy Username and Copy Link.
+                        let owner = cx.entity().downgrade();
+                        let mention = format!("@{name}");
+                        let actions = [
+                            CopyAction {
+                                text: mention.clone(),
+                                menu: "Copy Username",
+                                toast: "Username copied to clipboard",
+                            },
+                            CopyAction {
+                                text: quill::profile_forms::profile_link(&name),
+                                menu: "Copy Link",
+                                toast: "Link copied to clipboard",
+                            },
+                        ];
+                        let tapped = actions[0].clone();
                         this.child(
                             div()
+                                .id("group-username")
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!("@{name}")),
+                                .cursor_pointer()
+                                .child(mention)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.copy_profile_text(&tapped.text, tapped.toast, cx);
+                                }))
+                                .context_menu(move |menu, _, _| copy_menu(menu, &owner, &actions)),
                         )
                     }),
             );

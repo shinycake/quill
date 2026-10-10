@@ -6,9 +6,10 @@ use super::actions::{
     LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder, OpenArchive,
     OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages, OpenSearch,
     OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious,
-    ShowChatMenu, ShowChatPreview, StoryTogglePause, ToggleFullscreen, ToggleTheme, ViewerCopy,
-    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
-    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer, SelectionFocusOlder,
+    ShowChatMenu, ShowChatPreview, StoryTogglePause, ToggleFullscreen, ToggleMessageSelection,
+    ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev,
+    ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -950,6 +951,36 @@ fn message_rows() -> Vec<ShortcutRow> {
             "Messages",
             DeleteSelection,
         ),
+        row(
+            primary!("shift-a"),
+            "Select the focused message",
+            "Messages",
+            ToggleMessageSelection,
+        ),
+        row(
+            "up",
+            "Focus the older message while selecting",
+            "Messages",
+            SelectionFocusOlder,
+        ),
+        row(
+            "down",
+            "Focus the newer message while selecting",
+            "Messages",
+            SelectionFocusNewer,
+        ),
+        row(
+            "shift-up",
+            "Extend the selection to the older message",
+            "Messages",
+            SelectionExtendOlder,
+        ),
+        row(
+            "shift-down",
+            "Extend the selection to the newer message",
+            "Messages",
+            SelectionExtendNewer,
+        ),
     ]
 }
 
@@ -1079,7 +1110,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 85);
+        assert_eq!(defaults.len(), 90);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
@@ -1481,6 +1512,11 @@ mod tests {
             ("end".to_string(), "HistoryToBottom"),
             ("delete".to_string(), "DeleteSelection"),
             ("backspace".to_string(), "DeleteSelection"),
+            (primary("shift-a"), "ToggleMessageSelection"),
+            ("up".to_string(), "SelectionFocusOlder"),
+            ("down".to_string(), "SelectionFocusNewer"),
+            ("shift-up".to_string(), "SelectionExtendOlder"),
+            ("shift-down".to_string(), "SelectionExtendNewer"),
             (primary("0"), "OpenSavedMessages"),
             (primary("9"), "OpenArchive"),
             (primary("j"), "OpenContacts"),

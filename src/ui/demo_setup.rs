@@ -288,6 +288,11 @@ impl QuillApp {
                 | super::scheduled_demo::ScheduledView::ReminderList => {
                     self.scheduled_dialog_open = true;
                 }
+                super::scheduled_demo::ScheduledView::ListSelected => {
+                    self.scheduled_dialog_open = true;
+                    self.scheduled_selected =
+                        vec![quill::ids::MessageId(501), quill::ids::MessageId(503)];
+                }
                 super::scheduled_demo::ScheduledView::Button => {}
             }
             self.status_note = "screenshot demo — scheduled messages".into();
@@ -370,6 +375,15 @@ impl QuillApp {
                 input.focus(window, cx);
             });
             self.status_note = "screenshot demo — select → pick dest → forwarded".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySelectKeyboard)) {
+            let mut draft =
+                ForwardDraft::from_message(ChatId(11), MessageId(201), false).expect("select 201");
+            draft.toggle(ChatId(11), MessageId(203), false);
+            self.pending_forward = Some(draft);
+            self.selection_anchor = Some(MessageId(201));
+            self.selection_focus = Some(MessageId(201));
+            self.status_note = "screenshot demo — keyboard selection".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySelectMode)) {
             let mut draft =
@@ -1183,6 +1197,7 @@ impl QuillApp {
             self.status_note = "screenshot demo — folder icon picker".into();
         }
         self.demo_setup_folder_followups(demo, window, cx);
+        self.demo_setup_chatlist_rows(demo, window, cx);
         // Parity slice: manage dialog over the same folder fixture.
         if matches!(demo, Some(ScreenshotDemo::ReadyFoldersManage)) {
             if let Some(session) = self.demo_session.as_mut() {

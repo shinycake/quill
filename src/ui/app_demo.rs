@@ -227,6 +227,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — share box, forward bar and send as (injected)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadySelectKeyboard => (
+            Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — keyboard selection over media (injected)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadySelectMode => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -287,6 +293,16 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — chat list: archive settings dialog".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyArchiveHint
+        | ScreenshotDemo::ReadyChatBadges
+        | ScreenshotDemo::ReadyFoldersChats
+        | ScreenshotDemo::ReadyFoldersChatPicker
+        | ScreenshotDemo::ReadyFoldersToast => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyArchiveRow
@@ -2099,6 +2115,7 @@ impl QuillApp {
             schedule_popup_open: false,
             schedule_picker: None,
             scheduled_dialog_open: false,
+            scheduled_selected: Vec::new(),
             rich_editor_open: false,
             message_menu: None,
             chat_menu: None,
@@ -2123,6 +2140,7 @@ impl QuillApp {
             inline_bot_alert_shown: false,
             forum_manage_dialog: None,
             saved_tag_dialog: None,
+            fact_check_dialog: None,
             poll_voters_dialog: None,
             poll_add_option: None,
             checklist_dialog: None,
@@ -2168,6 +2186,8 @@ impl QuillApp {
             pending_forward: None,
             selection_anchor: None,
             selection_drag: None,
+            selection_focus: None,
+            drag_select_from: None,
             forward_picker_open: false,
             share_selection: quill::share_box::ShareSelection::default(),
             forward_bar_dest: None,
@@ -2380,6 +2400,7 @@ impl QuillApp {
             folder_tab_menu: None,
             folder_new_chats_dialog: None,
             folder_limit_box: None,
+            archive_hint_open: false,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,

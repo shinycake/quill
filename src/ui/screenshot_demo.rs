@@ -74,6 +74,9 @@ pub enum ScreenshotDemo {
     /// Message selection mode: check circles, selection tint and the
     /// Forward N / Delete N / Cancel header (injected, no live Telegram).
     ReadySelectMode,
+    /// Selection mode over a photo and a document that is not downloaded
+    /// yet: keyboard focus ring and the Download / Save buttons.
+    ReadySelectKeyboard,
     /// Reply bar above the composer for a photo message, with its thumbnail.
     ReadyReplyMedia,
     /// Edit bar above the composer for an outgoing photo (caption edit).
@@ -113,6 +116,16 @@ pub enum ScreenshotDemo {
     /// Archived-chats row on top of the chat list (names + muted unread
     /// badge) with story rings on avatars and three pinned chats.
     ReadyArchiveRow,
+    /// Chat-list rows: the Archive's "How does it work?" box.
+    ReadyArchiveHint,
+    /// Chat-list rows: video chat badge and emoji status on rows.
+    ReadyChatBadges,
+    /// Chat-list rows: the folder editor's chat sections.
+    ReadyFoldersChats,
+    /// Chat-list rows: the folder editor's chat picker with search.
+    ReadyFoldersChatPicker,
+    /// Chat-list rows: toast after adding a chat to a folder.
+    ReadyFoldersToast,
     /// Same, with `archiveCollapsed`: the slim bar.
     ReadyArchiveBar,
     /// Same, with the archive row's context menu open.
@@ -810,7 +823,7 @@ pub enum ScreenshotDemo {
     /// (`QUILL_DEMO_PROXY=list|edit|link|link-bad`; injected data, no live
     /// Telegram, no real proxy).
     ReadyProxy,
-    /// Scheduled messages; `QUILL_DEMO_SCHEDULED=button|picker|list|reminder|reminder-list`
+    /// Scheduled messages; `QUILL_DEMO_SCHEDULED=button|picker|list|list-selected|reminder|reminder-list`
     /// (composer button, date+time picker, list with Send now / Reschedule,
     /// Saved Messages reminder wording; injected, no live Telegram).
     ReadyScheduled,

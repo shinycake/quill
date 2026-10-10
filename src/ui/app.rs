@@ -310,6 +310,9 @@ pub struct QuillApp {
     pub(super) spell_task: Option<Task<()>>,
     /// M1: the scheduled-messages dialog (view/delete).
     pub(super) scheduled_dialog_open: bool,
+    /// Scheduled messages ticked in the dialog (send now, reschedule or
+    /// delete together).
+    pub(super) scheduled_selected: Vec<MessageId>,
     /// M2: the rich editor is open — the composer textarea is interpreted
     /// as block markup (`quill::rich::markup_to_blocks`) and sends via
     /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
@@ -557,6 +560,11 @@ pub struct QuillApp {
     pub(super) selection_anchor: Option<MessageId>,
     /// A drag over rows is selecting (`true`) or deselecting (`false`).
     pub(super) selection_drag: Option<bool>,
+    /// The row keyboard selection acts on (Cmd/Ctrl+Space, Up / Down).
+    pub(super) selection_focus: Option<MessageId>,
+    /// A left press on a row outside text: dragging onto another row
+    /// starts selecting messages.
+    pub(super) drag_select_from: Option<(ChatId, MessageId)>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
     pub(super) forward_picker_open: bool,
     /// Destinations ticked in the share box.
@@ -810,6 +818,8 @@ pub struct QuillApp {
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
     /// Saved Messages: "Add Name" / "Edit Name" for a tag.
     pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
+    /// The message menu's "Add Fact Check" / "Edit Fact Check" dialog.
+    pub(super) fact_check_dialog: Option<super::fact_check::FactCheckDialog>,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
     /// B15: the inline "Add an Option" panel (`addPollOption`).
@@ -1077,6 +1087,8 @@ pub struct QuillApp {
     pub(super) folder_new_chats_dialog: Option<super::folder_extras::FolderNewChatsDialog>,
     /// A folder limit box (or the tag Premium notice).
     pub(super) folder_limit_box: Option<quill::folder_limits::FolderLimitKind>,
+    /// The Archive menu's "How does it work?" box is open.
+    pub(super) archive_hint_open: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

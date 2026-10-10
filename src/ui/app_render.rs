@@ -1,18 +1,7 @@
 //! impl Render for QuillApp (root view composition).
 
 use super::actions::{
-    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
-    ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat,
-    FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear, FormatItalic,
-    FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, HistoryPageDown,
-    HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat, LoadOlder, LockApp, MarkChatRead,
-    MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenChatSearch, OpenContacts, OpenHelp,
-    OpenPinnedChat, OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat,
-    PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious, ShowChatMenu, ShowChatPreview,
-    SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn, StoryTogglePause, SubmitCode,
-    SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
-    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
-    ViewerZoomReset, ZoomWindow,
+    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat, LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious, SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer, SelectionFocusOlder, ShowChatMenu, ShowChatPreview, SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn, StoryTogglePause, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleMessageSelection, ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -435,6 +424,31 @@ impl Render for QuillApp {
             }))
             .on_action(cx.listener(|this, _: &DeleteSelection, window, cx| {
                 if !this.delete_selection_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleMessageSelection, window, cx| {
+                if !this.toggle_focused_selection_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectionFocusOlder, window, cx| {
+                if !this.move_selection_focus_by_key(true, false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectionFocusNewer, window, cx| {
+                if !this.move_selection_focus_by_key(false, false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectionExtendOlder, window, cx| {
+                if !this.move_selection_focus_by_key(true, true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectionExtendNewer, window, cx| {
+                if !this.move_selection_focus_by_key(false, true, window, cx) {
                     cx.propagate();
                 }
             }))
