@@ -1,4 +1,0 @@
-# codex/composer-input: formatted composer field (docs/decisions/codex-composer-input.md)
-parity:composer-wysiwyg
-parity:composer-mention-tags
-parity:composer-custom-emoji
