@@ -178,7 +178,7 @@ impl QuillApp {
     }
 
     /// B1: one custom keyboard button. `Text` sends the text; `WebApp` opens
-    /// in the browser (honest fallback — no in-app web view yet); request
+    /// the mini app window (`ui/web_app_ui.rs`); request
     /// contact/location/poll/user/chat/bot variants stay disabled with
     /// honest tooltips — Quill has no permission/selection flows for them.
     pub(super) fn custom_keyboard_button(
@@ -207,8 +207,9 @@ impl QuillApp {
             }
             KeyboardButtonType::WebApp { url } => {
                 let url = url.clone();
+                let text = button.text.clone();
                 element.on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_message_url(&url, cx);
+                    this.open_simple_web_app(chat_id, &text, &url, cx);
                 }))
             }
             KeyboardButtonType::RequestPhoneNumber => {

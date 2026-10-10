@@ -17,6 +17,7 @@ impl Session {
         }
         self.apply_proxy_ok(pending);
         self.apply_privacy_data_ok(pending);
+        self.apply_web_app_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme

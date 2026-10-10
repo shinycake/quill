@@ -68,6 +68,9 @@ jobs:
       - name: compile release ui
         if: inputs.package
         run: cargo build --features ui --release --locked
+      - name: compile mini-app helper
+        if: inputs.package
+        run: cargo build --release --locked -p quill-webview
       - name: build bundled TGS renderer
         if: inputs.package
         run: bash scripts/build-rlottie.sh

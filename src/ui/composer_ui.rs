@@ -1259,6 +1259,10 @@ impl QuillApp {
             .session()
             .map(|s| s.sync.dice_menu())
             .unwrap_or_default();
+        // Mini apps: the attachment menu bots that open in this chat
+        // (`updateAttachmentMenuBots`, filtered like tdesktop's
+        // `PeerMatchesTypes`).
+        let attach_bots = self.attachment_menu_bots_for_open_chat();
         Button::new("composer-attach")
             .icon(IconName::Paperclip)
             .ghost()
@@ -1336,6 +1340,23 @@ impl QuillApp {
                             .update(cx, |this, cx| this.open_share_location_panel(window, cx));
                     },
                 ))
+                .map(|mut menu| {
+                    if attach_bots.is_empty() {
+                        return menu;
+                    }
+                    menu = menu.separator();
+                    for (bot_id, name) in attach_bots.iter().cloned() {
+                        let owner = owner.clone();
+                        menu = menu.item(PopupMenuItem::new(name).icon(IconName::Bot).on_click(
+                            move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.open_attachment_menu_bot(bot_id, cx)
+                                });
+                            },
+                        ));
+                    }
+                    menu
+                })
                 .submenu("Dice", window, cx, {
                     let owner = owner.clone();
                     let dice = dice.clone();

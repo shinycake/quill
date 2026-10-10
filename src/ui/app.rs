@@ -849,6 +849,9 @@ pub struct QuillApp {
     pub(super) collapsed_keyboards: std::collections::HashSet<(i64, i64)>,
     /// A bot request button's share dialog (`DialogKind::RequestShare`).
     pub(super) request_share: Option<super::request_share::RequestShare>,
+    /// Mini apps: the helper window, its launch and the open box
+    /// (`ui/web_app_ui.rs`, `DialogKind::WebAppConfirm`).
+    pub(super) mini_apps: super::web_app_ui::MiniApps,
     /// Slice G1: default chat permissions editor.
     pub(super) permissions_dialog: Option<PermissionsDialog>,
     /// Slice G1: public username editor.

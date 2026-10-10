@@ -18,8 +18,10 @@ PKG="$(cd "$PKG" && pwd)"
 
 # Standard system libraries a desktop Linux install provides (glibc, the C++
 # runtime, zlib, and the GPU/windowing/font/audio/GTK stack GPUI and tray-icon
-# link). Matched against the NEEDED soname.
-SYSTEM_RE='^(linux-vdso\.so\.1|ld-linux[^/]*\.so[.0-9]*|lib(c|m|dl|pthread|rt|util|resolv|anl|nsl|crypt)\.so\.[0-9]+|libstdc\+\+\.so\.6|libgcc_s\.so\.1|libz\.so\.1|libatomic\.so\.1|libX11\.so\.6|libX11-xcb\.so\.1|libX[a-z0-9]+\.so\.[0-9]+|libxcb[a-z0-9-]*\.so\.[0-9]+|libxkbcommon(-x11)?\.so\.0|libwayland-[a-z-]+\.so\.0|libvulkan\.so\.1|libEGL\.so\.1|libGL(ESv2|X)?\.so\.[0-9]+|libfontconfig\.so\.1|libfreetype\.so\.6|libasound\.so\.2|libdbus-1\.so\.3|libgtk-3\.so\.0|libgdk-3\.so\.0|libgdk_pixbuf-2\.0\.so\.0|libglib-2\.0\.so\.0|libgobject-2\.0\.so\.0|libgio-2\.0\.so\.0|libgmodule-2\.0\.so\.0|libcairo(-gobject)?\.so\.2|libpango(cairo)?-1\.0\.so\.0|libatk-1\.0\.so\.0|libatk-bridge-2\.0\.so\.0|libharfbuzz\.so\.0|libayatana-appindicator3\.so\.1|libappindicator3\.so\.1)$'
+# link). WebKitGTK 4.1 and libsoup 3 are what quill-webview (mini apps) links;
+# they are a system package, not bundled (docs/decisions/codex-miniapp-webview.md).
+# Matched against the NEEDED soname.
+SYSTEM_RE='^(linux-vdso\.so\.1|ld-linux[^/]*\.so[.0-9]*|lib(c|m|dl|pthread|rt|util|resolv|anl|nsl|crypt)\.so\.[0-9]+|libstdc\+\+\.so\.6|libgcc_s\.so\.1|libz\.so\.1|libatomic\.so\.1|libX11\.so\.6|libX11-xcb\.so\.1|libX[a-z0-9]+\.so\.[0-9]+|libxcb[a-z0-9-]*\.so\.[0-9]+|libxkbcommon(-x11)?\.so\.0|libwayland-[a-z-]+\.so\.0|libvulkan\.so\.1|libEGL\.so\.1|libGL(ESv2|X)?\.so\.[0-9]+|libfontconfig\.so\.1|libfreetype\.so\.6|libasound\.so\.2|libdbus-1\.so\.3|libgtk-3\.so\.0|libgdk-3\.so\.0|libgdk_pixbuf-2\.0\.so\.0|libglib-2\.0\.so\.0|libgobject-2\.0\.so\.0|libgio-2\.0\.so\.0|libgmodule-2\.0\.so\.0|libcairo(-gobject)?\.so\.2|libpango(cairo)?-1\.0\.so\.0|libatk-1\.0\.so\.0|libatk-bridge-2\.0\.so\.0|libharfbuzz\.so\.0|libayatana-appindicator3\.so\.1|libappindicator3\.so\.1|libwebkit2gtk-4\.1\.so\.0|libjavascriptcoregtk-4\.1\.so\.0|libsoup-3\.0\.so\.0)$'
 
 bad=0
 checked=0

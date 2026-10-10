@@ -349,6 +349,8 @@ pub enum ScreenshotDemo {
     /// adding a bot to a group or channel, verification badges, sharing
     /// a game and owned bots; the mode comes from `QUILL_DEMO_BOTEXTRAS`.
     ReadyBotExtras,
+    /// Mini apps: the first-open and add-to-menu boxes (`QUILL_DEMO_MINIAPP`).
+    ReadyMiniApp,
     /// Text-entity demo (injected, no live Telegram): a message with mixed
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).

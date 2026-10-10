@@ -1647,6 +1647,33 @@ pub enum EnvelopePayload {
     /// B1: `loginUrlInfo*` — response to `getLoginUrlInfo` after a
     /// login-URL button press.
     LoginUrlInfo(LoginUrlInfo),
+    /// Mini apps: `webAppInfo` (`openWebApp` answer, schema 1.8.68 line 1141).
+    WebAppInfo {
+        launch_id: i64,
+        url: String,
+    },
+    /// Mini apps: `webAppUrl` (`getWebAppUrl` / `getWebAppLinkUrl` answer).
+    WebAppUrl {
+        url: String,
+    },
+    /// Mini apps: `mainWebApp` (`getMainWebApp` answer).
+    MainWebApp {
+        url: String,
+    },
+    /// Mini apps: `foundWebApp` (`searchWebApp` answer).
+    FoundWebApp(FoundWebApp),
+    /// Mini apps: `attachmentMenuBot` (`getAttachmentMenuBot` answer).
+    AttachmentMenuBot(AttachmentMenuBot),
+    /// Mini apps: `updateAttachmentMenuBots`.
+    UpdateAttachmentMenuBots(Vec<AttachmentMenuBot>),
+    /// Mini apps: `updateWebAppMessageSent`.
+    UpdateWebAppMessageSent {
+        launch_id: i64,
+    },
+    /// Mini apps: `customRequestResult` (`sendWebAppCustomRequest` answer).
+    CustomRequestResult {
+        result: String,
+    },
     /// Slice P1: `paymentForm` — the `getPaymentForm` answer after a Buy
     /// button press (schema/td_api.tl:4734).
     PaymentForm(PaymentFormData),

@@ -835,7 +835,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             user_id: UserId(int53(value.get("user_id"))?),
             status: parse_user_status(value.get("status")),
         }),
-        "users" => Ok(EnvelopePayload::Users {
+        // `foundUsers` (`getGrossingWebAppBots`) carries the same ids.
+        "users" | "foundUsers" => Ok(EnvelopePayload::Users {
             user_ids: value
                 .get("user_ids")
                 .and_then(Value::as_array)
@@ -1148,6 +1149,31 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         ))),
         // B1: `getLoginUrlInfo` answers (TDLib 1.8.67, `schema/td_api.tl:3862`
         // / `:3869`).
+        // Mini apps (docs/decisions/codex-miniapp-webview.md).
+        "webAppInfo" => Ok(EnvelopePayload::WebAppInfo {
+            launch_id: int53_or_zero(value.get("launch_id")),
+            url: web_app_url(&value),
+        }),
+        "webAppUrl" => Ok(EnvelopePayload::WebAppUrl {
+            url: json_field_str(&value, "url"),
+        }),
+        "mainWebApp" => Ok(EnvelopePayload::MainWebApp {
+            url: web_app_url(&value),
+        }),
+        "foundWebApp" => Ok(EnvelopePayload::FoundWebApp(parse_found_web_app(&value))),
+        "attachmentMenuBot" => match parse_attachment_menu_bot(&value) {
+            Some(bot) => Ok(EnvelopePayload::AttachmentMenuBot(bot)),
+            None => Err(ParseError::MissingField),
+        },
+        "updateAttachmentMenuBots" => Ok(EnvelopePayload::UpdateAttachmentMenuBots(
+            parse_attachment_menu_bots(&value),
+        )),
+        "updateWebAppMessageSent" => Ok(EnvelopePayload::UpdateWebAppMessageSent {
+            launch_id: int53_or_zero(value.get("web_app_launch_id")),
+        }),
+        "customRequestResult" => Ok(EnvelopePayload::CustomRequestResult {
+            result: json_field_str(&value, "result"),
+        }),
         "loginUrlInfoOpen" => Ok(EnvelopePayload::LoginUrlInfo(LoginUrlInfo::Open {
             url: json_field_str(&value, "url"),
         })),

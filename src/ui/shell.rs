@@ -109,6 +109,8 @@ pub enum DialogKind {
     Marketplace,
     CallbackPassword,
     LoginUrlConfirm,
+    /// Mini apps: the first-open terms box / add to the attachment menu.
+    WebAppConfirm,
     /// `parity:platform-deep-links`: TDLib's deep-link info / error text.
     DeepLinkInfo,
     DeepLinkInvite,
@@ -248,6 +250,7 @@ impl QuillShell {
             DialogKind::Marketplace => app.marketplace_open,
             DialogKind::CallbackPassword => app.callback_password_dialog.is_some(),
             DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
+            DialogKind::WebAppConfirm => app.mini_apps.confirm.is_some(),
             DialogKind::RequestShare => app.request_share.is_some(),
             DialogKind::DeepLinkInfo => app.deep_link_dialog.is_some(),
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
@@ -326,6 +329,7 @@ impl QuillShell {
             DialogKind::Marketplace => QuillApp::build_marketplace_dialog,
             DialogKind::CallbackPassword => QuillApp::build_callback_password_dialog,
             DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
+            DialogKind::WebAppConfirm => QuillApp::build_web_app_confirm_dialog,
             DialogKind::RequestShare => QuillApp::build_request_share_dialog,
             DialogKind::DeepLinkInfo => QuillApp::build_deep_link_dialog,
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
@@ -420,6 +424,7 @@ impl QuillShell {
         DialogKind::FolderManage,
         DialogKind::CallbackPassword,
         DialogKind::LoginUrlConfirm,
+        DialogKind::WebAppConfirm,
         DialogKind::RequestShare,
         // `parity:platform-deep-links`: link info sits with the other
         // low-priority informational dialogs.

@@ -1102,6 +1102,46 @@ pub enum RequestPurpose {
     /// the bot ids land in `Session::similar_bots` (keyed by the pending
     /// request's `user_id`).
     GetBotSimilarBots,
+    /// Mini apps (docs/decisions/codex-miniapp-webview.md). The open calls
+    /// answer `webAppInfo` / `webAppUrl` / `mainWebApp`; the context of
+    /// the launch waits in `Session::web_apps.pending`.
+    OpenWebApp {
+        bot_user_id: i64,
+    },
+    GetWebAppUrl {
+        bot_user_id: i64,
+    },
+    GetMainWebApp {
+        bot_user_id: i64,
+    },
+    GetWebAppLinkUrl {
+        bot_user_id: i64,
+    },
+    /// `searchWebApp` for a `t.me/bot/app` link; answers `foundWebApp`.
+    SearchWebApp {
+        bot_user_id: i64,
+    },
+    CloseWebApp,
+    SendWebAppData,
+    /// `canBotSendMessages`: ok, or 404 when consent is needed.
+    CanBotSendMessages {
+        bot_user_id: i64,
+    },
+    AllowBotToSendMessages {
+        bot_user_id: i64,
+    },
+    GetAttachmentMenuBot {
+        bot_user_id: i64,
+    },
+    ToggleBotInAttachmentMenu {
+        bot_user_id: i64,
+        added: bool,
+    },
+    /// `getGrossingWebAppBots` for the Apps tab; answers `foundUsers`.
+    GetGrossingWebAppBots,
+    /// `sendWebAppCustomRequest`; the app's `req_id` waits in
+    /// `Session::web_apps.custom_requests`.
+    SendWebAppCustomRequest,
     /// B10: a chat-id list for a profile panel — groups in common
     /// (`getGroupsInCommon`, pending `user_id`), similar channels
     /// (`getChatSimilarChats`, pending `chat_id`) or the channels that

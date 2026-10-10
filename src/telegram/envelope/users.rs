@@ -102,6 +102,11 @@ pub struct ParsedUser {
     /// `userTypeBot.can_join_groups` (schema 1.8.67, line 816): the bot
     /// accepts being added to groups. False for non-bots.
     pub can_join_groups: bool,
+    /// `userTypeBot.has_main_web_app` (schema 1.8.68): the bot has a main
+    /// mini app (`getMainWebApp`), shown as "Open App" in its profile.
+    pub has_main_web_app: bool,
+    /// `userTypeBot.can_be_added_to_attachment_menu`.
+    pub can_be_added_to_attachment_menu: bool,
     pub status: UserStatusKind,
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
@@ -291,6 +296,8 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     let has_topics = bot_flag("has_topics");
     let allows_users_to_create_topics = bot_flag("allows_users_to_create_topics");
     let can_join_groups = bot_flag("can_join_groups");
+    let has_main_web_app = bot_flag("has_main_web_app");
+    let can_be_added_to_attachment_menu = bot_flag("can_be_added_to_attachment_menu");
     let status = parse_user_status(value.get("status"));
     let photo_small_file_id = i32::try_from(int53_or_zero(
         value
@@ -352,6 +359,8 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         has_topics,
         allows_users_to_create_topics,
         can_join_groups,
+        has_main_web_app,
+        can_be_added_to_attachment_menu,
         status,
         photo_small_file_id,
         accent_color_id,

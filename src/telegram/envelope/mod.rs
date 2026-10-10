@@ -46,6 +46,7 @@ mod stories;
 mod story_insights;
 mod updates_sync;
 mod users;
+mod web_apps;
 
 #[cfg(test)]
 mod account_change_tests;
@@ -147,3 +148,4 @@ pub use stories::*;
 pub use story_insights::*;
 pub use updates_sync::*;
 pub use users::*;
+pub use web_apps::*;

@@ -49,6 +49,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake gperf git patchelf pkg-config curl unzip file \
             zlib1g-dev libssl-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwebkit2gtk-4.1-dev libsoup-3.0-dev \
             libwayland-dev libxcb1-dev libx11-xcb-dev libxcb-xkb-dev libfontconfig-dev \
             libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev libclang-dev nasm
       - name: restore TDLib build
@@ -113,6 +114,8 @@ jobs:
           QUILL_BUILD_TELEGRAM_API_ID: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID || '' }}
           QUILL_BUILD_TELEGRAM_API_HASH: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_HASH || '' }}
         run: cargo build --release --features ui --locked
+      - name: build mini-app helper (WebKitGTK)
+        run: cargo build --release --locked -p quill-webview
       - name: package
         run: bash scripts/linux-package.sh
       - name: check package (ELF dependencies)

@@ -11,6 +11,7 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
+        self.apply_web_app_error(pending, &err);
         if matches!(
             pending.map(|p| p.purpose),
             Some(

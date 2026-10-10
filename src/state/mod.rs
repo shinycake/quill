@@ -114,12 +114,14 @@ mod session_subsection_tabs;
 mod session_thread;
 mod session_translate;
 mod session_updates;
+mod session_web_apps;
 mod shared_media_types;
 mod sticker_gif_types;
 mod story_insights;
 mod story_types;
 mod thread_types;
 mod updates_sync;
+mod web_app_types;
 
 pub use account_notices::*;
 pub use call_types::*;
@@ -168,6 +170,7 @@ pub use story_insights::*;
 pub use story_types::*;
 pub use thread_types::*;
 pub use updates_sync::*;
+pub use web_app_types::*;
 
 #[cfg(test)]
 mod tests;

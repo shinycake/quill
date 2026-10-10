@@ -398,6 +398,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.search.filters.scope == crate::search_filters::SearchScope::PublicPosts {
             return self.send_public_posts_search(trimmed, search_gen);
         }
+        // The Apps tab lists bots the session already knows; nothing to
+        // search for, so the query resolves at once.
+        if !self.session.search.filters.scope.searches_messages() {
+            self.session.search.accept_chats(Vec::new(), false);
+            self.session.search.accept_messages(Vec::new(), false);
+            self.session.search.accept_public_chats(Vec::new(), false);
+            return Ok(None);
+        }
         let chats_extra = self
             .session
             .request_search(RequestPurpose::SearchChats, search_gen);

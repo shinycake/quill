@@ -110,8 +110,8 @@ fn fast_button_cell(
 /// Phase 3.2 (extended in B1): one inline keyboard button. `Url` opens in
 /// the OS browser (same gate as URLs in message text); `LoginUrl` resolves
 /// via `getLoginUrlInfo` (TDLib 1.8.67, schema:12985), degrading to the raw
-/// URL on error; `WebApp` opens in the browser (honest fallback — no
-/// in-app web view yet); `Callback` sends `getCallbackQueryAnswer`;
+/// URL on error; `WebApp` opens the mini app window
+/// (`docs/decisions/codex-miniapp-webview.md`); `Callback` sends `getCallbackQueryAnswer`;
 /// `CallbackWithPassword` prompts for the 2-step password and sends
 /// `callbackQueryPayloadDataWithPassword` (schema:7740); `CallbackGame`
 /// sends `callbackQueryPayloadGame` with the message's `messageGame`
@@ -189,8 +189,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match &button.kind {
-            InlineKeyboardButtonType::Url { url } | InlineKeyboardButtonType::WebApp { url } => {
+            InlineKeyboardButtonType::Url { url } => {
                 self.open_message_url(url, cx);
+            }
+            // Mini apps open in their own window (`ui/web_app_ui.rs`).
+            InlineKeyboardButtonType::WebApp { url } => {
+                self.open_inline_web_app(chat_id, message_id, url, cx);
             }
             InlineKeyboardButtonType::LoginUrl { url, id } => {
                 self.press_login_url(chat_id, message_id, *id, url, cx);

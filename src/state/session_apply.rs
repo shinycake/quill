@@ -362,7 +362,9 @@ impl Session {
                 // Phase 6: `getContacts` answer — only answers to our own
                 // fetch are accepted (matched by `@extra`); the user
                 // objects themselves arrive via `updateUser`.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
+                if self.apply_web_app_users(&user_ids, pending) {
+                    // Apps tab: `getGrossingWebAppBots`.
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
                     self.contacts = Some(user_ids);
                     self.contacts_error = false;
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
@@ -2941,6 +2943,16 @@ impl Session {
                             .insert((chat_id.0, message_id.0), Some(scores));
                     }
                 }
+            }
+            payload @ (EnvelopePayload::WebAppInfo { .. }
+            | EnvelopePayload::WebAppUrl { .. }
+            | EnvelopePayload::MainWebApp { .. }
+            | EnvelopePayload::FoundWebApp(_)
+            | EnvelopePayload::AttachmentMenuBot(_)
+            | EnvelopePayload::UpdateAttachmentMenuBots(_)
+            | EnvelopePayload::UpdateWebAppMessageSent { .. }
+            | EnvelopePayload::CustomRequestResult { .. }) => {
+                self.apply_web_app_payload(payload, pending);
             }
             EnvelopePayload::LoginUrlInfo(info) => {
                 // B1: `getLoginUrlInfo` response to our own login-button

@@ -654,6 +654,9 @@ pub struct Session {
     /// (Phase 3.2). The UI takes it on the next poll and shows the answer in
     /// the status line (URL answers open in the OS browser).
     pub last_callback_answer: Option<CallbackQueryAnswer>,
+    /// Mini apps (docs/decisions/codex-miniapp-webview.md): open answers,
+    /// consent answers and the attachment menu bots.
+    pub web_apps: WebApps,
     /// B1: last `loginUrlInfo*` / `httpUrl` answer for a login-URL button
     /// press. The UI takes it on the next poll: `Open` opens the URL in the
     /// OS browser, `RequestConfirmation` asks for consent, `Failed` opens
@@ -1464,6 +1467,7 @@ impl Session {
             share_search: ShareSearch::default(),
             last_forward: None,
             last_callback_answer: None,
+            web_apps: WebApps::default(),
             last_login_url_info: None,
             login_url_request: None,
             payment_request: None,

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ntgcalls-sys"]
+members = [".", "crates/ntgcalls-sys", "crates/webview-protocol", "crates/webview-host"]
 resolver = "2"
 
 [package]
@@ -58,6 +58,9 @@ smallvec = { version = "1", optional = true }
 # Interface scale (docs/decisions/codex-interface-scale-full.md): the platform
 # decorator names GPUI's oneshot receiver type. Already in the lockfile via GPUI.
 futures-channel = { version = "0.3", optional = true }
+# Mini apps (docs/decisions/codex-miniapp-webview.md): the wire types shared
+# with the quill-webview helper process.
+quill-webview-protocol = { path = "crates/webview-protocol" }
 thiserror = "2"
 unicode-segmentation = "1.13"
 unicode-bidi = "0.3"

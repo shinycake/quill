@@ -751,6 +751,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — bot extras (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyMiniApp => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — mini app boxes (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBotProfile => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2464,6 +2470,7 @@ impl QuillApp {
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),
             request_share: None,
+            mini_apps: Default::default(),
             permissions_dialog: None,
             username_dialog: None,
             community_ui: CommunityUi::default(),
@@ -2603,6 +2610,7 @@ impl QuillApp {
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
         app.demo_setup_bot_extras(demo, window, cx);
+        app.demo_setup_mini_app(demo, window, cx);
         app.demo_setup_proxy(demo, window, cx);
         app.demo_setup_profile_panels(demo, window, cx);
         app.demo_setup_updates_sync(demo, window, cx);

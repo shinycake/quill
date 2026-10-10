@@ -35,6 +35,22 @@ pub enum InternalLink {
         username: String,
         administrator_rights: Option<ChatAdminRights>,
     },
+    /// `internalLinkTypeWebApp`: `t.me/<bot>/<app>?startapp=`.
+    WebApp {
+        username: String,
+        short_name: String,
+        start_parameter: String,
+    },
+    /// `internalLinkTypeMainWebApp`: `t.me/<bot>?startapp=`.
+    MainWebApp {
+        username: String,
+        start_parameter: String,
+    },
+    /// `internalLinkTypeAttachmentMenuBot`: `t.me/<bot>?startattach=`.
+    AttachmentMenuBot {
+        username: String,
+        url: String,
+    },
     Game {
         username: String,
         game_short_name: String,
@@ -206,6 +222,19 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
             username: text(value, "bot_username"),
             administrator_rights: parse_chat_admin_rights(value.get("administrator_rights"))
                 .filter(|rights| *rights != ChatAdminRights::default()),
+        },
+        "WebApp" => InternalLink::WebApp {
+            username: text(value, "bot_username"),
+            short_name: text(value, "web_app_short_name"),
+            start_parameter: text(value, "start_parameter"),
+        },
+        "MainWebApp" => InternalLink::MainWebApp {
+            username: text(value, "bot_username"),
+            start_parameter: text(value, "start_parameter"),
+        },
+        "AttachmentMenuBot" => InternalLink::AttachmentMenuBot {
+            username: text(value, "bot_username"),
+            url: text(value, "url"),
         },
         "Game" => InternalLink::Game {
             username: text(value, "bot_username"),
@@ -397,6 +426,35 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
             },
         }),
         InternalLink::BotStartInGroup { .. } | InternalLink::BotAddToChannel { .. } => {
+            LinkRoute::Message("This bot link is broken.".into())
+        }
+        InternalLink::WebApp {
+            username,
+            short_name,
+            start_parameter,
+        } if !username.is_empty() && !short_name.is_empty() => {
+            LinkRoute::Resolve(A::OpenWebAppLink {
+                domain: username.clone(),
+                short_name: short_name.clone(),
+                start_parameter: start_parameter.clone(),
+            })
+        }
+        InternalLink::WebApp { .. } => LinkRoute::Message("This app link is broken.".into()),
+        InternalLink::MainWebApp {
+            username,
+            start_parameter,
+        } if !username.is_empty() => LinkRoute::Resolve(A::OpenMainWebApp {
+            domain: username.clone(),
+            start_parameter: start_parameter.clone(),
+        }),
+        InternalLink::MainWebApp { .. } => LinkRoute::Message("This app link is broken.".into()),
+        InternalLink::AttachmentMenuBot { username, url } if !username.is_empty() => {
+            LinkRoute::Resolve(A::OpenAttachmentBot {
+                domain: username.clone(),
+                url: url.clone(),
+            })
+        }
+        InternalLink::AttachmentMenuBot { .. } => {
             LinkRoute::Message("This bot link is broken.".into())
         }
         InternalLink::Game {
@@ -986,6 +1044,56 @@ mod tests {
             "https://t.me/durov",
         ] {
             assert_eq!(login_code_from_link(bad), None, "{bad}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod web_app_link_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn route_of(value: serde_json::Value) -> LinkRoute {
+        route(&parse_internal_link(&value).expect("parsed"), "")
+    }
+
+    #[test]
+    fn app_links_resolve_the_bot_first() {
+        assert_eq!(
+            route_of(
+                json!({"@type":"internalLinkTypeWebApp","bot_username":"shopbot","web_app_short_name":"shop","start_parameter":"ref1","mode":{"@type":"webAppOpenModeCompact"}})
+            ),
+            LinkRoute::Resolve(DeepLinkAction::OpenWebAppLink {
+                domain: "shopbot".into(),
+                short_name: "shop".into(),
+                start_parameter: "ref1".into(),
+            })
+        );
+        assert_eq!(
+            route_of(
+                json!({"@type":"internalLinkTypeMainWebApp","bot_username":"shopbot","start_parameter":"","mode":{"@type":"webAppOpenModeFullSize"}})
+            ),
+            LinkRoute::Resolve(DeepLinkAction::OpenMainWebApp {
+                domain: "shopbot".into(),
+                start_parameter: String::new(),
+            })
+        );
+        assert_eq!(
+            route_of(
+                json!({"@type":"internalLinkTypeAttachmentMenuBot","bot_username":"shopbot","url":"https://a/","target_chat":{"@type":"targetChatCurrent"}})
+            ),
+            LinkRoute::Resolve(DeepLinkAction::OpenAttachmentBot {
+                domain: "shopbot".into(),
+                url: "https://a/".into(),
+            })
+        );
+        for broken in [
+            json!({"@type":"internalLinkTypeWebApp","bot_username":"","web_app_short_name":"shop"}),
+            json!({"@type":"internalLinkTypeWebApp","bot_username":"b","web_app_short_name":""}),
+            json!({"@type":"internalLinkTypeMainWebApp","bot_username":""}),
+            json!({"@type":"internalLinkTypeAttachmentMenuBot","bot_username":""}),
+        ] {
+            assert!(matches!(route_of(broken), LinkRoute::Message(_)));
         }
     }
 }

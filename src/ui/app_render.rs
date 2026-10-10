@@ -184,6 +184,7 @@ impl Render for QuillApp {
         }
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
+        self.run_pending_mini_app_action(window, cx);
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
         // chats whose active stories should be refreshed (an own story
         // posted from another client appears in the tray this way).
