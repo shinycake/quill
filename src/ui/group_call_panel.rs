@@ -972,6 +972,7 @@ impl QuillApp {
                                     }
                                 },
                             ),
+                            pinned_on_top: false,
                         }
                     });
                     cx.new(|cx| Root::new(view, window, cx))
@@ -1095,6 +1096,8 @@ struct GroupCallPanel {
     /// Takes keyboard focus so push-to-talk key events reach the window.
     focus: FocusHandle,
     _activation: Subscription,
+    /// The window stays above the others (tdesktop "pin on top").
+    pinned_on_top: bool,
 }
 
 impl Render for GroupCallPanel {
@@ -1145,6 +1148,22 @@ impl Render for GroupCallPanel {
                 }
             }))
             .child(body)
+            // tdesktop's pin-on-top control; the full-screen stage has no
+            // window chrome to pin.
+            .when(!fullscreen, |this| {
+                this.relative().child(
+                    super::window_control::pin_on_top_button(
+                        "group-call-pin-on-top",
+                        self.pinned_on_top,
+                        cx,
+                        |this, pinned, _, cx| {
+                            this.pinned_on_top = pinned;
+                            cx.notify();
+                        },
+                    )
+                    .text_color(white()),
+                )
+            })
             .into_any_element()
     }
 }

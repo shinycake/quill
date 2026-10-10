@@ -352,8 +352,14 @@ impl Render for QuillApp {
                     this.appearance.minimize_to_tray,
                     quill::tray::tray_available(),
                     cfg!(target_os = "macos"),
+                    super::window_control::hide_supported(window),
                 ) {
                     CloseOutcome::HideApp => cx.hide(),
+                    CloseOutcome::Hide => {
+                        if !super::window_control::set_visible(window, false) {
+                            window.minimize_window();
+                        }
+                    }
                     CloseOutcome::Minimize => window.minimize_window(),
                     CloseOutcome::Quit => {
                         window.remove_window();

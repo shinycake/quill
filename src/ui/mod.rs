@@ -275,6 +275,7 @@ mod viewer_demo;
 mod wallpaper;
 mod wallpaper_pattern;
 mod window_chrome;
+pub(crate) mod window_control;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;
