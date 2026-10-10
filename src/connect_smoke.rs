@@ -68,7 +68,7 @@ pub fn classify_smoke_auth(auth: &AuthorizationState) -> Option<SmokeOutcome> {
         AuthorizationState::WaitPassword { .. } => Some(SmokeOutcome::OkWaitPassword),
         AuthorizationState::Ready => Some(SmokeOutcome::OkReady),
         AuthorizationState::WaitOtherDeviceConfirmation { .. } => Some(SmokeOutcome::OkOtherDevice),
-        AuthorizationState::WaitPremiumPurchase
+        AuthorizationState::WaitPremiumPurchase { .. }
         | AuthorizationState::WaitEmailAddress
         | AuthorizationState::WaitEmailCode { .. }
         | AuthorizationState::WaitRegistration { .. }
@@ -277,7 +277,11 @@ mod tests {
             None
         );
         assert_eq!(
-            classify_smoke_auth(&AuthorizationState::WaitPremiumPurchase),
+            classify_smoke_auth(&AuthorizationState::WaitPremiumPurchase {
+                premium_day_count: 0,
+                support_email_address: String::new(),
+                support_email_subject: String::new(),
+            }),
             Some(SmokeOutcome::BlockedUnsupported)
         );
         assert_eq!(

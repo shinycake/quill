@@ -2,6 +2,7 @@
 mod account_hygiene;
 mod admin_extras;
 mod ai_tools;
+mod auth_leftovers;
 mod bot_pending;
 mod bots;
 mod calls;

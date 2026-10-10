@@ -42,6 +42,7 @@ fn code_state_carries_delivery_and_next_type() {
                 kind: CodeKind::TelegramMessage,
                 next: Some(CodeKind::Sms),
                 timeout_secs: 60,
+                detail: Default::default(),
             },
         }
     );
