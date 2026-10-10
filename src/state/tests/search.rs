@@ -13,11 +13,11 @@ fn inline_query_first_page_loads_slot() {
         fetch: InlineQueryFetch::Loading,
     });
     let extra = session.request(
-        RequestPurpose::GetInlineQueryResults {
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
             bot_user_id: 77,
             first_page: true,
-        },
+        }),
         Some(ChatId(1)),
     );
     apply_json(
@@ -73,11 +73,11 @@ fn inline_query_pagination_appends() {
         },
     });
     let extra = session.request(
-        RequestPurpose::GetInlineQueryResults {
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
             bot_user_id: 77,
             first_page: false,
-        },
+        }),
         Some(ChatId(1)),
     );
     apply_json(
@@ -120,11 +120,11 @@ fn inline_query_first_page_error_fails_slot() {
         fetch: InlineQueryFetch::Loading,
     });
     let extra = session.request(
-        RequestPurpose::GetInlineQueryResults {
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
             bot_user_id: 77,
             first_page: true,
-        },
+        }),
         Some(ChatId(1)),
     );
     apply_json(
@@ -168,11 +168,11 @@ fn inline_query_pagination_error_keeps_loaded_page() {
         },
     });
     let extra = session.request(
-        RequestPurpose::GetInlineQueryResults {
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
             bot_user_id: 77,
             first_page: false,
-        },
+        }),
         Some(ChatId(1)),
     );
     apply_json(

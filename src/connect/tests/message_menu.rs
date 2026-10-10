@@ -6,6 +6,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{ChatId, MessageId};
 use crate::platform::MemorySecretStore;
+use crate::state::MessagesPurpose;
 use crate::state::{Audience, MessageReportStage};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::MessageReadDate;
@@ -490,10 +491,10 @@ fn message_properties_carry_the_new_rights() {
     let (mut driver, _recorder, sink, seq) = group_driver();
     private_chat(&mut driver, &seq, &sink);
     let extra = driver.session.request(
-        crate::state::RequestPurpose::GetMessageMenuActions {
+        crate::state::RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
             chat_id: ChatId(7),
             message_id: MessageId(5),
-        },
+        }),
         Some(ChatId(7)),
     );
     feed(

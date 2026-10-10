@@ -344,7 +344,7 @@ fn delete_sublist_history_removes_the_row_and_leaves_the_sublist() {
     );
     session.open_saved_sublist(77);
     let extra = session.request(
-        RequestPurpose::DeleteSavedMessagesTopicHistory { topic_id: 77 },
+        RequestPurpose::Threads(ThreadsPurpose::DeleteSavedMessagesTopicHistory { topic_id: 77 }),
         None,
     );
     apply_json(
@@ -407,7 +407,7 @@ fn topic_mark_counts_parse_and_clear() {
     assert_eq!(topic.unread_mention_count, 3);
     assert_eq!(topic.unread_reaction_count, 2);
     let extra = session.request(
-        RequestPurpose::ReadAllForumTopicMentions { forum_topic_id: 1 },
+        RequestPurpose::Threads(ThreadsPurpose::ReadAllForumTopicMentions { forum_topic_id: 1 }),
         Some(ChatId(16)),
     );
     apply_json(
@@ -420,7 +420,7 @@ fn topic_mark_counts_parse_and_clear() {
     assert_eq!(topic.unread_mention_count, 0);
     assert_eq!(topic.unread_reaction_count, 2);
     let extra = session.request(
-        RequestPurpose::ReadAllForumTopicReactions { forum_topic_id: 1 },
+        RequestPurpose::Threads(ThreadsPurpose::ReadAllForumTopicReactions { forum_topic_id: 1 }),
         Some(ChatId(16)),
     );
     apply_json(

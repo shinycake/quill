@@ -220,15 +220,17 @@ pub(crate) fn parse_sponsored_messages(value: &Value) -> Result<EnvelopePayload,
         }
     }
     files.retain(|file| file.id.0 != 0);
-    Ok(EnvelopePayload::SponsoredMessages {
-        messages,
-        files,
-        messages_between: value
-            .get("messages_between")
-            .and_then(Value::as_i64)
-            .unwrap_or(0)
-            .sat_i32(),
-    })
+    Ok(EnvelopePayload::Messages(
+        MessagesPayload::SponsoredMessages {
+            messages,
+            files,
+            messages_between: value
+                .get("messages_between")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
+        },
+    ))
 }
 
 pub(crate) fn parse_sponsored_message(

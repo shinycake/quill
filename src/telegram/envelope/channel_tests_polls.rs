@@ -12,7 +12,7 @@ fn message_poll_json(closed: bool) -> String {
 fn message_poll_parses_regular_open_with_chosen_option() {
     let env = parse_envelope(&message_poll_json(false)).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Poll(poll_content) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -43,7 +43,7 @@ fn message_poll_parses_quiz_closed() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":107,"chat_id":15,"is_outgoing":false,"content":{"@type":"messagePoll","poll":{"@type":"poll","id":9002,"question":{"@type":"formattedText","text":"Red planet?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Mars","entities":[]},"voter_count":18,"vote_percentage":72,"is_chosen":false}],"total_voter_count":25,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":false,"is_closed":true,"type":{"@type":"pollTypeQuiz","correct_option_ids":[0],"explanation":{"@type":"formattedText","text":"","entities":[]}}},"description":{"@type":"formattedText","text":"","entities":[]},"can_add_option":false}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Poll(poll_content) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -72,7 +72,7 @@ fn update_poll_parses_and_applies_new_counts() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdatePoll { poll } => {
+        EnvelopePayload::Messages(MessagesPayload::UpdatePoll { poll }) => {
             assert_eq!(poll.id, 9001);
             assert_eq!(poll.total_voter_count, 23);
             assert_eq!(poll.options[0].voter_count, 13);

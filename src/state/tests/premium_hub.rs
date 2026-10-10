@@ -12,8 +12,14 @@ fn tx_page(extra: u64, id: &str) -> String {
 fn transactions_apply_only_to_the_newest_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let old = session.request(RequestPurpose::GetStarTransactions { append: false }, None);
-    let new = session.request(RequestPurpose::GetStarTransactions { append: false }, None);
+    let old = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
+        None,
+    );
+    let new = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
+        None,
+    );
     session.hub.tx_request = new.0;
     session.hub.tx_loading = true;
     // A slower answer to the previous filter is dropped.
@@ -44,7 +50,10 @@ fn owned_star_count_updates_the_balance() {
 fn gifts_page_applies_and_registers_sticker_files() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(RequestPurpose::GetReceivedGifts { append: false }, None);
+    let extra = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
+        None,
+    );
     session.hub.gifts_request = extra.0;
     session.hub.gifts_loading = true;
     apply_json(
@@ -66,7 +75,10 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.hub.gift_mutating = true;
-    let extra = session.request(RequestPurpose::ToggleGiftSaved { saved: false }, None);
+    let extra = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,

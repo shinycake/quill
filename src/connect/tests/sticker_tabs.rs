@@ -3,6 +3,7 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::FileId;
 use crate::platform::MemorySecretStore;
+use crate::state::StickersPurpose;
 use crate::state::{RequestPurpose, StickerTab};
 use crate::telegram::client::copy_and_parse;
 use serde_json::json;
@@ -570,11 +571,11 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
         .values()
         .find(|pending| {
             pending.purpose
-                == RequestPurpose::ManageStickerSet {
+                == RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
                     set_id: 77,
                     installed: true,
                     archived: false,
-                }
+                })
         })
         .unwrap()
         .id;

@@ -1,6 +1,7 @@
 //! Connect driver: bots, callback queries, login URLs.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::state::{BotsPurpose, UsersPurpose};
 use crate::state::{
     InlineBotResolve, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, RequestPurpose,
 };
@@ -207,7 +208,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.my_user_id.is_some_and(|me| me == user_id) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::SetMessageSenderBlockList { block };
+        let purpose = RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { block });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -534,11 +535,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             });
         }
         let extra = self.session.request(
-            RequestPurpose::GetInlineQueryResults {
+            RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
                 chat_id,
                 bot_user_id,
                 first_page,
-            },
+            }),
             Some(chat_id),
         );
         let json = get_inline_query_results(extra, bot_user_id, chat_id, query, offset);
@@ -573,9 +574,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             username: username.to_string(),
             generation,
         });
-        let extra = self
-            .session
-            .request(RequestPurpose::ResolveInlineBot { generation }, None);
+        let extra = self.session.request(
+            RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation }),
+            None,
+        );
         let json = search_public_chat(extra, username);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
@@ -642,7 +644,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if draft.draft_id != draft_id || !draft.can_stop {
             return Ok(None);
         }
-        let purpose = RequestPurpose::StopPendingMessage { topic_id, draft_id };
+        let purpose = RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }

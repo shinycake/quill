@@ -9,10 +9,10 @@ fn bot_commands_parsed_from_get_commands_response() {
     let json = r#"{"@type":"botCommands","@extra":"9","bot_user_id":21,"commands":[{"@type":"botCommand","command":"settings","description":"Tweak the bot","is_ephemeral":false},{"@type":"botCommand","command":"help","description":"","is_ephemeral":false}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::BotCommands {
+        EnvelopePayload::Bots(BotsPayload::BotCommands {
             bot_user_id,
             commands,
-        } => {
+        }) => {
             assert_eq!(bot_user_id.0, 21);
             assert_eq!(commands.len(), 2);
             assert_eq!(commands[0].command, "settings");
@@ -32,7 +32,7 @@ fn bot_commands_keep_ephemeral_flag() {
     let json = r#"{"@type":"botCommands","@extra":"9","bot_user_id":21,"commands":[{"@type":"botCommand","command":"secret","description":"Only you see this","is_ephemeral":true},{"@type":"botCommand","command":"start","description":"Start"}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::BotCommands { commands, .. } => {
+        EnvelopePayload::Bots(BotsPayload::BotCommands { commands, .. }) => {
             assert_eq!(commands.len(), 2);
             assert!(commands[0].is_ephemeral);
             assert!(!commands[1].is_ephemeral);
@@ -48,10 +48,10 @@ fn bot_commands_parsed_without_command_list() {
     let json = r#"{"@type":"botCommands","@extra":"9","bot_user_id":21}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::BotCommands {
+        EnvelopePayload::Bots(BotsPayload::BotCommands {
             bot_user_id,
             commands,
-        } => {
+        }) => {
             assert_eq!(bot_user_id.0, 21);
             assert!(commands.is_empty());
         }
@@ -76,7 +76,7 @@ fn inline_keyboard_parsed_from_reply_markup() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":301,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Open","icon_custom_emoji_id":0,"style":{"@type":"buttonStylePrimary"},"type":{"@type":"inlineKeyboardButtonTypeUrl","url":"https://example.com"}},{"@type":"inlineKeyboardButton","text":"Tap me","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AQID"}}],[{"@type":"inlineKeyboardButton","text":"Search","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleLink"},"type":{"@type":"inlineKeyboardButtonTypeSwitchInline","query":"pic","target_chat":{"@type":"targetChatCurrent"}}}]],"force_reply":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Pick one","entities":[]}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let ReplyMarkup::InlineKeyboard(keyboard) = message.reply_markup.expect("reply_markup")
             else {
                 panic!("expected inline keyboard");
@@ -123,7 +123,7 @@ fn inline_keyboard_tolerates_unknown_types() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Mystery","style":{"@type":"buttonStyleFuture"},"type":{"@type":"inlineKeyboardButtonTypeQuantum"}}],[{"@type":"inlineKeyboardButton","text":"No type here"}],"not an array"],"force_reply":true},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let ReplyMarkup::InlineKeyboard(keyboard) = message.reply_markup.expect("reply_markup")
             else {
                 panic!("expected inline keyboard");
@@ -150,7 +150,7 @@ fn inline_keyboard_tolerates_unknown_types() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             // B1: custom keyboards are parsed now (not ignored).
             assert!(matches!(
                 message.reply_markup,
@@ -165,7 +165,7 @@ fn inline_keyboard_tolerates_unknown_types() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             assert!(message.reply_markup.is_none());
         }
         other => panic!("{other:?}"),
@@ -180,7 +180,7 @@ fn callback_query_answer_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::CallbackQueryAnswer(answer) => {
+        EnvelopePayload::Bots(BotsPayload::CallbackQueryAnswer(answer)) => {
             assert_eq!(answer.text, "Done!");
             assert!(!answer.show_alert);
             assert!(answer.url.is_empty());
@@ -197,7 +197,7 @@ fn b1_show_keyboard_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             match message.reply_markup.expect("show keyboard markup") {
                 ReplyMarkup::ShowKeyboard(keyboard) => {
                     assert_eq!(keyboard.rows.len(), 1);
@@ -228,7 +228,7 @@ fn b1_force_reply_and_remove_keyboard_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             assert!(matches!(
                 message.reply_markup,
                 Some(ReplyMarkup::ForceReply { .. })
@@ -241,7 +241,7 @@ fn b1_force_reply_and_remove_keyboard_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             assert!(matches!(
                 message.reply_markup,
                 Some(ReplyMarkup::RemoveKeyboard)
@@ -295,7 +295,7 @@ fn b1_login_url_info_parsed() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::LoginUrlInfo(LoginUrlInfo::Open { url }) => {
+        EnvelopePayload::Bots(BotsPayload::LoginUrlInfo(LoginUrlInfo::Open { url })) => {
             assert_eq!(url, "https://example.com/authed");
         }
         other => panic!("{other:?}"),
@@ -305,10 +305,10 @@ fn b1_login_url_info_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::LoginUrlInfo(LoginUrlInfo::RequestConfirmation {
+        EnvelopePayload::Bots(BotsPayload::LoginUrlInfo(LoginUrlInfo::RequestConfirmation {
             domain,
             request_write_access,
-        }) => {
+        })) => {
             assert_eq!(domain, "example.com");
             assert!(request_write_access);
         }
@@ -322,7 +322,7 @@ fn b1_login_url_info_parsed() {
         parse_envelope(r#"{"@type":"httpUrl","@extra":"13","url":"https://example.com/authed2"}"#)
             .unwrap();
     match env.payload {
-        EnvelopePayload::HttpUrl { url } => {
+        EnvelopePayload::Common(CommonPayload::HttpUrl { url }) => {
             assert_eq!(url, "https://example.com/authed2");
         }
         other => panic!("{other:?}"),
@@ -335,7 +335,7 @@ fn request_users_and_chat_buttons_keep_their_restrictions() {
         r#"{"@type":"updateNewMessage","message":{"id":310,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Pick bots","type":{"@type":"keyboardButtonTypeRequestUsers","id":7,"restrict_user_is_bot":true,"user_is_bot":true,"restrict_user_is_premium":false,"user_is_premium":true,"max_quantity":3}},{"@type":"keyboardButton","text":"Pick forum","type":{"@type":"keyboardButtonTypeRequestChat","id":8,"chat_is_channel":false,"restrict_chat_is_forum":true,"chat_is_forum":true,"restrict_chat_has_username":false,"chat_has_username":true,"chat_is_created":true,"bot_is_member":true}}]],"is_persistent":false,"resize_keyboard":false,"one_time":false,"is_personal":false,"force_reply":false,"input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
     )
     .unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("not a message");
     };
     let Some(ReplyMarkup::ShowKeyboard(keyboard)) = message.reply_markup else {
@@ -370,11 +370,11 @@ fn update_chat_reply_markup_parses_the_message_and_null() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatReplyMarkup {
+        EnvelopePayload::Bots(BotsPayload::UpdateChatReplyMarkup {
             chat_id,
             message_id,
             reply_markup,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 21);
             assert_eq!(message_id.map(|m| m.0), Some(12));
             assert!(matches!(reply_markup, Some(ReplyMarkup::RemoveKeyboard)));
@@ -386,11 +386,11 @@ fn update_chat_reply_markup_parses_the_message_and_null() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatReplyMarkup {
+        EnvelopePayload::Bots(BotsPayload::UpdateChatReplyMarkup {
             message_id,
             reply_markup,
             ..
-        } => {
+        }) => {
             assert!(message_id.is_none() && reply_markup.is_none());
         }
         other => panic!("{other:?}"),

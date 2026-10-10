@@ -11,6 +11,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
+use quill::state::GroupsPurpose;
 use quill::state::{MemberListFilter, RequestPurpose, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -34,7 +35,7 @@ pub(super) fn apply_ready_invite_links(
     let revoked_extra =
         session.request(RequestPurpose::GetRevokedChatInviteLinks, Some(ChatId(13)));
     let members_extra = session.request(
-        RequestPurpose::GetChatInviteLinkMembers { append: false },
+        RequestPurpose::Groups(GroupsPurpose::GetChatInviteLinkMembers { append: false }),
         Some(ChatId(13)),
     );
     session.invite_link_members.insert(
@@ -116,9 +117,9 @@ pub(super) fn apply_ready_admin_management(
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let admins_extra = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
     let members_extra = session.request(
-        RequestPurpose::GetSupergroupMembers {
+        RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
             filter: MemberListFilter::Recent,
-        },
+        }),
         Some(ChatId(13)),
     );
     let user = |id: i64, first: &str, last: &str| {
@@ -162,7 +163,7 @@ pub(super) fn apply_ready_admin_log(
     apply_ready_channels_admin(session, sink, seq);
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let log_extra = session.request(
-        RequestPurpose::GetChatEventLog { from_event_id: 0 },
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
         Some(ChatId(13)),
     );
     let user = |id: i64, first: &str, last: &str| {

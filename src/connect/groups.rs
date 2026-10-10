@@ -2,6 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback, WelcomeMessagesFetch};
+use crate::state::{GroupsPurpose, ThreadsPurpose};
 use crate::telegram::envelope::{ChatKind, ParsedCommunity};
 use crate::telegram::requests::{
     add_chat_welcome_message, boost_chat, create_community, create_forum_topic,
@@ -587,7 +588,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let purpose = RequestPurpose::CreateSupergroupChannel { is_channel };
+        let purpose = RequestPurpose::Groups(GroupsPurpose::CreateSupergroupChannel { is_channel });
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
@@ -1313,7 +1314,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.forum_topic_gate(chat_id) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::EditForumTopic { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::EditForumTopic { forum_topic_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -1341,7 +1342,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.toggle_forum_topic_flag(
             chat_id,
             forum_topic_id,
-            RequestPurpose::ToggleForumTopicClosed { forum_topic_id },
+            RequestPurpose::Threads(ThreadsPurpose::ToggleForumTopicClosed { forum_topic_id }),
             closed,
         )
     }
@@ -1357,7 +1358,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.toggle_forum_topic_flag(
             chat_id,
             forum_topic_id,
-            RequestPurpose::ToggleForumTopicPinned { forum_topic_id },
+            RequestPurpose::Threads(ThreadsPurpose::ToggleForumTopicPinned { forum_topic_id }),
             pinned,
         )
     }
@@ -1380,7 +1381,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        let sent = if matches!(purpose, RequestPurpose::ToggleForumTopicClosed { .. }) {
+        let sent = if matches!(
+            purpose,
+            RequestPurpose::Threads(ThreadsPurpose::ToggleForumTopicClosed { .. })
+        ) {
             self.sender.send_json(&toggle_forum_topic_closed(
                 extra,
                 chat_id,
@@ -1415,7 +1419,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.forum_topic_gate(chat_id) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::DeleteForumTopic { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::DeleteForumTopic { forum_topic_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -1692,7 +1696,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.welcome_mutation_gate(chat_id) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::EditChatWelcomeMessage { welcome_message_id };
+        let purpose =
+            RequestPurpose::Groups(GroupsPurpose::EditChatWelcomeMessage { welcome_message_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -1722,7 +1727,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.welcome_mutation_gate(chat_id) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::DeleteChatWelcomeMessage { welcome_message_id };
+        let purpose =
+            RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage { welcome_message_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -1772,7 +1778,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !allowed {
             return Ok(None);
         }
-        let purpose = RequestPurpose::SetChatMemberTag { user_id };
+        let purpose = RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }

@@ -283,7 +283,7 @@ fn a6_block_ok_updates_cached_blocked() {
     );
     assert!(!session.user_full_infos.get(&31).expect("info").blocked);
     let extra = session.request_for_user(
-        RequestPurpose::SetMessageSenderBlockList { block: true },
+        RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { block: true }),
         31,
     );
     apply_json(

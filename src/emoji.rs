@@ -1,4 +1,5 @@
 use crate::state::{RequestPurpose, Session};
+use crate::telegram::envelope::StickersPayload;
 use crate::telegram::envelope::{
     EnvelopePayload, MessageContent, ParsedFile, StickerItem, StickerSetInfo,
 };
@@ -300,24 +301,26 @@ impl Session {
         payload: EnvelopePayload,
     ) {
         match payload {
-            EnvelopePayload::EmojiStatuses { statuses } => {
+            EnvelopePayload::Stickers(StickersPayload::EmojiStatuses { statuses }) => {
                 self.accept_emoji_statuses(purpose, statuses);
             }
-            EnvelopePayload::EmojiStatusCustomEmojis { custom_emoji_ids } => {
+            EnvelopePayload::Stickers(StickersPayload::EmojiStatusCustomEmojis {
+                custom_emoji_ids,
+            }) => {
                 self.accept_emoji_status_ids(purpose, custom_emoji_ids);
             }
-            EnvelopePayload::AnimatedEmoji { sticker, files } => {
+            EnvelopePayload::Stickers(StickersPayload::AnimatedEmoji { sticker, files }) => {
                 self.accept_animated_emoji(purpose, sticker, files);
             }
-            EnvelopePayload::EmojiKeywords { keywords } => {
+            EnvelopePayload::Stickers(StickersPayload::EmojiKeywords { keywords }) => {
                 self.accept_emoji_keywords(purpose, keywords);
             }
-            EnvelopePayload::Emojis { emojis } => {
+            EnvelopePayload::Stickers(StickersPayload::Emojis { emojis }) => {
                 if purpose == Some(RequestPurpose::GetKeywordEmojis) {
                     self.emoji.keyword_emojis = emojis;
                 }
             }
-            EnvelopePayload::EmojiCategories { categories, files } => {
+            EnvelopePayload::Stickers(StickersPayload::EmojiCategories { categories, files }) => {
                 self.accept_emoji_categories(purpose, categories, files);
             }
             _ => {}
@@ -548,6 +551,7 @@ mod tests {
     use super::*;
     use crate::diagnostics::{DiagnosticSink, MemorySink};
     use crate::ids::{AccountKey, ChatId};
+    use crate::state::StickersPurpose;
     use crate::telegram::client::copy_and_parse;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
@@ -895,7 +899,7 @@ mod tests {
         assert!(with_purpose.stickers.found_sets.is_empty());
 
         let extra = with_purpose.request(
-            RequestPurpose::GetArchivedEmojiSets { first_page: true },
+            RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: true }),
             None,
         );
         apply_json(
@@ -909,7 +913,7 @@ mod tests {
             ),
         );
         let extra = with_purpose.request(
-            RequestPurpose::GetArchivedEmojiSets { first_page: false },
+            RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: false }),
             None,
         );
         apply_json(

@@ -114,17 +114,18 @@ pub(crate) fn parse_supergroup_usernames(value: Option<&Value>) -> SupergroupUse
 #[cfg(test)]
 mod tests {
     use super::{ParsedBoostSource, SupergroupUsernames};
+    use crate::telegram::envelope::GroupsPayload;
     use crate::telegram::envelope::{EnvelopePayload, parse_envelope};
 
     #[test]
     fn found_chat_boosts_parse() {
         let json = r#"{"@type":"foundChatBoosts","total_count":3,"boosts":[{"@type":"chatBoost","id":"b1","count":2,"source":{"@type":"chatBoostSourcePremium","user_id":9},"start_date":100,"expiration_date":200},{"@type":"chatBoost","id":"b2","count":1,"source":{"@type":"chatBoostSourceGiveaway","user_id":0,"gift_code":"","star_count":0,"giveaway_message_id":4,"is_unclaimed":true},"start_date":100,"expiration_date":300}],"next_offset":"nx"}"#;
         match parse_envelope(json).unwrap().payload {
-            EnvelopePayload::FoundChatBoosts {
+            EnvelopePayload::Groups(GroupsPayload::FoundChatBoosts {
                 total_count,
                 boosts,
                 next_offset,
-            } => {
+            }) => {
                 assert_eq!(total_count, 3);
                 assert_eq!(next_offset, "nx");
                 assert_eq!(boosts.len(), 2);
@@ -148,7 +149,7 @@ mod tests {
         let json =
             r#"{"@type":"chatBoostLink","link":"https://t.me/boost/rustaceans","is_public":true}"#;
         match parse_envelope(json).unwrap().payload {
-            EnvelopePayload::ChatBoostLink { link, is_public } => {
+            EnvelopePayload::Groups(GroupsPayload::ChatBoostLink { link, is_public }) => {
                 assert_eq!(link, "https://t.me/boost/rustaceans");
                 assert!(is_public);
             }
@@ -160,7 +161,7 @@ mod tests {
     fn update_supergroup_keeps_username_lists() {
         let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":18,"usernames":{"@type":"usernames","active_usernames":["a","b"],"disabled_usernames":["c"],"editable_username":"a","collectible_usernames":["b"]}}}"#;
         match parse_envelope(json).unwrap().payload {
-            EnvelopePayload::UpdateSupergroup { usernames, .. } => {
+            EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup { usernames, .. }) => {
                 assert_eq!(usernames.active, vec!["a", "b"]);
                 assert_eq!(usernames.disabled, vec!["c"]);
                 assert_eq!(usernames.editable, "a");

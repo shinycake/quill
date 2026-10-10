@@ -11,7 +11,7 @@ fn community_updates_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateCommunity { community } => {
+        EnvelopePayload::Groups(GroupsPayload::UpdateCommunity { community }) => {
             assert_eq!(
                 community,
                 ParsedCommunity {
@@ -33,10 +33,10 @@ fn community_updates_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateCommunityFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::UpdateCommunityFullInfo {
             community_id,
             full_info,
-        } => {
+        }) => {
             assert_eq!(community_id, 42);
             assert_eq!(
                 full_info,
@@ -59,7 +59,7 @@ fn community_updates_parsed() {
     // `getCommunityFullInfo`.
     let env = parse_envelope(r#"{"@type":"communityId","id":42}"#).unwrap();
     match env.payload {
-        EnvelopePayload::CommunityId { id } => assert_eq!(id, 42),
+        EnvelopePayload::Groups(GroupsPayload::CommunityId { id }) => assert_eq!(id, 42),
         other => panic!("{other:?}"),
     }
 }
@@ -74,7 +74,7 @@ fn community_full_info_answer_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::CommunityFullInfo { full_info } => {
+        EnvelopePayload::Groups(GroupsPayload::CommunityFullInfo { full_info }) => {
             assert_eq!(full_info.administrator_count, 2);
             assert_eq!(full_info.add_chat_request_count, 5);
             assert_eq!(full_info.chats.len(), 1);
@@ -95,7 +95,7 @@ fn community_status_rights_parsed() {
             r#"{{"@type":"updateCommunity","community":{{"@type":"community","id":42,"have_access":true,"name":"R","date":1,"status":{status},"permissions":{permissions}}}}}"#
         );
         match parse_envelope(&json).unwrap().payload {
-            EnvelopePayload::UpdateCommunity { community } => community,
+            EnvelopePayload::Groups(GroupsPayload::UpdateCommunity { community }) => community,
             other => panic!("{other:?}"),
         }
     };
@@ -124,11 +124,11 @@ fn update_supergroup_parses_own_status() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
             supergroup_id,
             status,
             ..
-        } => {
+        }) => {
             assert_eq!(supergroup_id, 16);
             assert_eq!(status, ChannelMemberStatus::Administrator);
         }
@@ -140,7 +140,7 @@ fn update_supergroup_parses_own_status() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup { status, .. } => {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup { status, .. }) => {
             assert_eq!(status, ChannelMemberStatus::Unknown);
         }
         other => panic!("{other:?}"),
@@ -154,7 +154,7 @@ fn update_new_chat_parses_photo_small() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"photo":{"@type":"chatPhotoInfo","small":{"@type":"file","id":91,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"big":{"@type":"file","id":92,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"minithumbnail":null,"has_animation":false,"is_personal":false}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat { chat_id, photo, .. } => {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { chat_id, photo, .. }) => {
             assert_eq!(chat_id.0, 11);
             let file = photo.expect("chat photo");
             assert_eq!(file.id.0, 91);
@@ -168,7 +168,9 @@ fn update_new_chat_without_photo_has_none() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"photo":null}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat { photo, .. } => assert!(photo.is_none()),
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { photo, .. }) => {
+            assert!(photo.is_none())
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -179,7 +181,7 @@ fn update_chat_photo_parsed() {
     let json = r#"{"@type":"updateChatPhoto","chat_id":11,"photo":{"@type":"chatPhotoInfo","small":{"@type":"file","id":93,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"big":{"@type":"file","id":94,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"minithumbnail":null,"has_animation":false,"is_personal":false}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatPhoto { chat_id, photo } => {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatPhoto { chat_id, photo }) => {
             assert_eq!(chat_id.0, 11);
             assert_eq!(photo.map(|f| f.id.0), Some(93));
         }
@@ -194,10 +196,10 @@ fn update_new_chat_parses_message_auto_delete_time() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":41,"title":"Zed","type":{"@type":"chatTypeSecret","secret_chat_id":7,"user_id":41},"unread_count":0,"message_auto_delete_time":3600}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat {
             message_auto_delete_time,
             ..
-        } => assert_eq!(message_auto_delete_time, 3600),
+        }) => assert_eq!(message_auto_delete_time, 3600),
         other => panic!("{other:?}"),
     }
 }
@@ -207,10 +209,10 @@ fn update_new_chat_without_auto_delete_time_defaults_to_zero() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat {
             message_auto_delete_time,
             ..
-        } => assert_eq!(message_auto_delete_time, 0),
+        }) => assert_eq!(message_auto_delete_time, 0),
         other => panic!("{other:?}"),
     }
 }
@@ -222,10 +224,10 @@ fn update_chat_message_auto_delete_time_parsed() {
     let json = r#"{"@type":"updateChatMessageAutoDeleteTime","chat_id":41,"message_auto_delete_time":86400}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatMessageAutoDeleteTime {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatMessageAutoDeleteTime {
             chat_id,
             message_auto_delete_time,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 41);
             assert_eq!(message_auto_delete_time, 86400);
         }
@@ -240,7 +242,7 @@ fn update_new_chat_video_chat_parsed() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":100,"title":"Team standup","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":false},"unread_count":0,"video_chat":{"@type":"videoChat","group_call_id":555,"has_participants":false,"default_participant_id":null}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat { video_chat, .. } => {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { video_chat, .. }) => {
             let v = video_chat.expect("video chat present");
             assert_eq!(v.group_call_id, 555);
             assert!(!v.has_participants);
@@ -250,7 +252,7 @@ fn update_new_chat_video_chat_parsed() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":100,"title":"Team standup","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":false},"unread_count":0,"video_chat":{"@type":"videoChat","group_call_id":0,"has_participants":false,"default_participant_id":null}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat { video_chat, .. } => {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { video_chat, .. }) => {
             assert!(video_chat.is_none());
         }
         other => panic!("{other:?}"),

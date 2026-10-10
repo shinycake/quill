@@ -69,7 +69,10 @@ fn rtmp_url_answer_caches_on_tracked_call() {
     });
     session.chats.insert(51, chat);
     session.active_group_call = Some(ActiveGroupCall::fresh(555));
-    let extra = session.request(RequestPurpose::GetVideoChatRtmpUrl { chat_id: 51 }, None);
+    let extra = session.request(
+        RequestPurpose::Calls(CallsPurpose::GetVideoChatRtmpUrl { chat_id: 51 }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -100,7 +103,9 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
     session.chats.insert(51, chat);
     session.active_group_call = Some(ActiveGroupCall::fresh(555));
     let extra = session.request(
-        RequestPurpose::GetVideoChatAvailableParticipants { group_call_id: 555 },
+        RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
+            group_call_id: 555,
+        }),
         None,
     );
     apply_json(
@@ -124,9 +129,9 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(
-        RequestPurpose::GetCallPrivacyRules {
+        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules {
             setting: CallPrivacySetting::AllowCalls,
-        },
+        }),
         None,
     );
     apply_json(
@@ -146,9 +151,9 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
     // flag is set.
     session.call_privacy_allow_calls = Some(PrivacyWho::Nobody);
     let extra = session.request(
-        RequestPurpose::SetCallPrivacyRules {
+        RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules {
             setting: CallPrivacySetting::AllowCalls,
-        },
+        }),
         None,
     );
     apply_json(
@@ -177,7 +182,10 @@ fn call_privacy_loading_clears_only_after_both_gets_land() {
         CallPrivacySetting::AllowCalls,
         CallPrivacySetting::PeerToPeer,
     ] {
-        let extra = session.request(RequestPurpose::GetCallPrivacyRules { setting }, None);
+        let extra = session.request(
+            RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }),
+            None,
+        );
         apply_json(
             &mut session,
             &seq,

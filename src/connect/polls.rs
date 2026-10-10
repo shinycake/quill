@@ -2,6 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
+use crate::state::MessagesPurpose;
 use crate::state::{PollVotersFetch, RequestPurpose};
 use crate::telegram::envelope::MessageContent;
 use crate::telegram::requests::{
@@ -197,12 +198,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.poll_voters.get(&key),
             Some(PollVotersFetch::Loading)
         ) || self.session.requests.has_purpose_for_chat(
-            RequestPurpose::GetPollVoters {
+            RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
                 chat_id,
                 message_id,
                 option_id: option_index as i32,
                 offset,
-            },
+            }),
             chat_id,
         ) {
             return Ok(None);
@@ -222,12 +223,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .insert(key, PollVotersFetch::Loading);
         }
         let extra = self.session.request(
-            RequestPurpose::GetPollVoters {
+            RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
                 chat_id,
                 message_id,
                 option_id: option_index as i32,
                 offset,
-            },
+            }),
             Some(chat_id),
         );
         let json = get_poll_voters(

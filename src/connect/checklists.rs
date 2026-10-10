@@ -3,6 +3,7 @@ use super::*;
 use crate::checklist::{ChecklistDraft, next_task_ids, toggle_task_request, validate_added_tasks};
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::poll::{can_offer_add_option, validate_new_option};
+use crate::state::MessagesPurpose;
 use crate::state::{PollStatsFetch, RequestPurpose};
 use crate::telegram::envelope::{Checklist, MessageContent};
 use crate::telegram::requests::{
@@ -114,10 +115,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.poll_stats.insert(key, PollStatsFetch::Loading);
         let result = self.send_tracked(
-            RequestPurpose::GetPollVoteStatistics {
+            RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics {
                 chat_id,
                 message_id,
-            },
+            }),
             chat_id,
             |extra| get_poll_vote_statistics(extra, chat_id, message_id, is_dark),
         );

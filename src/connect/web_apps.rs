@@ -4,7 +4,7 @@
 //! session so answers find their context.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::state::{RequestPurpose, WebAppPending};
+use crate::state::{BotsPurpose, RequestPurpose, WebAppPending};
 use crate::telegram::requests::{
     allow_bot_to_send_messages, can_bot_send_messages, close_web_app, get_attachment_menu_bot,
     get_grossing_web_app_bots, get_main_web_app, get_web_app_link_url, get_web_app_url,
@@ -53,8 +53,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         source: LaunchSource,
         theme: &ThemeParams,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra =
-            self.web_app_extra(RequestPurpose::OpenWebApp { bot_user_id }, Some(chat_id))?;
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::OpenWebApp { bot_user_id }),
+            Some(chat_id),
+        )?;
         self.mark_web_app_pending(bot_user_id, Some(chat_id), source);
         let json = open_web_app(extra, chat_id, bot_user_id, url, theme.td_json());
         self.send_json_request(extra, &json)
@@ -70,8 +72,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         button_text: &str,
         theme: &ThemeParams,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra =
-            self.web_app_extra(RequestPurpose::GetWebAppUrl { bot_user_id }, Some(chat_id))?;
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::GetWebAppUrl { bot_user_id }),
+            Some(chat_id),
+        )?;
         self.mark_web_app_pending(
             bot_user_id,
             Some(chat_id),
@@ -91,8 +95,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         start_parameter: &str,
         theme: &ThemeParams,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra =
-            self.web_app_extra(RequestPurpose::GetMainWebApp { bot_user_id }, Some(chat_id))?;
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::GetMainWebApp { bot_user_id }),
+            Some(chat_id),
+        )?;
         self.mark_web_app_pending(bot_user_id, Some(chat_id), LaunchSource::MainApp);
         let json = get_main_web_app(
             extra,
@@ -116,7 +122,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         theme: &ThemeParams,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(
-            RequestPurpose::GetWebAppLinkUrl { bot_user_id },
+            RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }),
             Some(chat_id),
         )?;
         self.mark_web_app_pending(
@@ -144,7 +150,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         bot_user_id: i64,
         short_name: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra = self.web_app_extra(RequestPurpose::SearchWebApp { bot_user_id }, None)?;
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }),
+            None,
+        )?;
         self.session.web_apps.found = None;
         let json = search_web_app(extra, bot_user_id, short_name);
         self.send_json_request(extra, &json)
@@ -179,7 +188,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         bot_user_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra = self.web_app_extra(RequestPurpose::CanBotSendMessages { bot_user_id }, None)?;
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }),
+            None,
+        )?;
         self.session.web_apps.write_access = None;
         let json = can_bot_send_messages(extra, bot_user_id);
         self.send_json_request(extra, &json)
@@ -190,8 +202,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         bot_user_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra =
-            self.web_app_extra(RequestPurpose::AllowBotToSendMessages { bot_user_id }, None)?;
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }),
+            None,
+        )?;
         self.session.web_apps.write_access = None;
         let json = allow_bot_to_send_messages(extra, bot_user_id);
         self.send_json_request(extra, &json)
@@ -202,8 +216,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         bot_user_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra =
-            self.web_app_extra(RequestPurpose::GetAttachmentMenuBot { bot_user_id }, None)?;
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { bot_user_id }),
+            None,
+        )?;
         self.session.web_apps.attachment_menu_bot = None;
         let json = get_attachment_menu_bot(extra, bot_user_id);
         self.send_json_request(extra, &json)
@@ -217,7 +233,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         allow_write_access: bool,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(
-            RequestPurpose::ToggleBotInAttachmentMenu { bot_user_id, added },
+            RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { bot_user_id, added }),
             None,
         )?;
         self.session.web_apps.attachment_menu_toggled = None;

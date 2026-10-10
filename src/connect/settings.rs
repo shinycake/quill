@@ -8,6 +8,7 @@ use crate::settings::{
     load_preferences, save_badge_prefs, save_call_prefs, save_language_prefs, save_preferences,
 };
 use crate::state::RequestPurpose;
+use crate::state::SettingsPurpose;
 use crate::telegram::envelope::{
     ChatNotificationSettings, MUTE_FOREVER, NotificationSettingsScope,
     ReactionNotificationSettings, ScopeNotificationSettings,
@@ -38,9 +39,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.privacy.insert(key, PrivacyKeyState::Loading);
-        let extra = self
-            .session
-            .request(RequestPurpose::GetPrivacyRules { key }, None);
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&get_privacy_rules(extra, key.td_type()))
@@ -63,9 +65,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::SetPrivacyRules { key }, None);
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key }),
+            None,
+        );
         let rules = detail.recompose();
         if let Err(err) = self
             .sender
@@ -145,9 +148,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.blocked_loading = true;
         self.session.blocked_error = false;
         let extra = self.session.request(
-            RequestPurpose::GetBlockedSenders {
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                 offset: offset as i32,
-            },
+            }),
             None,
         );
         if let Err(err) =
@@ -170,10 +173,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::SetSenderBlockList {
+            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
                 user_id,
                 block: false,
-            },
+            }),
             None,
         );
         if let Err(err) = self
@@ -199,10 +202,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::SetSenderBlockList {
+            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
                 user_id,
                 block: true,
-            },
+            }),
             None,
         );
         if let Err(err) = self
@@ -576,7 +579,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::SetAutoDownloadSettings { network, settings },
+            RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings {
+                network,
+                settings,
+            }),
             None,
         );
         let payload = set_auto_download_settings(extra, settings.to_json(), network.td_type());
@@ -772,9 +778,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.sessions_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::TerminateSession { session_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id }),
+            None,
+        );
         self.session.sessions_mutating = true;
         match self.sender.send_json(&terminate_session(extra, session_id)) {
             Ok(()) => Ok(extra),
@@ -874,9 +881,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.default_auto_delete_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::SetDefaultAutoDelete { seconds }, None);
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds }),
+            None,
+        );
         self.session.default_auto_delete_busy = true;
         let json = crate::telegram::requests::set_default_message_auto_delete_time(extra, seconds);
         match self.sender.send_json(&json) {
@@ -921,9 +929,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.account_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::SetAccountTtl { days }, None);
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
+            None,
+        );
         self.session.account_mutating = true;
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => Ok(extra),
@@ -978,7 +987,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let (extra, json) = match kind {
             ToggleSessionKind::SecretChats => {
                 let extra = self.session.request(
-                    RequestPurpose::ToggleSessionSecretChats { session_id },
+                    RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats {
+                        session_id,
+                    }),
                     None,
                 );
                 let value = !can_accept_secret_chats;
@@ -988,9 +999,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 )
             }
             ToggleSessionKind::Calls => {
-                let extra = self
-                    .session
-                    .request(RequestPurpose::ToggleSessionCalls { session_id }, None);
+                let extra = self.session.request(
+                    RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { session_id }),
+                    None,
+                );
                 let value = !can_accept_calls;
                 (
                     extra,
@@ -1073,9 +1085,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.websites_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::DisconnectWebsite { website_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id }),
+            None,
+        );
         self.session.websites_mutating = true;
         match self
             .sender

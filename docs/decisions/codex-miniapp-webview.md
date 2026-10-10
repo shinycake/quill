@@ -81,3 +81,7 @@ Features Quill does not have answer with the bridge's failure events at once (`l
 - Quill itself in the `ready-mini-app` demo with `QUILL_DEMO_MINIAPP=window` and a local URL: the real spawn, `ready` → `load`, events in, commands out.
 - Demo captures: `ready-mini-app` (`terms`, `terms-write`, `add`) for the boxes; the helper's own `--capture` for the window chrome.
 - Not touched: real bots, real accounts.
+
+## Domain modules
+
+After the state/envelope split (codex-refactor-4.md) the mini-app requests live in the bots domain: the `BotsPurpose` variants in `src/state/domains/bots/purpose.rs`, the `BotsPayload` variants and parse arms in `src/telegram/envelope/domains/bots/`, and the apply and error arms in that domain's `apply.rs` / `error.rs` (both call into `session_web_apps.rs`). `foundUsers` (the Apps tab) is parsed by the users domain next to `users`.
