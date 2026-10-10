@@ -1988,7 +1988,11 @@ impl QuillApp {
         // setting, and the blocked list (no live Telegram).
         if matches!(
             demo,
-            Some(ScreenshotDemo::ReadyPrivacy | ScreenshotDemo::ReadyPrivacyGifts)
+            Some(
+                ScreenshotDemo::ReadyPrivacy
+                    | ScreenshotDemo::ReadyPrivacyGifts
+                    | ScreenshotDemo::ReadyPrivacyCalls
+            )
         ) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -2000,8 +2004,24 @@ impl QuillApp {
                     quill::telegram::requests_privacy::PrivacySettingKey::AutosaveGifts,
                 ));
             }
+            if matches!(demo, Some(ScreenshotDemo::ReadyPrivacyCalls)) {
+                self.privacy_editor = Some(PrivacyEditorTarget::Rule(
+                    quill::telegram::requests_privacy::PrivacySettingKey::AllowCalls,
+                ));
+            }
             self.status_note =
                 "screenshot demo — privacy settings (injected, no live Telegram)".into();
+        }
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadySettingsHelp | ScreenshotDemo::ReadyAskQuestion)
+        ) {
+            self.settings_open = true;
+            if matches!(demo, Some(ScreenshotDemo::ReadyAskQuestion)) {
+                self.settings_page = Some(super::settings_account_ui::ASK_QUESTION_PAGE);
+            }
+            self.status_note =
+                "screenshot demo — settings help (injected, no live Telegram)".into();
         }
         // B13: session details view and the file-open warning.
         if matches!(demo, Some(ScreenshotDemo::ReadySessionDetails)) {
