@@ -1,0 +1,2 @@
+parity:calls-pin-tile
+parity:calls-incoming-notification

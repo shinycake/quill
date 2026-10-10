@@ -76,9 +76,27 @@ impl TilePin {
     }
 }
 
+/// The tile the full-screen stage shows: the pinned one, only while its
+/// stream is still there. tdesktop fills the whole window with the video
+/// on a black background (`calls_group_viewport*.cpp`, `_fullscreen`).
+pub fn stage_tile(pin: &TilePin, tiles: &[TileKey]) -> Option<TileKey> {
+    pin.layout(tiles).main
+}
+
+/// Whether the window shows the stage instead of the member list: it must
+/// be full screen and have a pinned stream to show.
+pub fn stage_active(fullscreen: bool, stage: Option<TileKey>) -> bool {
+    fullscreen && stage.is_some()
+}
+
+/// Escape leaves full screen (tdesktop `Panel::toggleFullScreen` on Esc).
+pub fn exits_fullscreen(key: &str) -> bool {
+    key.eq_ignore_ascii_case("escape")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TileKey, TilePin};
+    use super::{TileKey, TilePin, exits_fullscreen, stage_active, stage_tile};
     use crate::telegram::envelope::MessageSender;
 
     fn key(user_id: i64, screen: bool) -> TileKey {
@@ -131,5 +149,27 @@ mod tests {
         let tiles = [key(1, false)];
         assert_eq!(pin.layout(&tiles).main, None);
         assert_eq!(pin.layout(&tiles).rest, tiles.to_vec());
+    }
+
+    #[test]
+    fn the_stage_needs_full_screen_and_a_pinned_stream() {
+        let mut pin = TilePin::default();
+        let tiles = [key(1, false), key(2, true)];
+        assert_eq!(stage_tile(&pin, &tiles), None);
+        assert!(!stage_active(true, stage_tile(&pin, &tiles)));
+        pin.toggle(key(2, true));
+        let stage = stage_tile(&pin, &tiles);
+        assert_eq!(stage, Some(key(2, true)));
+        assert!(stage_active(true, stage));
+        assert!(!stage_active(false, stage), "windowed shows the list");
+        assert_eq!(stage_tile(&pin, &[key(1, false)]), None, "stream gone");
+    }
+
+    #[test]
+    fn only_escape_leaves_full_screen() {
+        assert!(exits_fullscreen("escape"));
+        assert!(exits_fullscreen("Escape"));
+        assert!(!exits_fullscreen("f"));
+        assert!(!exits_fullscreen("enter"));
     }
 }
