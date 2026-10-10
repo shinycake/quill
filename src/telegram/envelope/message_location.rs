@@ -108,6 +108,21 @@ impl LiveLocationState {
         is_outgoing && self.remaining_at(now) > 0
     }
 
+    /// Seconds until the status line reads differently, or `None` once the
+    /// share has ended (nothing left to refresh). A minute apart until the
+    /// last minute, then every second.
+    pub fn refresh_in_at(&self, now: i64) -> Option<u32> {
+        let remaining = i64::from(self.remaining_at(now));
+        if remaining <= 0 {
+            return None;
+        }
+        if remaining <= 60 {
+            return Some(1);
+        }
+        let minutes = minutes_left(remaining);
+        Some((remaining - (minutes - 1) * 60).clamp(1, 60) as u32)
+    }
+
     /// Status line for the card, with the remaining time counted from
     /// `received_at` to `now`.
     pub fn status_label_at(&self, now: i64) -> String {
@@ -134,13 +149,26 @@ impl LiveLocationState {
     }
 }
 
-/// `mm:ss` or `Xh Ym` for `expires_in`-style second counts.
+/// Whole minutes left, rounded up, so the label reads the same until the
+/// minute really turns over.
+fn minutes_left(seconds: i64) -> i64 {
+    (seconds + 59) / 60
+}
+
+/// `N s` in the last minute, `N min` up to an hour and `Xh YYm` beyond, for
+/// `expires_in`-style second counts. Minute resolution keeps the label from
+/// changing (and the row from redrawing) more than once a minute until the
+/// last one.
 pub(crate) fn duration_label(seconds: i32) -> String {
-    let seconds = seconds.max(0) as i64;
-    if seconds >= 3600 {
-        format!("{}h {:02}m", seconds / 3600, (seconds % 3600) / 60)
+    let seconds = i64::from(seconds.max(0));
+    if seconds < 60 {
+        return format!("{seconds} s");
+    }
+    let minutes = minutes_left(seconds);
+    if minutes >= 60 {
+        format!("{}h {:02}m", minutes / 60, minutes % 60)
     } else {
-        format!("{}:{:02}", seconds / 60, seconds % 60)
+        format!("{minutes} min")
     }
 }
 

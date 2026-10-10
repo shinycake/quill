@@ -132,9 +132,7 @@ impl Render for QuillApp {
         if let Some((chat_id, text)) = ai_text
             && open_chat == Some(chat_id)
         {
-            self.composer.update(cx, |input, cx| {
-                input.set_value(&text, window, cx);
-            });
+            self.set_composer_markup(&text, window, cx);
             self.status_note = "AI updated the draft".into();
         }
         if let Some((chat_id, rich, note)) = ai_blocks
@@ -153,6 +151,9 @@ impl Render for QuillApp {
         // open chat has a live `self_destruct_in` timer (same 1s task
         // pattern as slow mode).
         self.ensure_self_destruct_tick(cx);
+        // Live-location countdowns: refreshed at the pace their labels
+        // change, only while the open chat shows a running one.
+        self.ensure_live_location_tick(cx);
         // Phase C1: keep the call overlay's ringing / connected clock
         // fresh while a call is tracked (same 1s task pattern).
         self.ensure_call_tick(cx);

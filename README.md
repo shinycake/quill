@@ -196,13 +196,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Clickable @mentions, #hashtags, $cashtags, /commands, emails, phone numbers, bank cards, media timestamps and dates in message text <!-- parity:render-entity-links -->
 - [x] Tapping a /command in a group chat sends it addressed to that bot <!-- parity:render-bot-command-click -->
-- [ ] Tapping a timestamp link seeks the video or voice message to that moment <!-- parity:render-media-timestamp-seek -->
+- [x] Tapping a timestamp link seeks the video or voice message to that moment <!-- parity:render-media-timestamp-seek -->
 - [x] "Open this link?" confirmation when a link's label differs from its real address <!-- parity:render-hidden-link-confirm -->
 - [ ] Hovering a text link shows its full address in a tooltip <!-- parity:render-link-hover-tooltip -->
 - [x] Reply header shows the replied sender's name in their color <!-- parity:render-reply-header-sender -->
-- [ ] Reply header shows a media thumbnail, quote mark, other-chat name, and story replies <!-- parity:render-reply-header-media -->
+- [x] Reply header shows a media thumbnail, quote mark, other-chat name, and story replies <!-- parity:render-reply-header-media -->
 - [x] Replied-to messages outside the loaded history are fetched and previewed <!-- parity:render-reply-outside-window -->
-- [ ] Reply header custom-emoji pattern and accent background <!-- parity:render-reply-header-emoji-pattern -->
+- [x] Reply header custom-emoji pattern and accent background <!-- parity:render-reply-header-emoji-pattern -->
 - [x] "edited" marker in the message footer <!-- parity:render-edited-marker -->
 - [x] Hovering the message time shows full sent, edited and original-forward dates <!-- parity:render-time-tooltip -->
 - [x] Forward header opens the original chat or post; hidden senders get a tooltip <!-- parity:render-forward-header-click -->
@@ -225,8 +225,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Gift and giveaway messages render as cards (regular, unique, refunded, prize, winners, gift code) <!-- parity:render-gift-cards -->
 - [x] Contact cards show an avatar with Message, Add contact and View buttons <!-- parity:render-contact-card-actions -->
 - [x] Location and venue messages show a map thumbnail <!-- parity:render-map-thumbnail -->
-- [ ] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
-- [ ] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
+- [x] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
+- [x] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
 - [ ] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
 - [ ] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
 - [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
@@ -236,7 +236,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
 - [x] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
 - [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
-- [ ] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
+- [x] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
 - [ ] Fact-check block under messages <!-- parity:render-fact-check -->
 - [ ] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
 
@@ -280,8 +280,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Composer & sending
 
-- [ ] Formatting shows live in the input (bold appears bold, mentions as tags, custom emoji inline) <!-- parity:composer-wysiwyg -->
-- [ ] Mention without a username inserts a styled tag instead of raw markup <!-- parity:composer-mention-tags -->
+- [x] Formatting shows live in the input (bold appears bold, mentions as tags, custom emoji inline) <!-- parity:composer-wysiwyg -->
+- [x] Mention without a username inserts a styled tag instead of raw markup <!-- parity:composer-mention-tags -->
 - [x] Send as another identity (channel or anonymous) picker <!-- parity:composer-send-as -->
 - [x] Forward bar in the composer: change recipient, hide sender or captions, add a comment <!-- parity:composer-forward-bar -->
 - [x] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
@@ -306,7 +306,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
 - [x] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
 - [x] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
-- [ ] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
+- [x] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
 
 ### Chat view chrome
 

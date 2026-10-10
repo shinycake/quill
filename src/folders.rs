@@ -324,6 +324,7 @@ mod tests {
             status: UserStatusKind::Empty,
             photo_small_file_id: 0,
             accent_color_id: 0,
+            background_custom_emoji_id: 0,
             profile_accent_color_id: -1,
             profile_background_custom_emoji_id: 0,
             is_premium: false,

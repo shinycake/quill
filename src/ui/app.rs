@@ -303,6 +303,8 @@ pub struct QuillApp {
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
     pub(super) composer_prev_text: String,
+    /// A typed markdown replacement Backspace can still take back.
+    pub(super) markdown_revert: Option<super::composer_field::MarkdownRevert>,
     /// M1: scheduling choice (`messageSchedulingState*`, schema 1.8.67
     /// lines 5902/5905). Reset to `None` after each successful send.
     pub(super) composer_scheduling: ComposerScheduling,
@@ -698,6 +700,9 @@ pub struct QuillApp {
     /// ticking (`Some` exactly while the 1s tick task runs). Mirrors
     /// `slow_mode_tick_chat`.
     pub(super) self_destruct_tick_chat: Option<ChatId>,
+    /// The open chat whose live-location countdowns are being refreshed
+    /// (`Some` exactly while that task runs; see `live_location_tick`).
+    pub(super) live_location_tick_chat: Option<ChatId>,
     /// Phase C1: whether the call-duration 1s tick task is running
     /// (keeps the overlay's ringing/connected clock fresh). Mirrors
     /// `voice_tick`.

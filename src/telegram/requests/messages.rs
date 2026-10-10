@@ -164,6 +164,10 @@ pub fn format_entity_json(entity: &ComposerEntity) -> Value {
             "@type": "textEntityTypeTextUrl",
             "url": entity.url,
         }),
+        FormatKind::MentionName => json!({
+            "@type": "textEntityTypeMentionName",
+            "user_id": crate::composer::mention_user_id(&entity.url).unwrap_or_default(),
+        }),
         FormatKind::CustomEmoji => json!({
             "@type": "textEntityTypeCustomEmoji",
             // int64 ids travel as strings.

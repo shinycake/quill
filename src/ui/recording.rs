@@ -374,7 +374,7 @@ impl QuillApp {
         self.record_discard_confirm = false;
         self.stop_record_preview();
         let play_once = std::mem::take(&mut self.record_once);
-        let caption = self.composer.read(cx).value().to_string();
+        let caption = self.composer_markup(cx);
         let draft = match capture.finish() {
             Ok(draft) => draft,
             Err(err) => {

@@ -636,6 +636,8 @@ pub(super) fn session_history_row(
     animation_playing: bool,
     animation_frame: Option<Arc<RenderImage>>,
     sticker_frame: Option<super::sticker_playback::AnimatedVisual>,
+    // A slot machine's five layers, bottom to top (empty for other rows).
+    dice_layers: Vec<Option<super::sticker_playback::AnimatedVisual>>,
     // Decoded animations of the message's custom emoji (by custom emoji id).
     animated_emoji: HashMap<i64, super::sticker_playback::AnimatedVisual>,
     video_playing: bool,
@@ -770,7 +772,8 @@ pub(super) fn session_history_row(
     let on_fill = message.is_outgoing && !look.plain;
     let quote = reply_header.map(|header| {
         let thumb = QuillApp::reply_thumb_path(&header, files, media_roots);
-        reply_header_strip(message.id, header, thumb, on_fill, cx)
+        let pattern = QuillApp::reply_pattern_path(&header, session, files, media_roots);
+        reply_header_strip(message.id, header, thumb, pattern, on_fill, cx)
     });
     let has_forward = forward_header.is_some();
     let forward_strip = forward_header.map(|header| {
@@ -1285,6 +1288,7 @@ pub(super) fn session_history_row(
             downloading,
             media_roots,
             sticker_frame,
+            dice_layers,
             cx,
         )),
         MessageContent::Action(_) if super::service_row::locked_paid_media(&message.content).is_some() => {
@@ -1305,10 +1309,6 @@ pub(super) fn session_history_row(
         // Slice G9: the join-from-community service row renders no extra
         // media either (the name ships in the centered row text).
         | MessageContent::ChatJoinFromCommunity { .. } => None,
-        MessageContent::Unsupported { type_name } if matches!(type_name.as_str(), "messageExpiredPhoto" | "messageExpiredVideo" | "messageExpiredVideoNote" | "messageExpiredVoiceNote") => Some(
-            div().id(("expired-message-label", message.id.0 as u64)).role(Role::Label)
-                .aria_label("This message has expired.").child("This message has expired.").into_any_element(),
-        ),
         MessageContent::Unsupported { .. } => Some(
             div().id(("unsupported-update-card", message.id.0 as u64))
                 .flex().flex_col().gap_2().p_3()

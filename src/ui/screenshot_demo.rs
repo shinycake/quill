@@ -212,6 +212,11 @@ pub enum ScreenshotDemo {
     /// MED4: composer with a typed URL → detected-URL chip + preview
     /// toggle (injected, no live Telegram).
     ReadyComposerPreview,
+    /// codex:composer-input: a draft whose formatting, mention tag and custom
+    /// emoji show in the field as they will be sent.
+    /// `QUILL_DEMO_WYSIWYG=rtl|wrap|select` picks a Persian draft, a long
+    /// bold line that wraps, or a selection across formats.
+    ReadyComposerWysiwyg,
     /// Composer core: files dragged over the chat show two drop zones
     /// (photos: quick versus without compression).
     ReadyDropZones,
@@ -388,6 +393,12 @@ pub enum ScreenshotDemo {
     /// suggested photo and birthday, expired media, live locations with
     /// Stop sharing, and link previews with a View button.
     ReadyServiceMedia,
+    /// Private chat with the follow-ups of the render slice.
+    /// `QUILL_DEMO_FOLLOWUPS_VIEW=media|replies` (default `media`): slot
+    /// machines, a running live location, expired media and timestamp
+    /// links; or reply strips with a picture, quote, emoji pattern, another
+    /// chat and a story.
+    ReadyRenderFollowups,
     /// Channel comments and reply threads (injected, no live Telegram):
     /// `QUILL_DEMO_THREADS_VIEW=posts` shows channel posts with comment
     /// bars, `thread` a post's comment thread in its discussion group,

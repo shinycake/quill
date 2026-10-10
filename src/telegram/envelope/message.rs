@@ -82,6 +82,9 @@ pub struct MessageReplyTo {
     /// `messageReplyToMessage.content`: the media of an other-chat reply
     /// (null for same-chat replies and replies without media).
     pub content: Option<Box<MessageContent>>,
+    /// `messageReplyToStory.story_id`; 0 for a reply to a message. A story
+    /// reply has `chat_id` = the poster's chat and `message_id` 0.
+    pub story_id: i32,
 }
 
 impl MessageReplyTo {
@@ -650,6 +653,24 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                     .unwrap_or(0)
                     .sat_i32(),
                 content: reply_content,
+                story_id: 0,
+            })
+        }
+        Some("messageReplyToStory") => {
+            let story_id = value
+                .get("story_id")
+                .and_then(Value::as_i64)
+                .and_then(|id| i32::try_from(id).ok())
+                .filter(|id| *id > 0)?;
+            Some(MessageReplyTo {
+                chat_id: ChatId(int53_or_zero(value.get("story_poster_chat_id"))),
+                message_id: MessageId(0),
+                quote_text: None,
+                content_preview: None,
+                origin: None,
+                origin_send_date: 0,
+                content: None,
+                story_id,
             })
         }
         _ => None,

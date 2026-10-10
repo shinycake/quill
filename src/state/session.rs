@@ -1,6 +1,6 @@
 //! The Session reducer: central client state and constructor.
 use super::*;
-use crate::telegram::envelope::{ChatBackground, EmojiChatTheme};
+use crate::telegram::envelope::{ChatAccent, ChatBackground, EmojiChatTheme};
 
 /// MED4b: composer `getLinkPreview` prefetch state (TGX `LinkPreview`).
 #[derive(Debug, Clone, Default)]
@@ -1019,6 +1019,12 @@ pub struct Session {
     /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
     /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
     pub chat_boost_status: HashMap<i64, (i32, i32)>,
+    /// Name color and reply emoji of chats that have one
+    /// (`chat.accent_color_id`, `updateChatAccentColors`).
+    pub chat_accents: HashMap<i64, ChatAccent>,
+    /// Stories replied to that `getStory` was already asked for, so a
+    /// deleted one is not requested again on every refresh.
+    pub story_reply_attempted: HashSet<(i64, i32)>,
     /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
     /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
     /// them to chain `boostChat` once per boost intent.
@@ -1600,6 +1606,8 @@ impl Session {
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),
+            chat_accents: HashMap::new(),
+            story_reply_attempted: HashSet::new(),
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
             thread: None,

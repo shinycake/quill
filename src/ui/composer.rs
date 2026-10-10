@@ -781,14 +781,24 @@ impl QuillApp {
         }
     }
 
-    /// M1: apply a formatting action to the composer selection (or insert
-    /// the marker pair at the cursor when the selection is empty).
+    /// M1: apply a formatting action to the composer selection. The field
+    /// shows formatting (codex:composer-input), so the selection gets the
+    /// format, or loses it when it has it already; with nothing selected the
+    /// next typed text does. The rich editor holds block markup, so there the
+    /// action still writes markers.
     pub(super) fn apply_composer_format(
         &mut self,
         action: FormatAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.rich_editor_open {
+            let tag = super::composer_field::tag_for_action(&action);
+            self.toggle_composer_tag(tag, window, cx);
+            self.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+            return;
+        }
         let text = self.composer.read(cx).value().to_string();
         let range = self.composer.read(cx).selected_range();
         let (new_text, new_selection) = apply_format_markup(&text, range, &action);
@@ -804,6 +814,12 @@ impl QuillApp {
     /// M1: strip formatting markers in the composer selection (whole text
     /// when the selection is empty), keeping the inner text.
     pub(super) fn clear_composer_format(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.rich_editor_open {
+            self.clear_composer_tags(window, cx);
+            self.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+            return;
+        }
         let text = self.composer.read(cx).value().to_string();
         let range = self.composer.read(cx).selected_range();
         let new_text = clear_format_markup(&text, range);
@@ -1111,13 +1127,16 @@ impl QuillApp {
                 Button::new("rich-editor-open")
                     .label("⛶ Rich editor")
                     .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_click(cx.listener(|this, _, window, cx| {
                         let premium = this
                             .live
                             .as_ref()
                             .is_some_and(|live| live.driver.session.my_is_premium());
                         if premium {
+                            // The editor works on block markup: show it raw.
+                            let markup = this.composer_markup(cx);
                             this.rich_editor_open = true;
+                            this.set_composer_markup(&markup, window, cx);
                             this.status_note = "rich editor — markup becomes blocks".into();
                         } else {
                             this.status_note = "Rich messages require Telegram Premium".into();
@@ -1144,7 +1163,7 @@ impl QuillApp {
             &str,
         ) -> Result<quill::ids::RequestId, quill::connect::ConnectSendError>,
     ) {
-        let text = self.composer.read(cx).value().to_string();
+        let text = self.composer_markup(cx);
         if text.trim().is_empty() {
             self.status_note = "type something first — the AI works on the draft".into();
         } else if let Some(live) = self.live.as_mut()
@@ -1267,8 +1286,11 @@ impl QuillApp {
             Button::new("rich-editor-close")
                 .label("\u{2715}")
                 .ghost()
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_click(cx.listener(|this, _, window, cx| {
+                    // Back to the formatted field.
+                    let markup = this.composer_markup(cx);
                     this.rich_editor_open = false;
+                    this.set_composer_markup(&markup, window, cx);
                     cx.notify();
                 })),
         );
@@ -1556,7 +1578,7 @@ impl QuillApp {
             return;
         };
         let command = item.command.clone();
-        let current = self.composer.read(cx).value().to_string();
+        let current = self.composer_markup(cx);
         let base = strip_command_menu_trigger(&current).unwrap_or(current.as_str());
         // Trailing space (tdesktop behavior): without it, the `/`-token
         // trigger still matches `/command`, the menu reopens on the next
@@ -1565,8 +1587,10 @@ impl QuillApp {
             "{} ",
             quill::composer::insert_bot_command_text(base, &command).trim_end()
         );
+        self.set_composer_markup(&next, window, cx);
         self.composer.update(cx, |input, cx| {
-            input.set_value(next, window, cx);
+            let end = input.value().len();
+            input.set_selected_range(end..end, cx);
         });
         self.close_command_menu(cx);
     }
@@ -1587,15 +1611,14 @@ impl QuillApp {
             return;
         };
         let command = format!("/{}", item.command.trim_start_matches('/'));
-        let current = self.composer.read(cx).value().to_string();
+        let current = self.composer_markup(cx);
         let rest = strip_command_menu_trigger(&current)
             .unwrap_or(current.as_str())
             .to_string();
         self.close_command_menu(cx);
-        self.composer.update(cx, |input, cx| {
-            input.set_value(rest.trim_end(), window, cx);
-            input.focus(window, cx);
-        });
+        self.set_composer_markup(rest.trim_end(), window, cx);
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
         self.submit_composer(command, window, cx);
     }
 
@@ -1737,7 +1760,7 @@ impl QuillApp {
     ) {
         self.pending_attachments.clear();
         self.edit_replace_as_file = false;
-        let current = self.composer.read(cx).value().to_string();
+        let current = self.composer_markup(cx);
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
         let reply = self.pending_reply.take();
@@ -1745,10 +1768,13 @@ impl QuillApp {
         self.pending_edit = Some(edit);
         self.saved_edit_draft = saved;
         self.saved_edit_reply = stashed;
+        self.set_composer_markup(&field, window, cx);
         self.composer.update(cx, |input, cx| {
-            input.set_value(&field, window, cx);
+            let end = input.value().len();
+            input.set_selected_range(end..end, cx);
             input.focus(window, cx);
         });
+        let field = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&field);
         self.status_note = "editing".into();
         cx.notify();
@@ -1761,8 +1787,8 @@ impl QuillApp {
         let (_, restored) = cancel_edit_draft(self.pending_edit.take(), saved);
         let (restored, reply) = cancel_edit_keeping_reply(restored, stashed);
         self.pending_reply = reply;
-        self.composer
-            .update(cx, |input, cx| input.set_value(&restored, window, cx));
+        self.set_composer_markup(&restored, window, cx);
+        let restored = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&restored);
         self.status_note = "edit cancelled".into();
         cx.notify();
@@ -1777,8 +1803,7 @@ impl QuillApp {
         let reply = self.saved_edit_reply.take();
         self.pending_edit = None;
         self.pending_reply = reply;
-        self.composer
-            .update(cx, |input, cx| input.set_value(&saved, window, cx));
+        self.set_composer_markup(&saved, window, cx);
     }
 
     pub(super) fn submit_edit(
@@ -1881,7 +1906,7 @@ impl QuillApp {
             self.saved_edit_reply = None;
             return;
         }
-        let text = self.composer.read(cx).value().to_string();
+        let text = self.composer_markup(cx);
         self.save_chat_draft(chat_id, &text, None, false, cx);
     }
 }
@@ -1998,15 +2023,21 @@ impl QuillApp {
         else {
             return;
         };
-        let text = self.composer.read(cx).value().to_string();
-        let completed = quill::composer::complete_mention(&text, user_id, &username, &name);
-        self.composer.update(cx, |input, cx| {
-            input.set_value(&completed, window, cx);
-            input.focus(window, cx);
-        });
+        // A user without a username becomes a mention tag over their first
+        // name (codex:composer-input), sent as a mention-name entity.
+        let first = self
+            .session()
+            .and_then(|s| s.user(user_id))
+            .map(|user| user.first_name.clone())
+            .unwrap_or_default();
+        let shown = super::composer_field::mention_name(&first, &name);
+        self.insert_composer_mention(user_id, &shown, &username, window, cx);
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
         if let Some(live) = self.live.as_mut() {
             live.driver.session.mention_search = None;
         }
+        let completed = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&completed);
         self.mention_selected = 0;
         cx.notify();
