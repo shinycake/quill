@@ -370,19 +370,30 @@ pub enum CloseOutcome {
     Quit,
     /// macOS: hide the whole app; the tray and Dock keep it reachable.
     HideApp,
-    /// Linux and Windows: keep the window but minimize it. GPUI cannot hide
-    /// a window after creation (`third_party/gpui-pre-*` expose no hide), so
-    /// the tray icon's "Open Quill" restores the minimized window instead.
+    /// Windows and X11: hide the window (off the taskbar and the switcher);
+    /// the tray icon's "Open Quill" shows it again
+    /// (`ui/window_control.rs`).
+    Hide,
+    /// Wayland: xdg-shell cannot hide a toplevel, so the window is
+    /// minimized and "Open Quill" asks the compositor to raise it.
     Minimize,
 }
 
 /// tdesktop "Run in the background" (`CloseBehavior::RunInBackground`): the
 /// window close button keeps the app alive when a tray icon exists.
-pub fn close_outcome(run_in_background: bool, tray_available: bool, macos: bool) -> CloseOutcome {
-    match (run_in_background && tray_available, macos) {
-        (false, _) => CloseOutcome::Quit,
-        (true, true) => CloseOutcome::HideApp,
-        (true, false) => CloseOutcome::Minimize,
+/// `hide_supported` is what `ui::window_control::hide_supported` says of
+/// the window.
+pub fn close_outcome(
+    run_in_background: bool,
+    tray_available: bool,
+    macos: bool,
+    hide_supported: bool,
+) -> CloseOutcome {
+    match (run_in_background && tray_available, macos, hide_supported) {
+        (false, _, _) => CloseOutcome::Quit,
+        (true, true, _) => CloseOutcome::HideApp,
+        (true, false, true) => CloseOutcome::Hide,
+        (true, false, false) => CloseOutcome::Minimize,
     }
 }
 
@@ -1152,11 +1163,12 @@ mod tests {
     #[test]
     fn closing_runs_in_the_background_only_with_a_tray() {
         use CloseOutcome::*;
-        assert_eq!(close_outcome(false, true, true), Quit);
-        assert_eq!(close_outcome(true, false, true), Quit);
-        assert_eq!(close_outcome(true, false, false), Quit);
-        assert_eq!(close_outcome(true, true, true), HideApp);
+        assert_eq!(close_outcome(false, true, true, true), Quit);
+        assert_eq!(close_outcome(true, false, true, true), Quit);
+        assert_eq!(close_outcome(true, false, false, true), Quit);
+        assert_eq!(close_outcome(true, true, true, true), HideApp);
+        assert_eq!(close_outcome(true, true, false, true), Hide);
         // Linux and Windows cannot hide a GPUI window: minimize it.
-        assert_eq!(close_outcome(true, true, false), Minimize);
+        assert_eq!(close_outcome(true, true, false, false), Minimize);
     }
 }

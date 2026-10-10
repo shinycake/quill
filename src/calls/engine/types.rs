@@ -338,6 +338,12 @@ impl NativeRtcServers {
     }
 }
 
+/// Stores `hook` in a callback slot of the ntgcalls state shared with its
+/// native callbacks.
+pub(crate) fn set_hook<T>(slot: &std::sync::Mutex<Option<T>>, hook: T) {
+    *slot.lock().expect("ntgcalls callback hook") = Some(hook);
+}
+
 #[cfg(test)]
 mod callback_tests {
     use super::CallbackShared;

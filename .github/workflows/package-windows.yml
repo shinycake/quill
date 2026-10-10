@@ -56,10 +56,14 @@ jobs:
         run: cargo build --release --locked -p quill-webview
       - name: tests (core + replay)
         run: cargo test --no-default-features --locked -- --nocapture
+      # Both executables ship: the package step reads quill-webview.exe
+      # next to quill.exe (scripts/windows-package.ps1).
       - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-exe
-          path: target/release/quill.exe
+          path: |
+            target/release/quill.exe
+            target/release/quill-webview.exe
           retention-days: 3
           if-no-files-found: error
 

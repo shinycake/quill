@@ -11,8 +11,10 @@
 
 use super::*;
 use crate::calls::audio_level::SpeakingTracker;
+use crate::calls::engine::CallEngine;
 use crate::state::{ActiveGroupCall, CallsPurpose, RequestPurpose};
 use crate::telegram::requests::set_group_call_participant_is_speaking;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "ui")]
@@ -141,9 +143,59 @@ pub fn tap_wanted(call: &ActiveGroupCall) -> Option<(i32, i32)> {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// Route the peer's camera, screen-share and microphone states from the
+    /// engine's worker threads into the driver queues (Phase C2e / C2j),
+    /// where the pump applies them behind the active-call gate.
+    pub(crate) fn install_remote_state_hooks(&self, engine: &mut dyn CallEngine) {
+        let outbox = self.video_state_outbox.clone();
+        engine.set_remote_video_state_callback(Arc::new(move |call_id, state| {
+            outbox
+                .lock()
+                .expect("call video state outbox")
+                .push_back((call_id, state));
+        }));
+        let outbox = self.screen_state_outbox.clone();
+        engine.set_remote_screen_state_callback(Arc::new(move |call_id, state| {
+            outbox
+                .lock()
+                .expect("call screen state outbox")
+                .push_back((call_id, state));
+        }));
+        let outbox = self.audio_state_outbox.clone();
+        engine.set_remote_audio_state_callback(Arc::new(move |call_id, muted| {
+            outbox
+                .lock()
+                .expect("call audio state outbox")
+                .push_back((call_id, muted));
+        }));
+    }
+
+    /// Apply the peer's microphone state to the active 1:1 call.
+    fn drain_remote_audio_state(&mut self) {
+        loop {
+            let update = self
+                .audio_state_outbox
+                .lock()
+                .expect("call audio state outbox")
+                .pop_front();
+            let Some((call_id, muted)) = update else {
+                break;
+            };
+            if let Some(call) = self
+                .session
+                .active_call
+                .as_mut()
+                .filter(|call| call.id == call_id)
+            {
+                call.remote_audio_muted = muted;
+            }
+        }
+    }
+
     /// Run the level tap for the tracked group call and tell TDLib when
     /// your speaking state changes. Called from the driver pump.
     pub(crate) fn pump_call_audio(&mut self) -> Result<(), ConnectSendError> {
+        self.drain_remote_audio_state();
         let wanted = self.session.active_group_call.as_ref().and_then(tap_wanted);
         let Some((group_call_id, audio_source)) = wanted else {
             let closing_speaking = self.call_audio.is_open() || self.call_audio.speaking;

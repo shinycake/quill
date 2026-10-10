@@ -30,7 +30,7 @@ impl QuillApp {
 
     pub(super) fn open_share_contact_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.share_target().is_none() {
-            self.status_note = "you can't send contacts here".into();
+            self.connection.status_note = "you can't send contacts here".into();
             cx.notify();
             return;
         }
@@ -48,7 +48,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.share_target().is_none() {
-            self.status_note = "you can't send locations here".into();
+            self.connection.status_note = "you can't send locations here".into();
             cx.notify();
             return;
         }
@@ -98,7 +98,7 @@ impl QuillApp {
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
-            self.status_note = "sharing needs a live connection (demo)".into();
+            self.connection.status_note = "sharing needs a live connection (demo)".into();
             cx.notify();
             return;
         };
@@ -109,9 +109,9 @@ impl QuillApp {
             Ok(_) => {
                 self.share.content_dialog = None;
                 self.composer_ui.pending_reply = None;
-                self.status_note = "sending contact…".into();
+                self.connection.status_note = "sending contact…".into();
             }
-            Err(_) => self.status_note = "could not send the contact".into(),
+            Err(_) => self.connection.status_note = "could not send the contact".into(),
         }
         cx.notify();
     }
@@ -127,7 +127,7 @@ impl QuillApp {
         let reply_to = self.share_reply(chat_id);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "sending dice needs a live connection (demo)".into();
+            self.connection.status_note = "sending dice needs a live connection (demo)".into();
             cx.notify();
             return;
         };
@@ -137,9 +137,9 @@ impl QuillApp {
         {
             Ok(_) => {
                 self.composer_ui.pending_reply = None;
-                self.status_note = "rolling…".into();
+                self.connection.status_note = "rolling…".into();
             }
-            Err(_) => self.status_note = "could not send the dice".into(),
+            Err(_) => self.connection.status_note = "could not send the dice".into(),
         }
         cx.notify();
     }
@@ -176,7 +176,7 @@ impl QuillApp {
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
-            self.status_note = "sharing needs a live connection (demo)".into();
+            self.connection.status_note = "sharing needs a live connection (demo)".into();
             cx.notify();
             return;
         };
@@ -187,9 +187,9 @@ impl QuillApp {
             Ok(_) => {
                 self.share.content_dialog = None;
                 self.composer_ui.pending_reply = None;
-                self.status_note = "sending location…".into();
+                self.connection.status_note = "sending location…".into();
             }
-            Err(_) => self.status_note = "could not send the location".into(),
+            Err(_) => self.connection.status_note = "could not send the location".into(),
         }
         cx.notify();
     }

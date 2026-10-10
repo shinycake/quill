@@ -51,15 +51,15 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     layer!(
         "context-menus",
         |app| app.message_ui.menu.is_some()
-            || app.chat_menu.is_some()
-            || app.archive_menu.is_some()
-            || app.global.story_menu.is_some()
+            || app.chat_list.menu.is_some()
+            || app.chat_list.archive_menu.is_some()
+            || app.chat_list.global.story_menu.is_some()
             || app.folders.tab_menu.is_some(),
         |app, _, cx| {
             app.message_ui.menu = None;
-            app.chat_menu = None;
-            app.archive_menu = None;
-            app.global.story_menu = None;
+            app.chat_list.menu = None;
+            app.chat_list.archive_menu = None;
+            app.chat_list.global.story_menu = None;
             app.folders.tab_menu = None;
             cx.notify();
         }
@@ -91,7 +91,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
-        |app| app.chat_preview.is_some() || app.preview_press.is_some(),
+        |app| app.chat_list.preview.is_some() || app.chat_list.preview_press.is_some(),
         |app, _, cx| app.close_chat_preview(cx)
     ),
     // The voice-chat rename box sits on the group-call panel; the panel
@@ -152,7 +152,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Slice P1: the checkout and receipt dialogs.
     layer!(
         "payment-dialog",
-        |app| app.payment_dialog.is_some(),
+        |app| app.payments.dialog.is_some(),
         |app, _, cx| app.close_payment_dialog(cx)
     ),
     layer!(
@@ -175,7 +175,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!("recording", |app| app.recording_active(), |app, _, cx| {
         if app.recording.locked {
-            app.status_note = "recording is locked — unlock it or use Cancel".into();
+            app.connection.status_note = "recording is locked — unlock it or use Cancel".into();
             cx.notify();
         } else {
             app.request_discard_recording(cx);
@@ -190,37 +190,49 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "notification-defaults",
-        |app| app.notification_defaults_open,
+        |app| app.notify.notification_defaults_open,
         |app, _, cx| {
-            app.notification_defaults_open = false;
-            app.defaults_sound_picker = None;
-            app.defaults_exceptions_scope = None;
+            app.notify.notification_defaults_open = false;
+            app.notify.defaults_sound_picker = None;
+            app.notify.defaults_exceptions_scope = None;
             cx.notify();
         }
     ),
     // Settings → Appearance: changes already applied live.
-    layer!("appearance", |app| app.appearance_open, |app, _, cx| {
-        app.close_appearance();
-        cx.notify();
-    }),
+    layer!(
+        "appearance",
+        |app| app.settings.appearance_open,
+        |app, _, cx| {
+            app.close_appearance();
+            cx.notify();
+        }
+    ),
     // Slice A3: Esc on the sessions overlay cancels a pending terminate
     // confirmation first, then closes the overlay.
-    layer!("sessions", |app| app.sessions_open, |app, _, cx| app
-        .close_sessions(cx)),
+    layer!("sessions", |app| app.privacy.sessions_open, |app, _, cx| {
+        app.close_sessions(cx)
+    }),
     // Slice S3: privacy peels one level per press (picker, exceptions,
     // editor, then the main overlay), like TGX's back stack.
     layer!(
         "privacy",
-        |app| app.privacy_open || app.privacy_editor.is_some() || app.privacy_exceptions.is_some(),
+        |app| app.privacy.open || app.privacy.editor.is_some() || app.privacy.exceptions.is_some(),
         |app, _, cx| app.close_privacy_top(cx)
     ),
-    layer!("mute-menu", |app| app.mute_menu_open, |app, _, cx| app
-        .close_mute_menu(cx)),
+    layer!(
+        "mute-menu",
+        |app| app.notify.mute_menu_open,
+        |app, _, cx| app.close_mute_menu(cx)
+    ),
     // Phase B4: the TTL picker.
-    layer!("ttl-picker", |app| app.ttl_picker_open, |app, _, cx| {
-        app.ttl_picker_open = false;
-        cx.notify();
-    }),
+    layer!(
+        "ttl-picker",
+        |app| app.notify.ttl_picker_open,
+        |app, _, cx| {
+            app.notify.ttl_picker_open = false;
+            cx.notify();
+        }
+    ),
     layer!(
         "sponsored-report",
         |app| app
@@ -313,7 +325,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.share.forward_result.is_some(),
         |app, _, cx| {
             app.share.forward_result = None;
-            app.status_note = "forward result dismissed".into();
+            app.connection.status_note = "forward result dismissed".into();
             cx.notify();
         }
     ),
@@ -355,7 +367,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.passcode_ui.locked {
+        if self.account.passcode.locked {
             return false;
         }
         let Some(layer) = self.topmost_esc_layer() else {
@@ -446,10 +458,10 @@ mod dispatch_tests {
     /// One opener per hand-drawn overlay, with the layer name it must show.
     fn openers() -> Vec<(&'static str, Opener)> {
         vec![
-            ("privacy", |app, _, _| app.privacy_open = true),
+            ("privacy", |app, _, _| app.privacy.open = true),
             ("privacy", |app, _, _| {
-                app.privacy_open = true;
-                app.exception_picker_open = true;
+                app.privacy.open = true;
+                app.privacy.exception_picker_open = true;
             }),
             ("story-page", |app, window, cx| {
                 app.stories.page =
@@ -467,7 +479,7 @@ mod dispatch_tests {
                 });
             }),
             ("context-menus", |app, _, _| {
-                app.archive_menu = Some(point(px(10.), px(10.)));
+                app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
             }),
             ("downloads-panel", |app, _, _| {
                 if let Some(session) = app.demo_session.as_mut() {
@@ -498,7 +510,7 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, window, cx| {
-            app.privacy_open = true;
+            app.privacy.open = true;
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             app.message_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                 position: point(px(10.), px(10.)),
@@ -508,7 +520,7 @@ mod dispatch_tests {
         assert_eq!(top(&app, vcx), Some("link-popup"));
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), Some("story-page"));
-        assert!(app.read_with(vcx, |app, _| app.privacy_open));
+        assert!(app.read_with(vcx, |app, _| app.privacy.open));
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), Some("privacy"));
         vcx.simulate_keystrokes("escape");
@@ -520,12 +532,13 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, _| {
-            app.privacy_open = true;
-            app.passcode_ui.locked = true;
+            app.privacy.open = true;
+            app.account.passcode.locked = true;
         });
         vcx.simulate_keystrokes("escape");
-        let (still_open, still_locked) =
-            app.read_with(vcx, |app, _| (app.privacy_open, app.passcode_ui.locked));
+        let (still_open, still_locked) = app.read_with(vcx, |app, _| {
+            (app.privacy.open, app.account.passcode.locked)
+        });
         assert!(still_open, "Escape must not touch layers under the lock");
         assert!(still_locked, "Escape must never unlock");
     }
@@ -555,28 +568,28 @@ mod dispatch_tests {
         let flags: [(&str, fn(&mut QuillApp), fn(&QuillApp) -> bool); 4] = [
             (
                 "proxy list",
-                |a| a.proxy_ui.list_open = true,
-                |a| a.proxy_ui.list_open,
+                |a| a.settings.proxy.list_open = true,
+                |a| a.settings.proxy.list_open,
             ),
             (
                 "marketplace",
-                |a| a.marketplace_open = true,
-                |a| a.marketplace_open,
+                |a| a.payments.marketplace_open = true,
+                |a| a.payments.marketplace_open,
             ),
             (
                 "passcode settings",
-                |a| a.passcode_ui.open = true,
-                |a| a.passcode_ui.open,
+                |a| a.account.passcode.open = true,
+                |a| a.account.passcode.open,
             ),
             (
                 "file open warning",
                 |a| {
-                    a.privacy_ui.file_open = Some(crate::ui::privacy_extra::FileOpenConfirm {
+                    a.privacy.extra.file_open = Some(crate::ui::privacy_extra::FileOpenConfirm {
                         path: std::path::PathBuf::from("setup.bin"),
                         warning: quill::file_prefs::OpenWarning::Executable,
                     });
                 },
-                |a| a.privacy_ui.file_open.is_some(),
+                |a| a.privacy.extra.file_open.is_some(),
             ),
         ];
         for (name, set, get) in flags {

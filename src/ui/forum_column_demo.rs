@@ -27,10 +27,11 @@ impl QuillApp {
     fn demo_forum_column(&mut self) {
         let view = std::env::var("QUILL_DEMO_FORUM_COLUMN_VIEW").unwrap_or_default();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_forum_column(session, &self.demo_sink, &self.demo_seq, &view);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_forum_column(session, &self.demo_ui.sink, &self.demo_ui.seq, &view);
         }
-        self.status_note = "screenshot demo — forum topic column and topic threads".into();
+        self.connection.status_note =
+            "screenshot demo — forum topic column and topic threads".into();
     }
 }
 

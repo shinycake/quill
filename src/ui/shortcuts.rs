@@ -28,7 +28,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Shortcuts, |this, _, cx| {
-                this.shortcuts_open = false;
+                this.settings.shortcuts_open = false;
                 cx.notify();
             });
         app.update(cx, |_this, cx| {
@@ -95,7 +95,7 @@ impl QuillApp {
                     .label("Close")
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.shortcuts_open = false;
+                        this.settings.shortcuts_open = false;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::Shortcuts, window, cx);
                     })),
@@ -126,7 +126,7 @@ crate::ui::shell::register_dialogs! {
     /// shortcuts reference dialog.
     Shortcuts => DialogSpec::new(
         7200,
-        |app| app.shortcuts_open,
+        |app| app.settings.shortcuts_open,
         QuillApp::build_shortcuts_dialog,
     ),
 }

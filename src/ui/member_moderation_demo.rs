@@ -64,13 +64,13 @@ impl QuillApp {
         let mode = std::env::var("QUILL_DEMO_MODERATION").unwrap_or_else(|_| "members".into());
         let chat = ChatId(CHAT);
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_manage(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_manage(session, &self.demo_ui.sink, &self.demo_ui.seq);
             if matches!(
                 mode.as_str(),
                 "leave" | "pick" | "confirm" | "blocked" | "delete"
             ) {
-                apply_owner_and_message(session, &self.demo_sink, &self.demo_seq);
+                apply_owner_and_message(session, &self.demo_ui.sink, &self.demo_ui.seq);
             }
             session.ownership.can_transfer = Some(match mode.as_str() {
                 "blocked" => CanTransferOwnershipResult::PasswordTooFresh {
@@ -85,7 +85,7 @@ impl QuillApp {
         }
         match mode.as_str() {
             "members" => {
-                self.member_dialog = Some(MemberDialog::new(window, cx, chat, false));
+                self.admin.member_dialog = Some(MemberDialog::new(window, cx, chat, false));
             }
             "restrict" | "ban" => {
                 self.open_restrict_dialog(chat, 5, mode == "ban", window, cx);
@@ -105,7 +105,7 @@ impl QuillApp {
             "pick" => self.open_transfer_ownership(chat, window, cx),
             "confirm" | "blocked" => {
                 self.open_transfer_ownership(chat, window, cx);
-                if let Some(dialog) = self.ownership_dialog.as_mut() {
+                if let Some(dialog) = self.admin.ownership_dialog.as_mut() {
                     dialog.stage = OwnershipStage::Confirm {
                         user_id: 5,
                         leave_after: false,
@@ -148,7 +148,7 @@ impl QuillApp {
             }
             _ => {}
         }
-        self.status_note = format!("screenshot demo — member moderation: {mode}");
+        self.connection.status_note = format!("screenshot demo — member moderation: {mode}");
         cx.notify();
     }
 }

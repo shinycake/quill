@@ -196,30 +196,32 @@ impl QuillApp {
                         .and_then(|s| s.marketplace_gift.as_ref())
                         .is_some_and(|g| g.loading || g.sending);
                     if !busy {
-                        self.marketplace_name_input
+                        self.payments
+                            .marketplace_name_input
                             .update(cx, |input, cx| input.set_value("", window, cx));
-                        self.marketplace_comment_input
+                        self.payments
+                            .marketplace_comment_input
                             .update(cx, |input, cx| input.set_value("", window, cx));
-                        self.marketplace_private = true;
-                        self.marketplace_error = None;
+                        self.payments.marketplace_private = true;
+                        self.payments.marketplace_error = None;
                         if let Some(live) = self.live.as_mut() {
                             live.driver.session.marketplace_gift = None;
                         } else if let Some(session) = self.demo_session.as_mut() {
                             session.marketplace_gift = None;
                         }
                     }
-                    self.marketplace_open = true;
+                    self.payments.marketplace_open = true;
                 } else {
-                    self.status_note =
+                    self.connection.status_note =
                         "Open a private chat or channel to choose the gift recipient.".into();
                 }
                 cx.notify();
             }
             NavigationAction::Appearance => {
-                self.appearance_open = true;
+                self.settings.appearance_open = true;
                 cx.notify();
             }
-            NavigationAction::Privacy => self.settings_page = Some("Privacy and security"),
+            NavigationAction::Privacy => self.settings.page = Some("Privacy and security"),
             NavigationAction::TwoFa => {
                 self.open_twofa(cx);
             }
@@ -236,12 +238,12 @@ impl QuillApp {
             NavigationAction::Accounts => {
                 self.open_accounts(cx);
             }
-            NavigationAction::Settings => self.settings_open = true,
-            NavigationAction::Notifications => self.notification_defaults_open = true,
+            NavigationAction::Settings => self.settings.open = true,
+            NavigationAction::Notifications => self.notify.notification_defaults_open = true,
             NavigationAction::Profile => self.open_edit_profile_dialog(window, cx),
-            NavigationAction::ChatSettings => self.settings_page = Some("Chat settings"),
-            NavigationAction::ContactsSettings => self.settings_page = Some("Contacts"),
-            NavigationAction::CallSettings => self.settings_page = Some("Calls"),
+            NavigationAction::ChatSettings => self.settings.page = Some("Chat settings"),
+            NavigationAction::ContactsSettings => self.settings.page = Some("Contacts"),
+            NavigationAction::CallSettings => self.settings.page = Some("Calls"),
             NavigationAction::MarkRead => self.mark_all_chats_as_read(false, cx),
             NavigationAction::Archive => self.open_archive_folder(cx),
             NavigationAction::ArchiveToList => self.toggle_archive_in_main_menu(cx),
@@ -258,8 +260,8 @@ impl QuillApp {
             .label(label)
             .ghost()
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.settings_open = false;
-                this.settings_page = None;
+                this.settings.open = false;
+                this.settings.page = None;
                 window.close_dialog(cx);
                 this.navigate(action, window, cx);
             }))
@@ -274,7 +276,7 @@ impl QuillApp {
                 Button::new("privacy-rules")
                     .label("Privacy rules and blocked users")
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.settings_open = false;
+                        this.settings.open = false;
                         window.close_dialog(cx);
                         this.open_privacy(cx);
                     })),
@@ -442,9 +444,9 @@ impl QuillApp {
                     menu =
                         menu.item(PopupMenuItem::new("Auto-Delete").on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
-                                this.ttl_picker_open = true;
-                                this.ttl_custom_open = false;
-                                this.ttl_custom_secs = this
+                                this.notify.ttl_picker_open = true;
+                                this.notify.ttl_custom_open = false;
+                                this.notify.ttl_custom_secs = this
                                     .session()
                                     .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
                                     .map(|c| c.message_auto_delete_time)
@@ -471,7 +473,8 @@ impl QuillApp {
     /// Whether a dark theme is in effect (the Night Mode switch).
     pub(super) fn night_mode_on(&self) -> bool {
         quill::main_menu::night_mode_on(
-            self.appearance_applied
+            self.settings
+                .appearance_applied
                 .as_ref()
                 .map(|(mode, ..)| *mode == gpui_kit::component::theme::ThemeMode::Dark),
             self.appearance.theme,
@@ -557,14 +560,14 @@ impl QuillApp {
                 shell,
                 DialogKind::Settings,
                 |this, _, cx| {
-                    this.settings_open = false;
-                    this.settings_page = None;
+                    this.settings.open = false;
+                    this.settings.page = None;
                     cx.notify();
                 },
             ))
             .content(crate::ui::shell::scrollable_dialog_content(
                 move |content, _, cx| {
-                    let page = app_c.read(cx).settings_page;
+                    let page = app_c.read(cx).settings.page;
                     if let Some(page) = page {
                         return content.child(app_c.update(cx, |this, cx| {
                             div()
@@ -575,7 +578,7 @@ impl QuillApp {
                                     Button::new("settings-back")
                                         .label("Back to Settings")
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            this.settings_page = None;
+                                            this.settings.page = None;
                                             cx.notify();
                                         })),
                                 )
@@ -634,7 +637,7 @@ impl QuillApp {
                                                 | NavigationAction::CallSettings
                                                 | NavigationAction::Privacy
                                         ) {
-                                            this.settings_open = false;
+                                            this.settings.open = false;
                                             window.close_dialog(cx);
                                         }
                                         this.navigate(action, window, cx);
@@ -703,8 +706,8 @@ impl QuillApp {
             px(quill::settings::MIN_SIDEBAR_WIDTH),
             px(quill::settings::MAX_SIDEBAR_WIDTH),
         );
-        if width != self.sidebar_width {
-            self.sidebar_width = width;
+        if width != self.frame.sidebar_width {
+            self.frame.sidebar_width = width;
             self.schedule_window_state_save(window, cx);
             cx.notify();
         }
@@ -717,16 +720,16 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.window_state_save_pending {
+        if self.frame.window_state_save_pending {
             return;
         }
-        self.window_state_save_pending = true;
+        self.frame.window_state_save_pending = true;
         cx.spawn_in(window, async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(600))
                 .await;
             let _ = this.update_in(cx, |this, window, _| {
-                this.window_state_save_pending = false;
+                this.frame.window_state_save_pending = false;
                 this.save_window_state(window);
             });
         })
@@ -746,7 +749,7 @@ impl QuillApp {
             width: f32::from(bounds.size.width),
             height: f32::from(bounds.size.height),
             maximized,
-            sidebar_width: f32::from(self.sidebar_width),
+            sidebar_width: f32::from(self.frame.sidebar_width),
         };
         // Demo windows run on an isolated app root; nothing to protect.
         if let Some(state) = state.sanitized() {
@@ -758,7 +761,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Settings => DialogSpec::new(
         7300,
-        |app| app.settings_open,
+        |app| app.settings.open,
         QuillApp::build_settings_dialog,
     ),
 }

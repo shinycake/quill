@@ -121,12 +121,12 @@ impl QuillApp {
             match access(device) {
                 Access::Granted => {}
                 Access::Denied => {
-                    self.status_note = denied_note(device);
+                    self.connection.status_note = denied_note(device);
                     cx.notify();
                     return;
                 }
                 Access::Undetermined => {
-                    self.status_note = format!(
+                    self.connection.status_note = format!(
                         "Allow Quill to use the {} to record.",
                         if device { "camera" } else { "microphone" }
                     );
@@ -149,7 +149,7 @@ impl QuillApp {
                             if granted {
                                 this.with_capture_access(camera, start, cx);
                             } else {
-                                this.status_note = denied_note(device);
+                                this.connection.status_note = denied_note(device);
                                 cx.notify();
                             }
                         });

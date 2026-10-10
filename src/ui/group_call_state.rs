@@ -3,6 +3,8 @@
 use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub(crate) struct GroupCallUi {
@@ -37,6 +39,10 @@ pub(crate) struct GroupCallUi {
     pub(super) level_anim: quill::calls::audio_level::LevelAnimation,
     pub(super) level_seen: f32,
     pub(super) demo_level: Option<f32>,
+    /// Phase C2g: group-call video tiles cached by
+    /// `(group_call_id, user_id, is_screen)` → `(frame seq, image)`,
+    /// rebuilt only when that slot's frame sequence changes.
+    pub(super) video_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,
 }
 
 impl GroupCallUi {
@@ -62,6 +68,7 @@ impl GroupCallUi {
             ),
             level_seen: 0.0,
             demo_level: None,
+            video_images: HashMap::new(),
         }
     }
 }

@@ -208,7 +208,8 @@ pub(in crate::ui) fn document_chip(
         .flex()
         .items_center()
         .gap_3()
-        .min_w(px(220.))
+        .min_w(px(quill::bubble_layout::FILE_MIN_WIDTH as f32))
+        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
         .child(disc)
         .child(
             div()

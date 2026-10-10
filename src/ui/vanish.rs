@@ -280,7 +280,7 @@ impl QuillApp {
             return;
         };
         let now = Instant::now();
-        let mut vanishing = self.vanishing.borrow_mut();
+        let mut vanishing = self.history.vanishing.borrow_mut();
         for id in ids {
             let Some(message) = history.messages.get(&id.0) else {
                 continue;
@@ -323,7 +323,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let now = Instant::now();
-        let mut vanishing = self.vanishing.borrow_mut();
+        let mut vanishing = self.history.vanishing.borrow_mut();
         vanishing.retain(|ghost| match ghost.started {
             Some(started) => now.duration_since(started).as_secs_f32() < DUST_LIFE,
             None => now.duration_since(ghost.requested) < VANISH_WAIT,
@@ -360,7 +360,7 @@ impl QuillApp {
 
     /// Seconds since a crumbling message left the history.
     pub(super) fn vanish_progress(&self, id: MessageId) -> Option<f32> {
-        let vanishing = self.vanishing.borrow();
+        let vanishing = self.history.vanishing.borrow();
         vanishing
             .iter()
             .find(|ghost| ghost.message.id == id)?
@@ -370,7 +370,7 @@ impl QuillApp {
     /// For the history rows key: a fresh value every frame while a
     /// message crumbles.
     pub(super) fn vanish_rows_hash(&self) -> Option<u128> {
-        let vanishing = self.vanishing.borrow();
+        let vanishing = self.history.vanishing.borrow();
         (!vanishing.is_empty()).then(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -381,7 +381,7 @@ impl QuillApp {
     /// A crumbling message's row, `t` seconds in: the message cut away
     /// behind the front, then an empty gap closing with a half-sine ease.
     pub(super) fn ghost_row(&self, id: MessageId, t: f32, row: AnyElement) -> AnyElement {
-        let vanishing = self.vanishing.borrow();
+        let vanishing = self.history.vanishing.borrow();
         let Some(ghost) = vanishing.iter().find(|ghost| ghost.message.id == id) else {
             return row;
         };
@@ -403,7 +403,7 @@ impl QuillApp {
 
     /// The dust of every crumbling message, over the history.
     pub(super) fn vanish_overlay(&self) -> Option<AnyElement> {
-        let vanishing = self.vanishing.borrow();
+        let vanishing = self.history.vanishing.borrow();
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
             .filter_map(|ghost| Some((ghost.elapsed()?, ghost.grains.clone())))

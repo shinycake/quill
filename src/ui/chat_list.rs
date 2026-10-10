@@ -435,9 +435,9 @@ impl QuillApp {
             .clone()
             .filter(|reply| reply.target_chat == Some(chat_id));
         // Choosing a chat from the list ends the peek at it.
-        self.forum_chats_peek = false;
+        self.chat_list.forum_chats_peek = false;
         // Phase B4: the TTL picker belongs to the previous chat.
-        self.ttl_picker_open = false;
+        self.notify.ttl_picker_open = false;
         if self
             .composer_ui
             .pending_reply
@@ -503,7 +503,7 @@ impl QuillApp {
             } else {
                 driver.select_chat(chat_id)
             };
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "".into(),
                 Err(_) => "could not open chat".into(),
             };
@@ -531,12 +531,12 @@ impl QuillApp {
 
     /// Slice G10: open the communities hub dialog (side-menu entry).
     pub(super) fn open_community_hub(&mut self, cx: &mut Context<Self>) {
-        self.community_ui.hub_open = true;
+        self.admin.community.hub_open = true;
         cx.notify();
     }
 
     pub(super) fn close_community_hub(&mut self, cx: &mut Context<Self>) {
-        self.community_ui.hub_open = false;
+        self.admin.community.hub_open = false;
         cx.notify();
     }
 
@@ -551,12 +551,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.folders.tab = None;
-        self.contacts_tab_open = false;
-        self.chat_filter = ChatListFilter::Community(community_id);
+        self.chat_list.contacts_tab_open = false;
+        self.chat_list.filter = ChatListFilter::Community(community_id);
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.get_community_full_info(community_id)
         {
-            self.status_note = format!("community info request failed: {err:?}");
+            self.connection.status_note = format!("community info request failed: {err:?}");
         }
         cx.notify();
     }
@@ -565,8 +565,8 @@ impl QuillApp {
     /// (banner ✕). Selecting a folder tab or the Unread/Archived tabs
     /// also exits it — they overwrite `chat_filter`.
     pub(super) fn exit_community_chat_list_mode(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.chat_filter, ChatListFilter::Community(_)) {
-            self.chat_filter = ChatListFilter::All;
+        if matches!(self.chat_list.filter, ChatListFilter::Community(_)) {
+            self.chat_list.filter = ChatListFilter::All;
             cx.notify();
         }
     }
@@ -622,7 +622,7 @@ impl QuillApp {
         // "Tabs on the left": the folders live in the column beside the
         // list, so only the community banner stays here.
         let tabs = (!self.folder_rail_active()).then(|| self.folder_tabs(cx));
-        if let ChatListFilter::Community(community_id) = self.chat_filter {
+        if let ChatListFilter::Community(community_id) = self.chat_list.filter {
             div()
                 .flex()
                 .flex_col()
@@ -639,21 +639,21 @@ impl QuillApp {
     /// Slice CL3: multi-select mode — enter with one chat checked (from
     /// the row-menu "Select" item).
     pub(super) fn enter_select_mode(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.selected_chats.insert(chat_id.0);
+        self.chat_list.selected.insert(chat_id.0);
         cx.notify();
     }
 
     /// Slice CL3: leave multi-select mode, clearing the checks.
     pub(super) fn exit_select_mode(&mut self, cx: &mut Context<Self>) {
-        self.selected_chats.clear();
+        self.chat_list.selected.clear();
         cx.notify();
     }
 
     /// Slice CL3: toggle one row's check in multi-select mode; the last
     /// uncheck exits the mode.
     pub(super) fn toggle_chat_selected(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if !self.selected_chats.remove(&chat_id.0) {
-            self.selected_chats.insert(chat_id.0);
+        if !self.chat_list.selected.remove(&chat_id.0) {
+            self.chat_list.selected.insert(chat_id.0);
         }
         cx.notify();
     }
@@ -677,7 +677,7 @@ impl QuillApp {
             })
             .unwrap_or_default();
         for id in unread {
-            self.selected_chats.insert(id);
+            self.chat_list.selected.insert(id);
         }
         cx.notify();
     }
@@ -694,7 +694,7 @@ impl QuillApp {
                 self.toggle_chat_pin(id, cx);
             }
         }
-        self.selected_chats.clear();
+        self.chat_list.selected.clear();
         cx.notify();
     }
 
@@ -702,7 +702,12 @@ impl QuillApp {
     /// single-chat mark-read path (`toggle_chat_marked_as_unread`
     /// does the TGX `viewMessages` flow when there is unread state).
     pub(super) fn mark_selected_read(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<ChatId> = self.selected_chats.iter().map(|id| ChatId(*id)).collect();
+        let ids: Vec<ChatId> = self
+            .chat_list
+            .selected
+            .iter()
+            .map(|id| ChatId(*id))
+            .collect();
         for id in ids {
             // `toggle_chat_marked_as_unread` is a genuine toggle: calling it
             // on a fully-read chat would mark it *unread* — never do that
@@ -715,7 +720,7 @@ impl QuillApp {
                 self.toggle_chat_marked_as_unread(id, cx);
             }
         }
-        self.selected_chats.clear();
+        self.chat_list.selected.clear();
         cx.notify();
     }
 
@@ -725,7 +730,8 @@ impl QuillApp {
     /// per chat that still needs the change.
     pub(super) fn toggle_selected_mute(&mut self, cx: &mut Context<Self>) {
         let chats: Vec<(ChatId, bool)> = self
-            .selected_chats
+            .chat_list
+            .selected
             .iter()
             .map(|&id| {
                 let muted = self
@@ -741,7 +747,7 @@ impl QuillApp {
                 self.apply_chat_mute(id, if mute_all { MUTE_FOREVER } else { 0 }, cx);
             }
         }
-        self.selected_chats.clear();
+        self.chat_list.selected.clear();
         cx.notify();
     }
 
@@ -751,7 +757,8 @@ impl QuillApp {
     /// the change.
     pub(super) fn toggle_selected_archive(&mut self, cx: &mut Context<Self>) {
         let chats: Vec<(ChatId, bool)> = self
-            .selected_chats
+            .chat_list
+            .selected
             .iter()
             .map(|&id| {
                 let archived = self
@@ -767,14 +774,15 @@ impl QuillApp {
                 self.toggle_archive(id, cx);
             }
         }
-        self.selected_chats.clear();
+        self.chat_list.selected.clear();
         cx.notify();
     }
 
     /// Slice CL3: per-selected-chat pin state, honoring the pinned flag
     /// of the list the chat actually sits in (main vs archive).
     pub(super) fn selected_chat_pin_states(&self) -> Vec<(ChatId, bool)> {
-        self.selected_chats
+        self.chat_list
+            .selected
             .iter()
             .map(|&id| {
                 let pinned = self
@@ -797,7 +805,7 @@ impl QuillApp {
     pub(super) fn delete_selected_chats(&mut self, cx: &mut Context<Self>) {
         // The dialog needs a chat id; the ids to delete are read from
         // the live selection at submit time.
-        if let Some(first) = self.selected_chats.iter().next().map(|id| ChatId(*id)) {
+        if let Some(first) = self.chat_list.selected.iter().next().map(|id| ChatId(*id)) {
             self.open_group_confirm(first, GroupConfirmAction::RemoveSelectedChats, cx);
         }
     }
@@ -810,9 +818,9 @@ impl QuillApp {
         if self.pane_mode() != PaneMode::Ready {
             return div().font_semibold().child("Chats").into_any_element();
         }
-        let selected = if self.contacts_tab_open {
+        let selected = if self.chat_list.contacts_tab_open {
             1
-        } else if self.calls_tab_open {
+        } else if self.chat_list.calls_tab_open {
             2
         } else {
             0
@@ -837,14 +845,14 @@ impl QuillApp {
     }
 
     pub(super) fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
-        self.contacts_tab_open = false;
-        self.calls_tab_open = false;
+        self.chat_list.contacts_tab_open = false;
+        self.chat_list.calls_tab_open = false;
         cx.notify();
     }
 
     pub(super) fn open_contacts_tab(&mut self, cx: &mut Context<Self>) {
-        self.contacts_tab_open = true;
-        self.calls_tab_open = false;
+        self.chat_list.contacts_tab_open = true;
+        self.chat_list.calls_tab_open = false;
         // Slice A6: the sync toggle gates the `getContacts` refresh —
         // with sync off the tab shows the last loaded snapshot.
         let sync_on = self
@@ -855,7 +863,7 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
-            self.status_note = format!("contacts request failed: {err:?}");
+            self.connection.status_note = format!("contacts request failed: {err:?}");
         }
         cx.notify();
     }
@@ -864,15 +872,15 @@ impl QuillApp {
     /// server-side call history plus both call privacy settings. Demo
     /// mode injects synthetic data instead (screenshot proof).
     pub(super) fn open_calls_tab(&mut self, cx: &mut Context<Self>) {
-        self.contacts_tab_open = false;
-        self.calls_tab_open = true;
+        self.chat_list.contacts_tab_open = false;
+        self.chat_list.calls_tab_open = true;
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.fetch_call_history() {
-                self.status_note = format!("call history request failed: {err:?}");
+                self.connection.status_note = format!("call history request failed: {err:?}");
             }
             for key in [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer] {
                 if let Err(err) = live.driver.fetch_privacy_rules(key) {
-                    self.status_note = format!("call privacy request failed: {err:?}");
+                    self.connection.status_note = format!("call privacy request failed: {err:?}");
                 }
             }
             // Slice S4: the call-settings "Use less data for calls"
@@ -886,12 +894,12 @@ impl QuillApp {
 
     pub(super) fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
         self.folders.tab = folder;
-        self.chat_filter = ChatListFilter::All;
-        self.contacts_tab_open = false;
+        self.chat_list.filter = ChatListFilter::All;
+        self.chat_list.contacts_tab_open = false;
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
             && let Err(err) = live.driver.load_folder_chats(folder_id)
         {
-            self.status_note = format!("folder load failed: {err:?}");
+            self.connection.status_note = format!("folder load failed: {err:?}");
         }
         // A shared folder: has its owner added chats?
         self.poll_folder_new_chats();
@@ -902,17 +910,17 @@ impl QuillApp {
     /// first move starts the reorder, later ones swap rows live.
     pub(super) fn pin_drag_move(&mut self, drag: &PinnedChatDrag, y: f32, cx: &mut Context<Self>) {
         let now = std::time::Instant::now();
-        if let Some(reorder) = self.pin_reorder.as_mut()
+        if let Some(reorder) = self.chat_list.pin_reorder.as_mut()
             && reorder.dragging() == Some(drag.chat_id.0)
         {
             reorder.drag_to(y, now);
         } else {
             // tdesktop `kStartReorderThreshold`: the pointer must travel
             // 30px vertically before the press becomes a reorder.
-            let anchor = match self.pin_drag_anchor {
+            let anchor = match self.chat_list.pin_drag_anchor {
                 Some((id, anchor)) if id == drag.chat_id.0 => anchor,
                 _ => {
-                    self.pin_drag_anchor = Some((drag.chat_id.0, y));
+                    self.chat_list.pin_drag_anchor = Some((drag.chat_id.0, y));
                     return;
                 }
             };
@@ -940,8 +948,8 @@ impl QuillApp {
                     Some((*id, f32::from(height)))
                 })
                 .collect();
-            self.pin_reorder_archived = drag.archived;
-            self.pin_reorder =
+            self.chat_list.pin_reorder_archived = drag.archived;
+            self.chat_list.pin_reorder =
                 quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, y);
         }
         self.notify_sidebar(cx);
@@ -951,9 +959,9 @@ impl QuillApp {
     /// `savePinnedOrder`): the dragged row slides into its slot and the
     /// full order goes out as `setPinnedChats`.
     pub(super) fn finish_pin_drag(&mut self, cx: &mut Context<Self>) {
-        self.pin_drag_anchor = None;
-        let archived = self.pin_reorder_archived;
-        let Some(reorder) = self.pin_reorder.as_mut() else {
+        self.chat_list.pin_drag_anchor = None;
+        let archived = self.chat_list.pin_reorder_archived;
+        let Some(reorder) = self.chat_list.pin_reorder.as_mut() else {
             return;
         };
         if reorder.dragging().is_none() {
@@ -962,7 +970,7 @@ impl QuillApp {
         let ids = reorder.release(std::time::Instant::now());
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(archived, ids) {
-                self.status_note = format!("pin reorder failed: {err:?}");
+                self.connection.status_note = format!("pin reorder failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(archived, &ids);
@@ -976,7 +984,7 @@ impl QuillApp {
     pub(super) fn mark_all_chats_as_read(&mut self, archived: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.mark_all_chats_as_read(archived) {
-                self.status_note = format!("mark all read failed: {err:?}");
+                self.connection.status_note = format!("mark all read failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             // Demo: clear the badges directly so the fixture shows the
@@ -1022,13 +1030,13 @@ impl QuillApp {
             match live.driver.create_private_chat_with_self() {
                 Ok(Some(_)) => {}
                 Ok(None) if live.driver.session.my_user_id.is_none() => {
-                    self.status_note = "account info not loaded yet".into();
+                    self.connection.status_note = "account info not loaded yet".into();
                 }
                 Ok(None) => {}
-                Err(err) => self.status_note = format!("saved messages failed: {err:?}"),
+                Err(err) => self.connection.status_note = format!("saved messages failed: {err:?}"),
             }
         } else {
-            self.status_note = "no Saved Messages chat in this demo".into();
+            self.connection.status_note = "no Saved Messages chat in this demo".into();
         }
         cx.notify();
     }
@@ -1052,7 +1060,7 @@ impl QuillApp {
                     .driver
                     .archive_chat(chat_id)
             };
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) if archived => "unarchiving…".into(),
                 Ok(_) => "archiving…".into(),
                 Err(_) => "could not change archive".into(),
@@ -1062,7 +1070,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_archive(chat_id, !archived);
-            self.status_note = if archived {
+            self.connection.status_note = if archived {
                 "unarchived".into()
             } else {
                 "archived".into()
@@ -1113,7 +1121,7 @@ impl QuillApp {
                 })
                 .count() as i32;
             if pinned_count >= limit.max(0) {
-                self.status_note = if archived {
+                self.connection.status_note = if archived {
                     format!(
                         "Sorry, you can pin up to {limit} chats and {limit} secret chats at once"
                     )
@@ -1135,7 +1143,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .toggle_chat_pin(chat_id, !pinned);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(Some(_)) if pinned => "unpinning…".into(),
                 Ok(Some(_)) => "pinning…".into(),
                 Ok(None) => "pin request already in flight".into(),
@@ -1146,7 +1154,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_pin(chat_id, !pinned, archived);
-            self.status_note = if pinned {
+            self.connection.status_note = if pinned {
                 "unpinned".into()
             } else {
                 "pinned".into()
@@ -1181,7 +1189,7 @@ impl QuillApp {
                     .is_some_and(|h| !h.messages.is_empty())
         });
         if marked && nothing_to_view && self.live.is_some() {
-            self.status_note = "open the chat to mark it as read".into();
+            self.connection.status_note = "open the chat to mark it as read".into();
             cx.notify();
             return;
         }
@@ -1199,7 +1207,7 @@ impl QuillApp {
                     .driver
                     .toggle_chat_marked_as_unread(chat_id, true)
             };
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(Some(_)) if marked => "marking as read…".into(),
                 Ok(Some(_)) => "marking as unread…".into(),
                 Ok(None) => "request already in flight".into(),
@@ -1210,7 +1218,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_marked_as_unread(chat_id, !marked);
-            self.status_note = if marked {
+            self.connection.status_note = if marked {
                 "marked as read".into()
             } else {
                 "marked as unread".into()
@@ -1238,7 +1246,7 @@ impl QuillApp {
             .id("sidebar")
             .when(mode != PaneMode::Ready, |this| this.overflow_y_scroll())
             .track_focus(&self.focus_sidebar)
-            .w(self.sidebar_width)
+            .w(self.frame.sidebar_width)
             .flex_none()
             .h_full()
             .p_3()
@@ -1257,14 +1265,14 @@ impl QuillApp {
                         this.child(self.main_navigation_menu(cx))
                     })
                     .when(
-                        mode == PaneMode::Ready && self.passcode_ui.enabled,
+                        mode == PaneMode::Ready && self.account.passcode.enabled,
                         |this| this.child(self.lock_button(cx)),
                     )
                     .child(self.list_tabs(cx))
                     .children(self.proxy_shield_button(cx)),
             )
             .when_some(
-                (!self.contacts_tab_open && !self.calls_tab_open)
+                (!self.chat_list.contacts_tab_open && !self.chat_list.calls_tab_open)
                     .then(|| chat_list_caption(mode, self.session()))
                     .flatten(),
                 |this, caption| {
@@ -1298,9 +1306,9 @@ impl QuillApp {
                 );
             }
             PaneMode::Ready => {
-                if self.contacts_tab_open {
+                if self.chat_list.contacts_tab_open {
                     list = list.child(self.contacts_panel(cx));
-                } else if self.calls_tab_open {
+                } else if self.chat_list.calls_tab_open {
                     list = list.child(
                         div()
                             .id("calls-scroll")
@@ -1334,7 +1342,7 @@ impl QuillApp {
                         list = list.child(self.search_results(cx));
                     } else {
                         let folder = self.folders.tab;
-                        let filter = self.chat_filter;
+                        let filter = self.chat_list.filter;
                         // Parity slice: folder names + tags flag for chat-row
                         // chips.
                         let (folder_names, show_folder_tags) = self.folder_tag_context();
@@ -1379,12 +1387,12 @@ impl QuillApp {
                         // check instead of opening the chat. Defined
                         // once here so the select bar, the main loop,
                         // and the archive loop all see it.
-                        let selecting = !self.selected_chats.is_empty();
+                        let selecting = !self.chat_list.selected.is_empty();
                         // Slice CL3: multi-select action bar (TGX
                         // `ChatsController` selection header): the
                         // selected count, the bulk actions, and cancel.
                         if selecting {
-                            let count = self.selected_chats.len();
+                            let count = self.chat_list.selected.len();
                             list = list.child(
                                 div()
                                     .id("select-bar")
@@ -1571,9 +1579,9 @@ impl QuillApp {
                             // A live pinned drag shows its swapped order
                             // (tdesktop moves rows while dragging); stable,
                             // so unpinned rows keep their place.
-                            if let Some(reorder) = self.pin_reorder.as_ref()
+                            if let Some(reorder) = self.chat_list.pin_reorder.as_ref()
                                 && reorder.dragging().is_some()
-                                && !self.pin_reorder_archived
+                                && !self.chat_list.pin_reorder_archived
                             {
                                 chats.sort_by_key(|chat| {
                                     reorder.position(chat.id.0).unwrap_or(usize::MAX)
@@ -1601,9 +1609,9 @@ impl QuillApp {
                                 .unwrap_or_default();
                             if filter == ChatListFilter::Unread {
                                 archived.retain(|c| c.is_unread());
-                            } else if let Some(reorder) = self.pin_reorder.as_ref()
+                            } else if let Some(reorder) = self.chat_list.pin_reorder.as_ref()
                                 && reorder.dragging().is_some()
-                                && self.pin_reorder_archived
+                                && self.chat_list.pin_reorder_archived
                             {
                                 archived.sort_by_key(|chat| {
                                     reorder.position(chat.id.0).unwrap_or(usize::MAX)
@@ -1627,12 +1635,12 @@ impl QuillApp {
                         }
                         // Pinned-drag animation: keep frames coming while
                         // rows slide, drop the state once everything settled.
-                        if let Some(reorder) = self.pin_reorder.as_ref() {
+                        if let Some(reorder) = self.chat_list.pin_reorder.as_ref() {
                             let now = std::time::Instant::now();
                             if reorder.settled(now)
-                                || (!self.window_active.get() && reorder.dragging().is_none())
+                                || (!self.frame.window_active.get() && reorder.dragging().is_none())
                             {
-                                self.pin_reorder = None;
+                                self.chat_list.pin_reorder = None;
                             } else {
                                 self.request_animation_tick(60, cx);
                             }
@@ -1659,7 +1667,7 @@ impl QuillApp {
                                 })
                                 .collect(),
                         );
-                        self.chat_list_items = items;
+                        self.chat_list.items = items;
                         list = list.child(
                             div()
                                 .flex()
@@ -1701,7 +1709,7 @@ impl QuillApp {
                                     )
                                     // The app-owned handle keeps scroll position
                                     // across re-renders (scroll restoration).
-                                    .track_scroll(&self.chat_list_scroll)
+                                    .track_scroll(&self.chat_list.scroll)
                                     .flex_1()
                                     .min_h_0()
                                     .w_full(),
@@ -1716,7 +1724,7 @@ impl QuillApp {
                 return div()
                     .id("sidebar-with-folder-rail")
                     .flex()
-                    .w(self.sidebar_width + px(self.folder_rail_width()))
+                    .w(self.frame.sidebar_width + px(self.folder_rail_width()))
                     .flex_none()
                     .h_full()
                     .child(self.folder_rail(cx))
@@ -1752,7 +1760,7 @@ impl QuillApp {
             matches!(auth.action, quill::auth::AuthAction::EnterEmail) && self.live.is_some(),
             |this| {
                 this.child(
-                    Textarea::new(&self.email_input)
+                    Textarea::new(&self.auth_ui.email_input)
                         .aria_label("Email address")
                         .h(px(40.)),
                 )
@@ -1766,7 +1774,7 @@ impl QuillApp {
         .when(show_phone, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Phone"))
                 .child(
-                    Textarea::new(&self.phone_input)
+                    Textarea::new(&self.auth_ui.phone_input)
                         .aria_label("Phone number")
                         .h(px(40.)),
                 )
@@ -1781,7 +1789,7 @@ impl QuillApp {
         })
         .when(
             quill::auth::can_request_qr_login(&self.current_auth())
-                && (self.live.is_some() || self.demo_auth_inputs),
+                && (self.live.is_some() || self.auth_ui.demo_inputs),
             |this| {
                 this.child(
                     Button::new("qr-login")
@@ -1795,7 +1803,7 @@ impl QuillApp {
         .when(show_code, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Code"))
                 .child(
-                    Textarea::new(&self.code_input)
+                    Textarea::new(&self.auth_ui.code_input)
                         .aria_label("Sign-in code")
                         .h(px(40.)),
                 )
@@ -1875,7 +1883,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let ids: Vec<ChatId> = self
-            .chat_list_items
+            .chat_list
+            .items
             .iter()
             .filter_map(|item| match item {
                 ChatListItem::Chat { id, .. } => Some(*id),

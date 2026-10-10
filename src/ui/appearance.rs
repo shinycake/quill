@@ -82,17 +82,17 @@ impl QuillApp {
     }
     pub(super) fn close_appearance(&mut self) {
         super::keybindings::close_appearance_capture(
-            &mut self.appearance_open,
-            &mut self.keybinding_capture,
-            &mut self.keybinding_error,
+            &mut self.settings.appearance_open,
+            &mut self.settings.keybinding_capture,
+            &mut self.settings.keybinding_error,
         );
     }
 
     pub(super) fn keybinding_capture_active(&mut self) -> bool {
         super::keybindings::capture_active(
-            self.appearance_open,
-            &mut self.keybinding_capture,
-            &mut self.keybinding_error,
+            self.settings.appearance_open,
+            &mut self.settings.keybinding_capture,
+            &mut self.settings.keybinding_error,
         )
     }
 
@@ -159,12 +159,12 @@ impl QuillApp {
         let accent = quill::system_accent::effective(
             self.appearance.accent_rgb,
             self.appearance.system_accent,
-            self.system_accent,
+            self.settings.system_accent,
         );
         let scale = self.appearance.interface_scale_pct;
         let family = super::appearance_power::interface_font(&self.appearance.font_family, cx);
         let applied = (mode, accent, hc, scale, family.clone());
-        if self.appearance_applied.as_ref() == Some(&applied) {
+        if self.settings.appearance_applied.as_ref() == Some(&applied) {
             return;
         }
         set_theme_mode(mode, None, cx);
@@ -205,7 +205,7 @@ impl QuillApp {
         // update.
         let zoom = super::interface_zoom::zoom_for_percent(scale);
         cx.defer(move |_| super::interface_zoom::set_zoom(zoom));
-        self.appearance_applied = Some(applied);
+        self.settings.appearance_applied = Some(applied);
         cx.notify();
     }
 
@@ -222,7 +222,7 @@ impl QuillApp {
         quill::tray::set_tray_enabled(self.appearance.show_tray_icon);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
         if let Err(err) = save_appearance_prefs(&Self::appearance_paths(), &self.appearance) {
-            self.status_note = format!("Couldn't save appearance settings: {err}");
+            self.connection.status_note = format!("Couldn't save appearance settings: {err}");
         }
         self.apply_appearance(cx);
         cx.notify();
@@ -242,7 +242,7 @@ impl QuillApp {
     ) {
         f(&mut self.chat_prefs);
         if let Err(err) = save_chat_prefs(&Self::appearance_paths(), &self.chat_prefs) {
-            self.status_note = format!("Couldn't save chat settings: {err}");
+            self.connection.status_note = format!("Couldn't save chat settings: {err}");
         }
         // Keep kit's newline-vs-submit behavior in sync with the mode on
         // the two chat composers (other inputs always submit on Enter).
@@ -267,11 +267,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.language_prefs = prefs;
             if let Err(err) = live.driver.save_language_prefs() {
-                self.status_note = format!("couldn't save language setting: {err}");
+                self.connection.status_note = format!("couldn't save language setting: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.language_prefs = prefs;
-            self.status_note = "demo: language setting is not saved".into();
+            self.connection.status_note = "demo: language setting is not saved".into();
         }
         cx.notify();
     }
@@ -345,21 +345,21 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            if !this.system_accent_probed {
+            if !this.settings.system_accent_probed {
                 this.refresh_system_accent(cx);
             }
             let mut body = div().flex().flex_col().gap_3();
-            if this.translate_ui.settings_only {
+            if this.settings.translate.settings_only {
                 body = body.child(this.translate_settings_section(cx));
-            } else if this.window_settings_screenshot {
+            } else if this.settings.window_settings_screenshot {
                 for section in this.window_behavior_sections(true, cx) {
                     body = body.child(section);
                 }
-            } else if this.appearance_power_screenshot {
+            } else if this.settings.appearance_power_screenshot {
                 body = body.child(this.appearance_accent_section(cx));
                 body = body.child(this.appearance_font_family_section(cx));
                 body = body.child(this.appearance_power_section(cx));
-            } else if this.keybindings_screenshot {
+            } else if this.settings.keybindings_screenshot {
                 body = body.child(
                     div()
                         .text_xs()
@@ -618,6 +618,28 @@ impl QuillApp {
         if tray.run_in_background {
             body.push(this.appearance_close_behavior_section(cx));
         }
+        // tdesktop keeps "Show taskbar icon" behind the tray icon: with
+        // neither, nothing could bring the window back.
+        if tray.run_in_background
+            && this.appearance.show_tray_icon
+            && cfg!(not(target_os = "macos"))
+        {
+            body.push(
+                this.appearance_section(
+                    cx,
+                    "Show taskbar icon",
+                    "Off keeps Quill out of the taskbar; the tray icon opens it.",
+                    Switch::new("general-show-taskbar-icon")
+                        .checked(this.appearance.show_taskbar_icon)
+                        .accessibility_label("Show Quill in the taskbar")
+                        .on_click(cx.listener(|this, &on, window, cx| {
+                            this.set_appearance(cx, |a| a.show_taskbar_icon = on);
+                            this.apply_taskbar_icon(window);
+                        }))
+                        .into_any_element(),
+                ),
+            );
+        }
         #[cfg(target_os = "macos")]
         {
             body.push(
@@ -638,6 +660,16 @@ impl QuillApp {
         body
     }
 
+    /// The main window's taskbar entry follows "Show taskbar icon"
+    /// (Windows, X11; the tray icon must stay on, see the switch).
+    pub(crate) fn apply_taskbar_icon(&self, window: &Window) {
+        if !super::window_control::taskbar_toggle_supported(window) {
+            return;
+        }
+        let skip = !self.appearance.show_taskbar_icon && self.appearance.show_tray_icon;
+        super::window_control::set_skip_taskbar(window, skip);
+    }
+
     /// tdesktop "When the window is closed": run in the background or quit.
     fn appearance_close_behavior_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let control = RadioGroup::vertical("appearance-close-behavior")
@@ -649,11 +681,7 @@ impl QuillApp {
             .on_click(cx.listener(|this, &ix, _, cx| {
                 this.set_appearance(cx, |a| a.minimize_to_tray = ix == 0);
             }));
-        let hint = if cfg!(target_os = "macos") {
-            "Quill keeps running and reopens from the tray icon."
-        } else {
-            "The window minimizes and reopens from the tray icon."
-        };
+        let hint = "Quill keeps running and reopens from the tray icon.";
         self.appearance_section(
             cx,
             "When the window is closed",
@@ -754,7 +782,10 @@ impl QuillApp {
 
     fn appearance_accent_section(&self, cx: &mut Context<Self>) -> AnyElement {
         // The system color counts as chosen only while the OS reports one.
-        let system = self.system_accent.filter(|_| self.appearance.system_accent);
+        let system = self
+            .settings
+            .system_accent
+            .filter(|_| self.appearance.system_accent);
         let current = if system.is_some() {
             u32::MAX
         } else {
@@ -778,7 +809,7 @@ impl QuillApp {
             ));
         // tdesktop's "System accent color" (settings_chat.cpp), shown only
         // where the OS reports an accent.
-        if let Some(color) = self.system_accent {
+        if let Some(color) = self.settings.system_accent {
             row = row.child(self.appearance_swatch(
                 "appearance-accent-system",
                 color,
@@ -812,7 +843,7 @@ impl QuillApp {
             .gap_2()
             .child(div().text_sm().child("Custom"))
             .child(
-                ColorSelect::new(&self.accent_picker)
+                ColorSelect::new(&self.settings.accent_picker)
                     .featured_colors(
                         ACCENT_PRESETS
                             .iter()
@@ -825,7 +856,7 @@ impl QuillApp {
         self.appearance_section(
             cx,
             "Accent color",
-            if self.system_accent.is_some() {
+            if self.settings.system_accent.is_some() {
                 "Highlights, selections and links across the app. System follows \
                  your operating system's accent. Custom colors are kept light \
                  enough on dark themes and dark enough on light ones."
@@ -979,7 +1010,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.set_default_background(background_id, dark) {
-                    self.status_note = format!("could not set the wallpaper: {err:?}");
+                    self.connection.status_note = format!("could not set the wallpaper: {err:?}");
                     return;
                 }
             }
@@ -1007,7 +1038,8 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.remove_installed_background(background_id) {
-                    self.status_note = format!("could not remove the wallpaper: {err:?}");
+                    self.connection.status_note =
+                        format!("could not remove the wallpaper: {err:?}");
                 }
             }
             None => {
@@ -1287,7 +1319,7 @@ impl QuillApp {
             .accessibility_label("Launch Quill at login")
             .on_click(cx.listener(|this, &on, _, cx| {
                 if let Err(err) = quill::autostart::set_enabled(on) {
-                    this.status_note = err.to_string();
+                    this.connection.status_note = err.to_string();
                 }
                 cx.notify();
             }));
@@ -1327,7 +1359,7 @@ impl QuillApp {
                 .disabled(unavailable)
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Err(err) = link_handler::make_default() {
-                        this.status_note = err;
+                        this.connection.status_note = err;
                     }
                     // The system confirmation is asynchronous: re-read the
                     // handler a few times so the status catches up.
@@ -1355,7 +1387,7 @@ impl QuillApp {
                         link_handler::release()
                     };
                     if let Err(err) = result {
-                        this.status_note = err;
+                        this.connection.status_note = err;
                     }
                     cx.notify();
                 }))
@@ -1624,7 +1656,7 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         let resolved = resolve_keybindings(&customs);
-        let capturing = self.keybinding_capture.clone();
+        let capturing = self.settings.keybinding_capture.clone();
         let rows = REBINDABLE_ACTIONS.iter().map(|ra| {
             let row_state = resolved.iter().find(|row| row.id == ra.id);
             let current = row_state
@@ -1646,7 +1678,8 @@ impl QuillApp {
             let error = if is_capturing {
                 None
             } else {
-                self.keybinding_error
+                self.settings
+                    .keybinding_error
                     .as_ref()
                     .filter(|(err_id, _)| err_id == ra.id)
                     .map(|(_, message)| message.clone())
@@ -1695,11 +1728,13 @@ impl QuillApp {
                                 .on_click({
                                     let id = id.clone();
                                     cx.listener(move |this, _, window, cx| {
-                                        if this.keybinding_capture.as_deref() == Some(id.as_str()) {
-                                            this.keybinding_capture = None;
+                                        if this.settings.keybinding_capture.as_deref()
+                                            == Some(id.as_str())
+                                        {
+                                            this.settings.keybinding_capture = None;
                                         } else {
-                                            this.keybinding_capture = Some(id.clone());
-                                            window.focus(&this.keybinding_focus, cx);
+                                            this.settings.keybinding_capture = Some(id.clone());
+                                            window.focus(&this.settings.keybinding_focus, cx);
                                         }
                                         cx.notify();
                                     })
@@ -1722,13 +1757,14 @@ impl QuillApp {
                                             let customs = live.driver.load_custom_keybindings();
                                             apply_custom_bindings(cx, &customs);
                                         }
-                                        this.keybinding_capture = None;
+                                        this.settings.keybinding_capture = None;
                                         if this
+                                            .settings
                                             .keybinding_error
                                             .as_ref()
                                             .is_some_and(|(err_id, _)| err_id == &id)
                                         {
-                                            this.keybinding_error = None;
+                                            this.settings.keybinding_error = None;
                                         }
                                         cx.notify();
                                     })
@@ -1736,7 +1772,7 @@ impl QuillApp {
                         ),
                 );
             let row = if is_capturing {
-                row.track_focus(&self.keybinding_focus)
+                row.track_focus(&self.settings.keybinding_focus)
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         // Stop the key before it dismisses Appearance or runs
                         // a global binding. GPUI also matches keybindings
@@ -1789,14 +1825,14 @@ impl QuillApp {
         if !self.keybinding_capture_active() {
             return;
         }
-        let Some(id) = self.keybinding_capture.clone() else {
+        let Some(id) = self.settings.keybinding_capture.clone() else {
             return;
         };
         if is_modifier_key(&keystroke.key) {
             return;
         }
         if keystroke.key == "escape" && !keystroke.modifiers.modified() {
-            self.keybinding_capture = None;
+            self.settings.keybinding_capture = None;
             cx.notify();
             return;
         }
@@ -1809,8 +1845,8 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         if let Some(conflict) = keybinding_conflict(&id, &chord, &customs) {
-            self.keybinding_error = Some((id, conflict_message(&chord, &conflict)));
-            self.keybinding_capture = None;
+            self.settings.keybinding_error = Some((id, conflict_message(&chord, &conflict)));
+            self.settings.keybinding_capture = None;
             cx.notify();
             return;
         }
@@ -1827,22 +1863,23 @@ impl QuillApp {
             Some((true, Some(customs))) => {
                 apply_custom_bindings(cx, &customs);
                 if self
+                    .settings
                     .keybinding_error
                     .as_ref()
                     .is_some_and(|(err_id, _)| err_id == &id)
                 {
-                    self.keybinding_error = None;
+                    self.settings.keybinding_error = None;
                 }
             }
             Some((false, _)) => {
-                self.keybinding_error = Some((
+                self.settings.keybinding_error = Some((
                     id,
                     "Couldn't save that shortcut. The previous one is still active.".into(),
                 ));
             }
             _ => {}
         }
-        self.keybinding_capture = None;
+        self.settings.keybinding_capture = None;
         cx.notify();
     }
 }
@@ -1850,7 +1887,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Appearance => DialogSpec::new(
         6600,
-        |app| app.appearance_open,
+        |app| app.settings.appearance_open,
         QuillApp::build_appearance_dialog,
     ),
 }

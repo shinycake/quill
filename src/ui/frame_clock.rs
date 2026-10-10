@@ -53,7 +53,7 @@ impl QuillApp {
         // Like tdesktop (`isGifPausedAtLeastFor` → `!widget()->isActive()`),
         // nothing animates behind another app; activation redraws and the
         // content asks again (`observe_window_activation`).
-        if !tick_wanted(self.window_active.get(), plays_sound) {
+        if !tick_wanted(self.frame.window_active.get(), plays_sound) {
             return;
         }
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
@@ -63,19 +63,20 @@ impl QuillApp {
                 std::panic::Location::caller(),
                 fps,
                 target,
-                self.window_active.get(),
+                self.frame.window_active.get(),
             );
         }
-        self.animation_demand
-            .set(self.animation_demand.get().max(fps.clamp(1, 60)));
-        self.animation_targets.borrow_mut().insert(target);
+        self.frame
+            .animation_demand
+            .set(self.frame.animation_demand.get().max(fps.clamp(1, 60)));
+        self.frame.animation_targets.borrow_mut().insert(target);
         if plays_sound {
-            self.animation_sound.set(true);
+            self.frame.animation_sound.set(true);
         }
-        if self.frame_clock_running.get() {
+        if self.frame.frame_clock_running.get() {
             return;
         }
-        self.frame_clock_running.set(true);
+        self.frame.frame_clock_running.set(true);
         cx.spawn(async move |this, cx| {
             let mut fps = 30;
             loop {
@@ -84,10 +85,11 @@ impl QuillApp {
                     .await;
                 let next = this
                     .update(cx, |this, cx| {
-                        let demand = this.animation_demand.replace(0);
-                        let targets = std::mem::take(&mut *this.animation_targets.borrow_mut());
-                        let sound = this.animation_sound.replace(false);
-                        if demand > 0 && tick_wanted(this.window_active.get(), sound) {
+                        let demand = this.frame.animation_demand.replace(0);
+                        let targets =
+                            std::mem::take(&mut *this.frame.animation_targets.borrow_mut());
+                        let sound = this.frame.animation_sound.replace(false);
+                        if demand > 0 && tick_wanted(this.frame.window_active.get(), sound) {
                             if targets.contains(&None) {
                                 cx.notify();
                             } else {
@@ -106,7 +108,7 @@ impl QuillApp {
                 }
                 fps = next;
             }
-            let _ = this.update(cx, |this, _| this.frame_clock_running.set(false));
+            let _ = this.update(cx, |this, _| this.frame.frame_clock_running.set(false));
         })
         .detach();
     }

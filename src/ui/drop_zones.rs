@@ -82,7 +82,7 @@ impl QuillApp {
         };
         match plan_drop(action, paths, &folder_files) {
             DropPlan::Attach(planned) => {
-                self.status_note = match ComposerAttachment::append_planned(
+                self.connection.status_note = match ComposerAttachment::append_planned(
                     &mut self.composer_ui.pending_attachments,
                     &planned,
                 ) {
@@ -92,14 +92,14 @@ impl QuillApp {
                 cx.notify();
             }
             DropPlan::Reject(note) => {
-                self.status_note = note.into();
+                self.connection.status_note = note.into();
                 cx.notify();
             }
             DropPlan::Archive(source) => {
                 let Some(chat) = self.open_chat_id() else {
                     return;
                 };
-                self.status_note = "Preparing the archive…".into();
+                self.connection.status_note = "Preparing the archive…".into();
                 cx.notify();
                 let dir = quill::local_path::media_cache_base().join("archives");
                 quill::local_path::ensure_private_dir(&dir);
@@ -131,7 +131,7 @@ impl QuillApp {
                     }
                     return;
                 }
-                self.status_note = match ComposerAttachment::append_planned(
+                self.connection.status_note = match ComposerAttachment::append_planned(
                     &mut self.composer_ui.pending_attachments,
                     &[(path, AttachmentKind::Document)],
                 ) {
@@ -139,7 +139,7 @@ impl QuillApp {
                     Err(note) => note.into(),
                 };
             }
-            Err(err) => self.status_note = err.note(),
+            Err(err) => self.connection.status_note = err.note(),
         }
         cx.notify();
     }

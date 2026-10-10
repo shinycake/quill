@@ -285,7 +285,7 @@ impl QuillApp {
     fn demo_ready2fa_forgot(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Batch 6: "Forgot password?" code step (injected).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.password_state = Some(demo_password_state_manage());
             session.password_state_loading = false;
             session.twofa_flow.recovery_code_sent_to = Some("i***@example.com".into());
@@ -298,18 +298,18 @@ impl QuillApp {
         // Slice A2: 2FA overlay fixture — password set with recovery
         // email (injected `passwordState`, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.password_state = Some(demo_password_state_manage());
             session.password_state_loading = false;
         }
         self.twofa.open = true;
-        self.status_note = "screenshot demo — two-step verification".into();
+        self.connection.status_note = "screenshot demo — two-step verification".into();
     }
 
     fn demo_ready2fa_reset(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Batch 6: reset waiting period (injected).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             let mut state = demo_password_state_manage();
             state.has_recovery_email_address = false;
             state.pending_reset_date =
@@ -326,42 +326,43 @@ impl QuillApp {
         // (180 days) + `passwordState` with a password set (no live
         // Telegram), dialog open.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.account_ttl_days = Some(180);
             session.default_auto_delete_secs = Some(604_800);
             session.account_ttl_loading = false;
             session.password_state = Some(demo_password_state_manage());
             session.password_state_loading = false;
         }
-        self.account_lifecycle.open = true;
+        self.account.lifecycle.open = true;
         // Slice auth-logout-warning: arm the logout confirm so the
         // screenshot shows the SignOutHint2 warning.
-        self.account_lifecycle.confirm_logout = true;
-        self.status_note = "screenshot demo — account lifecycle".into();
+        self.account.lifecycle.confirm_logout = true;
+        self.connection.status_note = "screenshot demo — account lifecycle".into();
     }
 
     fn demo_ready_accounts(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.accounts_ui.open = true;
-        self.status_note = "screenshot demo — accounts".into();
+        self.account.accounts.open = true;
+        self.connection.status_note = "screenshot demo — accounts".into();
     }
 
     fn demo_ready_appearance_power(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Appearance cluster: the system accent, a font family and the
         // power-saving switches, with fixture values (the OS accent and the
         // installed fonts differ per machine).
-        self.system_accent = Some(0xa550a7);
-        self.system_accent_probed = true;
+        self.settings.system_accent = Some(0xa550a7);
+        self.settings.system_accent_probed = true;
         self.appearance.system_accent = true;
         self.appearance.font_family = "Georgia".into();
-        self.font_picker.update(cx, |picker, cx| {
+        self.settings.font_picker.update(cx, |picker, cx| {
             picker.set_selected_value(&SharedString::from("Georgia"), window, cx)
         });
         self.appearance.power_saving = quill::power_saving::Flag::StickersChat.bit()
             | quill::power_saving::Flag::ChatSpoiler.bit()
             | quill::power_saving::Flag::Calls.bit();
-        self.appearance_open = true;
-        self.appearance_power_screenshot = true;
-        self.status_note = "screenshot demo — appearance: accent, font and power saving".into();
+        self.settings.appearance_open = true;
+        self.settings.appearance_power_screenshot = true;
+        self.connection.status_note =
+            "screenshot demo — appearance: accent, font and power saving".into();
     }
 
     fn demo_ready_appearance_wallpapers(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -371,12 +372,12 @@ impl QuillApp {
         }
         self.appearance.interface_scale_pct = 125;
         self.appearance.telegram_wallpaper = true;
-        self.appearance_open = true;
-        self.status_note = "screenshot demo — appearance: scale and wallpapers".into();
+        self.settings.appearance_open = true;
+        self.connection.status_note = "screenshot demo — appearance: scale and wallpapers".into();
     }
 
     fn demo_ready_background_link(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.chat_look_dialog = Some(crate::ui::chat_look_ui::ChatLookDialog {
+        self.dialogs.chat_look_dialog = Some(crate::ui::chat_look_ui::ChatLookDialog {
             target: crate::ui::chat_look_ui::LookTarget::Link {
                 name: "doodles".into(),
             },
@@ -391,7 +392,7 @@ impl QuillApp {
     fn demo_ready_chat_look(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Per-chat theme and wallpaper: the picker, the themed chat, and the
         // `bg/` link preview over the ReadyChats fixture.
-        self.chat_look_dialog = Some(crate::ui::chat_look_ui::ChatLookDialog {
+        self.dialogs.chat_look_dialog = Some(crate::ui::chat_look_ui::ChatLookDialog {
             target: crate::ui::chat_look_ui::LookTarget::Chat(11),
             theme: Some("🌷".into()),
             background: Some(6),
@@ -406,10 +407,10 @@ impl QuillApp {
         // a real 36-byte key_hash and Zed's info panel open on the
         // "Encryption key" fingerprint grid.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_key_verification(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_key_verification(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note =
+        self.connection.status_note =
             "secret chat key verification — compare with your contact's device".into();
     }
 
@@ -417,7 +418,7 @@ impl QuillApp {
         // Batch 6: local storage fixture — two ticked types with the clear
         // confirmation open, limits applied (injected, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.storage_stats = Some(demo_storage_stats());
             session.storage_stats_loading = false;
             session.data_storage = demo_data_storage_prefs();
@@ -437,16 +438,16 @@ impl QuillApp {
                 );
             }
         }
-        self.storage_selected.insert("fileTypePhoto");
-        self.storage_selected.insert("fileTypeVideo");
-        self.storage_confirm = Some(StorageClear::Selected);
-        self.storage_usage_open = true;
+        self.settings.storage_selected.insert("fileTypePhoto");
+        self.settings.storage_selected.insert("fileTypeVideo");
+        self.settings.storage_confirm = Some(StorageClear::Selected);
+        self.settings.storage_usage_open = true;
     }
 
     fn demo_ready_login_email(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Batch 6: login email code step (injected).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             let mut state = demo_password_state_manage();
             state.login_email_address_pattern = "i***@example.com".into();
             session.password_state = Some(state);
@@ -459,7 +460,7 @@ impl QuillApp {
 
     fn demo_ready_login_prevented(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Batch 4: "New Login Prevented" box (injected, no live Telegram).
-        self.login_prevented = Some(vec!["Berlin, Germany (Pixel 9)".into()]);
+        self.auth_ui.login_prevented = Some(vec!["Berlin, Germany (Pixel 9)".into()]);
     }
 
     fn demo_ready_marketplace_gift(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -479,19 +480,22 @@ impl QuillApp {
                 note: Some("Injected quote — no purchase is sent in this demo.".into()),
             });
         }
-        self.marketplace_name_input
+        self.payments
+            .marketplace_name_input
             .update(cx, |input, cx| input.set_value("PlushPepe-123", window, cx));
-        self.marketplace_comment_input.update(cx, |input, cx| {
-            input.set_value("A little gift for you 🎁", window, cx)
-        });
-        self.marketplace_open = true;
+        self.payments
+            .marketplace_comment_input
+            .update(cx, |input, cx| {
+                input.set_value("A little gift for you 🎁", window, cx)
+            });
+        self.payments.marketplace_open = true;
     }
 
     fn demo_ready_new_login(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Batch 4: new-login alert fixture — an unconfirmed Android login
         // resolved from the sessions list (injected, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.notices.unconfirmed_count = 1;
             session.notices.unconfirmed_entries = vec![quill::state::UnconfirmedEntry {
                 id: 77,
@@ -505,12 +509,12 @@ impl QuillApp {
         // Slice A2: 2FA overlay fixture — recovery email pending
         // confirmation (injected `passwordState`, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.password_state = Some(demo_password_state_pending());
             session.password_state_loading = false;
         }
         self.twofa.open = true;
-        self.status_note = "screenshot demo — recovery email pending".into();
+        self.connection.status_note = "screenshot demo — recovery email pending".into();
     }
 
     fn demo_ready_secret_bot_alert(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -518,24 +522,24 @@ impl QuillApp {
         // with a stashed `SwitchInline` query, so the warning banner
         // renders above the composer (injected, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_secret_chat(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_secret_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer_ui.pending_inline_bot_alert = Some("@gif cats".to_string());
-        self.status_note = "screenshot demo — inline-bot warning in secret chat".into();
+        self.connection.status_note = "screenshot demo — inline-bot warning in secret chat".into();
     }
 
     fn demo_ready_secret_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Phase B1: secret chat lifecycle fixture — a Ready secret chat
         // with Zed, opened with E2E history and the composer live.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_secret_chat(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_secret_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer.update(cx, |input, cx| {
             input.set_value("this goes through the E2E session…", window, cx);
         });
-        self.status_note = "secret chat — Ready, 🔒 badge in the chat list".into();
+        self.connection.status_note = "secret chat — Ready, 🔒 badge in the chat list".into();
     }
 
     fn demo_ready_secret_picker(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -545,16 +549,16 @@ impl QuillApp {
         // answer); the picker rows come from `contact_rows()` through the
         // real eligibility gate.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_secret_chat(session, &self.demo_sink, &self.demo_seq);
-            apply_ready_contacts(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_secret_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            apply_ready_contacts(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.contacts = Some(vec![31, 33]);
             // `apply_ready_contacts` opens the contact info panel for
             // its own demo; the picker screenshot wants it closed.
             session.open_info_panel = None;
         }
         self.share.new_secret_picker_open = true;
-        self.status_note = "screenshot demo — new secret chat picker".into();
+        self.connection.status_note = "screenshot demo — new secret chat picker".into();
     }
 
     fn demo_ready_self_destruct(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -563,11 +567,11 @@ impl QuillApp {
         // outgoing photo; the composer's pending photo attachment has
         // the picker pre-set to 30s.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_self_destruct(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_self_destruct(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer_ui.self_destruct = Some(SelfDestructSend::Timer(30));
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — self-destructing media · picker on 30s (injected, no live Telegram)"
                 .into();
     }
@@ -575,7 +579,7 @@ impl QuillApp {
     fn demo_ready_service_notice(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Batch 4: server service notification popup (injected).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.notices.service.push_back(quill::state::ServiceNotice {
                     kind: String::new(),
                     text: "Your Telegram Premium subscription ends in 3 days. Renew it to keep your extra features.".into(),
@@ -589,13 +593,13 @@ impl QuillApp {
         // overlay open so the per-row direct toggles are visible
         // (injected, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.sessions = Some(demo_sessions());
             session.sessions_loading = false;
             session.sessions_error = None;
         }
-        self.sessions_open = true;
-        self.status_note = "screenshot demo — session acceptance toggles".into();
+        self.privacy.sessions_open = true;
+        self.connection.status_note = "screenshot demo — session acceptance toggles".into();
     }
 
     fn demo_ready_sessions(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -603,16 +607,17 @@ impl QuillApp {
         // device, two other sessions, one incomplete login attempt) with
         // the overlay open (injected, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.sessions = Some(demo_sessions());
             session.sessions_loading = false;
             session.sessions_error = None;
         }
-        self.sessions_open = true;
+        self.privacy.sessions_open = true;
         if std::env::var_os("QUILL_DEMO_DEVICE_LINK").is_some() {
-            self.device_login_qr = Some(zeroize::Zeroizing::new("tg://login?token=AQID".into()));
+            self.privacy.device_login_qr =
+                Some(zeroize::Zeroizing::new("tg://login?token=AQID".into()));
         }
-        self.status_note = "screenshot demo — active sessions".into();
+        self.connection.status_note = "screenshot demo — active sessions".into();
     }
 
     fn demo_ready_storage_usage(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -621,14 +626,14 @@ impl QuillApp {
         // download settings, with the dialog open (injected, no live
         // Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.storage_stats = Some(demo_storage_stats());
             session.storage_stats_loading = false;
             session.data_storage = demo_data_storage_prefs();
             session.storage_freed = Some(54_525_952);
         }
-        self.storage_usage_open = true;
-        self.status_note = "screenshot demo — data & storage".into();
+        self.settings.storage_usage_open = true;
+        self.connection.status_note = "screenshot demo — data & storage".into();
     }
 
     fn demo_ready_subscriptions(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -636,18 +641,18 @@ impl QuillApp {
         // fixture `starSubscriptions` with the dialog open (injected, no
         // live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.star_subscriptions = Some(demo_star_subscriptions());
             session.star_subscriptions_loading = false;
             session.subscriptions_open = true;
         }
-        self.status_note = "screenshot demo — ⭐ subscriptions".into();
+        self.connection.status_note = "screenshot demo — ⭐ subscriptions".into();
     }
 
     fn demo_ready_terms(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Batch 4: terms of service prompt with the age check (injected).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.notices.terms = Some(quill::telegram::envelope::TermsOfService {
                     id: "tos-2026".into(),
                     text: "1. Telegram is a cloud service. Your messages, media and files are stored on our servers so you can reach them from any device.\n\n2. Do not use Telegram to spam, scam or harm others, and do not promote violence or sell illegal goods.\n\n3. We do not use your data for ad targeting. You can adjust how your data is used in Privacy & Security settings.\n\nBy continuing you accept these updated terms.".into(),
@@ -661,13 +666,13 @@ impl QuillApp {
         // Slice A4: Connected Websites fixture — fixture websites with
         // the overlay open (injected, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.connected_websites = Some(demo_websites());
             session.connected_websites_loading = false;
             session.websites_error = None;
         }
-        self.websites_open = true;
-        self.status_note = "screenshot demo — connected websites".into();
+        self.privacy.websites_open = true;
+        self.connection.status_note = "screenshot demo — connected websites".into();
     }
 
     fn demo_appearance(
@@ -702,9 +707,9 @@ impl QuillApp {
         self.appearance.accent_rgb = 0x2f81f7;
         self.appearance.wallpaper_rgb = Some(0x0e1621);
         self.appearance.font_size_px = 16;
-        self.appearance_open = true;
-        self.keybindings_screenshot = matches!(demo, AppearanceDemo::Keybindings);
-        self.status_note = if self.keybindings_screenshot {
+        self.settings.appearance_open = true;
+        self.settings.keybindings_screenshot = matches!(demo, AppearanceDemo::Keybindings);
+        self.connection.status_note = if self.settings.keybindings_screenshot {
             "screenshot demo — keyboard shortcuts".into()
         } else {
             "screenshot demo — appearance settings".into()
@@ -716,21 +721,21 @@ impl QuillApp {
         // over the ReadyChats fixture (injected, no live Telegram). The
         // list reads the real local registry, read-only — nothing is
         // added, switched, or removed by the fixture.
-        self.passcode_ui.fixture(
+        self.account.passcode.fixture(
             !matches!(demo, PasscodeDemo::PasscodeCreate),
             matches!(demo, PasscodeDemo::LockScreen),
             matches!(demo, PasscodeDemo::LockScreen).then_some("Wrong passcode"),
         );
-        self.passcode_ui.autolock_secs = 300;
-        self.passcode_ui.system_unlock = true;
+        self.account.passcode.autolock_secs = 300;
+        self.account.passcode.system_unlock = true;
         if matches!(demo, PasscodeDemo::PasscodeSettings) {
-            self.passcode_ui.open = true;
+            self.account.passcode.open = true;
         }
         if matches!(demo, PasscodeDemo::PasscodeCreate) {
-            self.passcode_ui.open = true;
-            self.passcode_ui.view = crate::ui::passcode::PasscodeView::Create;
-            self.passcode_ui.error = Some("Passcodes are different".into());
+            self.account.passcode.open = true;
+            self.account.passcode.view = crate::ui::passcode::PasscodeView::Create;
+            self.account.passcode.error = Some("Passcodes are different".into());
         }
-        self.status_note = "screenshot demo — local passcode".into();
+        self.connection.status_note = "screenshot demo — local passcode".into();
     }
 }

@@ -62,16 +62,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let open = self
+            .admin
             .invite_link_details
             .as_ref()
             .is_some_and(|(chat, link)| *chat == chat_id && link == invite_link);
         if open {
-            self.invite_link_details = None;
+            self.admin.invite_link_details = None;
             if let Some(live) = self.live.as_mut() {
                 live.driver.close_chat_invite_link_members(chat_id);
             }
         } else {
-            self.invite_link_details = Some((chat_id, invite_link.to_owned()));
+            self.admin.invite_link_details = Some((chat_id, invite_link.to_owned()));
             if let Some(live) = self.live.as_mut() {
                 let _ = live
                     .driver
@@ -83,8 +84,8 @@ impl QuillApp {
 
     /// Show or hide the revoked-links list (fetched on first open).
     pub(super) fn toggle_revoked_links(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.revoked_links_open = !self.revoked_links_open;
-        if self.revoked_links_open
+        self.admin.revoked_links_open = !self.admin.revoked_links_open;
+        if self.admin.revoked_links_open
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.fetch_revoked_chat_invite_links(chat_id);
@@ -93,7 +94,7 @@ impl QuillApp {
     }
 
     fn delete_revoked_link(&mut self, chat_id: ChatId, invite_link: &str, cx: &mut Context<Self>) {
-        self.status_note = match self.live.as_mut() {
+        self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live
                 .driver
                 .delete_revoked_chat_invite_link(chat_id, invite_link)
@@ -125,7 +126,7 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.status_note = match this.live.as_mut() {
+                        this.connection.status_note = match this.live.as_mut() {
                             Some(live) => {
                                 match live.driver.delete_all_revoked_chat_invite_links(chat_id) {
                                     Ok(_) => "deleting revoked links…".into(),
@@ -157,6 +158,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let open = self
+            .admin
             .invite_link_details
             .as_ref()
             .is_some_and(|(chat, link)| *chat == chat_id && link == invite_link);
@@ -304,7 +306,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let open = self.revoked_links_open;
+        let open = self.admin.revoked_links_open;
         let mut block = div().flex().flex_col().w_full().gap_1().pt_1().child(
             div()
                 .flex()

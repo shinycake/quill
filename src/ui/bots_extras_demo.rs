@@ -106,15 +106,15 @@ impl QuillApp {
         quill::fast_buttons::set_persistence(false);
         let mode = std::env::var("QUILL_DEMO_BOTEXTRAS").unwrap_or_else(|_| "fast".into());
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             match mode.as_str() {
                 "fast" => {
-                    apply_bot_chat(session, &self.demo_sink, &self.demo_seq);
+                    apply_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
                     quill::fast_buttons::set_enabled(21, true);
                 }
-                "share-game" => apply_bot_chat(session, &self.demo_sink, &self.demo_seq),
+                "share-game" => apply_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq),
                 _ => {
-                    apply_add_bot(session, &self.demo_sink, &self.demo_seq);
+                    apply_add_bot(session, &self.demo_ui.sink, &self.demo_ui.seq);
                     session.open_info_panel = Some(InfoPanelTarget::User(21));
                 }
             }

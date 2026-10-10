@@ -11,8 +11,8 @@ use super::message_media::{
     video_attachment, video_note_attachment, voice_note_row,
 };
 use super::message_media::{
-    MediaCorners, file_is_downloading, media_content_width, media_frame, photo_display_path,
-    single_media_width, spoiler_cover,
+    MediaCorners, MediaFrameKind, file_is_downloading, media_content_width, media_frame,
+    photo_display_path, single_media_width, spoiler_cover,
 };
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,
@@ -1090,8 +1090,8 @@ pub(super) fn session_history_row(
             let (frame_w, frame_h) = photo
                 .largest_size()
                 .or_else(|| photo.thumb_size())
-                .map(|size| media_frame(size.width, size.height))
-                .unwrap_or_else(|| media_frame(0, 0));
+                .map(|size| media_frame(MediaFrameKind::Photo, size.width, size.height))
+                .unwrap_or_else(|| media_frame(MediaFrameKind::Photo, 0, 0));
             Some(spoiler_cover(
                 message.id.0 as u64,
                 message.chat_id,
@@ -1105,11 +1105,11 @@ pub(super) fn session_history_row(
             ))
         }
         MessageContent::Video(video) if video.has_spoiler && !media_revealed => {
-            let (frame_w, frame_h) = media_frame(video.width, video.height);
+            let (frame_w, frame_h) = media_frame(MediaFrameKind::Video, video.width, video.height);
             Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, corners, cx))
         }
         MessageContent::Animation(animation) if animation.has_spoiler && !media_revealed => {
-            let (frame_w, frame_h) = media_frame(animation.width, animation.height);
+            let (frame_w, frame_h) = media_frame(MediaFrameKind::Gif, animation.width, animation.height);
             Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, corners, cx))
         }
         MessageContent::Photo(photo) => {
@@ -1500,8 +1500,8 @@ pub(super) fn session_history_row(
                         let (frame_w, frame_h) = photo
                             .largest_size()
                             .or_else(|| photo.thumb_size())
-                            .map(|size| media_frame(size.width, size.height))
-                            .unwrap_or_else(|| media_frame(0, 0));
+                            .map(|size| media_frame(MediaFrameKind::Photo, size.width, size.height))
+                            .unwrap_or_else(|| media_frame(MediaFrameKind::Photo, 0, 0));
                         Some(spoiler_cover(
                             message.id.0 as u64,
                             message.chat_id,
@@ -1515,7 +1515,8 @@ pub(super) fn session_history_row(
                         ))
                     }
                     MessageContent::Video(video) if video.has_spoiler => {
-                        let (frame_w, frame_h) = media_frame(video.width, video.height);
+                        let (frame_w, frame_h) =
+                            media_frame(MediaFrameKind::Video, video.width, video.height);
                         Some(spoiler_cover(
                             message.id.0 as u64,
                             message.chat_id,
@@ -1529,7 +1530,8 @@ pub(super) fn session_history_row(
                         ))
                     }
                     MessageContent::Animation(animation) if animation.has_spoiler => {
-                        let (frame_w, frame_h) = media_frame(animation.width, animation.height);
+                        let (frame_w, frame_h) =
+                            media_frame(MediaFrameKind::Gif, animation.width, animation.height);
                         Some(spoiler_cover(
                             message.id.0 as u64,
                             message.chat_id,
@@ -1764,7 +1766,7 @@ impl QuillApp {
                     } else {
                         self.live.as_mut().expect("live").driver.fetch_history()
                     };
-                    self.status_note = match result {
+                    self.connection.status_note = match result {
                         Ok(Some(_)) => "loading older messages".into(),
                         Ok(None) => "no older messages to load".into(),
                         Err(_) => "could not load history".into(),

@@ -109,7 +109,7 @@ impl QuillApp {
             live.driver.maybe_fetch_star_transactions()
         });
         if let Some(Err(_)) = sent {
-            self.status_note = "could not load Stars".into();
+            self.connection.status_note = "could not load Stars".into();
         }
         cx.notify();
     }
@@ -256,7 +256,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.open_received_gifts(owner));
         if let Some(Err(_)) = sent {
-            self.status_note = "could not load gifts".into();
+            self.connection.status_note = "could not load gifts".into();
         }
         cx.notify();
     }
@@ -298,7 +298,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.toggle_gift_saved(&id, saved));
         if let Some(Err(_)) = sent {
-            self.status_note = "could not update the gift".into();
+            self.connection.status_note = "could not update the gift".into();
         }
         cx.notify();
     }
@@ -309,7 +309,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.convert_gift_to_stars(&id));
         if let Some(Err(_)) = sent {
-            self.status_note = "could not convert the gift".into();
+            self.connection.status_note = "could not convert the gift".into();
         }
         if let Some(hub) = self.hub_mut() {
             hub.gift_convert_confirm = None;
@@ -417,7 +417,7 @@ impl QuillApp {
             live.driver.maybe_fetch_premium()
         });
         if let Some(Err(_)) = sent {
-            self.status_note = "could not load Premium".into();
+            self.connection.status_note = "could not load Premium".into();
         }
         cx.notify();
     }

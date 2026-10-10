@@ -90,7 +90,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "topics need a live connection (demo)".into();
+            self.connection.status_note = "topics need a live connection (demo)".into();
             cx.notify();
             return;
         };
@@ -130,7 +130,7 @@ impl QuillApp {
             ),
             TopicExtra::Edit => return,
         };
-        self.status_note = if result.is_ok() { done } else { failed }.into();
+        self.connection.status_note = if result.is_ok() { done } else { failed }.into();
         cx.notify();
     }
 }

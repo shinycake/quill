@@ -1068,7 +1068,7 @@ impl QuillApp {
             return;
         }
         if !self.session().is_some_and(|s| s.my_is_premium()) {
-            self.status_note = "Custom emoji need Telegram Premium".into();
+            self.connection.status_note = "Custom emoji need Telegram Premium".into();
             cx.notify();
             return;
         }

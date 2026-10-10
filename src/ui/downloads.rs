@@ -23,7 +23,7 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.download_user_file(file_id, sponsored);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(Some(_)) => "downloading…".into(),
                 Ok(None) => "already local or in progress".into(),
                 Err(_) => {
@@ -32,7 +32,7 @@ impl QuillApp {
                 }
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — addFileToDownloads runs with live TDLib".into();
+            self.connection.status_note = "demo — addFileToDownloads runs with live TDLib".into();
         }
         cx.notify();
     }
@@ -86,7 +86,7 @@ impl QuillApp {
             for file_id in failed {
                 self.clear_pending_media_playback(file_id);
             }
-            self.status_note = "Download stopped. Press Play to try again.".into();
+            self.connection.status_note = "Download stopped. Press Play to try again.".into();
             cx.notify();
         }
     }
@@ -104,7 +104,7 @@ impl QuillApp {
             // and files that may reveal the IP address.
             Some(path) => self.open_file_guarded(path, cx),
             None => {
-                self.status_note = "could not open the file".into();
+                self.connection.status_note = "could not open the file".into();
                 cx.notify();
             }
         }
@@ -118,7 +118,7 @@ impl QuillApp {
             .and_then(|s| s.files.get(&file_id.0))
             .and_then(|f| f.usable_path())
             .map(PathBuf::from);
-        self.status_note = match path {
+        self.connection.status_note = match path {
             Some(path) if quill::platform::reveal_in_file_manager(&path) => {
                 "revealed in file manager".into()
             }
@@ -132,7 +132,7 @@ impl QuillApp {
     /// `cancelDownloadFile` (TGX's cancel button on downloading media).
     pub(super) fn cancel_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.cancel_download(file_id) {
+            self.connection.status_note = match live.driver.cancel_download(file_id) {
                 Ok(true) => {
                     self.clear_pending_media_playback(file_id);
                     "Download canceled.".into()
@@ -141,7 +141,7 @@ impl QuillApp {
                 Err(_) => "could not cancel the download".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — cancelDownloadFile runs with live TDLib".into();
+            self.connection.status_note = "demo — cancelDownloadFile runs with live TDLib".into();
         }
         cx.notify();
     }
@@ -151,13 +151,14 @@ impl QuillApp {
     /// `updateFileDownload`).
     pub(super) fn pause_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.pause_download(file_id) {
+            self.connection.status_note = match live.driver.pause_download(file_id) {
                 Ok(true) => "download paused".into(),
                 Ok(false) => "nothing to pause".into(),
                 Err(_) => "could not pause the download".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — toggleDownloadIsPaused runs with live TDLib".into();
+            self.connection.status_note =
+                "demo — toggleDownloadIsPaused runs with live TDLib".into();
         }
         cx.notify();
     }
@@ -165,13 +166,14 @@ impl QuillApp {
     /// Slice media-downloads-pause: resume a paused user-initiated download.
     pub(super) fn resume_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.resume_download(file_id) {
+            self.connection.status_note = match live.driver.resume_download(file_id) {
                 Ok(true) => "download resumed".into(),
                 Ok(false) => "nothing to resume".into(),
                 Err(_) => "could not resume the download".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — toggleDownloadIsPaused runs with live TDLib".into();
+            self.connection.status_note =
+                "demo — toggleDownloadIsPaused runs with live TDLib".into();
         }
         cx.notify();
     }

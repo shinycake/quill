@@ -1043,7 +1043,7 @@ impl QuillApp {
                         .and_then(|session| session.users.get(&bot_user_id))
                         .map(|user| user.display_name())
                         .unwrap_or_else(|| "Mini app".into());
-                    self.status_note.clear();
+                    self.connection.status_note.clear();
                     self.spawn_mini_app_window(
                         WebAppLaunch {
                             bot_user_id,

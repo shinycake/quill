@@ -558,6 +558,10 @@ pub struct AppearancePrefs {
     /// tdesktop `WorkMode` tray bit ("Show tray icon").
     #[serde(default = "default_true")]
     pub show_tray_icon: bool,
+    /// tdesktop `WorkMode` taskbar bit ("Show taskbar icon"): off keeps the
+    /// main window out of the taskbar (Windows, X11); the tray reopens it.
+    #[serde(default = "default_true")]
+    pub show_taskbar_icon: bool,
     /// tdesktop `macWarnBeforeQuit`: hold Cmd+Q to quit (macOS only).
     #[serde(default = "default_true")]
     pub mac_warn_before_quit: bool,
@@ -612,6 +616,7 @@ impl Default for AppearancePrefs {
             start_in_tray: false,
             minimize_to_tray: false,
             show_tray_icon: true,
+            show_taskbar_icon: true,
             mac_warn_before_quit: true,
             check_updates_on_launch: true,
         }
@@ -1417,6 +1422,7 @@ mod tests {
             start_in_tray: true,
             minimize_to_tray: true,
             show_tray_icon: false,
+            show_taskbar_icon: false,
             mac_warn_before_quit: false,
             check_updates_on_launch: false,
         };

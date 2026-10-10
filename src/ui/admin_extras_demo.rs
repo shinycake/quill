@@ -29,16 +29,16 @@ impl QuillApp {
     fn demo_setup_admin_extras(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_ADMIN_EXTRAS").unwrap_or_else(|_| "log".into());
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_admin_log(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_admin_log(session, &self.demo_ui.sink, &self.demo_ui.seq);
             // The administrator list feeds the "Recent actions" admin chips.
             let admins = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
             let json = format!(
                 r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":1,"custom_title":"Founder","is_owner":true,"can_be_edited":false}},{{"@type":"chatAdministrator","user_id":777,"custom_title":"","is_owner":false,"can_be_edited":true}},{{"@type":"chatAdministrator","user_id":2,"custom_title":"","is_owner":false,"can_be_edited":true}}]}}"#,
                 admins.0
             );
-            let sink: std::sync::Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-            if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &sink) {
+            let sink: std::sync::Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
                 session.apply(owned);
             }
             if mode == "log" {
@@ -58,7 +58,8 @@ impl QuillApp {
             "delete" => self.open_group_confirm(ChatId(13), GroupConfirmAction::DeleteChat, cx),
             _ => self.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx),
         }
-        self.status_note = "screenshot demo — admin extras (injected, no live Telegram)".into();
+        self.connection.status_note =
+            "screenshot demo — admin extras (injected, no live Telegram)".into();
         cx.notify();
     }
 }

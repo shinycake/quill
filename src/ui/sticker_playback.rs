@@ -34,8 +34,8 @@ pub(super) struct StickerJob {
     cancel: Arc<AtomicBool>,
     child: Arc<Mutex<Option<std::process::Child>>>,
 }
-/// Which playback cache. Stickers decode at 128 px (at most 16 clips,
-/// 48 MB). Custom emoji are small and many — every visible one animates,
+/// Which playback cache. Stickers decode at 224 px, the box Telegram
+/// Desktop draws them in (`maxStickerSize`; at most 16 clips). Custom emoji are small and many — every visible one animates,
 /// as in Telegram Desktop — so 56 px, at most 36 frames, 160 clips and
 /// 32 MB. Both play at most 30 fps (`MAX_PLAYBACK_FPS`).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,7 +47,7 @@ pub(super) enum PlaybackSize {
 impl PlaybackSize {
     fn edge(self) -> u32 {
         match self {
-            Self::Sticker => 128,
+            Self::Sticker => 224,
             Self::Emoji => 56,
         }
     }
@@ -373,7 +373,7 @@ impl QuillApp {
                         }
                         Err(error) => {
                             this.playback_cache_mut(size).failed.insert(id.0);
-                            this.status_note = error;
+                            this.connection.status_note = error;
                             None
                         }
                     };
@@ -692,7 +692,7 @@ impl QuillApp {
             };
             clip.frames.get(index).cloned()
         });
-        if animating && app.window_active.get() {
+        if animating && app.frame.window_active.get() {
             // Clips play at their decoded rate, at most 30 fps
             // (`MAX_PLAYBACK_FPS`; Lottie files are usually 60).
             let fps = match size {

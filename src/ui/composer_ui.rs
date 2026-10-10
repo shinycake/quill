@@ -254,7 +254,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.gifs.close();
         }
-        self.status_note = "GIFs closed".into();
+        self.connection.status_note = "GIFs closed".into();
         cx.notify();
     }
 
@@ -283,7 +283,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|reply| reply.send_target(chat_id));
         let sent = if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.send_animation(
+            self.connection.status_note = match live.driver.send_animation(
                 chat_id,
                 quill::telegram::requests::AnimationSend {
                     file_id,
@@ -299,10 +299,10 @@ impl QuillApp {
                 Ok(_) => "sending GIF".into(),
                 Err(_) => "could not send GIF".into(),
             };
-            self.status_note == "sending GIF"
+            self.connection.status_note == "sending GIF"
         } else if self.demo_session.is_some() {
             self.apply_demo_gif(chat_id, file_id, duration, width, height, reply);
-            self.status_note = "demo GIF applied locally (no live Telegram)".into();
+            self.connection.status_note = "demo GIF applied locally (no live Telegram)".into();
             true
         } else {
             false
@@ -318,25 +318,25 @@ impl QuillApp {
     }
 
     pub(super) fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {
-        self.sticker_settings_open = false;
+        self.settings.sticker_settings_open = false;
         if let Some(live) = self.live.as_mut() {
             live.driver.close_sticker_panel();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.close();
         }
-        self.status_note = "stickers closed".into();
+        self.connection.status_note = "stickers closed".into();
         cx.notify();
     }
 
     pub(super) fn select_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.select_sticker_set(set_id) {
+            self.connection.status_note = match live.driver.select_sticker_set(set_id) {
                 Ok(_) => "sticker set".into(),
                 Err(_) => "could not open sticker set".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.select_sticker_set(set_id);
-            self.status_note = "sticker set".into();
+            self.connection.status_note = "sticker set".into();
         }
         cx.notify();
     }
@@ -353,7 +353,7 @@ impl QuillApp {
         if self.session().is_some_and(|session| {
             session.sticker_requires_premium(file_id) && !session.my_is_premium()
         }) {
-            self.status_note = "Sending this sticker requires Telegram Premium".into();
+            self.connection.status_note = "Sending this sticker requires Telegram Premium".into();
             cx.notify();
             return;
         }
@@ -374,7 +374,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|reply| reply.send_target(chat_id));
         let sent = if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.send_sticker(
+            self.connection.status_note = match live.driver.send_sticker(
                 chat_id,
                 quill::telegram::requests::StickerSend {
                     file_id,
@@ -391,10 +391,10 @@ impl QuillApp {
                 Ok(_) => "sticker sent".into(),
                 Err(_) => "could not send sticker".into(),
             };
-            self.status_note == "sticker sent"
+            self.connection.status_note == "sticker sent"
         } else if self.demo_session.is_some() {
             self.apply_demo_sticker(chat_id, &emoji, file_id, reply);
-            self.status_note = "sticker sent".into();
+            self.connection.status_note = "sticker sent".into();
             true
         } else {
             false
@@ -513,7 +513,7 @@ impl QuillApp {
                 if let Some(live) = this.live.as_mut()
                     && live.driver.request_composer_link_preview(&url).is_err()
                 {
-                    this.status_note = "couldn't load link preview".into();
+                    this.connection.status_note = "couldn't load link preview".into();
                 }
                 cx.notify();
             })
@@ -591,7 +591,7 @@ impl QuillApp {
                 change(&mut choice);
                 this.set_preview_choice(choice);
                 if let Some(note) = note {
-                    this.status_note = note.into();
+                    this.connection.status_note = note.into();
                 }
                 cx.notify();
             });

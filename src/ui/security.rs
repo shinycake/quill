@@ -149,10 +149,10 @@ impl QuillApp {
             others.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
 
             let mut body = div().flex().flex_col().gap_2();
-            if let Some(notice) = this.device_link_notice {
+            if let Some(notice) = this.privacy.device_link_notice {
                 body = body.child(div().id("device-link-notice").role(Role::Status).aria_label(notice).text_sm().child(notice));
             }
-            if this.device_login_qr.is_some() {
+            if this.privacy.device_login_qr.is_some() {
                 body = body.child(div().flex().flex_col().gap_2()
                     .child(div().id("device-login-consent").role(Role::Label)
                         .aria_label("Allow the device displaying this QR code to sign in to your Telegram account? It will have access to your cloud chats.")
@@ -162,7 +162,7 @@ impl QuillApp {
                             .on_click(cx.listener(|this, _, _, cx| this.confirm_scanned_device(cx))))
                         .child(Button::new("cancel-device-login").label("Cancel").ghost()
                             .on_click(cx.listener(|this, _, _, cx| { this.clear_device_qr(); cx.notify(); })))));
-            } else if this.device_qr_scanner.is_some() {
+            } else if this.privacy.device_qr_scanner.is_some() {
                 body = body.child(Button::new("cancel-device-scan").label("Cancel camera scan").ghost()
                     .on_click(cx.listener(|this, _, _, cx| { this.clear_device_qr(); cx.notify(); })));
             } else {
@@ -185,7 +185,7 @@ impl QuillApp {
                         .child(format!("Error: {line}")),
                 );
             }
-            if let Some(confirm) = this.sessions_confirm {
+            if let Some(confirm) = this.privacy.sessions_confirm {
                 body = body.child(this.sessions_confirm_banner(confirm, mutating, cx));
             }
             if sessions.is_empty() {
@@ -286,12 +286,12 @@ impl QuillApp {
             }
             // B13: a tapped session opens its details instead of the list.
             let details = this
-                .privacy_ui
+                .privacy.extra
                 .session_details
                 .and_then(|id| sessions.iter().find(|s| s.id == id))
                 .map(|s| this.session_details_body(s, mutating, cx));
             if details.is_none() {
-                this.privacy_ui.session_details = None;
+                this.privacy.extra.session_details = None;
                 body = body.child(this.sessions_ttl_section(cx));
             }
             let body = match details {
@@ -368,7 +368,7 @@ impl QuillApp {
                         .child(format!("Error: {line}")),
                 );
             }
-            if let Some(confirm) = this.websites_confirm {
+            if let Some(confirm) = this.privacy.websites_confirm {
                 body = body.child(this.websites_confirm_banner(confirm, &websites, mutating, cx));
             }
             if websites.is_empty() {
@@ -582,9 +582,9 @@ impl QuillApp {
     /// the authoritative `getActiveSessions` answer (cached state reused,
     /// in-flight fetch deduped). Demo: the fixture is already injected.
     pub(super) fn open_sessions(&mut self, cx: &mut Context<Self>) {
-        self.sessions_open = true;
-        self.sessions_confirm = None;
-        self.privacy_ui.session_details = None;
+        self.privacy.sessions_open = true;
+        self.privacy.sessions_confirm = None;
+        self.privacy.extra.session_details = None;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(demo) = self.demo_session.as_mut() {
@@ -621,8 +621,8 @@ impl QuillApp {
     /// confirmation.
     pub(super) fn close_sessions(&mut self, cx: &mut Context<Self>) {
         self.clear_device_qr();
-        self.sessions_open = false;
-        self.sessions_confirm = None;
+        self.privacy.sessions_open = false;
+        self.privacy.sessions_confirm = None;
         cx.notify();
     }
 
@@ -775,7 +775,7 @@ impl QuillApp {
         incomplete: bool,
         cx: &mut Context<Self>,
     ) {
-        self.sessions_confirm = Some(SessionsConfirm::TerminateOne {
+        self.privacy.sessions_confirm = Some(SessionsConfirm::TerminateOne {
             session_id,
             incomplete,
         });
@@ -785,13 +785,13 @@ impl QuillApp {
     /// Slice A3: arm the "terminate all other sessions" confirmation
     /// (TGX `AreYouSureSessions`).
     pub(super) fn begin_terminate_all_sessions(&mut self, cx: &mut Context<Self>) {
-        self.sessions_confirm = Some(SessionsConfirm::TerminateAll);
+        self.privacy.sessions_confirm = Some(SessionsConfirm::TerminateAll);
         cx.notify();
     }
 
     /// Slice A3: drop the pending terminate confirmation.
     pub(super) fn cancel_sessions_confirm(&mut self, cx: &mut Context<Self>) {
-        self.sessions_confirm = None;
+        self.privacy.sessions_confirm = None;
         cx.notify();
     }
 
@@ -799,7 +799,7 @@ impl QuillApp {
     /// no TDLib; the list refreshes from the authoritative `ok` answer,
     /// never optimistically.
     pub(super) fn confirm_sessions_terminate(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.sessions_confirm.take();
+        let confirm = self.privacy.sessions_confirm.take();
         if let (Some(live), Some(confirm)) = (self.live.as_mut(), confirm) {
             let result = match confirm {
                 SessionsConfirm::TerminateOne { session_id, .. } => {
@@ -809,7 +809,7 @@ impl QuillApp {
                     live.driver.terminate_all_other_sessions().map(|_| ())
                 }
             };
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(()) => "Terminating session…".into(),
                 Err(_) => "Could not terminate the session.".into(),
             };
@@ -1167,8 +1167,10 @@ impl QuillApp {
                 .driver
                 .toggle_session_can_accept_secret_chats(session_id)
             {
-                Ok(_) => self.status_note = "Updating session setting…".into(),
-                Err(_) => self.status_note = "Could not update the session setting.".into(),
+                Ok(_) => self.connection.status_note = "Updating session setting…".into(),
+                Err(_) => {
+                    self.connection.status_note = "Could not update the session setting.".into()
+                }
             }
         }
         cx.notify();
@@ -1179,8 +1181,10 @@ impl QuillApp {
     pub(super) fn toggle_session_calls(&mut self, session_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.toggle_session_can_accept_calls(session_id) {
-                Ok(_) => self.status_note = "Updating session setting…".into(),
-                Err(_) => self.status_note = "Could not update the session setting.".into(),
+                Ok(_) => self.connection.status_note = "Updating session setting…".into(),
+                Err(_) => {
+                    self.connection.status_note = "Could not update the session setting.".into()
+                }
             }
         }
         cx.notify();
@@ -1404,7 +1408,7 @@ impl QuillApp {
                 .small()
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.privacy_ui.session_details = Some(session_id);
+                    this.privacy.extra.session_details = Some(session_id);
                     cx.notify();
                 })),
         );
@@ -1417,8 +1421,8 @@ impl QuillApp {
     /// reused, in-flight fetch deduped). Demo: the fixture is already
     /// injected.
     pub(super) fn open_websites(&mut self, cx: &mut Context<Self>) {
-        self.websites_open = true;
-        self.websites_confirm = None;
+        self.privacy.websites_open = true;
+        self.privacy.websites_confirm = None;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_connected_websites();
         }
@@ -1428,8 +1432,8 @@ impl QuillApp {
     /// Slice A4: close the overlay and drop any pending disconnect
     /// confirmation.
     pub(super) fn close_websites(&mut self, cx: &mut Context<Self>) {
-        self.websites_open = false;
-        self.websites_confirm = None;
+        self.privacy.websites_open = false;
+        self.privacy.websites_confirm = None;
         cx.notify();
     }
 
@@ -1451,7 +1455,7 @@ impl QuillApp {
     /// Slice A4: arm the disconnect confirmation for one website (TGX
     /// `TerminateWebSessionQuestion` "Disconnect %1$s?").
     pub(super) fn begin_disconnect_website(&mut self, website_id: i64, cx: &mut Context<Self>) {
-        self.websites_confirm = Some(WebsitesConfirm::DisconnectOne { website_id });
+        self.privacy.websites_confirm = Some(WebsitesConfirm::DisconnectOne { website_id });
         cx.notify();
     }
 
@@ -1459,13 +1463,13 @@ impl QuillApp {
     /// `DisconnectAllWebsitesHint` "Are you sure you want to disconnect
     /// all websites?").
     pub(super) fn begin_disconnect_all_websites(&mut self, cx: &mut Context<Self>) {
-        self.websites_confirm = Some(WebsitesConfirm::DisconnectAll);
+        self.privacy.websites_confirm = Some(WebsitesConfirm::DisconnectAll);
         cx.notify();
     }
 
     /// Slice A4: drop the pending disconnect confirmation.
     pub(super) fn cancel_websites_confirm(&mut self, cx: &mut Context<Self>) {
-        self.websites_confirm = None;
+        self.privacy.websites_confirm = None;
         cx.notify();
     }
 
@@ -1473,7 +1477,7 @@ impl QuillApp {
     /// no TDLib; the list refreshes from the authoritative `ok` answer,
     /// never optimistically.
     pub(super) fn confirm_websites_disconnect(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.websites_confirm.take();
+        let confirm = self.privacy.websites_confirm.take();
         if let (Some(live), Some(confirm)) = (self.live.as_mut(), confirm) {
             let result = match confirm {
                 WebsitesConfirm::DisconnectOne { website_id } => {
@@ -1481,7 +1485,7 @@ impl QuillApp {
                 }
                 WebsitesConfirm::DisconnectAll => live.driver.disconnect_all_websites().map(|_| ()),
             };
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(()) => "Disconnecting website…".into(),
                 Err(_) => "Could not disconnect the website.".into(),
             };
@@ -1658,13 +1662,13 @@ pub(super) fn quiet_danger(cx: &App) -> ButtonCustomVariant {
 crate::ui::shell::register_dialogs! {
     Websites => DialogSpec::new(
         600,
-        |app| app.websites_open,
+        |app| app.privacy.websites_open,
         QuillApp::build_websites_dialog,
     ),
 
     Sessions => DialogSpec::new(
         700,
-        |app| app.sessions_open,
+        |app| app.privacy.sessions_open,
         QuillApp::build_sessions_dialog,
     ),
 

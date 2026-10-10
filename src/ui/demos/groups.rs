@@ -159,10 +159,10 @@ enum NotifySettingsDemo {
 impl QuillApp {
     fn demo_bot_topics(&mut self, mode: SubsectionTabsMode) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_bot_topics(session, &self.demo_sink, &self.demo_seq, mode);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_topics(session, &self.demo_ui.sink, &self.demo_ui.seq, mode);
         }
-        self.status_note = "screenshot demo — bot topic tabs".into();
+        self.connection.status_note = "screenshot demo — bot topic tabs".into();
     }
 
     fn demo_ready_block_user(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -170,37 +170,37 @@ impl QuillApp {
         // contacts fixture — TGX `BlockUserConfirm`. Ada's info panel
         // is open behind the dialog so the demo is consistent.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_contacts(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_contacts(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.open_info_panel = Some(InfoPanelTarget::User(31));
         }
-        self.contacts_tab_open = true;
-        self.group_confirm_dialog = Some(GroupConfirmDialog {
+        self.chat_list.contacts_tab_open = true;
+        self.admin.group_confirm_dialog = Some(GroupConfirmDialog {
             chat_id: ChatId(0),
             action: GroupConfirmAction::BlockContact {
                 user_id: 31,
                 block: true,
             },
         });
-        self.status_note = "screenshot demo — block user confirm".into();
+        self.connection.status_note = "screenshot demo — block user confirm".into();
     }
 
     fn demo_ready_chat_avatars(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Parity slice: chat-list avatars + channel header extras fixture.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_avatars(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_avatars(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "chat avatars & channel header".into();
+        self.connection.status_note = "chat avatars & channel header".into();
     }
 
     fn demo_ready_contacts(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_contacts(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_contacts(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.contacts_tab_open = true;
-        self.status_note = "screenshot demo — contacts tab + user info panel".into();
+        self.chat_list.contacts_tab_open = true;
+        self.connection.status_note = "screenshot demo — contacts tab + user info panel".into();
     }
 
     fn demo_ready_contacts_manage(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -208,45 +208,45 @@ impl QuillApp {
         // to Ada (31, a contact) so Delete contact + Block user show,
         // and a notice proves the settings-section wiring.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_contacts(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_contacts(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.open_info_panel = Some(InfoPanelTarget::User(31));
             session.contacts_notice = Some("Imported 2 contacts.".to_string());
         }
-        self.contacts_tab_open = true;
-        self.status_note = "screenshot demo — contacts management".into();
+        self.chat_list.contacts_tab_open = true;
+        self.connection.status_note = "screenshot demo — contacts management".into();
     }
 
     fn demo_ready_folders(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_folders(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_folders(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // Select the non-default "News" folder so the screenshot shows
         // the filtered chat list.
         self.folders.tab = Some(2);
-        self.status_note = "screenshot demo — folder tabs · News folder".into();
+        self.connection.status_note = "screenshot demo — folder tabs · News folder".into();
     }
 
     fn demo_ready_folders_add_link(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Shareable folders slice: "Add folder" for an addlist link.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_folders_share(session, &self.demo_ui.sink, &self.demo_ui.seq);
             apply_ready_folder_invite(session, "https://t.me/addlist/Xk3pQ9aBn2");
         }
         let mut dialog = FolderInviteDialog::new("https://t.me/addlist/Xk3pQ9aBn2".into());
         dialog.selected = [13, 16].into_iter().collect();
         dialog.seeded = true;
         self.folders.invite = Some(dialog);
-        self.status_note = "screenshot demo — Add folder by link".into();
+        self.connection.status_note = "screenshot demo — Add folder by link".into();
     }
 
     fn demo_ready_folders_icons(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Shareable folders slice: the folder editor with the icon picker.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_folders_share(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         let mut dialog = FolderEditorDialog::new(window, cx, None);
         dialog.editor.name = "Family".into();
@@ -256,71 +256,72 @@ impl QuillApp {
             .name_input
             .update(cx, |input, cx| input.set_value("Family", window, cx));
         self.folders.editor = Some(dialog);
-        self.status_note = "screenshot demo — folder icon picker".into();
+        self.connection.status_note = "screenshot demo — folder icon picker".into();
     }
 
     fn demo_ready_folders_manage(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Parity slice: manage dialog over the same folder fixture.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_folders_share(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // Open the manage dialog over the folder fixture.
         self.folders.manage_open = true;
-        self.status_note = "screenshot demo — folder management dialog".into();
+        self.connection.status_note = "screenshot demo — folder management dialog".into();
     }
 
     fn demo_ready_folders_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Shareable folders slice: the Share Folder dialog over four folders.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_folders_share(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_folder_share(1, window, cx);
-        self.status_note = "screenshot demo — Share Folder".into();
+        self.connection.status_note = "screenshot demo — Share Folder".into();
     }
 
     fn demo_ready_folders_sidebar(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Shareable folders slice: the folders in a left column with icons.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_folders_share(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.appearance.folder_tabs_view = quill::folder_icons::FolderTabsView::Left;
         self.folders.tab = Some(2);
-        self.status_note = "screenshot demo — folders on the left".into();
+        self.connection.status_note = "screenshot demo — folders on the left".into();
     }
 
     fn demo_ready_forum_topics(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_forum_topics(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_forum_topics(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — forum topics list".into();
+        self.connection.status_note = "screenshot demo — forum topics list".into();
     }
 
     fn demo_ready_slow_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Phase A1: slow-mode enforcement fixture — the composer shows the
         // countdown and blocks sends until it expires.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_slow_mode(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_slow_mode(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer.update(cx, |input, cx| {
             input.set_value("this send will be blocked by slow mode…", window, cx);
         });
-        self.status_note = "slow-mode enforcement — sends blocked until the timer expires".into();
+        self.connection.status_note =
+            "slow-mode enforcement — sends blocked until the timer expires".into();
     }
 
     fn demo_ready_topic_post(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_topic_post(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_topic_post(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer.update(cx, |input, cx| {
             input.set_value("Posting into the General topic…", window, cx);
         });
-        self.status_note = "screenshot demo — posting to a forum topic".into();
+        self.connection.status_note = "screenshot demo — posting to a forum topic".into();
     }
 
     fn demo_notify_settings(
@@ -330,13 +331,14 @@ impl QuillApp {
         _cx: &mut Context<Self>,
     ) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_folders(session, &self.demo_sink, &self.demo_seq);
-            apply_ready_folder_badges(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_folders(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            apply_ready_folder_badges(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         if matches!(demo, NotifySettingsDemo::NotifyOs) {
-            self.notification_defaults_open = true;
+            self.notify.notification_defaults_open = true;
         }
-        self.status_note = "screenshot demo — notification settings · folder counters".into();
+        self.connection.status_note =
+            "screenshot demo — notification settings · folder counters".into();
     }
 }

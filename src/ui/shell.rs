@@ -219,7 +219,7 @@ impl QuillShell {
     /// the render-time overlay conditions the hand-rolled dialogs used.
     fn dialog_is_open(app: &QuillApp, kind: DialogKind) -> bool {
         // The lock screen covers everything: no dialog stays above it.
-        if app.passcode_ui.locked {
+        if app.account.passcode.locked {
             return false;
         }
         registry()
@@ -231,7 +231,7 @@ impl QuillShell {
     /// The open dialog that wins by priority (first open flag in
     /// registry order), or `None` when none is open or the app is locked.
     fn first_open(app: &QuillApp) -> Option<&'static DialogSpec> {
-        if app.passcode_ui.locked {
+        if app.account.passcode.locked {
             return None;
         }
         registry().iter().find(|r| (r.is_open)(app)).copied()

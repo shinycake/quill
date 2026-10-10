@@ -44,7 +44,8 @@ impl QuillApp {
                     if let Some(live) = this.live.as_mut()
                         && live.driver.load_group_sticker_choices(chat_id).is_err()
                     {
-                        this.status_note = "Could not load group packs. Retry the action.".into();
+                        this.connection.status_note =
+                            "Could not load group packs. Retry the action.".into();
                     }
                     cx.notify();
                 })),
@@ -107,7 +108,7 @@ impl QuillApp {
                                 } else {
                                     live.driver.set_supergroup_sticker_set(chat_id, id)
                                 };
-                                this.status_note = match result {
+                                this.connection.status_note = match result {
                                     Ok(Some(_)) => "Group pack change requested.".into(),
                                     Ok(None) => {
                                         "Group pack change is unavailable or already pending."
@@ -229,7 +230,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chat_boost_status.remove(&chat_id.0);
             if live.driver.fetch_chat_boost_status(chat_id).is_err() {
-                self.status_note = "could not load boost status".into();
+                self.connection.status_note = "could not load boost status".into();
             }
         }
         cx.notify();

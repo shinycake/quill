@@ -149,11 +149,11 @@ enum GifsDemo {
 impl QuillApp {
     fn demo_ready_audio(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_audio(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_audio(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.playback.playing_audio = Some(MessageId(801));
-        self.status_note = "screenshot demo — audio · playing".into();
+        self.connection.status_note = "screenshot demo — audio · playing".into();
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -189,8 +189,8 @@ impl QuillApp {
 
     fn demo_ready_emoji_packs(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_gifs(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_gifs(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.gifs.open = false;
             session.emoji.open = true;
             session.emoji.installed_sets = [
@@ -237,21 +237,21 @@ impl QuillApp {
         );
         self.pickers.media_panel.open = true;
         self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Emoji;
-        self.status_note = "screenshot demo — emoji panel".into();
+        self.connection.status_note = "screenshot demo — emoji panel".into();
     }
 
     fn demo_ready_game_card(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_game_card(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_game_card(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — game card + high scores".into();
+        self.connection.status_note = "screenshot demo — game card + high scores".into();
     }
 
     fn demo_ready_player_bar(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_audio(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_audio(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // Music paused at 1:27 of 3:34; the bar shows repeat-all and
         // shuffle as active.
@@ -266,14 +266,14 @@ impl QuillApp {
         self.pause_active_playback();
         self.playback.player.repeat = quill::playlist::RepeatMode::All;
         self.playback.player.order = quill::playlist::OrderMode::Shuffle;
-        self.status_note = "screenshot demo — player bar".into();
+        self.connection.status_note = "screenshot demo — player bar".into();
     }
 
     fn demo_ready_seek_bars(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_voice(session, &self.demo_sink, &self.demo_seq);
-            apply_ready_audio(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_voice(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            apply_ready_audio(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // Fake an in-progress playback without starting audio: voice
         // note 90 (12 s) playing from 5.0 s — the tick advances it —
@@ -288,18 +288,19 @@ impl QuillApp {
             cx,
         );
         self.playback.positions.insert(MessageId(801), 87.0);
-        self.status_note = "screenshot demo — seek bars · voice playing · audio paused".into();
+        self.connection.status_note =
+            "screenshot demo — seek bars · voice playing · audio paused".into();
     }
 
     fn demo_ready_shortcuts(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.shortcuts_open = true;
-        self.status_note = "screenshot demo — keyboard shortcuts reference".into();
+        self.settings.shortcuts_open = true;
+        self.connection.status_note = "screenshot demo — keyboard shortcuts reference".into();
     }
 
     fn demo_ready_video(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_video(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_video(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.playback.playing_video = Some(MessageId(601));
         self.playback.video_frames = vec![
@@ -307,13 +308,13 @@ impl QuillApp {
             demo_media_allowlist().join("demo-gif-2.png"),
         ];
         self.spawn_video_tick(cx);
-        self.status_note = "screenshot demo — video · playing".into();
+        self.connection.status_note = "screenshot demo — video · playing".into();
     }
 
     fn demo_ready_video_note(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_video_note(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_video_note(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.playback.playing_video = Some(MessageId(611));
         self.playback.video_frames = vec![
@@ -321,13 +322,13 @@ impl QuillApp {
             demo_media_allowlist().join("demo-gif-2.png"),
         ];
         self.spawn_video_tick(cx);
-        self.status_note = "screenshot demo — video note · playing".into();
+        self.connection.status_note = "screenshot demo — video note · playing".into();
     }
 
     fn demo_ready_voice(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_voice(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_voice(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // One Play request must survive the download and start the note.
         let local = self.demo_session.as_ref().unwrap().files[&82].clone();
@@ -357,18 +358,19 @@ impl QuillApp {
         self.playback.playing_voice = Some(MessageId(91));
         // MED2: demo shows the locked record bar + a transcribed note.
         self.recording.locked = true;
-        self.status_note = "screenshot demo — recording voice · locked · playing voice note".into();
+        self.connection.status_note =
+            "screenshot demo — recording voice · locked · playing voice note".into();
     }
 
     fn demo_stickers(&mut self, demo: StickersDemo, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_stickers(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_stickers(session, &self.demo_ui.sink, &self.demo_ui.seq);
             if demo == StickersDemo::StickerPlayback {
                 crate::ui::composer_ui::apply_ready_sticker_playback(
                     session,
-                    &self.demo_sink,
-                    &self.demo_seq,
+                    &self.demo_ui.sink,
+                    &self.demo_ui.seq,
                 );
             }
         }
@@ -385,7 +387,7 @@ impl QuillApp {
             if demo == StickersDemo::StickerPlayback && extra > 0 {
                 let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
                 let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
-                    self.demo_sink.clone();
+                    self.demo_ui.sink.clone();
                 let root = crate::ui::demo::demo_media_allowlist();
                 for i in 0..extra {
                     let id = 9_000 + i;
@@ -418,13 +420,13 @@ impl QuillApp {
         }
         self.pickers.media_panel.open = true;
         self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
-        self.status_note = "screenshot demo — stickers · tap to send".into();
+        self.connection.status_note = "screenshot demo — stickers · tap to send".into();
     }
 
     fn demo_gifs(&mut self, demo: GifsDemo, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_gifs(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_gifs(session, &self.demo_ui.sink, &self.demo_ui.seq);
             if demo == GifsDemo::GifPlayback {
                 session.gifs.open = false;
                 if let Some(history) = session.histories.get_mut(&11) {

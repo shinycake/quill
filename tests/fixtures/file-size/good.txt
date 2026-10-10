@@ -1,0 +1,2 @@
+# fixture baseline
+16 tests/fixtures/file-size/good/shrunk.rs

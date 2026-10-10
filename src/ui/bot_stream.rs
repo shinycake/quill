@@ -100,7 +100,7 @@ impl QuillApp {
             MessageContent::Text(text) => text.text.chars().count(),
             _ => 0,
         };
-        let reveal = self.stream_reveal.borrow();
+        let reveal = self.history.stream_reveal.borrow();
         let revealing = reveal.draft_id != draft.draft_id || (reveal.shown as usize) < total;
         let tick = if revealing {
             std::time::SystemTime::now()
@@ -129,6 +129,7 @@ impl QuillApp {
             MessageContent::Text(text) if !text.text.is_empty() => {
                 let total = text.text.chars().count();
                 let shown = self
+                    .history
                     .stream_reveal
                     .borrow_mut()
                     .advance(draft.draft_id, total);

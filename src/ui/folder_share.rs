@@ -110,10 +110,10 @@ impl QuillApp {
             if !live.driver.session.folder_specs.contains_key(&folder_id)
                 && let Err(err) = live.driver.fetch_chat_folder(folder_id)
             {
-                self.status_note = format!("could not load folder: {err:?}");
+                self.connection.status_note = format!("could not load folder: {err:?}");
             }
             if let Err(err) = live.driver.fetch_folder_share(folder_id) {
-                self.status_note = format!("could not load folder links: {err:?}");
+                self.connection.status_note = format!("could not load folder links: {err:?}");
             }
         }
         cx.notify();
@@ -300,7 +300,7 @@ impl QuillApp {
         if let Some(dialog) = self.folders.share.as_mut() {
             dialog.copied = Some(link.to_string());
         }
-        self.status_note = "Link copied to clipboard".into();
+        self.connection.status_note = "Link copied to clipboard".into();
         cx.notify();
     }
 
@@ -329,7 +329,7 @@ impl QuillApp {
             }
         } else if let Some(error) = error {
             // Recommended folders (or a stray failure) report in the toast.
-            self.status_note = error;
+            self.connection.status_note = error;
             changed = true;
         }
         if changed {
@@ -726,7 +726,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.check_folder_invite_link(&link)
         {
-            self.status_note = format!("could not check the folder link: {err:?}");
+            self.connection.status_note = format!("could not check the folder link: {err:?}");
         }
         cx.notify();
     }
@@ -763,7 +763,7 @@ impl QuillApp {
                 .map(|d| d.selected.len())
                 .unwrap_or(0);
             self.close_folder_invite(cx);
-            self.status_note = match (name, joined) {
+            self.connection.status_note = match (name, joined) {
                 (Some(name), 0) => format!("Folder {name} added"),
                 (Some(name), n) => format!("Folder {name} added · you also joined {n} chat(s)"),
                 (None, _) => "Folder added".into(),

@@ -3,7 +3,9 @@
 use super::*;
 
 /// Round video message diameter.
-pub(in crate::ui) const VIDEO_NOTE_DIAMETER: f32 = 220.;
+/// Telegram Desktop `maxVideoMessageSize`.
+pub(in crate::ui) const VIDEO_NOTE_DIAMETER: f32 =
+    quill::bubble_layout::MAX_VIDEO_MESSAGE_SIZE as f32;
 
 pub(in crate::ui) fn video_note_attachment(
     chat_id: ChatId,

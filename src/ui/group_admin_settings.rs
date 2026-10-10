@@ -59,7 +59,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.refresh_group_admin(chat_id);
         }
-        self.group_settings_dialog = Some(GroupSettingsDialog {
+        self.admin.group_settings_dialog = Some(GroupSettingsDialog {
             chat_id,
             view: GroupSettingsView::Main,
         });
@@ -67,12 +67,12 @@ impl QuillApp {
     }
 
     pub(super) fn close_group_settings_dialog(&mut self, cx: &mut Context<Self>) {
-        self.group_settings_dialog = None;
+        self.admin.group_settings_dialog = None;
         cx.notify();
     }
 
     fn set_group_settings_view(&mut self, view: GroupSettingsView, cx: &mut Context<Self>) {
-        let Some(dialog) = self.group_settings_dialog.as_mut() else {
+        let Some(dialog) = self.admin.group_settings_dialog.as_mut() else {
             return;
         };
         dialog.view = view;
@@ -96,11 +96,11 @@ impl QuillApp {
         action: GroupSettingsAction,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.group_settings_dialog.as_ref().map(|d| d.chat_id) else {
+        let Some(chat_id) = self.admin.group_settings_dialog.as_ref().map(|d| d.chat_id) else {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: this needs a live session.".into();
+            self.connection.status_note = "Demo mode: this needs a live session.".into();
             cx.notify();
             return;
         };
@@ -184,11 +184,11 @@ impl QuillApp {
         match result {
             Ok(Some(_)) => {}
             Ok(None) => {
-                self.status_note =
+                self.connection.status_note =
                     "That setting isn't available for you, or it's already being saved.".into();
             }
             Err(_) => {
-                self.status_note = "Couldn't send the change. Try again.".into();
+                self.connection.status_note = "Couldn't send the change. Try again.".into();
             }
         }
         cx.notify();
@@ -206,11 +206,12 @@ impl QuillApp {
         }
         for (old, new) in upgrades {
             if self
+                .admin
                 .group_settings_dialog
                 .as_ref()
                 .is_some_and(|d| d.chat_id == old)
             {
-                self.group_settings_dialog = None;
+                self.admin.group_settings_dialog = None;
             }
             if let Some(live) = self.live.as_mut()
                 && live.driver.session.open_chat == Some(old)
@@ -792,7 +793,7 @@ impl QuillApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<(String, AnyElement, AnyElement)> {
-        let dialog = self.group_settings_dialog.as_ref()?;
+        let dialog = self.admin.group_settings_dialog.as_ref()?;
         let (chat_id, view) = (dialog.chat_id, dialog.view);
         let session = self.session()?;
         let controls = session.group_admin_controls(chat_id);
@@ -957,7 +958,7 @@ crate::ui::shell::register_dialogs! {
     /// B7: group and channel settings (topics, history, reactions, ...).
     GroupSettings => DialogSpec::new(
         4900,
-        |app| app.group_settings_dialog.is_some(),
+        |app| app.admin.group_settings_dialog.is_some(),
         QuillApp::build_group_settings_dialog,
     ),
 }

@@ -164,19 +164,22 @@ impl QuillApp {
     ) -> Option<Arc<RenderImage>> {
         let key = (call_id, user_id, screen);
         if self
-            .group_video_images
+            .group_call
+            .video_images
             .get(&key)
             .is_some_and(|(seq, _)| *seq == frame.seq)
         {
             return self
-                .group_video_images
+                .group_call
+                .video_images
                 .get(&key)
                 .map(|(_, image)| image.clone());
         }
         let image = Self::video_render_image(frame)?;
         // Tiles of any other call are dead weight.
         self.prune_group_video_images(Some(call_id));
-        self.group_video_images
+        self.group_call
+            .video_images
             .insert(key, (frame.seq, image.clone()));
         Some(image)
     }
@@ -184,7 +187,7 @@ impl QuillApp {
     /// Drop cached group-call tiles that don't belong to `live_call`
     /// (`None`: no call, drop all), handing them to the atlas sweeper.
     pub(in crate::ui) fn prune_group_video_images(&mut self, live_call: Option<i32>) {
-        let images = take_dead_call_tiles(&mut self.group_video_images, live_call)
+        let images = take_dead_call_tiles(&mut self.group_call.video_images, live_call)
             .into_iter()
             .map(|(_, image)| image);
         crate::ui::image_budget::retire_all(images);
@@ -345,7 +348,7 @@ impl QuillApp {
                         } else {
                             format!("couldn't play this {noun}")
                         };
-                        this.status_note = message.clone();
+                        this.connection.status_note = message.clone();
                         this.playback.error = Some(message);
                     }
                 }

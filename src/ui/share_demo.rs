@@ -80,10 +80,10 @@ enum ShareDemo {
 impl QuillApp {
     fn demo_setup_share(&mut self, demo: ShareDemo, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_share(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_share(session, &self.demo_ui.sink, &self.demo_ui.seq);
             if matches!(demo, ShareDemo::SendAs) {
-                apply_send_as_options(session, &self.demo_sink, &self.demo_seq);
+                apply_send_as_options(session, &self.demo_ui.sink, &self.demo_ui.seq);
                 session.open_chat(ChatId(22));
             }
             if matches!(demo, ShareDemo::ForwardBar) {
@@ -102,7 +102,8 @@ impl QuillApp {
                 self.share.comment_input.update(cx, |input, cx| {
                     input.set_value("Thought you'd like this", window, cx);
                 });
-                self.status_note = "screenshot demo — share box (two chats ticked)".into();
+                self.connection.status_note =
+                    "screenshot demo — share box (two chats ticked)".into();
             }
             ShareDemo::ForwardBar => {
                 self.share.pending_forward = Some(draft);
@@ -111,11 +112,12 @@ impl QuillApp {
                     input.set_value("Check this out", window, cx);
                     input.focus(window, cx);
                 });
-                self.status_note = "screenshot demo — forward bar in the destination".into();
+                self.connection.status_note =
+                    "screenshot demo — forward bar in the destination".into();
             }
             ShareDemo::SendAs => {
                 self.composer_ui.send_as_open = true;
-                self.status_note = "screenshot demo — send as".into();
+                self.connection.status_note = "screenshot demo — send as".into();
             }
         }
     }

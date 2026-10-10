@@ -16,7 +16,8 @@ use std::path::PathBuf;
 
 /// Side of the media thumbnail in a reply strip (tdesktop
 /// `st::historyReplyPreview`).
-const REPLY_THUMB: f32 = 30.;
+/// Telegram Desktop `historyReplyPreview`.
+const REPLY_THUMB: f32 = quill::bubble_layout::REPLY_PREVIEW as f32;
 
 /// The strip above a reply's text: the replied-to sender's name in their
 /// color, a media thumbnail, and the quote or a one-line preview. A click
@@ -230,7 +231,7 @@ pub(super) fn forward_header_line(
                         message_id: None,
                     } => this.select_search_chat(chat_id, window, cx),
                     ForwardLink::Imported => {
-                        this.status_note = imported_note.clone().unwrap_or_default();
+                        this.connection.status_note = imported_note.clone().unwrap_or_default();
                         cx.notify();
                     }
                     ForwardLink::Hidden | ForwardLink::None => {}

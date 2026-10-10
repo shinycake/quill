@@ -67,8 +67,8 @@ impl Drop for DeviceQrScanner {
 }
 impl QuillApp {
     pub(super) fn scan_device_qr(&mut self, cx: &mut Context<Self>) {
-        if self.device_qr_scanner.is_some()
-            || self.device_login_qr.is_some()
+        if self.privacy.device_qr_scanner.is_some()
+            || self.privacy.device_login_qr.is_some()
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,
@@ -78,15 +78,15 @@ impl QuillApp {
         {
             return;
         }
-        self.device_link_notice = None;
+        self.privacy.device_link_notice = None;
         match DeviceQrScanner::start() {
-            Ok(scanner) => self.device_qr_scanner = Some(scanner),
-            Err(error) => self.device_link_notice = Some(error),
+            Ok(scanner) => self.privacy.device_qr_scanner = Some(scanner),
+            Err(error) => self.privacy.device_link_notice = Some(error),
         }
         cx.notify();
     }
     pub(super) fn poll_device_qr(&mut self, cx: &mut Context<Self>) {
-        if !self.sessions_open
+        if !self.privacy.sessions_open
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,
@@ -102,7 +102,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.device_login_result.take())
         {
-            self.device_link_notice = Some(match linked {
+            self.privacy.device_link_notice = Some(match linked {
                 quill::auth::DeviceLoginResult::Linked => "Device linked.",
                 quill::auth::DeviceLoginResult::PasswordRequired => {
                     "QR code accepted. Enter your two-step verification password on the other device to finish signing in."
@@ -114,18 +114,19 @@ impl QuillApp {
             cx.notify();
         }
         let event = self
+            .privacy
             .device_qr_scanner
             .as_mut()
             .and_then(DeviceQrScanner::poll);
         let Some(event) = event else {
             return;
         };
-        self.device_qr_scanner = None;
+        self.privacy.device_qr_scanner = None;
         match event {
-            ScanEvent::Login(link) => self.device_login_qr = Some(link),
+            ScanEvent::Login(link) => self.privacy.device_login_qr = Some(link),
             ScanEvent::Cancelled => {}
             ScanEvent::Failed => {
-                self.device_link_notice =
+                self.privacy.device_link_notice =
                     Some("Couldn't read a Telegram login QR code. Please try again.")
             }
         }
@@ -137,7 +138,7 @@ impl QuillApp {
     /// through the same validation and explicit consent step as a scan; it
     /// is never logged.
     pub(super) fn paste_device_login_link(&mut self, cx: &mut Context<Self>) {
-        if self.device_login_qr.is_some()
+        if self.privacy.device_login_qr.is_some()
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,
@@ -153,11 +154,11 @@ impl QuillApp {
             .map(|text| Zeroizing::new(text.trim().to_string()));
         match link {
             Some(link) if quill::auth::is_device_login_qr(&link) => {
-                self.device_link_notice = None;
-                self.device_login_qr = Some(link);
+                self.privacy.device_link_notice = None;
+                self.privacy.device_login_qr = Some(link);
             }
             _ => {
-                self.device_link_notice = Some(
+                self.privacy.device_link_notice = Some(
                     "Copy the tg://login link from the other device's QR code first, then try again.",
                 );
             }
@@ -165,14 +166,14 @@ impl QuillApp {
         cx.notify();
     }
     pub(super) fn confirm_scanned_device(&mut self, cx: &mut Context<Self>) {
-        let Some(link) = self.device_login_qr.take() else {
+        let Some(link) = self.privacy.device_login_qr.take() else {
             return;
         };
         let result = self
             .live
             .as_mut()
             .map(|live| live.driver.confirm_device_login(&link));
-        self.device_link_notice = Some(if matches!(result, Some(Ok(_))) {
+        self.privacy.device_link_notice = Some(if matches!(result, Some(Ok(_))) {
             "Waiting for Telegram to link the device…"
         } else {
             "The device couldn't be linked. Scan a fresh login QR code and try again."
@@ -180,8 +181,8 @@ impl QuillApp {
         cx.notify();
     }
     pub(super) fn clear_device_qr(&mut self) {
-        self.device_qr_scanner = None;
-        self.device_login_qr = None;
-        self.device_link_notice = None;
+        self.privacy.device_qr_scanner = None;
+        self.privacy.device_login_qr = None;
+        self.privacy.device_link_notice = None;
     }
 }

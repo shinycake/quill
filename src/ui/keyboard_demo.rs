@@ -75,9 +75,10 @@ impl QuillApp {
     pub(super) fn demo_setup_reply_keyboard(&mut self, cx: &mut Context<Self>) {
         let view = std::env::var("QUILL_DEMO_KEYBOARD_VIEW").unwrap_or_default();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq
+            self.demo_ui
+                .seq
                 .store(session.last_seq, std::sync::atomic::Ordering::SeqCst);
-            apply_ready_reply_keyboard(session, &self.demo_sink, &self.demo_seq);
+            apply_ready_reply_keyboard(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         let chat = ChatId(BOT_CHAT);
         let message = MessageId(KEYBOARD_MESSAGE);
@@ -124,6 +125,6 @@ impl QuillApp {
             ),
             _ => {}
         }
-        self.status_note = "screenshot demo — bot reply keyboard".into();
+        self.connection.status_note = "screenshot demo — bot reply keyboard".into();
     }
 }

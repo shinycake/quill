@@ -111,8 +111,8 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-        apply_ready_reply_elsewhere(session, &self.demo_sink, &self.demo_seq);
+        self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+        apply_ready_reply_elsewhere(session, &self.demo_ui.sink, &self.demo_ui.seq);
         match demo {
             ReplyDemo::Elsewhere => {
                 self.composer_ui.pending_reply = Some(reply_to_choose());

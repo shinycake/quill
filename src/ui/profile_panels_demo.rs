@@ -155,8 +155,8 @@ impl QuillApp {
     fn demo_setup_profile_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_PROFILE").unwrap_or_else(|_| "contact".into());
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_profile_panels(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_profile_panels(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.open_info_panel = Some(match mode.as_str() {
                 "self" | "birthday" | "channel" => InfoPanelTarget::User(777),
                 "similar" => {
@@ -173,20 +173,20 @@ impl QuillApp {
             "share" => self.open_share_contact_dialog(31, cx),
             "gallery" => self.open_profile_photos(31, cx),
             "report" => {
-                self.profile_dialog = Some(ProfileDialog::ReportPhoto {
+                self.dialogs.profile_dialog = Some(ProfileDialog::ReportPhoto {
                     user_id: 31,
                     file_id: 9502,
                 });
             }
             "personal-photo" => {
-                self.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+                self.dialogs.profile_dialog = Some(ProfileDialog::PersonalPhoto {
                     user_id: 31,
                     mode: PersonalPhotoMode::Set,
                     path: Some("/tmp/ada.png".into()),
                 });
             }
             "contact" => {
-                self.status_note = "Phone number copied to clipboard".into();
+                self.connection.status_note = "Phone number copied to clipboard".into();
             }
             _ => {}
         }

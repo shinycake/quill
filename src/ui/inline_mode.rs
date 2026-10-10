@@ -439,7 +439,7 @@ impl QuillApp {
                         .send_inline_query_result(chat_id, query_id, &result_id)
                         .is_err()
                 {
-                    self.status_note = "could not send the inline result".into();
+                    self.connection.status_note = "could not send the inline result".into();
                 }
                 cx.notify();
             }

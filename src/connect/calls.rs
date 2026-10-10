@@ -36,32 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .expect("call transport outbox")
                 .push_back((call_id, state));
         }));
-        // Phase C2e: peer camera states and decoded frames ride the same
-        // worker-thread -> driver-pump path as transport and signaling.
-        let video_state_outbox = self.video_state_outbox.clone();
-        engine.set_remote_video_state_callback(Arc::new(move |call_id, state| {
-            video_state_outbox
-                .lock()
-                .expect("call video state outbox")
-                .push_back((call_id, state));
-        }));
-        // Phase C2j: the peer's 1:1 screen-share state rides the same
-        // worker-thread -> driver-pump path as the camera state.
-        let screen_state_outbox = self.screen_state_outbox.clone();
-        engine.set_remote_screen_state_callback(Arc::new(move |call_id, state| {
-            screen_state_outbox
-                .lock()
-                .expect("call screen state outbox")
-                .push_back((call_id, state));
-        }));
-        // The peer's microphone on/off rides the same path.
-        let audio_state_outbox = self.audio_state_outbox.clone();
-        engine.set_remote_audio_state_callback(Arc::new(move |call_id, muted| {
-            audio_state_outbox
-                .lock()
-                .expect("call audio state outbox")
-                .push_back((call_id, muted));
-        }));
+        self.install_remote_state_hooks(engine.as_mut());
         let video_frame_slots = self.video_frame_slots.clone();
         let group_video_frame_slots = self.group_video_frame_slots.clone();
         engine.set_video_frame_callback(Arc::new(move |call_id, frame| {
@@ -554,26 +529,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .filter(|call| call.id == call_id)
             {
                 call.remote_video = state;
-            }
-        }
-
-        // The peer's microphone follows the same gate as the camera.
-        loop {
-            let update = self
-                .audio_state_outbox
-                .lock()
-                .expect("call audio state outbox")
-                .pop_front();
-            let Some((call_id, muted)) = update else {
-                break;
-            };
-            if let Some(call) = self
-                .session
-                .active_call
-                .as_mut()
-                .filter(|call| call.id == call_id)
-            {
-                call.remote_audio_muted = muted;
             }
         }
 

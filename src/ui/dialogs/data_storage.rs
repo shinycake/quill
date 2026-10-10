@@ -57,16 +57,16 @@ impl QuillApp {
     /// view state, clear the last "Cache cleared" note, and fire the
     /// storage + presets fetches (both guarded: once per session).
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
-        self.storage_usage_open = true;
-        self.data_storage_editor = None;
-        self.storage_confirm = None;
+        self.settings.storage_usage_open = true;
+        self.settings.data_storage_editor = None;
+        self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.storage_freed = None;
             let _ = live.driver.maybe_fetch_storage_statistics();
             let _ = live.driver.fetch_auto_download_presets();
             let _ = live.driver.fetch_network_statistics();
         }
-        self.privacy_ui.network_reset_confirm = false;
+        self.privacy.extra.network_reset_confirm = false;
         if let Some(demo) = self.demo_session.as_mut() {
             demo.storage_freed = None;
             if demo.privacy_data.network_usage.is_none() {
@@ -115,13 +115,13 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StorageUsage, |this, _, cx| {
-                this.storage_usage_open = false;
-                this.data_storage_editor = None;
-                this.storage_confirm = None;
+                this.settings.storage_usage_open = false;
+                this.settings.data_storage_editor = None;
+                this.settings.storage_confirm = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let editing = this.data_storage_editor;
+            let editing = this.settings.data_storage_editor;
             let (title, body) = match &editing {
                 Some((network, draft)) => (
                     format!("{} downloads", network.label()),
@@ -137,7 +137,7 @@ impl QuillApp {
                             .label("Back")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.data_storage_editor = None;
+                                this.settings.data_storage_editor = None;
                                 cx.notify();
                             })),
                     )
@@ -146,7 +146,9 @@ impl QuillApp {
                             .label("Save")
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some((network, draft)) = this.data_storage_editor.take() {
+                                if let Some((network, draft)) =
+                                    this.settings.data_storage_editor.take()
+                                {
                                     if let Some(live) = this.live.as_mut() {
                                         // Applied on the confirmed `ok`
                                         // (never optimistically); a failed
@@ -157,7 +159,8 @@ impl QuillApp {
                                             .set_auto_download_settings(network, draft)
                                             .is_err()
                                         {
-                                            this.data_storage_editor = Some((network, draft));
+                                            this.settings.data_storage_editor =
+                                                Some((network, draft));
                                         }
                                     } else {
                                         // Demo mode: apply locally.
@@ -186,7 +189,7 @@ impl QuillApp {
                             .label("Done")
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.storage_usage_open = false;
+                                this.settings.storage_usage_open = false;
                                 cx.notify();
                                 this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
                             })),
@@ -429,7 +432,7 @@ impl QuillApp {
             .on_click(cx.listener(move |this, _, _, cx| {
                 let draft = this.session().map(|s| *s.data_storage.for_network(network));
                 if let Some(draft) = draft {
-                    this.data_storage_editor = Some((network, draft));
+                    this.settings.data_storage_editor = Some((network, draft));
                     cx.notify();
                 }
             }))
@@ -471,7 +474,7 @@ impl QuillApp {
                         .checked(draft.is_auto_download_enabled)
                         .accessibility_label("Automatic download")
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some((_, draft)) = this.data_storage_editor.as_mut() {
+                            if let Some((_, draft)) = this.settings.data_storage_editor.as_mut() {
                                 draft.is_auto_download_enabled = on;
                             }
                             cx.notify();
@@ -512,7 +515,7 @@ impl QuillApp {
                         .checked(draft.use_less_data_for_calls)
                         .accessibility_label("Use less data for calls")
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some((_, draft)) = this.data_storage_editor.as_mut() {
+                            if let Some((_, draft)) = this.settings.data_storage_editor.as_mut() {
                                 draft.use_less_data_for_calls = on;
                             }
                             cx.notify();
@@ -549,7 +552,7 @@ impl QuillApp {
                     .label(size_cap_label(cap))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some((_, draft)) = this.data_storage_editor.as_mut() {
+                        if let Some((_, draft)) = this.settings.data_storage_editor.as_mut() {
                             cycle(draft);
                         }
                         cx.notify();
@@ -599,7 +602,7 @@ pub(crate) fn demo_data_storage_prefs() -> DataStoragePrefs {
 crate::ui::shell::register_dialogs! {
     StorageUsage => DialogSpec::new(
         900,
-        |app| app.storage_usage_open,
+        |app| app.settings.storage_usage_open,
         QuillApp::build_storage_usage_dialog,
     ),
 }

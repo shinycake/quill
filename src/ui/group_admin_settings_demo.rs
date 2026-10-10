@@ -126,15 +126,15 @@ impl QuillApp {
             _ => (GROUP, GroupSettingsView::Main),
         };
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_group_admin(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_group_admin(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.open_chat(ChatId(chat));
             if chat != BASIC {
                 session.open_info_panel = Some(InfoPanelTarget::Supergroup(chat));
             }
         }
         self.open_group_settings_dialog(ChatId(chat), cx);
-        if let Some(dialog) = self.group_settings_dialog.as_mut() {
+        if let Some(dialog) = self.admin.group_settings_dialog.as_mut() {
             dialog.view = view;
         }
     }

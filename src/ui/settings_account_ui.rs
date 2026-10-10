@@ -47,7 +47,7 @@ impl QuillApp {
                     .label(ASK_QUESTION_PAGE)
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.settings_page = Some(ASK_QUESTION_PAGE);
+                        this.settings.page = Some(ASK_QUESTION_PAGE);
                         cx.notify();
                     })),
             )
@@ -122,8 +122,8 @@ impl QuillApp {
             .map(|live| live.driver.open_support_chat());
         match sent {
             Some(Ok(_)) => {
-                self.settings_open = false;
-                self.settings_page = None;
+                self.settings.open = false;
+                self.settings.page = None;
                 window.close_dialog(cx);
             }
             Some(Err(_)) => self.set_status_note("Couldn't reach Telegram Support; try again.", cx),

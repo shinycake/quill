@@ -210,8 +210,8 @@ impl QuillApp {
 
     fn demo_ready_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_forward(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_forward(session, &self.demo_ui.sink, &self.demo_ui.seq);
             self.share.forward_result = session.last_forward.clone();
         }
         let mut draft =
@@ -223,31 +223,32 @@ impl QuillApp {
             input.set_value("Demo chat B", window, cx);
             input.focus(window, cx);
         });
-        self.status_note = "screenshot demo — select → pick dest → forwarded".into();
+        self.connection.status_note = "screenshot demo — select → pick dest → forwarded".into();
     }
 
     fn demo_ready_mute_archive(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_mute_archive(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_mute_archive(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.mute_menu_open = true;
-        self.status_note = "screenshot demo — mute presets · muted icon · archive".into();
+        self.notify.mute_menu_open = true;
+        self.connection.status_note =
+            "screenshot demo — mute presets · muted icon · archive".into();
     }
 
     fn demo_ready_pin(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_pin(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_pin(session, &self.demo_ui.sink, &self.demo_ui.seq);
             let _ = session.begin_chat_search_jump(MessageId(101));
         }
-        self.status_note = "screenshot demo — pin · unpin · pinned bar".into();
+        self.connection.status_note = "screenshot demo — pin · unpin · pinned bar".into();
     }
 
     fn demo_ready_reactions(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_reactions(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_reactions(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // The message menu with its reaction strip, expanded.
         if let Some(session) = self.demo_session.as_mut() {
@@ -276,7 +277,7 @@ impl QuillApp {
             position: point(px(420.), px(200.)),
         });
         self.message_ui.reactions_expanded = true;
-        self.status_note = "screenshot demo — react · unreact · chips".into();
+        self.connection.status_note = "screenshot demo — react · unreact · chips".into();
     }
 
     fn demo_ready_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -285,8 +286,8 @@ impl QuillApp {
             input.focus(window, cx);
         });
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_reply(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_reply(session, &self.demo_ui.sink, &self.demo_ui.seq);
             self.composer_ui.pending_reply = Some(ComposerReplyTo::new(
                 ChatId(11),
                 MessageId(101),
@@ -324,18 +325,19 @@ impl QuillApp {
             .as_ref()
             .and_then(|session| session.histories.get(&11))
             .map_or(0, |history| history.messages.len());
-        self.motion
+        self.frame
+            .motion
             .start_reveal(rows.saturating_sub(1), std::time::Instant::now());
     }
 
     fn demo_ready_scheduled(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = crate::ui::scheduled_demo::ScheduledView::from_env();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::scheduled_demo::apply_ready_scheduled(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 view,
             );
         }
@@ -359,7 +361,7 @@ impl QuillApp {
             }
             crate::ui::scheduled_demo::ScheduledView::Button => {}
         }
-        self.status_note = "screenshot demo — scheduled messages".into();
+        self.connection.status_note = "screenshot demo — scheduled messages".into();
     }
 
     fn demo_ready_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -368,8 +370,8 @@ impl QuillApp {
             input.focus(window, cx);
         });
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_search(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_search(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
     }
 
@@ -379,16 +381,16 @@ impl QuillApp {
             input.focus(window, cx);
         });
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_search(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_search(session, &self.demo_ui.sink, &self.demo_ui.seq);
             apply_ready_search_filters(session);
         }
     }
 
     fn demo_ready_search_frequent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_search_frequent(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_search_frequent(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.search_ui
             .input
@@ -401,8 +403,8 @@ impl QuillApp {
             input.focus(window, cx);
         });
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_search_in_chat(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_search_in_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
     }
 
@@ -412,8 +414,8 @@ impl QuillApp {
             input.focus(window, cx);
         });
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_search_public(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_search_public(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
     }
 
@@ -424,7 +426,7 @@ impl QuillApp {
         self.share.pending_forward = Some(draft);
         self.message_ui.selection_anchor = Some(MessageId(201));
         self.message_ui.selection_focus = Some(MessageId(201));
-        self.status_note = "screenshot demo — keyboard selection".into();
+        self.connection.status_note = "screenshot demo — keyboard selection".into();
     }
 
     fn demo_ready_select_mode(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -432,7 +434,7 @@ impl QuillApp {
             ForwardDraft::from_message(ChatId(11), MessageId(101), false).expect("select 101");
         draft.toggle(ChatId(11), MessageId(102), false);
         self.share.pending_forward = Some(draft);
-        self.status_note = "screenshot demo — selection mode".into();
+        self.connection.status_note = "screenshot demo — selection mode".into();
     }
 
     fn demo_find_in_history(
@@ -442,22 +444,22 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             match demo {
                 FindInHistoryDemo::JumpDate => {
-                    apply_ready_jump_date(session, &self.demo_sink, &self.demo_seq)
+                    apply_ready_jump_date(session, &self.demo_ui.sink, &self.demo_ui.seq)
                 }
                 FindInHistoryDemo::SearchFrom => {
-                    apply_ready_search_from(session, &self.demo_sink, &self.demo_seq)
+                    apply_ready_search_from(session, &self.demo_ui.sink, &self.demo_ui.seq)
                 }
-                _ => apply_ready_search_from_hits(session, &self.demo_sink, &self.demo_seq),
+                _ => apply_ready_search_from_hits(session, &self.demo_ui.sink, &self.demo_ui.seq),
             }
             if !matches!(demo, FindInHistoryDemo::JumpDate) {
                 self.search_ui
                     .chat_input
                     .update(cx, |input, cx| input.focus(window, cx));
             }
-            self.status_note = "screenshot demo — find in history".into();
+            self.connection.status_note = "screenshot demo — find in history".into();
         }
     }
 }

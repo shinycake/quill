@@ -558,43 +558,23 @@ impl CallEngine for NtgcallsEngine {
     }
 
     fn set_transport_state_callback(&mut self, callback: TransportStateCallback) {
-        *self
-            .callback
-            .transport_hook
-            .lock()
-            .expect("ntgcalls transport callback hook") = Some(callback);
+        set_hook(&self.callback.transport_hook, callback);
     }
 
     fn set_video_frame_callback(&mut self, callback: VideoFrameCallback) {
-        *self
-            .callback
-            .frame_hook
-            .lock()
-            .expect("ntgcalls video frame hook") = Some(callback);
+        set_hook(&self.callback.frame_hook, callback);
     }
 
     fn set_remote_video_state_callback(&mut self, callback: RemoteVideoStateCallback) {
-        *self
-            .callback
-            .remote_video_hook
-            .lock()
-            .expect("ntgcalls remote video state hook") = Some(callback);
+        set_hook(&self.callback.remote_video_hook, callback);
     }
 
     fn set_remote_screen_state_callback(&mut self, callback: RemoteVideoStateCallback) {
-        *self
-            .callback
-            .remote_screen_hook
-            .lock()
-            .expect("ntgcalls remote screen state hook") = Some(callback);
+        set_hook(&self.callback.remote_screen_hook, callback);
     }
 
     fn set_remote_audio_state_callback(&mut self, callback: RemoteAudioStateCallback) {
-        *self
-            .callback
-            .remote_audio_hook
-            .lock()
-            .expect("ntgcalls remote audio state hook") = Some(callback);
+        set_hook(&self.callback.remote_audio_hook, callback);
     }
 
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {

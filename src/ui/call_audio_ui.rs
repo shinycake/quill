@@ -142,7 +142,7 @@ impl QuillApp {
         } else {
             match LevelTap::open_default() {
                 Ok(tap) => self.start_mic_test(Box::new(tap), cx),
-                Err(err) => self.status_note = err,
+                Err(err) => self.connection.status_note = err,
             }
         }
         cx.notify();

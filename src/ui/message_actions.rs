@@ -37,11 +37,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Stopping a live location needs a live connection (demo)".into();
+            self.connection.status_note =
+                "Stopping a live location needs a live connection (demo)".into();
             cx.notify();
             return;
         };
-        self.status_note = match live.driver.stop_live_location(chat_id, message_id) {
+        self.connection.status_note = match live.driver.stop_live_location(chat_id, message_id) {
             Ok(_) => "Stopped sharing your live location".into(),
             Err(_) => "Couldn't stop sharing; try again.".into(),
         };
@@ -62,7 +63,7 @@ impl QuillApp {
             return false;
         }
         let kind = session.chats.get(&chat_id.0).map(|chat| chat.kind.clone());
-        self.status_note = match kind {
+        self.connection.status_note = match kind {
             Some(ChatKind::Supergroup {
                 is_channel: true, ..
             }) => "Sorry, copying from this channel is disabled by admins.",
@@ -855,7 +856,7 @@ impl QuillApp {
         }
         div()
             .id("message-menu-overlay")
-            .track_focus(&self.context_menu_focus)
+            .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()
             .top_0()
@@ -902,7 +903,7 @@ impl QuillApp {
                             .child(panel),
                     ),
             )
-            .focus_trap("message-menu-focus", &self.context_menu_focus)
+            .focus_trap("message-menu-focus", &self.frame.context_menu_focus)
             .into_any_element()
     }
 
@@ -916,14 +917,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let started = Instant::now();
-        self.preview_press = Some((chat_id, started));
+        self.chat_list.preview_press = Some((chat_id, started));
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)
                 .await;
             let _ = this.update(cx, |this, cx| {
                 // Still the same press (no release, no newer press)?
-                if this.preview_press == Some((chat_id, started)) {
+                if this.chat_list.preview_press == Some((chat_id, started)) {
                     this.open_chat_preview(chat_id, anchor, cx);
                 }
             });
@@ -940,8 +941,8 @@ impl QuillApp {
         anchor: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.chat_menu = None;
-        self.chat_preview = Some(ChatPreviewState { chat_id, anchor });
+        self.chat_list.menu = None;
+        self.chat_list.preview = Some(ChatPreviewState { chat_id, anchor });
         // Live fetch for unopened chats; already-loaded history renders
         // immediately. Demo/no-driver sessions skip the network.
         if let Some(live) = self.live.as_mut() {
@@ -954,9 +955,9 @@ impl QuillApp {
     /// that ends the long press, or Escape). Also cancels a pending
     /// long press.
     pub(super) fn close_chat_preview(&mut self, cx: &mut Context<Self>) {
-        if self.chat_preview.is_some() || self.preview_press.is_some() {
-            self.chat_preview = None;
-            self.preview_press = None;
+        if self.chat_list.preview.is_some() || self.chat_list.preview_press.is_some() {
+            self.chat_list.preview = None;
+            self.chat_list.preview_press = None;
             cx.notify();
         }
     }
@@ -1236,7 +1237,7 @@ impl QuillApp {
             cx,
             {
                 this.toggle_archive(chat_id, cx);
-                this.chat_menu = None;
+                this.chat_list.menu = None;
                 cx.notify();
             }
         );
@@ -1249,7 +1250,7 @@ impl QuillApp {
             cx,
             {
                 this.toggle_chat_pin(chat_id, cx);
-                this.chat_menu = None;
+                this.chat_list.menu = None;
                 cx.notify();
             }
         );
@@ -1266,7 +1267,7 @@ impl QuillApp {
             cx,
             {
                 this.apply_chat_mute(chat_id, if muted { 0 } else { MUTE_FOREVER }, cx);
-                this.chat_menu = None;
+                this.chat_list.menu = None;
                 cx.notify();
             }
         );
@@ -1287,7 +1288,7 @@ impl QuillApp {
             cx,
             {
                 this.toggle_chat_marked_as_unread(chat_id, cx);
-                this.chat_menu = None;
+                this.chat_list.menu = None;
                 cx.notify();
             }
         );
@@ -1314,7 +1315,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     if let Some(target) = this
                         .session()
                         .and_then(|s| s.info_panel_target_for_chat(chat_id))
@@ -1339,7 +1340,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::Mention,
                         cx,
                     );
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     cx.notify();
                 }
             );
@@ -1358,7 +1359,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::Reaction,
                         cx,
                     );
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     cx.notify();
                 }
             );
@@ -1377,7 +1378,7 @@ impl QuillApp {
                         quill::state::UnreadJumpKind::PollVote,
                         cx,
                     );
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     cx.notify();
                 }
             );
@@ -1392,7 +1393,7 @@ impl QuillApp {
             cx,
             {
                 this.enter_select_mode(chat_id, cx);
-                this.chat_menu = None;
+                this.chat_list.menu = None;
                 cx.notify();
             }
         );
@@ -1410,7 +1411,7 @@ impl QuillApp {
                         GroupConfirmAction::ClearHistory { revoke: false },
                         cx,
                     );
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     cx.notify();
                 }
             );
@@ -1429,7 +1430,7 @@ impl QuillApp {
                         GroupConfirmAction::ClearHistory { revoke: true },
                         cx,
                     );
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     cx.notify();
                 }
             );
@@ -1440,7 +1441,7 @@ impl QuillApp {
         if chat.can_be_reported {
             item!(70, Lucide::Flag, "chat-menu-report", "Report", this, cx, {
                 this.open_group_confirm(chat_id, GroupConfirmAction::ReportChat, cx);
-                this.chat_menu = None;
+                this.chat_list.menu = None;
                 cx.notify();
             });
         }
@@ -1477,7 +1478,7 @@ impl QuillApp {
                         GroupConfirmAction::BlockUser { block: !blocked },
                         cx,
                     );
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     cx.notify();
                 }
             );
@@ -1492,7 +1493,7 @@ impl QuillApp {
                 cx,
                 {
                     this.start_chat_export(chat_id, cx);
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     cx.notify();
                 }
             );
@@ -1507,7 +1508,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_group_confirm(chat_id, GroupConfirmAction::RemoveFromList, cx);
-                    this.chat_menu = None;
+                    this.chat_list.menu = None;
                     cx.notify();
                 }
             );
@@ -1528,7 +1529,7 @@ impl QuillApp {
             .children(rows.into_iter().map(|(_, row)| row));
         div()
             .id("chat-menu-overlay")
-            .track_focus(&self.context_menu_focus)
+            .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()
             .top_0()
@@ -1545,7 +1546,7 @@ impl QuillApp {
                     .right_0()
                     .bottom_0()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_menu = None;
+                        this.chat_list.menu = None;
                         cx.notify();
                     })),
             )
@@ -1555,7 +1556,7 @@ impl QuillApp {
                     .snap_to_window_with_margin(px(8.))
                     .child(panel),
             )
-            .focus_trap("chat-menu-focus", &self.context_menu_focus)
+            .focus_trap("chat-menu-focus", &self.frame.context_menu_focus)
             .into_any_element()
     }
 
@@ -1657,7 +1658,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_message_url(&mut self, url: &str, cx: &mut Context<Self>) {
-        self.status_note = if quill::platform::open_external_url(url) {
+        self.connection.status_note = if quill::platform::open_external_url(url) {
             "opened link".into()
         } else {
             "could not open link".into()
@@ -1700,7 +1701,7 @@ impl QuillApp {
             }
         }
         if requested {
-            self.status_note = "loading Instant View…".into();
+            self.connection.status_note = "loading Instant View…".into();
             cx.notify();
         } else {
             self.open_message_url(&url, cx);
@@ -1720,7 +1721,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_callback_query(chat_id, message_id, &data);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "sending…".into(),
                 Err(_) => "could not send callback".into(),
             };
@@ -1728,7 +1729,7 @@ impl QuillApp {
             return;
         }
         if self.demo_session.is_some() {
-            self.status_note = "demo — callback sent (no live Telegram)".into();
+            self.connection.status_note = "demo — callback sent (no live Telegram)".into();
             cx.notify();
         }
     }
@@ -1786,13 +1787,14 @@ impl QuillApp {
 
     pub(super) fn jump_to_pinned_message(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.jump_to_chat_search_message(message_id) {
+            self.connection.status_note = match live.driver.jump_to_chat_search_message(message_id)
+            {
                 Ok(_) => chat_search_jump_note(&live.driver.session),
                 Err(_) => "could not jump to pinned message".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);
-            self.status_note = chat_search_jump_note(session);
+            self.connection.status_note = chat_search_jump_note(session);
         }
         cx.notify();
     }
@@ -1810,7 +1812,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .unpin_chat_message(chat_id, message_id);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "unpinning…".into(),
                 Err(_) => "could not unpin".into(),
             };
@@ -1823,12 +1825,12 @@ impl QuillApp {
                 chat_id.0, message_id.0
             );
             if let Some(session) = self.demo_session.as_mut() {
-                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-                if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+                if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                     session.apply(owned);
                 }
             }
-            self.status_note = "unpinned".into();
+            self.connection.status_note = "unpinned".into();
             cx.notify();
         }
     }
@@ -1846,11 +1848,12 @@ impl QuillApp {
         let session = self.session()?;
         let list = session.pinned_list(chat_id);
         let newest = list.first()?.id;
-        if self.hidden_pinned.get(&chat_id.0) == Some(&newest) {
+        if self.history.hidden_pinned.get(&chat_id.0) == Some(&newest) {
             return None;
         }
         let count = list.len();
         let index = self
+            .history
             .pinned_cursor
             .get(&chat_id.0)
             .copied()
@@ -1919,11 +1922,11 @@ impl QuillApp {
                 .icon(gpui_kit::assets::IconName::List)
                 .ghost()
                 .small()
-                .selected(self.pinned_list_open)
+                .selected(self.history.pinned_list_open)
                 .tooltip("Pinned messages")
                 .accessibility_label("Pinned messages")
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.pinned_list_open = !this.pinned_list_open;
+                    this.history.pinned_list_open = !this.history.pinned_list_open;
                     cx.notify();
                 }))
         };
@@ -1952,7 +1955,9 @@ impl QuillApp {
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.jump_to_pinned_message(message_id, cx);
-                            this.pinned_cursor.insert(chat_id.0, (index + 1) % count);
+                            this.history
+                                .pinned_cursor
+                                .insert(chat_id.0, (index + 1) % count);
                             cx.notify();
                         }))
                         .child(
@@ -2034,8 +2039,8 @@ impl QuillApp {
                 ))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.jump_to_pinned_message(message_id, cx);
-                    this.pinned_cursor.insert(chat_id.0, index);
-                    this.pinned_list_open = false;
+                    this.history.pinned_cursor.insert(chat_id.0, index);
+                    this.history.pinned_list_open = false;
                     cx.notify();
                 }))
                 // Telegram Desktop's "Go To Message" on a pinned row.
@@ -2049,8 +2054,8 @@ impl QuillApp {
                                 .on_click(move |_, _, cx| {
                                     let _ = owner.update(cx, |this, cx| {
                                         this.jump_to_pinned_message(message_id, cx);
-                                        this.pinned_cursor.insert(chat_id.0, index);
-                                        this.pinned_list_open = false;
+                                        this.history.pinned_cursor.insert(chat_id.0, index);
+                                        this.history.pinned_list_open = false;
                                         cx.notify();
                                     });
                                 }),
@@ -2076,7 +2081,7 @@ impl QuillApp {
                         "Unpin",
                         move |cx| {
                             let _ = app.update(cx, |this, cx| {
-                                this.pinned_list_open = false;
+                                this.history.pinned_list_open = false;
                                 this.unpin_all_messages(chat_id, cx);
                             });
                         },
@@ -2130,13 +2135,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.jump_to_replied_message(message_id) {
+            self.connection.status_note = match live.driver.jump_to_replied_message(message_id) {
                 Ok(_) => chat_search_jump_note(&live.driver.session),
                 Err(_) => "could not jump to message".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);
-            self.status_note = chat_search_jump_note(session);
+            self.connection.status_note = chat_search_jump_note(session);
         }
         cx.notify();
     }
@@ -2182,8 +2187,8 @@ fn confirm_hide_pinned(
         "Hide",
         move |cx| {
             let _ = app.update(cx, |this, cx| {
-                this.hidden_pinned.insert(chat_id.0, newest);
-                this.pinned_list_open = false;
+                this.history.hidden_pinned.insert(chat_id.0, newest);
+                this.history.pinned_list_open = false;
                 cx.notify();
             });
         },

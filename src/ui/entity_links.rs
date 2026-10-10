@@ -106,9 +106,10 @@ impl QuillApp {
                 let username = name.trim_start_matches('@');
                 if self.live.is_some() {
                     self.pending_deep_link = Some(format!("https://t.me/{username}"));
-                    self.status_note = format!("opening @{username}…");
+                    self.connection.status_note = format!("opening @{username}…");
                 } else {
-                    self.status_note = "can't open @mentions without a Telegram connection".into();
+                    self.connection.status_note =
+                        "can't open @mentions without a Telegram connection".into();
                 }
             }
             LinkTarget::MentionName { user_id, .. } => {
@@ -121,7 +122,7 @@ impl QuillApp {
                 self.send_bot_command(chat_id, message_id, &command, cx);
             }
             LinkTarget::Email(address) => {
-                self.status_note = if quill::platform::open_mailto(&address) {
+                self.connection.status_note = if quill::platform::open_mailto(&address) {
                     "opened mail".into()
                 } else {
                     "could not open the mail app".into()
@@ -143,7 +144,7 @@ impl QuillApp {
     /// Copy `text` and say so (Telegram Desktop's "Text copied" toast).
     pub(super) fn copy_entity_text(&mut self, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.status_note = "text copied to clipboard".into();
+        self.connection.status_note = "text copied to clipboard".into();
         cx.notify();
     }
 
@@ -227,13 +228,13 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let snapshot = ComposerSnapshot::capture(chat_id, view_generation, &text);
-            self.status_note = match live.driver.send_snapshot(&snapshot) {
+            self.connection.status_note = match live.driver.send_snapshot(&snapshot) {
                 Ok(_) => "sending…".into(),
                 Err(_) => "could not send the command".into(),
             };
         } else {
             self.apply_demo_outgoing(&text, None, None);
-            self.status_note = "demo send applied locally (no live Telegram)".into();
+            self.connection.status_note = "demo send applied locally (no live Telegram)".into();
         }
     }
 
@@ -263,7 +264,7 @@ impl QuillApp {
             .flatten()
             .find_map(|message| Some((message, seek_target(&message.content, seconds)?)));
         let Some((target, kind)) = target else {
-            self.status_note = "nothing to seek".into();
+            self.connection.status_note = "nothing to seek".into();
             return;
         };
         let target_id = target.id;

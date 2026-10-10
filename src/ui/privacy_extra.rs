@@ -141,8 +141,8 @@ impl QuillApp {
                     .child(value),
             )
             .on_click(cx.listener(|this, _, _, cx| {
-                this.privacy_editor = Some(PrivacyEditorTarget::NewChat);
-                this.exception_picker_open = false;
+                this.privacy.editor = Some(PrivacyEditorTarget::NewChat);
+                this.privacy.exception_picker_open = false;
                 cx.notify();
             }))
             .into_any_element()
@@ -242,13 +242,13 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.premium_option == Some(true));
         if !allow && !premium {
-            self.status_note = "Restricting new chats needs Telegram Premium.".into();
+            self.connection.status_note = "Restricting new chats needs Telegram Premium.".into();
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_new_chat_privacy(allow) {
-                self.status_note = format!("privacy update failed: {err:?}");
+                self.connection.status_note = format!("privacy update failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut()
             && let Some(NewChatPrivacyState::Ready(current)) = demo.privacy_data.new_chat
@@ -414,7 +414,7 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.premium_option == Some(true));
         if !premium {
-            self.status_note = "Changing gift settings needs Telegram Premium.".into();
+            self.connection.status_note = "Changing gift settings needs Telegram Premium.".into();
             cx.notify();
             return;
         }
@@ -425,7 +425,7 @@ impl QuillApp {
         edit(&mut next);
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_gift_settings(next) {
-                self.status_note = format!("gift settings update failed: {err:?}");
+                self.connection.status_note = format!("gift settings update failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.set_my_gift_settings_local(next);
@@ -524,7 +524,7 @@ impl QuillApp {
     pub(super) fn set_sensitive_content(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_ignore_sensitive_content(on) {
-                self.status_note = format!("couldn't change the 18+ setting: {err:?}");
+                self.connection.status_note = format!("couldn't change the 18+ setting: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.privacy_data.ignore_sensitive = Some(on);
@@ -536,18 +536,19 @@ impl QuillApp {
     fn open_file_open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prefs = file_prefs::current();
         let text = file_prefs::format_extension_list(&prefs.no_warning_extensions);
-        self.privacy_ui
+        self.privacy
+            .extra
             .file_ext_input
             .update(cx, |input, cx| input.set_value(&text, window, cx));
-        self.privacy_ui.file_open_ip_draft = prefs.ip_reveal_warning;
-        self.privacy_editor = Some(PrivacyEditorTarget::FileOpen);
+        self.privacy.extra.file_open_ip_draft = prefs.ip_reveal_warning;
+        self.privacy.editor = Some(PrivacyEditorTarget::FileOpen);
         cx.notify();
     }
 
     /// "File open confirmations" (tdesktop `OpenFileConfirmationsBox`):
     /// the extension whitelist and the IP-reveal switch, saved together.
     pub(super) fn file_open_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let ip = self.privacy_ui.file_open_ip_draft;
+        let ip = self.privacy.extra.file_open_ip_draft;
         let body = div()
             .flex()
             .flex_col()
@@ -561,7 +562,7 @@ impl QuillApp {
                     .child("Extensions whitelist"),
             )
             .child(
-                Textarea::new(&self.privacy_ui.file_ext_input)
+                Textarea::new(&self.privacy.extra.file_ext_input)
                     .aria_label("Extensions whitelist")
                     .h(px(72.)),
             )
@@ -598,7 +599,7 @@ impl QuillApp {
                             .checked(ip)
                             .accessibility_label("IP reveal warning")
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                this.privacy_ui.file_open_ip_draft = on;
+                                this.privacy.extra.file_open_ip_draft = on;
                                 cx.notify();
                             })),
                     ),
@@ -613,7 +614,7 @@ impl QuillApp {
                             .label("Cancel")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.privacy_editor = None;
+                                this.privacy.editor = None;
                                 cx.notify();
                             })),
                     )
@@ -631,15 +632,21 @@ impl QuillApp {
     }
 
     fn save_file_open_settings(&mut self, cx: &mut Context<Self>) {
-        let text = self.privacy_ui.file_ext_input.read(cx).value().to_string();
-        let ip = self.privacy_ui.file_open_ip_draft;
+        let text = self
+            .privacy
+            .extra
+            .file_ext_input
+            .read(cx)
+            .value()
+            .to_string();
+        let ip = self.privacy.extra.file_open_ip_draft;
         let extensions = file_prefs::parse_extension_list(&text);
         file_prefs::update(|prefs| {
             prefs.no_warning_extensions = extensions;
             prefs.ip_reveal_warning = ip;
         });
-        self.privacy_editor = None;
-        self.status_note = "file open settings saved".into();
+        self.privacy.editor = None;
+        self.connection.status_note = "file open settings saved".into();
         cx.notify();
     }
 
@@ -651,15 +658,15 @@ impl QuillApp {
         match file_prefs::open_warning(&path, &prefs, false) {
             None => self.open_file_now(&path, cx),
             Some(warning) => {
-                self.privacy_ui.file_open_remember = false;
-                self.privacy_ui.file_open = Some(FileOpenConfirm { path, warning });
+                self.privacy.extra.file_open_remember = false;
+                self.privacy.extra.file_open = Some(FileOpenConfirm { path, warning });
                 cx.notify();
             }
         }
     }
 
     fn open_file_now(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
-        self.status_note = if quill::platform::open_local_file(path) {
+        self.connection.status_note = if quill::platform::open_local_file(path) {
             "opened file".into()
         } else {
             "could not open the file".into()
@@ -669,10 +676,10 @@ impl QuillApp {
 
     /// The warning's confirm: remember the choice when ticked, then open.
     pub(super) fn confirm_file_open(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.privacy_ui.file_open.take() else {
+        let Some(confirm) = self.privacy.extra.file_open.take() else {
             return;
         };
-        if self.privacy_ui.file_open_remember {
+        if self.privacy.extra.file_open_remember {
             let extension = file_prefs::file_extension(&confirm.path);
             file_prefs::update(|prefs| match confirm.warning {
                 OpenWarning::IpReveal => prefs.ip_reveal_warning = false,
@@ -695,11 +702,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::FileOpenConfirm, |this, _, cx| {
-                this.privacy_ui.file_open = None;
+                this.privacy.extra.file_open = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let confirm = this.privacy_ui.file_open.clone();
+            let confirm = this.privacy.extra.file_open.clone();
             let (text, confirm_label, remember_label) = match confirm.as_ref() {
                 Some(c) => {
                     let extension = file_prefs::file_extension(&c.path);
@@ -739,7 +746,7 @@ impl QuillApp {
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
-            let remember = this.privacy_ui.file_open_remember;
+            let remember = this.privacy.extra.file_open_remember;
             let can_remember = confirm.as_ref().is_some_and(|c| {
                 c.warning == OpenWarning::IpReveal
                     || !file_prefs::file_extension(&c.path).is_empty()
@@ -757,7 +764,7 @@ impl QuillApp {
                                 .label(remember_label)
                                 .checked(remember)
                                 .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                    this.privacy_ui.file_open_remember = on;
+                                    this.privacy.extra.file_open_remember = on;
                                     cx.notify();
                                 })),
                         )
@@ -777,7 +784,7 @@ impl QuillApp {
                         .label("Cancel")
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.privacy_ui.file_open = None;
+                            this.privacy.extra.file_open = None;
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::FileOpenConfirm, window, cx);
                         })),
@@ -829,7 +836,7 @@ impl QuillApp {
                 .spawn(async move { std::fs::copy(&src, &dest).map(|_| dest) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.status_note = match copied {
+                this.connection.status_note = match copied {
                     Ok(dest) => format!(
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
@@ -969,7 +976,7 @@ crate::ui::shell::register_dialogs! {
     /// IP-revealing file.
     FileOpenConfirm => DialogSpec::new(
         3400,
-        |app| app.privacy_ui.file_open.is_some(),
+        |app| app.privacy.extra.file_open.is_some(),
         QuillApp::build_file_open_dialog,
     ),
 }
@@ -1080,7 +1087,7 @@ mod dispatch_tests {
             app.update_gift_settings(|g| g.limited_gifts = false, cx);
         });
         assert_eq!(app.read_with(vcx, |app, _| limited(app)), Some(true));
-        let note = app.read_with(vcx, |app, _| app.status_note.clone());
+        let note = app.read_with(vcx, |app, _| app.connection.status_note.clone());
         assert!(note.contains("Premium"), "{note}");
     }
 
@@ -1197,7 +1204,7 @@ mod dispatch_tests {
         });
         app.read_with(vcx, |app, _| {
             assert_eq!(
-                app.privacy_ui.file_open,
+                app.privacy.extra.file_open,
                 Some(FileOpenConfirm {
                     path: path.clone(),
                     warning: OpenWarning::Executable
@@ -1210,7 +1217,7 @@ mod dispatch_tests {
         // Confirm with it ticked: the extension opens directly afterwards.
         app.update_in(vcx, |app, _, cx| {
             app.open_file_guarded(path.clone(), cx);
-            app.privacy_ui.file_open_remember = true;
+            app.privacy.extra.file_open_remember = true;
             app.confirm_file_open(cx);
         });
         assert!(file_prefs::current().no_warning_extensions.contains("bin"));
@@ -1219,7 +1226,7 @@ mod dispatch_tests {
         });
         app.read_with(vcx, |app, _| {
             assert!(
-                app.privacy_ui.file_open.is_none(),
+                app.privacy.extra.file_open.is_none(),
                 "trusted type opens directly"
             );
         });

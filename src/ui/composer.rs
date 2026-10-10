@@ -59,12 +59,13 @@ impl QuillApp {
     ) {
         match self.pane_mode() {
             PaneMode::Connecting => {
-                self.status_note = "sign in before sending".into();
+                self.connection.status_note = "sign in before sending".into();
                 cx.notify();
             }
             PaneMode::Ready => {
                 if self.session().is_some_and(|s| s.is_frozen()) {
-                    self.status_note = "Your account is frozen and can't send messages.".into();
+                    self.connection.status_note =
+                        "Your account is frozen and can't send messages.".into();
                     cx.notify();
                     return;
                 }
@@ -96,12 +97,12 @@ impl QuillApp {
                     };
                     let (open_chat, view_generation, supported) = plan;
                     let Some(chat_id) = open_chat else {
-                        self.status_note = "select a chat to send".into();
+                        self.connection.status_note = "select a chat to send".into();
                         cx.notify();
                         return;
                     };
                     if supported != Some(true) {
-                        self.status_note = "this chat type is not supported yet".into();
+                        self.connection.status_note = "this chat type is not supported yet".into();
                         cx.notify();
                         return;
                     }
@@ -197,7 +198,7 @@ impl QuillApp {
                         );
                     }
                     if snaps.first().is_none_or(ComposerSnapshot::is_empty) {
-                        self.status_note = "type a message or attach a file".into();
+                        self.connection.status_note = "type a message or attach a file".into();
                         cx.notify();
                         return;
                     }
@@ -212,7 +213,7 @@ impl QuillApp {
                         if quill::text_split::units_over_limit(&only.text, limit) > 0 {
                             let parts = quill::text_split::split_markup_text(&only.text, limit);
                             if parts.is_empty() {
-                                self.status_note = "message too long to send".into();
+                                self.connection.status_note = "message too long to send".into();
                                 cx.notify();
                                 return;
                             }
@@ -271,13 +272,15 @@ impl QuillApp {
                             self.composer
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             self.forget_local_draft(chat_id);
-                            self.status_note = self.send_started_note(scheduling, "sending…");
+                            self.connection.status_note =
+                                self.send_started_note(scheduling, "sending…");
                         }
                         Err(quill::connect::ConnectSendError::CaptionTooLong { limit }) => {
                             // MED4: runtime `message_caption_length_max`
                             // refusal — the counter already warned; this
                             // names the limit.
-                            self.status_note = format!("caption too long (max {limit} characters)");
+                            self.connection.status_note =
+                                format!("caption too long (max {limit} characters)");
                         }
                         Err(_) => {
                             let video_unreadable = snaps
@@ -294,7 +297,7 @@ impl QuillApp {
                                     att.kind == AttachmentKind::VideoNote
                                         && quill::video::probe_local_video_note(&att.path).is_err()
                                 });
-                            self.status_note = if note_unreadable {
+                            self.connection.status_note = if note_unreadable {
                                 "video note must be a square clip (max 60s, 640px)".into()
                             } else if video_unreadable {
                                 "could not read video duration or size".into()
@@ -319,7 +322,7 @@ impl QuillApp {
                         att.kind == AttachmentKind::VideoNote
                             && quill::video::probe_local_video_note(&att.path).is_err()
                     }) {
-                        self.status_note =
+                        self.connection.status_note =
                             "video note must be a square clip (max 60s, 640px)".into();
                         cx.notify();
                         return;
@@ -351,7 +354,8 @@ impl QuillApp {
                     }
                     self.composer
                         .update(cx, |input, cx| input.set_value("", window, cx));
-                    self.status_note = "demo send applied locally (no live Telegram)".into();
+                    self.connection.status_note =
+                        "demo send applied locally (no live Telegram)".into();
                     cx.notify();
                 }
             }
@@ -395,17 +399,17 @@ impl QuillApp {
             .session
             .my_is_premium();
         if !premium {
-            self.status_note = "Rich messages require Telegram Premium".into();
+            self.connection.status_note = "Rich messages require Telegram Premium".into();
             cx.notify();
             return;
         }
         let Some(chat_id) = open_chat else {
-            self.status_note = "select a chat to send".into();
+            self.connection.status_note = "select a chat to send".into();
             cx.notify();
             return;
         };
         if supported != Some(true) {
-            self.status_note = "this chat type is not supported yet".into();
+            self.connection.status_note = "this chat type is not supported yet".into();
             cx.notify();
             return;
         }
@@ -448,7 +452,7 @@ impl QuillApp {
         // limit): refuse over-limit drafts before the emptiness check so
         // the note names the limit instead of "type a message".
         if quill::rich::rich_blocks_char_len(&blocks) > quill::rich::RICH_TEXT_MAX_CHARS {
-            self.status_note = format!(
+            self.connection.status_note = format!(
                 "rich message too long (max {} characters)",
                 quill::rich::RICH_TEXT_MAX_CHARS
             );
@@ -456,7 +460,7 @@ impl QuillApp {
             return;
         }
         if quill::rich::input_rich_message(&blocks).is_none() {
-            self.status_note = "type a message or attach a file".into();
+            self.connection.status_note = "type a message or attach a file".into();
             cx.notify();
             return;
         }
@@ -484,10 +488,11 @@ impl QuillApp {
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
-                self.status_note = self.send_started_note(options.scheduling, "sending…");
+                self.connection.status_note =
+                    self.send_started_note(options.scheduling, "sending…");
             }
             Err(_) => {
-                self.status_note = "could not send rich message".into();
+                self.connection.status_note = "could not send rich message".into();
             }
         }
         cx.notify();
@@ -508,13 +513,14 @@ impl QuillApp {
                     self.set_edit_replacement(only, cx);
                 }
                 _ => {
-                    self.status_note = "Drop a single file to replace the attachment.".into();
+                    self.connection.status_note =
+                        "Drop a single file to replace the attachment.".into();
                     cx.notify();
                 }
             }
             return;
         }
-        self.status_note = match ComposerAttachment::append_dropped_files(
+        self.connection.status_note = match ComposerAttachment::append_dropped_files(
             &mut self.composer_ui.pending_attachments,
             paths,
         ) {
@@ -643,14 +649,15 @@ impl QuillApp {
                 let name = att.file_name.clone();
                 let before = self.composer_ui.pending_attachments.len();
                 ComposerAttachment::push_attachment(&mut self.composer_ui.pending_attachments, att);
-                self.status_note = if self.composer_ui.pending_attachments.len() == before {
-                    format!("album is full ({before})")
-                } else {
-                    format!("attached {name}")
-                };
+                self.connection.status_note =
+                    if self.composer_ui.pending_attachments.len() == before {
+                        format!("album is full ({before})")
+                    } else {
+                        format!("attached {name}")
+                    };
             }
             None => {
-                self.status_note = "could not paste image".into();
+                self.connection.status_note = "could not paste image".into();
             }
         }
         cx.notify();
@@ -682,7 +689,7 @@ impl QuillApp {
         self.composer_ui.self_destruct = None;
         // MED1: the grouping override belongs to this composer batch.
         self.composer_ui.group_media = None;
-        self.status_note = "attachment cleared".into();
+        self.connection.status_note = "attachment cleared".into();
         cx.notify();
     }
 
@@ -733,7 +740,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.composer_ui.self_destruct = next;
-        self.status_note = match next {
+        self.connection.status_note = match next {
             None => "self-destruct off".into(),
             Some(SelfDestructSend::Timer(secs)) => format!("self-destruct: {secs}s"),
             Some(SelfDestructSend::Immediately) => "self-destruct: view once".into(),
@@ -844,8 +851,8 @@ impl QuillApp {
             && let Some(chat_id) = live.driver.session.open_chat
         {
             match live.driver.get_chat_scheduled_messages(chat_id) {
-                Ok(_) => self.status_note = "loading scheduled messages…".into(),
-                Err(_) => self.status_note = "could not load scheduled messages".into(),
+                Ok(_) => self.connection.status_note = "loading scheduled messages…".into(),
+                Err(_) => self.connection.status_note = "could not load scheduled messages".into(),
             }
         }
         self.composer_ui.scheduled_dialog_open = true;
@@ -872,9 +879,9 @@ impl QuillApp {
                     .session
                     .scheduled_messages
                     .retain(|m| m.id != message_id);
-                self.status_note = "scheduled message deleted".into();
+                self.connection.status_note = "scheduled message deleted".into();
             }
-            Err(_) => self.status_note = "could not delete scheduled message".into(),
+            Err(_) => self.connection.status_note = "could not delete scheduled message".into(),
         }
         cx.notify();
     }
@@ -1144,9 +1151,11 @@ impl QuillApp {
                             let markup = this.composer_markup(cx);
                             this.composer_ui.rich_editor_open = true;
                             this.set_composer_markup(&markup, window, cx);
-                            this.status_note = "rich editor — markup becomes blocks".into();
+                            this.connection.status_note =
+                                "rich editor — markup becomes blocks".into();
                         } else {
-                            this.status_note = "Rich messages require Telegram Premium".into();
+                            this.connection.status_note =
+                                "Rich messages require Telegram Premium".into();
                         }
                         cx.notify();
                     })),
@@ -1172,16 +1181,16 @@ impl QuillApp {
     ) {
         let text = self.composer_markup(cx);
         if text.trim().is_empty() {
-            self.status_note = "type something first — the AI works on the draft".into();
+            self.connection.status_note = "type something first — the AI works on the draft".into();
         } else if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
-            self.status_note = match send(live, chat_id, &text) {
+            self.connection.status_note = match send(live, chat_id, &text) {
                 Ok(_) => working_note.into(),
                 Err(_) => "AI tools unavailable here".into(),
             };
         } else {
-            self.status_note = "AI tools unavailable here".into();
+            self.connection.status_note = "AI tools unavailable here".into();
         }
         cx.notify();
     }
@@ -1404,12 +1413,12 @@ impl QuillApp {
     /// all" action.
     pub(super) fn unpin_all_messages(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.unpin_all_chat_messages(chat_id) {
+            self.connection.status_note = match live.driver.unpin_all_chat_messages(chat_id) {
                 Ok(_) => "unpinning all…".into(),
                 Err(_) => "could not unpin all".into(),
             };
         } else {
-            self.status_note = "no live connection".into();
+            self.connection.status_note = "no live connection".into();
         }
         cx.notify();
     }
@@ -1426,12 +1435,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.resend_failed_message(chat_id, message_id) {
-                Ok(_) => self.send_started_note(ComposerScheduling::None, "retrying send…"),
-                Err(_) => "could not retry".into(),
-            };
+            self.connection.status_note =
+                match live.driver.resend_failed_message(chat_id, message_id) {
+                    Ok(_) => self.send_started_note(ComposerScheduling::None, "retrying send…"),
+                    Err(_) => "could not retry".into(),
+                };
         } else {
-            self.status_note = "no live connection".into();
+            self.connection.status_note = "no live connection".into();
         }
         cx.notify();
     }
@@ -1447,12 +1457,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.get_message_link(chat_id, message_id) {
+            self.connection.status_note = match live.driver.get_message_link(chat_id, message_id) {
                 Ok(_) => "fetching message link…".into(),
                 Err(_) => "could not get message link".into(),
             };
         } else {
-            self.status_note = "no live connection".into();
+            self.connection.status_note = "no live connection".into();
         }
         cx.notify();
     }
@@ -1633,7 +1643,7 @@ impl QuillApp {
     /// Phase 3.2: `inlineKeyboardButtonTypeCopyText` — copy to the clipboard.
     pub(super) fn copy_inline_text(&mut self, text: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-        self.status_note = "copied".into();
+        self.connection.status_note = "copied".into();
         cx.notify();
     }
 
@@ -1675,10 +1685,11 @@ impl QuillApp {
         };
         match edit.replacement_for(path, as_file) {
             Ok(replacement) => {
-                self.status_note = format!("Replacing attachment with {}", replacement.file_name);
+                self.connection.status_note =
+                    format!("Replacing attachment with {}", replacement.file_name);
                 edit.media_edit.replacement = Some(replacement);
             }
-            Err(note) => self.status_note = note.into(),
+            Err(note) => self.connection.status_note = note.into(),
         }
         cx.notify();
     }
@@ -1689,7 +1700,7 @@ impl QuillApp {
             edit.media_edit.replacement = None;
         }
         self.composer_ui.edit_replace_as_file = false;
-        self.status_note = "replacement cleared".into();
+        self.connection.status_note = "replacement cleared".into();
         cx.notify();
     }
 
@@ -1732,7 +1743,7 @@ impl QuillApp {
         self.note_open_draft(true, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
-        self.status_note = "replying".into();
+        self.connection.status_note = "replying".into();
         cx.notify();
     }
 
@@ -1786,7 +1797,7 @@ impl QuillApp {
         });
         let field = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&field);
-        self.status_note = "editing".into();
+        self.connection.status_note = "editing".into();
         cx.notify();
     }
 
@@ -1800,7 +1811,7 @@ impl QuillApp {
         self.set_composer_markup(&restored, window, cx);
         let restored = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&restored);
-        self.status_note = "edit cancelled".into();
+        self.connection.status_note = "edit cancelled".into();
         cx.notify();
     }
 
@@ -1835,18 +1846,18 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.finish_edit_restore_draft(window, cx);
-                    self.status_note =
+                    self.connection.status_note =
                         self.send_started_note(ComposerScheduling::None, "saving edit…");
                 }
                 Err(quill::connect::ConnectSendError::TextTooLong { limit }) => {
                     // R8: tdesktop `lng_edit_limit_reached` — the edit stays
                     // open so the text can be shortened.
                     let over = quill::text_split::units_over_limit(&text, limit);
-                    self.status_note =
+                    self.connection.status_note =
                         format!("message too long (max {limit} characters, remove {over})");
                 }
                 Err(_) => {
-                    self.status_note = "could not edit message".into();
+                    self.connection.status_note = "could not edit message".into();
                 }
             }
             cx.notify();
@@ -1855,7 +1866,7 @@ impl QuillApp {
         if self.demo_session.is_some() {
             self.apply_demo_edit(&edit, text.trim());
             self.finish_edit_restore_draft(window, cx);
-            self.status_note = "demo edit applied locally (no live Telegram)".into();
+            self.connection.status_note = "demo edit applied locally (no live Telegram)".into();
             cx.notify();
         }
     }
@@ -1871,7 +1882,7 @@ impl QuillApp {
 
     pub(super) fn cancel_delete(&mut self, cx: &mut Context<Self>) {
         self.message_ui.pending_delete = None;
-        self.status_note = "delete cancelled".into();
+        self.connection.status_note = "delete cancelled".into();
         cx.notify();
     }
 
@@ -1887,13 +1898,13 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .delete_confirmed(&confirm);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "deleting…".into(),
                 Err(_) => "could not delete message".into(),
             };
         } else if self.demo_session.is_some() {
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
-            self.status_note = "demo delete applied locally (no live Telegram)".into();
+            self.connection.status_note = "demo delete applied locally (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -1905,7 +1916,7 @@ impl QuillApp {
         self.share.reply_elsewhere_open = false;
         self.share.reply_quote_open = false;
         self.note_open_draft(true, cx);
-        self.status_note = "reply cancelled".into();
+        self.connection.status_note = "reply cancelled".into();
         cx.notify();
     }
 

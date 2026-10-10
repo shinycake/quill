@@ -11,14 +11,17 @@ pub(in crate::ui) fn sticker_attachment(
     animated: Option<crate::ui::sticker_playback::AnimatedVisual>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    // Telegram Desktop `Sticker::Size`: the sticker's own size, downscaled
+    // into `maxStickerSize` (224).
+    let (w, h) = sticker_box(sticker.width, sticker.height);
     match animated {
         Some(crate::ui::sticker_playback::AnimatedVisual::Image(image)) => {
             return img(image)
                 .id(("sticker-animated", row_id))
                 .mt_2()
-                .w(px(128.))
-                .h(px(128.))
-                .aspect_ratio(px(128.) / px(128.))
+                .w(w)
+                .h(h)
+                .aspect_ratio(w / h)
                 .object_fit(ObjectFit::Contain)
                 .into_any_element();
         }
@@ -28,7 +31,8 @@ pub(in crate::ui) fn sticker_attachment(
             return crate::ui::anim_layer::frames(clip, 60)
                 .mt_2()
                 .flex_none()
-                .size(px(128.))
+                .w(w)
+                .h(h)
                 .into_any_element();
         }
         None => {}
@@ -44,20 +48,20 @@ pub(in crate::ui) fn sticker_attachment(
         let fallback_label = fallback_label.clone();
         return img(crate::ui::image_budget::sized_media(
             &path,
-            (px(128.), px(128.)),
+            (w, h),
             Some((sticker.width, sticker.height)),
             crate::ui::image_budget::Fit::Contain,
         ))
         .id(("sticker-img", row_id))
         .mt_2()
-        .w(px(128.))
-        .h(px(128.))
-        .aspect_ratio(px(128.) / px(128.))
+        .w(w)
+        .h(h)
+        .aspect_ratio(w / h)
         .object_fit(ObjectFit::Contain)
         .with_fallback(move || {
             div()
-                .w(px(128.))
-                .h(px(128.))
+                .w(w)
+                .h(h)
                 .rounded_md()
                 .bg(fill_muted())
                 .flex()
@@ -84,7 +88,8 @@ pub(in crate::ui) fn sticker_attachment(
     div()
         .id(("sticker-ph", row_id))
         .mt_2()
-        .size(px(128.))
+        .w(w)
+        .h(h)
         .flex_none()
         .rounded_lg()
         .bg(fill_muted().opacity(0.5))
@@ -109,6 +114,12 @@ pub(in crate::ui) fn sticker_attachment(
                 .child(glyph),
         )
         .into_any_element()
+}
+
+/// The box a sticker of `width`x`height` pixels draws in.
+pub(in crate::ui) fn sticker_box(width: i32, height: i32) -> (Pixels, Pixels) {
+    let size = quill::bubble_layout::sticker_size(quill::bubble_layout::Size::new(width, height));
+    (px(size.w as f32), px(size.h as f32))
 }
 
 pub(in crate::ui) fn sticker_label(sticker: &quill::telegram::envelope::StickerContent) -> String {

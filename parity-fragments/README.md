@@ -1,8 +1,8 @@
 # parity-fragments
 
 Feature PRs declare the README checklist items they complete here — one file
-per slice — instead of editing `README.md` directly. The merge pipeline checks
-the boxes on `main` after the PR merges (it is the only writer of
+per slice — instead of editing `README.md` directly. The merge script checks
+the boxes on `main` right after the PR merges, with a direct push (it is the only writer of
 `README.md`, so checkbox conflicts are impossible by construction).
 
 ## Format
@@ -19,7 +19,7 @@ parity:platform-spellcheck
 parity:platform-spellcheck-languages
 ```
 
-## Rules (CI-enforced by `scripts/check-parity-fragments.sh`)
+## Rules (`scripts/check-parity-fragments.sh` checks them locally)
 
 - Every line must be a valid `parity:` ID that exists as a `<!-- parity:… -->`
   anchor in `README.md`'s Status section.

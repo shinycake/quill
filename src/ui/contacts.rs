@@ -112,7 +112,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true).title(crate::ui::shell::dialog_title("Import contacts"));
-            let Some(dialog_state) = this.import_contacts_dialog.as_ref() else {
+            let Some(dialog_state) = this.dialogs.import_contacts_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
             let body = div()
@@ -175,7 +175,7 @@ impl QuillApp {
                 this.close_add_contact_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(dialog_state) = this.add_contact_dialog.as_ref() else {
+            let Some(dialog_state) = this.dialogs.add_contact_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Add contact"))
@@ -288,7 +288,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
-            self.status_note = format!("contacts request failed: {err:?}");
+            self.connection.status_note = format!("contacts request failed: {err:?}");
         }
         cx.notify();
     }
@@ -326,6 +326,7 @@ impl QuillApp {
             list = list.child(note("Loading contacts…", cx));
         } else if items.is_empty() {
             let searching = !self
+                .chat_list
                 .global
                 .contacts_search
                 .read(cx)
@@ -373,13 +374,13 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.contact_prefs.sync_enabled = next;
             if let Err(err) = live.driver.save_contact_prefs() {
-                self.status_note = format!("couldn't save contact prefs: {err}");
+                self.connection.status_note = format!("couldn't save contact prefs: {err}");
             }
             if next && live.driver.session.contacts.is_none() {
                 // Re-enable refetches the server list so the tab
                 // converges with TDLib immediately.
                 if let Err(err) = live.driver.fetch_contacts() {
-                    self.status_note = format!("contacts request failed: {err:?}");
+                    self.connection.status_note = format!("contacts request failed: {err:?}");
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -403,7 +404,7 @@ impl QuillApp {
                 .auto_grow(4, 12)
                 .submit_on_enter(false)
         });
-        self.import_contacts_dialog = Some(ImportContactsDialog { input });
+        self.dialogs.import_contacts_dialog = Some(ImportContactsDialog { input });
         cx.notify();
     }
 
@@ -418,20 +419,21 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(dialog) = self.import_contacts_dialog.as_ref() else {
+        let Some(dialog) = self.dialogs.import_contacts_dialog.as_ref() else {
             return;
         };
         let text = dialog.input.read(cx).text().to_string();
         let (contacts, skipped, truncated) = parse_vcard(&text);
         if contacts.is_empty() {
-            self.status_note = "No phone-number contacts found in that vCard.".to_string();
+            self.connection.status_note =
+                "No phone-number contacts found in that vCard.".to_string();
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.import_contacts(&contacts) {
                 Ok(Some(_)) => {
-                    self.status_note = if skipped == 0 && truncated == 0 {
+                    self.connection.status_note = if skipped == 0 && truncated == 0 {
                         "importing contacts…".to_string()
                     } else {
                         let mut details = Vec::new();
@@ -447,25 +449,25 @@ impl QuillApp {
                     };
                 }
                 Ok(None) => {
-                    self.status_note = "request already in flight".to_string();
+                    self.connection.status_note = "request already in flight".to_string();
                     cx.notify();
                     return;
                 }
                 Err(err) => {
-                    self.status_note = format!("import failed: {err:?}");
+                    self.connection.status_note = format!("import failed: {err:?}");
                     cx.notify();
                     return;
                 }
             }
         }
-        self.import_contacts_dialog = None;
+        self.dialogs.import_contacts_dialog = None;
         cx.notify();
         let _ = window;
     }
 
     /// Slice A6: dismiss the import dialog.
     pub(super) fn close_import_contacts_dialog(&mut self, cx: &mut Context<Self>) {
-        self.import_contacts_dialog = None;
+        self.dialogs.import_contacts_dialog = None;
         cx.notify();
     }
 
@@ -559,10 +561,10 @@ impl QuillApp {
                 )
             })
             .unwrap_or_default();
-        self.add_contact_dialog = Some(AddContactDialog::new(
+        self.dialogs.add_contact_dialog = Some(AddContactDialog::new(
             window, cx, user_id, &phone, &first, &last,
         ));
-        if let Some(dialog) = &self.add_contact_dialog {
+        if let Some(dialog) = &self.dialogs.add_contact_dialog {
             dialog
                 .phone_input
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -582,10 +584,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.add_contact_dialog = Some(AddContactDialog::new(
+        self.dialogs.add_contact_dialog = Some(AddContactDialog::new(
             window, cx, user_id, phone, first, last,
         ));
-        if let Some(dialog) = &self.add_contact_dialog {
+        if let Some(dialog) = &self.dialogs.add_contact_dialog {
             dialog
                 .phone_input
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -594,7 +596,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_add_contact_dialog(&mut self, cx: &mut Context<Self>) {
-        self.add_contact_dialog = None;
+        self.dialogs.add_contact_dialog = None;
         cx.notify();
     }
 
@@ -607,28 +609,29 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let draft = self
+            .dialogs
             .add_contact_dialog
             .as_ref()
             .and_then(|dialog| dialog.draft(cx));
         let Some((user_id, phone, first, last)) = draft else {
-            self.status_note = "Enter a name or phone number to add the contact.".into();
+            self.connection.status_note = "Enter a name or phone number to add the contact.".into();
             cx.notify();
             return;
         };
         if let Some(live) = self.live.as_mut() {
             match live.driver.add_contact(user_id, &phone, &first, &last) {
                 Ok(_) => {
-                    self.add_contact_dialog = None;
-                    self.status_note = "Contact add requested.".into();
+                    self.dialogs.add_contact_dialog = None;
+                    self.connection.status_note = "Contact add requested.".into();
                 }
                 Err(err) => {
-                    self.status_note = format!("add contact failed: {err:?}");
+                    self.connection.status_note = format!("add contact failed: {err:?}");
                 }
             }
         } else {
             // Demo: no driver — just close.
-            self.add_contact_dialog = None;
-            self.status_note = "Contact add requested.".into();
+            self.dialogs.add_contact_dialog = None;
+            self.connection.status_note = "Contact add requested.".into();
         }
         let _ = window;
         cx.notify();
@@ -638,13 +641,13 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ImportContacts => DialogSpec::new(
         5900,
-        |app| app.import_contacts_dialog.is_some(),
+        |app| app.dialogs.import_contacts_dialog.is_some(),
         QuillApp::build_import_contacts_dialog,
     ),
 
     AddContact => DialogSpec::new(
         6200,
-        |app| app.add_contact_dialog.is_some(),
+        |app| app.dialogs.add_contact_dialog.is_some(),
         QuillApp::build_add_contact_dialog,
     ),
 }
