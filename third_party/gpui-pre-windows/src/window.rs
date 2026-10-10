@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
 // windows stop receiving vsync frames while idle. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -56,6 +56,7 @@ pub struct WindowsWindowState {
     pub restore_from_minimized: Cell<Option<Box<dyn FnMut(RequestFrameOptions)>>>,
 
     pub callbacks: Callbacks,
+    pub frame_signal: Arc<PlatformFrameSignal>,
     pub input_handler: Cell<Option<PlatformInputHandler>>,
     pub ime_enabled: Cell<bool>,
     pub pending_surrogate: Cell<Option<u16>>,
@@ -175,6 +176,7 @@ impl WindowsWindowState {
             restore_from_minimized: Cell::new(restore_from_minimized),
             min_size,
             callbacks,
+            frame_signal: Arc::new(PlatformFrameSignal::new()),
             input_handler: Cell::new(input_handler),
             ime_enabled: Cell::new(true),
             pending_surrogate: Cell::new(pending_surrogate),

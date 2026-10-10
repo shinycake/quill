@@ -1,11 +1,13 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-linux 0.3.7 from crates.io (Apache-2.0,
+This directory is gpui-pre-linux 0.3.8 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's Linux platform (X11 and Wayland), used through
-`[patch.crates-io]` in Quill's `Cargo.toml`. Commit `86dc5470` added the
+`[patch.crates-io]` in Quill's `Cargo.toml`. Commit `d2e24766` added the
 unmodified registry copy (without the registry's `.cargo-ok`,
 `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff 86dc5470 -- third_party/gpui-pre-linux` shows every change.
+`git diff d2e24766 -- third_party/gpui-pre-linux` shows every change. (The
+patch was first made on 0.3.7 and carried to 0.3.8 in
+`docs/decisions/codex-gpui-kit-0.7.1.md`.)
 
 The Quill project changed it in 2026 so an idle X11 window stops waking the
 main thread at the display's refresh rate. Wayland is unchanged (it already
@@ -28,8 +30,10 @@ draws on demand).
   per-window calloop ping source (`resume_refresh_loop`) replaces it with an
   immediate refresh-rate timer when the frame waker fires. A pending forced
   render after GPU recovery keeps the timer running, and a window whose ping
-  could not be created never parks. The ping source is removed with the
-  window.
+  could not be created never parks. The ping source reaches the client
+  through 0.3.8's weak `X11ClientStatePtr` (the event loop no longer carries
+  the client) and is removed with the window, or with the connection when
+  `X11Connection` drops.
 - `src/linux/x11.rs`: declares the new module.
 
 Each changed source file starts with a comment saying so. The changes are

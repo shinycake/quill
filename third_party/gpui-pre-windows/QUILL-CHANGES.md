@@ -1,10 +1,12 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-windows 0.3.7 from crates.io (Apache-2.0,
+This directory is gpui-pre-windows 0.3.8 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's Windows platform, used through `[patch.crates-io]`
-in Quill's `Cargo.toml`. Commit `86dc5470` added the unmodified registry copy
+in Quill's `Cargo.toml`. Commit `d2e24766` added the unmodified registry copy
 (without the registry's `.cargo-ok`, `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff 86dc5470 -- third_party/gpui-pre-windows` shows every change.
+`git diff d2e24766 -- third_party/gpui-pre-windows` shows every change.
+(The patch was first made on 0.3.7 and carried to 0.3.8 in
+`docs/decisions/codex-gpui-kit-0.7.1.md`.)
 
 The Quill project changed it in 2026 so an idle window stops receiving a
 `WM_PAINT` and a GPUI frame request on every vblank:
@@ -18,11 +20,14 @@ The Quill project changed it in 2026 so an idle window stops receiving a
   `off`), read once, disables parking (upstream behavior).
 - `src/vsync.rs`: `FrameGate`, the set of parked windows shared with the
   vsync thread, which sleeps on a condition variable while every window is
-  parked (waking for the heartbeat or an unpark).
+  parked (waking for the heartbeat or an unpark). It is generic over the
+  window list's entry type (0.3.8 tracks each window with its frame signal),
+  and `parked_windows` snapshots the parked set before the vsync thread
+  reads the window list.
 - `src/platform.rs`: upstream's `begin_vsync_thread` invalidates every window
   on every vblank. It now waits on `FrameGate` first and skips parked windows
-  except on the heartbeat; the device-lost check still runs on every
-  iteration. A new window is unparked (in case a closed one had the same
+  except on the heartbeat (parked windows get no frame signal either); the
+  device-lost check and 0.3.8's stop flag still run on every iteration. A new window is unparked (in case a closed one had the same
   handle); a closed one is forgotten.
 - `src/window.rs`: `draw` and `schedule_frame` mark activity; the new
   `frame_waker` unparks a parked window and invalidates it at once

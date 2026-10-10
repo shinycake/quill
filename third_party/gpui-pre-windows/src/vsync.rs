@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
 // adds `FrameGate`, which lets the vsync thread sleep while every window is idle.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
@@ -7,11 +7,11 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use gpui::FrameRequestSource;
 use gpui_util::ResultExt;
 use parking_lot::{Condvar, Mutex, RwLock};
 use smallvec::SmallVec;
 
-use crate::SafeHwnd;
 use windows::Win32::{
     Foundation::HWND,
     Graphics::Dwm::{DWM_TIMING_INFO, DwmFlush, DwmGetCompositionTimingInfo},
@@ -44,7 +44,7 @@ impl VSyncProvider {
         Self { interval, f }
     }
 
-    pub(crate) fn wait_for_vsync(&self) {
+    pub(crate) fn wait_for_vsync(&self) -> FrameRequestSource {
         let vsync_start = Instant::now();
         let wait_succeeded = (self.f)();
         let elapsed = vsync_start.elapsed();
@@ -58,6 +58,9 @@ impl VSyncProvider {
         if !wait_succeeded || elapsed < VSYNC_INTERVAL_THRESHOLD {
             log::trace!("VSyncProvider::wait_for_vsync() took less time than expected");
             std::thread::sleep(self.interval);
+            FrameRequestSource::LocalSchedule
+        } else {
+            FrameRequestSource::NativeCallback
         }
     }
 }
@@ -133,10 +136,11 @@ impl FrameGate {
 
     /// Blocks the vsync thread while every window is parked, until a window
     /// unparks or `heartbeat_at`. Returns `false` once the window list is
-    /// gone (the platform was dropped).
-    pub(crate) fn wait_for_frames(
+    /// gone (the platform was dropped). `raw` gives each list entry's handle.
+    pub(crate) fn wait_for_frames<W>(
         &self,
-        all_windows: &std::sync::Weak<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+        all_windows: &std::sync::Weak<RwLock<SmallVec<[W; 4]>>>,
+        raw: impl Fn(&W) -> HWND,
         heartbeat_at: Instant,
     ) -> bool {
         let mut parked = self.parked.lock();
@@ -147,7 +151,7 @@ impl FrameGate {
             let any_awake = windows
                 .read()
                 .iter()
-                .any(|hwnd| !parked.contains(&hwnd_key(hwnd.as_raw())));
+                .any(|window| !parked.contains(&hwnd_key(raw(window))));
             drop(windows);
             let now = Instant::now();
             if any_awake || now >= heartbeat_at {
@@ -157,9 +161,20 @@ impl FrameGate {
         }
     }
 
-    /// Whether the vsync thread should skip this window on this vblank.
-    pub(crate) fn is_parked(&self, hwnd: HWND) -> bool {
-        self.parked.lock().contains(&hwnd_key(hwnd))
+    /// The windows the vsync thread skips on this vblank. Taken before the
+    /// window list's read lock, so the vsync thread never holds both.
+    pub(crate) fn parked_windows(&self) -> ParkedWindows {
+        ParkedWindows(self.parked.lock().iter().copied().collect())
+    }
+}
+
+/// Quill: a snapshot of [`FrameGate`]'s parked windows.
+#[derive(Default)]
+pub(crate) struct ParkedWindows(SmallVec<[isize; 4]>);
+
+impl ParkedWindows {
+    pub(crate) fn contains(&self, hwnd: HWND) -> bool {
+        self.0.contains(&hwnd_key(hwnd))
     }
 }
 
@@ -167,4 +182,38 @@ impl FrameGate {
 fn retrieve_duration(counts: u64, ticks_per_second: u64) -> Duration {
     let ticks_per_microsecond = ticks_per_second / 1_000_000;
     Duration::from_micros(counts / ticks_per_microsecond)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn successful_compositor_wait_reports_native_callback() {
+        let provider = VSyncProvider {
+            interval: Duration::ZERO,
+            f: Box::new(|| {
+                std::thread::sleep(VSYNC_INTERVAL_THRESHOLD * 2);
+                true
+            }),
+        };
+
+        assert_eq!(
+            provider.wait_for_vsync(),
+            FrameRequestSource::NativeCallback
+        );
+    }
+
+    #[test]
+    fn failed_compositor_wait_reports_local_schedule_even_after_threshold() {
+        let provider = VSyncProvider {
+            interval: Duration::ZERO,
+            f: Box::new(|| {
+                std::thread::sleep(VSYNC_INTERVAL_THRESHOLD * 2);
+                false
+            }),
+        };
+
+        assert_eq!(provider.wait_for_vsync(), FrameRequestSource::LocalSchedule);
+    }
 }

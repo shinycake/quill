@@ -11,7 +11,7 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 673
+- MIT License: 670
 - Apache License 2.0: 41
 - ISC License: 22
 - Unicode License v3: 19
@@ -1435,8 +1435,8 @@ Apache License
 
 Used by:
 - [dunce 1.0.5](https://gitlab.com/kornelski/dunce)
-- [gpui-kit-assets 0.7.0](https://github.com/longbridge/gpui-kit)
-- [gpui-kit 0.7.0](https://github.com/longbridge/gpui-kit)
+- [gpui-kit-assets 0.7.1](https://github.com/longbridge/gpui-kit)
+- [gpui-kit 0.7.1](https://github.com/longbridge/gpui-kit)
 - [interprocess 2.4.4](https://github.com/kotauskas/interprocess)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 - [spirv 0.4.0+sdk-1.4.341.0](https://github.com/gfx-rs/rspirv)
@@ -1521,27 +1521,27 @@ limitations under the License.
 ### Apache License 2.0
 
 Used by:
-- [gpui-pre-linux 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-macos 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-windows 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-apple 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-collections 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-derive-refineable 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-http-client 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-macros 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-perf 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-platform 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-refineable 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-scheduler 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-shared-string 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-sum-tree 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-util-macros 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-util 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-wgpu 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-zlog 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing-macro 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing 0.3.7](https://github.com/zed-industries/zed)
-- [gpui-pre 0.3.7](https://github.com/zed-industries/zed)
+- [gpui-pre-linux 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-macos 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-windows 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-apple 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-collections 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-derive-refineable 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-http-client 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-macros 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-perf 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-platform 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-refineable 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-scheduler 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-shared-string 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-sum-tree 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-util-macros 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-util 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-wgpu 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-zlog 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing-macro 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing 0.3.8](https://github.com/zed-industries/zed)
+- [gpui-pre 0.3.8](https://github.com/zed-industries/zed)
 
 ````text
 Copyright 2022 - 2025 Zed Industries, Inc.
@@ -1772,9 +1772,9 @@ Apache License
 ### Apache License 2.0
 
 Used by:
-- [gpui-base 0.7.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component-macros 0.7.0](https://crates.io/crates/gpui-component-macros)
-- [gpui-component 0.7.0](https://github.com/longbridge/gpui-kit)
+- [gpui-base 0.7.1](https://github.com/longbridge/gpui-kit)
+- [gpui-component-macros 0.7.1](https://crates.io/crates/gpui-component-macros)
+- [gpui-component 0.7.1](https://github.com/longbridge/gpui-kit)
 
 ````text
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
@@ -2377,7 +2377,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### Creative Commons Zero v1.0 Universal
 
 Used by:
-- [notify 7.0.0](https://github.com/notify-rs/notify.git)
+- [notify 8.2.0](https://github.com/notify-rs/notify.git)
 
 ````text
 Creative Commons CC0 1.0 Universal
@@ -3184,7 +3184,7 @@ THIS SOFTWARE.
 ### ISC License
 
 Used by:
-- [inotify 0.10.2](https://github.com/hannobraun/inotify)
+- [inotify 0.11.5](https://github.com/hannobraun/inotify-rs)
 
 ````text
 Copyright (c) Hanno Braun and contributors
@@ -4375,7 +4375,6 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 - [backtrace 0.3.76](https://github.com/rust-lang/backtrace-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
-- [filetime 0.2.29](https://github.com/alexcrichton/filetime)
 - [rustc-demangle 0.1.28](https://github.com/rust-lang/rustc-demangle)
 - [scoped-tls 1.0.1](https://github.com/alexcrichton/scoped-tls)
 
@@ -8182,7 +8181,7 @@ THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [notify-types 1.0.1](https://github.com/notify-rs/notify.git)
+- [notify-types 2.1.0](https://github.com/notify-rs/notify.git)
 
 ````text
 Copyright (c) 2023 Notify Contributors
@@ -10421,7 +10420,6 @@ Used by:
 - [windows-strings 0.4.2](https://github.com/microsoft/windows-rs)
 - [windows-strings 0.5.1](https://github.com/microsoft/windows-rs)
 - [windows-sys 0.48.0](https://github.com/microsoft/windows-rs)
-- [windows-sys 0.52.0](https://github.com/microsoft/windows-rs)
 - [windows-sys 0.60.2](https://github.com/microsoft/windows-rs)
 - [windows-sys 0.61.2](https://github.com/microsoft/windows-rs)
 - [windows-targets 0.48.5](https://github.com/microsoft/windows-rs)
@@ -10718,23 +10716,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
-- [x11-clipboard 0.9.3](https://github.com/quininer/x11-clipboard)
-
-````text
-MIT License
-Copyright (c) 2017 quininer@live.com
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ````
 
