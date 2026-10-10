@@ -1921,6 +1921,22 @@ impl QuillApp {
                 "screenshot demo — group voice chat invite picker (injected, no live Telegram)"
                     .into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallStage)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_polish(session, &self.demo_sink, &self.demo_seq);
+                self.demo_group_frames = demo_group_video_frames();
+                self.demo_local_frame = Some(demo_video_frame(true));
+            }
+            // Zed's camera, pinned and shown across the window.
+            self.group_call_pin.toggle(quill::calls::tile_pin::TileKey {
+                participant: quill::telegram::envelope::MessageSender::User { user_id: 41 },
+                screen: false,
+            });
+            self.demo_group_stage = true;
+            self.status_note =
+                "screenshot demo — full-screen pinned stream (injected, no live Telegram)".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallPolish)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

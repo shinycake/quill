@@ -246,6 +246,11 @@ pub struct QuillApp {
     /// Phase 8.1: in-flight OS notification workers; capped so a message
     /// burst cannot stack threads.
     pub(super) notify_inflight: Arc<AtomicUsize>,
+    /// Accept / Decline / body picks on incoming-call notifications.
+    pub(super) call_notify_clicks:
+        Arc<Mutex<Vec<(i32, quill::notify_call::CallNotificationAction)>>>,
+    /// The incoming call last announced with a system notification.
+    pub(super) call_notified: Option<i32>,
     /// Local files the user explicitly attached (canonical paths via `pick`).
     /// One item sends with `sendMessage`. Two or more photos/videos send with
     /// `sendMessageAlbum`.
@@ -683,6 +688,8 @@ pub struct QuillApp {
     pub(super) global_ptt_polling: bool,
     /// Locally pinned video tile of the group call (tdesktop viewport pin).
     pub(super) group_call_pin: quill::calls::tile_pin::TilePin,
+    /// Demo captures can't go full screen: show the stage anyway.
+    pub(super) demo_group_stage: bool,
     pub(super) call_window_opening: bool,
     pub(super) call_window_raised: bool,
     pub(super) call_window_closed_by_user: Option<i32>,
