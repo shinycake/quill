@@ -693,6 +693,47 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        "updateChatDefaultDisableNotification" => {
+            Ok(EnvelopePayload::UpdateChatDefaultDisableNotification {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                default_disable_notification: json_bool(
+                    value.get("default_disable_notification"),
+                    false,
+                ),
+            })
+        }
+        "updateFileDownloads" => Ok(EnvelopePayload::UpdateFileDownloads {
+            total_size: int53_or_zero(value.get("total_size")),
+            total_count: json_i32(value.get("total_count"), 0),
+            downloaded_size: int53_or_zero(value.get("downloaded_size")),
+        }),
+        "updateFileAddedToDownloads" => parse_file_download(&value)
+            .map(|download| EnvelopePayload::UpdateFileAddedToDownloads(Box::new(download)))
+            .ok_or(ParseError::MissingField),
+        "updateFileRemovedFromDownloads" => Ok(EnvelopePayload::UpdateFileRemovedFromDownloads {
+            file_id: json_i32(value.get("file_id"), 0),
+        }),
+        "updateDiceEmojis" => Ok(EnvelopePayload::UpdateDiceEmojis {
+            emojis: parse_dice_emojis(&value),
+        }),
+        "updateFreezeState" => Ok(EnvelopePayload::UpdateFreezeState(parse_freeze_state(
+            &value,
+        ))),
+        "updateSpeechRecognitionTrial" => Ok(EnvelopePayload::UpdateSpeechRecognitionTrial(
+            parse_speech_trial(&value),
+        )),
+        "updateActiveLiveLocationMessages" => {
+            Ok(EnvelopePayload::UpdateActiveLiveLocationMessages {
+                shares: parse_active_live_locations(&value),
+            })
+        }
+        "updateMessageLiveLocationViewed" => Ok(EnvelopePayload::UpdateMessageLiveLocationViewed {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53(value.get("message_id"))?),
+        }),
+        "updateAgeVerificationParameters" => Ok(EnvelopePayload::UpdateAgeVerificationParameters {
+            parameters: parse_age_verification(&value),
+        }),
         "updateSavedMessagesTopic" => value
             .get("topic")
             .and_then(parse_saved_messages_topic)

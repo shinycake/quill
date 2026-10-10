@@ -478,7 +478,7 @@ impl QuillApp {
                             .checked(ignore)
                             .accessibility_label("Show 18+ Content")
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                this.set_sensitive_content(on, cx);
+                                this.toggle_sensitive_content(on, cx);
                             })),
                     ),
             );

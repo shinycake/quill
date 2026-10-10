@@ -3,11 +3,11 @@
 //! Per platform, matching Telegram Desktop (`platform/*/main_window_*`):
 //! - Linux: the Unity `com.canonical.Unity.LauncherEntry` `Update`
 //!   signal, the de-facto standard Telegram Desktop uses on Linux, honored
-//!   by Ubuntu Dock, Dash-to-Dock, and KDE's task manager. The signal is
-//!   emitted through `dbus-send`, which ships with the base D-Bus install:
-//!   no new dependency and no hand-rolled D-Bus wire protocol. It is a
-//!   silent no-op when `dbus-send` or the session bus is absent (same
-//!   convention as the tray module).
+//!   by Ubuntu Dock, Dash-to-Dock, and KDE's task manager. A worker thread
+//!   owns a zbus session connection and emits the signal; the UI thread only
+//!   drops the count into a latest-wins slot, so D-Bus can never stall it.
+//!   Silent no-op when the session bus is absent (same convention as the
+//!   tray module).
 //! - macOS: `NSApplication.dockTile.badgeLabel` (the count text, capped
 //!   "99+"; cleared at zero). Main-thread only, which the UI timer is.
 //! - Windows: `ITaskbarList3::SetOverlayIcon` on the main window's taskbar
@@ -279,33 +279,86 @@ mod windows_overlay {
     }
 }
 
-/// `dbus-send` argv for the broadcast `Update` signal:
-/// `(string app_uri, dict<string, variant> {count: int64, count-visible: bool})`.
-#[cfg(any(target_os = "linux", test))]
-fn launcher_entry_args(unread: u32) -> Vec<String> {
-    vec![
-        "--session".to_string(),
-        "--type=signal".to_string(),
-        "/".to_string(),
-        "com.canonical.Unity.LauncherEntry.Update".to_string(),
-        format!("string:{APP_URI}"),
-        format!(
-            "dict:string:variant:\"count\",int64:{unread},\"count-visible\",boolean:{}",
-            unread > 0
-        ),
-    ]
+/// Latest-wins mailbox between the UI thread and the D-Bus worker: a burst
+/// of unread changes while the worker is busy collapses to the newest count.
+#[cfg(any(all(target_os = "linux", feature = "ui"), test))]
+struct LatestSlot<T> {
+    value: std::sync::Mutex<Option<T>>,
+    ready: std::sync::Condvar,
 }
 
+#[cfg(any(all(target_os = "linux", feature = "ui"), test))]
+impl<T> LatestSlot<T> {
+    const fn new() -> Self {
+        Self {
+            value: std::sync::Mutex::new(None),
+            ready: std::sync::Condvar::new(),
+        }
+    }
+
+    /// Replace any pending value; never blocks on the consumer.
+    fn put(&self, value: T) {
+        *self.value.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
+        self.ready.notify_one();
+    }
+
+    /// Block until a value is pending, then take it.
+    fn take(&self) -> T {
+        let mut guard = self.value.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(value) = guard.take() {
+                return value;
+            }
+            guard = self.ready.wait(guard).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "ui"))]
+static LAUNCHER_SLOT: LatestSlot<u32> = LatestSlot::new();
+
+/// Hands the count to a worker thread that owns the session-bus connection
+/// and emits the signal, so the UI thread never waits on D-Bus. The worker
+/// starts on first use; any failure (no session bus, no listening dock) is
+/// silently ignored and retried on the next count change.
 #[cfg(target_os = "linux")]
 fn emit_launcher_entry(unread: u32) {
-    // Fire-and-wait: dbus-send exits immediately for signals, and this runs
-    // only when the count changed. Any failure (no dbus-send, no session
-    // bus, no listening dock) is silently ignored.
-    let _ = std::process::Command::new("dbus-send")
-        .args(launcher_entry_args(unread))
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    #[cfg(feature = "ui")]
+    {
+        use std::sync::Once;
+        static WORKER: Once = Once::new();
+        WORKER.call_once(|| {
+            let _ = std::thread::Builder::new()
+                .name("quill-launcher-badge".into())
+                .spawn(|| {
+                    let mut connection: Option<zbus::blocking::Connection> = None;
+                    loop {
+                        let count = LAUNCHER_SLOT.take();
+                        if connection.is_none() {
+                            connection = zbus::blocking::Connection::session().ok();
+                        }
+                        let Some(conn) = &connection else { continue };
+                        let mut props: std::collections::HashMap<&str, zbus::zvariant::Value> =
+                            std::collections::HashMap::new();
+                        props.insert("count", zbus::zvariant::Value::from(i64::from(count)));
+                        props.insert("count-visible", zbus::zvariant::Value::from(count > 0));
+                        let sent = conn.emit_signal(
+                            None::<&str>,
+                            "/",
+                            "com.canonical.Unity.LauncherEntry",
+                            "Update",
+                            &(APP_URI, props),
+                        );
+                        if sent.is_err() {
+                            connection = None;
+                        }
+                    }
+                });
+        });
+        LAUNCHER_SLOT.put(unread);
+    }
+    #[cfg(not(feature = "ui"))]
+    let _ = unread;
 }
 
 #[cfg(test)]
@@ -313,30 +366,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn args_target_launcher_entry_update_signal() {
-        let args = launcher_entry_args(5);
-        assert_eq!(
-            &args[..5],
-            [
-                "--session",
-                "--type=signal",
-                "/",
-                "com.canonical.Unity.LauncherEntry.Update",
-                "string:application://quill.desktop",
-            ]
-        );
+    fn latest_slot_keeps_only_the_newest_value() {
+        let slot = LatestSlot::new();
+        slot.put(1u32);
+        slot.put(2);
+        slot.put(3);
+        assert_eq!(slot.take(), 3);
     }
 
     #[test]
-    fn args_encode_count_and_visibility() {
-        let body = launcher_entry_args(5)[5].clone();
-        assert!(body.contains("\"count\",int64:5"), "{body}");
-        assert!(body.contains("\"count-visible\",boolean:true"), "{body}");
-
-        // Zero unread hides the badge (and clears a stale one).
-        let body = launcher_entry_args(0)[5].clone();
-        assert!(body.contains("\"count\",int64:0"), "{body}");
-        assert!(body.contains("\"count-visible\",boolean:false"), "{body}");
+    fn latest_slot_wakes_a_blocked_consumer() {
+        let slot = std::sync::Arc::new(LatestSlot::new());
+        let reader = {
+            let slot = slot.clone();
+            std::thread::spawn(move || slot.take())
+        };
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        slot.put(9u32);
+        assert_eq!(reader.join().unwrap(), 9);
     }
 
     #[test]

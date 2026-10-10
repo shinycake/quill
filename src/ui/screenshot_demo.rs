@@ -12,6 +12,14 @@ pub enum ScreenshotDemo {
     WaitPhoneFormatted,
     /// Sign-in polish: code step with the resend countdown and "Wrong number?".
     WaitCodeResend,
+    /// Code step for `authenticationCodeTypeFirebase*` (official apps only).
+    WaitCodeFirebase,
+    /// Code step for `authenticationCodeTypeFlashCall`.
+    WaitCodeFlash,
+    /// Code step for `authenticationCodeTypeFragment` with "Open Fragment".
+    WaitCodeFragment,
+    /// Code step for `authenticationCodeTypeMissedCall`.
+    WaitCodeMissed,
     /// Sign-in polish: tdesktop's banned-number box (with Help).
     WaitPhoneBanned,
     WaitPassword,
@@ -341,6 +349,10 @@ pub enum ScreenshotDemo {
     /// button), `botInfo` with a menu button and a privacy-policy URL,
     /// and a loaded `getBotSimilarBots` answer (Slice B2).
     ReadyBotProfile,
+    /// Bot extras demo (injected, no live Telegram): fast buttons mode,
+    /// adding a bot to a group or channel, verification badges, sharing
+    /// a game and owned bots; the mode comes from `QUILL_DEMO_BOTEXTRAS`.
+    ReadyBotExtras,
     /// Text-entity demo (injected, no live Telegram): a message with mixed
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
@@ -397,6 +409,9 @@ pub enum ScreenshotDemo {
     /// settings. `QUILL_DEMO_TRANSLATE_VIEW=bar|translated|box|rtl|selection|chooser|settings|skip`
     /// (default `bar`).
     ReadyTranslate,
+    /// Account-level sync updates (`QUILL_DEMO_SYNC=frozen|live|speech|age|
+    /// downloads`; injected data, no live Telegram).
+    ReadyUpdatesSync,
     /// A bot chat whose reply keyboard comes from `updateChatReplyMarkup`
     /// (message outside the window), with request buttons and the share
     /// dialogs. `QUILL_DEMO_KEYBOARD_VIEW=keyboard|hidden|phone|users|chat|confirm`.
@@ -647,6 +662,9 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Appearance cluster: system accent, font family and the Battery and
+    /// animations switches.
+    ReadyAppearancePower,
     /// Appearance slice: Appearance with Telegram wallpapers and interface scale.
     ReadyAppearanceWallpapers,
     /// Per-chat theme and wallpaper picker open over a private chat.
@@ -661,6 +679,9 @@ pub enum ScreenshotDemo {
     ReadySpellcheckPanel,
     /// Appearance dialog with the Spelling / Check spelling row visible.
     ReadySpellcheckToggle,
+    /// Appearance → Spelling with the Manage dictionaries list open
+    /// (fixture rows: enabled, installed, downloading 42%, failed, available).
+    ReadyDictionaries,
     /// Slice `parity:platform-custom-keybindings`: the Appearance dialog
     /// open on the Keyboard shortcuts section (injected, no live Telegram).
     ReadyKeybindings,
