@@ -451,7 +451,7 @@ impl QuillApp {
             // the self tile behind the panel renders the preview.
             self.demo_local_frame = Some(demo_video_frame(true));
         }
-        self.group_call_invite_open = true;
+        self.group_call.invite_open = true;
         self.status_note =
             "screenshot demo — group voice chat invite picker (injected, no live Telegram)".into();
     }
@@ -483,7 +483,7 @@ impl QuillApp {
             self.demo_local_frame = Some(demo_video_frame(true));
         }
         // Pin Zed's camera: the large tile, the rest in the strip.
-        self.group_call_pin.toggle(quill::calls::tile_pin::TileKey {
+        self.group_call.pin.toggle(quill::calls::tile_pin::TileKey {
             participant: quill::telegram::envelope::MessageSender::User { user_id: 41 },
             screen: false,
         });
@@ -509,7 +509,7 @@ impl QuillApp {
             self.demo_local_frame = Some(demo_video_frame(true));
         }
         // Zed's camera, pinned and shown across the window.
-        self.group_call_pin.toggle(quill::calls::tile_pin::TileKey {
+        self.group_call.pin.toggle(quill::calls::tile_pin::TileKey {
             participant: quill::telegram::envelope::MessageSender::User { user_id: 41 },
             screen: false,
         });

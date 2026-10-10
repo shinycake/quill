@@ -28,7 +28,7 @@ impl QuillApp {
     }
 
     fn ptt_now_ms(&self) -> u64 {
-        u64::try_from(self.ptt_clock.elapsed().as_millis()).unwrap_or(u64::MAX)
+        u64::try_from(self.group_call.ptt_clock.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
     fn group_call_joined(&self) -> bool {
@@ -76,7 +76,7 @@ impl QuillApp {
         if forced {
             return false;
         }
-        if let Some(action) = self.group_call_ptt.key_down() {
+        if let Some(action) = self.group_call.ptt.key_down() {
             self.apply_ptt_action(action, cx);
         }
         true
@@ -96,9 +96,9 @@ impl QuillApp {
     fn ptt_release(&mut self, cx: &mut Context<Self>) {
         let delay = self.ptt_config().release_delay_ms;
         let now = self.ptt_now_ms();
-        if let Some(action) = self.group_call_ptt.key_up(now, delay) {
+        if let Some(action) = self.group_call.ptt.key_up(now, delay) {
             self.apply_ptt_action(action, cx);
-        } else if let Some(deadline) = self.group_call_ptt.mute_deadline() {
+        } else if let Some(deadline) = self.group_call.ptt.mute_deadline() {
             let wait = Duration::from_millis(deadline.saturating_sub(now));
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(wait).await;
@@ -110,7 +110,7 @@ impl QuillApp {
 
     fn group_call_ptt_tick(&mut self, cx: &mut Context<Self>) {
         let now = self.ptt_now_ms();
-        if let Some(action) = self.group_call_ptt.tick(now) {
+        if let Some(action) = self.group_call.ptt.tick(now) {
             self.apply_ptt_action(action, cx);
         }
     }
@@ -119,10 +119,10 @@ impl QuillApp {
     /// push-to-talk was switched off: drop held state, close the microphone.
     pub(super) fn group_call_ptt_release_all(&mut self, cx: &mut Context<Self>) {
         // With the system-wide hook the key-up still arrives in the background.
-        if self.global_ptt.is_active() {
+        if self.group_call.global_ptt.is_active() {
             return;
         }
-        if let Some(action) = self.group_call_ptt.reset()
+        if let Some(action) = self.group_call.ptt.reset()
             && self.group_call_joined()
         {
             self.apply_ptt_action(action, cx);
@@ -135,11 +135,11 @@ impl QuillApp {
         self.sync_global_ptt(cx);
         let enabled = self.ptt_config().enabled;
         if enabled {
-            if self.group_call_joined() && !self.group_call_ptt.is_talking() {
+            if self.group_call_joined() && !self.group_call.ptt.is_talking() {
                 self.set_group_call_self_mute_to(true, cx);
             }
         } else {
-            let _ = self.group_call_ptt.reset();
+            let _ = self.group_call.ptt.reset();
         }
     }
 
@@ -151,7 +151,7 @@ impl QuillApp {
         let want = (self.live.is_some() && config.enabled && self.group_call_joined())
             .then_some(config.key);
         let mut events = None;
-        let changed = self.global_ptt.sync(want.as_deref(), |key| {
+        let changed = self.group_call.global_ptt.sync(want.as_deref(), |key| {
             let (tx, rx) = std::sync::mpsc::channel::<KeyEdge>();
             let sink: Sink = std::sync::Arc::new(move |edge| {
                 let _ = tx.send(edge);
@@ -164,9 +164,12 @@ impl QuillApp {
             self.listen_global_ptt(rx, cx);
         }
         if want.is_none() && changed {
-            let _ = self.group_call_ptt.reset();
+            let _ = self.group_call.ptt.reset();
         }
-        if matches!(self.global_ptt.state(), HookState::NeedsPermission) {
+        if matches!(
+            self.group_call.global_ptt.state(),
+            HookState::NeedsPermission
+        ) {
             self.arm_global_ptt_permission_poll(cx);
         }
         if changed {
@@ -219,17 +222,20 @@ impl QuillApp {
     /// Input Monitoring changes need no restart to be noticed by a fresh
     /// check, so look again every couple of seconds while it is missing.
     fn arm_global_ptt_permission_poll(&mut self, cx: &mut Context<Self>) {
-        if self.global_ptt_polling {
+        if self.group_call.global_ptt_polling {
             return;
         }
-        self.global_ptt_polling = true;
+        self.group_call.global_ptt_polling = true;
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(2)).await;
             let _ = this.update(cx, |this, cx| {
-                this.global_ptt_polling = false;
+                this.group_call.global_ptt_polling = false;
                 if quill::calls::ptt_global::permission_granted() {
                     this.recheck_global_ptt(cx);
-                } else if matches!(this.global_ptt.state(), HookState::NeedsPermission) {
+                } else if matches!(
+                    this.group_call.global_ptt.state(),
+                    HookState::NeedsPermission
+                ) {
                     this.arm_global_ptt_permission_poll(cx);
                 }
             });
@@ -239,14 +245,14 @@ impl QuillApp {
 
     /// "Check again" in Settings: allow a failed start to be retried.
     pub(super) fn recheck_global_ptt(&mut self, cx: &mut Context<Self>) {
-        self.global_ptt.retry();
+        self.group_call.global_ptt.retry();
         self.sync_global_ptt(cx);
         cx.notify();
     }
 
     /// Bind the next pressed key as the push-to-talk key (Settings).
     pub(super) fn capture_ptt_key(&mut self, key: &str, cx: &mut Context<Self>) {
-        self.ptt_capture = false;
+        self.group_call.ptt_capture = false;
         if key == "escape" {
             cx.notify();
             return;
@@ -257,7 +263,7 @@ impl QuillApp {
 
     /// Pin or unpin a video tile (local only, like tdesktop).
     pub(super) fn toggle_group_call_tile_pin(&mut self, key: TileKey, cx: &mut Context<Self>) {
-        self.group_call_pin.toggle(key);
+        self.group_call.pin.toggle(key);
         cx.notify();
     }
 
@@ -313,10 +319,12 @@ impl QuillApp {
         let delays = quill::calls::ptt::RELEASE_DELAYS_MS;
         let config = config.sanitized();
         let selected_delay = delays.iter().position(|d| *d == config.release_delay_ms);
-        let capturing = self.ptt_capture;
+        let capturing = self.group_call.ptt_capture;
         let needs_permission = config.enabled
-            && (matches!(self.global_ptt.state(), HookState::NeedsPermission)
-                || !quill::calls::ptt_global::permission_granted());
+            && (matches!(
+                self.group_call.global_ptt.state(),
+                HookState::NeedsPermission
+            ) || !quill::calls::ptt_global::permission_granted());
         let mut section = div().flex().flex_col().gap_1().child(
             div()
                 .id("call-pref-ptt")
@@ -331,7 +339,7 @@ impl QuillApp {
                         .checked(config.enabled)
                         .accessibility_label("Push-to-talk")
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            this.ptt_capture = false;
+                            this.group_call.ptt_capture = false;
                             this.set_call_pref(|prefs| prefs.push_to_talk.enabled = on, cx);
                         })),
                 )
@@ -371,7 +379,7 @@ impl QuillApp {
                                 })
                                 .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.ptt_capture = !this.ptt_capture;
+                                    this.group_call.ptt_capture = !this.group_call.ptt_capture;
                                     cx.notify();
                                 })),
                         ),
@@ -401,7 +409,7 @@ impl QuillApp {
                 )
                 .child(div().text_xs().text_color(muted).px_2().child(
                     quill::calls::ptt_global::status_note(
-                        self.global_ptt.state(),
+                        self.group_call.global_ptt.state(),
                         quill::calls::ptt_global::static_limit().as_deref(),
                     ),
                 ));

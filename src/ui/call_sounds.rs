@@ -164,8 +164,8 @@ impl super::app::QuillApp {
         };
         let (call, summary) = (session.active_call.clone(), session.call_summary.clone());
         let enabled = session.inapp_sounds_enabled;
-        let marks = &mut self.call_sound_marks;
-        let sounds = &mut self.call_sounds;
+        let marks = &mut self.calls.sound_marks;
+        let sounds = &mut self.calls.sounds;
         sounds.set_enabled(enabled);
         match (call, summary) {
             (Some(call), _) => {

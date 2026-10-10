@@ -1105,7 +1105,7 @@ impl QuillApp {
                 this.child(self.ttl_picker_panel(cx))
             })
             // Parity slice: per-chat folder picker below the header.
-            .when(self.folder_menu_open, |this| {
+            .when(self.folders.menu_open, |this| {
                 this.child(self.folder_menu_panel(cx))
             })
             .children(

@@ -290,8 +290,8 @@ impl QuillApp {
             session.password_state_loading = false;
             session.twofa_flow.recovery_code_sent_to = Some("i***@example.com".into());
         }
-        self.twofa_view = TwofaView::Recover;
-        self.twofa_open = true;
+        self.twofa.view = TwofaView::Recover;
+        self.twofa.open = true;
     }
 
     fn demo_ready2fa_manage(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -302,7 +302,7 @@ impl QuillApp {
             session.password_state = Some(demo_password_state_manage());
             session.password_state_loading = false;
         }
-        self.twofa_open = true;
+        self.twofa.open = true;
         self.status_note = "screenshot demo — two-step verification".into();
     }
 
@@ -317,8 +317,8 @@ impl QuillApp {
             session.password_state = Some(state);
             session.password_state_loading = false;
         }
-        self.twofa_view = TwofaView::Recover;
-        self.twofa_open = true;
+        self.twofa.view = TwofaView::Recover;
+        self.twofa.open = true;
     }
 
     fn demo_ready_account_lifecycle(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -453,8 +453,8 @@ impl QuillApp {
             session.password_state_loading = false;
             session.twofa_flow.login_email_code_sent_to = Some("m***@example.com".into());
         }
-        self.twofa_view = TwofaView::LoginEmail;
-        self.twofa_open = true;
+        self.twofa.view = TwofaView::LoginEmail;
+        self.twofa.open = true;
     }
 
     fn demo_ready_login_prevented(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -509,7 +509,7 @@ impl QuillApp {
             session.password_state = Some(demo_password_state_pending());
             session.password_state_loading = false;
         }
-        self.twofa_open = true;
+        self.twofa.open = true;
         self.status_note = "screenshot demo — recovery email pending".into();
     }
 

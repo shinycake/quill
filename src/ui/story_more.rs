@@ -35,17 +35,17 @@ impl QuillApp {
     /// A text field of the viewer owns the keyboard: Space and the arrows
     /// belong to it, not to playback.
     pub(super) fn story_text_input_open(&self) -> bool {
-        self.story_reply_open
-            || self.story_report_open
-            || self.story_share_open
-            || self.close_friends_edit.is_some()
-            || self.story_privacy_edit.is_some()
-            || self.story_cover_target.is_some()
+        self.stories.reply_open
+            || self.stories.report_open
+            || self.stories.share_open
+            || self.stories.close_friends_edit.is_some()
+            || self.stories.privacy_edit.is_some()
+            || self.stories.cover_target.is_some()
     }
 
     /// The current video story's clip, once it is a local sandboxed file.
     fn story_video_path(&self) -> Option<PathBuf> {
-        let item = self.story_viewer.current()?;
+        let item = self.stories.viewer.current()?;
         let file_id = item.video_file_id?;
         let roots = self.media_display_roots();
         self.session()?
@@ -56,7 +56,8 @@ impl QuillApp {
     }
 
     fn story_key(&self) -> Option<(i64, i32)> {
-        self.story_viewer
+        self.stories
+            .viewer
             .current()
             .map(|item| (item.chat_id.0, item.story_id))
     }
@@ -64,54 +65,54 @@ impl QuillApp {
     /// Whether the current story is a video the viewer plays natively (or
     /// is waiting to), i.e. the player, not the duration clock, drives it.
     pub(super) fn story_video_driven(&self) -> bool {
-        let Some(item) = self.story_viewer.current() else {
+        let Some(item) = self.stories.viewer.current() else {
             return false;
         };
         item.kind == StoryViewerKind::Video
             && item.video_file_id.is_some()
             && super::native_video::supported()
-            && self.story_native_failed != self.story_key()
+            && self.stories.native_failed != self.story_key()
     }
 
     /// The clip is not local yet: the clock stays frozen, so the story does
     /// not run away while it downloads.
     fn story_video_waiting(&self) -> bool {
-        self.story_video_driven() && self.story_native.borrow().is_none()
+        self.story_video_driven() && self.stories.native.borrow().is_none()
     }
 
     /// Open, replace or drop the native player to match the current story.
     pub(super) fn sync_story_video(&mut self) {
         let key = self.story_key();
-        if self.story_native_key != key {
-            *self.story_native.borrow_mut() = None;
-            self.story_native_key = None;
-            self.story_video_wait_since = Some(Instant::now());
-            self.story_native_paused_by_us = false;
+        if self.stories.native_key != key {
+            *self.stories.native.borrow_mut() = None;
+            self.stories.native_key = None;
+            self.stories.video_wait_since = Some(Instant::now());
+            self.stories.native_paused_by_us = false;
         }
         if !self.story_video_driven() {
-            *self.story_native.borrow_mut() = None;
-            self.story_native_key = None;
+            *self.stories.native.borrow_mut() = None;
+            self.stories.native_key = None;
             return;
         }
-        let failed_now = if let Some(video) = self.story_native.borrow().as_ref() {
+        let failed_now = if let Some(video) = self.stories.native.borrow().as_ref() {
             video.error().is_some()
         } else {
             false
         };
         if failed_now {
-            *self.story_native.borrow_mut() = None;
-            self.story_native_key = None;
-            self.story_native_failed = key;
-            self.story_playback.start(Instant::now());
+            *self.stories.native.borrow_mut() = None;
+            self.stories.native_key = None;
+            self.stories.native_failed = key;
+            self.stories.playback.start(Instant::now());
             return;
         }
-        if self.story_native.borrow().is_some() {
+        if self.stories.native.borrow().is_some() {
             return;
         }
         if let Some(path) = self.story_video_path() {
             match NativeVideo::open(&path, Purpose::Viewer) {
                 Ok(mut video) => {
-                    let volume = if self.story_muted {
+                    let volume = if self.stories.muted {
                         0.0
                     } else {
                         self.playback_volume
@@ -119,39 +120,41 @@ impl QuillApp {
                     video.set_volume(volume);
                     if !self.story_playback_paused() {
                         video.play();
-                        self.story_native_play_at = Instant::now();
+                        self.stories.native_play_at = Instant::now();
                     } else {
-                        self.story_native_paused_by_us = true;
+                        self.stories.native_paused_by_us = true;
                     }
-                    *self.story_native.borrow_mut() = Some(video);
-                    self.story_native_key = key;
+                    *self.stories.native.borrow_mut() = Some(video);
+                    self.stories.native_key = key;
                 }
                 Err(_) => {
-                    self.story_native_failed = key;
-                    self.story_playback.start(Instant::now());
+                    self.stories.native_failed = key;
+                    self.stories.playback.start(Instant::now());
                 }
             }
         } else {
             // Not local: wait while it downloads, then give up.
             let downloading = self.session().is_some_and(|session| {
-                self.story_viewer
+                self.stories
+                    .viewer
                     .current()
                     .and_then(|item| item.video_file_id)
                     .is_some_and(|id| file_is_downloading(id, &session.files, &session.downloading))
             });
             let waited = self
-                .story_video_wait_since
+                .stories
+                .video_wait_since
                 .is_some_and(|since| since.elapsed() > VIDEO_WAIT);
             if waited && !downloading {
-                self.story_native_failed = key;
-                self.story_playback.start(Instant::now());
+                self.stories.native_failed = key;
+                self.stories.playback.start(Instant::now());
             }
         }
     }
 
     /// Pause or resume the player to match `paused`.
     pub(super) fn apply_story_native_pause(&mut self, paused: bool) {
-        let mut slot = self.story_native.borrow_mut();
+        let mut slot = self.stories.native.borrow_mut();
         let Some(video) = slot.as_mut() else {
             return;
         };
@@ -159,22 +162,23 @@ impl QuillApp {
             if video.is_playing() {
                 video.pause();
             }
-            self.story_native_paused_by_us = true;
-        } else if self.story_native_paused_by_us {
+            self.stories.native_paused_by_us = true;
+        } else if self.stories.native_paused_by_us {
             video.play();
-            self.story_native_play_at = Instant::now();
-            self.story_native_paused_by_us = false;
+            self.stories.native_play_at = Instant::now();
+            self.stories.native_paused_by_us = false;
         }
     }
 
     /// Progress of the current segment: the player's position for video
     /// stories it drives, the duration clock otherwise.
     pub(super) fn story_segment_progress(&self, now: Instant) -> f32 {
-        if let Some(video) = self.story_native.borrow().as_ref() {
+        if let Some(video) = self.stories.native.borrow().as_ref() {
             let duration = video
                 .duration_secs()
                 .or_else(|| {
-                    self.story_viewer
+                    self.stories
+                        .viewer
                         .current()
                         .and_then(|item| item.duration_secs)
                         .map(f64::from)
@@ -185,27 +189,29 @@ impl QuillApp {
         if self.story_video_waiting() {
             return 0.0;
         }
-        self.story_viewer
+        self.stories
+            .viewer
             .current()
-            .map(|item| self.story_playback.progress(item, now))
+            .map(|item| self.stories.playback.progress(item, now))
             .unwrap_or(0.0)
     }
 
     /// Whether the current story reached its end (player or clock).
     pub(super) fn story_segment_finished(&self, now: Instant) -> bool {
-        if let Some(video) = self.story_native.borrow_mut().as_mut() {
+        if let Some(video) = self.stories.native.borrow_mut().as_mut() {
             let duration = video
                 .duration_secs()
                 .or_else(|| {
-                    self.story_viewer
+                    self.stories
+                        .viewer
                         .current()
                         .and_then(|item| item.duration_secs)
                         .map(f64::from)
                 })
                 .unwrap_or(0.0);
             // A just-requested play() has not started yet.
-            let playing =
-                self.story_native_play_at.elapsed() < Duration::from_secs(1) || video.is_playing();
+            let playing = self.stories.native_play_at.elapsed() < Duration::from_secs(1)
+                || video.is_playing();
             return video_finished(
                 video.position_secs(),
                 duration,
@@ -216,20 +222,21 @@ impl QuillApp {
         if self.story_video_waiting() {
             return false;
         }
-        self.story_viewer
+        self.stories
+            .viewer
             .current()
-            .is_some_and(|item| self.story_playback.finished(item, now))
+            .is_some_and(|item| self.stories.playback.finished(item, now))
     }
 
     /// Mute / unmute the video story's sound.
     pub(super) fn toggle_story_mute(&mut self, cx: &mut Context<Self>) {
-        self.story_muted = !self.story_muted;
-        let volume = if self.story_muted {
+        self.stories.muted = !self.stories.muted;
+        let volume = if self.stories.muted {
             0.0
         } else {
             self.playback_volume
         };
-        if let Some(video) = self.story_native.borrow_mut().as_mut() {
+        if let Some(video) = self.stories.native.borrow_mut().as_mut() {
             video.set_volume(volume);
         }
         cx.notify();
@@ -237,23 +244,23 @@ impl QuillApp {
 
     /// Space: pause or resume the story.
     pub(super) fn toggle_story_pause(&mut self, cx: &mut Context<Self>) {
-        self.story_pause.toggle();
+        self.stories.pause.toggle();
         self.refresh_story_pause(cx);
     }
 
     /// Press-and-hold on the story media pauses until release.
     pub(super) fn story_hold(&mut self, held: bool, cx: &mut Context<Self>) {
         if held {
-            self.story_pause.press();
+            self.stories.pause.press();
         } else {
-            self.story_pause.release();
+            self.stories.pause.release();
         }
         self.refresh_story_pause(cx);
     }
 
     fn refresh_story_pause(&mut self, cx: &mut Context<Self>) {
         let paused = self.story_playback_paused();
-        self.story_playback.set_paused(paused, Instant::now());
+        self.stories.playback.set_paused(paused, Instant::now());
         self.apply_story_native_pause(paused);
         self.ensure_story_tick(cx);
         cx.notify();
@@ -268,7 +275,7 @@ impl QuillApp {
 
     /// Hide the peer's stories (archive list) or bring them back.
     pub(super) fn toggle_hide_story_peer(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let archive = !self.story_chat_hidden(item.chat_id.0);
@@ -276,7 +283,7 @@ impl QuillApp {
             live.driver
                 .set_chat_active_stories_list(item.chat_id, archive)
         });
-        self.story_notice = Some(match sent {
+        self.stories.notice = Some(match sent {
             Some(Ok(_)) if archive => "Hiding stories…".into(),
             Some(Ok(_)) => "Showing stories…".into(),
             Some(Err(_)) => "Could not change the stories list".into(),
@@ -287,7 +294,7 @@ impl QuillApp {
 
     /// Post the own story to the profile or remove it from there.
     pub(super) fn toggle_story_profile(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let posted = self
@@ -298,7 +305,7 @@ impl QuillApp {
             live.driver
                 .toggle_story_is_posted_to_chat_page(item.chat_id, item.story_id, !posted)
         });
-        self.story_notice = Some(match sent {
+        self.stories.notice = Some(match sent {
             Some(Ok(_)) if posted => "Removing from profile…".into(),
             Some(Ok(_)) => "Posting to profile…".into(),
             Some(Err(_)) => "Could not change the profile post".into(),
@@ -309,7 +316,7 @@ impl QuillApp {
 
     /// Copy the story's public link (`t.me/<username>/s/<id>`).
     pub(super) fn copy_story_link(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let username = self.session().and_then(|session| {
@@ -329,16 +336,16 @@ impl QuillApp {
         match username.and_then(|name| story_link(&name, item.story_id)) {
             Some(link) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(link));
-                self.story_notice = Some("Story link copied".into());
+                self.stories.notice = Some("Story link copied".into());
             }
-            None => self.story_notice = Some("This story has no public link".into()),
+            None => self.stories.notice = Some("This story has no public link".into()),
         }
         cx.notify();
     }
 
     /// Save the story's photo / clip to the Downloads folder.
     pub(super) fn save_story_media(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let allowed = self
@@ -346,7 +353,7 @@ impl QuillApp {
             .and_then(|s| s.stories.get(&(item.chat_id.0, item.story_id)))
             .is_some_and(can_save_story);
         if !allowed {
-            self.story_notice = Some("Saving is not allowed for this story".into());
+            self.stories.notice = Some("Saving is not allowed for this story".into());
             cx.notify();
             return;
         }
@@ -367,7 +374,7 @@ impl QuillApp {
                 })
             })
         };
-        self.story_notice = Some(match source {
+        self.stories.notice = Some(match source {
             Some(path) => match quill::media_viewer::save_media_to_downloads(&path) {
                 Ok(saved) => format!("Saved to {}", saved.display()),
                 Err(err) => format!("Could not save: {err}"),
@@ -379,10 +386,11 @@ impl QuillApp {
 
     /// Open / close the share panel.
     pub(super) fn toggle_story_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.story_share_open = !self.story_share_open;
-        self.close_friends_edit = None;
-        if self.story_share_open {
-            self.story_more_search
+        self.stories.share_open = !self.stories.share_open;
+        self.stories.close_friends_edit = None;
+        if self.stories.share_open {
+            self.stories
+                .more_search
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
         self.refresh_story_pause(cx);
@@ -390,7 +398,7 @@ impl QuillApp {
 
     /// Send the current story to `dest` as an `inputMessageStory`.
     pub(super) fn share_story_to(&mut self, dest: quill::ids::ChatId, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let options = self.composer_send_options();
@@ -398,9 +406,9 @@ impl QuillApp {
             live.driver
                 .share_story_to_chat(dest, item.chat_id, item.story_id, &options)
         });
-        self.story_notice = Some(match sent {
+        self.stories.notice = Some(match sent {
             Some(Ok(_)) => {
-                self.story_share_open = false;
+                self.stories.share_open = false;
                 "Story sent".into()
             }
             Some(Err(_)) => "Could not share the story here".into(),
@@ -423,16 +431,17 @@ impl QuillApp {
             .session()
             .and_then(|s| s.close_friends.clone())
             .unwrap_or_default();
-        self.close_friends_edit = Some(CloseFriendsEdit::new(&current));
-        self.close_friends_saving = false;
-        self.story_share_open = false;
-        self.story_more_search
+        self.stories.close_friends_edit = Some(CloseFriendsEdit::new(&current));
+        self.stories.close_friends_saving = false;
+        self.stories.share_open = false;
+        self.stories
+            .more_search
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.refresh_story_pause(cx);
     }
 
     pub(super) fn toggle_close_friend(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        if let Some(edit) = self.close_friends_edit.as_mut() {
+        if let Some(edit) = self.stories.close_friends_edit.as_mut() {
             edit.toggle(user_id);
         }
         cx.notify();
@@ -440,21 +449,23 @@ impl QuillApp {
 
     /// Send the edited list with `setCloseFriends`.
     pub(super) fn save_close_friends(&mut self, cx: &mut Context<Self>) {
-        let Some(edit) = self.close_friends_edit.as_ref() else {
+        let Some(edit) = self.stories.close_friends_edit.as_ref() else {
             return;
         };
         if !edit.changed() {
-            self.close_friends_edit = None;
+            self.stories.close_friends_edit = None;
             self.refresh_story_pause(cx);
             return;
         }
         let ids = edit.ids();
         match self.live.as_mut() {
             Some(live) => match live.driver.set_close_friends(&ids) {
-                Ok(_) => self.close_friends_saving = true,
-                Err(_) => self.story_notice = Some("Could not save close friends".into()),
+                Ok(_) => self.stories.close_friends_saving = true,
+                Err(_) => self.stories.notice = Some("Could not save close friends".into()),
             },
-            None => self.story_notice = Some("demo — setCloseFriends runs with live TDLib".into()),
+            None => {
+                self.stories.notice = Some("demo — setCloseFriends runs with live TDLib".into())
+            }
         }
         cx.notify();
     }
@@ -463,17 +474,17 @@ impl QuillApp {
     /// has not touched it, close after a confirmed save.
     pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) {
         let loaded = self.session().and_then(|s| s.close_friends.clone());
-        let Some(edit) = self.close_friends_edit.as_mut() else {
+        let Some(edit) = self.stories.close_friends_edit.as_mut() else {
             return;
         };
         let Some(loaded) = loaded else {
             return;
         };
-        if self.close_friends_saving {
+        if self.stories.close_friends_saving {
             if CloseFriendsEdit::new(&loaded).ids() == edit.ids() {
-                self.close_friends_saving = false;
-                self.close_friends_edit = None;
-                self.story_notice = Some("Close friends updated".into());
+                self.stories.close_friends_saving = false;
+                self.stories.close_friends_edit = None;
+                self.stories.notice = Some("Close friends updated".into());
                 self.refresh_story_pause(cx);
             } else if self
                 .session()
@@ -482,7 +493,7 @@ impl QuillApp {
                     matches!(op.state, quill::story_page::StoryPageOpState::Failed(_))
                 })
             {
-                self.close_friends_saving = false;
+                self.stories.close_friends_saving = false;
             }
         } else if !edit.changed() && CloseFriendsEdit::new(&loaded) != *edit {
             *edit = CloseFriendsEdit::new(&loaded);
@@ -492,7 +503,7 @@ impl QuillApp {
     /// The viewer's extra actions row: sound, share, link, save, hide,
     /// profile. Gated by what TDLib allows for the current story.
     pub(super) fn story_more_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(item) = self.story_viewer.current() else {
+        let Some(item) = self.stories.viewer.current() else {
             return div().into_any_element();
         };
         let story = self.current_story();
@@ -515,7 +526,7 @@ impl QuillApp {
             .items_center()
             .justify_center();
         if is_video {
-            let label = if self.story_muted {
+            let label = if self.stories.muted {
                 "Sound off"
             } else {
                 "Sound on"
@@ -530,7 +541,7 @@ impl QuillApp {
         }
         row = row.child(
             Button::new("story-pause")
-                .label(if self.story_pause.is_paused() {
+                .label(if self.stories.pause.is_paused() {
                     "Resume"
                 } else {
                     "Pause"
@@ -596,13 +607,13 @@ impl QuillApp {
             );
         }
         let mut column = div().flex().flex_col().gap_2().items_center().child(row);
-        if self.story_share_open {
+        if self.stories.share_open {
             column = column.child(self.story_share_panel(cx));
         }
-        if self.close_friends_edit.is_some() {
+        if self.stories.close_friends_edit.is_some() {
             column = column.child(self.close_friends_panel(cx));
         }
-        if let Some(notice) = self.story_notice.clone() {
+        if let Some(notice) = self.stories.notice.clone() {
             column = column.child(div().text_xs().text_color(text_muted()).child(notice));
         }
         if let Some(op) = self.session().and_then(|s| s.story_page_op.clone()) {
@@ -632,7 +643,7 @@ impl QuillApp {
 
     /// Chat picker for Share: search box and the first matches.
     fn story_share_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let query = self.story_more_search.read(cx).value().to_string();
+        let query = self.stories.more_search.read(cx).value().to_string();
         let rows: Vec<(quill::ids::ChatId, String)> = self
             .session()
             .map(|s| {
@@ -688,7 +699,7 @@ impl QuillApp {
                     .child("Share story to…"),
             )
             .child(
-                Textarea::new(&self.story_more_search)
+                Textarea::new(&self.stories.more_search)
                     .aria_label("Search chats")
                     .h(px(32.)),
             )
@@ -698,10 +709,10 @@ impl QuillApp {
 
     /// The close-friends editor: contact checkboxes, Save and Cancel.
     fn close_friends_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(edit) = self.close_friends_edit.as_ref() else {
+        let Some(edit) = self.stories.close_friends_edit.as_ref() else {
             return div().into_any_element();
         };
-        let query = self.story_more_search.read(cx).value().to_string();
+        let query = self.stories.more_search.read(cx).value().to_string();
         let rows = self.g1_contact_rows(&query, cx);
         let mut list = div()
             .id("story-close-friends-list")
@@ -727,7 +738,7 @@ impl QuillApp {
                 cx,
             ));
         }
-        let saving = self.close_friends_saving;
+        let saving = self.stories.close_friends_saving;
         div()
             .flex()
             .flex_col()
@@ -741,7 +752,7 @@ impl QuillApp {
                     .child(format!("Close friends · {} selected", edit.count())),
             )
             .child(
-                Textarea::new(&self.story_more_search)
+                Textarea::new(&self.stories.more_search)
                     .aria_label("Search contacts")
                     .h(px(32.)),
             )
@@ -762,7 +773,7 @@ impl QuillApp {
                             .ghost()
                             .text_color(text_bright())
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_friends_edit = None;
+                                this.stories.close_friends_edit = None;
                                 this.refresh_story_pause(cx);
                             })),
                     ),
@@ -775,7 +786,7 @@ impl QuillApp {
     /// Asks the frame clock for the next frame while the clip plays.
     pub(super) fn story_video_element(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let picture = {
-            let mut slot = self.story_native.borrow_mut();
+            let mut slot = self.stories.native.borrow_mut();
             slot.as_mut()?.frame()?
         };
         if !self.story_playback_paused() {
