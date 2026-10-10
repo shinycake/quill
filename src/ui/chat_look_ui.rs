@@ -152,15 +152,12 @@ impl QuillApp {
 
     /// `bg/<name>` links: search the background and preview it.
     pub(super) fn open_background_link(&mut self, name: String, cx: &mut Context<Self>) {
-        match self.live.as_mut() {
-            Some(live) => {
-                live.driver.session.background_error = None;
-                if live.driver.search_background(&name).is_err() {
-                    self.status_note = "could not open the wallpaper link".into();
-                    return;
-                }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.background_error = None;
+            if live.driver.search_background(&name).is_err() {
+                self.status_note = "could not open the wallpaper link".into();
+                return;
             }
-            None => {}
         }
         self.chat_look_dialog = Some(ChatLookDialog {
             target: LookTarget::Link { name },
