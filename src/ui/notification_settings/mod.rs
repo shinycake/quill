@@ -2,9 +2,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, danger_bg};
-use super::demo::{demo_file_json, demo_media_allowlist};
 use super::dialogs::NotificationsConfirm;
-use super::notifications::notification_settings_json;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -13,12 +11,10 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
 use quill::notify::NotificationSoundKind;
 use quill::settings::BadgePrefs;
-use quill::state::{ChatSummary, RequestPurpose, Session};
-use quill::telegram::client::copy_and_parse;
+use quill::state::ChatSummary;
 use quill::telegram::envelope::{
     ChatKind, ChatNotificationSettings, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS,
     MUTE_FOREVER, NotificationSettingsScope, NotificationSound, ReactionNotificationSettings,
@@ -26,8 +22,6 @@ use quill::telegram::envelope::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 mod fixtures;
 mod global;
@@ -36,8 +30,6 @@ mod reactions;
 mod scope;
 mod sounds;
 mod ttl_picker;
-
-pub(super) use fixtures::{apply_ready_folder_badges, apply_ready_notification_sound};
 
 /// Phase 8.1: cap on concurrent OS-notification worker threads (`notify-send
 /// --wait` blocks until dismissal). Excess bursts are dropped, not stacked.

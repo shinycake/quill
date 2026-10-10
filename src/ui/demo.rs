@@ -14,9 +14,8 @@ use quill::state::{RequestPurpose, Session, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatNotificationSettings, ConnectionState, MessageContent,
-    ParsedSession, ParsedWebsite, PasswordState, StarSubscriptionData, StarSubscriptionPricing,
-    StarSubscriptionTypeData, StarSubscriptionsData, StickerFormat, StickerItem,
-    StorageFileTypeStats, StorageStats, toggle_chosen_emoji_reaction,
+    ParsedSession, ParsedWebsite, StickerFormat, StickerItem, StorageFileTypeStats, StorageStats,
+    toggle_chosen_emoji_reaction,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -32,24 +31,6 @@ pub(super) fn seed_ready_unread_session(sink: Arc<MemorySink>) -> Session {
 
 pub(super) fn seed_ready_unread_read_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::AfterMarkRead)
-}
-
-/// Slice parity:platform-offline-indicator — ReadyChats fixture with the
-/// client offline (`connectionStateWaitingForNetwork`), so the offline
-/// banner renders for screenshots.
-pub(super) fn seed_ready_offline_session(sink: Arc<MemorySink>) -> Session {
-    let mut session = seed_ready_chats_session(sink);
-    session.connection = ConnectionState::WaitingForNetwork;
-    session
-}
-
-/// Slice parity:platform-reconnect-states — ReadyChats fixture with the
-/// client mid-reconnect (`connectionStateUpdating`), so the transitional
-/// strip renders with its per-state label for screenshots.
-pub(super) fn seed_ready_reconnecting_session(sink: Arc<MemorySink>) -> Session {
-    let mut session = seed_ready_chats_session(sink);
-    session.connection = ConnectionState::Updating;
-    session
 }
 
 /// Custom emoji inline rendering — ReadyChats fixture plus a message with a
@@ -178,106 +159,6 @@ pub(super) fn rtl_emoji_message_json(id: u64) -> String {
     format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1790632500,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text},"entities":[{{"@type":"textEntity","offset":{offset},"length":2,"type":{{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4242"}}}}]}}}}}}}}"#
     )
-}
-
-/// Suggest-animated-emoji fixture — an injected `animatedEmoji` answer
-/// (with its sticker file downloaded) so the composer suggestion row
-/// renders for screenshots without a live Telegram login.
-pub(super) fn seed_ready_animated_emoji_session(sink: Arc<MemorySink>) -> Session {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let mut session = seed_ready_chats_session(sink);
-    // Continue the envelope sequence from the ReadyChats seed: `Session::apply`
-    // ignores out-of-order envelopes, so restarting at 0 would silently drop
-    // every injected update.
-    let seq = AtomicU64::new(session.last_seq);
-    let apply = |session: &mut Session, json: &str| {
-        if let Some(owned) = copy_and_parse(json, &seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    };
-    // The sticker file the animated emoji resolves to (completed download).
-    apply(
-        &mut session,
-        &demo_file_json(61, &demo_thumb_png_path(), true),
-    );
-    session.emoji.animated_emoji = Some(StickerItem {
-        custom_emoji_id: None,
-        id: 9001,
-        set_id: 77,
-        emoji: "🔥".to_string(),
-        width: 512,
-        height: 512,
-        format: StickerFormat::Tgs,
-        file_id: FileId(61),
-        // The static preview: a real `animatedEmoji` answer carries the
-        // sticker thumbnail, which is what renders (TGS itself is not
-        // played — same as the sticker suggestion row).
-        thumb_file_id: Some(FileId(61)),
-        thumb_width: 512,
-        thumb_height: 512,
-        requires_premium: false,
-    });
-    session.emoji.animated_emoji_for = Some("🔥".to_string());
-    session.open_chat(ChatId(11));
-    session
-}
-
-/// Phase C1b: connected-video-call fixture — Zed's incoming video
-/// call goes pending → exchanging keys → ready, so the call overlay
-/// renders the video-stage placeholder grid. Injected, no live
-/// Telegram, no media.
-/// Phase C2e: synthetic video-call fixture frames — 320x240 RGBA test
-/// patterns generated in code so the two feeds are visually distinct
-/// (remote: teal gradient + circle; local: warm gradient + crosshair).
-/// NOT a real camera: screenshot demos only.
-pub(super) fn demo_video_frame(is_local: bool) -> quill::calls::engine::VideoFrame {
-    const W: usize = 320;
-    const H: usize = 240;
-    let mut rgba = Vec::with_capacity(W * H * 4);
-    for y in 0..H {
-        for x in 0..W {
-            let fx = x as f32 / (W - 1) as f32;
-            let fy = y as f32 / (H - 1) as f32;
-            let (mut r, mut g, mut b) = if is_local {
-                // Warm gradient.
-                (
-                    (200.0 + 55.0 * fx) as u8,
-                    (110.0 + 60.0 * fy) as u8,
-                    (60.0 + 40.0 * fx) as u8,
-                )
-            } else {
-                // Teal gradient.
-                (
-                    (20.0 + 40.0 * fx) as u8,
-                    (120.0 + 80.0 * fy) as u8,
-                    (140.0 + 60.0 * fx) as u8,
-                )
-            };
-            if is_local {
-                // Crosshair.
-                if (x as i32 - W as i32 / 2).abs() <= 2 || (y as i32 - H as i32 / 2).abs() <= 2 {
-                    (r, g, b) = (255, 255, 255);
-                }
-            } else {
-                // Circle.
-                let dx = x as i32 - W as i32 / 2;
-                let dy = y as i32 - H as i32 / 2;
-                if dx * dx + dy * dy < 50 * 50 {
-                    (r, g, b) = (170, 240, 240);
-                }
-            }
-            rgba.extend_from_slice(&[r, g, b, 255]);
-        }
-    }
-    quill::calls::engine::VideoFrame {
-        seq: 0,
-        width: W as u16,
-        height: H as u16,
-        rgba,
-        is_local,
-        participant_user_id: None,
-        is_screen: false,
-    }
 }
 
 pub(super) fn seed_ready_media_session(sink: Arc<MemorySink>) -> Session {
@@ -974,7 +855,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
     ]
 }
 
-/// Slice A4: `getConnectedWebsites` fixture for the `ready-web-sessions`
+/// Slice A4: `getConnectedWebsites` fixture for the web-sessions
 /// screenshot demo — three connected websites (injected, no live
 /// Telegram).
 pub(super) fn demo_websites() -> Vec<ParsedWebsite> {
@@ -1066,38 +947,6 @@ pub(super) fn demo_storage_stats() -> StorageStats {
                 count: 640,
             },
         ],
-    }
-}
-
-/// Slice A2: `passwordState` fixture for the `Ready2faManage` screenshot
-/// demo — password set, hint, recovery email set, no pending
-/// confirmation (injected, no live Telegram).
-pub(super) fn demo_password_state_manage() -> PasswordState {
-    PasswordState {
-        has_password: true,
-        password_hint: "favorite street".to_string(),
-        has_recovery_email_address: true,
-        has_passport_data: false,
-        pending_email_pattern: None,
-        pending_email_code_length: 0,
-        login_email_address_pattern: String::new(),
-        pending_reset_date: 0,
-    }
-}
-
-/// Slice A2: `passwordState` fixture for the `ReadyRecoveryEmail`
-/// screenshot demo — recovery email change pending confirmation
-/// (TGX `PendingEmailText` wording, injected, no live Telegram).
-pub(super) fn demo_password_state_pending() -> PasswordState {
-    PasswordState {
-        has_password: true,
-        password_hint: String::new(),
-        has_recovery_email_address: true,
-        has_passport_data: false,
-        pending_email_pattern: Some("n***@example.com".to_string()),
-        pending_email_code_length: 6,
-        login_email_address_pattern: String::new(),
-        pending_reset_date: 0,
     }
 }
 
@@ -1805,71 +1654,5 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
-    }
-}
-
-/// Slice `parity:bots-payment-recurring`: subscriptions dialog fixture —
-/// one active channel subscription ("Demo channel", chat 13 in the
-/// `ReadyChats` seed), one canceled bot subscription with its own title,
-/// and one expired channel subscription to show the Renew row.
-/// Injected, no live Telegram.
-pub(super) fn demo_star_subscriptions() -> StarSubscriptionsData {
-    // Far-future / fixed dates so the demo is stable: sub1 renews,
-    // sub2 was canceled, sub3 already expired.
-    StarSubscriptionsData {
-        star_amount: 500,
-        required_star_count: 100,
-        next_offset: String::new(),
-        subscriptions: vec![
-            StarSubscriptionData {
-                id: "demo-sub-1".into(),
-                chat_id: 13,
-                expiration_date: 1893456000, // 2030-01-01
-                is_canceled: false,
-                is_expiring: false,
-                pricing: StarSubscriptionPricing {
-                    period: 2_592_000,
-                    star_count: 100,
-                },
-                sub_type: StarSubscriptionTypeData::Channel {
-                    can_reuse: true,
-                    invite_link: "https://t.me/+demo".into(),
-                },
-            },
-            StarSubscriptionData {
-                id: "demo-sub-2".into(),
-                chat_id: 42,
-                expiration_date: 1893456000,
-                is_canceled: true,
-                is_expiring: false,
-                pricing: StarSubscriptionPricing {
-                    period: 604_800,
-                    star_count: 25,
-                },
-                sub_type: StarSubscriptionTypeData::Bot {
-                    is_canceled_by_bot: false,
-                    title: "Demo Poll Bot".into(),
-                    invoice_link: "https://t.me/$demo-invoice".into(),
-                },
-            },
-            StarSubscriptionData {
-                id: "demo-sub-3".into(),
-                chat_id: 13,
-                expiration_date: 1700000000, // 2023-11-14, expired
-                is_canceled: false,
-                is_expiring: true,
-                pricing: StarSubscriptionPricing {
-                    period: 2_592_000,
-                    star_count: 50,
-                },
-                // `can_reuse` is false: it implies an ACTIVE subscription
-                // (schema 1.8.67), so an expired channel sub renews through
-                // `invite_link` instead.
-                sub_type: StarSubscriptionTypeData::Channel {
-                    can_reuse: false,
-                    invite_link: "https://t.me/+demo-renew".into(),
-                },
-            },
-        ],
     }
 }

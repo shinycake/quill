@@ -5,36 +5,19 @@ use crate::ui::audio_playback::{apply_ready_audio, apply_ready_voice};
 use crate::ui::composer_ui::apply_ready_stickers;
 use crate::ui::demo::demo_media_allowlist;
 use crate::ui::demo::{
-    seed_ready_animated_emoji_session, seed_ready_custom_emoji_session,
-    seed_ready_downloads_session, seed_ready_media_session,
+    seed_ready_custom_emoji_session, seed_ready_downloads_session, seed_ready_media_session,
 };
 use crate::ui::inline_playback::{apply_ready_gifs, apply_ready_video, apply_ready_video_note};
-use crate::ui::message_games::apply_ready_game_card;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
-use crate::ui::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::voice::VoiceCapture;
 use std::sync::atomic::Ordering;
 
 register_demos![
-    // Animated emoji suggestion above the composer (injected
-    // `animatedEmoji` answer + downloaded sticker fixture).
-    DemoSpec::ready(
-        "ready-animated-emoji",
-        seed_ready_animated_emoji_session,
-        "screenshot demo — animated emoji suggestion above the composer"
-    ),
     // Music file bubble with title, performer, cover, and Play/Pause.
     DemoSpec::chats("ready-audio", "screenshot demo — audio file playback")
         .setup(QuillApp::demo_ready_audio),
-    // Custom emoji rendered inline in message text (injected
-    // `textEntityTypeCustomEmoji` entity + resolved sticker fixture).
-    DemoSpec::ready(
-        "ready-custom-emoji",
-        seed_ready_custom_emoji_session,
-        "screenshot demo — custom emoji rendered inline in message text"
-    ),
     // MED3 downloads-manager demo (injected, no live Telegram): the
     // `ReadyMedia` seed plus an actively downloading document (file 24,
     // 42% through `notes.txt`), a failed document (file 26, "Retry"
@@ -48,29 +31,12 @@ register_demos![
         "screenshot demo — downloads manager (injected updates, no live Telegram)"
     )
     .setup(QuillApp::demo_ready_downloads),
-    // Composer core: a dragged folder offers its files or one archive.
-    DemoSpec::chats("ready-drop-folder", "screenshot demo — file drop zones")
-        .setup(QuillApp::demo_ready_drop_folder),
-    // Composer core: files dragged over the chat show two drop zones
-    // (photos: quick versus without compression).
-    DemoSpec::chats("ready-drop-zones", "screenshot demo — file drop zones")
-        .setup(QuillApp::demo_ready_drop_zones),
     DemoSpec::ready(
         "ready-emoji-packs",
         seed_ready_custom_emoji_session,
         "screenshot demo — custom emoji rendered inline in message text"
     )
     .setup(QuillApp::demo_ready_emoji_packs),
-    // The composer's emoji / sticker / GIF panel on the Emoji tab.
-    DemoSpec::chats("ready-emoji-panel", "screenshot demo — emoji panel")
-        .setup(QuillApp::demo_ready_emoji_panel),
-    // Slice bots-games: `messageGame` card with an open high-score panel
-    // (injected, no live Telegram).
-    DemoSpec::chats(
-        "ready-game-card",
-        "screenshot demo — game card + high scores"
-    )
-    .setup(QuillApp::demo_ready_game_card),
     DemoSpec::chats(
         "ready-gif-playback",
         "screenshot demo — saved GIFs + history playback"
@@ -87,24 +53,6 @@ register_demos![
         seed_ready_media_session,
         "screenshot demo — photo/document (injected updates, no live Telegram)"
     ),
-    // The top "now playing" bar over a music chat (audio, repeat all, shuffle).
-    DemoSpec::chats("ready-player-bar", "screenshot demo — player bar")
-        .setup(QuillApp::demo_ready_player_bar),
-    // Seek-bar demo (injected, no live Telegram): a voice note playing
-    // with its seek bar mid-track (elapsed advancing via the playback
-    // tick) plus a music track paused with a remembered position, both
-    // showing elapsed/total time labels (Phase 4.6). No subprocess is
-    // spawned — playback state is faked.
-    DemoSpec::chats("ready-seek-bars", "screenshot demo — audio/voice seek bars")
-        .setup(QuillApp::demo_ready_seek_bars),
-    // Slice parity:platform-shortcuts-reference: the keyboard shortcuts
-    // reference dialog open over the demo chat list (injected, no live
-    // Telegram).
-    DemoSpec::chats(
-        "ready-shortcuts",
-        "screenshot demo — keyboard shortcuts reference (injected, no live Telegram)"
-    )
-    .setup(QuillApp::demo_ready_shortcuts),
     DemoSpec::chats(
         "ready-sticker-playback",
         "screenshot demo — sticker panel + sticker in history"
@@ -179,14 +127,6 @@ impl QuillApp {
         self.playback.pending_audio_play = None;
     }
 
-    fn demo_ready_drop_folder(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.composer_ui.drop_preview = Some(quill::drop_modes::DragState::Folder);
-    }
-
-    fn demo_ready_drop_zones(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.composer_ui.drop_preview = Some(quill::drop_modes::DragState::PhotoFiles);
-    }
-
     fn demo_ready_emoji_packs(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
@@ -223,78 +163,6 @@ impl QuillApp {
             session.emoji.mutating_set = Some((4, true));
             session.media_prefs.recent_emoji_packs = vec![2, 1];
         }
-    }
-
-    fn demo_ready_emoji_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.set_media_pref(
-            |prefs| {
-                prefs.recent_emoji = ["👍", "😂", "❤️", "🔥", "🎉", "😍", "🙏", "😭"]
-                    .iter()
-                    .map(|e| (*e).to_string())
-                    .collect();
-            },
-            cx,
-        );
-        self.pickers.media_panel.open = true;
-        self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Emoji;
-        self.connection.status_note = "screenshot demo — emoji panel".into();
-    }
-
-    fn demo_ready_game_card(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        if let Some(session) = self.demo_session.as_mut() {
-            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_game_card(session, &self.demo_ui.sink, &self.demo_ui.seq);
-        }
-        self.connection.status_note = "screenshot demo — game card + high scores".into();
-    }
-
-    fn demo_ready_player_bar(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.demo_session.as_mut() {
-            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_audio(session, &self.demo_ui.sink, &self.demo_ui.seq);
-        }
-        // Music paused at 1:27 of 3:34; the bar shows repeat-all and
-        // shuffle as active.
-        self.begin_track_playback(
-            PlaybackKind::Audio,
-            ChatId(11),
-            MessageId(801),
-            214.0,
-            87.0,
-            cx,
-        );
-        self.pause_active_playback();
-        self.playback.player.repeat = quill::playlist::RepeatMode::All;
-        self.playback.player.order = quill::playlist::OrderMode::Shuffle;
-        self.connection.status_note = "screenshot demo — player bar".into();
-    }
-
-    fn demo_ready_seek_bars(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.demo_session.as_mut() {
-            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_voice(session, &self.demo_ui.sink, &self.demo_ui.seq);
-            apply_ready_audio(session, &self.demo_ui.sink, &self.demo_ui.seq);
-        }
-        // Fake an in-progress playback without starting audio: voice
-        // note 90 (12 s) playing from 5.0 s — the tick advances it —
-        // and the music track 801 (214 s) paused with a remembered
-        // 1:27 position, so both rows show seek bars.
-        self.begin_track_playback(
-            PlaybackKind::Voice,
-            ChatId(11),
-            MessageId(90),
-            12.0,
-            5.0,
-            cx,
-        );
-        self.playback.positions.insert(MessageId(801), 87.0);
-        self.connection.status_note =
-            "screenshot demo — seek bars · voice playing · audio paused".into();
-    }
-
-    fn demo_ready_shortcuts(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.settings.shortcuts_open = true;
-        self.connection.status_note = "screenshot demo — keyboard shortcuts reference".into();
     }
 
     fn demo_ready_video(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

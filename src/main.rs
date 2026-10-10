@@ -792,7 +792,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
 
     // Demo-only window size override (`QUILL_DEMO_WINDOW_SIZE=1200x1100`)
     // for slices whose fixture needs more vertical room than the default
-    // 1200x740 (e.g. ready-location's four rows). Unset = unchanged, so
+    // 1200x740 (a fixture with many rows). Unset = unchanged, so
     // existing captures are unaffected.
     let (demo_w, demo_h) = std::env::var("QUILL_DEMO_WINDOW_SIZE")
         .ok()

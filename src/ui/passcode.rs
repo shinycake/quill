@@ -181,14 +181,6 @@ impl PasscodeUi {
             "Auto-lock if inactive for"
         }
     }
-
-    /// Demo/test fixture: show the lock screen without a real passcode.
-    pub(crate) fn fixture(&mut self, enabled: bool, locked: bool, error: Option<&str>) {
-        self.demo = true;
-        self.enabled = enabled;
-        self.locked = locked;
-        self.lock_error = error.map(str::to_string);
-    }
 }
 
 fn demo_store() -> Box<dyn SecretStore> {

@@ -57,7 +57,6 @@ handling exists.
   inserts the command. `getCommands` is schema-annotated "for bots
   only", so on a user session the fetch errors are absorbed and the menu
   falls back to `bot_info` commands (documented in DECISIONS).
-  `docs/screenshots/ready-bot-command-menu.png`.
 
 ## Phase 4 — Message richness
 
@@ -72,7 +71,6 @@ handling exists.
   toggle/replace for regular; no-op when revoting is disallowed);
   `updatePoll` live refresh; `inputMessagePoll` creation from the
   composer (regular polls: 2–10 options, anonymous/multiple toggles).
-  `docs/screenshots/ready-poll.png`.
 - **4.3 Location / venue / contact.** ✅ 2026-09-26 —
   `messageLocation` / `messageLiveLocation` (live period/expires state),
   `messageVenue` (title + address + provider), `messageContact` (name +
@@ -80,13 +78,11 @@ handling exists.
   (OpenStreetMap via OS open); coordinates validated (finite,
   |lat|≤90, |lon|≤180, else dropped). No map tiles, no live-location
   re-rendering, no contact add-to-address-book.
-  `docs/screenshots/ready-location.png`.
 - **4.4 Dice.** ✅ 2026-09-26 — `messageDice` display rows: large
   static emoji face + rolled value (`🎲 4` preview); animation stickers
   (`initial_state` / `final_state`) and `success_animation_frame_number`
   dropped; missing `value` → `Unsupported`. No roll animation, no
   `messageStakeDice`, no dice sending from the composer.
-  `docs/screenshots/ready-dice.png`.
 - **4.5 Fullscreen media viewer.** ✅ 2026-09-26 — Clicking a
   downloaded/viewable photo or video visual opens a fullscreen viewer
   overlay (Esc/backdrop/Close): dark backdrop, Prev/Next across the
@@ -95,7 +91,6 @@ handling exists.
   thumbnail in the viewer (playback stays in the history row); secret
   and spoiler media are excluded; documents, animations/GIFs, stickers,
   audio/voice remain unopened.
-  `docs/screenshots/ready-media-viewer.png`.
 - **4.6 Seek bars.** ✅ 2026-09-26 — `messageAudio` and
   `messageVoiceNote` rows get tdesktop-style seek bars: elapsed/total
   time label, bar advancing while playing (250 ms tick), click-to-seek
@@ -107,7 +102,6 @@ handling exists.
   remembered positions resume on Play; auto-stop at track end. Pure
   `PlaybackClock` state machine in `src/playback.rs` (unit-tested).
   Waveform stays as the real decoded TDLib 5-bit bars.
-  `docs/screenshots/ready-seek-bars.png`.
 
 ## Phase 5 — Supergroups: forum topics
 
@@ -118,7 +112,6 @@ handling exists.
   general history for forums, topic rows open per-topic history in the
   same history component, composer hidden in topic view (read-only).
   First page only (limit 100, no `next_offset_*` pagination).
-  `docs/screenshots/ready-forum-topics.png`.
 
 ## Phase 6 — Contacts & profiles
 
@@ -126,13 +119,11 @@ handling exists.
   **Contacts** tab (name + online/last-seen status rows, tap → user
   panel); `addContact` flow from the user panel via an `importedContact`
   dialog (phone required, prefilled; `share_phone_number: false`).
-  `docs/screenshots/ready-contacts.png`.
 - **6.2 Info panels.** ✅ 2026-09-26 — User info
   (`getUserFullInfo`: bio + `photo:chatPhoto` preferred size, downloaded
   on panel open) and supergroup info (`getSupergroupFullInfo`:
   description, member count) side panels, opened from the Contacts tab
   and from clickable conversation-header titles.
-  `docs/screenshots/ready-contacts.png`.
 
 ## Phase 7 — Folders & discovery
 
@@ -145,7 +136,6 @@ handling exists.
   section unchanged under the main list) and fires a single-shot
   `loadChats(chatListFolder)`. `getChatListsToAddChat` verified as
   *not* folder membership (per-chat add-to-list suitability) — not used.
-  `ScreenshotDemo::ReadyFolders` → `docs/screenshots/ready-folders.png`.
 - **7.2 Public username lookup.** ✅ Done (2026-09-26).
   `searchPublicChats` (type_filter null = all types) sent alongside
   `searchChats` + `searchMessages` on every typed global search; results
@@ -176,7 +166,7 @@ handling exists.
 - **9.1 Story viewing.** ✅ Done (2026-09-26) — `getStory` / story tray for
   contacts (accent/muted read ring), fullscreen viewer overlay with photo
   and video-thumbnail rendering, `openStory`/`closeStory` view tracking.
-  Screenshot: `docs/screenshots/ready-stories.png`. Posting, reactions, and
+  Posting, reactions, and
   replies stay out (→ future).
 
 ## Folded-in backlog (from per-slice "Out of this slice" lists)

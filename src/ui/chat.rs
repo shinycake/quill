@@ -2,66 +2,10 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{RequestPurpose, Session, unix_ms_now};
-use quill::telegram::client::copy_and_parse;
+use quill::state::unix_ms_now;
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::Duration;
-/// `ReadySlowMode` fixture (Phase A1): a dedicated supergroup
-/// ("Slow-mode demo group", chat id 17) with slow mode enabled
-/// (`slow_mode_delay: 30`, `slow_mode_delay_expires_in: 25.0`) and the
-/// viewer as a plain member (no bypass), opened with two messages — all
-/// through the normal reducer, no live Telegram. The composer shows the
-/// "Slow mode · wait Ns" countdown and blocks sends until it expires.
-pub(super) fn apply_ready_slow_mode(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let chat_id = 17i64;
-    let extra = session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, chat_id);
-    let description_json = serde_json::to_string(
-        "Demo group with slow mode on: members wait 30 seconds between messages.",
-    )
-    .unwrap();
-    let jsons = [
-        format!(
-            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Slow-mode demo group","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat_id},"is_channel":false}},"unread_count":0}}}}"#
-        ),
-        format!(
-            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"80","is_pinned":false}}}}"#
-        ),
-        // The viewer is a plain member — no slow-mode bypass.
-        format!(
-            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{chat_id},"is_forum":false,"status":{{"@type":"chatMemberStatusMember"}}}}}}"#
-        ),
-        format!(
-            r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":{description_json},"member_count":128,"slow_mode_delay":30,"slow_mode_delay_expires_in":25.0,"my_boost_count":0,"unrestrict_boost_count":0}}"#,
-            extra.0,
-        ),
-        r#"{"@type":"updateUser","user":{"@type":"user","id":501,"first_name":"Maya","last_name":"Levin","accent_color_id":3,"type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusRecently"}}}"#.to_string(),
-        r#"{"@type":"updateUser","user":{"@type":"user","id":502,"first_name":"Omar","last_name":"Haddad","accent_color_id":5,"type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusRecently"}}}"#.to_string(),
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":301,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":501}},"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Slow mode is on in this group: 30 seconds between messages.","entities":[]}}}}}}}}"#
-        ),
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":302,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":502}},"is_outgoing":false,"date":1700000060,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Type below and hit Enter: Quill blocks the send until the timer expires.","entities":[]}}}}}}}}"#
-        ),
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":303,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":502}},"is_outgoing":false,"date":1700000090,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"The countdown shows on the send button.","entities":[]}}}}}}}}"#
-        ),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    session.open_chat(ChatId(chat_id));
-}
 
 impl QuillApp {
     /// Phase A1: slow-mode wait (whole seconds) for a chat, via the

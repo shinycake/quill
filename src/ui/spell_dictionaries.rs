@@ -48,38 +48,6 @@ pub(super) struct DictManager {
     pub demo_rows: Option<Vec<ManagerRow>>,
 }
 
-impl DictManager {
-    /// The screenshot fixture: an enabled and an installed dictionary, one
-    /// mid-download and the rest available.
-    pub(super) fn demo() -> Self {
-        let mut rows = Vec::new();
-        let transfer = Transfer {
-            code: "de",
-            percent: 42,
-        };
-        let available = vec!["en_US".to_string(), "fr".to_string()];
-        let active = vec!["en_US".to_string()];
-        let managed = std::collections::BTreeSet::from(["fr".to_string()]);
-        rows.extend(build_rows(
-            &RowInputs {
-                managed: &managed,
-                available: &available,
-                active: &active,
-                transfer: Some(transfer),
-                failed: Some("it"),
-            },
-            "",
-        ));
-        // States worth seeing first, the plain downloads after them.
-        rows.sort_by_key(|r| matches!(r.state, RowState::Available { .. }));
-        DictManager {
-            open: true,
-            demo_rows: Some(rows),
-            ..Default::default()
-        }
-    }
-}
-
 impl QuillApp {
     /// Where downloaded dictionaries live.
     fn dictionaries_dir() -> Option<PathBuf> {

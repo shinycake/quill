@@ -41,13 +41,6 @@ pub(super) struct CodeLanguageDialog {
     error: Option<&'static str>,
 }
 
-impl CodeLanguageDialog {
-    /// The box's field, for demo fixtures.
-    pub(super) fn input_for_demo(&self) -> &Entity<TextareaState> {
-        &self.input
-    }
-}
-
 /// The chord for a shortcut as shown in menus: "⌘B" on macOS, "Ctrl+B"
 /// elsewhere (tdesktop appends `QKeySequence::NativeText` after a tab).
 pub(super) fn shortcut_hint(shortcut: ComposerShortcut) -> String {

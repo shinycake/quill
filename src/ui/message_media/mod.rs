@@ -10,19 +10,16 @@ use gpui_kit::component::slider::Slider;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::MediaViewerItem;
 use quill::state::Session;
 use quill::story_viewer::StoryViewerItem;
-use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{ParsedFile, SpeechRecognition};
 use quill::voice::{self, format_voice_duration};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 mod audio;
 mod cards;
@@ -40,7 +37,6 @@ pub(super) use cards::{ContactCardState, contact_row, dice_row, paid_media_card}
 pub(super) use document::{
     action_disc, bubble_accent, document_chip, download_display_name, format_bytes, inline_link,
 };
-pub(super) use fixtures::{apply_ready_dice, apply_ready_location};
 pub(super) use layout::{
     MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, media_content_width, media_disc,
     media_frame, single_media_width,

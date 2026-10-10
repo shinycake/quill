@@ -118,14 +118,6 @@ impl QuillApp {
             .collect()
     }
 
-    /// Screenshot demo: pick these chats and go to the confirmation.
-    pub(super) fn demo_select_request_peers(&mut self, picked: &[ChatId]) {
-        if let Some(share) = self.message_ui.request_share.as_mut() {
-            share.selected = picked.to_vec();
-            share.confirm = !picked.is_empty();
-        }
-    }
-
     fn request_toggle(&mut self, id: ChatId, cx: &mut Context<Self>) {
         let Some(share) = self.message_ui.request_share.as_mut() else {
             return;

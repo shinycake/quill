@@ -10,92 +10,10 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::state::{ContactRow, InfoPanelTarget, RequestPurpose, Session};
-use quill::telegram::client::copy_and_parse;
+use quill::state::{ContactRow, InfoPanelTarget};
 use quill::telegram::requests::{VCARD_IMPORT_LIMIT, parse_vcard};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-/// `ReadyContacts` fixture: inject three users via `updateUser` (Ada online
-/// and already a contact, Zed last-week and *not* a contact so the Add
-/// affordance shows, Noor recently seen and a contact), a `getContacts`
-/// `users` response through the same reducer the live path uses, and a
-/// `userFullInfo` response with a bio for Zed. Opens the user info panel
-/// for Zed; the demo block opens the contacts sidebar tab.
-pub(super) fn apply_ready_contacts(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let user_json = |id: i64,
-                     first: &str,
-                     last: &str,
-                     phone: &str,
-                     username: &str,
-                     contact: bool,
-                     status: &str| {
-        format!(
-            r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{first}","last_name":"{last}","usernames":{{"@type":"usernames","active_usernames":["{username}"],"disabled_usernames":[],"editable_username":"{username}","collectible_usernames":[]}},"phone_number":"{phone}","status":{status},"is_contact":{contact},"type":{{"@type":"userTypeRegular"}}}}}}"#,
-            id = id,
-            first = first,
-            last = last,
-            phone = phone,
-            username = username,
-            contact = contact,
-            status = status,
-        )
-    };
-    let jsons = [
-        user_json(
-            31,
-            "Ada",
-            "Lovelace",
-            "+15550101031",
-            "adalove",
-            true,
-            r#"{"@type":"userStatusOnline","expires":9999999999}"#,
-        ),
-        user_json(
-            32,
-            "Zed",
-            "Hopper",
-            "+15550101032",
-            "zedhopper",
-            false,
-            r#"{"@type":"userStatusLastWeek","by_my_privacy_settings":false}"#,
-        ),
-        user_json(
-            33,
-            "Noor",
-            "Haddad",
-            "+15550101033",
-            "noorhaddad",
-            true,
-            r#"{"@type":"userStatusRecently","by_my_privacy_settings":false}"#,
-        ),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    let extra = session.request(RequestPurpose::GetContacts, None);
-    let json = format!(
-        r#"{{"@type":"users","@extra":"{}","total_count":3,"user_ids":[31,32,33]}}"#,
-        extra.0,
-    );
-    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 32);
-    let json = format!(
-        r#"{{"@type":"userFullInfo","@extra":"{}","block_list":null,"bio":{{"@type":"formattedText","text":"Demo bio — systems programmer, occasional keyboard builder. This panel comes from the cached userFullInfo slice (Phase 6).","entities":[]}},"bot_info":null}}"#,
-        extra.0,
-    );
-    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-    session.open_info_panel = Some(InfoPanelTarget::User(32));
-}
 
 impl QuillApp {
     /// kit Phase 2 (redo): import contacts hosted in a kit `Dialog` via

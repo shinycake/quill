@@ -536,7 +536,7 @@ fn open_ready_secret_chat_for_user_gates_on_ready() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     // Deterministic 36-byte key_hash (same fixture as the
-    // ready-key-verification screenshot demo).
+    // key-verification screenshot demo).
     let hash_b64 = "GUYMUT5VLuA6j7l7taiDAR9tM+Y30on50Cklur/t+/w57sWo";
     let secret_ready = format!(
         r#"{{"@type":"updateSecretChat","secret_chat":{{"@type":"secretChat","id":7,"user_id":41,"state":{{"@type":"secretChatStateReady"}},"is_outbound":true,"key_hash":"{hash_b64}","layer":144}}}}"#

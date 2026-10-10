@@ -1,99 +1,13 @@
 //! channel statistics panel.
 
 use super::app::QuillApp;
-use super::groups::apply_ready_channels;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{ChatStatisticsFetch, RequestPurpose, Session};
-use quill::telegram::client::copy_and_parse;
+use quill::state::ChatStatisticsFetch;
 use quill::telegram::envelope::{ChatKind, ChatStatistics, StatisticalGraph, StatisticalValue};
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-/// `ReadyChannelStats` fixture (Phase D2): like `apply_ready_channels`,
-/// plus an `updateSupergroupFullInfo` with `can_get_statistics: true`
-/// (schema 1.8.67 line 2792) and a `chatStatisticsChannel` response
-/// through the real `getChatStatistics` reducer path, so the statistics
-/// panel renders loaded data. One graph (`story_reaction_graph`) is a
-/// `statisticalGraphAsync` and one (`language_graph`) a
-/// `statisticalGraphError` to show the honest states.
-pub(super) fn apply_ready_channel_stats(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    apply_ready_channels(session, sink, seq);
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let stats_extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
-    let value = |v: f64, previous: f64, growth: f64| {
-        format!(
-            r#"{{"@type":"statisticalValue","value":{v},"previous_value":{previous},"growth_rate_percentage":{growth}}}"#
-        )
-    };
-    // TDLib `statisticalGraphData.json_data`: columns of ["x",t..] +
-    // ["y0",v..]; the panel sparklines the first non-"x" numeric column.
-    let graph_data = |values: &[i64]| {
-        let mut x_col = vec![serde_json::json!("x")];
-        let mut y_col = vec![serde_json::json!("y0")];
-        for (i, v) in values.iter().enumerate() {
-            x_col.push(serde_json::json!(1_788_000_000i64 + i as i64 * 86_400));
-            y_col.push(serde_json::json!(v));
-        }
-        serde_json::to_string(&serde_json::json!({
-            "columns": [x_col, y_col],
-            "types": {"x": "x", "y0": "line"},
-        }))
-        .unwrap_or_default()
-        .replace('"', "\\\"")
-    };
-    let graph = |values: &[i64]| {
-        format!(
-            r#"{{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}}"#,
-            graph_data(values)
-        )
-    };
-    let async_graph = r#"{"@type":"statisticalGraphAsync","token":"stats-token-1"}"#.to_string();
-    let error_graph =
-        r#"{"@type":"statisticalGraphError","error_message":"STATS_GRAPH_NOT_AVAILABLE"}"#
-            .to_string();
-    let jsons = [
-        // `updateSupergroupFullInfo` carries its own `supergroup_id`
-        // (schema 1.8.67 line 10750) — no pending-request correlation.
-        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":13,"supergroup_full_info":{"description":"The demo channel.","member_count":12345,"linked_chat_id":16,"can_get_statistics":true}}"#
-            .to_string(),
-        format!(
-            r#"{{"@type":"chatStatisticsChannel","@extra":"{}","period":{{"@type":"dateRange","start_date":1788000000,"end_date":1788604800}},"member_count":{member_count},"mean_message_view_count":{mean_views},"mean_message_share_count":{mean_shares},"mean_message_reaction_count":{mean_reactions},"mean_story_view_count":{mean_story_views},"mean_story_share_count":{mean_story_shares},"mean_story_reaction_count":{mean_story_reactions},"enabled_notifications_percentage":61.5,"member_count_graph":{members_graph},"join_graph":{join_graph},"mute_graph":{mute_graph},"view_count_by_hour_graph":{hour_graph},"view_count_by_source_graph":{source_graph},"join_by_source_graph":{join_source_graph},"language_graph":{language_graph},"message_interaction_graph":{interaction_graph},"message_reaction_graph":{reaction_graph},"story_interaction_graph":{story_graph},"story_reaction_graph":{story_reaction_graph},"instant_view_interaction_graph":{iv_graph},"recent_interactions":[{{"@type":"chatStatisticsInteractionInfo","object_type":{{"@type":"chatStatisticsObjectTypeMessage","message_id":201}},"view_count":12402,"forward_count":7,"reaction_count":213}},{{"@type":"chatStatisticsInteractionInfo","object_type":{{"@type":"chatStatisticsObjectTypeStory","story_id":44}},"view_count":987,"forward_count":12,"reaction_count":65}}]}}"#,
-            stats_extra.0,
-            member_count = value(12345.0, 11700.0, 5.5),
-            mean_views = value(8421.0, 9010.0, -6.5),
-            mean_shares = value(312.0, 280.0, 11.4),
-            mean_reactions = value(428.0, 390.0, 9.7),
-            mean_story_views = value(5120.0, 4980.0, 2.8),
-            mean_story_shares = value(96.0, 104.0, -7.7),
-            mean_story_reactions = value(154.0, 140.0, 10.0),
-            members_graph = graph(&[11800, 11950, 12080, 12190, 12260, 12310, 12345]),
-            join_graph = graph(&[120, 145, 98, 160, 132, 175, 141]),
-            mute_graph = graph(&[12, 9, 14, 11, 8, 10, 9]),
-            hour_graph = graph(&[120, 90, 60, 45, 55, 110, 230, 410, 620, 780, 850, 900, 870, 820, 790, 760, 800, 880, 950, 990, 940, 700, 420, 210]),
-            source_graph = graph(&[5200, 2100, 900, 221]),
-            join_source_graph = graph(&[95, 30, 12, 4]),
-            language_graph = error_graph,
-            interaction_graph = graph(&[4100, 4300, 4050, 4600, 4400, 4700, 4521]),
-            reaction_graph = graph(&[380, 410, 395, 450, 430, 470, 428]),
-            story_graph = graph(&[4900, 5050, 4980, 5200, 5120]),
-            story_reaction_graph = async_graph,
-            iv_graph = graph(&[1200, 1350, 1280, 1420, 1390]),
-        ),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
 
 /// Compact view-count formatting for broadcast posts (`👁 1.2K`, `👁 3.4M`).
 pub(super) fn format_view_count(count: i32) -> String {

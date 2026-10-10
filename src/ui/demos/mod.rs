@@ -4,10 +4,8 @@
 //! docs/decisions/codex-refactor-1.md).
 
 mod bots_profile;
-mod calls;
 mod chat_list;
 mod composer;
-mod groups;
 mod groups_admin;
 mod media;
 mod messages;
@@ -38,15 +36,17 @@ pub(in crate::ui) fn attachments(files: &[(&str, AttachmentKind)]) -> Vec<Compos
 mod tests {
     use super::super::screenshot_demo::ScreenshotDemo;
 
-    /// Every kind `--screenshot-demo` accepted before demos registered
-    /// themselves (docs/decisions/codex-refactor-1.md). New kinds need no
-    /// entry here.
+    /// The kinds `--screenshot-demo` still accepts from before demos
+    /// registered themselves (docs/decisions/codex-refactor-1.md): the 59 that
+    /// scripts, tests or the README use. The other 233 were deleted
+    /// (docs/decisions/codex-refactor-demo-prune.md). New kinds need no entry
+    /// here.
     const KINDS_BEFORE_REGISTRY: &str = include_str!("kinds_before_registry.txt");
 
     #[test]
     fn every_earlier_kind_is_still_registered() {
         let kinds: Vec<&str> = KINDS_BEFORE_REGISTRY.lines().collect();
-        assert_eq!(kinds.len(), 291);
+        assert_eq!(kinds.len(), 59);
         for kind in kinds {
             assert_eq!(ScreenshotDemo::named(kind).kind(), kind);
         }

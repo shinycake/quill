@@ -62,69 +62,6 @@ pub(super) fn apply_ready_link_preview(
     }
 }
 
-/// MED4: `ReadyPreviewCards` fixture — one message with an embedded
-/// video player preview (play badge + duration), one with an album
-/// preview (thumbnail strip). Both carry `instant_view_version > 0` so
-/// the tap path is honest.
-pub(super) fn apply_ready_preview_cards(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let thumb = demo_file_json(61, &demo_thumb_png_path(), true);
-    let mk_text = |body: &str, url: &str| {
-        let url_at = body.find("https").unwrap();
-        let url_len = url.len();
-        let text_json = serde_json::to_string(body).unwrap();
-        format!(
-            r#"{{"@type":"formattedText","text":{text_json},"entities":[{{"@type":"textEntity","offset":{url_at},"length":{url_len},"type":{{"@type":"textEntityTypeUrl"}}}}]}}"#,
-        )
-    };
-    let embedded = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":102,"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{text},"link_preview":{{"@type":"linkPreview","url":"https://video.example/watch","display_url":"video.example","site_name":"Vids","title":"Clip","description":{{"@type":"formattedText","text":"","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeEmbeddedVideoPlayer","url":"https://video.example/embed/1","thumbnail":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}},"duration":95,"width":640,"height":360}},"has_large_media":true,"show_large_media":true,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":2}},"link_preview_options":null}}}}}}"#,
-        text = mk_text(
-            "watch https://video.example/watch",
-            "https://video.example/watch"
-        ),
-    );
-    let album = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":103,"chat_id":11,"is_outgoing":false,"date":1700000001,"content":{{"@type":"messageText","text":{text},"link_preview":{{"@type":"linkPreview","url":"https://example.com/album","display_url":"example.com","site_name":"","title":"Album","description":{{"@type":"formattedText","text":"","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeAlbum","media":[{{"@type":"linkPreviewAlbumMediaPhoto","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}}}}],"caption":""}},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":false,"show_above_text":false,"instant_view_version":0}},"link_preview_options":null}}}}}}"#,
-        text = mk_text(
-            "pics https://example.com/album",
-            "https://example.com/album"
-        ),
-    );
-    for json in [embedded, album] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
-/// MED4: `ReadyCaptionPosition` fixture — two photo messages, one with
-/// `show_caption_above_media: true`, one false.
-pub(super) fn apply_ready_caption_position(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let file = demo_file_json(71, &demo_thumb_png_path(), true);
-    for (id, above, caption) in [
-        (104, true, "caption above the photo"),
-        (105, false, "caption below the photo"),
-    ] {
-        let caption_json = serde_json::to_string(caption).unwrap();
-        let json = format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{caption_json},"entities":[]}},"show_caption_above_media":{above},"has_spoiler":false,"is_secret":false}}}}}}"#,
-        );
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
 /// `ReadyTextEntities` fixture (Phase 4.1): open a dedicated "Demo entities"
 /// chat (id 14) holding a `messageText` with mixed entities
 /// (bold/italic/underline/strikethrough/spoiler/code/preCode with a `rust`
@@ -269,53 +206,6 @@ pub(super) fn apply_ready_text_entities(
     );
 
     for json in [text_message, photo_message, links_message] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
-pub(super) fn apply_ready_blockquote_expandable(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    // Dedicated chat so the collapsed long quote + Show more affordance are
-    // visible without scrolling past other Ready fixtures.
-    let chat_id = 15;
-    let chat_json = format!(
-        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo blockquotes","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
-    );
-    let position_json = format!(
-        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"49","is_pinned":false}}}}"#
-    );
-    for json in [chat_json, position_json] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    session.open_chat(ChatId(chat_id));
-
-    let short = "Short quote stays fully visible.";
-    let long = "Line one of a long block quote.\nLine two of a long block quote.\nLine three of a long block quote.\nLine four — past the collapse threshold.\nLine five — Show more reveals the rest.";
-    let ent = |text: &str, type_name: &str| -> String {
-        let utf16_len = text.encode_utf16().count();
-        format!(
-            r#"{{"@type":"textEntity","offset":0,"length":{utf16_len},"type":{{"@type":"{type_name}"}}}}"#
-        )
-    };
-    let short_json = serde_json::to_string(short).unwrap();
-    let long_json = serde_json::to_string(long).unwrap();
-    let short_msg = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":201,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{short_json},"entities":[{}]}}}}}}}}"#,
-        ent(short, "textEntityTypeBlockQuote")
-    );
-    let long_msg = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":202,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{long_json},"entities":[{}]}}}}}}}}"#,
-        ent(long, "textEntityTypeExpandableBlockQuote")
-    );
-    for json in [short_msg, long_msg] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }

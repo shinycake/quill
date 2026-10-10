@@ -7,15 +7,11 @@ use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::state::Session;
-use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{GameContent, GameHighScore, ParsedFile};
+use quill::telegram::envelope::{GameContent, ParsedFile};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 /// Slice bots-games: `messageGame` card — thumbnail (glyph when the game
 /// carries no photo/animation sizes), title, text, description, and
@@ -172,43 +168,6 @@ fn game_scores_panel(
         }
     }
     Some(panel.into_any_element())
-}
-
-/// Slice bots-games: screenshot fixture — a game message in chat 11 with
-/// an open high-score panel whose names resolve from injected users.
-pub(super) fn apply_ready_game_card(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let users = [
-        r#"{"@type":"updateUser","user":{"@type":"user","id":21,"first_name":"Ada","last_name":"","type":{"@type":"userTypeRegular"}}}"#,
-        r#"{"@type":"updateUser","user":{"@type":"user","id":22,"first_name":"Grace","last_name":"","type":{"@type":"userTypeRegular"}}}"#,
-    ];
-    let game = r#"{"@type":"updateNewMessage","message":{"id":701,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageGame","game":{"@type":"game","id":"1","short_name":"chess","title":"Chess","text":{"@type":"formattedText","text":"Beat my high score!","entities":[]},"description":"The royal game, in your chat.","photo":null,"animation":null}}}}"#;
-    for json in users.into_iter().chain(std::iter::once(game)) {
-        if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    // Pre-open the scores panel with two loaded rows (the demo has no
-    // live Telegram to answer `getGameHighScores`).
-    session.game_scores.insert(
-        (11, 701),
-        Some(vec![
-            GameHighScore {
-                position: 1,
-                user_id: 21,
-                score: 9000,
-            },
-            GameHighScore {
-                position: 2,
-                user_id: 22,
-                score: 1500,
-            },
-        ]),
-    );
 }
 
 impl QuillApp {

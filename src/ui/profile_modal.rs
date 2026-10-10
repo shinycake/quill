@@ -15,13 +15,8 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::ChatId;
-use quill::state::{InfoPanelTarget, RequestPurpose, Session};
-use quill::telegram::client::copy_and_parse;
+use quill::state::InfoPanelTarget;
 use quill::telegram::envelope::MessageSender;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
 
 const MODAL_WIDTH: f32 = 380.;
@@ -36,17 +31,6 @@ pub(super) struct ProfileModal {
     /// 0 = hidden, 1 = shown.
     glide: Glide,
     closing: bool,
-}
-
-impl ProfileModal {
-    /// A modal already fully shown (demo captures, tests).
-    pub(super) fn shown(target: InfoPanelTarget) -> Self {
-        Self {
-            target,
-            glide: Glide::settled(1., Instant::now(), ease_out_circ),
-            closing: false,
-        }
-    }
 }
 
 impl QuillApp {
@@ -213,42 +197,4 @@ impl QuillApp {
                 .into_any_element(),
         )
     }
-}
-
-/// `ReadyAvatarProfile` fixture: a supergroup ("Design Club", chat 72,
-/// opened) with messages from two members and a `userFullInfo` bio for
-/// the second (user 602, not a contact, so the Add contact tile shows).
-pub(super) fn apply_ready_avatar_profile(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let chat_id = 72i64;
-    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 602);
-    let text = |id: i64, user: i64, date: i64, body: &str| {
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":{user}}},"is_outgoing":false,"date":{date},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{body}","entities":[]}}}}}}}}"#
-        )
-    };
-    let jsons = [
-        r#"{"@type":"updateUser","user":{"@type":"user","id":601,"first_name":"Maya","last_name":"Levin","accent_color_id":3,"is_contact":true,"type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOnline","expires":9999999999}}}"#.to_string(),
-        r#"{"@type":"updateUser","user":{"@type":"user","id":602,"first_name":"Omar","last_name":"Haddad","accent_color_id":5,"is_contact":false,"usernames":{"@type":"usernames","active_usernames":["omarh"],"disabled_usernames":[],"editable_username":"omarh","collectible_usernames":[]},"phone_number":"","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusRecently","by_my_privacy_settings":false}}}"#.to_string(),
-        format!(
-            r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Design Club","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat_id},"is_channel":false}},"unread_count":0}}}}"#
-        ),
-        text(801, 601, 1700000000, "Anyone up for a design critique on Friday?"),
-        text(802, 602, 1700000060, "Count me in. I can bring the new onboarding flow."),
-        text(803, 602, 1700000090, "Also the icon set, if there is time."),
-        format!(
-            r#"{{"@type":"userFullInfo","@extra":"{}","block_list":null,"bio":{{"@type":"formattedText","text":"Product designer. Type nerd. Coffee first.","entities":[]}},"bot_info":null}}"#,
-            extra.0,
-        ),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    session.open_chat(ChatId(chat_id));
 }

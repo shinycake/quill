@@ -705,32 +705,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Demo: open the helper on a local page without TDLib
-    /// (`QUILL_DEMO_MINIAPP=window`, `QUILL_DEMO_MINIAPP_URL`).
-    pub(super) fn open_mini_app_window_demo(&mut self, url: &str, cx: &mut Context<Self>) {
-        self.spawn_mini_app_window(
-            WebAppLaunch {
-                bot_user_id: 21,
-                bot_name: "Weather Desk".into(),
-                chat_id: Some(21),
-                source: LaunchSource::InlineButton,
-                launch_id: 0,
-                url: url.to_string(),
-            },
-            cx,
-        );
-    }
-
-    /// Demo and tests: put a box up without a connection.
-    pub(super) fn show_web_app_confirm_demo(
-        &mut self,
-        confirm: WebAppConfirm,
-        cx: &mut Context<Self>,
-    ) {
-        self.mini_apps.confirm = Some(confirm);
-        cx.notify();
-    }
-
     pub(super) fn build_web_app_confirm_dialog(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,

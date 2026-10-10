@@ -2,138 +2,27 @@
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
-use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::message_media::{file_is_downloading, story_viewer_display_path};
 use super::message_text::rich_text_line;
 use super::nested_click::SwallowPress;
 use super::pressable::PressableDiv;
 use super::search_ui::chat_search_jump_note;
-use super::story_composer::apply_ready_story_post;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{RequestPurpose, Session, StoryReportStage, event_log_relative_time};
+use quill::state::{StoryReportStage, event_log_relative_time};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
-use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     MessageSender, ParsedFile, ParsedStory, StoryAreaKind, StoryAvailableReactionKind,
     StoryChosenExtraReaction, StoryOriginView,
 };
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
-/// `ReadyStoryViewers` fixture (Phase 9.5): the `ReadyStoryPost` seed
-/// (own photo story 5 in chat 11, `can_get_interactions`), two demo
-/// users, and a `storyInteractions` page injected through the real
-/// reducer path — a registered `GetStoryInteractions` pending request
-/// answered with the JSON — so the viewers panel renders exactly as it
-/// would live: one ❤ view 5 minutes ago, one forward 2 hours ago.
-pub(super) fn apply_ready_story_viewers(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    apply_ready_story_post(session, sink, seq);
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let user = |id: i64, first: &str, last: &str| -> String {
-        format!(
-            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
-        )
-    };
-    for json in [user(7001, "Dana", "Levi"), user(7002, "Omar", "Haddad")] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    // Register the pending fetch the way the driver does, then answer
-    // it — the purpose-gated reducer only honors the page for the
-    // viewer's own request.
-    session.begin_story_viewers(11, 5);
-    let extra = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
-    let now = now_unix_secs() as i32;
-    let interactions = format!(
-        r#"{{"@type":"storyInteractions","@extra":"{}","total_count":2,"total_forward_count":1,"total_reaction_count":1,"next_offset":"","interactions":[{{"@type":"storyInteraction","actor_id":{{"@type":"messageSenderUser","user_id":7001}},"interaction_date":{},"block_list":null,"type":{{"@type":"storyInteractionTypeView","chosen_reaction_type":{{"@type":"reactionTypeEmoji","emoji":"❤"}}}}}},{{"@type":"storyInteraction","actor_id":{{"@type":"messageSenderUser","user_id":7002}},"interaction_date":{},"block_list":null,"type":{{"@type":"storyInteractionTypeForward"}}}}]}}"#,
-        extra.0,
-        now - 300,
-        now - 7200,
-    );
-    if let Some(owned) = copy_and_parse(&interactions, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-}
-
-/// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
-/// inject a `sponsoredMessages` response through the same reducer the live
-/// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
-/// `ReadyStories` fixture (Phase 9.1): active-story tray entries for the two
-/// seeded demo chats plus full story details, all through the normal
-/// reducer — chat 11 "Demo chat A": order 30, `max_read_story_id` 4, stories
-/// 4 (video, read) and 5 (photo, unread); chat 12 "Demo chat B": order 20,
-/// all read (muted ring in the tray). Story media points at the existing
-/// `demo-thumb.png` fixture as completed downloads, so the viewer renders
-/// immediately. The demo opens on chat 11's story 5 ("Photo 2 of 2").
-pub(super) fn apply_ready_stories(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
-    let video_thumb_file = demo_file_json(92, &demo_thumb_png_path(), true);
-    // B14: the video story plays the generated 12 s fixture clip.
-    let clip_path = super::demo::demo_media_allowlist()
-        .join("demo-clip-12s.mp4")
-        .to_string_lossy()
-        .into_owned();
-    let video_file = demo_file_json(93, &clip_path, true);
-    let tray = |chat_id: i64, order: i64, max_read: i32, story_ids: &[i32]| -> String {
-        let stories = story_ids
-            .iter()
-            .map(|id| {
-                format!(
-                    r#"{{"@type":"storyInfo","story_id":{id},"date":1700000000,"is_for_close_friends":false,"is_live":false}}"#
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":{chat_id},"list":{{"@type":"storyListMain"}},"order":"{order}","can_be_archived":false,"max_read_story_id":{max_read},"stories":[{stories}]}}}}"#
-        )
-    };
-    let caption = |text: &str| -> String {
-        format!(
-            r#"{{"@type":"formattedText","text":{},"entities":[]}}"#,
-            serde_json::to_string(text).unwrap()
-        )
-    };
-    let photo_story = |id: i32, chat_id: i64, text: &str, file: &str| -> String {
-        format!(
-            r#"{{"@type":"story","id":{id},"poster_chat_id":{chat_id},"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"caption":{}}}"#,
-            caption(text),
-        )
-    };
-    let jsons = [
-        tray(11, 30, 4, &[4, 5]),
-        tray(12, 20, 6, &[6]),
-        // Chat 11, story 4: video story with a thumbnail (read).
-        format!(
-            r#"{{"@type":"story","id":4,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentVideo","video":{{"@type":"storyVideo","duration":12.0,"video":{video_file},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":120,"file":{video_thumb_file}}}}},"alternative_video":null}},"caption":{}}}"#,
-            caption("Demo video story — plays with the native player."),
-        ),
-        // Chat 11, story 5: photo story (unread).
-        photo_story(5, 11, "Demo story — full-size photo render.", &photo_file),
-        // Chat 12, story 6: photo story (read).
-        photo_story(6, 12, "Demo chat B story.", &photo_file),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
 
 impl QuillApp {
     /// Phase 9.1: open the fullscreen story viewer on `(chat_id, story_id)`.
