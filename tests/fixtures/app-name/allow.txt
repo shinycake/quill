@@ -1,0 +1,2 @@
+# fixture allowlist for tests/app_name_check.rs
+good.rs|Telegram will call

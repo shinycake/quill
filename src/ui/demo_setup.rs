@@ -98,7 +98,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInfo)) {
-            self.deep_link_dialog = Some("This link requires a newer version of Telegram. Please update your app to open it.".into());
+            self.deep_link_dialog = Some(
+                "This link requires a newer version of Quill. Please update Quill to open it."
+                    .into(),
+            );
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkShare)) {
             self.share_link_text = Some("https://example.com/article\nWorth a look".into());

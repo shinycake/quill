@@ -22,6 +22,8 @@ jobs:
           toolchain: 1.99.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: app name copy
+        run: bash scripts/check-app-name.sh
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy (core)
