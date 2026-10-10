@@ -2050,6 +2050,9 @@ pub(super) fn location_row(
     row_id: u64,
     location: &quill::telegram::envelope::GeoLocation,
     live: Option<&quill::telegram::envelope::LiveLocationState>,
+    // Set when this is your own running live location: the message that
+    // the "Stop sharing" button ends.
+    stop: Option<(ChatId, MessageId)>,
     tile: Option<PathBuf>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -2073,7 +2076,13 @@ pub(super) fn location_row(
         .border_color(text_muted())
         .bg(bg_subtle())
         .children(tile)
-        .child(div().text_sm().font_medium().child(header))
+        .child(
+            div()
+                .text_sm()
+                .font_medium()
+                .text_color(text_primary())
+                .child(header),
+        )
         .child(
             div()
                 .text_xs()
@@ -2093,6 +2102,19 @@ pub(super) fn location_row(
                 .text_xs()
                 .text_color(text_muted())
                 .child(format!("accuracy ±{} m", location.accuracy_m)),
+        );
+    }
+    if let Some((chat_id, message_id)) = stop {
+        body = body.child(
+            div().flex().child(
+                Button::new(format!("live-location-stop-{row_id}"))
+                    .label("Stop sharing")
+                    .small()
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.stop_live_location(chat_id, message_id, cx);
+                    })),
+            ),
         );
     }
     body.child(

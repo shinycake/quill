@@ -116,6 +116,16 @@ pub enum ScreenshotDemo {
     /// Archived-chats row on top of the chat list (names + muted unread
     /// badge) with story rings on avatars and three pinned chats.
     ReadyArchiveRow,
+    /// Chat-list rows: the Archive's "How does it work?" box.
+    ReadyArchiveHint,
+    /// Chat-list rows: video chat badge and emoji status on rows.
+    ReadyChatBadges,
+    /// Chat-list rows: the folder editor's chat sections.
+    ReadyFoldersChats,
+    /// Chat-list rows: the folder editor's chat picker with search.
+    ReadyFoldersChatPicker,
+    /// Chat-list rows: toast after adding a chat to a folder.
+    ReadyFoldersToast,
     /// Same, with `archiveCollapsed`: the slim bar.
     ReadyArchiveBar,
     /// Same, with the archive row's context menu open.
@@ -321,6 +331,10 @@ pub enum ScreenshotDemo {
     /// Service-message tour in a group: members, pins with excerpt,
     /// photo change, calls, gifts, giveaways, topics, timers, boosts.
     ReadyServiceMessages,
+    /// Private chat with the cards of the render-service-media slice:
+    /// suggested photo and birthday, expired media, live locations with
+    /// Stop sharing, and link previews with a View button.
+    ReadyServiceMedia,
     /// Channel comments and reply threads (injected, no live Telegram):
     /// `QUILL_DEMO_THREADS_VIEW=posts` shows channel posts with comment
     /// bars, `thread` a post's comment thread in its discussion group,
@@ -393,6 +407,9 @@ pub enum ScreenshotDemo {
     /// (Parity slice 5.)
     ReadyVideoPlayback,
     ReadyVideoPip,
+    /// A playing video in the viewer with a formatted caption, the saved
+    /// toast and the open speed dial.
+    ReadyViewerExtras,
     /// A GIF looping in the viewer, with a custom emoji in its caption.
     ReadyViewerGif,
     /// The viewer paging over the Shared Media panel's photos.
