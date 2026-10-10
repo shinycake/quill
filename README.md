@@ -257,21 +257,21 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Translate message and Translate selected text <!-- parity:menu-translate -->
 - [ ] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
 - [ ] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
-- [ ] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
+- [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
 - [ ] Edit Image, Edit Video and Edit Cover on your own media <!-- parity:menu-edit-media-items -->
 - [x] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
 - [ ] Go To Message from search, pinned and saved lists <!-- parity:menu-go-to-message -->
-- [ ] Add or edit a fact check as a channel admin <!-- parity:menu-fact-check-edit -->
-- [ ] Save an audio message as a notification tone <!-- parity:menu-save-notification-tone -->
-- [ ] Copy Post Link versus Copy Message Link wording and "members only" hint <!-- parity:menu-copy-post-link-wording -->
-- [ ] Copy Card Number for bank-card entities <!-- parity:menu-copy-card-number -->
+- [x] Add or edit a fact check as a channel admin <!-- parity:menu-fact-check-edit -->
+- [x] Save an audio message as a notification tone <!-- parity:menu-save-notification-tone -->
+- [x] Copy Post Link versus Copy Message Link wording and "members only" hint <!-- parity:menu-copy-post-link-wording -->
+- [x] Copy Card Number for bank-card entities <!-- parity:menu-copy-card-number -->
 - [ ] Poll menu: Retract vote, View results and ends-in note <!-- parity:menu-poll-actions -->
 - [ ] Saved Messages tag menu: Filter by Tag, Add or Edit Name, Remove Tag <!-- parity:menu-saved-tag-menu -->
-- [ ] Info line explaining why Forward and Copy are missing in protected chats <!-- parity:menu-noforwards-note -->
+- [x] Info line explaining why Forward and Copy are missing in protected chats <!-- parity:menu-noforwards-note -->
 - [x] Admin delete box: delete all from user, ban and report spam in one step <!-- parity:menu-moderate-delete -->
 - [x] Delete a member's reaction as an admin <!-- parity:menu-delete-reaction -->
 - [x] Selection bar: Copy Selected as Text <!-- parity:selection-copy-text -->
-- [ ] Selection bar: Download, Save, Unpin, Report, Send Now and Reschedule selected messages <!-- parity:selection-bulk-actions -->
+- [x] Selection bar: Download, Save, Unpin, Report, Send Now and Reschedule selected messages <!-- parity:selection-bulk-actions -->
 - [ ] Drag-select across messages and Shift-click range selection <!-- parity:selection-drag-range -->
 - [x] Delete key removes the selected messages and Esc clears the selection <!-- parity:selection-delete-key -->
 - [ ] Keyboard selection with Ctrl+Space and per-message focus <!-- parity:selection-keyboard -->
@@ -882,7 +882,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Links and media in poll options <!-- parity:polls-option-media -->
 - [x] Poll statistics, "Show more" voters and admin vote view <!-- parity:polls-stats -->
 - [x] Unread poll-vote badges and "Read all poll votes" <!-- parity:polls-unread-votes -->
-- [ ] Retract a vote from the message menu <!-- parity:polls-retract-menu -->
+- [x] Retract a vote from the message menu <!-- parity:polls-retract-menu -->
 - [x] Checklists: mark tasks done, add tasks, create <!-- parity:polls-checklist-tasks -->
 
 ### Premium, Stars & gifts
@@ -931,7 +931,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] "Set a reminder" wording when scheduling in Saved Messages <!-- parity:scheduled-reminder-wording -->
 - [x] Send when online stays available next to the date picker in the schedule popup <!-- parity:scheduled-send-when-online -->
 - [x] Scheduled-messages icon next to the composer when a chat has scheduled messages <!-- parity:scheduled-composer-icon -->
-- [ ] Select several scheduled messages to send now, reschedule or delete <!-- parity:scheduled-select-many -->
+- [x] Select several scheduled messages to send now, reschedule or delete <!-- parity:scheduled-select-many -->
 
 ### Deep links
 
