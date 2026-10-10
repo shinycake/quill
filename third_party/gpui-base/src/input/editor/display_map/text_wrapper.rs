@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
+// bidirectional text support and formatting spans in the input engine. See
+// third_party/gpui-base/QUILL-CHANGES.md.
 use super::inline_line::InputLine;
 use gpui::Half;
 use std::borrow::Cow;
@@ -37,6 +38,21 @@ fn measured_wrap_boundaries(
     wrapping_indent: WrappingIndent,
     mut measure: impl FnMut(&str) -> Pixels,
 ) -> Vec<gpui::Boundary> {
+    measured_wrap_boundaries_in(text, width, wrapping_indent, &[], |range| {
+        measure(&text[range])
+    })
+}
+
+/// [`measured_wrap_boundaries`] measuring byte ranges of `text`, which never
+/// breaks inside one of the `atomic` ranges (inline tokens) (Quill patch: a
+/// line with formatting spans is measured with their fonts).
+fn measured_wrap_boundaries_in(
+    text: &str,
+    width: Pixels,
+    wrapping_indent: WrappingIndent,
+    atomic: &[Range<usize>],
+    mut measure: impl FnMut(Range<usize>) -> Pixels,
+) -> Vec<gpui::Boundary> {
     let indent = if wrapping_indent == WrappingIndent::Same {
         text.chars()
             .take_while(|&c| c == ' ')
@@ -45,10 +61,11 @@ fn measured_wrap_boundaries(
     } else {
         0
     };
-    let indent_width = measure(&text[..indent]);
+    let indent_width = measure(0..indent);
     let ends: Vec<usize> = text
         .grapheme_indices(true)
         .map(|(ix, grapheme)| ix + grapheme.len())
+        .filter(|&end| !atomic.iter().any(|r| r.start < end && end < r.end))
         .collect();
     let opportunities: Vec<usize> = unicode_linebreak::linebreaks(text)
         .map(|(ix, _)| ix)
@@ -68,7 +85,7 @@ fn measured_wrap_boundaries(
         let remaining = ends.len() - first;
         let mut low = 0;
         let mut high = 1;
-        while measure(&text[start..ends[first + high - 1]]) <= available {
+        while measure(start..ends[first + high - 1]) <= available {
             low = high;
             if high == remaining {
                 break;
@@ -77,7 +94,7 @@ fn measured_wrap_boundaries(
         }
         while low + 1 < high {
             let mid = (low + high) / 2;
-            if measure(&text[start..ends[first + mid - 1]]) <= available {
+            if measure(start..ends[first + mid - 1]) <= available {
                 low = mid;
             } else {
                 high = mid;
@@ -102,6 +119,97 @@ fn measured_wrap_boundaries(
         start = end;
     }
     result
+}
+
+/// The text runs of the byte range `range` of a line starting at `line_start`,
+/// with the font changes of the formatting spans applied (Quill patch).
+pub(crate) fn styled_runs(
+    font: &Font,
+    line_start: usize,
+    range: Range<usize>,
+    fonts: &[(Range<usize>, crate::input::text_spans::FontChange)],
+) -> Vec<gpui::TextRun> {
+    let abs = line_start + range.start..line_start + range.end;
+    let mut cuts = vec![abs.start, abs.end];
+    for (r, _) in fonts {
+        if r.start < abs.end && abs.start < r.end {
+            cuts.push(r.start.clamp(abs.start, abs.end));
+            cuts.push(r.end.clamp(abs.start, abs.end));
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts.windows(2)
+        .map(|w| {
+            let mut run_font = font.clone();
+            for (r, change) in fonts {
+                if r.start <= w[0] && w[0] < r.end {
+                    change.apply(&mut run_font);
+                }
+            }
+            gpui::TextRun {
+                len: w[1] - w[0],
+                font: run_font,
+                color: gpui::black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }
+        })
+        .collect()
+}
+
+/// Wrap boundaries of a line that holds formatting spans: text measured with
+/// the spans' fonts, inline elements (tokens) by their measured width and
+/// never split (Quill patch).
+#[allow(clippy::too_many_arguments)]
+fn styled_wrap_boundaries(
+    line_str: &str,
+    line_start: usize,
+    wrap_width: Pixels,
+    wrapping_indent: WrappingIndent,
+    metrics: &[(Range<usize>, Pixels)],
+    fonts: &[(Range<usize>, crate::input::text_spans::FontChange)],
+    font: &Font,
+    font_size: Pixels,
+    text_system: &gpui::WindowTextSystem,
+) -> Vec<gpui::Boundary> {
+    let line_end = line_start + line_str.len();
+    // Tokens of this line, relative to it.
+    let tokens: Vec<(Range<usize>, Pixels)> = metrics
+        .iter()
+        .filter(|(r, _)| line_start <= r.start && r.end <= line_end)
+        .map(|(r, w)| (r.start - line_start..r.end - line_start, *w))
+        .filter(|(r, _)| line_str.is_char_boundary(r.start) && line_str.is_char_boundary(r.end))
+        .collect();
+    let atomic: Vec<Range<usize>> = tokens.iter().map(|(r, _)| r.clone()).collect();
+    let shape = |range: Range<usize>| -> Pixels {
+        if range.is_empty() {
+            return px(0.);
+        }
+        let runs = styled_runs(font, line_start, range.clone(), fonts);
+        text_system
+            .layout_line(&line_str[range], font_size, &runs, None)
+            .width
+    };
+    measured_wrap_boundaries_in(line_str, wrap_width, wrapping_indent, &atomic, |range| {
+        let mut width = px(0.);
+        let mut at = range.start;
+        for (token, token_width) in &tokens {
+            if token.end <= range.start || token.start >= range.end {
+                continue;
+            }
+            if at < token.start {
+                width += shape(at..token.start);
+            }
+            width += *token_width;
+            at = token.end;
+        }
+        if at < range.end {
+            width += shape(at..range.end);
+        }
+        width
+    })
 }
 
 /// A line with soft wrapped lines info.
@@ -230,6 +338,8 @@ pub(crate) struct TextWrapper {
     pub(crate) lines: SumTree<LineItem>,
 
     inline_metrics: Rc<[(Range<usize>, Pixels)]>,
+    /// Font changes of formatting spans (Quill patch, `text_spans.rs`).
+    span_fonts: crate::input::text_spans::SpanFonts,
     _initialized: bool,
 }
 
@@ -244,6 +354,7 @@ impl TextWrapper {
             wrapping_indent: WrappingIndent::default(),
             lines: SumTree::new(&()),
             inline_metrics: Rc::from([]),
+            span_fonts: Rc::from([]),
             _initialized: false,
         }
     }
@@ -375,6 +486,7 @@ impl TextWrapper {
             .text_system()
             .line_wrapper(self.font.clone(), self.font_size);
         let metrics = self.inline_metrics.clone();
+        let span_fonts = self.span_fonts.clone();
         let text_system = gpui::WindowTextSystem::new(cx.text_system().clone());
         let font = self.font.clone();
         let font_size = self.font_size;
@@ -384,6 +496,23 @@ impl TextWrapper {
             range,
             new_text,
             &mut |line_str, wrap_width, line_start| {
+                let line_end = line_start + line_str.len();
+                if span_fonts
+                    .iter()
+                    .any(|(r, _)| r.start < line_end && line_start < r.end)
+                {
+                    return styled_wrap_boundaries(
+                        line_str,
+                        line_start,
+                        wrap_width,
+                        wrapping_indent,
+                        &metrics,
+                        &span_fonts,
+                        &font,
+                        font_size,
+                        &text_system,
+                    );
+                }
                 let mut fragments = Vec::new();
                 let mut offset = 0;
                 let first = metrics.partition_point(|(r, _)| r.end <= line_start);
@@ -460,6 +589,80 @@ impl TextWrapper {
                 Some((token, *width))
             })
             .collect();
+    }
+
+    /// Install the font changes of the formatting spans (Quill patch). `rewrap`
+    /// says which rows to wrap again: none (an edit that rewraps its own rows
+    /// next), the rows of entries that changed, or every row an old or new
+    /// entry touches (after undo or redo moved text and spans together).
+    /// Install span fonts without wrapping anything: the edit that changed
+    /// them wraps its own rows next (Quill patch).
+    pub(crate) fn stage_span_fonts(&mut self, fonts: crate::input::text_spans::SpanFonts) {
+        self.span_fonts = fonts;
+    }
+
+    pub(crate) fn set_span_fonts(
+        &mut self,
+        fonts: crate::input::text_spans::SpanFonts,
+        rewrap: crate::input::text_spans::SpanRewrap,
+        cx: &mut App,
+    ) {
+        use crate::input::text_spans::SpanRewrap;
+        if rewrap == SpanRewrap::None || self.wrap_width.is_none() {
+            self.span_fonts = fonts;
+            return;
+        }
+        let affected: Vec<Range<usize>> = if rewrap == SpanRewrap::Touched {
+            self.span_fonts
+                .iter()
+                .chain(fonts.iter())
+                .map(|(r, _)| r.clone())
+                .collect()
+        } else {
+            self.span_fonts
+                .iter()
+                .filter(|entry| !fonts.contains(entry))
+                .chain(
+                    fonts
+                        .iter()
+                        .filter(|entry| !self.span_fonts.contains(entry)),
+                )
+                .map(|(r, _)| r.clone())
+                .collect()
+        };
+        self.span_fonts = fonts;
+        if affected.is_empty() {
+            return;
+        }
+        let text = self.text.clone();
+        let len = text.len();
+        let mut rows: Vec<(usize, usize)> = affected
+            .iter()
+            .map(|r| {
+                (
+                    text.offset_to_point(r.start.min(len)).row,
+                    text.offset_to_point(r.end.min(len)).row,
+                )
+            })
+            .collect();
+        rows.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (a, b) in rows {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 + 1 => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
+        for (first, last) in merged {
+            let start = text.line_start_offset(first);
+            let end = text.line_end_offset(last);
+            self.update(
+                &text,
+                &(start..end),
+                &Rope::from(text.slice(start..end).to_string()),
+                cx,
+            );
+        }
     }
 
     pub(crate) fn set_inline_metrics(
@@ -908,7 +1111,6 @@ impl LineLayout {
         let mut acc_len = 0;
         let mut offset_y = px(0.);
 
-
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let is_last = i + 1 == self.wrapped_lines.len();
 
@@ -942,6 +1144,42 @@ impl LineLayout {
             offset_y += last_layout.line_height;
         }
 
+        None
+    }
+
+    /// The top-left of the box an inline object over the local byte `range` is
+    /// drawn in, relative to this line layout. On a bidi row this is the left
+    /// edge of the object's rectangle; the caret position of its start would
+    /// be its right edge in a right-to-left run (Quill patch).
+    pub(crate) fn object_position(
+        &self,
+        range: Range<usize>,
+        last_layout: &LastLayout,
+    ) -> Option<Point<Pixels>> {
+        let mut acc_len = 0;
+        let mut offset_y = px(0.);
+        for (i, line) in self.wrapped_lines.iter().enumerate() {
+            let is_last = i + 1 == self.wrapped_lines.len();
+            let inside = range.start >= acc_len
+                && (range.start < acc_len + line.len
+                    || (is_last && range.start <= acc_len + line.len));
+            if inside {
+                let local = range.start - acc_len..(range.end - acc_len).min(line.len);
+                let left = if line.is_bidi() {
+                    line.range_rects(local.clone())
+                        .into_iter()
+                        .map(|(left, _)| left)
+                        .reduce(|a, b| a.min(b))
+                        .unwrap_or_else(|| line.x_for_index(local.start))
+                } else {
+                    line.x_for_index(local.start)
+                };
+                let x = left + self.sub_line_offset(i, last_layout) + self.line_indent(i);
+                return Some(point(x, offset_y));
+            }
+            acc_len += if is_last { line.len + 1 } else { line.len };
+            offset_y += last_layout.line_height;
+        }
         None
     }
 

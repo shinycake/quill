@@ -1456,7 +1456,7 @@ impl QuillApp {
             SoundChoice::Default,
             current,
             "Default",
-            "Telegram default tone",
+            "Quill default tone",
             None,
         ));
         list = list.child(self.sound_picker_row(

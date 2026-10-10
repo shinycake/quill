@@ -456,6 +456,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — composer link preview chip".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyComposerWysiwyg => (
+            Some(seed_ready_custom_emoji_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — formatted composer field".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyPreviewCards => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1498,10 +1504,13 @@ impl QuillApp {
         let chat_prefs = Self::load_chat_prefs();
         let submit_on_enter = chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
         let composer = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            let mut state = TextareaState::new(window, cx)
                 .placeholder("Write a message...")
                 .auto_grow(1, 8)
-                .submit_on_enter(submit_on_enter)
+                .submit_on_enter(submit_on_enter);
+            // Formatting shows in the field (codex:composer-input).
+            state.set_span_styler(Some(super::composer_field::span_styler()), cx);
+            state
         });
         // Phase C2h: in-call group-chat composer for the voice-chat
         // overlay (sendGroupCallMessage).
@@ -1834,8 +1843,20 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 let mut text = state.read(cx).value().to_string();
                 if matches!(event, InputEvent::Change) {
+                    let prev = this.composer_prev_text.clone();
+                    if this
+                        .markdown_revert
+                        .as_ref()
+                        .is_some_and(|revert| revert.text != text)
+                    {
+                        this.markdown_revert = None;
+                    }
                     if let Some(replaced) = this.apply_instant_replace(&text, window, cx) {
                         text = replaced;
+                    } else if this.apply_markdown_replacement(&prev, window, cx) {
+                        // `**bold**` typed: the markers became formatting.
+                        text = state.read(cx).value().to_string();
+                        this.composer_prev_text = text.clone();
                     }
                     this.sync_composer_typing(&text);
                     this.note_open_draft(true, cx);
@@ -1880,9 +1901,10 @@ impl QuillApp {
                             || !this.pending_attachments.is_empty()
                             || this.forward_bar_here()
                         {
+                            let markup = this.composer_markup(cx);
                             this.submit_composer(
                                 quill::composer::send_text_on_enter(
-                                    text,
+                                    markup,
                                     this.chat_prefs.send_key_mode,
                                 ),
                                 window,
@@ -2267,6 +2289,7 @@ impl QuillApp {
             edit_replace_as_file: false,
             composer_preview_token: 0,
             composer_prev_text: String::new(),
+            markdown_revert: None,
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
             schedule_picker: None,
@@ -2801,6 +2824,22 @@ impl QuillApp {
             }
             let handled = edit_app
                 .update(cx, |this, cx| this.try_edit_last_message(window, cx))
+                .unwrap_or(false);
+            if handled {
+                cx.stop_propagation();
+            }
+        })
+        .detach();
+        // Backspace right after `**bold**` turned into formatting puts the
+        // markers back (Telegram Desktop's reverse markdown replacement).
+        let revert_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, window, cx| {
+            let keystroke = &event.keystroke;
+            if keystroke.key != "backspace" || keystroke.modifiers.modified() {
+                return;
+            }
+            let handled = revert_app
+                .update(cx, |this, cx| this.try_revert_markdown(window, cx))
                 .unwrap_or(false);
             if handled {
                 cx.stop_propagation();

@@ -119,6 +119,9 @@ mod chatlist_rows_demo;
 mod chatlist_style;
 mod checklists;
 mod composer;
+mod composer_field;
+#[cfg(all(test, feature = "demo-capture"))]
+mod composer_field_tests;
 mod composer_shortcuts;
 mod composer_suggest;
 mod composer_ui;

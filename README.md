@@ -280,8 +280,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Composer & sending
 
-- [ ] Formatting shows live in the input (bold appears bold, mentions as tags, custom emoji inline) <!-- parity:composer-wysiwyg -->
-- [ ] Mention without a username inserts a styled tag instead of raw markup <!-- parity:composer-mention-tags -->
+- [x] Formatting shows live in the input (bold appears bold, mentions as tags, custom emoji inline) <!-- parity:composer-wysiwyg -->
+- [x] Mention without a username inserts a styled tag instead of raw markup <!-- parity:composer-mention-tags -->
 - [x] Send as another identity (channel or anonymous) picker <!-- parity:composer-send-as -->
 - [x] Forward bar in the composer: change recipient, hide sender or captions, add a comment <!-- parity:composer-forward-bar -->
 - [x] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
@@ -306,7 +306,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
 - [x] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
 - [x] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
-- [ ] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
+- [x] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
 
 ### Chat view chrome
 

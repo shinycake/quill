@@ -1687,10 +1687,8 @@ impl QuillApp {
         // A stash left over from another chat (the open chat changed
         // since the gated press) never survives an ungated insert.
         self.pending_inline_bot_alert = None;
-        self.composer.update(cx, |input, cx| {
-            let next = quill::composer::insert_switch_inline_text(&input.value(), query);
-            input.set_value(next, window, cx);
-        });
+        let next = quill::composer::insert_switch_inline_text(&self.composer_markup(cx), query);
+        self.set_composer_markup(&next, window, cx);
         self.sync_command_menu(cx);
     }
 
@@ -1708,10 +1706,9 @@ impl QuillApp {
         };
         self.inline_bot_alert_shown = true;
         if !query.is_empty() {
-            self.composer.update(cx, |input, cx| {
-                let next = quill::composer::insert_switch_inline_text(&input.value(), &query);
-                input.set_value(next, window, cx);
-            });
+            let next =
+                quill::composer::insert_switch_inline_text(&self.composer_markup(cx), &query);
+            self.set_composer_markup(&next, window, cx);
         }
         self.sync_command_menu(cx);
         self.sync_inline_mode(cx);

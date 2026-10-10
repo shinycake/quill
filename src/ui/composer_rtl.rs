@@ -12,7 +12,7 @@
 //! `cargo test --features demo-capture --bin quill composer_rtl`.
 
 #[cfg(all(test, feature = "demo-capture"))]
-mod tests {
+pub(super) mod tests {
     use gpui_kit::component::Root;
     use gpui_kit::component::input::{Textarea, TextareaState};
     use gpui_kit::test::{TestSupportExt, TestWindowExt};
@@ -31,8 +31,8 @@ mod tests {
     /// out in typing order and so cannot show bidi at all. `base_rtl` forces
     /// the paragraph direction (DirectWrite always lays out left to right:
     /// `Some(false)`); `None` takes it from the first strong character.
-    struct BidiTextSystem {
-        base_rtl: Option<bool>,
+    pub(in crate::ui) struct BidiTextSystem {
+        pub(in crate::ui) base_rtl: Option<bool>,
     }
 
     thread_local! {

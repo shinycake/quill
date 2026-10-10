@@ -303,6 +303,8 @@ pub struct QuillApp {
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
     pub(super) composer_prev_text: String,
+    /// A typed markdown replacement Backspace can still take back.
+    pub(super) markdown_revert: Option<super::composer_field::MarkdownRevert>,
     /// M1: scheduling choice (`messageSchedulingState*`, schema 1.8.67
     /// lines 5902/5905). Reset to `None` after each successful send.
     pub(super) composer_scheduling: ComposerScheduling,

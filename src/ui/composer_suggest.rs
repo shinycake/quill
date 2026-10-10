@@ -150,15 +150,9 @@ impl QuillApp {
             range.start,
             self.chat_prefs.replace_emoji,
         )?;
-        let mut new_text = String::with_capacity(text.len() + replace.with.len());
-        new_text.push_str(&text[..replace.range.start]);
-        new_text.push_str(&replace.with);
-        new_text.push_str(&text[replace.range.end..]);
-        let caret = replace.range.start + replace.with.len();
-        self.composer.update(cx, |input, cx| {
-            input.set_value(&new_text, window, cx);
-            input.set_selected_range(caret..caret, cx);
-        });
+        // A range edit keeps the formatting around it (codex:composer-input).
+        self.replace_composer_text(replace.range.clone(), &replace.with, window, cx);
+        let new_text = self.composer.read(cx).value().to_string();
         self.composer_prev_text = new_text.clone();
         Some(new_text)
     }
@@ -232,11 +226,12 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        self.composer.update(cx, |input, cx| {
-            input.set_value(&new_text, window, cx);
-            input.set_selected_range(caret..caret, cx);
-            input.focus(window, cx);
-        });
+        // A range edit keeps the formatting around it (codex:composer-input).
+        let insert = new_text[active.query.range.start..caret].to_string();
+        self.replace_composer_text(active.query.range.clone(), &insert, window, cx);
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
+        let new_text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&new_text);
         cx.notify();
     }
