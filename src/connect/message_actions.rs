@@ -299,6 +299,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
+        self.read_all_chat_unread_markers(chat_id, kind)
+    }
+
+    /// Chat row menu: mark every mention, reaction or poll vote of any
+    /// chat (not only the open one) as read.
+    pub fn read_all_chat_unread_markers(
+        &mut self,
+        chat_id: ChatId,
+        kind: UnreadJumpKind,
+    ) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
