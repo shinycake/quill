@@ -139,15 +139,15 @@ impl QuillApp {
 
     fn playback_cache(&self, size: PlaybackSize) -> &StickerPlayback {
         match size {
-            PlaybackSize::Sticker => &self.sticker_playback,
-            PlaybackSize::Emoji => &self.emoji_playback,
+            PlaybackSize::Sticker => &self.playback.sticker_playback,
+            PlaybackSize::Emoji => &self.playback.emoji_playback,
         }
     }
 
     fn playback_cache_mut(&mut self, size: PlaybackSize) -> &mut StickerPlayback {
         match size {
-            PlaybackSize::Sticker => &mut self.sticker_playback,
-            PlaybackSize::Emoji => &mut self.emoji_playback,
+            PlaybackSize::Sticker => &mut self.playback.sticker_playback,
+            PlaybackSize::Emoji => &mut self.playback.emoji_playback,
         }
     }
 

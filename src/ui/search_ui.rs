@@ -299,7 +299,8 @@ impl QuillApp {
             session.open_search();
             self.status_note = "search chats and messages".into();
         }
-        self.search_input
+        self.search_ui
+            .input
             .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
     }
@@ -315,7 +316,8 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.clear_story_search();
         }
-        self.search_input
+        self.search_ui
+            .input
             .update(cx, |input, cx| input.set_value("", window, cx));
         window.focus(&self.focus_sidebar, cx);
         self.status_note = "search closed".into();
@@ -427,7 +429,8 @@ impl QuillApp {
         }
         self.open_search_ui(window, cx);
         let query = tag.to_string();
-        self.search_input
+        self.search_ui
+            .input
             .update(cx, |input, cx| input.set_value(&query, window, cx));
         if let Some(live) = self.live.as_mut() {
             match live.driver.search_hashtag(tag, scope) {
@@ -452,7 +455,8 @@ impl QuillApp {
         self.close_search_ui(window, cx);
         self.open_chat_search_ui(window, cx);
         let text = query.to_string();
-        self.chat_search_input
+        self.search_ui
+            .chat_input
             .update(cx, |input, cx| input.set_value(&text, window, cx));
         self.sync_chat_search_query(query, cx);
     }
@@ -506,7 +510,8 @@ impl QuillApp {
             false
         };
         if opened {
-            self.chat_search_input
+            self.search_ui
+                .chat_input
                 .update(cx, |input, cx| input.focus(window, cx));
         }
         cx.notify();
@@ -518,7 +523,8 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_chat_search();
         }
-        self.chat_search_input
+        self.search_ui
+            .chat_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -665,9 +671,11 @@ impl QuillApp {
         }
         // The field's text was the member filter while choosing: start the
         // message query from scratch.
-        self.chat_search_input
+        self.search_ui
+            .chat_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.chat_search_input
+        self.search_ui
+            .chat_input
             .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
     }
@@ -709,9 +717,11 @@ impl QuillApp {
             session.open_from_picker();
         }
         // The field now filters members (or messages again): start empty.
-        self.chat_search_input
+        self.search_ui
+            .chat_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.chat_search_input
+        self.search_ui
+            .chat_input
             .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
     }
@@ -947,7 +957,7 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         div().id("chat-search-field").flex_1().child(
-                            Textarea::new(&self.chat_search_input)
+                            Textarea::new(&self.search_ui.chat_input)
                                 .aria_label(if picker_open {
                                     "Search members"
                                 } else {
@@ -1162,7 +1172,8 @@ impl QuillApp {
         }
         self.dismiss_cross_chat_state(chat_id, cx);
         self.restore_open_draft(window, cx);
-        self.search_input
+        self.search_ui
+            .input
             .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
@@ -1203,7 +1214,8 @@ impl QuillApp {
         }
         self.dismiss_cross_chat_state(chat_id, cx);
         self.restore_open_draft(window, cx);
-        self.search_input
+        self.search_ui
+            .input
             .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
@@ -1228,7 +1240,7 @@ impl QuillApp {
                         }
                     }))
                     .child(
-                        Textarea::new(&self.search_input)
+                        Textarea::new(&self.search_ui.input)
                             .aria_label("Search")
                             .h(px(40.)),
                     ),

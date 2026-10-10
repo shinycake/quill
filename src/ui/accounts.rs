@@ -129,9 +129,10 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.code_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.emoji_set_search_input
+        self.pickers
+            .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.media_panel.open = false;
+        self.pickers.media_panel.open = false;
         self.marketplace_open = false;
         self.marketplace_private = true;
         self.marketplace_error = None;
@@ -139,12 +140,15 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.marketplace_comment_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.emoji_search_input
+        self.pickers
+            .emoji_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.gif_search_input
+        self.pickers
+            .gif_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.sticker_settings_open = false;
-        self.sticker_search_input
+        self.pickers
+            .sticker_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.stop_sticker_playback();
         if let Some(mut live) = self.live.take() {

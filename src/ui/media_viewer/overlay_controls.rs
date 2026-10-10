@@ -20,15 +20,17 @@ impl QuillApp {
         let clip_path = self.viewer_clip_path(item);
         if let Some(_clip) = clip_path {
             let playing = self
-                .viewer_clock
+                .viewer
+                .clock
                 .as_ref()
                 .is_some_and(|clock| clock.is_playing())
-                && self.viewer_video == Some(item.message_id);
+                && self.viewer.video == Some(item.message_id);
             // MED1: while scrubbing, the label previews the drag
             // position (the history-row seek pattern).
             let elapsed = self
-                .viewer_seek_preview_secs
-                .or_else(|| self.viewer_clock.as_ref().map(|clock| clock.elapsed_secs()))
+                .viewer
+                .seek_preview_secs
+                .or_else(|| self.viewer.clock.as_ref().map(|clock| clock.elapsed_secs()))
                 .unwrap_or(0.0);
             let total = item.duration_secs.unwrap_or(0) as f64;
             let label = format!(
@@ -38,10 +40,10 @@ impl QuillApp {
             );
             // While ffmpeg extracts frames the thumbnail stays up;
             // the Play button appears once frames are ready.
-            let extracting = self.viewer_extracting;
+            let extracting = self.viewer.extracting;
             let speed_dial = self.speed_dial("media-viewer-speed", cx);
-            let muted = self.playback_volume < 0.01;
-            let volume_pct = (self.playback_volume * 100.0).round() as i32;
+            let muted = self.playback.volume < 0.01;
+            let volume_pct = (self.playback.volume * 100.0).round() as i32;
             // Telegram Desktop's player panel: the seek bar spans the
             // panel with elapsed / remaining time at its ends; below it
             // play/pause, volume, then speed and picture-in-picture.
@@ -75,7 +77,7 @@ impl QuillApp {
                     // The slider thumb overhangs its track; the padding
                     // keeps it clear of the labels beside it.
                     div().flex_1().px_2().when_some(
-                        self.viewer_seek_slider.clone(),
+                        self.viewer.seek_slider.clone(),
                         |this, slider| {
                             this.child(Slider::new(&slider).bg(accent()).text_color(text_on_fill()))
                         },
@@ -121,7 +123,7 @@ impl QuillApp {
                         this.toggle_playback_mute(cx);
                     })),
                 )
-                .when_some(self.viewer_volume_slider.clone(), |this, slider| {
+                .when_some(self.viewer.volume_slider.clone(), |this, slider| {
                     this.child(
                         div()
                             .w(px(96.))
@@ -132,7 +134,7 @@ impl QuillApp {
                 .child(div().flex_1())
                 .child(speed_dial)
                 .when(
-                    cfg!(target_os = "macos") && !self.viewer_video_frames.is_empty(),
+                    cfg!(target_os = "macos") && !self.viewer.video_frames.is_empty(),
                     |this| {
                         this.child(
                             icon_button(
@@ -145,7 +147,7 @@ impl QuillApp {
                     },
                 )
                 .child({
-                    let fullscreen = self.viewer_extra.video_fullscreen;
+                    let fullscreen = self.viewer.extra.video_fullscreen;
                     icon_button(
                         "media-viewer-fullscreen",
                         if fullscreen {
@@ -205,7 +207,7 @@ impl QuillApp {
                             .ghost()
                             .text_color(gpui_kit::white())
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.viewer_pending_play = Some((message_id, id));
+                                this.viewer.pending_play = Some((message_id, id));
                                 this.request_media_download(id, None, cx);
                             })),
                     )
@@ -264,7 +266,7 @@ impl QuillApp {
     /// tdesktop `showSaveMsgToast`: where the saved file went, with a
     /// link that shows it in the file manager.
     pub(super) fn viewer_saved_toast(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.viewer_extra.saved_toast.clone().map(|toast| {
+        self.viewer.extra.saved_toast.clone().map(|toast| {
             div()
                 .absolute()
                 .top(px(VIEWER_TOP_BAR + 12.))

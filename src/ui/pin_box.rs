@@ -150,8 +150,8 @@ impl QuillApp {
                         for id in ids {
                             this.unpin_from_banner(chat_id, id, cx);
                         }
-                        this.pending_forward = None;
-                        this.forward_picker_open = false;
+                        this.share.pending_forward = None;
+                        this.share.forward_picker_open = false;
                         cx.notify();
                     });
                     true
@@ -162,7 +162,7 @@ impl QuillApp {
     /// Whether every selected message is pinned and the user may unpin
     /// (`MessagesToUnpin`).
     pub(super) fn selection_unpinnable(&self, chat_id: ChatId) -> bool {
-        let Some(draft) = self.pending_forward.as_ref() else {
+        let Some(draft) = self.share.pending_forward.as_ref() else {
             return false;
         };
         let Some(session) = self.session() else {

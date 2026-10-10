@@ -665,7 +665,7 @@ impl QuillApp {
                                 this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
                                 if !on {
                                     this.stop_animation_playback();
-                                    this.inline_videos.borrow_mut().clear();
+                                    this.playback.inline_videos.borrow_mut().clear();
                                 }
                                 cx.notify();
                             })),
@@ -686,7 +686,7 @@ impl QuillApp {
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.autoplay_videos = on, cx);
                                 if !on {
-                                    this.inline_videos.borrow_mut().clear();
+                                    this.playback.inline_videos.borrow_mut().clear();
                                 }
                                 cx.notify();
                             })),

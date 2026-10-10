@@ -51,7 +51,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.request_share = Some(RequestShare {
+        self.message_ui.request_share = Some(RequestShare {
             chat_id,
             message_id,
             bot_name,
@@ -120,14 +120,14 @@ impl QuillApp {
 
     /// Screenshot demo: pick these chats and go to the confirmation.
     pub(super) fn demo_select_request_peers(&mut self, picked: &[ChatId]) {
-        if let Some(share) = self.request_share.as_mut() {
+        if let Some(share) = self.message_ui.request_share.as_mut() {
             share.selected = picked.to_vec();
             share.confirm = !picked.is_empty();
         }
     }
 
     fn request_toggle(&mut self, id: ChatId, cx: &mut Context<Self>) {
-        let Some(share) = self.request_share.as_mut() else {
+        let Some(share) = self.message_ui.request_share.as_mut() else {
             return;
         };
         match &share.kind {
@@ -152,7 +152,7 @@ impl QuillApp {
     }
 
     fn request_send(&mut self, cx: &mut Context<Self>) {
-        let Some(share) = self.request_share.take() else {
+        let Some(share) = self.message_ui.request_share.take() else {
             return;
         };
         let Some(live) = self.live.as_mut() else {
@@ -201,11 +201,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::RequestShare, |this, _, cx| {
-                this.request_share = None;
+                this.message_ui.request_share = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let share = this.request_share.clone();
+            let share = this.message_ui.request_share.clone();
             let Some(share) = share else {
                 return dialog.on_close(on_close);
             };
@@ -215,7 +215,7 @@ impl QuillApp {
                     .label("Cancel")
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.request_share = None;
+                        this.message_ui.request_share = None;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::RequestShare, window, cx);
                     })),
@@ -282,7 +282,7 @@ impl QuillApp {
                                 .primary()
                                 .disabled(share.selected.is_empty())
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(share) = this.request_share.as_mut() {
+                                    if let Some(share) = this.message_ui.request_share.as_mut() {
                                         share.confirm = !share.selected.is_empty();
                                     }
                                     cx.notify();
@@ -327,7 +327,7 @@ crate::ui::shell::register_dialogs! {
     /// A bot keyboard's share-phone / share-users / share-chat request.
     RequestShare => DialogSpec::new(
         2600,
-        |app| app.request_share.is_some(),
+        |app| app.message_ui.request_share.is_some(),
         QuillApp::build_request_share_dialog,
     ),
 }

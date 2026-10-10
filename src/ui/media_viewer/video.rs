@@ -17,39 +17,39 @@ impl QuillApp {
     /// cached frames always goes through extraction — never straight to
     /// playback with an empty frame cache.
     pub(in crate::ui) fn maybe_autoplay_viewer_video(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.media_viewer.current().cloned() else {
+        let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
         let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
         let path = self.viewer_clip_path(&item);
         let frames_ready =
-            self.viewer_frame_cache_file == Some(file_id) && !self.viewer_video_frames.is_empty();
+            self.viewer.frame_cache_file == Some(file_id) && !self.viewer.video_frames.is_empty();
         match decide_viewer_video_start(&item, path.is_some(), frames_ready) {
             ViewerVideoStart::Nothing => {}
             ViewerVideoStart::ParkDownload => {
                 if let Some(play_id) = item.play_file_id {
-                    self.viewer_pending_play = Some((item.message_id, play_id));
+                    self.viewer.pending_play = Some((item.message_id, play_id));
                     self.request_media_download(play_id, None, cx);
                 }
             }
             ViewerVideoStart::PlayNow | ViewerVideoStart::ExtractFrames
                 if Self::viewer_uses_native(&item, path.as_deref())
-                    && !self.viewer_demo_sync_frames =>
+                    && !self.viewer.demo_sync_frames =>
             {
-                self.viewer_pending_play = None;
+                self.viewer.pending_play = None;
                 let path = path.expect("clip checked local by decide_viewer_video_start");
                 self.play_native_viewer_video(&item, &path, cx);
             }
             ViewerVideoStart::PlayNow => {
-                self.viewer_pending_play = None;
+                self.viewer.pending_play = None;
                 let path = path.expect("clip checked local by decide_viewer_video_start");
                 self.play_viewer_video(&item, &path, cx);
             }
             ViewerVideoStart::ExtractFrames => {
-                self.viewer_pending_play = None;
+                self.viewer.pending_play = None;
                 // The screenshot demo extracts + decodes frames synchronously
                 // itself; don't start a redundant background extraction.
-                if self.viewer_demo_sync_frames {
+                if self.viewer.demo_sync_frames {
                     return;
                 }
                 let path = path.expect("clip checked local by decide_viewer_video_start");
@@ -73,7 +73,8 @@ impl QuillApp {
 
     /// The current item is a GIF: loops, no sound, no transport.
     pub(in crate::ui) fn viewer_loops(&self) -> bool {
-        self.media_viewer
+        self.viewer
+            .state
             .current()
             .is_some_and(|item| item.kind.loops())
     }
@@ -197,10 +198,10 @@ impl QuillApp {
         // Signal cancellation first: the worker checks this before spawning
         // and right after publishing the child, so a kill that lands before
         // ffmpeg publishes still aborts the run instead of orphaning it.
-        if let Some(cancel) = self.viewer_extract_cancel.take() {
+        if let Some(cancel) = self.viewer.extract_cancel.take() {
             cancel.store(true, Ordering::SeqCst);
         }
-        if let Some(slot) = self.viewer_extract_child.take() {
+        if let Some(slot) = self.viewer.extract_child.take() {
             // Take the child out of the lock before kill/wait: the worker
             // only holds the lock briefly around `try_wait`.
             let child = slot.lock().ok().and_then(|mut guard| guard.take());
@@ -210,7 +211,7 @@ impl QuillApp {
                 let _ = child.wait();
             }
         }
-        self.viewer_extract_epoch = self.viewer_extract_epoch.wrapping_add(1);
+        self.viewer.extract_epoch = self.viewer.extract_epoch.wrapping_add(1);
     }
 
     /// Extract the clip's frames on a background thread, decode them into
@@ -226,24 +227,25 @@ impl QuillApp {
     ) {
         let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
         if self
-            .viewer_frame_cache_file
+            .viewer
+            .frame_cache_file
             .is_some_and(|cached| cached != file_id)
-            && let Some(old) = self.viewer_frame_cache_file.take()
+            && let Some(old) = self.viewer.frame_cache_file.take()
         {
             quill::video::discard_viewer_frame_cache(old);
         }
-        self.viewer_frame_cache_file = Some(file_id);
-        crate::ui::image_budget::retire_all(self.viewer_video_frames.drain(..));
-        self.viewer_extracting = true;
+        self.viewer.frame_cache_file = Some(file_id);
+        crate::ui::image_budget::retire_all(self.viewer.video_frames.drain(..));
+        self.viewer.extracting = true;
         // A step between two videos goes through `stop_viewer_video` first,
         // but cancel explicitly anyway: a fresh run must not share the
         // previous run's slot or epoch.
         self.kill_viewer_extraction();
-        let epoch = self.viewer_extract_epoch;
+        let epoch = self.viewer.extract_epoch;
         let slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
-        self.viewer_extract_child = Some(slot.clone());
+        self.viewer.extract_child = Some(slot.clone());
         let cancel: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-        self.viewer_extract_cancel = Some(cancel.clone());
+        self.viewer.extract_cancel = Some(cancel.clone());
         cx.notify();
 
         let cache = quill::video::viewer_frame_cache_dir(file_id);
@@ -293,21 +295,23 @@ impl QuillApp {
                 // extraction started): drop silently — no error note, no
                 // playback, and crucially don't clear a newer run's
                 // loading state.
-                if this.viewer_extract_epoch != epoch {
+                if this.viewer.extract_epoch != epoch {
                     return;
                 }
-                this.viewer_extracting = false;
+                this.viewer.extracting = false;
                 // Drop the slot only if it's still ours (`stop_viewer_video`
                 // may have taken it to kill the child).
                 if this
-                    .viewer_extract_child
+                    .viewer
+                    .extract_child
                     .as_ref()
                     .is_some_and(|current| Arc::ptr_eq(current, &slot))
                 {
-                    this.viewer_extract_child = None;
+                    this.viewer.extract_child = None;
                 }
                 let still_current = this
-                    .media_viewer
+                    .viewer
+                    .state
                     .current()
                     .is_some_and(|current| current.message_id == message_id);
                 if !still_current {
@@ -318,16 +322,16 @@ impl QuillApp {
                         // The screenshot demo extracts + decodes synchronously
                         // and starts playback itself; don't restart it when the
                         // background extraction lands.
-                        let already_playing = this.viewer_video == Some(message_id)
-                            && !this.viewer_video_frames.is_empty();
+                        let already_playing = this.viewer.video == Some(message_id)
+                            && !this.viewer.video_frames.is_empty();
                         if !already_playing {
-                            this.viewer_video_frames = decoded;
-                            this.viewer_video_fps = fps;
+                            this.viewer.video_frames = decoded;
+                            this.viewer.video_fps = fps;
                             this.play_viewer_video(&item, &path, cx);
                         }
                     }
                     Err(err) => {
-                        this.viewer_video_frames.clear();
+                        this.viewer.video_frames.clear();
                         // MED1: TGX distinguishes unsupported formats
                         // (`VideoPlaybackUnsupported`) from generic
                         // playback failures (`VideoPlaybackError`).
@@ -342,7 +346,7 @@ impl QuillApp {
                             format!("couldn't play this {noun}")
                         };
                         this.status_note = message.clone();
-                        this.playback_error = Some(message);
+                        this.playback.error = Some(message);
                     }
                 }
                 cx.notify();
@@ -357,7 +361,7 @@ impl QuillApp {
     /// frames or starts async extraction — never straight to playback
     /// with an empty frame cache.
     pub(in crate::ui) fn resume_pending_viewer_video(&mut self, cx: &mut Context<Self>) {
-        let Some((message_id, file_id)) = self.viewer_pending_play else {
+        let Some((message_id, file_id)) = self.viewer.pending_play else {
             return;
         };
         let ready = self.session().is_some_and(|session| {
@@ -371,11 +375,12 @@ impl QuillApp {
             return;
         }
         let matches = self
-            .media_viewer
+            .viewer
+            .state
             .current()
             .is_some_and(|item| item.message_id == message_id && item.kind.is_playable());
         if !matches {
-            self.viewer_pending_play = None;
+            self.viewer.pending_play = None;
             return;
         }
         self.maybe_autoplay_viewer_video(cx);
@@ -401,24 +406,25 @@ impl QuillApp {
         let mut duration = item.duration_secs.unwrap_or(0).max(0) as f64;
         // A loop wraps at the end of its frames, not at TDLib's rounded
         // duration.
-        if looping && !self.viewer_video_frames.is_empty() && self.viewer_video_fps > 0.0 {
-            duration = self.viewer_video_frames.len() as f64 / self.viewer_video_fps;
+        if looping && !self.viewer.video_frames.is_empty() && self.viewer.video_fps > 0.0 {
+            duration = self.viewer.video_frames.len() as f64 / self.viewer.video_fps;
         }
         let mut clock = PlaybackClock::new(duration);
         if !looping {
-            clock.set_rate(self.playback_speed);
+            clock.set_rate(self.playback.speed);
         }
         // A media-timestamp link opened this clip at a given second.
         let start = self
-            .pending_viewer_seek
+            .viewer
+            .pending_seek
             .take_if(|(id, _)| *id == item.message_id)
             .map_or(0.0, |(_, secs)| secs.clamp(0.0, duration));
         clock.seek(start);
         clock.resume();
-        self.viewer_clock = Some(clock);
-        self.viewer_video = Some(item.message_id);
-        self.viewer_video_path = Some(path.to_path_buf());
-        self.playback_error = None;
+        self.viewer.clock = Some(clock);
+        self.viewer.video = Some(item.message_id);
+        self.viewer.video_path = Some(path.to_path_buf());
+        self.playback.error = None;
         if looping {
             // No transport, no sound: nothing to scrub or mute.
             self.spawn_viewer_tick(cx);
@@ -436,20 +442,20 @@ impl QuillApp {
             this.on_viewer_seek_event(event, cx);
         })
         .detach();
-        self.viewer_seek_slider = Some(slider);
+        self.viewer.seek_slider = Some(slider);
         // MED1: volume slider (0–100%); applies on release so a drag
         // doesn't restart the sound per tick.
         let volume = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
                 .max(100.0)
-                .default_value((self.playback_volume * 100.0).round())
+                .default_value((self.playback.volume * 100.0).round())
         });
         cx.subscribe(&volume, |this, _, event, cx| {
             this.on_viewer_volume_event(event, cx);
         })
         .detach();
-        self.viewer_volume_slider = Some(volume);
+        self.viewer.volume_slider = Some(volume);
         self.spawn_viewer_tick(cx);
         cx.notify();
     }
@@ -466,7 +472,7 @@ impl QuillApp {
         self.begin_viewer_video(item, path, cx);
         // GIFs are silent: no audio player.
         if self.demo_session.is_none() && !item.kind.loops() {
-            let start = self.viewer_clock.as_ref().map_or(0.0, |c| c.elapsed_secs());
+            let start = self.viewer.clock.as_ref().map_or(0.0, |c| c.elapsed_secs());
             self.start_viewer_audio(path, start);
         }
     }
@@ -489,19 +495,19 @@ impl QuillApp {
                     video.set_volume(0.0);
                     video.play();
                 } else {
-                    video.set_volume(self.playback_volume);
+                    video.set_volume(self.playback.volume);
                     video.play();
-                    video.set_rate(self.playback_speed as f32);
+                    video.set_rate(self.playback.speed as f32);
                 }
-                let start = self.viewer_clock.as_ref().map_or(0.0, |c| c.elapsed_secs());
+                let start = self.viewer.clock.as_ref().map_or(0.0, |c| c.elapsed_secs());
                 if start > 0.0 {
                     video.seek(start);
                 }
-                self.viewer_native = Some(video);
+                self.viewer.native = Some(video);
             }
             Err(err) => {
                 self.stop_viewer_video();
-                self.playback_error = Some(err);
+                self.playback.error = Some(err);
             }
         }
         cx.notify();
@@ -518,31 +524,32 @@ impl QuillApp {
         offset_secs: f64,
     ) -> bool {
         match self
-            .viewer_audio
-            .start(path, offset_secs, self.playback_volume, self.playback_speed)
+            .viewer
+            .audio
+            .start(path, offset_secs, self.playback.volume, self.playback.speed)
         {
             Ok(()) => {
-                self.playback_error = None;
+                self.playback.error = None;
                 true
             }
             Err(err) => {
-                self.playback_error = Some(err.to_string());
+                self.playback.error = Some(err.to_string());
                 false
             }
         }
     }
 
     pub(in crate::ui) fn kill_viewer_player(&mut self) {
-        self.viewer_audio.stop();
+        self.viewer.audio.stop();
     }
 
     /// Pause: freeze the clock, stop the sound, keep the item active so the
     /// controls stay and Play resumes from the frozen offset.
     pub(in crate::ui) fn pause_viewer_video(&mut self, cx: &mut Context<Self>) {
-        if let Some(clock) = self.viewer_clock.as_mut() {
+        if let Some(clock) = self.viewer.clock.as_mut() {
             clock.pause();
         }
-        if let Some(video) = self.viewer_native.as_mut() {
+        if let Some(video) = self.viewer.native.as_mut() {
             video.pause();
         }
         self.kill_viewer_player();
@@ -552,26 +559,26 @@ impl QuillApp {
     /// Resume from the frozen clock position.
     pub(in crate::ui) fn resume_viewer_video(&mut self, cx: &mut Context<Self>) {
         let loops = self.viewer_loops();
-        if let Some(video) = self.viewer_native.as_mut() {
+        if let Some(video) = self.viewer.native.as_mut() {
             video.play();
             if !loops {
-                video.set_rate(self.playback_speed as f32);
+                video.set_rate(self.playback.speed as f32);
             }
-            if let Some(clock) = self.viewer_clock.as_mut() {
+            if let Some(clock) = self.viewer.clock.as_mut() {
                 clock.seek(video.position_secs());
                 clock.resume();
             }
             cx.notify();
             return;
         }
-        let offset = self.viewer_clock.as_ref().map(|c| c.elapsed_secs());
-        let path = self.viewer_video_path.clone();
+        let offset = self.viewer.clock.as_ref().map(|c| c.elapsed_secs());
+        let path = self.viewer.video_path.clone();
         match (offset, path) {
             (Some(offset), Some(path)) => {
                 if !loops {
                     self.start_viewer_audio(&path, offset);
                 }
-                if let Some(clock) = self.viewer_clock.as_mut() {
+                if let Some(clock) = self.viewer.clock.as_mut() {
                     clock.resume();
                 }
             }
@@ -587,10 +594,11 @@ impl QuillApp {
     /// instead of playing with an empty frame cache.
     pub(in crate::ui) fn toggle_viewer_video(&mut self, cx: &mut Context<Self>) {
         let playing = self
-            .viewer_clock
+            .viewer
+            .clock
             .as_ref()
             .is_some_and(|clock| clock.is_playing());
-        if self.viewer_video.is_none() {
+        if self.viewer.video.is_none() {
             self.maybe_autoplay_viewer_video(cx);
             return;
         }
@@ -608,14 +616,15 @@ impl QuillApp {
         if self.active_playback_id().is_some() {
             return;
         }
-        let Some(item) = self.media_viewer.current().cloned() else {
+        let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
         if item.kind != MediaViewerKind::Video {
             return;
         }
         let (playing, duration) = self
-            .viewer_clock
+            .viewer
+            .clock
             .as_ref()
             .map(|clock| (clock.is_playing(), clock.duration_secs()))
             .unwrap_or((false, 0.0));
@@ -632,7 +641,7 @@ impl QuillApp {
                 None => {}
             }
         }
-        let Some(clock) = self.viewer_clock.as_ref() else {
+        let Some(clock) = self.viewer.clock.as_ref() else {
             return;
         };
         let (sender, chat) = self.viewer_sender_line(&item).map_or_else(
@@ -652,7 +661,7 @@ impl QuillApp {
             clock.duration_secs(),
             clock.elapsed_secs(),
             clock.is_playing(),
-            self.playback_speed,
+            self.playback.speed,
         );
         quill::media_session::publish(Some(&info));
     }
@@ -661,22 +670,22 @@ impl QuillApp {
     /// all viewer-video state. Called on viewer close/step and when any
     /// other player starts.
     pub(in crate::ui) fn stop_viewer_video(&mut self) {
-        self.pip_window = None;
-        self.viewer_native = None;
+        self.viewer.pip_window = None;
+        self.viewer.native = None;
         self.kill_viewer_player();
         self.kill_viewer_extraction();
-        self.viewer_video = None;
-        self.viewer_video_path = None;
-        self.viewer_clock = None;
-        self.viewer_pending_play = None;
-        crate::ui::image_budget::retire_all(self.viewer_video_frames.drain(..));
-        self.viewer_extracting = false;
-        self.viewer_seek_slider = None;
-        self.viewer_seek_scrubbing = false;
-        self.viewer_seek_preview_secs = None;
-        self.viewer_volume_slider = None;
-        self.viewer_volume_scrubbing = false;
-        if let Some(cached) = self.viewer_frame_cache_file.take() {
+        self.viewer.video = None;
+        self.viewer.video_path = None;
+        self.viewer.clock = None;
+        self.viewer.pending_play = None;
+        crate::ui::image_budget::retire_all(self.viewer.video_frames.drain(..));
+        self.viewer.extracting = false;
+        self.viewer.seek_slider = None;
+        self.viewer.seek_scrubbing = false;
+        self.viewer.seek_preview_secs = None;
+        self.viewer.volume_slider = None;
+        self.viewer.volume_scrubbing = false;
+        if let Some(cached) = self.viewer.frame_cache_file.take() {
             quill::video::discard_viewer_frame_cache(cached);
         }
     }

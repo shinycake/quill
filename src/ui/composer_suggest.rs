@@ -110,21 +110,24 @@ impl QuillApp {
         let text = self.composer.read(cx).value().to_string();
         let range = self.composer.read(cx).selected_range();
         let mention = quill::composer::mention_trigger(&text).is_some();
-        let query = (range.is_empty() && !mention && self.pending_edit.is_none())
+        let query = (range.is_empty() && !mention && self.composer_ui.pending_edit.is_none())
             .then(|| detect(&text, range.start, self.chat_prefs.suggest_emoji))
             .flatten()
             .filter(|q| {
-                self.suggest.dismissed.as_ref() != Some(&(q.kind, q.range.start, q.query.clone()))
+                self.composer_ui.suggest.dismissed.as_ref()
+                    != Some(&(q.kind, q.range.start, q.query.clone()))
             });
         let active = query.and_then(|query| {
-            let items = suggest_items(&query, &self.suggest.hashtags);
+            let items = suggest_items(&query, &self.composer_ui.suggest.hashtags);
             (!items.is_empty()).then_some(ActiveSuggest { query, items })
         });
-        if self.suggest.active.as_ref().map(|a| &a.query) != active.as_ref().map(|a| &a.query) {
-            self.suggest.selected = 0;
+        if self.composer_ui.suggest.active.as_ref().map(|a| &a.query)
+            != active.as_ref().map(|a| &a.query)
+        {
+            self.composer_ui.suggest.selected = 0;
         }
-        if self.suggest.active != active {
-            self.suggest.active = active;
+        if self.composer_ui.suggest.active != active {
+            self.composer_ui.suggest.active = active;
             cx.notify();
         }
     }
@@ -139,9 +142,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let prev = std::mem::replace(&mut self.composer_prev_text, text.to_string());
+        let prev = std::mem::replace(&mut self.composer_ui.prev_text, text.to_string());
         let range = self.composer.read(cx).selected_range();
-        if !range.is_empty() || self.pending_edit.is_some() {
+        if !range.is_empty() || self.composer_ui.pending_edit.is_some() {
             return None;
         }
         let replace = quill::emoji_replace::instant_replacement(
@@ -153,23 +156,23 @@ impl QuillApp {
         // A range edit keeps the formatting around it (codex:composer-input).
         self.replace_composer_text(replace.range.clone(), &replace.with, window, cx);
         let new_text = self.composer.read(cx).value().to_string();
-        self.composer_prev_text = new_text.clone();
+        self.composer_ui.prev_text = new_text.clone();
         Some(new_text)
     }
 
     /// Esc / blur: close the popup. True when it was showing.
     pub(super) fn close_suggest_menu(&mut self, remember: bool, cx: &mut Context<Self>) -> bool {
-        let Some(active) = self.suggest.active.take() else {
+        let Some(active) = self.composer_ui.suggest.active.take() else {
             return false;
         };
         if remember {
-            self.suggest.dismissed = Some((
+            self.composer_ui.suggest.dismissed = Some((
                 active.query.kind,
                 active.query.range.start,
                 active.query.query,
             ));
         }
-        self.suggest.selected = 0;
+        self.composer_ui.suggest.selected = 0;
         cx.notify();
         true
     }
@@ -182,14 +185,15 @@ impl QuillApp {
         horizontal: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(active) = self.suggest.active.as_ref() else {
+        let Some(active) = self.composer_ui.suggest.active.as_ref() else {
             return false;
         };
         if horizontal && active.query.kind != SuggestKind::Emoji {
             return false;
         }
         let rows = active.items.len() as i32;
-        self.suggest.selected = (self.suggest.selected as i32 + delta).rem_euclid(rows) as usize;
+        self.composer_ui.suggest.selected =
+            (self.composer_ui.suggest.selected as i32 + delta).rem_euclid(rows) as usize;
         cx.notify();
         true
     }
@@ -200,10 +204,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(active) = self.suggest.active.as_ref() else {
+        let Some(active) = self.composer_ui.suggest.active.as_ref() else {
             return false;
         };
-        let index = self.suggest.selected.min(active.items.len() - 1);
+        let index = self
+            .composer_ui
+            .suggest
+            .selected
+            .min(active.items.len() - 1);
         self.pick_suggest_index(index, window, cx);
         true
     }
@@ -214,10 +222,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active) = self.suggest.active.take() else {
+        let Some(active) = self.composer_ui.suggest.active.take() else {
             return;
         };
-        self.suggest.selected = 0;
+        self.composer_ui.suggest.selected = 0;
         let Some(item) = active.items.get(index) else {
             return;
         };
@@ -238,12 +246,13 @@ impl QuillApp {
 
     /// Remember the hashtags of a message that is being sent.
     pub(super) fn remember_sent_hashtags(&mut self, text: &str) {
-        if !self.suggest.hashtags.record_message(text) {
+        if !self.composer_ui.suggest.hashtags.record_message(text) {
             return;
         }
-        if let Err(err) =
-            quill::settings::save_recent_hashtags(&Self::appearance_paths(), &self.suggest.hashtags)
-        {
+        if let Err(err) = quill::settings::save_recent_hashtags(
+            &Self::appearance_paths(),
+            &self.composer_ui.suggest.hashtags,
+        ) {
             self.status_note = format!("Couldn't save recent hashtags: {err}");
         }
     }
@@ -251,8 +260,12 @@ impl QuillApp {
     /// The popup above the composer: a list of hashtags, or a strip of
     /// emoji tiles with the highlighted one's name.
     pub(super) fn suggest_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let active = self.suggest.active.as_ref()?;
-        let selected = self.suggest.selected.min(active.items.len() - 1);
+        let active = self.composer_ui.suggest.active.as_ref()?;
+        let selected = self
+            .composer_ui
+            .suggest
+            .selected
+            .min(active.items.len() - 1);
         let panel = div()
             .id("suggest-menu")
             .role(gpui_kit::Role::ListBox)

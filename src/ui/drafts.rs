@@ -33,7 +33,7 @@ impl QuillApp {
     }
 
     pub(super) fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
-        if self.pending_edit.is_some() {
+        if self.composer_ui.pending_edit.is_some() {
             return;
         }
         let Some(chat_id) = self.open_chat_id() else {
@@ -41,6 +41,7 @@ impl QuillApp {
         };
         let text = self.composer_markup(cx);
         let reply = self
+            .composer_ui
             .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_reply(chat_id));
@@ -58,16 +59,18 @@ impl QuillApp {
         let Some(chat_id) = self.open_chat_id() else {
             return (String::new(), None, now_ms);
         };
-        if self.pending_edit.is_some() {
+        if self.composer_ui.pending_edit.is_some() {
             let reply = self
+                .composer_ui
                 .saved_edit_reply
                 .as_ref()
                 .and_then(|saved| saved.send_reply(chat_id));
-            return (self.saved_edit_draft.clone(), reply, now_ms);
+            return (self.composer_ui.saved_edit_draft.clone(), reply, now_ms);
         }
         (
             self.composer_markup(cx),
-            self.pending_reply
+            self.composer_ui
+                .pending_reply
                 .as_ref()
                 .and_then(|reply| reply.send_reply(chat_id)),
             now_ms,
@@ -76,43 +79,47 @@ impl QuillApp {
 
     pub(super) fn dismiss_cross_chat_state(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if self
+            .composer_ui
             .pending_reply
             .as_ref()
             .is_some_and(|reply| !reply.belongs_to(chat_id))
         {
-            self.pending_reply = None;
+            self.composer_ui.pending_reply = None;
         }
         if self
+            .composer_ui
             .pending_edit
             .as_ref()
             .is_some_and(|edit| edit.chat_id != chat_id)
         {
-            self.pending_edit = None;
-            self.saved_edit_draft.clear();
-            self.saved_edit_reply = None;
+            self.composer_ui.pending_edit = None;
+            self.composer_ui.saved_edit_draft.clear();
+            self.composer_ui.saved_edit_reply = None;
         }
         if self
+            .message_ui
             .pending_delete
             .as_ref()
             .is_some_and(|confirm| confirm.chat_id != chat_id)
         {
-            self.pending_delete = None;
+            self.message_ui.pending_delete = None;
         }
         // B4: a pending stop-poll confirm belongs to its own chat.
         if self
+            .message_ui
             .pending_stop_poll
             .is_some_and(|(id, _, _)| id != chat_id)
         {
-            self.pending_stop_poll = None;
+            self.message_ui.pending_stop_poll = None;
         }
         self.dismiss_forward_for_chat(chat_id);
         // Phase 3.3: the `/` menu never survives a chat switch.
-        self.command_menu_open = false;
-        self.command_menu_selected = 0;
+        self.composer_ui.command_menu_open = false;
+        self.composer_ui.command_menu_selected = 0;
         // Bots slice: neither does the inline-results dropdown.
-        self.inline_results_open = false;
-        self.inline_results_selected = 0;
-        self.inline_query_armed = None;
+        self.composer_ui.inline_results_open = false;
+        self.composer_ui.inline_results_selected = 0;
+        self.composer_ui.inline_query_armed = None;
         if self.recording_active() {
             self.cancel_recording(cx);
         }
@@ -122,16 +129,18 @@ impl QuillApp {
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
-        let (text, reply) = if self.pending_edit.is_some() {
+        let (text, reply) = if self.composer_ui.pending_edit.is_some() {
             let reply = self
+                .composer_ui
                 .saved_edit_reply
                 .as_ref()
                 .and_then(|saved| saved.send_reply(chat_id));
-            (self.saved_edit_draft.clone(), reply)
+            (self.composer_ui.saved_edit_draft.clone(), reply)
         } else {
             (
                 self.composer_markup(cx),
-                self.pending_reply
+                self.composer_ui
+                    .pending_reply
                     .as_ref()
                     .and_then(|reply| reply.send_reply(chat_id)),
             )
@@ -206,7 +215,7 @@ impl QuillApp {
     }
 
     pub(super) fn restore_open_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pending_edit.is_some() {
+        if self.composer_ui.pending_edit.is_some() {
             return;
         }
         let Some(chat_id) = self.open_chat_id() else {
@@ -245,7 +254,7 @@ impl QuillApp {
             .as_ref()
             .map(|draft| draft.text.clone())
             .unwrap_or_default();
-        self.pending_reply = preview.map(|(id, preview)| {
+        self.composer_ui.pending_reply = preview.map(|(id, preview)| {
             // Slice G1: a draft saved with a partial quote restores the
             // quote picker state, not just the replied-to message.
             match draft.as_ref().and_then(|draft| draft.quote.clone()) {
@@ -261,7 +270,7 @@ impl QuillApp {
         self.set_composer_markup(&text, window, cx);
         // `set_value` emits no Change: re-check the restored draft.
         let text = self.composer.read(cx).value().to_string();
-        self.composer_prev_text = text.clone();
+        self.composer_ui.prev_text = text.clone();
         self.sync_spellcheck(&text, cx);
         self.sync_suggest_menu(cx);
     }
@@ -270,7 +279,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let editing = self.pending_edit.is_some();
+        let editing = self.composer_ui.pending_edit.is_some();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)

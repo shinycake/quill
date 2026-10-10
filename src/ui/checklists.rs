@@ -43,8 +43,8 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
-        if let Some(dialog) = &self.checklist_dialog {
+        self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
+        if let Some(dialog) = &self.composer_ui.checklist_dialog {
             dialog
                 .title_input
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -65,12 +65,12 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.checklist_dialog = Some(ChecklistDialog::new(
+        self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(
             Some((chat_id, message_id)),
             window,
             cx,
         ));
-        if let Some(dialog) = self.checklist_dialog.as_ref()
+        if let Some(dialog) = self.composer_ui.checklist_dialog.as_ref()
             && let Some(first) = dialog.task_inputs.first()
         {
             first.update(cx, |input, cx| input.focus(window, cx));
@@ -79,7 +79,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_checklist_dialog(&mut self, cx: &mut Context<Self>) {
-        self.checklist_dialog = None;
+        self.composer_ui.checklist_dialog = None;
         cx.notify();
     }
 
@@ -99,7 +99,7 @@ impl QuillApp {
 
     /// Create the checklist (or add the typed tasks) through the driver.
     pub(super) fn submit_checklist_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.checklist_dialog.as_ref() else {
+        let Some(dialog) = self.composer_ui.checklist_dialog.as_ref() else {
             return;
         };
         let add_to = dialog.add_to;
@@ -112,7 +112,7 @@ impl QuillApp {
                 .and_then(|list| validate_added_tasks(&list, &draft.tasks).err()),
         };
         if let Some(reason) = error {
-            if let Some(dialog) = self.checklist_dialog.as_mut() {
+            if let Some(dialog) = self.composer_ui.checklist_dialog.as_mut() {
                 dialog.error = Some(reason);
             }
             cx.notify();
@@ -125,14 +125,14 @@ impl QuillApp {
                     .add_checklist_tasks(chat_id, message_id, &draft.tasks);
                 match result {
                     Ok(_) => {
-                        self.checklist_dialog = None;
+                        self.composer_ui.checklist_dialog = None;
                         self.status_note = "adding tasks…".into();
                     }
                     Err(_) => self.status_note = "could not add the tasks".into(),
                 }
             } else {
                 self.apply_demo_checklist_tasks(chat_id, message_id, &draft.tasks);
-                self.checklist_dialog = None;
+                self.composer_ui.checklist_dialog = None;
                 self.status_note = "tasks added (demo)".into();
             }
             cx.notify();
@@ -147,20 +147,21 @@ impl QuillApp {
             return;
         }
         let reply_to = self
+            .composer_ui
             .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_target(chat_id));
         if let Some(live) = self.live.as_mut() {
             match live.driver.send_checklist_draft(chat_id, &draft, reply_to) {
                 Ok(_) => {
-                    self.checklist_dialog = None;
-                    self.pending_reply = None;
+                    self.composer_ui.checklist_dialog = None;
+                    self.composer_ui.pending_reply = None;
                     self.status_note = "sending checklist…".into();
                 }
                 Err(_) => self.status_note = "could not send the checklist".into(),
             }
         } else {
-            self.checklist_dialog = None;
+            self.composer_ui.checklist_dialog = None;
             self.status_note = "checklists need a live connection (demo)".into();
         }
         cx.notify();
@@ -272,7 +273,7 @@ impl QuillApp {
     /// The checklist composer / "Add Tasks" panel above the composer
     /// (tdesktop `EditTodoListBox`).
     pub(super) fn checklist_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.checklist_dialog.as_ref()?;
+        let dialog = self.composer_ui.checklist_dialog.as_ref()?;
         let adding = dialog.add_to.is_some();
         let remaining = match dialog.add_to {
             Some((chat_id, message_id)) => self
@@ -326,7 +327,7 @@ impl QuillApp {
                         .ghost()
                         .tooltip("Remove task")
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(dialog) = this.checklist_dialog.as_mut()
+                            if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut()
                                 && index < dialog.task_inputs.len()
                             {
                                 dialog.task_inputs.remove(index);
@@ -345,7 +346,7 @@ impl QuillApp {
                         .label("Add a task...")
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(dialog) = this.checklist_dialog.as_mut() {
+                            if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
                                 dialog.push_task_row(window, cx);
                             }
                             cx.notify();
@@ -376,7 +377,7 @@ impl QuillApp {
                         .checked(dialog.others_can_add_tasks)
                         .label("Allow Others to Add Tasks")
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(dialog) = this.checklist_dialog.as_mut() {
+                            if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
                                 dialog.others_can_add_tasks = on;
                             }
                             cx.notify();
@@ -387,7 +388,7 @@ impl QuillApp {
                         .checked(dialog.others_can_mark_tasks_as_done)
                         .label("Allow Others to Mark As Done")
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(dialog) = this.checklist_dialog.as_mut() {
+                            if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
                                 dialog.others_can_mark_tasks_as_done = on;
                             }
                             cx.notify();
@@ -448,7 +449,7 @@ impl QuillApp {
                 .submit_on_enter(false)
         });
         input.update(cx, |input, cx| input.focus(window, cx));
-        self.poll_add_option = Some(PollAddOption {
+        self.message_ui.poll_add_option = Some(PollAddOption {
             chat_id,
             message_id,
             input,
@@ -458,12 +459,12 @@ impl QuillApp {
     }
 
     pub(super) fn close_poll_add_option(&mut self, cx: &mut Context<Self>) {
-        self.poll_add_option = None;
+        self.message_ui.poll_add_option = None;
         cx.notify();
     }
 
     pub(super) fn submit_poll_add_option(&mut self, cx: &mut Context<Self>) {
-        let Some(panel) = self.poll_add_option.as_ref() else {
+        let Some(panel) = self.message_ui.poll_add_option.as_ref() else {
             return;
         };
         let (chat_id, message_id) = (panel.chat_id, panel.message_id);
@@ -477,14 +478,14 @@ impl QuillApp {
                 _ => None,
             });
         let Some(poll) = poll else {
-            self.poll_add_option = None;
+            self.message_ui.poll_add_option = None;
             cx.notify();
             return;
         };
         let text = match validate_new_option(&poll, &text) {
             Ok(text) => text,
             Err(reason) => {
-                if let Some(panel) = self.poll_add_option.as_mut() {
+                if let Some(panel) = self.message_ui.poll_add_option.as_mut() {
                     panel.error = Some(reason);
                 }
                 cx.notify();
@@ -494,7 +495,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.add_poll_option(chat_id, message_id, &text) {
                 Ok(_) => {
-                    self.poll_add_option = None;
+                    self.message_ui.poll_add_option = None;
                     self.status_note = "adding option…".into();
                 }
                 Err(_) => {
@@ -516,14 +517,14 @@ impl QuillApp {
                     is_chosen: false,
                 });
             }
-            self.poll_add_option = None;
+            self.message_ui.poll_add_option = None;
             self.status_note = "option added (demo)".into();
         }
         cx.notify();
     }
 
     pub(super) fn poll_add_option_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let panel = self.poll_add_option.as_ref()?;
+        let panel = self.message_ui.poll_add_option.as_ref()?;
         let mut body = div()
             .id("poll-add-option-panel")
             .flex()
