@@ -203,6 +203,7 @@ mod security;
 mod security_recovery;
 mod send_button_ui;
 mod service_demo;
+mod service_media_demo;
 mod service_row;
 mod settings_ui;
 mod share_box_ui;

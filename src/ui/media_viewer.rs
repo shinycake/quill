@@ -11,6 +11,7 @@ use super::message_text::{custom_emoji_paths, rich_text_line};
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -59,6 +60,15 @@ pub(super) struct ViewerExtra {
     pub profile_user: Option<i64>,
     /// The `chatPhoto.id` of the photo you set for that contact.
     pub profile_personal: Option<i64>,
+    /// The "saved to your Downloads folder" toast and its generation (a
+    /// newer save restarts the hide timer).
+    pub saved_toast: Option<quill::viewer_extras::SavedToast>,
+    pub saved_toast_gen: u64,
+    /// The speed dial's slider and the speed shown while it is dragged.
+    pub speed_slider: Option<Entity<SliderState>>,
+    pub speed_preview: Option<f64>,
+    /// Screenshot demo: open the speed dial on the first frame.
+    pub demo_speed_dial_open: bool,
 }
 
 /// Screenshot-capture runs render a single frame: skip fades there so the
@@ -232,6 +242,7 @@ impl QuillApp {
     pub(super) fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
         self.viewer_leave_video_fullscreen();
         self.stop_viewer_video();
+        self.viewer_extra.saved_toast = None;
         self.media_viewer.close();
         cx.notify();
     }
@@ -900,6 +911,62 @@ impl QuillApp {
         }
     }
 
+    /// Media keys and the OS Now Playing widget for the viewer's video.
+    /// The audio player owns the session while a track is active.
+    fn drive_viewer_media_session(&mut self, cx: &mut Context<Self>) {
+        use quill::viewer_extras::{ViewerMediaAction, viewer_media_action, viewer_now_playing};
+        if self.active_playback_id().is_some() {
+            return;
+        }
+        let Some(item) = self.media_viewer.current().cloned() else {
+            return;
+        };
+        if item.kind != MediaViewerKind::Video {
+            return;
+        }
+        let (playing, duration) = self
+            .viewer_clock
+            .as_ref()
+            .map(|clock| (clock.is_playing(), clock.duration_secs()))
+            .unwrap_or((false, 0.0));
+        for command in quill::media_session::take_commands() {
+            match viewer_media_action(command, playing, duration) {
+                Some(ViewerMediaAction::Toggle) => self.toggle_viewer_video(cx),
+                Some(ViewerMediaAction::Stop) => {
+                    self.stop_viewer_video();
+                    quill::media_session::publish(None);
+                    cx.notify();
+                    return;
+                }
+                Some(ViewerMediaAction::SeekTo(secs)) => self.seek_viewer_to(secs, cx),
+                None => {}
+            }
+        }
+        let Some(clock) = self.viewer_clock.as_ref() else {
+            return;
+        };
+        let (sender, chat) = self.viewer_sender_line(&item).map_or_else(
+            || (String::new(), String::new()),
+            |(name, _)| {
+                let chat = self
+                    .session()
+                    .and_then(|s| s.chats.get(&item.chat_id.0))
+                    .map(|chat| chat.title.clone())
+                    .unwrap_or_default();
+                (name, chat)
+            },
+        );
+        let info = viewer_now_playing(
+            &sender,
+            &chat,
+            clock.duration_secs(),
+            clock.elapsed_secs(),
+            clock.is_playing(),
+            self.playback_speed,
+        );
+        quill::media_session::publish(Some(&info));
+    }
+
     /// Full stop: stop the sound and any running frame extraction, and clear
     /// all viewer-video state. Called on viewer close/step and when any
     /// other player starts.
@@ -1052,10 +1119,7 @@ impl QuillApp {
         match path {
             Some(path) => match save_media_to_downloads(&path) {
                 Ok(dest) => {
-                    self.status_note = quill::media_viewer::saved_note(
-                        &dest,
-                        quill::media_viewer::downloads_dir().as_deref(),
-                    );
+                    self.show_saved_toast(dest, item.kind != MediaViewerKind::Photo, cx);
                 }
                 Err(err) => {
                     self.status_note = format!("couldn't save: {err}");
@@ -1064,6 +1128,44 @@ impl QuillApp {
             None => {
                 self.status_note = "download the media first to save it".into();
             }
+        }
+        cx.notify();
+    }
+
+    /// The viewer's own "saved to your Downloads folder" toast, with a
+    /// link that reveals the file (tdesktop `showSaveMsgToast`). It hides
+    /// itself after a few seconds.
+    pub(super) fn show_saved_toast(&mut self, dest: PathBuf, video: bool, cx: &mut Context<Self>) {
+        let text = quill::viewer_extras::saved_toast_text(
+            &dest,
+            quill::media_viewer::downloads_dir().as_deref(),
+            video,
+        );
+        self.viewer_extra.saved_toast = Some(quill::viewer_extras::SavedToast { dest, text });
+        self.viewer_extra.saved_toast_gen += 1;
+        let generation = self.viewer_extra.saved_toast_gen;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(quill::viewer_extras::SAVED_TOAST_MS))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.viewer_extra.saved_toast_gen == generation {
+                    this.viewer_extra.saved_toast = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The toast's folder link: show the saved file in the file manager.
+    fn reveal_saved_toast_file(&mut self, cx: &mut Context<Self>) {
+        let Some(toast) = self.viewer_extra.saved_toast.take() else {
+            return;
+        };
+        if !quill::platform::reveal_in_file_manager(&toast.dest) {
+            self.status_note = "couldn't open the folder".into();
         }
         cx.notify();
     }
@@ -1285,6 +1387,45 @@ impl QuillApp {
             &quill::local_time::civil_local(quill::local_time::now_unix()),
         );
         Some((name, when))
+    }
+
+    /// Whose profile the sender name opens (tdesktop `Over::Name`).
+    fn viewer_sender_profile(
+        &self,
+        item: &MediaViewerItem,
+    ) -> Option<quill::viewer_extras::SenderProfile> {
+        let session = self.session()?;
+        let message = session
+            .histories
+            .get(&item.chat_id.0)?
+            .messages
+            .get(&item.message_id.0)?;
+        let sender_chat = match message.sender {
+            Some(quill::telegram::envelope::MessageSender::Chat { chat_id }) => {
+                session.chats.get(&chat_id).map(|chat| &chat.kind)
+            }
+            _ => None,
+        };
+        let chat = session.chats.get(&item.chat_id.0).map(|chat| &chat.kind);
+        quill::viewer_extras::sender_profile(message.sender.as_ref(), sender_chat, chat)
+    }
+
+    /// The sender name was clicked: close the viewer and show the profile.
+    fn open_viewer_sender_profile(
+        &mut self,
+        profile: quill::viewer_extras::SenderProfile,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use quill::state::InfoPanelTarget;
+        use quill::viewer_extras::SenderProfile;
+        let target = match profile {
+            SenderProfile::User(id) => InfoPanelTarget::User(id),
+            SenderProfile::Supergroup(id) => InfoPanelTarget::Supergroup(id),
+            SenderProfile::BasicGroup(id) => InfoPanelTarget::BasicGroup(id),
+        };
+        self.close_media_viewer(cx);
+        self.open_info_panel_target(target, window, cx);
     }
 
     /// Mouse-move listener for the control surfaces: keeps them shown.
@@ -1705,7 +1846,15 @@ impl QuillApp {
             .position(|s| (*s - self.playback_speed).abs() < 0.01)
             .map(|i| SPEEDS[(i + 1) % SPEEDS.len()])
             .unwrap_or(1.0);
+        self.set_playback_speed(next, cx);
+    }
+
+    /// Apply a playback speed from the speed dial (slider or preset) to the
+    /// active track and the viewer video.
+    pub(super) fn set_playback_speed(&mut self, speed: f64, cx: &mut Context<Self>) {
+        let next = quill::viewer_extras::clamp_speed(speed);
         self.playback_speed = next;
+        self.viewer_extra.speed_preview = None;
         let mut restarted = false;
         if let Some(clock) = self.playback_clock.as_mut() {
             let was_playing = clock.is_playing();
@@ -1736,13 +1885,107 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The speed slider of the speed dial, created on first use.
+    fn ensure_speed_slider(&mut self, cx: &mut Context<Self>) -> Entity<SliderState> {
+        if let Some(slider) = self.viewer_extra.speed_slider.clone() {
+            return slider;
+        }
+        let slider = cx.new(|_| {
+            SliderState::new()
+                .min(quill::viewer_extras::SPEED_MIN as f32)
+                .max(quill::viewer_extras::SPEED_MAX as f32)
+                .step(0.1)
+                .default_value(self.playback_speed as f32)
+        });
+        cx.subscribe(&slider, |this, _, event, cx| match event {
+            SliderEvent::Change(value) => {
+                this.viewer_extra.speed_preview =
+                    Some(quill::viewer_extras::snap_speed(f64::from(value.end())));
+                cx.notify();
+            }
+            SliderEvent::Release(value) => {
+                let speed = quill::viewer_extras::snap_speed(f64::from(value.end()));
+                this.set_playback_speed(speed, cx);
+            }
+        })
+        .detach();
+        self.viewer_extra.speed_slider = Some(slider.clone());
+        slider
+    }
+
+    /// Move the speed dial's thumb to the current speed.
+    fn sync_speed_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let speed = self.playback_speed as f32;
+        if let Some(slider) = self.viewer_extra.speed_slider.as_ref() {
+            slider.update(cx, |state, cx| state.set_value(speed, window, cx));
+        }
+    }
+
+    /// Telegram Desktop's speed dial: the current speed on a button that
+    /// opens a slider from 0.5x to 2.5x (sticking to the usual speeds)
+    /// above the named presets.
+    pub(super) fn speed_dial(&mut self, id: &'static str, cx: &mut Context<Self>) -> AnyElement {
+        use quill::viewer_extras::{SPEED_PRESETS, equal_speeds, speed_label};
+        let slider = self.ensure_speed_slider(cx);
+        let dragging = self.viewer_extra.speed_preview.is_some();
+        let current = self.playback_speed;
+        let shown = self.viewer_extra.speed_preview.unwrap_or(current);
+        let view = cx.entity().downgrade();
+        Popover::new((id, 1usize))
+            .anchor(Anchor::BottomRight)
+            .default_open(self.viewer_extra.demo_speed_dial_open)
+            .trigger(
+                Button::new((id, 0usize))
+                    .label(speed_label(shown))
+                    .ghost()
+                    .text_color(gpui_kit::white())
+                    .tooltip("Playback speed")
+                    .accessibility_label("Playback speed"),
+            )
+            .content(move |_state, window, cx| {
+                // Another control (a row's speed link) may have moved the
+                // speed since the thumb was last set.
+                if !dragging {
+                    let want = current as f32;
+                    if slider.read(cx).value() != SliderValue::Single(want) {
+                        slider.update(cx, |state, cx| state.set_value(want, window, cx));
+                    }
+                }
+                let rows = SPEED_PRESETS.iter().map(|(speed, name)| {
+                    let (speed, name) = (*speed, *name);
+                    let chosen = equal_speeds(speed, current);
+                    let view = view.clone();
+                    let popover = cx.entity();
+                    Button::new((id, 100 + (speed * 10.0) as usize))
+                        .label(format!("{name}  {}", speed_label(speed)))
+                        .ghost()
+                        .small()
+                        .w_full()
+                        .when(chosen, |button| {
+                            button.icon(gpui_kit::assets::IconName::Check)
+                        })
+                        .on_click(move |_, window, cx| {
+                            let _ = view.update(cx, |this, cx| {
+                                this.set_playback_speed(speed, cx);
+                                this.sync_speed_slider(window, cx);
+                            });
+                            popover.update(cx, |state, cx| state.dismiss(window, cx));
+                        })
+                });
+                div()
+                    .w(px(220.))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().px_2().py_1().child(Slider::new(&slider)))
+                    .children(rows)
+            })
+            .into_any_element()
+    }
+
     /// MED1: short "1.5×" style label for the speed button.
     pub(super) fn speed_label(speed: f64) -> String {
-        if (speed - speed.round()).abs() < 0.01 {
-            format!("{}×", speed as i32)
-        } else {
-            format!("{speed}×")
-        }
+        quill::viewer_extras::speed_label(speed)
     }
 
     /// MED1: mute toggle — 0 volume remembers the previous level and
@@ -1862,6 +2105,13 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         let active = this.viewer_video.is_some();
                         if !active {
+                            if this.active_playback_id().is_none() {
+                                quill::media_session::publish(None);
+                            }
+                            return false;
+                        }
+                        this.drive_viewer_media_session(cx);
+                        if this.viewer_video.is_none() {
                             return false;
                         }
                         // The native player owns time: the clock mirrors
@@ -2408,9 +2658,10 @@ impl QuillApp {
                         }));
                     }
                     if menu_chat_source {
-                        menu = menu.item(item("View All Media", |this, _, cx| {
-                            this.view_all_viewer_media(cx)
-                        }));
+                        menu = menu.item(item(
+                            quill::viewer_extras::view_all_label(is_photo),
+                            |this, _, cx| this.view_all_viewer_media(cx),
+                        ));
                     }
                     if is_photo {
                         menu = menu
@@ -2454,7 +2705,7 @@ impl QuillApp {
                 // While ffmpeg extracts frames the thumbnail stays up;
                 // the Play button appears once frames are ready.
                 let extracting = self.viewer_extracting;
-                let speed_label = Self::speed_label(self.playback_speed);
+                let speed_dial = self.speed_dial("media-viewer-speed", cx);
                 let muted = self.playback_volume < 0.01;
                 let volume_pct = (self.playback_volume * 100.0).round() as i32;
                 // Telegram Desktop's player panel: the seek bar spans the
@@ -2546,16 +2797,7 @@ impl QuillApp {
                         )
                     })
                     .child(div().flex_1())
-                    .child(
-                        Button::new(("media-viewer-speed", row_id))
-                            .label(speed_label)
-                            .ghost()
-                            .text_color(gpui_kit::white())
-                            .tooltip("Playback speed")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cycle_playback_speed(cx);
-                            })),
-                    )
+                    .child(speed_dial)
                     .when(
                         cfg!(target_os = "macos") && !self.viewer_video_frames.is_empty(),
                         |this| {
@@ -2705,6 +2947,54 @@ impl QuillApp {
                 cx,
             )
         });
+        let sender_profile = self.viewer_sender_profile(&item);
+        // tdesktop `showSaveMsgToast`: where the saved file went, with a
+        // link that shows it in the file manager.
+        let saved_toast: Option<AnyElement> = self.viewer_extra.saved_toast.clone().map(|toast| {
+            div()
+                .absolute()
+                .top(px(VIEWER_TOP_BAR + 12.))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .id("media-viewer-saved-toast")
+                        .occlude()
+                        .role(Role::Status)
+                        .aria_label(format!(
+                            "{}{}{}",
+                            toast.text.before, toast.text.folder, toast.text.after
+                        ))
+                        .max_w(px(520.))
+                        .pl_3()
+                        .pr_1()
+                        .py_1()
+                        .rounded_full()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().popover)
+                        .text_color(cx.theme().popover_foreground)
+                        .shadow_md()
+                        .text_sm()
+                        .flex()
+                        .items_center()
+                        .child(toast.text.before.clone())
+                        .child(
+                            Button::new("media-viewer-saved-folder")
+                                .label(toast.text.folder.clone())
+                                .link()
+                                .small()
+                                .tooltip("Show in folder")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.reveal_saved_toast_file(cx);
+                                })),
+                        )
+                        .child(toast.text.after.clone()),
+                )
+                .into_any_element()
+        });
         let icon_action =
             |id: (&'static str, u64), icon: gpui_kit::assets::IconName, label: &'static str| {
                 Button::new(id)
@@ -2738,6 +3028,15 @@ impl QuillApp {
                     .flex_col()
                     .min_w_0()
                     .text_color(gpui_kit::white())
+                    .when_some(sender_profile, |this, profile| {
+                        this.role(Role::Button)
+                            .aria_label("Open profile")
+                            .cursor_pointer()
+                            .hover(|style| style.opacity(0.8))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_viewer_sender_profile(profile, window, cx);
+                            }))
+                    })
                     .child(
                         div()
                             .font_semibold()
@@ -3039,6 +3338,7 @@ impl QuillApp {
                 fade_gen,
                 hidden,
             ))
+            .children(saved_toast)
             // Fade the whole overlay in over 200 ms when it opens
             // (tdesktop `mediaviewShowDuration`). Closing is instant: a
             // fade-out would have to keep the closed viewer's state alive.
