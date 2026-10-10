@@ -98,7 +98,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInfo)) {
-            self.deep_link_dialog = Some("This link requires a newer version of Telegram. Please update your app to open it.".into());
+            self.deep_link_dialog = Some(
+                "This link requires a newer version of Quill. Please update Quill to open it."
+                    .into(),
+            );
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkShare)) {
             self.share_link_text = Some("https://example.com/article\nWorth a look".into());
@@ -939,6 +942,41 @@ impl QuillApp {
             self.record_locked = true;
             self.status_note =
                 "screenshot demo — recording voice · locked · playing voice note".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVoicePause)) {
+            // A paused recording: the play button leads the bar, the
+            // preview has played to 3 s of 7, and Play once is on.
+            let bars = vec![
+                4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14, 22, 9, 17, 5, 26, 11,
+            ];
+            let mut capture =
+                VoiceCapture::preview(demo_media_allowlist().join("demo-voice.ogg"), 7, bars);
+            capture.pause();
+            self.voice_capture = Some(capture);
+            let mut clock = quill::playback::PlaybackClock::new(7.0);
+            clock.seek(3.0);
+            self.record_preview = Some(clock);
+            self.record_once = true;
+            self.status_note = "screenshot demo — recording paused · previewing · play once".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRestrictedComposer)) {
+            let variant = std::env::var("QUILL_DEMO_RESTRICTION").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::composer_leftovers_demo::apply_ready_restricted_composer(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &variant,
+                    quill::local_time::now_unix(),
+                );
+            }
+            self.status_note = if variant == "media" {
+                self.send_denial(quill::send_rights::SendKind::VoiceMessages)
+                    .unwrap_or_default()
+            } else {
+                "screenshot demo — restricted composer".into()
+            };
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyShortcuts)) {
             self.shortcuts_open = true;
@@ -2379,6 +2417,19 @@ impl QuillApp {
                 );
             }
             self.status_note = "screenshot demo — comments and threads".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyForumColumn)) {
+            let view = std::env::var("QUILL_DEMO_FORUM_COLUMN_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::forum_column_demo::apply_ready_forum_column(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            self.status_note = "screenshot demo — forum topic column and topic threads".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyForumThreadStories)) {
             let view = std::env::var("QUILL_DEMO_FTS_VIEW").unwrap_or_default();

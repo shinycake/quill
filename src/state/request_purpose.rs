@@ -803,6 +803,30 @@ pub enum RequestPurpose {
     DeleteRevokedChatInviteLink,
     /// B8: `deleteAllRevokedChatInviteLinks`.
     DeleteAllRevokedChatInviteLinks,
+    /// `getChatInviteLinks` with another admin's `creator_user_id`.
+    GetAdminChatInviteLinks {
+        revoked: bool,
+    },
+    /// `getChatJoinRequests` filtered by one invite link; `append` marks
+    /// a later page.
+    GetLinkJoinRequests {
+        append: bool,
+    },
+    /// `processChatJoinRequests` for one invite link.
+    ProcessLinkJoinRequests {
+        approve: bool,
+    },
+    /// `getChatBoosts`; `append` marks a later page.
+    GetChatBoosts {
+        append: bool,
+    },
+    /// `getChatBoostLink`.
+    GetChatBoostLink,
+    /// `toggleSupergroupUsernameIsActive`. Response `ok`; the new lists
+    /// arrive with `updateSupergroup`.
+    ToggleSupergroupUsername,
+    /// `reorderSupergroupActiveUsernames`. Same follow-up.
+    ReorderSupergroupUsernames,
     /// Phase D3b: `getChatAdministrators`. Response is
     /// `chatAdministrators`; correlated via `PendingRequest::chat_id`.
     GetChatAdministrators,

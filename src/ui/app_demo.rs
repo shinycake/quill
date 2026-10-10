@@ -347,6 +347,8 @@ pub(super) fn demo_seed_for(
         ),
         ScreenshotDemo::ReadyArchiveHint
         | ScreenshotDemo::ReadyChatBadges
+        | ScreenshotDemo::ReadyChatExport
+        | ScreenshotDemo::ReadyWindowSettings
         | ScreenshotDemo::ReadyFoldersChats
         | ScreenshotDemo::ReadyFoldersChatPicker
         | ScreenshotDemo::ReadyFoldersToast => (
@@ -434,7 +436,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sticker panel + sticker in history".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVoice => (
+        ScreenshotDemo::ReadyRestrictedComposer => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — restricted composer".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyVoice | ScreenshotDemo::ReadyVoicePause => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — voice record bar + history playback".into(),
@@ -694,6 +702,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — member moderation (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyLinksBoosts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — admin links, boosts and usernames (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyGroupAdminSettings => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -828,6 +843,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — comments and threads".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyForumColumn => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — forum topic column and topic threads".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyForumThreadStories => (
@@ -2168,6 +2189,8 @@ impl QuillApp {
             story_stats_open: false,
             topic_info_open: false,
             thread_info_open: false,
+            forum_chats_peek: false,
+            forum_column_shown: false,
             story_report_open: false,
             story_report_text_input,
             story_page: None,
@@ -2396,6 +2419,8 @@ impl QuillApp {
             video_note_capture: None,
             record_locked: false,
             record_discard_confirm: false,
+            record_preview: None,
+            record_once: false,
             drop_paths: Vec::new(),
             drop_state: None,
             drop_preview: None,
@@ -2412,6 +2437,8 @@ impl QuillApp {
             group_call_chat_shown: false,
             group_call_ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
+            quit_guard: Default::default(),
+            quit_clock: std::time::Instant::now(),
             ptt_capture: false,
             global_ptt: Default::default(),
             global_ptt_polling: false,
@@ -2465,6 +2492,7 @@ impl QuillApp {
             invite_link_dialog: None,
             invite_link_details: None,
             revoked_links_open: false,
+            invite_link_qr: None,
             admin_dialog: None,
             create_chat_dialog: None,
             member_dialog: None,
@@ -2562,6 +2590,8 @@ impl QuillApp {
             folder_new_chats_dialog: None,
             folder_limit_box: None,
             archive_hint_open: false,
+            window_settings_screenshot: false,
+            chat_export_dialog: None,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,
@@ -2632,6 +2662,7 @@ impl QuillApp {
         app.demo_setup_updates_sync(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
+        app.demo_setup_links_boosts(demo, cx);
         app.demo_setup_admin_extras(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);

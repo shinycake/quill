@@ -676,6 +676,10 @@ pub struct QuillApp {
     pub(super) record_locked: bool,
     /// MED2: the record bar is showing the discard-confirmation row.
     pub(super) record_discard_confirm: bool,
+    /// The paused recording is being played back (position of the preview).
+    pub(super) record_preview: Option<PlaybackClock>,
+    /// "Play once": the voice message goes out as a one-time message.
+    pub(super) record_once: bool,
     /// Files being dragged over the conversation, and what they hold
     /// (`drop_zones`).
     pub(super) drop_paths: Vec<std::path::PathBuf>,
@@ -712,6 +716,9 @@ pub struct QuillApp {
     /// and whether Settings is waiting for the next key to bind.
     pub(super) group_call_ptt: quill::calls::ptt::PushToTalk,
     pub(super) ptt_clock: Instant,
+    /// Cmd+Q hold detection (`macWarnBeforeQuit`) and its clock origin.
+    pub(super) quit_guard: quill::quit_guard::QuitGuard,
+    pub(super) quit_clock: Instant,
     pub(super) ptt_capture: bool,
     /// System-wide push-to-talk hook, live only while joined with PTT on.
     pub(super) global_ptt: quill::calls::ptt_global::PlatformController,
@@ -801,6 +808,8 @@ pub struct QuillApp {
     pub(super) invite_link_details: Option<(ChatId, String)>,
     /// B8: whether the revoked-links list is expanded.
     pub(super) revoked_links_open: bool,
+    /// The invite link whose QR code is showing.
+    pub(super) invite_link_qr: Option<(ChatId, String, Arc<RenderImage>)>,
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     pub(super) admin_dialog: Option<AdminDialog>,
@@ -1029,6 +1038,12 @@ pub struct QuillApp {
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.
     pub(super) thread_info_open: bool,
+    /// On a narrow window the forum's topic column replaces the chat list;
+    /// this brings the list back until another forum opens.
+    pub(super) forum_chats_peek: bool,
+    /// The forum topic column is on screen this frame, so the conversation
+    /// shows a hint instead of repeating the topic list.
+    pub(super) forum_column_shown: bool,
     /// Phase 9.5: report flow UI open in the viewer overlay
     /// (`reportStory`).
     pub(super) story_report_open: bool,
@@ -1139,6 +1154,10 @@ pub struct QuillApp {
     pub(super) folder_limit_box: Option<quill::folder_limits::FolderLimitKind>,
     /// The Archive menu's "How does it work?" box is open.
     pub(super) archive_hint_open: bool,
+    /// Screenshot demo: the Appearance box shows only the window and tray switches.
+    pub(super) window_settings_screenshot: bool,
+    /// The "Export chat history" box.
+    pub(super) chat_export_dialog: Option<super::chat_export_ui::ChatExportDraft>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

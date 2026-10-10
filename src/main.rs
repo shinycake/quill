@@ -325,6 +325,7 @@ fn ui_main(args: &[String]) {
 
     let credentials = quill::credentials::load();
     let appearance = ui::QuillApp::load_appearance();
+    quill::tray::set_tray_enabled(appearance.show_tray_icon);
     let start_in_tray =
         args.iter().any(|arg| arg == "--start-minimized") || appearance.start_in_tray;
     let application = quill_application(appearance.interface_scale_pct).with_assets(QuillAssets);
@@ -532,13 +533,31 @@ fn install_main_window_tray(
         }
     }
     quill::notify_focus::warm();
-    #[cfg(target_os = "macos")]
-    window.on_window_should_close(cx, |_, cx| {
-        if quill::tray::tray_available() {
-            cx.hide();
-            false
-        } else {
-            true
+    // The title-bar close button: "Run in the background" hides the app
+    // (macOS) or minimizes the window (Linux/Windows, where GPUI cannot hide
+    // a window), otherwise the window closes.
+    window.on_window_should_close(cx, {
+        let view = view.downgrade();
+        move |window, cx| {
+            use quill::tray::{CloseOutcome, close_outcome};
+            let background = view
+                .update(cx, |this, _| this.minimize_to_tray())
+                .unwrap_or(false);
+            match close_outcome(
+                background,
+                quill::tray::tray_available(),
+                cfg!(target_os = "macos"),
+            ) {
+                CloseOutcome::Quit => true,
+                CloseOutcome::HideApp => {
+                    cx.hide();
+                    false
+                }
+                CloseOutcome::Minimize => {
+                    window.minimize_window();
+                    false
+                }
+            }
         }
     });
     // parity:platform-tray-icon — system tray icon with
@@ -722,6 +741,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-channels-admin", ReadyChannelsAdmin),
         ("ready-chat-avatars", ReadyChatAvatars),
         ("ready-chat-badges", ReadyChatBadges),
+        ("ready-chat-export", ReadyChatExport),
         ("ready-chat-header", ReadyChatHeader),
         ("ready-chat-list", ReadyChatListMenu),
         ("ready-chat-list-2", ReadyChatList),
@@ -783,6 +803,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-folders-tag-color", ReadyFoldersTagColor),
         ("ready-folders-tags", ReadyFoldersTags),
         ("ready-folders-toast", ReadyFoldersToast),
+        ("ready-forum-column", ReadyForumColumn),
         ("ready-forum-thread-stories", ReadyForumThreadStories),
         ("ready-forum-topics", ReadyForumTopics),
         ("ready-forums-saved", ReadyForumsSaved),
@@ -812,6 +833,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-key-verification", ReadyKeyVerification),
         ("ready-keybindings", ReadyKeybindings),
         ("ready-link-preview", ReadyLinkPreview),
+        ("ready-links-boosts", ReadyLinksBoosts),
         ("ready-local-storage", ReadyLocalStorage),
         ("ready-location", ReadyLocation),
         ("ready-lock-screen", ReadyLockScreen),
@@ -857,6 +879,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-reply-keyboard", ReadyReplyKeyboard),
         ("ready-reply-media", ReadyReplyMedia),
         ("ready-reply-quote", ReadyReplyQuote),
+        ("ready-restricted-composer", ReadyRestrictedComposer),
         ("ready-reveal", ReadyReveal),
         ("ready-rich-ai-tools", ReadyRichAiTools),
         ("ready-rich-editor", ReadyRichEditor),
@@ -945,7 +968,9 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-viewer-gif", ReadyViewerGif),
         ("ready-viewer-shared", ReadyViewerShared),
         ("ready-voice", ReadyVoice),
+        ("ready-voice-pause", ReadyVoicePause),
         ("ready-web-sessions", ReadyWebSessions),
+        ("ready-window-settings", ReadyWindowSettings),
         ("wait-code", WaitCode),
         ("wait-code-firebase", WaitCodeFirebase),
         ("wait-code-flash", WaitCodeFlash),
@@ -1156,6 +1181,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             ".quill-ready-ready-chatlist-suggestions-phone"
         }
         ScreenshotDemo::ReadyChatBadges => ".quill-ready-ready-chat-badges",
+        ScreenshotDemo::ReadyChatExport => ".quill-ready-ready-chat-export",
+        ScreenshotDemo::ReadyWindowSettings => ".quill-ready-ready-window-settings",
         ScreenshotDemo::ReadyFoldersChats => ".quill-ready-ready-folders-chats",
         ScreenshotDemo::ReadyFoldersChatPicker => ".quill-ready-ready-folders-chat-picker",
         ScreenshotDemo::ReadyFoldersToast => ".quill-ready-ready-folders-toast",
@@ -1178,6 +1205,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyStickers => ".quill-ready-ready-stickers",
         ScreenshotDemo::ReadyStickerPlayback => ".quill-ready-ready-sticker-playback",
         ScreenshotDemo::ReadyVoice => ".quill-ready-ready-voice",
+        ScreenshotDemo::ReadyVoicePause => ".quill-ready-ready-voice-pause",
+        ScreenshotDemo::ReadyRestrictedComposer => ".quill-ready-ready-restricted-composer",
         ScreenshotDemo::ReadyGameCard => ".quill-ready-ready-game-card",
         ScreenshotDemo::ReadyLinkPreview => ".quill-ready-ready-link-preview",
         ScreenshotDemo::ReadyComposerPreview => ".quill-ready-ready-composer-preview",
@@ -1229,6 +1258,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyRtlPolish => ".quill-ready-ready-rtl-polish",
         ScreenshotDemo::ReadyServiceMessages => ".quill-ready-ready-service-messages",
         ScreenshotDemo::ReadyThreads => ".quill-ready-ready-threads",
+        ScreenshotDemo::ReadyForumColumn => ".quill-ready-ready-forum-column",
         ScreenshotDemo::ReadyForumThreadStories => ".quill-ready-ready-forum-thread-stories",
         ScreenshotDemo::ReadyForumsSaved => ".quill-ready-ready-forums-saved",
         ScreenshotDemo::ReadyBubbleHeaders => ".quill-ready-ready-bubble-headers",
@@ -1358,6 +1388,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyProfilePanels => ".quill-ready-ready-profile-panels",
         ScreenshotDemo::ReadyMemberModeration => ".quill-ready-ready-member-moderation",
         ScreenshotDemo::ReadyGroupAdminSettings => ".quill-ready-ready-group-admin-settings",
+        ScreenshotDemo::ReadyLinksBoosts => ".quill-ready-ready-links-boosts",
         ScreenshotDemo::ReadyUpdatesSync => ".quill-ready-ready-updates-sync",
         ScreenshotDemo::ReadyUsername => ".quill-ready-ready-username",
         ScreenshotDemo::ReadyShortcuts => ".quill-ready-ready-shortcuts",

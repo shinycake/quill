@@ -46,7 +46,7 @@ pub(crate) fn joined_label(date: i32, via_folder: bool) -> String {
 }
 
 impl QuillApp {
-    fn invite_block_title(&self, text: &str, cx: &mut Context<Self>) -> Div {
+    pub(super) fn invite_block_title(&self, text: &str, cx: &mut Context<Self>) -> Div {
         div()
             .text_xs()
             .font_semibold()
@@ -235,6 +235,9 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if let Some(open) = self.admin_links_block(chat_id, cx) {
+            return Some(open);
+        }
         let Some(InviteLinkCountsFetch::Loaded(counts)) = self
             .session()
             .and_then(|s| s.invite_link_counts.get(&chat_id.0))
@@ -278,6 +281,15 @@ impl QuillApp {
                                 count.invite_link_count,
                                 count.revoked_invite_link_count,
                             )),
+                    )
+                    .child(
+                        Button::new(("invite-link-count-open", uid as u64))
+                            .label("View")
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_admin_links(chat_id, uid, cx);
+                            })),
                     ),
             );
         }

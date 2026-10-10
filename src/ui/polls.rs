@@ -621,6 +621,9 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        if self.deny_send(quill::send_rights::SendKind::Polls, cx) {
+            return;
+        }
         self.poll_dialog = Some(PollDialog::new(window, cx));
         if let Some(dialog) = &self.poll_dialog {
             dialog

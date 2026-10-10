@@ -73,6 +73,8 @@ impl QuillApp {
             demo,
             D::ReadyArchiveHint
                 | D::ReadyChatBadges
+                | D::ReadyChatExport
+                | D::ReadyWindowSettings
                 | D::ReadyFoldersChatPicker
                 | D::ReadyFoldersChats
                 | D::ReadyFoldersToast
@@ -82,7 +84,13 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_chat_badges(session, &self.demo_sink, &self.demo_seq);
-            if !matches!(demo, D::ReadyArchiveHint | D::ReadyChatBadges) {
+            if !matches!(
+                demo,
+                D::ReadyArchiveHint
+                    | D::ReadyChatBadges
+                    | D::ReadyChatExport
+                    | D::ReadyWindowSettings
+            ) {
                 apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
             }
         }
@@ -90,6 +98,16 @@ impl QuillApp {
             D::ReadyArchiveHint => {
                 self.archive_hint_open = true;
                 self.status_note = "screenshot demo — the Archive's How does it work? box".into();
+            }
+            D::ReadyChatExport => {
+                self.start_chat_export(quill::ids::ChatId(52), cx);
+                self.status_note = "screenshot demo — the Export chat history box".into();
+            }
+            D::ReadyWindowSettings => {
+                self.appearance.minimize_to_tray = true;
+                self.window_settings_screenshot = true;
+                self.appearance_open = true;
+                self.status_note = "screenshot demo — tray and window settings".into();
             }
             D::ReadyChatBadges => {
                 self.status_note = "screenshot demo — video chat badge and emoji status".into();

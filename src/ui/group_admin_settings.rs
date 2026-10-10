@@ -77,6 +77,9 @@ impl QuillApp {
         };
         dialog.view = view;
         let chat_id = dialog.chat_id;
+        if view == GroupSettingsView::Boosts {
+            self.open_boosts_page(chat_id, false);
+        }
         if view == GroupSettingsView::Discussion
             && self.is_channel_chat(chat_id)
             && let Some(live) = self.live.as_mut()
@@ -452,6 +455,29 @@ impl QuillApp {
                 cx,
             ));
         }
+        if controls.usernames {
+            let count = session
+                .and_then(|s| s.chat_usernames(chat_id))
+                .map_or(0, |lists| lists.active.len());
+            body = body.child(self.settings_link_row(
+                "gl-usernames",
+                IconName::Link,
+                "Link order",
+                format!("{count} active"),
+                GroupSettingsView::Usernames,
+                cx,
+            ));
+        }
+        if controls.boosts {
+            body = body.child(self.settings_link_row(
+                "gl-boosts",
+                IconName::Zap,
+                "Boosts",
+                String::new(),
+                GroupSettingsView::Boosts,
+                cx,
+            ));
+        }
         if controls.upgrade {
             body = body.child(
                 action_row(
@@ -808,6 +834,16 @@ impl QuillApp {
                     "Discussion".to_string()
                 },
                 self.settings_discussion(chat_id, cx),
+                div().flex().gap_2().child(back).into_any_element(),
+            ),
+            GroupSettingsView::Usernames => (
+                "Link order".to_string(),
+                self.settings_usernames(chat_id, cx),
+                div().flex().gap_2().child(back).into_any_element(),
+            ),
+            GroupSettingsView::Boosts => (
+                "Boosts".to_string(),
+                self.settings_boosts(chat_id, cx),
                 div().flex().gap_2().child(back).into_any_element(),
             ),
             GroupSettingsView::ConfirmUpgrade => (

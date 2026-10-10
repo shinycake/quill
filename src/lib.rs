@@ -83,6 +83,7 @@ pub mod presence;
 pub mod privacy;
 pub mod profile_forms;
 pub mod proxy;
+pub mod quit_guard;
 pub mod reaction_who;
 pub mod reply_options;
 pub mod request_share;
@@ -92,6 +93,7 @@ pub mod schedule;
 pub mod search_filters;
 pub mod selection_pin;
 pub mod send_button;
+pub mod send_rights;
 pub mod service_text;
 #[cfg(test)]
 mod service_text_tests;

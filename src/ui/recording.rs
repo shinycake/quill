@@ -11,9 +11,13 @@ use gpui_kit::*;
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerReplyTo};
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::{ChatId, MessageId};
+use quill::playback::PlaybackClock;
+use quill::send_rights::SendKind;
 use quill::telegram::client::copy_and_parse;
 use quill::video::VideoNoteCapture;
-use quill::voice::{VoiceCapture, format_voice_duration};
+use quill::voice::{
+    RecordBarFacts, RecordControl, VoiceCapture, format_voice_duration, record_controls,
+};
 use std::sync::Arc;
 /// MED2: the record button's mode (TGX `preferVideoMode`, persisted in
 /// `MediaPrefs`). Desktop mapping of TGX's hold-to-record / tap-to-switch:
@@ -95,6 +99,9 @@ impl QuillApp {
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
         }
+        if self.deny_send(SendKind::VoiceMessages, cx) {
+            return;
+        }
         self.with_capture_access(false, Self::begin_voice_capture, cx);
     }
 
@@ -140,6 +147,9 @@ impl QuillApp {
         }
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
+        }
+        if self.deny_send(SendKind::VideoMessages, cx) {
+            return;
         }
         self.with_capture_access(true, Self::begin_video_note_capture, cx);
     }
@@ -222,7 +232,111 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Pause the voice recording, or carry on after a pause. Pausing
+    /// releases the microphone; resuming stops any preview first.
+    pub(super) fn toggle_record_pause(&mut self, cx: &mut Context<Self>) {
+        let Some(capture) = self.voice_capture.as_mut() else {
+            return;
+        };
+        if capture.is_paused() {
+            capture.resume();
+            self.stop_record_preview();
+            self.status_note = "recording voice note".into();
+        } else {
+            capture.pause();
+            self.status_note = "recording paused".into();
+        }
+        self.sync_voice_action();
+        cx.notify();
+    }
+
+    /// Stop the preview of a paused recording.
+    pub(super) fn stop_record_preview(&mut self) {
+        if self.record_preview.take().is_some() {
+            self.kill_shared_player();
+        }
+    }
+
+    /// Play or pause what has been recorded so far. A preview that reached
+    /// its end starts again from the top.
+    pub(super) fn toggle_record_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(capture) = self.voice_capture.as_ref() else {
+            return;
+        };
+        let Some(path) = capture.preview_path().map(std::path::Path::to_path_buf) else {
+            self.status_note = "getting the recording ready…".into();
+            cx.notify();
+            return;
+        };
+        let seconds = f64::from(capture.elapsed_secs());
+        if let Some(clock) = self.record_preview.as_mut() {
+            if clock.is_playing() {
+                clock.pause();
+                self.audio.pause();
+                cx.notify();
+                return;
+            }
+            if !clock.finished() && self.audio.is_loaded() && !self.audio.is_ended() {
+                let at = clock.elapsed_secs();
+                if self.audio.resume(at).is_ok() {
+                    clock.resume();
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+        // Whatever else was playing gives way to the preview.
+        self.stop_voice_playback();
+        self.stop_audio_playback();
+        if self.start_player(&path, 0.0) {
+            let mut clock = PlaybackClock::new(seconds);
+            clock.resume();
+            self.record_preview = Some(clock);
+            self.spawn_voice_tick(cx);
+        } else {
+            self.status_note = "couldn't play the recording".into();
+        }
+        cx.notify();
+    }
+
+    /// The preview ran to its end: show it stopped, ready to play again.
+    pub(super) fn check_record_preview(&mut self) {
+        let ended = self
+            .record_preview
+            .as_ref()
+            .is_some_and(|clock| clock.is_playing() && (clock.finished() || self.audio.is_ended()));
+        if ended {
+            self.record_preview = None;
+            self.kill_shared_player();
+        }
+    }
+
+    /// Switch "Play once" for the voice message being recorded.
+    pub(super) fn toggle_record_once(&mut self, cx: &mut Context<Self>) {
+        self.record_once = !self.record_once;
+        self.status_note = if self.record_once {
+            "The recipient will be able to listen only once.".into()
+        } else {
+            "play once off".into()
+        };
+        cx.notify();
+    }
+
+    /// Self-destructing messages exist only in private chats.
+    fn once_allowed(&self) -> bool {
+        self.session()
+            .and_then(|session| session.chats.get(&session.open_chat?.0))
+            .is_some_and(|chat| {
+                matches!(
+                    chat.kind,
+                    quill::telegram::envelope::ChatKind::Private { .. }
+                )
+            })
+    }
+
     pub(super) fn cancel_recording(&mut self, cx: &mut Context<Self>) {
+        self.stop_record_preview();
+        self.record_once = false;
         let was_video = self.video_note_capture.is_some();
         if let Some(capture) = self.voice_capture.take() {
             capture.discard();
@@ -258,6 +372,8 @@ impl QuillApp {
         // not leak into the next recording.
         self.record_locked = false;
         self.record_discard_confirm = false;
+        self.stop_record_preview();
+        let play_once = std::mem::take(&mut self.record_once);
         let caption = self.composer.read(cx).value().to_string();
         let draft = match capture.finish() {
             Ok(draft) => draft,
@@ -275,6 +391,7 @@ impl QuillApp {
                 &draft,
                 caption.trim(),
                 reply_to,
+                play_once,
             );
             self.status_note = match result {
                 Ok(_) => "sending voice note".into(),
@@ -343,6 +460,7 @@ impl QuillApp {
         let Some(capture) = self.video_note_capture.take() else {
             return;
         };
+        self.record_once = false;
         // MED2 fix-up: the send consumes the recording — locked state must
         // not leak into the next recording.
         self.record_locked = false;
@@ -493,7 +611,10 @@ impl QuillApp {
     /// / `chatActionRecordingVideoNote` to the open chat (Unigram record
     /// actions). Cancels when recording stops.
     pub(super) fn sync_voice_action(&mut self) {
-        let voice = self.voice_capture.is_some();
+        let voice = self
+            .voice_capture
+            .as_ref()
+            .is_some_and(|capture| !capture.is_paused());
         let video = self.video_note_capture.is_some();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -530,11 +651,24 @@ impl QuillApp {
             .as_ref()
             .map(|capture| capture.bars.clone())
             .unwrap_or_default();
-        // A pulsing red dot + elapsed time, the live waveform, then the
-        // lock / discard / send actions — one row, like the composer it
-        // replaces while recording.
+        let paused = !video
+            && self
+                .voice_capture
+                .as_ref()
+                .is_some_and(|capture| capture.is_paused());
+        let previewing = self
+            .record_preview
+            .as_ref()
+            .is_some_and(|clock| clock.is_playing());
+        // While a paused recording plays, the time and the lit part of the
+        // waveform follow the playhead.
+        let (shown_seconds, lit) = match &self.record_preview {
+            Some(clock) if paused => (clock.elapsed_secs().floor() as i32, clock.fraction() as f32),
+            _ => (seconds, 1.0),
+        };
         let label = format!(
-            "Recording {} {}",
+            "{} {} {}",
+            if paused { "Paused" } else { "Recording" },
             if video {
                 "video message"
             } else {
@@ -542,6 +676,40 @@ impl QuillApp {
             },
             format_voice_duration(seconds),
         );
+        // A pulsing red dot while recording; on a paused recording a play
+        // button takes its place (tdesktop's listen state).
+        let leading = if paused {
+            let control = RecordControl::Preview;
+            Button::new("record-preview")
+                .icon(if previewing {
+                    gpui_kit::assets::IconName::Pause
+                } else {
+                    gpui_kit::assets::IconName::Play
+                })
+                .primary()
+                .rounded_full()
+                .small()
+                .tooltip(control.label(previewing))
+                .accessibility_label(control.label(previewing))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.toggle_record_preview(cx);
+                }))
+                .into_any_element()
+        } else {
+            div()
+                .size(px(10.))
+                .flex_none()
+                .rounded_full()
+                .bg(danger())
+                .with_animation(
+                    "record-pulse",
+                    Animation::new(std::time::Duration::from_millis(1200))
+                        .repeat()
+                        .with_easing(pulsating_between(0.35, 1.0)),
+                    |dot, delta| dot.opacity(delta),
+                )
+                .into_any_element()
+        };
         div()
             .id("voice-record-bar")
             .role(gpui_kit::Role::Group)
@@ -549,26 +717,13 @@ impl QuillApp {
             .flex()
             .items_center()
             .gap_3()
-            .child(
-                div()
-                    .size(px(10.))
-                    .flex_none()
-                    .rounded_full()
-                    .bg(danger())
-                    .with_animation(
-                        "record-pulse",
-                        Animation::new(std::time::Duration::from_millis(1200))
-                            .repeat()
-                            .with_easing(pulsating_between(0.35, 1.0)),
-                        |dot, delta| dot.opacity(delta),
-                    ),
-            )
+            .child(leading)
             .child(
                 div()
                     .text_sm()
                     .font_medium()
                     .flex_none()
-                    .child(format_voice_duration(seconds)),
+                    .child(format_voice_duration(shown_seconds)),
             )
             .child(
                 div()
@@ -581,7 +736,7 @@ impl QuillApp {
                             .child("Video message")
                     })
                     .when(!video, |this| {
-                        this.child(waveform_row(0, &bars, accent().into(), 1.0))
+                        this.child(waveform_row(0, &bars, accent().into(), lit))
                     }),
             )
             .child(self.record_bar_actions(cx))
@@ -617,12 +772,21 @@ impl QuillApp {
                 )
                 .into_any_element();
         }
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(
-                Button::new("lock-record")
+        let video = self.video_note_capture.is_some();
+        let paused = !video
+            && self
+                .voice_capture
+                .as_ref()
+                .is_some_and(|capture| capture.is_paused());
+        let controls = record_controls(RecordBarFacts {
+            video,
+            paused,
+            once_allowed: !video && self.once_allowed(),
+        });
+        let mut row = div().flex().items_center().gap_1();
+        for control in controls {
+            row = row.child(match control {
+                RecordControl::Lock => Button::new("lock-record")
                     .icon(gpui_kit::assets::IconName::Lock)
                     .ghost()
                     .selected(self.record_locked)
@@ -631,36 +795,61 @@ impl QuillApp {
                     } else {
                         "Lock: hands-free recording — Esc won't cancel"
                     })
-                    .accessibility_label(if self.record_locked {
-                        "Unlock recording"
-                    } else {
-                        "Lock recording"
-                    })
+                    .accessibility_label(control.label(self.record_locked))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_record_lock(cx);
-                    })),
-            )
-            .child(
-                Button::new("cancel-record")
+                    }))
+                    .into_any_element(),
+                RecordControl::Pause | RecordControl::Resume => {
+                    let resume = control == RecordControl::Resume;
+                    Button::new("pause-record")
+                        .icon(if resume {
+                            gpui_kit::assets::IconName::Mic
+                        } else {
+                            gpui_kit::assets::IconName::Pause
+                        })
+                        .ghost()
+                        .tooltip(control.label(false))
+                        .accessibility_label(control.label(false))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.toggle_record_pause(cx);
+                        }))
+                        .into_any_element()
+                }
+                // The play button leads the bar while paused.
+                RecordControl::Preview => div().into_any_element(),
+                RecordControl::PlayOnce => Button::new("once-record")
+                    .label("Play once")
+                    .ghost()
+                    .small()
+                    .selected(self.record_once)
+                    .tooltip(control.label(self.record_once))
+                    .accessibility_label(control.label(self.record_once))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_record_once(cx);
+                    }))
+                    .into_any_element(),
+                RecordControl::Discard => Button::new("cancel-record")
                     .icon(gpui_kit::assets::IconName::Trash)
                     .ghost()
-                    .tooltip("Discard recording")
-                    .accessibility_label("Discard recording")
+                    .tooltip(control.label(false))
+                    .accessibility_label(control.label(false))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.request_discard_recording(cx);
-                    })),
-            )
-            .child(
-                Button::new("send-record")
+                    }))
+                    .into_any_element(),
+                RecordControl::Send => Button::new("send-record")
                     .icon(gpui_kit::assets::IconName::Send)
                     .primary()
                     .rounded_full()
-                    .tooltip("Send recording")
-                    .accessibility_label("Send recording")
+                    .tooltip(control.label(false))
+                    .accessibility_label(control.label(false))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.send_recording(window, cx);
-                    })),
-            )
-            .into_any_element()
+                    }))
+                    .into_any_element(),
+            });
+        }
+        row.into_any_element()
     }
 }

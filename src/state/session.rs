@@ -933,6 +933,16 @@ pub struct Session {
     pub join_request_latest: HashMap<i64, RequestId>,
     /// B8: `getChatInviteLinks` with `is_revoked = true`, keyed by chat id.
     pub revoked_invite_links: HashMap<i64, InviteLinkFetch>,
+    /// Another admin's invite links (owner only), by chat id.
+    pub admin_invite_links: HashMap<i64, AdminLinksState>,
+    /// Pending join requests of the invite link whose details are open.
+    pub link_join_requests: HashMap<i64, LinkRequestsState>,
+    /// `getChatBoosts` list of the open tab, by chat id.
+    pub chat_boost_lists: HashMap<i64, BoostsListState>,
+    /// `getChatBoostLink` answer `(link, is_public)`, by chat id.
+    pub chat_boost_links: HashMap<i64, (String, bool)>,
+    /// `supergroup.usernames`, by supergroup id.
+    pub supergroup_username_lists: HashMap<i64, crate::telegram::envelope::SupergroupUsernames>,
     /// B8: `getChatInviteLinkCounts` (owner only), keyed by chat id.
     pub invite_link_counts: HashMap<i64, InviteLinkCountsFetch>,
     /// B8: members of the invite link whose details are open, by chat id.
@@ -1561,6 +1571,11 @@ impl Session {
             join_request_latest: HashMap::new(),
             revoked_invite_links: HashMap::new(),
             invite_link_counts: HashMap::new(),
+            admin_invite_links: HashMap::new(),
+            link_join_requests: HashMap::new(),
+            chat_boost_lists: HashMap::new(),
+            chat_boost_links: HashMap::new(),
+            supergroup_username_lists: HashMap::new(),
             invite_link_members: HashMap::new(),
             revoked_link_deletions: HashMap::new(),
             pending_join_request_counts: HashMap::new(),

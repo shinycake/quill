@@ -14,6 +14,7 @@
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
+use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -441,8 +442,8 @@ impl QuillApp {
                         if muted { "Unmute" } else { "Mute" },
                         0.,
                     )
+                    .swallow_press()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        cx.stop_propagation();
                         this.toggle_call_mute(cx);
                     })),
                 )
@@ -469,8 +470,8 @@ impl QuillApp {
                         "End Call",
                         std::f32::consts::PI * 0.75,
                     )
+                    .swallow_press()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        cx.stop_propagation();
                         this.hang_up_call(cx);
                     })),
                 )

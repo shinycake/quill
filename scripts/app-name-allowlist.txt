@@ -1,0 +1,13 @@
+# path|text -- hits ignored by scripts/check-app-name.sh (see the script header).
+# Right-to-left demo text imitating a message that mentions the official app.
+src/ui/rtl_demo.rs|Telegram Desktop
+src/ui/demo_setup.rs|Telegram Desktop
+# Detecting another app registered as the tg: link handler.
+src/link_handler.rs|Telegram Desktop
+# Names the official app's theme file format (Quill does not use it).
+src/deep_link_types.rs|Telegram Desktop theme files
+# Fixture JSON imitating a server session list entry.
+src/telegram/envelope/sessions_tests.rs|Telegram Desktop
+src/state/tests/sessions.rs|Telegram Desktop
+# Sign-in copy: the Telegram service is the one that phones the user.
+src/signin.rs|Telegram will call

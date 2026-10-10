@@ -433,6 +433,8 @@ impl QuillApp {
             .pending_reply
             .clone()
             .filter(|reply| reply.target_chat == Some(chat_id));
+        // Choosing a chat from the list ends the peek at it.
+        self.forum_chats_peek = false;
         // Phase B4: the TTL picker belongs to the previous chat.
         self.ttl_picker_open = false;
         if self

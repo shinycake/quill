@@ -77,6 +77,11 @@ pub struct GroupAdminControls {
     pub reactions: bool,
     /// Offer the explicit "Upgrade to supergroup" action.
     pub upgrade: bool,
+    /// Owner of a supergroup or channel with more than one username to
+    /// manage (tdesktop's "Link order" list).
+    pub usernames: bool,
+    /// Administrator of a supergroup or channel: boosts list and link.
+    pub boosts: bool,
 }
 
 impl GroupAdminControls {
@@ -144,6 +149,8 @@ impl Session {
             RequestPurpose::SetChatAvailableReactions,
             RequestPurpose::SetChatDiscussionGroup,
             RequestPurpose::UpgradeBasicGroup,
+            RequestPurpose::ToggleSupergroupUsername,
+            RequestPurpose::ReorderSupergroupUsernames,
         ]
         .iter()
         .any(|purpose| self.requests.has_purpose_for_chat(*purpose, chat_id))
@@ -159,7 +166,7 @@ impl Session {
         };
         let owner = self.chat_is_owner(chat_id);
         let can_change_info = self.chat_can_change_info(chat_id);
-        match chat.kind {
+        let mut controls = match chat.kind {
             ChatKind::BasicGroup { basic_group_id } => {
                 // An upgraded group is deactivated: nothing to manage.
                 if self.basic_group_active.get(&basic_group_id) == Some(&false) {
@@ -251,10 +258,17 @@ impl Session {
                         .map(|channel| DiscussionControl::Group { channel }),
                     reactions: can_change_info,
                     upgrade: false,
+                    ..GroupAdminControls::default()
                 }
             }
             _ => GroupAdminControls::default(),
-        }
+        };
+        controls.usernames = owner
+            && self
+                .chat_usernames(chat_id)
+                .is_some_and(|lists| lists.is_manageable());
+        controls.boosts = self.chat_can_view_boosts(chat_id);
+        controls
     }
 
     /// Optimistically set a supergroup toggle; returns the previous value
