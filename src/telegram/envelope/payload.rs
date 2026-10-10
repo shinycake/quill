@@ -1590,6 +1590,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 username: parse_first_active_username(supergroup.get("usernames")),
+                usernames: parse_supergroup_usernames(supergroup.get("usernames")),
                 // Phase A1: own `chatMemberStatus*` (schema 1.8.67 line
                 // 2746); unknown/missing → `Unknown` (gated, no bypass).
                 // `can_restrict_members` gates the slow-mode admin control
@@ -2577,6 +2578,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 })
                 .collect(),
         }),
+        "updateChatAccentColors" => Ok(EnvelopePayload::UpdateChatAccentColors {
+            chat_id: int53(value.get("chat_id"))?,
+            accent: ChatAccent::parse(&value),
+        }),
         "updateChatIsTranslatable" => Ok(EnvelopePayload::UpdateChatIsTranslatable {
             chat_id: int53(value.get("chat_id"))?,
             is_translatable: value
@@ -2711,6 +2716,35 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                         .collect()
                 })
                 .unwrap_or_default(),
+        }),
+        "foundChatBoosts" => Ok(EnvelopePayload::FoundChatBoosts {
+            total_count: int53(value.get("total_count")).map(|v| v.sat_i32())?,
+            boosts: value
+                .get("boosts")
+                .and_then(Value::as_array)
+                .map(|boosts| {
+                    boosts
+                        .iter()
+                        .filter_map(|boost| parse_chat_boost(Some(boost)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            next_offset: value
+                .get("next_offset")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        }),
+        "chatBoostLink" => Ok(EnvelopePayload::ChatBoostLink {
+            link: value
+                .get("link")
+                .and_then(Value::as_str)
+                .ok_or(ParseError::MissingField)?
+                .to_owned(),
+            is_public: value
+                .get("is_public")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         }),
         "chatInviteLinkCounts" => Ok(EnvelopePayload::ChatInviteLinkCounts {
             counts: value

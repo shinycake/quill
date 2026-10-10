@@ -266,6 +266,24 @@ pub(super) fn demo_seed_for(
             "screenshot demo — reply bar with a media thumbnail (injected)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyReplyElsewhere => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — choosing a chat for a reply (injected)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyReplyExternal => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — a reply carried into another chat (injected)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyReplyQuote => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — picking the part to quote (injected)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyEditMedia => (
             Some(seed_ready_send_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -329,6 +347,8 @@ pub(super) fn demo_seed_for(
         ),
         ScreenshotDemo::ReadyArchiveHint
         | ScreenshotDemo::ReadyChatBadges
+        | ScreenshotDemo::ReadyChatExport
+        | ScreenshotDemo::ReadyWindowSettings
         | ScreenshotDemo::ReadyFoldersChats
         | ScreenshotDemo::ReadyFoldersChatPicker
         | ScreenshotDemo::ReadyFoldersToast => (
@@ -416,7 +436,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sticker panel + sticker in history".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVoice => (
+        ScreenshotDemo::ReadyRestrictedComposer => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — restricted composer".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyVoice | ScreenshotDemo::ReadyVoicePause => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — voice record bar + history playback".into(),
@@ -446,6 +472,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — composer link preview chip".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyComposerWysiwyg => (
+            Some(seed_ready_custom_emoji_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — formatted composer field".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyPreviewCards => (
@@ -676,6 +708,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — member moderation (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyLinksBoosts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — admin links, boosts and usernames (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyGroupAdminSettings => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -806,6 +845,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — service and media cards".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyRenderFollowups => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — render follow-ups".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyServiceMessages => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -816,6 +861,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — comments and threads".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyForumColumn => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — forum topic column and topic threads".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyForumThreadStories => (
@@ -1477,10 +1528,13 @@ impl QuillApp {
         let chat_prefs = Self::load_chat_prefs();
         let submit_on_enter = chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
         let composer = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            let mut state = TextareaState::new(window, cx)
                 .placeholder("Write a message...")
                 .auto_grow(1, 8)
-                .submit_on_enter(submit_on_enter)
+                .submit_on_enter(submit_on_enter);
+            // Formatting shows in the field (codex:composer-input).
+            state.set_span_styler(Some(super::composer_field::span_styler()), cx);
+            state
         });
         // Phase C2h: in-call group-chat composer for the voice-chat
         // overlay (sendGroupCallMessage).
@@ -1813,8 +1867,20 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 let mut text = state.read(cx).value().to_string();
                 if matches!(event, InputEvent::Change) {
+                    let prev = this.composer_prev_text.clone();
+                    if this
+                        .markdown_revert
+                        .as_ref()
+                        .is_some_and(|revert| revert.text != text)
+                    {
+                        this.markdown_revert = None;
+                    }
                     if let Some(replaced) = this.apply_instant_replace(&text, window, cx) {
                         text = replaced;
+                    } else if this.apply_markdown_replacement(&prev, window, cx) {
+                        // `**bold**` typed: the markers became formatting.
+                        text = state.read(cx).value().to_string();
+                        this.composer_prev_text = text.clone();
                     }
                     this.sync_composer_typing(&text);
                     this.note_open_draft(true, cx);
@@ -1859,9 +1925,10 @@ impl QuillApp {
                             || !this.pending_attachments.is_empty()
                             || this.forward_bar_here()
                         {
+                            let markup = this.composer_markup(cx);
                             this.submit_composer(
                                 quill::composer::send_text_on_enter(
-                                    text,
+                                    markup,
                                     this.chat_prefs.send_key_mode,
                                 ),
                                 window,
@@ -2010,7 +2077,11 @@ impl QuillApp {
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                         quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
-                        this.activate_first_forward_destination(cx);
+                        if this.reply_elsewhere_open {
+                            this.choose_first_reply_chat(window, cx);
+                        } else {
+                            this.activate_first_forward_destination(cx);
+                        }
                     }
                 }
             },
@@ -2152,6 +2223,8 @@ impl QuillApp {
             story_stats_open: false,
             topic_info_open: false,
             thread_info_open: false,
+            forum_chats_peek: false,
+            forum_column_shown: false,
             story_report_open: false,
             story_report_text_input,
             story_page: None,
@@ -2244,6 +2317,7 @@ impl QuillApp {
             edit_replace_as_file: false,
             composer_preview_token: 0,
             composer_prev_text: String::new(),
+            markdown_revert: None,
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
             schedule_picker: None,
@@ -2328,6 +2402,8 @@ impl QuillApp {
             selection_focus: None,
             drag_select_from: None,
             forward_picker_open: false,
+            reply_elsewhere_open: false,
+            reply_quote_open: false,
             share_selection: quill::share_box::ShareSelection::default(),
             forward_bar_dest: None,
             send_as_open: false,
@@ -2378,6 +2454,8 @@ impl QuillApp {
             video_note_capture: None,
             record_locked: false,
             record_discard_confirm: false,
+            record_preview: None,
+            record_once: false,
             drop_paths: Vec::new(),
             drop_state: None,
             drop_preview: None,
@@ -2386,6 +2464,7 @@ impl QuillApp {
             round_preview: Default::default(),
             slow_mode_tick_chat: None,
             self_destruct_tick_chat: None,
+            live_location_tick_chat: None,
             call_tick_active: false,
             call_window: None,
             group_call_window: None,
@@ -2394,6 +2473,8 @@ impl QuillApp {
             group_call_chat_shown: false,
             group_call_ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
+            quit_guard: Default::default(),
+            quit_clock: std::time::Instant::now(),
             ptt_capture: false,
             global_ptt: Default::default(),
             global_ptt_polling: false,
@@ -2447,6 +2528,7 @@ impl QuillApp {
             invite_link_dialog: None,
             invite_link_details: None,
             revoked_links_open: false,
+            invite_link_qr: None,
             admin_dialog: None,
             create_chat_dialog: None,
             member_dialog: None,
@@ -2545,6 +2627,8 @@ impl QuillApp {
             folder_new_chats_dialog: None,
             folder_limit_box: None,
             archive_hint_open: false,
+            window_settings_screenshot: false,
+            chat_export_dialog: None,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,
@@ -2616,6 +2700,7 @@ impl QuillApp {
         app.demo_setup_updates_sync(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
+        app.demo_setup_links_boosts(demo, cx);
         app.demo_setup_admin_extras(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);
@@ -2771,6 +2856,22 @@ impl QuillApp {
             }
             let handled = edit_app
                 .update(cx, |this, cx| this.try_edit_last_message(window, cx))
+                .unwrap_or(false);
+            if handled {
+                cx.stop_propagation();
+            }
+        })
+        .detach();
+        // Backspace right after `**bold**` turned into formatting puts the
+        // markers back (Telegram Desktop's reverse markdown replacement).
+        let revert_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, window, cx| {
+            let keystroke = &event.keystroke;
+            if keystroke.key != "backspace" || keystroke.modifiers.modified() {
+                return;
+            }
+            let handled = revert_app
+                .update(cx, |this, cx| this.try_revert_markdown(window, cx))
                 .unwrap_or(false);
             if handled {
                 cx.stop_propagation();

@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
+// bidirectional text support and inline tokens in bidi rows. See
+// third_party/gpui-base/QUILL-CHANGES.md.
 //! A visual row whose offsets remain in source UTF-8 bytes.
 use super::bidi::{BidiLine, Fragment, clusters_from_glyphs, fragment_extent};
 use gpui::{App, Pixels, Point, ShapedLine, SharedString, TextAlign, Window, point, px};
@@ -25,10 +26,11 @@ enum Content {
     Text(ShapedLine),
     Inline(Vec<InlineFragment>),
     /// A row with right-to-left content: single-direction runs shaped one by
-    /// one and placed in visual order (`geo.fragments[i]` ↔ `lines[i]`).
+    /// one and placed in visual order (`geo.fragments[i]` ↔ `lines[i]`); an
+    /// inline object (token) has no shaped line.
     Bidi {
         geo: BidiLine,
-        lines: Vec<ShapedLine>,
+        lines: Vec<Option<ShapedLine>>,
     },
 }
 impl From<ShapedLine> for InputLine {
@@ -53,6 +55,15 @@ impl InputLine {
     }
     /// A row whose runs were shaped separately and laid out by [`BidiLine`].
     pub(crate) fn bidi(text: SharedString, geo: BidiLine, lines: Vec<ShapedLine>) -> Self {
+        Self::bidi_with_objects(text, geo, lines.into_iter().map(Some).collect())
+    }
+
+    /// A bidi row some of whose fragments are inline objects (`None`).
+    pub(crate) fn bidi_with_objects(
+        text: SharedString,
+        geo: BidiLine,
+        lines: Vec<Option<ShapedLine>>,
+    ) -> Self {
         debug_assert_eq!(geo.fragments.len(), lines.len());
         Self {
             len: text.len(),
@@ -227,7 +238,12 @@ impl InputLine {
                     TextAlign::Center => remaining / 2.,
                     _ => px(0.),
                 };
-                for (fragment, line) in geo.fragments.iter().zip(lines) {
+                for (fragment, line) in geo
+                    .fragments
+                    .iter()
+                    .zip(lines)
+                    .filter_map(|(fragment, line)| Some((fragment, line.as_ref()?)))
+                {
                     paint(
                         line,
                         pos + point(offset + px(fragment.x + fragment.paint_shift), px(0.)),

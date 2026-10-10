@@ -237,7 +237,12 @@ fn message_reply_to_message_is_typed() {
         )
         .unwrap();
     match story.payload {
-        EnvelopePayload::UpdateNewMessage(message) => assert_eq!(message.reply_to, None),
+        EnvelopePayload::UpdateNewMessage(message) => {
+            // A story reply keeps the poster's chat and the story id.
+            let reply = message.reply_to.expect("story reply");
+            assert_eq!((reply.chat_id, reply.story_id), (ChatId(11), 3));
+            assert_eq!(reply.message_id.0, 0);
+        }
         other => panic!("{other:?}"),
     }
     let schema = include_str!("../../../schema/td_api.tl");

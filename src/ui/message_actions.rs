@@ -9,6 +9,7 @@ use super::message_text::message_rich_block;
 use super::search_ui::chat_search_jump_note;
 use super::*;
 use gpui_kit::component::button::*;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -249,6 +250,27 @@ impl QuillApp {
                     }))
                     .into_any_element(),
             ));
+        }
+        // Reply in Another Chat: TDLib decides per message, secret chats
+        // never take part.
+        let is_secret_chat = matches!(chat_kind, Some(ChatKind::Secret { .. }));
+        if !is_secret_chat
+            && message_id.0 > 0
+            && allows(false, |a| a.can_be_replied_in_another_chat)
+        {
+            item!(
+                order::REPLY_ELSEWHERE,
+                gpui_kit::assets::IconName::Replace,
+                "menu-reply-another-chat",
+                "Reply in Another Chat",
+                this,
+                window,
+                cx,
+                {
+                    this.message_menu = None;
+                    this.begin_reply_elsewhere(chat_id, message_id, window, cx);
+                }
+            );
         }
         let copy = match selection {
             Some(selected) => Some(("Copy Selected Text", selected)),
@@ -707,6 +729,52 @@ impl QuillApp {
                 },
             );
             rows.push(report);
+        }
+        // "This message contains emoji from X pack": opens the pack.
+        let packs = self
+            .session()
+            .map(|s| {
+                s.message_emoji_pack_ids(effective_content(
+                    &message.content,
+                    message.ephemeral.as_ref(),
+                ))
+            })
+            .unwrap_or_default();
+        let pack_name = match packs[..] {
+            [only] => self
+                .session()
+                .and_then(|s| s.emoji_pack_titles.get(&only).cloned()),
+            _ => None,
+        };
+        if let Some((before, bold, after)) =
+            quill::message_menu::emoji_pack_footer(packs.len(), pack_name.as_deref())
+        {
+            let first = packs[0];
+            let row_hover = cx.theme().accent;
+            rows.push(menu_separator(order::EMOJI_PACKS - 1));
+            rows.push((
+                order::EMOJI_PACKS,
+                div()
+                    .id("menu-emoji-packs")
+                    .px_3()
+                    .py_1p5()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .text_xs()
+                    .max_w(px(260.))
+                    .text_color(text_muted())
+                    .hover(|style| style.bg(row_hover))
+                    .role(gpui_kit::Role::MenuItem)
+                    .aria_label(format!("{before}{bold}{after}"))
+                    .child(before)
+                    .child(div().font_semibold().child(bold))
+                    .child(after)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.message_menu = None;
+                        this.view_message_sticker_set(first, cx);
+                    }))
+                    .into_any_element(),
+            ));
         }
         let audience_rows = self.menu_audience_rows(chat_id, &message, cx);
         if !audience_rows.is_empty() {
@@ -1687,10 +1755,8 @@ impl QuillApp {
         // A stash left over from another chat (the open chat changed
         // since the gated press) never survives an ungated insert.
         self.pending_inline_bot_alert = None;
-        self.composer.update(cx, |input, cx| {
-            let next = quill::composer::insert_switch_inline_text(&input.value(), query);
-            input.set_value(next, window, cx);
-        });
+        let next = quill::composer::insert_switch_inline_text(&self.composer_markup(cx), query);
+        self.set_composer_markup(&next, window, cx);
         self.sync_command_menu(cx);
     }
 
@@ -1708,10 +1774,9 @@ impl QuillApp {
         };
         self.inline_bot_alert_shown = true;
         if !query.is_empty() {
-            self.composer.update(cx, |input, cx| {
-                let next = quill::composer::insert_switch_inline_text(&input.value(), &query);
-                input.set_value(next, window, cx);
-            });
+            let next =
+                quill::composer::insert_switch_inline_text(&self.composer_markup(cx), &query);
+            self.set_composer_markup(&next, window, cx);
         }
         self.sync_command_menu(cx);
         self.sync_inline_mode(cx);
@@ -1972,6 +2037,25 @@ impl QuillApp {
                     this.pinned_list_open = false;
                     cx.notify();
                 }))
+                // Telegram Desktop's "Go To Message" on a pinned row.
+                .context_menu({
+                    let owner = cx.entity().downgrade();
+                    move |menu, _, _| {
+                        let owner = owner.clone();
+                        menu.item(
+                            gpui_kit::component::menu::PopupMenuItem::new("Go To Message")
+                                .icon(gpui_kit::assets::IconName::MessageSquare)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |this, cx| {
+                                        this.jump_to_pinned_message(message_id, cx);
+                                        this.pinned_cursor.insert(chat_id.0, index);
+                                        this.pinned_list_open = false;
+                                        cx.notify();
+                                    });
+                                }),
+                        )
+                    }
+                })
         });
         let noun = if count == 1 { "message" } else { "messages" };
         let footer = if can_pin {

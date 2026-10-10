@@ -19,6 +19,9 @@ pub mod order {
     pub const REPLY: u8 = 10;
     /// "Reply with timecode" follows Reply on a playing voice message.
     pub const REPLY_TIMECODE: u8 = 11;
+    /// "Reply in Another Chat" sits with the reply rows (stable sort keeps
+    /// the push order inside the shared slot).
+    pub const REPLY_ELSEWHERE: u8 = 11;
     pub const COPY_SELECTED: u8 = 12;
     /// "Translate Selected Text" (`ui/translate_ui.rs`).
     pub const TRANSLATE_SELECTED: u8 = 13;
@@ -50,6 +53,8 @@ pub mod order {
     /// The "N Seen" / "N Reacted" row and the date line follow a separator.
     pub const AUDIENCE: u8 = 90;
     pub const SENT: u8 = 92;
+    /// "This message contains emoji from X pack" closes the menu.
+    pub const EMOJI_PACKS: u8 = 94;
 }
 
 /// The kinds of message content that carry a file.
@@ -387,6 +392,20 @@ pub fn read_status_label(read: MessageReadDate, now: &CivilTime) -> String {
     }
 }
 
+/// The footer line about custom emoji packs (`lng_context_animated_emoji`
+/// and `lng_context_animated_emoji_many`): the text before the bold part,
+/// the bold part, the text after. One known pack is named; otherwise the
+/// packs are counted. `None` when the message uses no pack.
+pub fn emoji_pack_footer(packs: usize, name: Option<&str>) -> Option<(String, String, String)> {
+    let before = "This message contains emoji from ".to_string();
+    match (packs, name.filter(|name| !name.is_empty())) {
+        (0, _) => None,
+        (1, Some(name)) => Some((before, format!("{name} pack"), ".".into())),
+        (1, None) => Some((before, "1 pack".into(), ".".into())),
+        (count, _) => Some((before, format!("{count} packs"), ".".into())),
+    }
+}
+
 /// "Sent today at 12:34" (`lng_context_sent_today` and its siblings).
 pub fn sent_label(date: &CivilTime, now: &CivilTime) -> String {
     let time = hhmm(date);
@@ -516,6 +535,23 @@ pub fn noforwards_text(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn emoji_pack_footer_names_one_pack_or_counts_them() {
+        use super::emoji_pack_footer;
+        assert_eq!(emoji_pack_footer(0, Some("x")), None);
+        assert_eq!(
+            emoji_pack_footer(1, Some("Fun")),
+            Some((
+                "This message contains emoji from ".into(),
+                "Fun pack".into(),
+                ".".into()
+            ))
+        );
+        assert_eq!(emoji_pack_footer(1, None).unwrap().1, "1 pack");
+        assert_eq!(emoji_pack_footer(1, Some("")).unwrap().1, "1 pack");
+        assert_eq!(emoji_pack_footer(3, Some("Fun")).unwrap().1, "3 packs");
+    }
+
     use crate::local_time::civil_at;
     use crate::message_menu::{
         MediaAction, MediaFacts, MediaKind, MediaTarget, ToneLimits, copy_link_label,

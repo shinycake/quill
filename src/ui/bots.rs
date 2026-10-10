@@ -930,10 +930,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.composer.update(cx, |input, cx| {
-            let next = quill::composer::insert_bot_command_text(input.value().as_ref(), command);
-            input.set_value(next, window, cx);
-        });
+        let next = quill::composer::insert_bot_command_text(&self.composer_markup(cx), command);
+        self.set_composer_markup(&next, window, cx);
         self.sync_command_menu(cx);
     }
 }

@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
+// bidirectional text support and formatting spans in the input engine. See
+// third_party/gpui-base/QUILL-CHANGES.md.
 //! A text input field that allows the user to enter text.
 //!
 //! Based on the `Input` example from the `gpui` crate.
@@ -359,6 +360,16 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) undo_manager: UndoManager,
     pub(super) inline_tokens: Option<Box<super::inline_tokens::InlineTokenStore>>,
     pub(super) pending_token: Option<super::InlineToken>,
+    /// Tokens of content being inserted, relative to it (Quill patch).
+    pub(super) pending_tokens: Option<Vec<super::InlineTokenSpan>>,
+    /// Formatting spans, sorted by start (Quill patch, `text_spans.rs`).
+    pub(super) text_spans: std::rc::Rc<[super::TextSpan]>,
+    /// The tags the next text typed at the caret takes (Quill patch).
+    pub(super) typing_spans: Option<super::text_spans::TypingSpans>,
+    /// Spans of content being inserted, relative to it (Quill patch).
+    pub(super) pending_spans: Option<Vec<super::TextSpan>>,
+    /// Presentation of span tags, installed by the view (Quill patch).
+    pub(super) span_styler: Option<super::TextSpanStyler>,
     pub(super) replaying_history: bool,
     pub(super) validated_token_edit: bool,
     pub(super) document_revision: u64,
@@ -730,6 +741,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             undo_manager,
             inline_tokens: None,
             pending_token: None,
+            pending_tokens: None,
+            text_spans: std::rc::Rc::from([]),
+            typing_spans: None,
+            pending_spans: None,
+            span_styler: None,
             replaying_history: false,
             validated_token_edit: false,
             document_revision: 0,
@@ -967,9 +983,13 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         let content = value.into();
         self.inline_tokens = None;
+        self.text_spans = std::rc::Rc::from([]);
+        self.typing_spans = None;
+        self.display_map.stage_span_fonts(std::rc::Rc::from([]));
         self.undo_manager.set_ignoring(true);
         self.emit_events = false;
         self.replace_text(content.text().clone(), window, cx);
+        self.install_spans(&content, cx);
         self.install_tokens(content);
         self.undo_manager.set_ignoring(false);
         self.emit_events = true;
@@ -2693,7 +2713,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let texts = self.selected_texts();
 
-        cx.write_to_clipboard(ClipboardItem::new_string(texts.join("\n")));
+        cx.write_to_clipboard(self.clipboard_item(texts.join("\n")));
     }
 
     pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
@@ -2703,7 +2723,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let texts = self.selected_texts();
 
-        cx.write_to_clipboard(ClipboardItem::new_string(texts.join("\n")));
+        cx.write_to_clipboard(self.clipboard_item(texts.join("\n")));
 
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
         self.replace_text_in_range_silent(None, "", window, cx);
@@ -2771,6 +2791,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         let Some(mut new_text) = clipboard.text().filter(|text| !text.is_empty()) else {
             return;
         };
+        // A copy from an input with formatting spans or tokens carries them;
+        // paste restores them into a single selection (Quill patch).
+        if self.selections.is_single() && self.paste_rich(&clipboard, &new_text, window, cx) {
+            self.scroll_to(self.cursor(), None, cx);
+            return;
+        }
         // A paste is one atomic edit, never part of a typing run.
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
 
@@ -2860,8 +2886,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         selection_before: CursorSelection,
         selection_after: Option<CursorSelection>,
     ) -> bool {
+        let revision = self.document_revision;
         self.document_revision = self.document_revision.wrapping_add(1);
         let token_delta = self.edit_tokens(range, new_text.len());
+        let span_snapshot = self.edit_spans(range, new_text, revision);
         if self.undo_manager.is_ignoring() {
             return false;
         }
@@ -2891,6 +2919,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let open_transaction = self.undo_manager.has_open_transaction();
         let mut change = Change::new(range, &old_text, new_range, new_text);
         change.token_delta = token_delta;
+        change.spans = span_snapshot;
         let recorded = self.undo_manager.record_transaction(change, intent);
         // A batch records its own cursor sets. This covers a change that is a
         // transaction on its own.
@@ -2922,10 +2951,12 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         };
         let token_aware = self.inline_tokens.is_some()
+            || !self.text_spans.is_empty()
             || replay
                 .changes
                 .iter()
-                .any(|change| change.token_delta.is_some());
+                .any(|change| change.token_delta.is_some() || change.spans.is_some());
+        let spans_before = self.text_spans.clone();
         let emit_events = self.emit_events;
         if token_aware {
             self.emit_events = false;
@@ -2938,10 +2969,20 @@ impl<M: InputModeKind> InputBaseState<M> {
             } else {
                 (change.old_range.into(), &change.new_text)
             };
-            let range_utf16 = self.range_to_utf16(&range);
-            self.replace_text_in_range_silent(Some(range_utf16), text, window, cx);
-            self.replay_tokens(&range, text.len(), change.token_delta.as_deref(), undo);
+            if !change.is_span_only() {
+                let range_utf16 = self.range_to_utf16(&range);
+                self.replace_text_in_range_silent(Some(range_utf16), text, window, cx);
+                self.replay_tokens(&range, text.len(), change.token_delta.as_deref(), undo);
+            }
+            if let Some(spans) = &change.spans {
+                self.text_spans = if undo {
+                    spans.before.clone()
+                } else {
+                    spans.after.clone()
+                };
+            }
         }
+        self.refresh_span_layout(&spans_before, true, cx);
         self.restore_selections(replay.selections);
         self.mode
             .restore_auto_closed_pairs(replay.auto_closed_pairs.unwrap_or_default());

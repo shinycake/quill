@@ -1,6 +1,6 @@
 //! The Session reducer: central client state and constructor.
 use super::*;
-use crate::telegram::envelope::{ChatBackground, EmojiChatTheme};
+use crate::telegram::envelope::{ChatAccent, ChatBackground, EmojiChatTheme};
 
 /// MED4b: composer `getLinkPreview` prefetch state (TGX `LinkPreview`).
 #[derive(Debug, Clone, Default)]
@@ -157,6 +157,9 @@ pub struct Session {
     pub sticker_set_view: Option<StickerSetView>,
     /// The pack of the custom emoji the user just tapped in a message.
     pub custom_emoji_preview: Option<CustomEmojiPreview>,
+    /// Titles of the emoji packs a message uses, by set id, for the menu's
+    /// "This message contains emoji from X pack" footer.
+    pub emoji_pack_titles: HashMap<i64, String>,
     /// One-shot result of an admin moderation call from the delete box
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
@@ -933,6 +936,16 @@ pub struct Session {
     pub join_request_latest: HashMap<i64, RequestId>,
     /// B8: `getChatInviteLinks` with `is_revoked = true`, keyed by chat id.
     pub revoked_invite_links: HashMap<i64, InviteLinkFetch>,
+    /// Another admin's invite links (owner only), by chat id.
+    pub admin_invite_links: HashMap<i64, AdminLinksState>,
+    /// Pending join requests of the invite link whose details are open.
+    pub link_join_requests: HashMap<i64, LinkRequestsState>,
+    /// `getChatBoosts` list of the open tab, by chat id.
+    pub chat_boost_lists: HashMap<i64, BoostsListState>,
+    /// `getChatBoostLink` answer `(link, is_public)`, by chat id.
+    pub chat_boost_links: HashMap<i64, (String, bool)>,
+    /// `supergroup.usernames`, by supergroup id.
+    pub supergroup_username_lists: HashMap<i64, crate::telegram::envelope::SupergroupUsernames>,
     /// B8: `getChatInviteLinkCounts` (owner only), keyed by chat id.
     pub invite_link_counts: HashMap<i64, InviteLinkCountsFetch>,
     /// B8: members of the invite link whose details are open, by chat id.
@@ -1009,6 +1022,12 @@ pub struct Session {
     /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
     /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
     pub chat_boost_status: HashMap<i64, (i32, i32)>,
+    /// Name color and reply emoji of chats that have one
+    /// (`chat.accent_color_id`, `updateChatAccentColors`).
+    pub chat_accents: HashMap<i64, ChatAccent>,
+    /// Stories replied to that `getStory` was already asked for, so a
+    /// deleted one is not requested again on every refresh.
+    pub story_reply_attempted: HashSet<(i64, i32)>,
     /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
     /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
     /// them to chain `boostChat` once per boost intent.
@@ -1309,6 +1328,7 @@ impl Session {
             wanted_reactor_tab: None,
             sticker_set_view: None,
             custom_emoji_preview: None,
+            emoji_pack_titles: HashMap::new(),
             message_action_note: None,
             ownership: OwnershipState::default(),
             basic_group_own: HashMap::new(),
@@ -1561,6 +1581,11 @@ impl Session {
             join_request_latest: HashMap::new(),
             revoked_invite_links: HashMap::new(),
             invite_link_counts: HashMap::new(),
+            admin_invite_links: HashMap::new(),
+            link_join_requests: HashMap::new(),
+            chat_boost_lists: HashMap::new(),
+            chat_boost_links: HashMap::new(),
+            supergroup_username_lists: HashMap::new(),
             invite_link_members: HashMap::new(),
             revoked_link_deletions: HashMap::new(),
             pending_join_request_counts: HashMap::new(),
@@ -1585,6 +1610,8 @@ impl Session {
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),
+            chat_accents: HashMap::new(),
+            story_reply_attempted: HashSet::new(),
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
             thread: None,

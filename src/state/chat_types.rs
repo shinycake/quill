@@ -198,6 +198,13 @@ pub struct ChatSummary {
     /// every other status or an absent rights block. Gates album pin /
     /// unpin (`pinChatMessage`, schema line 13559).
     pub my_admin_can_pin_messages: Option<bool>,
+    /// Own `chatMemberStatusRestricted` rights and end date, from
+    /// `getChatMember(me)` / `updateChatMember`. `None` when the viewer is
+    /// not restricted or nothing was fetched yet.
+    pub my_restriction: Option<crate::telegram::envelope::MemberRestriction>,
+    /// Own member record arrived at least once, so a missing restriction
+    /// means "not restricted" rather than "unknown".
+    pub my_rights_fetched: bool,
     /// Phase 5.1: `supergroup.is_forum` (TDLib 1.8.67). `None` until
     /// `updateSupergroup` / the `getSupergroup` response resolves it; only
     /// meaningful for non-channel supergroups.
@@ -493,6 +500,15 @@ impl ChatSummary {
                     .is_some_and(|p| p.can_pin_messages),
             },
         }
+    }
+
+    /// Record the viewer's own restriction (`None` when not restricted).
+    pub fn set_my_restriction(
+        &mut self,
+        restriction: Option<crate::telegram::envelope::MemberRestriction>,
+    ) {
+        self.my_restriction = restriction;
+        self.my_rights_fetched = true;
     }
 
     /// MED1: record `rights.can_pin_messages` (`None` for non-admin

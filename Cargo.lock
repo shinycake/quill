@@ -6227,6 +6227,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "futures-channel",
+ "gpui-base",
  "gpui-kit",
  "image",
  "interprocess",

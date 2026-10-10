@@ -61,11 +61,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `parity:platform-chat-export` — start exporting a chat's history to
-    /// a JSON file. Refuses while another export is running.
+    /// a JSON or HTML file. Refuses while another export is running.
     pub fn start_chat_export(
         &mut self,
         chat_id: ChatId,
         chat_title: String,
+        options: crate::chat_export::ChatExportOptions,
     ) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -79,8 +80,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.chat_has_protected_content(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chat_export = Some(crate::chat_export::ChatExportState::new(
-            chat_id, chat_title,
+        self.session.chat_export = Some(crate::chat_export::ChatExportState::with_options(
+            chat_id,
+            chat_title,
+            options,
+            crate::local_time::now_unix(),
         ));
         self.send_export_page()
     }
@@ -938,6 +942,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         draft: &VoiceDraft,
         caption: &str,
         reply_to: Option<SendReply>,
+        play_once: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -960,6 +965,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
         let topic_id = self.send_topic(chat_id);
+        // "Play once" is a self-destruct type, which TDLib accepts in
+        // private chats only (the same gate as photos and videos).
+        let self_destruct = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .filter(|chat| matches!(chat.kind, ChatKind::Private { .. }))
+            .and(play_once.then_some(crate::telegram::requests::SelfDestructSend::Immediately));
         let json = send_voice_note(
             extra,
             chat_id,
@@ -970,6 +983,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 caption,
                 reply_to,
                 topic_id,
+                self_destruct,
             },
         );
         let json = self.thread_routed(chat_id, json);

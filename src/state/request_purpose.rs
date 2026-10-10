@@ -314,6 +314,11 @@ pub enum RequestPurpose {
         emoji_id: i64,
         set_id: i64,
     },
+    /// The message menu's emoji pack footer: `getStickerSet` for the
+    /// pack's title, answered into `Session::emoji_pack_titles`.
+    EmojiPackTitle {
+        set_id: i64,
+    },
     /// "Save to... Profile" on a song: `addProfileAudio`.
     AddProfileAudio,
     /// "Cancel Upload": `deleteMessages` on a message still being sent.
@@ -798,6 +803,30 @@ pub enum RequestPurpose {
     DeleteRevokedChatInviteLink,
     /// B8: `deleteAllRevokedChatInviteLinks`.
     DeleteAllRevokedChatInviteLinks,
+    /// `getChatInviteLinks` with another admin's `creator_user_id`.
+    GetAdminChatInviteLinks {
+        revoked: bool,
+    },
+    /// `getChatJoinRequests` filtered by one invite link; `append` marks
+    /// a later page.
+    GetLinkJoinRequests {
+        append: bool,
+    },
+    /// `processChatJoinRequests` for one invite link.
+    ProcessLinkJoinRequests {
+        approve: bool,
+    },
+    /// `getChatBoosts`; `append` marks a later page.
+    GetChatBoosts {
+        append: bool,
+    },
+    /// `getChatBoostLink`.
+    GetChatBoostLink,
+    /// `toggleSupergroupUsernameIsActive`. Response `ok`; the new lists
+    /// arrive with `updateSupergroup`.
+    ToggleSupergroupUsername,
+    /// `reorderSupergroupActiveUsernames`. Same follow-up.
+    ReorderSupergroupUsernames,
     /// Phase D3b: `getChatAdministrators`. Response is
     /// `chatAdministrators`; correlated via `PendingRequest::chat_id`.
     GetChatAdministrators,

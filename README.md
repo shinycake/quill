@@ -18,23 +18,16 @@ Quill is under active development. The [progress dashboard](https://shinycake.gi
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/readme-chat-dark.png" alt="Group chat in the dark theme: chat list with stories, archive row and badges; voice note, link preview and replies"/><br/><sub>Group chat · dark</sub></td>
-    <td><img src="docs/screenshots/readme-chat-light.png" alt="Group chat in the light theme with reactions, replies and colored sender names"/><br/><sub>Group chat · light</sub></td>
+    <td><img src="docs/screenshots/readme-chat-dark.png" alt="Group chat in the dark theme: chat list with stories and badges, a voice note, a link preview and replies"/><br/><sub>Group chat</sub></td>
+    <td><img src="docs/screenshots/readme-channel-photos.png" alt="Channel with photo posts, reactions and view counts in the light theme"/><br/><sub>Channels</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/readme-reactions-menu.png" alt="Reaction picker over the message context menu"/><br/><sub>Reactions and message menu</sub></td>
     <td><img src="docs/screenshots/readme-media-viewer.png" alt="Fullscreen media viewer with zoom, forward and download actions"/><br/><sub>Media viewer</sub></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/readme-reactions-menu.png" alt="Reaction picker over the message context menu"/><br/><sub>Reactions &amp; message menu</sub></td>
-    <td><img src="docs/screenshots/readme-polls.png" alt="Polls and a closed quiz with explanation"/><br/><sub>Polls &amp; quizzes</sub></td>
-    <td><img src="docs/screenshots/readme-player-bar.png" alt="Audio player bar above a private chat with music, a photo and reactions"/><br/><sub>Audio player bar</sub></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/readme-channel-photos.png" alt="Channel with photo posts, reactions and view counts"/><br/><sub>Channels</sub></td>
-    <td><img src="docs/screenshots/readme-appearance-dark.png" alt="Appearance settings: themes, accent colors, wallpapers"/><br/><sub>Appearance settings</sub></td>
-    <td><img src="docs/screenshots/readme-accent-light.png" alt="Private chat in the light theme with a purple accent color"/><br/><sub>Accent colors</sub></td>
   </tr>
 </table>
 
-Captured from a real GPUI window using demo fixtures (no live Telegram). The [full gallery](docs/screenshots/README.md) has 130+ captures covering auth, chats, media, calls, bots, settings, and more.
+Captured from a real Quill window using demo data, not a live Telegram account.
 
 ## What is Quill?
 
@@ -196,13 +189,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Clickable @mentions, #hashtags, $cashtags, /commands, emails, phone numbers, bank cards, media timestamps and dates in message text <!-- parity:render-entity-links -->
 - [x] Tapping a /command in a group chat sends it addressed to that bot <!-- parity:render-bot-command-click -->
-- [ ] Tapping a timestamp link seeks the video or voice message to that moment <!-- parity:render-media-timestamp-seek -->
+- [x] Tapping a timestamp link seeks the video or voice message to that moment <!-- parity:render-media-timestamp-seek -->
 - [x] "Open this link?" confirmation when a link's label differs from its real address <!-- parity:render-hidden-link-confirm -->
 - [ ] Hovering a text link shows its full address in a tooltip <!-- parity:render-link-hover-tooltip -->
 - [x] Reply header shows the replied sender's name in their color <!-- parity:render-reply-header-sender -->
-- [ ] Reply header shows a media thumbnail, quote mark, other-chat name, and story replies <!-- parity:render-reply-header-media -->
+- [x] Reply header shows a media thumbnail, quote mark, other-chat name, and story replies <!-- parity:render-reply-header-media -->
 - [x] Replied-to messages outside the loaded history are fetched and previewed <!-- parity:render-reply-outside-window -->
-- [ ] Reply header custom-emoji pattern and accent background <!-- parity:render-reply-header-emoji-pattern -->
+- [x] Reply header custom-emoji pattern and accent background <!-- parity:render-reply-header-emoji-pattern -->
 - [x] "edited" marker in the message footer <!-- parity:render-edited-marker -->
 - [x] Hovering the message time shows full sent, edited and original-forward dates <!-- parity:render-time-tooltip -->
 - [x] Forward header opens the original chat or post; hidden senders get a tooltip <!-- parity:render-forward-header-click -->
@@ -225,8 +218,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Gift and giveaway messages render as cards (regular, unique, refunded, prize, winners, gift code) <!-- parity:render-gift-cards -->
 - [x] Contact cards show an avatar with Message, Add contact and View buttons <!-- parity:render-contact-card-actions -->
 - [x] Location and venue messages show a map thumbnail <!-- parity:render-map-thumbnail -->
-- [ ] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
-- [ ] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
+- [x] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
+- [x] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
 - [ ] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
 - [ ] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
 - [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
@@ -236,7 +229,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
 - [x] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
 - [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
-- [ ] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
+- [x] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
 - [ ] Fact-check block under messages <!-- parity:render-fact-check -->
 - [ ] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
 
@@ -250,13 +243,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Add to GIFs and Open GIF from the message menu <!-- parity:menu-gif-actions -->
 - [x] Add or remove favorite sticker, View Sticker Set and Add Stickers from the message menu <!-- parity:menu-sticker-actions -->
 - [x] Attached Stickers for photos that contain stickers <!-- parity:menu-attached-stickers -->
-- [ ] "This message contains emoji from X pack" footer <!-- parity:menu-emoji-pack-footer -->
+- [x] "This message contains emoji from X pack" footer <!-- parity:menu-emoji-pack-footer -->
 - [x] Report a message with a reason flow, also from the selection bar <!-- parity:menu-report-message -->
 - [x] "N Seen / N Reacted" row with reader and reactor lists and read date <!-- parity:menu-seen-by -->
 - [x] "Sent today at 12:34" row in the message menu <!-- parity:menu-sent-time-row -->
 - [x] Translate message and Translate selected text <!-- parity:menu-translate -->
-- [ ] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
-- [ ] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
+- [x] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
+- [x] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
 - [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
 - [ ] Edit Image, Edit Video and Edit Cover on your own media <!-- parity:menu-edit-media-items -->
 - [x] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
@@ -266,7 +259,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Copy Post Link versus Copy Message Link wording and "members only" hint <!-- parity:menu-copy-post-link-wording -->
 - [x] Copy Card Number for bank-card entities <!-- parity:menu-copy-card-number -->
 - [ ] Poll menu: Retract vote, View results and ends-in note <!-- parity:menu-poll-actions -->
-- [ ] Saved Messages tag menu: Filter by Tag, Add or Edit Name, Remove Tag <!-- parity:menu-saved-tag-menu -->
+- [x] Saved Messages tag menu: Filter by Tag, Add or Edit Name, Remove Tag <!-- parity:menu-saved-tag-menu -->
 - [x] Info line explaining why Forward and Copy are missing in protected chats <!-- parity:menu-noforwards-note -->
 - [x] Admin delete box: delete all from user, ban and report spam in one step <!-- parity:menu-moderate-delete -->
 - [x] Delete a member's reaction as an admin <!-- parity:menu-delete-reaction -->
@@ -280,8 +273,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Composer & sending
 
-- [ ] Formatting shows live in the input (bold appears bold, mentions as tags, custom emoji inline) <!-- parity:composer-wysiwyg -->
-- [ ] Mention without a username inserts a styled tag instead of raw markup <!-- parity:composer-mention-tags -->
+- [x] Formatting shows live in the input (bold appears bold, mentions as tags, custom emoji inline) <!-- parity:composer-wysiwyg -->
+- [x] Mention without a username inserts a styled tag instead of raw markup <!-- parity:composer-mention-tags -->
 - [x] Send as another identity (channel or anonymous) picker <!-- parity:composer-send-as -->
 - [x] Forward bar in the composer: change recipient, hide sender or captions, add a comment <!-- parity:composer-forward-bar -->
 - [x] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
@@ -294,7 +287,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
 - [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
 - [x] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
-- [ ] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->
+- [x] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->
 - [ ] Premium-only and paid-message gates ("charges N per message", "only accepts messages from contacts") <!-- parity:composer-paid-gates -->
 - [x] Show and hide button for bot reply keyboards <!-- parity:composer-bot-keyboard-toggle -->
 - [x] Reply keyboards update from the server outside the loaded history <!-- parity:composer-reply-markup-update -->
@@ -305,8 +298,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
 - [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
 - [x] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
-- [ ] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
-- [ ] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
+- [x] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
+- [x] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
 
 ### Chat view chrome
 
@@ -558,8 +551,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Transfer ownership with password confirmation <!-- parity:admin-transfer-ownership -->
 - [x] Pick a new owner when leaving as owner <!-- parity:admin-new-owner-on-leave -->
 - [ ] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
-- [ ] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
-- [ ] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
+- [x] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
+- [x] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
 - [x] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
 - [ ] Boosts list, boost link, boost features table and unrestrict-by-boosts setting <!-- parity:admin-boosts-list -->
 - [ ] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
@@ -574,7 +567,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Forums, Saved Messages & threads
 
 - [x] Topic icon picker with default icons, custom emoji and color <!-- parity:forum-topic-icon-picker -->
-- [ ] Forum topics as a second column next to the chat list <!-- parity:forum-second-column -->
+- [x] Forum topics as a second column next to the chat list <!-- parity:forum-second-column -->
 - [x] View as topics or as messages toggle <!-- parity:forum-view-as-topics -->
 - [x] Copy topic link, reorder pinned topics, read all mentions and reactions in a topic, unpin all in a topic <!-- parity:forum-topic-extras -->
 - [x] Saved Messages sublists by original chat, pinned sublists, delete a sublist <!-- parity:saved-sublists -->
@@ -1081,14 +1074,14 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
 - [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip <!-- parity:data-proxy-extras -->
-- [ ] Try IPv6 option <!-- parity:data-ipv6 -->
+- [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [ ] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [ ] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
 - [ ] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
 - [ ] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
 - [ ] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
-- [ ] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
-- [ ] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
+- [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
+- [x] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
 - [ ] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
 - [ ] Hardware decoding and renderer toggles (blocked: tdesktop-specific renderer options do not apply to GPUI) <!-- parity:data-hw-decode -->
 
@@ -1128,7 +1121,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
 - [x] Ctrl+Up and Ctrl+Down reply to the previous or next message <!-- parity:platform-shortcut-reply-nav -->
 - [x] Ctrl+O opens the attach picker <!-- parity:platform-shortcut-attach -->
-- [ ] Ctrl+L locks the app <!-- parity:platform-shortcut-lock -->
+- [x] Ctrl+L locks the app <!-- parity:platform-shortcut-lock -->
 - [x] Ctrl+PageUp and Ctrl+PageDown switch chats; Ctrl+Alt+Home and End jump to the first or last chat <!-- parity:platform-shortcut-chat-nav -->
 - [x] Ctrl+1 to 8 open pinned chats, Ctrl+0 Saved Messages, Ctrl+9 Archive, Ctrl+J Contacts <!-- parity:platform-shortcut-pinned -->
 - [x] Ctrl+Shift+Up and Down switch folders <!-- parity:platform-shortcut-folders -->

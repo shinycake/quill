@@ -20,3 +20,5 @@ Workflow:
 Never: delete user data, message anyone, enter credentials, change system settings, merge PRs, or touch the reference repos.
 
 Dependencies must stay current; see docs/dependency-updates.md
+
+UI copy: call the app Quill; say Telegram only for the Telegram service, accounts, Premium, links or official apps.

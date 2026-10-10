@@ -124,14 +124,13 @@ impl QuillApp {
         if text.is_empty() {
             return;
         }
-        let current = self.composer.read(cx).value().to_string();
+        let current = self.composer_markup(cx);
         let value = if current.trim().is_empty() {
             text.to_string()
         } else {
             format!("{current}\n{text}")
         };
-        self.composer
-            .update(cx, |input, cx| input.set_value(&value, window, cx));
+        self.set_composer_markup(&value, window, cx);
     }
 
     /// Seek a linked media timestamp once the message has loaded.

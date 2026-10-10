@@ -274,17 +274,13 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
+        if self.deny_send(quill::send_rights::SendKind::Gifs, cx) {
+            return;
+        }
         let reply = self
             .pending_reply
             .as_ref()
-            .filter(|reply| reply.chat_id == chat_id)
-            .map(|reply| quill::telegram::SendReply {
-                message_id: reply.message_id,
-                quote: reply
-                    .quote
-                    .as_ref()
-                    .map(|quote| (quote.text.clone(), quote.position)),
-            });
+            .and_then(|reply| reply.send_target(chat_id));
         let sent = if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.send_animation(
                 chat_id,
@@ -368,17 +364,13 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
+        if self.deny_send(quill::send_rights::SendKind::Stickers, cx) {
+            return;
+        }
         let reply = self
             .pending_reply
             .as_ref()
-            .filter(|reply| reply.chat_id == chat_id)
-            .map(|reply| quill::telegram::SendReply {
-                message_id: reply.message_id,
-                quote: reply
-                    .quote
-                    .as_ref()
-                    .map(|quote| (quote.text.clone(), quote.position)),
-            });
+            .and_then(|reply| reply.send_target(chat_id));
         let sent = if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.send_sticker(
                 chat_id,
@@ -987,7 +979,7 @@ impl QuillApp {
             return None;
         }
         let limit = self.text_length_limit();
-        let value = self.composer.read(cx).value().to_string();
+        let value = self.composer_markup(cx);
         let over = quill::text_split::units_over_limit(value.trim(), limit);
         if over == 0 {
             return None;
@@ -1092,7 +1084,15 @@ impl QuillApp {
                     session.chats.get(&chat_id).map(|c| c.title.clone())
                 }
             });
-        let title = sender.map_or_else(|| "Reply".to_string(), |name| format!("Reply to {name}"));
+        // A message from another chat names that chat.
+        let from_chat = (self.open_chat_id() != Some(reply.chat_id))
+            .then(|| {
+                self.session()
+                    .and_then(|s| s.chats.get(&reply.chat_id.0))
+                    .map(|chat| chat.title.clone())
+            })
+            .flatten();
+        let title = quill::reply_options::reply_bar_title(sender.as_deref(), from_chat.as_deref());
         // Slice G1: show the quoted part when the reply carries one.
         let preview: AnyElement = match (&reply.quote, message.as_ref().map(|m| &m.content)) {
             (Some(quote), _) => div()
@@ -1130,7 +1130,7 @@ impl QuillApp {
             title,
             preview,
             self.bar_thumbnail(reply.chat_id, reply.message_id, cx),
-            None,
+            Some(self.reply_options_button(reply, cx).into_any_element()),
             Button::new("cancel-reply")
                 .icon(gpui_kit::assets::IconName::X)
                 .ghost()

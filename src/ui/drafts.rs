@@ -39,7 +39,7 @@ impl QuillApp {
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
-        let text = self.composer.read(cx).value().to_string();
+        let text = self.composer_markup(cx);
         let reply = self
             .pending_reply
             .as_ref()
@@ -66,7 +66,7 @@ impl QuillApp {
             return (self.saved_edit_draft.clone(), reply, now_ms);
         }
         (
-            self.composer.read(cx).value().to_string(),
+            self.composer_markup(cx),
             self.pending_reply
                 .as_ref()
                 .and_then(|reply| reply.send_reply(chat_id)),
@@ -78,7 +78,7 @@ impl QuillApp {
         if self
             .pending_reply
             .as_ref()
-            .is_some_and(|reply| reply.chat_id != chat_id)
+            .is_some_and(|reply| !reply.belongs_to(chat_id))
         {
             self.pending_reply = None;
         }
@@ -130,7 +130,7 @@ impl QuillApp {
             (self.saved_edit_draft.clone(), reply)
         } else {
             (
-                self.composer.read(cx).value().to_string(),
+                self.composer_markup(cx),
                 self.pending_reply
                     .as_ref()
                     .and_then(|reply| reply.send_reply(chat_id)),
@@ -258,9 +258,10 @@ impl QuillApp {
                 None => ComposerReplyTo::new(chat_id, id, preview),
             }
         });
-        self.composer
-            .update(cx, |input, cx| input.set_value(&text, window, cx));
+        self.set_composer_markup(&text, window, cx);
         // `set_value` emits no Change: re-check the restored draft.
+        let text = self.composer.read(cx).value().to_string();
+        self.composer_prev_text = text.clone();
         self.sync_spellcheck(&text, cx);
         self.sync_suggest_menu(cx);
     }

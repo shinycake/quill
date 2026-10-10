@@ -28,6 +28,8 @@ pub const FADE_MS: usize = 300;
 pub const PRE_SKIP: u16 = 312;
 
 const BITRATE: i32 = 32_000;
+/// Fade at a pause (out) and at the resume (in), so the joint does not click.
+const PAUSE_FADE: usize = 30 * RATE as usize / 1000;
 const SKIP: usize = SKIP_MS * RATE as usize / 1000;
 const FADE: usize = FADE_MS * RATE as usize / 1000;
 /// A page is flushed about every second, so a killed process still leaves
@@ -57,6 +59,8 @@ pub struct VoiceEncoder<W: Write> {
     in_block: usize,
     /// Per-10 ms peaks, `peak / 256` on the 16-bit scale (tdesktop levels).
     levels: Vec<u8>,
+    /// Samples still to fade in after a resume.
+    resume_fade: usize,
 }
 
 impl<W: Write> VoiceEncoder<W> {
@@ -101,7 +105,13 @@ impl<W: Write> VoiceEncoder<W> {
             peak: 0.0,
             in_block: 0,
             levels: Vec::new(),
+            resume_fade: 0,
         })
+    }
+
+    /// The writer behind the muxer (a test reads the bytes so far).
+    pub fn get_ref(&self) -> &W {
+        self.writer.inner()
     }
 
     /// Samples pushed so far.
@@ -124,6 +134,10 @@ impl<W: Write> VoiceEncoder<W> {
             } else if self.seen < SKIP + FADE {
                 sample *= (self.seen - SKIP) as f32 / FADE as f32;
             }
+            if self.resume_fade > 0 {
+                sample *= (PAUSE_FADE - self.resume_fade) as f32 / PAUSE_FADE as f32;
+                self.resume_fade -= 1;
+            }
             self.seen += 1;
             self.peak = self.peak.max(sample.abs());
             self.in_block += 1;
@@ -141,6 +155,39 @@ impl<W: Write> VoiceEncoder<W> {
             self.encode_frame(&frame, FRAME as u64)?;
         }
         Ok(())
+    }
+
+    /// Make everything pushed so far playable: fade the last few
+    /// milliseconds out, encode every whole frame and flush a page to the
+    /// writer. Less than one frame (20 ms) stays queued and joins the audio
+    /// that follows a [`Self::resume`].
+    pub fn pause(&mut self) -> Result<(), String> {
+        let tail = self.pending.len();
+        let fade = tail.min(PAUSE_FADE);
+        for (i, sample) in self.pending[tail - fade..].iter_mut().enumerate() {
+            *sample *= 1.0 - (i as f32 / fade as f32);
+        }
+        while self.pending.len() >= FRAME {
+            let frame: Vec<f32> = self.pending.drain(..FRAME).collect();
+            self.encode_frame(&frame, FRAME as u64)?;
+        }
+        if let Some(held) = self.held.take() {
+            self.packets += 1;
+            let granule = u64::from(PRE_SKIP) + self.packets * FRAME as u64;
+            self.writer
+                .write_packet(held, self.serial, PacketWriteEndInfo::EndPage, granule)
+                .map_err(|err| err.to_string())?;
+            self.last_granule = granule;
+        }
+        self.writer
+            .inner_mut()
+            .flush()
+            .map_err(|err| err.to_string())
+    }
+
+    /// Continue after [`Self::pause`]: the next few milliseconds fade in.
+    pub fn resume(&mut self) {
+        self.resume_fade = PAUSE_FADE;
     }
 
     /// Fade the tail out, flush the last frame and end the stream.
@@ -161,6 +208,11 @@ impl<W: Write> VoiceEncoder<W> {
         // file must carry that many extra samples after the real ones.
         let wanted = u64::from(PRE_SKIP) + self.real_samples;
         while self.frames * (FRAME as u64) < wanted {
+            self.encode_frame(&[0.0; FRAME], 0)?;
+        }
+        // Right after a pause nothing is held back: a silent frame can
+        // still carry the end-of-stream mark.
+        if self.held.is_none() {
             self.encode_frame(&[0.0; FRAME], 0)?;
         }
         if let Some(last) = self.held.take() {
@@ -309,6 +361,70 @@ mod tests {
         }
         assert!(ended, "stream ends with the end-of-stream page");
         (pre_skip, granule, pcm)
+    }
+
+    /// Decode the packets of a file that may not be finished: the PCM
+    /// (pre-skip included) and the last page granule.
+    fn decode_partial(file: &[u8]) -> (Vec<f32>, u64) {
+        let mut reader = PacketReader::new(Cursor::new(file));
+        reader.read_packet().unwrap().unwrap();
+        reader.read_packet().unwrap().unwrap();
+        let mut decoder = OpusDecoder::new(RATE as i32, 1).unwrap();
+        let (mut pcm, mut granule) = (Vec::new(), 0);
+        while let Some(packet) = reader.read_packet().unwrap() {
+            let mut out = vec![0.0f32; FRAME];
+            let n = decoder.decode(&packet.data, FRAME, &mut out).unwrap();
+            pcm.extend_from_slice(&out[..n]);
+            if packet.last_in_page() {
+                granule = packet.absgp_page();
+            }
+        }
+        (pcm, granule)
+    }
+
+    #[test]
+    fn a_paused_recording_is_playable_and_resumes_into_one_stream() {
+        let first = sine(440.0, 1.5, 0.5);
+        let second = sine(330.0, 1.0, 0.5);
+        let mut encoder = VoiceEncoder::new(Vec::new()).unwrap();
+        for part in first.chunks(441) {
+            encoder.push(part).unwrap();
+        }
+        encoder.pause().unwrap();
+        // Everything but under one frame is in the file, and it decodes.
+        let (pcm, _) = decode_partial(encoder.get_ref());
+        let heard = (pcm.len() - usize::from(PRE_SKIP)) as u64;
+        // The decoder delay and under one frame are still queued.
+        assert!(
+            first.len() as u64 - heard < (FRAME + usize::from(PRE_SKIP)) as u64,
+            "{heard} of {}",
+            first.len()
+        );
+        // The end fades out instead of stopping dead.
+        let tail = &pcm[pcm.len() - 200..];
+        assert!(rms(tail) < 0.1, "tail rms {}", rms(tail));
+        encoder.resume();
+        for part in second.chunks(441) {
+            encoder.push(part).unwrap();
+        }
+        let file = encoder.finish().unwrap();
+        let (_, granule, _) = decode(&file);
+        assert_eq!(
+            granule - u64::from(PRE_SKIP),
+            (first.len() + second.len()) as u64,
+            "no audio lost or added across the pause"
+        );
+    }
+
+    #[test]
+    fn finishing_right_after_a_pause_still_ends_the_stream() {
+        let mut encoder = VoiceEncoder::new(Vec::new()).unwrap();
+        // A whole number of frames: nothing is left queued by the pause.
+        encoder.push(&vec![0.2; FRAME * 40]).unwrap();
+        encoder.pause().unwrap();
+        let file = encoder.finish().unwrap();
+        let (pre_skip, granule, _) = decode(&file);
+        assert_eq!(granule - u64::from(pre_skip), (FRAME * 40) as u64);
     }
 
     fn rms(samples: &[f32]) -> f32 {

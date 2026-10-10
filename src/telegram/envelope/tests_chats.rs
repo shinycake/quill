@@ -287,6 +287,7 @@ fn update_supergroup_parses_forum_flag() {
             show_message_sender: _,
             is_broadcast_group,
             join_to_send_messages: _,
+            usernames: _,
         } => {
             assert_eq!(supergroup_id, 16);
             assert!(is_forum);
@@ -336,6 +337,7 @@ fn update_supergroup_parses_username() {
             show_message_sender: _,
             is_broadcast_group,
             join_to_send_messages: _,
+            usernames: _,
         } => {
             assert_eq!(supergroup_id, 18);
             assert!(!is_forum);

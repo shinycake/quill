@@ -237,6 +237,10 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         title: String,
         kind: ChatKind,
+        /// `chat.accent_color_id` and `chat.background_custom_emoji_id`
+        /// (schema 1.8.67, line 3937): the channel's or group's name color
+        /// and the emoji repeated behind replies to its posts.
+        accent: ChatAccent,
         unread_count: i32,
         last_read_inbox_message_id: MessageId,
         last_read_outbox_message_id: MessageId,
@@ -793,6 +797,8 @@ pub enum EnvelopePayload {
         /// 2746): the channel shows its messages translated for everyone.
         has_automatic_translation: bool,
         username: String,
+        /// `supergroup.usernames`: active/disabled/collectible lists.
+        usernames: SupergroupUsernames,
         /// `supergroup.member_count` — may be 0 until full info is known.
         member_count: i32,
         /// Phase A1: own `chatMemberStatus*` (`supergroup.status`, schema
@@ -1436,6 +1442,12 @@ pub enum EnvelopePayload {
     ChatMessageSenders {
         senders: Vec<AvailableMessageSender>,
     },
+    /// `updateChatAccentColors` (schema 1.8.67, line 10860): the chat's
+    /// name color or reply emoji changed.
+    UpdateChatAccentColors {
+        chat_id: i64,
+        accent: ChatAccent,
+    },
     /// `updateChatIsTranslatable` (schema 1.8.67, line 10585) — translation
     /// of the chat's messages was enabled or disabled.
     UpdateChatIsTranslatable {
@@ -1515,6 +1527,17 @@ pub enum EnvelopePayload {
     ChatJoinRequests {
         total_count: i32,
         requests: Vec<ParsedChatJoinRequest>,
+    },
+    /// `foundChatBoosts` — the `getChatBoosts` answer.
+    FoundChatBoosts {
+        total_count: i32,
+        boosts: Vec<ParsedChatBoost>,
+        next_offset: String,
+    },
+    /// `chatBoostLink` — the `getChatBoostLink` answer.
+    ChatBoostLink {
+        link: String,
+        is_public: bool,
     },
     /// B8: `chatInviteLinkCounts` — the `getChatInviteLinkCounts` answer.
     ChatInviteLinkCounts {
@@ -2086,4 +2109,25 @@ pub struct SupergroupFullAdmin {
     pub is_all_history_available: bool,
     /// `can_enable_paid_reaction` — channels only.
     pub can_enable_paid_reaction: bool,
+}
+
+/// A chat's name color and reply emoji (`chat.accent_color_id`,
+/// `chat.background_custom_emoji_id`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChatAccent {
+    pub accent_color_id: i32,
+    pub background_custom_emoji_id: i64,
+}
+
+impl ChatAccent {
+    pub(crate) fn parse(value: &serde_json::Value) -> Self {
+        Self {
+            accent_color_id: value
+                .get("accent_color_id")
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|id| i32::try_from(id).ok())
+                .unwrap_or(0),
+            background_custom_emoji_id: int64(value.get("background_custom_emoji_id")).unwrap_or(0),
+        }
+    }
 }

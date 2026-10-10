@@ -115,6 +115,9 @@ pub struct ParsedUser {
     /// chats. 0–6 are the built-in colors (red, orange, violet, green,
     /// cyan, blue, pink); higher ids are server palettes.
     pub accent_color_id: i32,
+    /// `user.background_custom_emoji_id` (schema 1.8.67, line 2712): the
+    /// custom emoji repeated behind the user's replies; 0 if none.
+    pub background_custom_emoji_id: i64,
     /// A12: `user.profile_accent_color_id` (schema 1.8.67, line 2386) —
     /// the accent color for the user's profile; -1 if none.
     pub profile_accent_color_id: i32,
@@ -311,6 +314,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(Value::as_i64)
         .and_then(|n| i32::try_from(n).ok())
         .unwrap_or(0);
+    let background_custom_emoji_id = int64(value.get("background_custom_emoji_id")).unwrap_or(0);
     // A12: -1 = no profile accent color (schema 1.8.67, line 2386).
     let profile_accent_color_id = value
         .get("profile_accent_color_id")
@@ -364,6 +368,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         status,
         photo_small_file_id,
         accent_color_id,
+        background_custom_emoji_id,
         profile_accent_color_id,
         profile_background_custom_emoji_id,
         is_premium,

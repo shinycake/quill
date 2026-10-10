@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// a change records the formatting spans it changed. See
+// third_party/gpui-base/QUILL-CHANGES.md.
 use std::fmt::Debug;
 
 use crate::input::Selection;
@@ -7,6 +10,9 @@ use crate::input::Selection;
 #[derive(Debug, PartialEq, Clone)]
 pub(super) struct Change {
     pub(super) token_delta: Option<Box<super::inline_tokens::TokenDelta>>,
+    /// The formatting spans before and after this change, when it changed
+    /// them (Quill patch, `text_spans.rs`).
+    pub(super) spans: Option<Box<super::text_spans::SpanSnapshot>>,
     pub(crate) old_range: Selection,
     pub(crate) old_text: String,
     pub(crate) new_range: Selection,
@@ -22,6 +28,7 @@ impl Change {
     ) -> Self {
         Self {
             token_delta: None,
+            spans: None,
             old_range: old_range.into(),
             old_text: old_text.to_string(),
             new_range: new_range.into(),
@@ -35,10 +42,19 @@ impl Change {
         let shift = |offset: usize| (offset as isize + delta).max(0) as usize;
         Self {
             token_delta: self.token_delta.clone(),
+            spans: self.spans.clone(),
             old_range: (shift(self.old_range.start)..shift(self.old_range.end)).into(),
             old_text: self.old_text.clone(),
             new_range: (shift(self.new_range.start)..shift(self.new_range.end)).into(),
             new_text: self.new_text.clone(),
         }
+    }
+
+    /// Whether this change only changed formatting spans, not text.
+    pub(super) fn is_span_only(&self) -> bool {
+        self.spans.is_some()
+            && self.old_range == self.new_range
+            && self.old_text.is_empty()
+            && self.new_text.is_empty()
     }
 }

@@ -98,7 +98,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInfo)) {
-            self.deep_link_dialog = Some("This link requires a newer version of Telegram. Please update your app to open it.".into());
+            self.deep_link_dialog = Some(
+                "This link requires a newer version of Quill. Please update Quill to open it."
+                    .into(),
+            );
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkShare)) {
             self.share_link_text = Some("https://example.com/article\nWorth a look".into());
@@ -402,6 +405,37 @@ impl QuillApp {
                 MessageId(201),
                 "Loaded photo",
             ));
+        }
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyReplyElsewhere
+                    | ScreenshotDemo::ReadyReplyExternal
+                    | ScreenshotDemo::ReadyReplyQuote
+            )
+        ) && let Some(session) = self.demo_session.as_mut()
+        {
+            use super::reply_options_demo as reply_demo;
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            reply_demo::apply_ready_reply_elsewhere(session, &self.demo_sink, &self.demo_seq);
+            match demo {
+                Some(ScreenshotDemo::ReadyReplyElsewhere) => {
+                    self.pending_reply = Some(reply_demo::reply_to_choose());
+                    self.reply_elsewhere_open = true;
+                }
+                Some(ScreenshotDemo::ReadyReplyQuote) => {
+                    self.pending_reply = Some(reply_demo::reply_with_quote());
+                    self.reply_quote_open = true;
+                }
+                _ => {
+                    session.open_chat(reply_demo::TARGET_CHAT);
+                    self.pending_reply = Some(reply_demo::reply_in_target());
+                    self.composer.update(cx, |input, cx| {
+                        input.set_value("I will send them tonight.", window, cx);
+                        input.focus(window, cx);
+                    });
+                }
+            }
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyEditMedia)) {
             let content = self
@@ -908,6 +942,41 @@ impl QuillApp {
             self.record_locked = true;
             self.status_note =
                 "screenshot demo — recording voice · locked · playing voice note".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyVoicePause)) {
+            // A paused recording: the play button leads the bar, the
+            // preview has played to 3 s of 7, and Play once is on.
+            let bars = vec![
+                4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14, 22, 9, 17, 5, 26, 11,
+            ];
+            let mut capture =
+                VoiceCapture::preview(demo_media_allowlist().join("demo-voice.ogg"), 7, bars);
+            capture.pause();
+            self.voice_capture = Some(capture);
+            let mut clock = quill::playback::PlaybackClock::new(7.0);
+            clock.seek(3.0);
+            self.record_preview = Some(clock);
+            self.record_once = true;
+            self.status_note = "screenshot demo — recording paused · previewing · play once".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRestrictedComposer)) {
+            let variant = std::env::var("QUILL_DEMO_RESTRICTION").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::composer_leftovers_demo::apply_ready_restricted_composer(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &variant,
+                    quill::local_time::now_unix(),
+                );
+            }
+            self.status_note = if variant == "media" {
+                self.send_denial(quill::send_rights::SendKind::VoiceMessages)
+                    .unwrap_or_default()
+            } else {
+                "screenshot demo — restricted composer".into()
+            };
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyShortcuts)) {
             self.shortcuts_open = true;
@@ -2191,8 +2260,9 @@ impl QuillApp {
         // media on offer so the size toggle renders too.
         if matches!(demo, Some(ScreenshotDemo::ReadyCodeLanguage)) {
             let text = "Here is the fix:\n```\nfn main() {\n    println!(\"hi\");\n}\n```";
+            // The fence becomes a code block in the field.
+            self.set_composer_markup(text, window, cx);
             self.composer.update(cx, |input, cx| {
-                input.set_value(text, window, cx);
                 input.set_selected_range(40..40, cx);
             });
             self.open_code_language_dialog(window, cx);
@@ -2202,6 +2272,34 @@ impl QuillApp {
                     .update(cx, |input, cx| input.set_value("rust", window, cx));
             }
             self.status_note = "screenshot demo — code language".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyComposerWysiwyg)) {
+            // codex:composer-input: formats, a mention tag and a custom emoji
+            // (id 4242 resolves in this seed) shown in the field.
+            let variant = std::env::var("QUILL_DEMO_WYSIWYG").unwrap_or_default();
+            let markup = match variant.as_str() {
+                "rtl" => {
+                    "سلام **دوستان**، پیش‌نویس با _قالب‌بندی_ و ![😀](tg://emoji?id=4242) آماده است\nنسخهٔ ۲ برای [Ann](tg://user?id=777) ارسال شد"
+                }
+                "wrap" => {
+                    "**A long bold line that has to wrap inside the composer, measured with the bold font so no word sticks out past the edge** and plain text after it"
+                }
+                _ => {
+                    "Release notes: **bold**, _italic_, __underline__, ~~struck~~, ||spoiler||, `code` and a [link](https://telegram.org)\nThanks [Ann](tg://user?id=777) for the ![😀](tg://emoji?id=4242) review!\n> Quoted feedback stays a quote"
+                }
+            };
+            self.set_composer_markup(markup, window, cx);
+            let select = variant == "select";
+            self.composer.update(cx, |input, cx| {
+                input.focus(window, cx);
+                if select {
+                    input.set_selected_range(15..43, cx);
+                } else {
+                    let end = input.value().len();
+                    input.set_selected_range(end..end, cx);
+                }
+            });
+            self.status_note = "screenshot demo — formatted composer".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyComposerPreview)) {
             self.composer.update(cx, |input, cx| {
@@ -2319,6 +2417,19 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — service and media cards".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRenderFollowups)) {
+            let view = std::env::var("QUILL_DEMO_FOLLOWUPS_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::render_followups_demo::apply_ready_render_followups(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            self.status_note = "screenshot demo — render follow-ups".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyServiceMessages)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -2348,6 +2459,19 @@ impl QuillApp {
                 );
             }
             self.status_note = "screenshot demo — comments and threads".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyForumColumn)) {
+            let view = std::env::var("QUILL_DEMO_FORUM_COLUMN_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::forum_column_demo::apply_ready_forum_column(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            self.status_note = "screenshot demo — forum topic column and topic threads".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyForumThreadStories)) {
             let view = std::env::var("QUILL_DEMO_FTS_VIEW").unwrap_or_default();

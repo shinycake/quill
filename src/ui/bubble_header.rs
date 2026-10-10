@@ -25,6 +25,9 @@ pub(super) fn reply_header_strip(
     row_id: MessageId,
     header: ReplyHeader,
     thumb: Option<PathBuf>,
+    // The still of the custom emoji repeated behind the strip, if the
+    // replied sender has one and it is downloaded.
+    pattern: Option<PathBuf>,
     on_fill: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -45,7 +48,13 @@ pub(super) fn reply_header_strip(
         (text_primary().into(), text_muted().into())
     };
     let name = header.name_line();
+    let story = header.story;
     let (target_chat, target_id) = (header.target_chat, header.target_id);
+    let rgb = color.to_rgb();
+    let pattern = pattern.and_then(|path| {
+        let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
+        super::reply_pattern::copies(&path, [channel(rgb.r), channel(rgb.g), channel(rgb.b)])
+    });
     let external = header.external_chat.is_some();
     let clickable = header.clickable;
     let state = header.state;
@@ -65,16 +74,23 @@ pub(super) fn reply_header_strip(
         .gap_2()
         .flex()
         .items_center()
+        .relative()
+        .overflow_hidden()
         .rounded_md()
         .border_l_2()
         .border_color(color)
         .bg(color.opacity(0.1))
+        .when_some(pattern, |this, copies| {
+            this.child(super::reply_pattern::layer(&copies, header.is_quote))
+        })
         .when(clickable, |this| {
             this.tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    if external {
+                    if let Some(story) = story {
+                        this.open_story_viewer(target_chat, story, cx);
+                    } else if external {
                         this.select_search_message(target_chat, target_id, window, cx);
                     } else {
                         this.jump_to_replied_message(target_id, cx);
@@ -258,6 +274,26 @@ pub(super) fn via_bot_line(row_id: MessageId, bot: String, on_fill: bool) -> Any
 
 impl QuillApp {
     /// Local image for a reply strip's thumbnail candidates.
+    /// Local still of the custom emoji behind a reply strip.
+    pub(super) fn reply_pattern_path(
+        header: &ReplyHeader,
+        session: Option<&quill::state::Session>,
+        files: &std::collections::HashMap<i32, quill::telegram::ParsedFile>,
+        media_roots: &[PathBuf],
+    ) -> Option<PathBuf> {
+        let id = header.background_emoji?;
+        let file = session?
+            .emoji
+            .custom_emoji_stickers
+            .iter()
+            .find(|sticker| sticker.custom_emoji_id == Some(id))?
+            .display_file_id()?;
+        files
+            .get(&file.0)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| quill::local_path::sandboxed_display_path(path, media_roots))
+    }
+
     pub(super) fn reply_thumb_path(
         header: &ReplyHeader,
         files: &std::collections::HashMap<i32, quill::telegram::ParsedFile>,

@@ -38,6 +38,11 @@ impl Session {
             && let Some(chat_id) = p.chat_id
         {
             self.adopt_supergroup_status_for_chat(chat_id);
+            // Not a member (or no access): there is no personal
+            // restriction to find, and the probe must not repeat.
+            if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                chat.my_rights_fetched = true;
+            }
         }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,
@@ -1102,6 +1107,70 @@ impl Session {
                     state.request = None;
                     state.error = Some(call_request_error_line(&err, "Could not load members"));
                 }
+            }
+            Some(RequestPurpose::GetAdminChatInviteLinks { revoked }) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(state) = self.admin_invite_links.get_mut(&chat_id.0)
+                {
+                    let failed = InviteLinkFetch::Failed(call_request_error_line(
+                        &err,
+                        "Could not load invite links",
+                    ));
+                    if revoked && state.revoked_request == Some(pending.id) {
+                        state.revoked = failed;
+                        state.revoked_request = None;
+                    } else if !revoked && state.active_request == Some(pending.id) {
+                        state.active = failed;
+                        state.active_request = None;
+                    }
+                }
+            }
+            Some(RequestPurpose::GetLinkJoinRequests { .. }) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(state) = self.link_join_requests.get_mut(&chat_id.0)
+                    && state.request == Some(pending.id)
+                {
+                    state.loading = false;
+                    state.request = None;
+                    state.error = Some(call_request_error_line(
+                        &err,
+                        "Could not load join requests",
+                    ));
+                }
+            }
+            Some(RequestPurpose::ProcessLinkJoinRequests { .. }) => {
+                self.invite_link_error = Some(call_request_error_line(
+                    &err,
+                    "Could not process join requests",
+                ));
+            }
+            Some(RequestPurpose::GetChatBoosts { .. }) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(state) = self.chat_boost_lists.get_mut(&chat_id.0)
+                    && state.request == Some(pending.id)
+                {
+                    state.loading = false;
+                    state.request = None;
+                    state.error = Some(call_request_error_line(&err, "Could not load boosts"));
+                }
+            }
+            Some(RequestPurpose::GetChatBoostLink) => {
+                self.chat_action_error = Some(call_request_error_line(
+                    &err,
+                    "Could not get the boost link",
+                ));
+            }
+            Some(
+                RequestPurpose::ToggleSupergroupUsername
+                | RequestPurpose::ReorderSupergroupUsernames,
+            ) => {
+                self.chat_action_error = Some(call_request_error_line(
+                    &err,
+                    "Could not change the usernames",
+                ));
             }
             Some(RequestPurpose::DeleteRevokedChatInviteLink) => {
                 if let Some(pending) = pending {

@@ -87,6 +87,12 @@ pub enum ScreenshotDemo {
     ReadySelectKeyboard,
     /// Reply bar above the composer for a photo message, with its thumbnail.
     ReadyReplyMedia,
+    /// The chat chooser behind "Reply in Another Chat".
+    ReadyReplyElsewhere,
+    /// A reply carried into another chat, quote and source chat in its bar.
+    ReadyReplyExternal,
+    /// The quote picker opened from the reply bar.
+    ReadyReplyQuote,
     /// Edit bar above the composer for an outgoing photo (caption edit).
     ReadyEditMedia,
     /// A new message revealing at the bottom of the history; freeze the
@@ -140,6 +146,10 @@ pub enum ScreenshotDemo {
     ReadyChatlistSuggestionsPhone,
     /// Chat-list rows: video chat badge and emoji status on rows.
     ReadyChatBadges,
+    /// The "Export chat history" options box.
+    ReadyChatExport,
+    /// Appearance box: tray icon, start in tray, close behavior, quit warning.
+    ReadyWindowSettings,
     /// Chat-list rows: the folder editor's chat sections.
     ReadyFoldersChats,
     /// Chat-list rows: the folder editor's chat picker with search.
@@ -202,11 +212,22 @@ pub enum ScreenshotDemo {
     /// MED4: composer with a typed URL → detected-URL chip + preview
     /// toggle (injected, no live Telegram).
     ReadyComposerPreview,
+    /// codex:composer-input: a draft whose formatting, mention tag and custom
+    /// emoji show in the field as they will be sent.
+    /// `QUILL_DEMO_WYSIWYG=rtl|wrap|select` picks a Persian draft, a long
+    /// bold line that wraps, or a selection across formats.
+    ReadyComposerWysiwyg,
     /// Composer core: files dragged over the chat show two drop zones
     /// (photos: quick versus without compression).
     ReadyDropZones,
     /// Composer core: the "Code Language" box over a fenced block.
     ReadyCodeLanguage,
+    /// Composer leftovers: a group that restricts the viewer replaces the
+    /// composer with the reason (`QUILL_DEMO_RESTRICTION`).
+    ReadyRestrictedComposer,
+    /// Composer leftovers: a paused voice recording with its preview and
+    /// the Play once switch.
+    ReadyVoicePause,
     /// Composer core: a dragged folder offers its files or one archive.
     ReadyDropFolder,
     /// MED4: embedded-player + album `linkPreview` cards in bubbles
@@ -374,6 +395,12 @@ pub enum ScreenshotDemo {
     /// suggested photo and birthday, expired media, live locations with
     /// Stop sharing, and link previews with a View button.
     ReadyServiceMedia,
+    /// Private chat with the follow-ups of the render slice.
+    /// `QUILL_DEMO_FOLLOWUPS_VIEW=media|replies` (default `media`): slot
+    /// machines, a running live location, expired media and timestamp
+    /// links; or reply strips with a picture, quote, emoji pattern, another
+    /// chat and a story.
+    ReadyRenderFollowups,
     /// Channel comments and reply threads (injected, no live Telegram):
     /// `QUILL_DEMO_THREADS_VIEW=posts` shows channel posts with comment
     /// bars, `thread` a post's comment thread in its discussion group,
@@ -383,6 +410,10 @@ pub enum ScreenshotDemo {
     /// and public story search (injected, no live Telegram):
     /// `QUILL_DEMO_FTS_VIEW=topic|thread|stats|search` (default `topic`).
     ReadyForumThreadStories,
+    /// The forum topic column next to the chat list, a topic with replies and
+    /// its thread (injected, no live Telegram):
+    /// `QUILL_DEMO_FORUM_COLUMN_VIEW=topics|topic|thread` (default `topics`).
+    ReadyForumColumn,
     /// Forums and Saved Messages sublists (injected, no live Telegram):
     /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
     /// sublist list, one sublist, a tag filter, or the forum topic editor
@@ -874,6 +905,10 @@ pub enum ScreenshotDemo {
     /// (`QUILL_DEMO_GROUP_ADMIN=group|channel|basic|reactions|discussion|
     /// linked|confirm`; injected data, no live Telegram).
     ReadyGroupAdminSettings,
+    /// Admin links, boosts and usernames
+    /// (`QUILL_DEMO_LINKS_BOOSTS=usernames|boosts|gifts|admin-links|
+    /// link-requests|qr`; injected data, no live Telegram).
+    ReadyLinksBoosts,
     /// Slice A5: like `ReadyProfileEdit`, but the username field holds a
     /// freshly-checked value with a seeded `checkChatUsernameResultOk`
     /// verdict — intended for a taller capture

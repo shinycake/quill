@@ -21,7 +21,7 @@ fn message_thread_requests_match_1_8_67() {
         None,
         &SendOptions::default(),
     );
-    let routed: Value = serde_json::from_str(&route_into_thread(&send, 501)).unwrap();
+    let routed: Value = serde_json::from_str(&route_into_thread(&send, 501, None)).unwrap();
     assert_eq!(routed["@type"], "sendMessage");
     assert_eq!(routed["topic_id"]["@type"], "messageTopicThread");
     assert_eq!(routed["topic_id"]["message_thread_id"], 501);
@@ -37,16 +37,17 @@ fn message_thread_requests_match_1_8_67() {
         Some(SendReply {
             message_id: MessageId(520),
             quote: None,
+            source_chat: None,
         }),
         &SendOptions::default(),
     );
-    let routed: Value = serde_json::from_str(&route_into_thread(&reply, 501)).unwrap();
+    let routed: Value = serde_json::from_str(&route_into_thread(&reply, 501, None)).unwrap();
     assert_eq!(routed["reply_to"]["message_id"], 520);
     assert_eq!(routed["topic_id"]["message_thread_id"], 501);
 
     // Typing has no `reply_to`: only the topic is set.
     let typing = send_chat_action(RequestId(7), ChatId(14), true);
-    let typing: Value = serde_json::from_str(&route_into_thread(&typing, 501)).unwrap();
+    let typing: Value = serde_json::from_str(&route_into_thread(&typing, 501, None)).unwrap();
     assert_eq!(typing["topic_id"]["message_thread_id"], 501);
     assert!(typing.get("reply_to").is_none());
 
@@ -58,5 +59,21 @@ fn message_thread_requests_match_1_8_67() {
         "messageSourceChatHistory",
         true,
     );
-    assert_eq!(route_into_thread(&view, 501), view);
+    assert_eq!(route_into_thread(&view, 501, None), view);
+}
+
+#[test]
+fn forum_thread_sends_stay_in_the_topic_and_reply_to_the_root() {
+    let send = send_text(
+        RequestId(5),
+        ChatId(16),
+        Some(7),
+        "hi",
+        None,
+        &SendOptions::default(),
+    );
+    let routed: Value = serde_json::from_str(&route_into_thread(&send, 501, Some(7))).unwrap();
+    assert_eq!(routed["topic_id"]["@type"], "messageTopicForum");
+    assert_eq!(routed["topic_id"]["forum_topic_id"], 7);
+    assert_eq!(routed["reply_to"]["message_id"], 501);
 }
