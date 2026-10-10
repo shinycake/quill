@@ -1,10 +1,12 @@
 name: quill-ui-build
 # Remote UI compile gate for the Quill build loop.
 # SECURITY: this repo is public and the runner below is a personal Mac.
-# This workflow is workflow_dispatch ONLY (triggering requires write access) —
-# there are intentionally no pull_request / pull_request_target triggers,
-# so fork PRs can never execute code on the self-hosted runner.
+# It runs on pushes to main and on manual dispatch, both of which need write
+# access. There are intentionally no pull_request / pull_request_target
+# triggers, so fork PRs can never execute code on the self-hosted runner.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
@@ -20,7 +22,7 @@ on:
         required: false
         default: false
         type: boolean
-run-name: ${{ inputs.run_name || format('{0} (run {1})', inputs.ref, github.run_id) }}
+run-name: ${{ inputs.run_name || format('{0} (run {1})', inputs.ref || github.sha, github.run_id) }}
 permissions:
   contents: read
   statuses: write
@@ -30,12 +32,12 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, quill-ui-build]
     timeout-minutes: 120
     env:
-      BUILDER_REF: ${{ inputs.ref }}
+      BUILDER_REF: ${{ inputs.ref || github.sha }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7, SHA-pinned
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || github.sha }}
           # Keep the runner's cargo cache: the default clean (git clean
           # -ffdx) deleted target/ and vendor/ before every build, so each
           # run compiled everything from scratch.

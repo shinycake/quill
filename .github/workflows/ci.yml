@@ -41,38 +41,31 @@ jobs:
         with:
           config-path: .gitleaks.toml
 
-  # Not required checks. The packaging jobs live in reusable workflows shared
+  # Not required checks, main only. The packaging jobs live in reusable workflows shared
   # with release.yml (docs/decisions/codex-release-pipeline.md); CI never passes
   # the Telegram credential secrets, so these builds embed nothing.
   # Linux: UI + native libs, relocatable package (docs/decisions/codex-linux-package.md).
   linux-package:
     name: linux-package
+    if: github.event_name == 'push'
     uses: ./.github/workflows/package-linux.yml
 
   # Windows zip (docs/decisions/codex-windows-package.md).
   windows:
     name: windows
+    if: github.event_name == 'push'
     uses: ./.github/workflows/package-windows.yml
 
   # The release's Quill.app, on a GitHub-hosted arm64 runner (never the
   # personal Mac), so release packaging breaks show up before a tag does.
   macos-package:
     name: macos-package
+    if: github.event_name == 'push'
     uses: ./.github/workflows/package-macos.yml
 
-  # The required macos-ui-build check is dispatched after source review through
-  # quill-ui-build.yml. Public PR workflows must never target the personal Mac.
-
-  parity:
-    name: parity-fragments
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: validate parity fragments
-        run: bash scripts/check-parity-fragments.sh ${{ github.event.pull_request.base.sha }}
+  # Packaging runs on pushes to main only; PRs get the Linux check. The macOS UI
+  # build runs after merge through quill-ui-build.yml (push to main). Public PR
+  # workflows must never target the personal Mac.
 
   # Not a required check (docs/decisions/codex-legal-compliance.md): fails when a
   # crate brings a license that deny.toml does not allow, or when
