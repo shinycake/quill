@@ -196,6 +196,7 @@ mod platform {
         UnmapNotifyEvent,
     };
     use x11rb::rust_connection::RustConnection;
+    use x11rb::wrapper::ConnectionExt as _;
 
     fn x_window(window: &Window) -> Option<u32> {
         match HasWindowHandle::window_handle(window).ok()?.as_raw() {
