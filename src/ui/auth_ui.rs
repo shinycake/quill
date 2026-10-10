@@ -11,7 +11,7 @@ impl QuillApp {
         if self.live.is_some() {
             return;
         }
-        self.auth_demo = match &self.auth_demo {
+        self.auth_ui.demo_state = match &self.auth_ui.demo_state {
             AuthorizationState::WaitPhoneNumber => AuthorizationState::WaitCode {
                 code_length: Some(5),
                 delivery: Default::default(),
@@ -35,12 +35,13 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let mut email = self.email_input.read(cx).value().to_string();
+        let mut email = self.auth_ui.email_input.read(cx).value().to_string();
         let result = live.driver.submit_email(&email);
         email.zeroize();
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(_) => {
-                self.email_input
+                self.auth_ui
+                    .email_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 "email submitted — waiting for Telegram".into()
             }
@@ -56,7 +57,7 @@ impl QuillApp {
         let allowed = match live.driver.session.auth {
             AuthorizationState::WaitPhoneNumber => true,
             // "Wrong number?" re-sends from the code step.
-            AuthorizationState::WaitCode { .. } => self.signin.editing_phone,
+            AuthorizationState::WaitCode { .. } => self.auth_ui.signin.editing_phone,
             _ => false,
         };
         if !allowed {
@@ -71,15 +72,15 @@ impl QuillApp {
         match live.driver.submit_phone(&number) {
             Ok(_) => {
                 // The field keeps the number so "Wrong number?" can edit it.
-                self.signin.submitted_phone = shown;
-                self.signin.editing_phone = false;
-                self.signin.code_clock = None;
-                self.signin.error_clock = None;
-                self.signin.banned_dismissed = false;
-                self.status_note = "phone submitted — waiting for Telegram".into();
+                self.auth_ui.signin.submitted_phone = shown;
+                self.auth_ui.signin.editing_phone = false;
+                self.auth_ui.signin.code_clock = None;
+                self.auth_ui.signin.error_clock = None;
+                self.auth_ui.signin.banned_dismissed = false;
+                self.connection.status_note = "phone submitted — waiting for Telegram".into();
             }
             Err(_) => {
-                self.status_note = "could not submit phone".into();
+                self.connection.status_note = "could not submit phone".into();
             }
         }
         let _ = window;
@@ -96,17 +97,18 @@ impl QuillApp {
         ) {
             return;
         }
-        let mut code = self.code_input.read(cx).value().to_string();
+        let mut code = self.auth_ui.code_input.read(cx).value().to_string();
         let result = live.driver.submit_code(&code);
         code.zeroize();
         match result {
             Ok(_) => {
-                self.code_input
+                self.auth_ui
+                    .code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.status_note = "code submitted — waiting for Telegram".into();
+                self.connection.status_note = "code submitted — waiting for Telegram".into();
             }
             Err(_) => {
-                self.status_note = "could not submit code".into();
+                self.connection.status_note = "could not submit code".into();
             }
         }
         cx.notify();
@@ -122,17 +124,18 @@ impl QuillApp {
         ) {
             return;
         }
-        let mut password = self.password_input.read(cx).value().to_string();
+        let mut password = self.auth_ui.password_input.read(cx).value().to_string();
         let result = live.driver.submit_password(&password);
         password.zeroize();
         match result {
             Ok(_) => {
-                self.password_input
+                self.auth_ui
+                    .password_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.status_note = "password submitted — waiting for Telegram".into();
+                self.connection.status_note = "password submitted — waiting for Telegram".into();
             }
             Err(_) => {
-                self.status_note = "could not submit password".into();
+                self.connection.status_note = "could not submit password".into();
             }
         }
         cx.notify();
@@ -153,11 +156,11 @@ impl QuillApp {
         }
         match live.driver.resend_code() {
             Ok(_) => {
-                self.signin.code_clock = None;
-                self.status_note = "code resent — waiting for Telegram".into();
+                self.auth_ui.signin.code_clock = None;
+                self.connection.status_note = "code resent — waiting for Telegram".into();
             }
             Err(_) => {
-                self.status_note = "could not resend code".into();
+                self.connection.status_note = "could not resend code".into();
             }
         }
         cx.notify();
@@ -171,10 +174,11 @@ impl QuillApp {
         };
         match live.driver.request_qr_login() {
             Ok(_) => {
-                self.status_note = "QR login requested — scan with a logged-in Telegram app".into();
+                self.connection.status_note =
+                    "QR login requested — scan with a logged-in Telegram app".into();
             }
             Err(_) => {
-                self.status_note = "could not start QR login".into();
+                self.connection.status_note = "could not start QR login".into();
             }
         }
         cx.notify();
@@ -188,13 +192,13 @@ impl QuillApp {
         if link.is_empty() {
             return None;
         }
-        if let Some((cached_link, image)) = &self.qr_login_cache
+        if let Some((cached_link, image)) = &self.auth_ui.qr_login_cache
             && cached_link == link
         {
             return Some(image.clone());
         }
         let rendered = render_qr_image(link)?;
-        self.qr_login_cache = Some((link.to_string(), rendered.clone()));
+        self.auth_ui.qr_login_cache = Some((link.to_string(), rendered.clone()));
         Some(rendered)
     }
 }

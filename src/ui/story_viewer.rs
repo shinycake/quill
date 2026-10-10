@@ -167,10 +167,10 @@ impl QuillApp {
                 let _ = live.driver.get_story(chat_id, id);
             }
         } else if !missing.is_empty() {
-            self.status_note = "demo — getStory runs with live TDLib".into();
+            self.connection.status_note = "demo — getStory runs with live TDLib".into();
         }
         if !self.rebuild_story_viewer(chat_id, story_id, cx) {
-            self.pending_story_open = Some((chat_id.0, story_id));
+            self.chat_list.pending_story_open = Some((chat_id.0, story_id));
         }
         cx.notify();
     }
@@ -255,7 +255,7 @@ impl QuillApp {
             Some("❤")
         };
         if let Some(live) = self.live.as_mut() {
-            self.status_note =
+            self.connection.status_note =
                 match live
                     .driver
                     .set_story_reaction(item.chat_id, item.story_id, emoji)
@@ -270,7 +270,7 @@ impl QuillApp {
                     Err(_) => "could not set story reaction".into(),
                 };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — setStoryReaction runs with live TDLib".into();
+            self.connection.status_note = "demo — setStoryReaction runs with live TDLib".into();
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -287,12 +287,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.join_live_story(chat_id, story_id) {
+            self.connection.status_note = match live.driver.join_live_story(chat_id, story_id) {
                 Ok(_) => "joining live story…".into(),
                 Err(_) => "could not join the live story".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — live stories join with live TDLib".into();
+            self.connection.status_note = "demo — live stories join with live TDLib".into();
         }
         cx.notify();
     }
@@ -307,11 +307,13 @@ impl QuillApp {
                 if live.driver.session.story_available_reactions.is_none() {
                     match live.driver.get_story_available_reactions() {
                         Ok(_) => {}
-                        Err(_) => self.status_note = "could not load story reactions".into(),
+                        Err(_) => {
+                            self.connection.status_note = "could not load story reactions".into()
+                        }
                     }
                 }
             } else if self.demo_session.is_some() {
-                self.status_note = "demo — story reactions run with live TDLib".into();
+                self.connection.status_note = "demo — story reactions run with live TDLib".into();
             }
         }
         cx.notify();
@@ -323,7 +325,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.status_note =
+            self.connection.status_note =
                 match live
                     .driver
                     .set_story_reaction(item.chat_id, item.story_id, Some(emoji))
@@ -332,7 +334,7 @@ impl QuillApp {
                     Err(_) => "could not set story reaction".into(),
                 };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — story reactions run with live TDLib".into();
+            self.connection.status_note = "demo — story reactions run with live TDLib".into();
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -387,7 +389,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.set_story_custom_emoji_reaction(
+            self.connection.status_note = match live.driver.set_story_custom_emoji_reaction(
                 item.chat_id,
                 item.story_id,
                 custom_emoji_id,
@@ -396,7 +398,7 @@ impl QuillApp {
                 Err(_) => "could not set story reaction".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — story reactions run with live TDLib".into();
+            self.connection.status_note = "demo — story reactions run with live TDLib".into();
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -420,7 +422,7 @@ impl QuillApp {
             } => {
                 let url = location.open_street_map_url();
                 let label = Self::story_area_pin_label(&[address, &location.coords_label()]);
-                self.status_note = if quill::platform::open_external_url(&url) {
+                self.connection.status_note = if quill::platform::open_external_url(&url) {
                     label
                 } else {
                     "could not open map".into()
@@ -439,7 +441,7 @@ impl QuillApp {
                     label.push_str(" — ");
                     label.push_str(address);
                 }
-                self.status_note = if quill::platform::open_external_url(&url) {
+                self.connection.status_note = if quill::platform::open_external_url(&url) {
                     label
                 } else {
                     "could not open map".into()
@@ -457,15 +459,15 @@ impl QuillApp {
                 self.story_area_open_message(ChatId(*chat_id), MessageId(*message_id), cx);
             }
             StoryAreaKind::Weather { temperature, emoji } => {
-                self.status_note = format!("{emoji} {temperature:.1}°C");
+                self.connection.status_note = format!("{emoji} {temperature:.1}°C");
                 cx.notify();
             }
             StoryAreaKind::Gift { gift_name } => {
-                self.status_note = format!("🎁 {gift_name}");
+                self.connection.status_note = format!("🎁 {gift_name}");
                 cx.notify();
             }
             StoryAreaKind::Unsupported { type_name } => {
-                self.status_note = format!("story area {type_name} isn't supported");
+                self.connection.status_note = format!("story area {type_name} isn't supported");
                 cx.notify();
             }
         }
@@ -482,7 +484,7 @@ impl QuillApp {
     ) {
         self.close_story_viewer(cx);
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live
+            self.connection.status_note = match live
                 .driver
                 .select_chat(chat_id)
                 .and_then(|_| live.driver.jump_to_replied_message(message_id))
@@ -493,7 +495,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
             let _ = session.begin_chat_search_jump(message_id);
-            self.status_note = chat_search_jump_note(session);
+            self.connection.status_note = chat_search_jump_note(session);
         }
         cx.notify();
     }
@@ -516,7 +518,7 @@ impl QuillApp {
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.status_note =
+            self.connection.status_note =
                 match live
                     .driver
                     .send_story_reply(item.chat_id, item.story_id, &text)
@@ -528,7 +530,7 @@ impl QuillApp {
                 .reply_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — story replies run with live TDLib".into();
+            self.connection.status_note = "demo — story replies run with live TDLib".into();
         }
         self.stories.reply_open = false;
         cx.notify();
@@ -543,12 +545,13 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.delete_story(item.chat_id, item.story_id) {
-                Ok(_) => "Deleting story…".into(),
-                Err(_) => "could not delete story".into(),
-            };
+            self.connection.status_note =
+                match live.driver.delete_story(item.chat_id, item.story_id) {
+                    Ok(_) => "Deleting story…".into(),
+                    Err(_) => "could not delete story".into(),
+                };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — deleteStory runs with live TDLib".into();
+            self.connection.status_note = "demo — deleteStory runs with live TDLib".into();
         }
         self.stories.reaction_picker_open = false;
         self.stories.reply_open = false;
@@ -592,12 +595,12 @@ impl QuillApp {
                 .get_story_interactions(item.chat_id, item.story_id, offset)
                 .is_err()
             {
-                self.status_note = "could not load story viewers".into();
+                self.connection.status_note = "could not load story viewers".into();
             }
         } else if self.demo_session.is_some() {
             // Demo seeds the panel state directly (see the
             // `ReadyStoryViewers` demo); a live fetch says so honestly.
-            self.status_note = "demo — story viewers run with live TDLib".into();
+            self.connection.status_note = "demo — story viewers run with live TDLib".into();
         }
         cx.notify();
     }
@@ -701,7 +704,7 @@ impl QuillApp {
                     .session
                     .story_report_sending(item.chat_id.0, item.story_id);
             }
-            self.status_note =
+            self.connection.status_note =
                 match live
                     .driver
                     .report_story(item.chat_id, item.story_id, option_id, text)
@@ -720,7 +723,7 @@ impl QuillApp {
                     }
                 };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — story reports run with live TDLib".into();
+            self.connection.status_note = "demo — story reports run with live TDLib".into();
         }
         cx.notify();
     }
@@ -756,7 +759,7 @@ impl QuillApp {
         }
         let text = self.stories.report_text_input.read(cx).value().to_string();
         if text.trim().is_empty() && !is_optional {
-            self.status_note = "add details or cancel the report".into();
+            self.connection.status_note = "add details or cancel the report".into();
             cx.notify();
             return;
         }
@@ -778,22 +781,23 @@ impl QuillApp {
             .map(|session| session.story_stealth)
             .unwrap_or_default();
         if stealth.is_active(now) {
-            self.status_note = "Stealth mode is active — your story views are hidden".into();
+            self.connection.status_note =
+                "Stealth mode is active — your story views are hidden".into();
             cx.notify();
             return;
         }
         if stealth.is_cooling_down(now) {
-            self.status_note = "Stealth mode is cooling down — try again later".into();
+            self.connection.status_note = "Stealth mode is cooling down — try again later".into();
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.activate_story_stealth_mode() {
+            self.connection.status_note = match live.driver.activate_story_stealth_mode() {
                 Ok(_) => "Enabling stealth mode…".into(),
                 Err(_) => "could not enable stealth mode".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — stealth mode needs live TDLib".into();
+            self.connection.status_note = "demo — stealth mode needs live TDLib".into();
         }
         cx.notify();
     }
@@ -823,7 +827,7 @@ impl QuillApp {
             let _ = live.driver.close_story(item.chat_id, item.story_id);
         }
         self.stories.viewer.close();
-        self.pending_story_open = None;
+        self.chat_list.pending_story_open = None;
         self.stories.reaction_picker_open = false;
         self.stories.reply_open = false;
         self.stories.viewers_open = false;

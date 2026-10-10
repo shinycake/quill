@@ -38,7 +38,7 @@ pub(crate) fn link_uses_label(member_count: i32, member_limit: i32) -> String {
 
 impl QuillApp {
     pub(super) fn open_admin_links(&mut self, chat_id: ChatId, admin: i64, cx: &mut Context<Self>) {
-        self.status_note = match self.live.as_mut() {
+        self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.open_admin_invite_links(chat_id, admin) {
                 Ok(_) => String::new(),
                 Err(_) => "could not load invite links".into(),
@@ -75,7 +75,7 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.status_note = match this.live.as_mut() {
+                        this.connection.status_note = match this.live.as_mut() {
                             Some(live) => match live.driver.delete_all_revoked_admin_links(chat_id)
                             {
                                 Ok(_) => "deleting revoked links…".into(),
@@ -253,7 +253,7 @@ impl QuillApp {
     }
 
     fn process_link_requests(&mut self, chat_id: ChatId, approve: bool, cx: &mut Context<Self>) {
-        self.status_note = match self.live.as_mut() {
+        self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.process_link_join_requests(chat_id, approve) {
                 Ok(_) => String::new(),
                 Err(_) => "could not process join requests".into(),
@@ -420,10 +420,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let open = self
+            .admin
             .invite_link_qr
             .as_ref()
             .is_some_and(|(chat, link, _)| *chat == chat_id && link == invite_link);
-        self.invite_link_qr = if open {
+        self.admin.invite_link_qr = if open {
             None
         } else {
             render_qr_image(invite_link).map(|image| (chat_id, invite_link.to_owned(), image))
@@ -439,6 +440,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let (_, _, image) = self
+            .admin
             .invite_link_qr
             .as_ref()
             .filter(|(chat, link, _)| *chat == chat_id && link == invite_link)?;

@@ -1114,7 +1114,7 @@ impl QuillApp {
         let Some(chat_id) = session.open_chat else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let caption = text.trim();
         let album_id = "88001";
         let reply_json = reply
@@ -1164,7 +1164,7 @@ impl QuillApp {
                 }
                 AttachmentKind::Document | AttachmentKind::VideoNote => continue,
             };
-            if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                 session.apply(owned);
             }
         }
@@ -1182,7 +1182,7 @@ impl QuillApp {
         let Some(chat_id) = session.open_chat else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         // After the newest loaded message, so the send lands at the bottom
         // and repeated sends don't replace each other.
         let id = session
@@ -1275,7 +1275,7 @@ impl QuillApp {
                 serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into()),
             ),
         };
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1290,7 +1290,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let id = -(session.view_generation.0 as i64);
         let path = session
             .files
@@ -1311,7 +1311,7 @@ impl QuillApp {
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"0","set_id":"0","width":512,"height":512,"emoji":{emoji},"format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatPng"}},"width":128,"height":128,"file":{file}}},"sticker":{file}}}}}{reply_json}}}}}"#,
             chat_id.0
         );
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1328,7 +1328,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let id = -(session.view_generation.0 as i64);
         let path = session
             .files
@@ -1348,7 +1348,7 @@ impl QuillApp {
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":{duration},"width":{width},"height":{height},"file_name":"gif.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":{width},"height":{height},"file":{file}}},"animation":{file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}{reply_json}}}}}"#,
             chat_id.0
         );
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1359,13 +1359,13 @@ impl QuillApp {
         };
         match edit.kind {
             quill::composer::ComposerEditKind::Text => {
-                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
                 let body = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into());
                 let json = format!(
                     r#"{{"@type":"updateMessageContent","chat_id":{},"message_id":{},"new_content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[]}}}}}}"#,
                     edit.chat_id.0, edit.message_id.0
                 );
-                if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                     session.apply(owned);
                 }
             }
@@ -1437,12 +1437,12 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let json = format!(
             r#"{{"@type":"updateDeleteMessages","chat_id":{},"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#,
             chat_id.0, message_id.0
         );
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1469,8 +1469,8 @@ impl QuillApp {
             r#"{{"@type":"updateChatMessageSender","chat_id":{},"message_sender_id":{sender_json}}}"#,
             chat_id.0
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1515,8 +1515,8 @@ impl QuillApp {
             copies.len(),
             copies.join(",")
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1537,8 +1537,8 @@ impl QuillApp {
             .and_then(|message| message.interaction_info.clone());
         let next = toggle_chosen_emoji_reaction(current.as_ref(), emoji);
         let json = interaction_info_update_json(chat_id, message_id, &next);
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1591,8 +1591,8 @@ impl QuillApp {
             r#"{{"@type":"updateMessageIsPinned","chat_id":{},"message_id":{},"is_pinned":{}}}"#,
             chat_id.0, message_id.0, !currently_pinned
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1620,8 +1620,8 @@ impl QuillApp {
             chat_id.0,
             notification_settings_json(&current)
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
         cx.notify();
@@ -1731,10 +1731,10 @@ impl QuillApp {
                 ),
             ]
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         if let Some(session) = self.demo_session.as_mut() {
             for json in jsons {
-                if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                     session.apply(owned);
                 }
             }
@@ -1768,8 +1768,8 @@ impl QuillApp {
             r#"{{"@type":"updateChatPosition","chat_id":{},"position":{{"@type":"chatPosition","list":{{"@type":"{list}"}},"order":"{order}","is_pinned":{pin}}}}}"#,
             chat_id.0
         );
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }
@@ -1799,9 +1799,9 @@ impl QuillApp {
                 ),
             ]
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         for json in jsons {
-            if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                 session.apply(owned);
             }
         }

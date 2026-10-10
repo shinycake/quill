@@ -296,7 +296,7 @@ impl QuillApp {
             },
             None => "invite links need a live connection (demo)".into(),
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -322,7 +322,7 @@ impl QuillApp {
             }
             None => "join requests need a live connection (demo)".into(),
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -341,7 +341,7 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.chats.get(&chat_id.0))
                 .is_some_and(|chat| chat.kind.is_channel());
-        self.invite_link_dialog = Some(InviteLinkDialog::new(
+        self.admin.invite_link_dialog = Some(InviteLinkDialog::new(
             window,
             cx,
             chat_id,
@@ -364,13 +364,13 @@ impl QuillApp {
         dialog
             .name_input
             .update(cx, |input, cx| input.set_value(name.to_owned(), window, cx));
-        self.invite_link_dialog = Some(dialog);
+        self.admin.invite_link_dialog = Some(dialog);
         cx.notify();
     }
 
     /// Phase D3a: close the invite-link create dialog.
     pub(super) fn close_invite_link_dialog(&mut self, cx: &mut Context<Self>) {
-        self.invite_link_dialog = None;
+        self.admin.invite_link_dialog = None;
         cx.notify();
     }
 
@@ -380,7 +380,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(dialog) = self.invite_link_dialog.as_ref() {
+        if let Some(dialog) = self.admin.invite_link_dialog.as_ref() {
             let chat_id = dialog.chat_id;
             let name = dialog.name_input.read(cx).value().to_string();
             let edit_link = dialog.edit_link.clone();
@@ -398,8 +398,8 @@ impl QuillApp {
                     ),
                     (None, _) => None,
                 };
-                self.invite_link_dialog = None;
-                self.status_note = match result {
+                self.admin.invite_link_dialog = None;
+                self.connection.status_note = match result {
                     Some(Ok(_)) => "saving invite link…".into(),
                     Some(Err(_)) => "could not save invite link".into(),
                     None => "invite links need a live connection (demo)".into(),
@@ -408,13 +408,13 @@ impl QuillApp {
                 return;
             }
             if !stars_text.trim().is_empty() && stars_text.trim().parse::<i64>().is_err() {
-                self.status_note = "Stars price must be a whole number".into();
+                self.connection.status_note = "Stars price must be a whole number".into();
                 cx.notify();
                 return;
             }
         }
         let (chat_id, name, expiration_date, member_limit, creates_join_request) =
-            match self.invite_link_dialog.as_ref() {
+            match self.admin.invite_link_dialog.as_ref() {
                 Some(dialog) => {
                     let name = dialog.name_input.read(cx).value().to_string();
                     let days = dialog.expiration_days_input.read(cx).value().to_string();
@@ -422,7 +422,7 @@ impl QuillApp {
                     let days: i64 = match days.trim().parse() {
                         Ok(days) if days >= 0 => days,
                         _ => {
-                            self.status_note =
+                            self.connection.status_note =
                                 "expiration must be a non-negative number of days".into();
                             cx.notify();
                             return;
@@ -431,7 +431,8 @@ impl QuillApp {
                     let member_limit: i32 = match limit.trim().parse() {
                         Ok(limit) if limit >= 0 => limit,
                         _ => {
-                            self.status_note = "member limit must be a non-negative number".into();
+                            self.connection.status_note =
+                                "member limit must be a non-negative number".into();
                             cx.notify();
                             return;
                         }
@@ -465,17 +466,17 @@ impl QuillApp {
                 creates_join_request,
             ) {
                 Ok(_) => {
-                    self.invite_link_dialog = None;
-                    self.status_note = "creating invite link…".into();
+                    self.admin.invite_link_dialog = None;
+                    self.connection.status_note = "creating invite link…".into();
                 }
                 Err(_) => {
-                    self.status_note = "could not create invite link".into();
+                    self.connection.status_note = "could not create invite link".into();
                 }
             }
         } else {
             // Screenshot demos have no live driver; close the dialog honestly.
-            self.invite_link_dialog = None;
-            self.status_note = "invite links need a live connection (demo)".into();
+            self.admin.invite_link_dialog = None;
+            self.connection.status_note = "invite links need a live connection (demo)".into();
         }
         let _ = window;
         cx.notify();
@@ -484,7 +485,7 @@ impl QuillApp {
     /// Phase D3a: the invite-link creation dialog, rendered above the
     /// composer like the poll dialog.
     pub(super) fn invite_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.invite_link_dialog.as_ref()?;
+        let dialog = self.admin.invite_link_dialog.as_ref()?;
         let creates_join_request = dialog.creates_join_request;
         let editing = dialog.edit_link.is_some();
         let title = if editing {
@@ -528,7 +529,7 @@ impl QuillApp {
                             .label("Approval required to join")
                             .checked(creates_join_request)
                             .on_click(cx.listener(|this, &on, _, cx| {
-                                if let Some(dialog) = this.invite_link_dialog.as_mut() {
+                                if let Some(dialog) = this.admin.invite_link_dialog.as_mut() {
                                     dialog.creates_join_request = on;
                                 }
                                 cx.notify();

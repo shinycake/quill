@@ -16,6 +16,7 @@ impl QuillApp {
     /// stores it per chat; an empty box clears it).
     pub(super) fn apply_event_log_search(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let query = self
+            .admin
             .event_log_search
             .as_ref()
             .map(|input| input.read(cx).value().trim().to_string())
@@ -23,7 +24,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.set_chat_event_log_query(chat_id, &query);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.status_note = "could not search recent actions".into();
+                self.connection.status_note = "could not search recent actions".into();
             }
         }
         cx.notify();
@@ -39,7 +40,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.toggle_chat_event_log_filter(chat_id, toggle);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.status_note = "could not filter recent actions".into();
+                self.connection.status_note = "could not filter recent actions".into();
             }
         }
         cx.notify();
@@ -50,11 +51,11 @@ impl QuillApp {
             match live.driver.refresh_chat_event_log(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.status_note = "could not refresh recent actions".into();
+                    self.connection.status_note = "could not refresh recent actions".into();
                 }
             }
         } else {
-            self.status_note = "recent actions need a live connection (demo)".into();
+            self.connection.status_note = "recent actions need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -65,11 +66,11 @@ impl QuillApp {
             match live.driver.fetch_chat_event_log_more(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.status_note = "could not load more actions".into();
+                    self.connection.status_note = "could not load more actions".into();
                 }
             }
         } else {
-            self.status_note = "recent actions need a live connection (demo)".into();
+            self.connection.status_note = "recent actions need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -138,7 +139,7 @@ impl QuillApp {
         // An empty selection means "all types" (the driver passes
         // `null`), so "Clear" just removes every active chip.
         let mut controls = div().flex().items_center().w_full().gap_1();
-        if let Some(input) = self.event_log_search.clone() {
+        if let Some(input) = self.admin.event_log_search.clone() {
             controls = controls.child(
                 div().flex_1().child(
                     Textarea::new(&input)
@@ -435,7 +436,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.event_log_filters.remove(&chat_id.0);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.status_note = "could not clear filters".into();
+                self.connection.status_note = "could not clear filters".into();
             }
         }
         cx.notify();

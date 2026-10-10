@@ -34,14 +34,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.admin_dialog = Some(AdminDialog::promote(window, cx, chat_id));
+        self.admin.admin_dialog = Some(AdminDialog::promote(window, cx, chat_id));
         if let Some(live) = self.live.as_mut()
             && live
                 .driver
                 .fetch_supergroup_members(chat_id, MemberListFilter::Recent, "")
                 .is_err()
         {
-            self.status_note = "could not load members".into();
+            self.connection.status_note = "could not load members".into();
         }
         cx.notify();
     }
@@ -49,7 +49,7 @@ impl QuillApp {
     /// Phase D3b: re-run the promote picker's member search with the
     /// current query text.
     pub(super) fn search_promote_members(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, query) = match self.admin_dialog.as_ref() {
+        let (chat_id, query) = match self.admin.admin_dialog.as_ref() {
             Some(dialog) => match &dialog.kind {
                 AdminDialogKind::Promote { search_input, .. } => {
                     (dialog.chat_id, search_input.read(cx).value().to_string())
@@ -69,10 +69,10 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, filter, query.trim())
                 .is_err()
             {
-                self.status_note = "could not search members".into();
+                self.connection.status_note = "could not search members".into();
             }
         } else {
-            self.status_note = "member search needs a live connection (demo)".into();
+            self.connection.status_note = "member search needs a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -93,11 +93,11 @@ impl QuillApp {
                 AdminRightsFetch::Loaded(rights) => Some(*rights),
                 _ => None,
             });
-        self.admin_dialog = Some(AdminDialog::edit_rights(chat_id, user_id, cached));
+        self.admin.admin_dialog = Some(AdminDialog::edit_rights(chat_id, user_id, cached));
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_admin_rights(chat_id, user_id).is_err()
         {
-            self.status_note = "could not load admin rights".into();
+            self.connection.status_note = "could not load admin rights".into();
         }
         cx.notify();
     }
@@ -109,13 +109,13 @@ impl QuillApp {
         user_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.admin_dialog = Some(AdminDialog::demote_confirm(chat_id, user_id));
+        self.admin.admin_dialog = Some(AdminDialog::demote_confirm(chat_id, user_id));
         cx.notify();
     }
 
     /// Phase D3b: close the admin-management dialog.
     pub(super) fn close_admin_dialog(&mut self, cx: &mut Context<Self>) {
-        self.admin_dialog = None;
+        self.admin.admin_dialog = None;
         cx.notify();
     }
 
@@ -124,7 +124,7 @@ impl QuillApp {
     /// dialog closes on submit and the lists refresh from the server
     /// responses (`updateChatMember` + `ok`).
     pub(super) fn submit_admin_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin_dialog.take() else {
+        let Some(dialog) = self.admin.admin_dialog.take() else {
             return;
         };
         // (keep_dialog, note): validation errors keep the dialog open so
@@ -155,8 +155,8 @@ impl QuillApp {
             } => (true, "select a member first".to_string()),
             AdminDialogKind::EditRights { user_id, rights } => {
                 let Some(rights) = rights else {
-                    self.admin_dialog = Some(dialog);
-                    self.status_note = "rights are still loading".into();
+                    self.admin.admin_dialog = Some(dialog);
+                    self.connection.status_note = "rights are still loading".into();
                     cx.notify();
                     return;
                 };
@@ -188,9 +188,9 @@ impl QuillApp {
             },
         };
         if keep_dialog {
-            self.admin_dialog = Some(dialog);
+            self.admin.admin_dialog = Some(dialog);
         }
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -215,19 +215,19 @@ impl QuillApp {
             .and_then(|session| session.chats.get(&chat_id.0))
             .and_then(|chat| chat.permissions)
             .unwrap_or_else(ChatPermissions::all);
-        self.restrict_dialog = Some(RestrictDialog::new(
+        self.admin.restrict_dialog = Some(RestrictDialog::new(
             window, cx, chat_id, user_id, ban, current,
         ));
         cx.notify();
     }
 
     pub(super) fn close_restrict_dialog(&mut self, cx: &mut Context<Self>) {
-        self.restrict_dialog = None;
+        self.admin.restrict_dialog = None;
         cx.notify();
     }
 
     pub(super) fn toggle_restrict_permission(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.restrict_dialog.as_mut() {
+        if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
             let enabled = chat_permission_get(&dialog.permissions, index);
             chat_permission_set(&mut dialog.permissions, index, !enabled);
             cx.notify();
@@ -236,7 +236,7 @@ impl QuillApp {
 
     /// Choose how long the restriction or ban lasts.
     pub(super) fn pick_restrict_until(&mut self, until: RestrictUntil, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.restrict_dialog.as_mut() {
+        if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
             dialog.until = until;
             dialog.error = None;
             cx.notify();
@@ -246,7 +246,7 @@ impl QuillApp {
     /// Slice G1: submit restrict/ban (`setChatMemberStatus`, schema
     /// 1.8.67 line 13592). Duration is now + days; 0 = forever.
     pub(super) fn submit_restrict_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(mut dialog) = self.restrict_dialog.take() else {
+        let Some(mut dialog) = self.admin.restrict_dialog.take() else {
             return;
         };
         // A custom time is read from the picker and bounded like
@@ -261,7 +261,7 @@ impl QuillApp {
                 Ok(unix) => RestrictUntil::Custom(unix).until_date(now),
                 Err(err) => {
                     dialog.error = Some(err.message());
-                    self.restrict_dialog = Some(dialog);
+                    self.admin.restrict_dialog = Some(dialog);
                     cx.notify();
                     return;
                 }
@@ -294,17 +294,17 @@ impl QuillApp {
                         }
                     }
                     Ok(None) | Err(_) => {
-                        self.restrict_dialog = Some(dialog);
+                        self.admin.restrict_dialog = Some(dialog);
                         "could not update member status".into()
                     }
                 }
             }
             None => {
-                self.restrict_dialog = Some(dialog);
+                self.admin.restrict_dialog = Some(dialog);
                 "member actions need a live connection (demo)".into()
             }
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -321,7 +321,7 @@ impl QuillApp {
             },
             None => "member actions need a live connection (demo)".into(),
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         self.refresh_member_dialog(cx);
     }
 
@@ -333,7 +333,7 @@ impl QuillApp {
             .and_then(|session| session.chats.get(&chat_id.0))
             .and_then(|chat| chat.permissions)
             .unwrap_or_else(ChatPermissions::all);
-        self.permissions_dialog = Some(PermissionsDialog {
+        self.admin.permissions_dialog = Some(PermissionsDialog {
             chat_id,
             permissions: current,
         });
@@ -341,12 +341,12 @@ impl QuillApp {
     }
 
     pub(super) fn close_permissions_dialog(&mut self, cx: &mut Context<Self>) {
-        self.permissions_dialog = None;
+        self.admin.permissions_dialog = None;
         cx.notify();
     }
 
     pub(super) fn toggle_permission(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.permissions_dialog.as_mut() {
+        if let Some(dialog) = self.admin.permissions_dialog.as_mut() {
             let enabled = chat_permission_get(&dialog.permissions, index);
             chat_permission_set(&mut dialog.permissions, index, !enabled);
             cx.notify();
@@ -355,7 +355,7 @@ impl QuillApp {
 
     /// Slice G1: `setChatPermissions` (schema 1.8.67, line 13464).
     pub(super) fn submit_permissions_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.permissions_dialog.take() else {
+        let Some(dialog) = self.admin.permissions_dialog.take() else {
             return;
         };
         let note = match self.live.as_mut() {
@@ -365,16 +365,16 @@ impl QuillApp {
             {
                 Ok(_) => "permissions updated".into(),
                 Err(_) => {
-                    self.permissions_dialog = Some(dialog);
+                    self.admin.permissions_dialog = Some(dialog);
                     "could not update permissions".into()
                 }
             },
             None => {
-                self.permissions_dialog = Some(dialog);
+                self.admin.permissions_dialog = Some(dialog);
                 "permissions need a live connection (demo)".into()
             }
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -394,7 +394,7 @@ impl QuillApp {
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title("Default permissions"));
-            let Some(dialog_state) = this.permissions_dialog.as_ref() else {
+            let Some(dialog_state) = this.admin.permissions_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
             let body = div()
@@ -461,7 +461,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
-            let Some(dialog_state) = this.restrict_dialog.as_ref() else {
+            let Some(dialog_state) = this.admin.restrict_dialog.as_ref() else {
                 return dialog
                     .title(crate::ui::shell::dialog_title("Restrict"))
                     .on_close(on_close);
@@ -654,7 +654,7 @@ impl QuillApp {
     /// the demote confirmation. All element IDs are namespaced
     /// `admin-*` so the screenshot/replay harnesses can find them.
     pub(super) fn admin_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.admin_dialog.as_ref()?;
+        let dialog = self.admin.admin_dialog.as_ref()?;
         match &dialog.kind {
             AdminDialogKind::Promote {
                 search_input,
@@ -721,7 +721,7 @@ impl QuillApp {
         index: usize,
         cx: &mut Context<Self>,
     ) {
-        let seed = match self.admin_dialog.as_ref() {
+        let seed = match self.admin.admin_dialog.as_ref() {
             Some(dialog) => match &dialog.kind {
                 AdminDialogKind::EditRights {
                     user_id,
@@ -740,7 +740,7 @@ impl QuillApp {
             },
             None => None,
         };
-        if let Some(dialog) = self.admin_dialog.as_mut() {
+        if let Some(dialog) = self.admin.admin_dialog.as_mut() {
             match &mut dialog.kind {
                 AdminDialogKind::Promote { rights, .. } if prefix == "admin-right" => {
                     let current = admin_right_get(rights, index);
@@ -910,7 +910,7 @@ impl QuillApp {
                             }))
                             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
                                 let user_id = candidates[ix].0;
-                                if let Some(dialog) = this.admin_dialog.as_mut()
+                                if let Some(dialog) = this.admin.admin_dialog.as_mut()
                                     && let AdminDialogKind::Promote { selected_user, .. } =
                                         &mut dialog.kind
                                 {
@@ -1098,13 +1098,13 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Permissions => DialogSpec::new(
         4400,
-        |app| app.permissions_dialog.is_some(),
+        |app| app.admin.permissions_dialog.is_some(),
         QuillApp::build_permissions_dialog,
     ),
 
     Restrict => DialogSpec::new(
         4600,
-        |app| app.restrict_dialog.is_some(),
+        |app| app.admin.restrict_dialog.is_some(),
         QuillApp::build_restrict_dialog,
     ),
 }

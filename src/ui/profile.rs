@@ -129,10 +129,10 @@ impl QuillApp {
             live.driver.session.username_check = None;
             live.driver.session.username_check_pending = None;
         }
-        self.edit_profile_dialog = Some(EditProfileDialog::new(
+        self.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(
             window, cx, &first, &last, &bio, &username, accent,
         ));
-        if let Some(dialog) = &self.edit_profile_dialog {
+        if let Some(dialog) = &self.dialogs.edit_profile_dialog {
             dialog
                 .first_name_input
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -141,14 +141,14 @@ impl QuillApp {
     }
 
     pub(super) fn close_edit_profile_dialog(&mut self, cx: &mut Context<Self>) {
-        self.edit_profile_dialog = None;
+        self.dialogs.edit_profile_dialog = None;
         cx.notify();
     }
 
     /// A5: `setName` from the dialog. The first name is required
     /// (schema: 1-64 chars).
     pub(super) fn submit_profile_name(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.edit_profile_dialog else {
+        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
             return;
         };
         let first = EditProfileDialog::text(&dialog.first_name_input, cx)
@@ -158,19 +158,19 @@ impl QuillApp {
             .trim()
             .to_string();
         if first.is_empty() {
-            self.status_note = "First name can't be empty.".into();
+            self.connection.status_note = "First name can't be empty.".into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         match live.driver.set_name(&first, &last) {
-            Ok(_) => self.status_note = "Name update requested.".into(),
-            Err(err) => self.status_note = format!("set name failed: {err:?}"),
+            Ok(_) => self.connection.status_note = "Name update requested.".into(),
+            Err(err) => self.connection.status_note = format!("set name failed: {err:?}"),
         }
         cx.notify();
     }
@@ -178,19 +178,19 @@ impl QuillApp {
     /// A5: `setBio` from the dialog. Newlines are collapsed — the schema
     /// allows no line feeds.
     pub(super) fn submit_profile_bio(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.edit_profile_dialog else {
+        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
             return;
         };
         let bio = EditProfileDialog::text(&dialog.bio_input, cx).replace(['\n', '\r'], " ");
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         match live.driver.set_bio(bio.trim()) {
-            Ok(_) => self.status_note = "Bio update requested.".into(),
-            Err(err) => self.status_note = format!("set bio failed: {err:?}"),
+            Ok(_) => self.connection.status_note = "Bio update requested.".into(),
+            Err(err) => self.connection.status_note = format!("set bio failed: {err:?}"),
         }
         cx.notify();
     }
@@ -199,23 +199,24 @@ impl QuillApp {
     /// with self is the documented check target for the current user's
     /// own username).
     pub(super) fn check_profile_username(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.edit_profile_dialog else {
+        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
             return;
         };
         let username = dialog.username_text(cx);
         if username.is_empty() {
-            self.status_note = "Enter a username to check, or save it empty to remove it.".into();
+            self.connection.status_note =
+                "Enter a username to check, or save it empty to remove it.".into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         if let Err(err) = live.driver.check_username(&username) {
-            self.status_note = format!("username check failed: {err:?}");
+            self.connection.status_note = format!("username check failed: {err:?}");
         }
         cx.notify();
     }
@@ -224,7 +225,7 @@ impl QuillApp {
     /// needs a fresh "Available" check first (TGX gates its Done button
     /// the same way); an empty value removes the username.
     pub(super) fn submit_profile_username(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.edit_profile_dialog else {
+        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
             return;
         };
         let username = dialog.username_text(cx);
@@ -241,20 +242,20 @@ impl QuillApp {
                 text == username && result == UsernameCheckResult::Available
             });
         if !username.is_empty() && username != editable && !checked_ok {
-            self.status_note =
+            self.connection.status_note =
                 "Check availability first — the text changed since the last check.".into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         match live.driver.set_username(&username) {
-            Ok(_) => self.status_note = "Username update requested.".into(),
-            Err(err) => self.status_note = format!("set username failed: {err:?}"),
+            Ok(_) => self.connection.status_note = "Username update requested.".into(),
+            Err(err) => self.connection.status_note = format!("set username failed: {err:?}"),
         }
         cx.notify();
     }
@@ -287,13 +288,13 @@ impl QuillApp {
         let mut new_order = order;
         new_order.swap(pos, swap);
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         if let Err(err) = live.driver.reorder_active_usernames(&new_order) {
-            self.status_note = format!("reorder failed: {err:?}");
+            self.connection.status_note = format!("reorder failed: {err:?}");
         }
         cx.notify();
     }
@@ -306,14 +307,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         match live.driver.toggle_username_is_active(username, is_active) {
-            Ok(_) => self.status_note = "Username update requested.".into(),
-            Err(err) => self.status_note = format!("username toggle failed: {err:?}"),
+            Ok(_) => self.connection.status_note = "Username update requested.".into(),
+            Err(err) => self.connection.status_note = format!("username toggle failed: {err:?}"),
         }
         cx.notify();
     }
@@ -322,26 +323,26 @@ impl QuillApp {
     /// `inputFileLocal`). Sets the main profile photo (`is_public=false`,
     /// not the public photo).
     pub(super) fn submit_profile_photo(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.edit_profile_dialog else {
+        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
             return;
         };
         let path = EditProfileDialog::text(&dialog.photo_path_input, cx)
             .trim()
             .to_string();
         if path.is_empty() {
-            self.status_note = "Enter a photo path first.".into();
+            self.connection.status_note = "Enter a photo path first.".into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         match live.driver.set_profile_photo(&path) {
-            Ok(_) => self.status_note = "Photo update requested.".into(),
-            Err(err) => self.status_note = format!("set photo failed: {err:?}"),
+            Ok(_) => self.connection.status_note = "Photo update requested.".into(),
+            Err(err) => self.connection.status_note = format!("set photo failed: {err:?}"),
         }
         cx.notify();
     }
@@ -350,7 +351,7 @@ impl QuillApp {
     /// `profile_background_custom_emoji_id` is preserved by the driver
     /// (Quill has no background-emoji picker).
     pub(super) fn submit_profile_accent(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.edit_profile_dialog else {
+        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
             return;
         };
         let selected = dialog.accent_selection;
@@ -361,19 +362,19 @@ impl QuillApp {
             .map(|u| u.profile_accent_color_id)
             .unwrap_or(-1);
         if selected == current {
-            self.status_note = "Accent color unchanged.".into();
+            self.connection.status_note = "Accent color unchanged.".into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         match live.driver.set_profile_accent_color(selected) {
-            Ok(_) => self.status_note = "Accent color update requested.".into(),
-            Err(err) => self.status_note = format!("set accent color failed: {err:?}"),
+            Ok(_) => self.connection.status_note = "Accent color update requested.".into(),
+            Err(err) => self.connection.status_note = format!("set accent color failed: {err:?}"),
         }
         cx.notify();
     }
@@ -387,19 +388,19 @@ impl QuillApp {
             .and_then(|me| self.session().and_then(|s| s.user_full_info(me)))
             .and_then(|info| info.photo_id);
         let Some(photo_id) = photo_id else {
-            self.status_note = "No profile photo to remove.".into();
+            self.connection.status_note = "No profile photo to remove.".into();
             cx.notify();
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
             cx.notify();
             return;
         };
         live.driver.session.profile_edit_error = None;
         match live.driver.delete_profile_photo(photo_id) {
-            Ok(_) => self.status_note = "Photo removal requested.".into(),
-            Err(err) => self.status_note = format!("remove photo failed: {err:?}"),
+            Ok(_) => self.connection.status_note = "Photo removal requested.".into(),
+            Err(err) => self.connection.status_note = format!("remove photo failed: {err:?}"),
         }
         cx.notify();
     }
@@ -411,7 +412,7 @@ impl QuillApp {
     /// per-section saves. Centered over the shell like the add-contact
     /// dialog.
     pub(super) fn edit_profile_dialog_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.edit_profile_dialog.as_ref()?;
+        let dialog = self.dialogs.edit_profile_dialog.as_ref()?;
         let me = self.session().and_then(|s| s.my_user_id);
         let (active, disabled, editable) = me
             .and_then(|me| self.session().and_then(|s| s.user(me)))
@@ -699,7 +700,7 @@ impl QuillApp {
                 selected,
                 cx,
                 move |this, cx| {
-                    if let Some(dialog) = this.edit_profile_dialog.as_mut() {
+                    if let Some(dialog) = this.dialogs.edit_profile_dialog.as_mut() {
                         dialog.accent_selection = id;
                     }
                     cx.notify();
@@ -713,7 +714,7 @@ impl QuillApp {
             none_selected,
             cx,
             |this, cx| {
-                if let Some(dialog) = this.edit_profile_dialog.as_mut() {
+                if let Some(dialog) = this.dialogs.edit_profile_dialog.as_mut() {
                     dialog.accent_selection = -1;
                 }
                 cx.notify();
@@ -743,7 +744,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     EditProfile => DialogSpec::new(
         6000,
-        |app| app.edit_profile_dialog.is_some(),
+        |app| app.dialogs.edit_profile_dialog.is_some(),
         QuillApp::build_edit_profile_dialog,
     ),
 }

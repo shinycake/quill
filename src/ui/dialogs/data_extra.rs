@@ -199,7 +199,7 @@ impl QuillApp {
                     )),
             );
         }
-        if self.privacy_ui.network_reset_confirm {
+        if self.privacy.extra.network_reset_confirm {
             section.child(
                 div()
                     .flex()
@@ -216,7 +216,7 @@ impl QuillApp {
                             .danger()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.privacy_ui.network_reset_confirm = false;
+                                this.privacy.extra.network_reset_confirm = false;
                                 if let Some(live) = this.live.as_mut() {
                                     let _ = live.driver.reset_network_statistics();
                                 } else if let Some(demo) = this.demo_session.as_mut() {
@@ -231,7 +231,7 @@ impl QuillApp {
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.privacy_ui.network_reset_confirm = false;
+                                this.privacy.extra.network_reset_confirm = false;
                                 cx.notify();
                             })),
                     ),
@@ -244,7 +244,7 @@ impl QuillApp {
                         .outline()
                         .small()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.privacy_ui.network_reset_confirm = true;
+                            this.privacy.extra.network_reset_confirm = true;
                             cx.notify();
                         })),
                 ),

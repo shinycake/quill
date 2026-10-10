@@ -78,7 +78,7 @@ impl QuillApp {
                 sha256: "a".repeat(64),
             }),
         };
-        self.update_state = match demo {
+        self.settings.update_state = match demo {
             UpdateDemo::Changelog => quill::updater::UpdateState::Installed(release),
             UpdateDemo::Failure => quill::updater::UpdateState::DownloadFailed(
                 release,
@@ -86,6 +86,6 @@ impl QuillApp {
             ),
             UpdateDemo::Install => quill::updater::UpdateState::Available(release),
         };
-        self.appearance_open = true;
+        self.settings.appearance_open = true;
     }
 }

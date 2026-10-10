@@ -107,7 +107,7 @@ impl QuillApp {
                 input.set_selected_range(end..end, cx);
             }
         });
-        self.status_note = "screenshot demo — formatted composer".into();
+        self.connection.status_note = "screenshot demo — formatted composer".into();
     }
 
     fn demo_ready_chats(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -138,13 +138,13 @@ impl QuillApp {
     }
 
     fn demo_ready_deep_link_info(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.deep_link_dialog = Some(
+        self.links.deep_link_dialog = Some(
             "This link requires a newer version of Quill. Please update Quill to open it.".into(),
         );
     }
 
     fn demo_ready_deep_link_invite(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.deep_link_invite = Some(quill::state::DeepLinkState::InvitePreview {
+        self.links.deep_link_invite = Some(quill::state::DeepLinkState::InvitePreview {
             hash: "demo_invite".into(),
             title: "Rust Community".into(),
             member_count: 1248,
@@ -162,7 +162,8 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_value("pasted from clipboard", window, cx);
         });
-        self.status_note = "screenshot demo — paste image → composer photo attachment".into();
+        self.connection.status_note =
+            "screenshot demo — paste image → composer photo attachment".into();
     }
 
     fn demo_ready_send_media(&mut self, window: &mut Window, cx: &mut Context<Self>) {

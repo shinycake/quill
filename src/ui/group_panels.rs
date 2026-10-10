@@ -38,11 +38,11 @@ impl QuillApp {
     pub(super) fn boost_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.request_chat_boost(chat_id) {
-                Ok(_) => self.status_note = "boost requested".into(),
-                Err(_) => self.status_note = "could not boost channel".into(),
+                Ok(_) => self.connection.status_note = "boost requested".into(),
+                Err(_) => self.connection.status_note = "could not boost channel".into(),
             }
         } else {
-            self.status_note = "boosts need a live connection (demo)".into();
+            self.connection.status_note = "boosts need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -299,11 +299,11 @@ impl QuillApp {
                     .map(|_| ()),
             };
             if let Err(err) = fetch {
-                self.status_note = format!("info request failed: {err:?}");
+                self.connection.status_note = format!("info request failed: {err:?}");
             } else if let InfoPanelTarget::User(user_id) = target
                 && let Err(err) = live.driver.download_user_photo(user_id)
             {
-                self.status_note = format!("photo download failed: {err:?}");
+                self.connection.status_note = format!("photo download failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_info_panel = Some(target);
@@ -311,8 +311,8 @@ impl QuillApp {
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin
         // filter lives in the session and follows the chat.
-        if self.event_log_search.is_none() {
-            self.event_log_search = Some(cx.new(|cx| {
+        if self.admin.event_log_search.is_none() {
+            self.admin.event_log_search = Some(cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder("Search recent actions")
                     .auto_grow(1, 1)
@@ -324,7 +324,7 @@ impl QuillApp {
                 .session()
                 .and_then(|session| session.event_log_queries.get(&chat_id.0).cloned())
                 .unwrap_or_default();
-            if let Some(input) = self.event_log_search.clone() {
+            if let Some(input) = self.admin.event_log_search.clone() {
                 input.update(cx, |state, cx| state.set_value(&query, window, cx));
             }
         }

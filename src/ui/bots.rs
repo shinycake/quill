@@ -265,13 +265,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if answer.url.is_empty() {
-            self.status_note = if answer.text.is_empty() {
+            self.connection.status_note = if answer.text.is_empty() {
                 "bot answered".into()
             } else {
                 answer.text
             };
         } else {
-            self.status_note = if quill::platform::open_external_url(&answer.url) {
+            self.connection.status_note = if quill::platform::open_external_url(&answer.url) {
                 "opened link".into()
             } else {
                 "could not open link".into()
@@ -319,10 +319,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.callback_password_dialog = Some(CallbackPasswordDialog::new(
+        self.links.callback_password_dialog = Some(CallbackPasswordDialog::new(
             window, cx, chat_id, message_id, data,
         ));
-        if let Some(dialog) = &self.callback_password_dialog {
+        if let Some(dialog) = &self.links.callback_password_dialog {
             dialog
                 .password_input
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -332,7 +332,7 @@ impl QuillApp {
 
     /// B1: close the password prompt without submitting.
     pub(super) fn close_callback_password_dialog(&mut self, cx: &mut Context<Self>) {
-        self.callback_password_dialog = None;
+        self.links.callback_password_dialog = None;
         cx.notify();
     }
 
@@ -342,7 +342,7 @@ impl QuillApp {
     /// as "wrong 2-step verification password" via the error drain in
     /// `Session::apply_payload` (TDLib error 400).
     pub(super) fn submit_callback_password_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.callback_password_dialog.take() else {
+        let Some(dialog) = self.links.callback_password_dialog.take() else {
             return;
         };
         let password = dialog.password_input.read(cx).value().to_string();
@@ -436,7 +436,7 @@ impl QuillApp {
                 this.close_callback_password_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(dialog_state) = this.callback_password_dialog.as_ref() else {
+            let Some(dialog_state) = this.links.callback_password_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Enter 2-step password"))
@@ -510,11 +510,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::LoginUrlConfirm, |this, _, cx| {
-                this.login_url_confirm = None;
+                this.links.login_url_confirm = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let confirm = this.login_url_confirm.as_ref();
+            let confirm = this.links.login_url_confirm.as_ref();
             let domain = confirm
                 .map(|confirm| confirm.domain.clone())
                 .unwrap_or_default();
@@ -544,7 +544,7 @@ impl QuillApp {
                         .label("Cancel")
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.login_url_confirm = None;
+                            this.links.login_url_confirm = None;
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::LoginUrlConfirm, window, cx);
                         })),
@@ -939,13 +939,13 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     CallbackPassword => DialogSpec::new(
         2400,
-        |app| app.callback_password_dialog.is_some(),
+        |app| app.links.callback_password_dialog.is_some(),
         QuillApp::build_callback_password_dialog,
     ),
 
     LoginUrlConfirm => DialogSpec::new(
         2500,
-        |app| app.login_url_confirm.is_some(),
+        |app| app.links.login_url_confirm.is_some(),
         QuillApp::build_login_url_confirm_dialog,
     ),
 }

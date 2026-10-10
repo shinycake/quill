@@ -165,7 +165,7 @@ impl QuillApp {
         let selected = dialog.selected.clone();
         let Some(url) = normalize_link_url(&typed) else {
             // Nothing (or something unusable) typed: leave the dialog open.
-            self.status_note = "enter a valid link".into();
+            self.connection.status_note = "enter a valid link".into();
             cx.notify();
             return;
         };
@@ -173,7 +173,8 @@ impl QuillApp {
         let text = self.composer.read(cx).value().to_string();
         if text.get(range.clone()) != Some(selected.as_str()) {
             // The draft changed under the dialog; don't link the wrong text.
-            self.status_note = "the text changed; select it again to add the link".into();
+            self.connection.status_note =
+                "the text changed; select it again to add the link".into();
             cx.notify();
             return;
         }
@@ -255,14 +256,14 @@ impl QuillApp {
         // the rich editor still writes fences.
         let (block, current) = if self.composer_ui.rich_editor_open {
             let Some(fence) = quill::code_language::fence_at(&text, caret) else {
-                self.status_note = "Put the cursor inside a code block first.".into();
+                self.connection.status_note = "Put the cursor inside a code block first.".into();
                 cx.notify();
                 return;
             };
             (fence.block.clone(), fence.current(&text).to_string())
         } else {
             let Some(found) = self.composer_code_block_at_caret(cx) else {
-                self.status_note = "Put the cursor inside a code block first.".into();
+                self.connection.status_note = "Put the cursor inside a code block first.".into();
                 cx.notify();
                 return;
             };
@@ -319,7 +320,7 @@ impl QuillApp {
                 .is_some_and(|(range, _)| range == block);
             if !still_there {
                 self.close_code_language_dialog(window, cx);
-                self.status_note = "The text changed. Open Code Language again.".into();
+                self.connection.status_note = "The text changed. Open Code Language again.".into();
                 cx.notify();
                 return;
             }
@@ -343,7 +344,7 @@ impl QuillApp {
         let Some(fence) = fence else {
             // The draft changed under the box; do not edit the wrong block.
             self.close_code_language_dialog(window, cx);
-            self.status_note = "The text changed. Open Code Language again.".into();
+            self.connection.status_note = "The text changed. Open Code Language again.".into();
             cx.notify();
             return;
         };

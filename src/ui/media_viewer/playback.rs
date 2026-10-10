@@ -171,7 +171,7 @@ impl QuillApp {
         match path {
             Some(path) => self.open_file_guarded(path, cx),
             None => {
-                self.status_note = "download the media first to open it".into();
+                self.connection.status_note = "download the media first to open it".into();
                 cx.notify();
             }
         }
@@ -288,7 +288,7 @@ impl QuillApp {
         }
         if !restarted {
             // Nothing playing: the speed applies to the next play.
-            self.status_note = format!("playback speed {}×", Self::speed_label(next));
+            self.connection.status_note = format!("playback speed {}×", Self::speed_label(next));
         }
         cx.notify();
     }
@@ -448,7 +448,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.media_prefs = prefs;
             if let Err(err) = live.driver.save_media_prefs() {
-                self.status_note = format!("couldn't save media settings: {err}");
+                self.connection.status_note = format!("couldn't save media settings: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.media_prefs = prefs;

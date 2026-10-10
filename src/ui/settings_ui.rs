@@ -79,7 +79,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.archive_settings_open = true;
             if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
-                self.status_note = format!("archive settings failed: {err:?}");
+                self.connection.status_note = format!("archive settings failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.archive_settings_open = true;
@@ -94,13 +94,13 @@ impl QuillApp {
     pub(super) fn set_archive_setting(&mut self, index: usize, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let Some(mut settings) = live.driver.session.archive_chat_list_settings else {
-                self.status_note = "archive settings still loading…".into();
+                self.connection.status_note = "archive settings still loading…".into();
                 cx.notify();
                 return;
             };
             archive_setting_set(&mut settings, index, on);
             if let Err(err) = live.driver.set_archive_chat_list_settings(settings) {
-                self.status_note = format!("archive setting failed: {err:?}");
+                self.connection.status_note = format!("archive setting failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(mut settings) = session.archive_chat_list_settings
@@ -471,7 +471,8 @@ impl QuillApp {
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     if live.driver.set_less_data_for_calls(on).is_err() {
-                                        this.status_note = "Couldn't update call settings.".into();
+                                        this.connection.status_note =
+                                            "Couldn't update call settings.".into();
                                     }
                                 } else if let Some(demo) = this.demo_session.as_mut() {
                                     // Demo: show the chosen value immediately
@@ -925,7 +926,7 @@ crate::ui::shell::register_dialogs! {
     /// split lands, then the entry can move next to its builder.
     NotificationDefaults => DialogSpec::new(
         1000,
-        |app| app.notification_defaults_open,
+        |app| app.notify.notification_defaults_open,
         QuillApp::build_notification_defaults_dialog,
     ),
 }

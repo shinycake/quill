@@ -85,18 +85,18 @@ enum VideoPlaybackDemo {
 impl QuillApp {
     fn demo_ready_dice(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_dice(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_dice(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — dice rolls".into();
+        self.connection.status_note = "screenshot demo — dice rolls".into();
     }
 
     fn demo_ready_location(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_location(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_location(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — location / venue / contact".into();
+        self.connection.status_note = "screenshot demo — location / venue / contact".into();
     }
 
     fn demo_ready_media_viewer(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -104,25 +104,25 @@ impl QuillApp {
         // (message 201, "Loaded photo") and a pending one (202, loading
         // state); the document (203) is not viewer-openable.
         self.open_media_viewer(ChatId(11), MessageId(201), cx);
-        self.status_note = "screenshot demo — fullscreen media viewer".into();
+        self.connection.status_note = "screenshot demo — fullscreen media viewer".into();
     }
 
     fn demo_ready_payments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Slice P1: invoice card, payment rows, and the checkout dialog.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_payments(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_payments(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_payment_dialog(window, cx);
-        self.status_note = "screenshot demo — payments: invoice + checkout".into();
+        self.connection.status_note = "screenshot demo — payments: invoice + checkout".into();
     }
 
     fn demo_ready_poll(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_poll(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_poll(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — polls: voted + closed".into();
+        self.connection.status_note = "screenshot demo — polls: voted + closed".into();
     }
 
     fn demo_video_playback(
@@ -132,8 +132,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_video_viewer(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_video_viewer(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // The Media seed plus a downloaded 12 s video (204, "Demo clip",
         // file 96). The demo extracts + decodes frames synchronously
@@ -173,7 +173,7 @@ impl QuillApp {
         }
         // Keep `viewer_demo_sync_frames` true so no background extraction
         // races the synchronously decoded frames.
-        self.status_note = "screenshot demo — in-viewer video playback".into();
+        self.connection.status_note = "screenshot demo — in-viewer video playback".into();
         if demo == VideoPlaybackDemo::VideoPip {
             if let Some(clock) = self.viewer.clock.as_mut() {
                 clock.seek(0.0);

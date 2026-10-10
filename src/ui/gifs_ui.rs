@@ -16,7 +16,7 @@ impl QuillApp {
     fn search_gif_picker(&mut self, cx: &mut Context<Self>) {
         let query = self.pickers.gif_search_input.read(cx).value().to_string();
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.search_gifs(&query) {
+            self.connection.status_note = match live.driver.search_gifs(&query) {
                 Ok(_) => "searching GIFs…".into(),
                 Err(_) => "could not search GIFs".into(),
             };
@@ -33,7 +33,7 @@ impl QuillApp {
     }
     fn more_gif_search_results(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.more_gif_search_results() {
+            self.connection.status_note = match live.driver.more_gif_search_results() {
                 Ok(_) => "loading more GIFs…".into(),
                 Err(_) => "could not load more GIFs".into(),
             };
@@ -42,7 +42,7 @@ impl QuillApp {
     }
     fn save_gif_pick(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.set_gif_saved(file_id, true) {
+            self.connection.status_note = match live.driver.set_gif_saved(file_id, true) {
                 Ok(_) => "saving GIF…".into(),
                 Err(_) => "could not save GIF".into(),
             };

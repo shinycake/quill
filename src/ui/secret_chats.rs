@@ -231,15 +231,15 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) {
-        self.pending_close_secret_chat = Some(chat_id);
-        self.status_note = "confirm close secret chat".into();
+        self.chat_list.pending_close_secret_chat = Some(chat_id);
+        self.connection.status_note = "confirm close secret chat".into();
         cx.notify();
     }
 
     /// Phase B1: cancel the "Close secret chat" confirm.
     pub(super) fn cancel_close_secret_chat(&mut self, cx: &mut Context<Self>) {
-        self.pending_close_secret_chat = None;
-        self.status_note = "close cancelled".into();
+        self.chat_list.pending_close_secret_chat = None;
+        self.connection.status_note = "close cancelled".into();
         cx.notify();
     }
 
@@ -247,7 +247,7 @@ impl QuillApp {
     /// The state change to `secretChatStateClosed` arrives as
     /// `updateSecretChat`; the composer hides then.
     pub(super) fn confirm_close_secret_chat(&mut self, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.pending_close_secret_chat.take() else {
+        let Some(chat_id) = self.chat_list.pending_close_secret_chat.take() else {
             return;
         };
         if self.live.is_some() {
@@ -257,12 +257,12 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .close_secret_chat(chat_id);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "closing secret chat…".into(),
                 Err(_) => "could not close secret chat".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo: secret chat close (no live Telegram)".into();
+            self.connection.status_note = "demo: secret chat close (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -286,12 +286,12 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .start_secret_chat(user_id);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "creating secret chat…".into(),
                 Err(_) => "could not start secret chat".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo: secret chat create (no live Telegram)".into();
+            self.connection.status_note = "demo: secret chat create (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -314,10 +314,10 @@ impl QuillApp {
         else {
             return;
         };
-        if self.self_destruct_tick_chat == Some(chat_id) {
+        if self.history.self_destruct_tick_chat == Some(chat_id) {
             return;
         }
-        self.self_destruct_tick_chat = Some(chat_id);
+        self.history.self_destruct_tick_chat = Some(chat_id);
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -332,8 +332,8 @@ impl QuillApp {
                             cx.notify();
                             true
                         } else {
-                            if this.self_destruct_tick_chat == Some(chat_id) {
-                                this.self_destruct_tick_chat = None;
+                            if this.history.self_destruct_tick_chat == Some(chat_id) {
+                                this.history.self_destruct_tick_chat = None;
                             }
                             false
                         }
@@ -354,8 +354,8 @@ impl QuillApp {
     /// Demo: apply the same update through the reducer so the screenshot
     /// fixture shows the new timer immediately.
     pub(super) fn apply_chat_ttl(&mut self, chat_id: ChatId, secs: i32, cx: &mut Context<Self>) {
-        self.ttl_picker_open = false;
-        self.ttl_custom_open = false;
+        self.notify.ttl_picker_open = false;
+        self.notify.ttl_custom_open = false;
         if self.live.is_some() {
             let result = self
                 .live
@@ -363,7 +363,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .set_chat_message_auto_delete_time(chat_id, secs);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) if secs == 0 => "turning off timer…".into(),
                 Ok(_) => "setting timer…".into(),
                 Err(_) => "could not change timer".into(),
@@ -375,7 +375,7 @@ impl QuillApp {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.message_auto_delete_time = secs;
             }
-            self.status_note = if secs == 0 {
+            self.connection.status_note = if secs == 0 {
                 "timer off".into()
             } else {
                 format!("timer {}", format_ttl_setting(secs))
@@ -463,6 +463,7 @@ impl QuillApp {
     pub(super) fn secret_close_copy(&self) -> (String, String, &'static str) {
         let session = self.session();
         let user_id = self
+            .chat_list
             .pending_close_secret_chat
             .and_then(|id| session.as_ref()?.chats.get(&id.0))
             .and_then(|chat| match &chat.kind {
@@ -474,6 +475,7 @@ impl QuillApp {
             |id| Self::secret_peer_name(session, id, "your contact"),
         );
         let state = self
+            .chat_list
             .pending_close_secret_chat
             .and_then(|id| session.as_ref()?.chats.get(&id.0))
             .and_then(|chat| chat.secret_state.clone());

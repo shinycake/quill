@@ -37,11 +37,11 @@ impl QuillApp {
     pub(super) fn selection_motion(&self, chat_id: ChatId, cx: &mut Context<Self>) -> (f32, f32) {
         let now = std::time::Instant::now();
         let on = self.selecting_in(chat_id);
-        let mut fx = self.motion.selection.borrow_mut();
+        let mut fx = self.frame.motion.selection.borrow_mut();
         if on && let Some(draft) = self.share.pending_forward.as_ref() {
             fx.last_count = draft.count();
         }
-        fx.sync_mode(on, self.window_active.get(), now);
+        fx.sync_mode(on, self.frame.window_active.get(), now);
         if fx.moving(now) {
             self.request_animation_tick(60, cx);
         }
@@ -69,10 +69,10 @@ impl QuillApp {
             return SelectionRow::default();
         }
         let now = std::time::Instant::now();
-        let checked = self.motion.selection.borrow_mut().check(
+        let checked = self.frame.motion.selection.borrow_mut().check(
             message_id.0,
             selected,
-            self.window_active.get(),
+            self.frame.window_active.get(),
             now,
         );
         let interactive = self.selecting_in(chat_id);
@@ -194,7 +194,7 @@ impl QuillApp {
         if slide <= 0. {
             return header.into_any_element();
         }
-        let count = self.motion.selection.borrow().last_count;
+        let count = self.frame.motion.selection.borrow().last_count;
         let bar = div()
             .id("selection-bar")
             .absolute()
@@ -465,7 +465,7 @@ impl QuillApp {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.status_note = "copied".into();
+        self.connection.status_note = "copied".into();
         cx.notify();
     }
 
@@ -527,7 +527,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_media_files(&missing);
         }
-        self.status_note = match missing.len() {
+        self.connection.status_note = match missing.len() {
             1 => "downloading 1 file…".into(),
             n => format!("downloading {n} files…"),
         };
@@ -569,7 +569,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&missing);
             }
-            self.status_note = "downloading… choose Save again when it finishes".into();
+            self.connection.status_note = "downloading… choose Save again when it finishes".into();
             cx.notify();
             return;
         }
@@ -601,7 +601,7 @@ impl QuillApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.status_note = match saved {
+                this.connection.status_note = match saved {
                     1 => "saved 1 file".into(),
                     n => format!("saved {n} files"),
                 };
@@ -772,7 +772,7 @@ impl QuillApp {
         self.begin_vanish(chat_id, ids);
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
-                self.status_note = "could not delete messages".into();
+                self.connection.status_note = "could not delete messages".into();
             }
         } else if self.demo_session.is_some() {
             for id in ids {

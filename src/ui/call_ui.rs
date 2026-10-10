@@ -130,8 +130,8 @@ impl QuillApp {
             )
         } else {
             (
-                self.demo_remote_frame.clone(),
-                self.demo_local_frame.clone(),
+                self.demo_ui.remote_frame.clone(),
+                self.demo_ui.local_frame.clone(),
             )
         };
         // Phase C2l: the peer's 1:1 screen share. The driver drops the
@@ -144,7 +144,7 @@ impl QuillApp {
             } else if let Some(live) = self.live.as_ref() {
                 live.driver.latest_screen_frame(call.id)
             } else {
-                self.demo_screen_frame.clone()
+                self.demo_ui.screen_frame.clone()
             };
 
         let status_text = |text: &str| {
@@ -474,8 +474,8 @@ impl QuillApp {
                 )
             } else {
                 (
-                    self.demo_call_devices.clone().unwrap_or_default(),
-                    self.demo_selected_devices.clone(),
+                    self.demo_ui.call_devices.clone().unwrap_or_default(),
+                    self.demo_ui.selected_devices.clone(),
                 )
             };
             if no_engine {
@@ -536,7 +536,7 @@ impl QuillApp {
                     let camera_selected: Option<&str> = if let Some(live) = self.live.as_ref() {
                         live.driver.selected_call_camera()
                     } else {
-                        self.demo_selected_camera.as_deref()
+                        self.demo_ui.selected_camera.as_deref()
                     };
                     pickers =
                         pickers.child(div().text_xs().font_semibold().child("Camera".to_string()));
@@ -786,7 +786,7 @@ impl QuillApp {
         }
         if summary.need_rating && !summary.rating_sent {
             card = card.child(div().text_sm().child("How was the call quality?"));
-            match &self.rating_detail {
+            match &self.dialogs.rating_detail {
                 // Phase C2i: star tap opens the detail editor (problems
                 // + comment) — nothing is sent until Submit.
                 None => {
@@ -859,7 +859,7 @@ impl QuillApp {
                 Button::new(format!("call-rate-pick-{star}"))
                     .label(format!("{star} ★"))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(detail) = this.rating_detail.as_mut() {
+                        if let Some(detail) = this.dialogs.rating_detail.as_mut() {
                             detail.stars = star;
                         }
                         cx.notify();
@@ -893,7 +893,7 @@ impl QuillApp {
                     .child("What went wrong? (optional)"),
             )
             .child(chips)
-            .child(self.rating_comment_input.clone())
+            .child(self.dialogs.rating_comment_input.clone())
             .child(
                 div()
                     .flex()

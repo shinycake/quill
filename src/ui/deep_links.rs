@@ -66,7 +66,7 @@ impl QuillApp {
         }
         // Consume terminal states once, retaining the invite preview until a decision.
         let state = live.driver.session.deep_link.take();
-        if !deep_link_step_redraws(state.as_ref(), self.deep_link_invite.as_ref()) {
+        if !deep_link_step_redraws(state.as_ref(), self.links.deep_link_invite.as_ref()) {
             // Nothing new (this runs on every poll, ~8×/s when idle): put
             // the state back and don't redraw.
             live.driver.session.deep_link = state;
@@ -88,7 +88,7 @@ impl QuillApp {
                     // The real in-app updater is a queued future slice; the
                     // honest UI is TDLib's own text saying so.
                     (true, _) => {
-                        self.deep_link_dialog = Some(text);
+                        self.links.deep_link_dialog = Some(text);
                     }
                     (false, Some(action)) => {
                         let _ = live.driver.resolve_deep_link(action);
@@ -96,23 +96,23 @@ impl QuillApp {
                     // Unknown link: TDLib's info text is the confirmation
                     // copy written for exactly this case.
                     (false, None) => {
-                        self.deep_link_dialog = Some(text);
+                        self.links.deep_link_dialog = Some(text);
                     }
                 }
             }
             Some(preview @ DeepLinkState::InvitePreview { .. }) => {
-                self.deep_link_invite = Some(preview.clone());
+                self.links.deep_link_invite = Some(preview.clone());
                 live.driver.session.deep_link = Some(preview);
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
-                self.pending_deep_link_open = Some((chat_id, action));
+                self.links.pending_deep_link_open = Some((chat_id, action));
             }
             Some(DeepLinkState::ShowText(text)) => {
-                self.deep_link_dialog = Some(text);
+                self.links.deep_link_dialog = Some(text);
             }
             // Typed links (`deep_link_types`): the UI half runs in render.
             Some(DeepLinkState::Ui(ui)) => {
-                self.pending_deep_link_ui = Some(ui);
+                self.links.pending_deep_link_ui = Some(ui);
             }
             // TDLib has no type for it: `getDeepLinkInfo` explains it.
             Some(DeepLinkState::Unknown { link }) => {
@@ -147,7 +147,7 @@ impl QuillApp {
         }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live
+            self.connection.status_note = match live
                 .driver
                 .select_search_chat(chat_id, &text, reply, now_ms)
             {
@@ -173,7 +173,7 @@ impl QuillApp {
                     .jump_to_replied_message(MessageId::from_server_id(message_id))
                     .is_err()
             {
-                self.status_note = "opened chat, couldn't jump to the message".into();
+                self.connection.status_note = "opened chat, couldn't jump to the message".into();
             }
         }
         self.dismiss_cross_chat_state(chat_id, cx);
@@ -201,7 +201,8 @@ impl QuillApp {
     }
 
     fn cancel_deep_link_invite(&mut self, cx: &mut Context<Self>) {
-        if let Some(DeepLinkState::InvitePreview { generation, .. }) = self.deep_link_invite.take()
+        if let Some(DeepLinkState::InvitePreview { generation, .. }) =
+            self.links.deep_link_invite.take()
             && let Some(live) = self.live.as_mut()
             && matches!(live.driver.session.deep_link, Some(DeepLinkState::InvitePreview { generation: slot, .. }) if slot == generation)
         {
@@ -221,7 +222,7 @@ impl QuillApp {
                 this.cancel_deep_link_invite(cx);
             });
         app.update(cx, |this, cx| {
-            let (title, count, request, channel) = match this.deep_link_invite.as_ref() {
+            let (title, count, request, channel) = match this.links.deep_link_invite.as_ref() {
                 Some(DeepLinkState::InvitePreview {
                     title,
                     member_count,
@@ -269,7 +270,7 @@ impl QuillApp {
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             if let Some(DeepLinkState::InvitePreview { generation, .. }) =
-                                this.deep_link_invite.take()
+                                this.links.deep_link_invite.take()
                                 && let Some(live) = this.live.as_mut()
                             {
                                 let _ = live.driver.confirm_deep_link_invite(generation);
@@ -310,11 +311,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::DeepLinkInfo, |this, _, cx| {
-                this.deep_link_dialog = None;
+                this.links.deep_link_dialog = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let text = this.deep_link_dialog.clone().unwrap_or_default();
+            let text = this.links.deep_link_dialog.clone().unwrap_or_default();
             let body = div()
                 .flex()
                 .flex_col()
@@ -326,7 +327,7 @@ impl QuillApp {
                     .label("OK")
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.deep_link_dialog = None;
+                        this.links.deep_link_dialog = None;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::DeepLinkInfo, window, cx);
                     })),
@@ -356,13 +357,13 @@ crate::ui::shell::register_dialogs! {
         // `parity:platform-deep-links`: link info sits with the other
         // low-priority informational dialogs.
         2700,
-        |app| app.deep_link_dialog.is_some(),
+        |app| app.links.deep_link_dialog.is_some(),
         QuillApp::build_deep_link_dialog,
     ),
 
     DeepLinkInvite => DialogSpec::new(
         2800,
-        |app| app.deep_link_invite.is_some(),
+        |app| app.links.deep_link_invite.is_some(),
         QuillApp::build_deep_link_invite_dialog,
     ),
 }

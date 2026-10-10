@@ -73,7 +73,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live
+            self.connection.status_note = match live
                 .driver
                 .stop_pending_bot_message(chat_id, topic_id, draft_id)
             {

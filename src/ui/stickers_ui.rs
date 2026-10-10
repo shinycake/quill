@@ -21,7 +21,7 @@ use std::rc::Rc;
 impl QuillApp {
     fn batch_install_sticker_sets(&mut self, ids: &[i64], cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.manage_sticker_sets(ids, true) {
+            self.connection.status_note = match live.driver.manage_sticker_sets(ids, true) {
                 Ok(sent) => format!("installing {sent} sticker sets…"),
                 Err(_) => "could not start sticker batch; wait for pending updates".into(),
             };
@@ -33,7 +33,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.update_sticker_suggestions(text).is_err()
         {
-            self.status_note = "could not load sticker suggestions".into();
+            self.connection.status_note = "could not load sticker suggestions".into();
             cx.notify();
         }
         // The suggestions row is part of the composer.
@@ -44,7 +44,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.update_animated_emoji_suggestion(text).is_err()
         {
-            self.status_note = "could not load animated emoji suggestion".into();
+            self.connection.status_note = "could not load animated emoji suggestion".into();
             cx.notify();
         }
         self.notify_composer(cx);
@@ -273,7 +273,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
-        self.sticker_settings_open = true;
+        self.settings.sticker_settings_open = true;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.open = true;
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -314,7 +314,7 @@ impl QuillApp {
 
     fn more_archived_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.fetch_archived_stickers(true) {
+            self.connection.status_note = match live.driver.fetch_archived_stickers(true) {
                 Ok(_) => "loading archived stickers…".into(),
                 Err(_) => "could not load archived stickers".into(),
             };
@@ -324,7 +324,8 @@ impl QuillApp {
 
     fn archive_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.manage_sticker_set(set_id, false, true) {
+            self.connection.status_note = match live.driver.manage_sticker_set(set_id, false, true)
+            {
                 Ok(Some(_)) => "archiving sticker set…".into(),
                 Ok(None) => "sticker set update already pending".into(),
                 Err(_) => "could not archive sticker set".into(),
@@ -335,7 +336,7 @@ impl QuillApp {
 
     fn select_sticker_tab(&mut self, tab: StickerTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.select_sticker_tab(tab) {
+            self.connection.status_note = match live.driver.select_sticker_tab(tab) {
                 Ok(_) => "stickers".into(),
                 Err(_) => "could not load sticker tab".into(),
             };
@@ -347,7 +348,7 @@ impl QuillApp {
 
     fn more_trending_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.fetch_trending_stickers(true) {
+            self.connection.status_note = match live.driver.fetch_trending_stickers(true) {
                 Ok(_) => "loading more trending stickers…".into(),
                 Err(_) => "could not load more trending stickers".into(),
             };
@@ -357,7 +358,7 @@ impl QuillApp {
 
     fn favorite_sticker(&mut self, id: FileId, favorite: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.set_favorite_sticker(id, favorite) {
+            self.connection.status_note = match live.driver.set_favorite_sticker(id, favorite) {
                 Ok(_) => "updating favorite stickers…".into(),
                 Err(_) => "could not update favorite sticker".into(),
             };
@@ -367,7 +368,7 @@ impl QuillApp {
 
     fn clear_recent_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.clear_recent_stickers() {
+            self.connection.status_note = match live.driver.clear_recent_stickers() {
                 Ok(_) => "clearing recent stickers…".into(),
                 Err(_) => "could not clear recent stickers".into(),
             };
@@ -383,7 +384,7 @@ impl QuillApp {
             .value()
             .to_string();
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.search_sticker_picker(&query) {
+            self.connection.status_note = match live.driver.search_sticker_picker(&query) {
                 Ok(_) => "searching stickers…".into(),
                 Err(_) => "could not search stickers".into(),
             };
@@ -393,7 +394,7 @@ impl QuillApp {
 
     fn more_sticker_search_results(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.more_sticker_search_results() {
+            self.connection.status_note = match live.driver.more_sticker_search_results() {
                 Ok(_) => "loading more stickers…".into(),
                 Err(_) => "could not load more stickers".into(),
             };
@@ -403,7 +404,8 @@ impl QuillApp {
 
     fn install_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.manage_sticker_set(set_id, true, false) {
+            self.connection.status_note = match live.driver.manage_sticker_set(set_id, true, false)
+            {
                 Ok(Some(_)) => "installing sticker set…".into(),
                 Ok(None) => "sticker set update already in progress".into(),
                 Err(_) => "could not install sticker set".into(),
@@ -414,7 +416,7 @@ impl QuillApp {
 
     fn reorder_sticker_set(&mut self, source: i64, target: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.reorder_sticker_set(source, target) {
+            self.connection.status_note = match live.driver.reorder_sticker_set(source, target) {
                 Ok(Some(_)) => "saving sticker set order…".into(),
                 Ok(None) => "sticker order unchanged or update already pending".into(),
                 Err(_) => "could not reorder sticker sets".into(),
@@ -912,7 +914,7 @@ fn greeting_pick(
 crate::ui::shell::register_dialogs! {
     ArchivedStickers => DialogSpec::new(
         5000,
-        |app| app.sticker_settings_open,
+        |app| app.settings.sticker_settings_open,
         QuillApp::build_archived_stickers_dialog,
     ),
 }

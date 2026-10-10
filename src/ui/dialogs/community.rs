@@ -103,7 +103,7 @@ pub fn build_create_community_dialog(
         });
     app.update(cx, |this, cx| {
         let dialog = dialog.overlay(true);
-        let Some(dialog_state) = this.community_ui.create_dialog.as_ref() else {
+        let Some(dialog_state) = this.admin.community.create_dialog.as_ref() else {
             return dialog
                 .title(crate::ui::shell::dialog_title("New community"))
                 .on_close(on_close);
@@ -183,7 +183,7 @@ pub fn build_create_community_dialog(
                         .checked(hide_chat)
                         .label("Hide the community chat (visible to admins only)")
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(dialog) = this.community_ui.create_dialog.as_mut() {
+                            if let Some(dialog) = this.admin.community.create_dialog.as_mut() {
                                 dialog.hide_chat = on;
                             }
                             cx.notify();
@@ -509,14 +509,14 @@ crate::ui::shell::register_dialogs! {
     CommunityCreate => DialogSpec::new(
         // Slice G10: communities dialogs render last (lowest priority).
         6800,
-        |app| app.community_ui.create_dialog.is_some(),
+        |app| app.admin.community.create_dialog.is_some(),
         build_create_community_dialog,
     ),
 
     /// Slice G10: communities hub dialog.
     CommunityHub => DialogSpec::new(
         6900,
-        |app| app.community_ui.hub_open,
+        |app| app.admin.community.hub_open,
         build_community_hub_dialog,
     ),
 }

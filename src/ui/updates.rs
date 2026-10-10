@@ -9,20 +9,20 @@ use quill::updater::{UpdateState, check_latest_release};
 impl QuillApp {
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
         if matches!(
-            self.update_state,
+            self.settings.update_state,
             UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
         ) {
             return;
         }
-        self.update_state = UpdateState::Checking;
-        self.update_banner_dismissed = false;
+        self.settings.update_state = UpdateState::Checking;
+        self.settings.update_banner_dismissed = false;
         let check = cx
             .background_executor()
             .spawn(async { check_latest_release() });
         cx.spawn(async move |this, cx| {
             let state = check.await;
             let _ = this.update(cx, |this, cx| {
-                this.update_state = state;
+                this.settings.update_state = state;
                 cx.notify();
             });
         })
@@ -32,12 +32,12 @@ impl QuillApp {
 
     fn install_update(&mut self, release: quill::updater::ReleaseInfo, cx: &mut Context<Self>) {
         if matches!(
-            self.update_state,
+            self.settings.update_state,
             UpdateState::Downloading(_) | UpdateState::Installing(_)
         ) {
             return;
         }
-        self.update_state = UpdateState::Downloading(release.clone());
+        self.settings.update_state = UpdateState::Downloading(release.clone());
         let download_release = release.clone();
         let download = cx
             .background_executor()
@@ -48,18 +48,18 @@ impl QuillApp {
                 match result {
                     Ok(plan) => match quill::update_install::launch_helper(&plan) {
                         Ok(()) => {
-                            this.update_state = UpdateState::Installing(release);
+                            this.settings.update_state = UpdateState::Installing(release);
                             cx.quit();
                         }
                         Err(_) => {
-                            this.update_state = UpdateState::InstallFailed(
+                            this.settings.update_state = UpdateState::InstallFailed(
                                 release,
                                 "Could not start the update installer. Retry the update.",
                             );
                         }
                     },
                     Err(message) => {
-                        this.update_state = UpdateState::DownloadFailed(release, message)
+                        this.settings.update_state = UpdateState::DownloadFailed(release, message)
                     }
                 }
                 cx.notify();
@@ -99,15 +99,15 @@ impl QuillApp {
                 div()
                     .id("quill-update-status")
                     .role(Role::Label)
-                    .aria_label(self.update_state.label())
+                    .aria_label(self.settings.update_state.label())
                     .text_sm()
-                    .child(self.update_state.label()),
+                    .child(self.settings.update_state.label()),
             )
             .child(
                 Button::new("check-for-updates")
                     .label("Check for updates")
                     .disabled(matches!(
-                        self.update_state,
+                        self.settings.update_state,
                         UpdateState::Checking
                             | UpdateState::Downloading(_)
                             | UpdateState::Installing(_)
@@ -117,7 +117,7 @@ impl QuillApp {
         if let UpdateState::Available(release)
         | UpdateState::DownloadFailed(release, _)
         | UpdateState::InstallFailed(release, _)
-        | UpdateState::Installed(release) = &self.update_state
+        | UpdateState::Installed(release) = &self.settings.update_state
         {
             let url = release.url.clone();
             section = section
@@ -142,15 +142,15 @@ impl QuillApp {
                         .label("View release on GitHub")
                         .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
                 );
-            if matches!(self.update_state, UpdateState::Installed(_)) {
+            if matches!(self.settings.update_state, UpdateState::Installed(_)) {
                 section = section.child(
                     Button::new("acknowledge-update-changelog")
                         .label("Dismiss changelog")
                         .on_click(cx.listener(|this, _, _, cx| {
                             match quill::update_install::acknowledge_changelog() {
-                                Ok(()) => this.update_state = UpdateState::UpToDate,
+                                Ok(()) => this.settings.update_state = UpdateState::UpToDate,
                                 Err(_) => {
-                                    this.status_note =
+                                    this.connection.status_note =
                                         "Could not save changelog dismissal. Retry.".into()
                                 }
                             }
@@ -226,12 +226,12 @@ impl QuillApp {
 
     pub(super) fn update_banner(&self, cx: &mut Context<Self>) -> AnyElement {
         if !matches!(
-            self.update_state,
+            self.settings.update_state,
             UpdateState::Available(_) | UpdateState::Installed(_)
         ) {
             return div().into_any_element();
         }
-        let label = self.update_state.label();
+        let label = self.settings.update_state.label();
         div()
             .flex()
             .items_center()
@@ -255,7 +255,7 @@ impl QuillApp {
                             .label("Release notes")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.appearance_open = true;
+                                this.settings.appearance_open = true;
                                 cx.notify();
                             })),
                     )
@@ -264,7 +264,7 @@ impl QuillApp {
                             .label("Dismiss")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.update_banner_dismissed = true;
+                                this.settings.update_banner_dismissed = true;
                                 cx.notify();
                             })),
                     ),

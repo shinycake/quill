@@ -26,7 +26,7 @@ impl QuillApp {
     pub(super) fn open_jump_date_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_history_calendar().is_err() {
-                self.status_note = "open a chat to jump to a date".into();
+                self.connection.status_note = "open a chat to jump to a date".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_history_calendar(now_unix());
@@ -58,7 +58,7 @@ impl QuillApp {
 
     fn jump_date_pick(&mut self, day: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.jump_to_date(day) {
+            self.connection.status_note = match live.driver.jump_to_date(day) {
                 Ok(_) => "jumping to date…".into(),
                 Err(_) => "could not jump to that date".into(),
             };

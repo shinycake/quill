@@ -223,13 +223,15 @@ impl QuillApp {
     fn demo_setup_links_boosts(&mut self, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_LINKS_BOOSTS").unwrap_or_else(|_| "usernames".into());
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            seed(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            seed(session, &self.demo_ui.sink, &self.demo_ui.seq);
             match mode.as_str() {
-                "boosts" => seed_boosts(session, &self.demo_sink, &self.demo_seq, false),
-                "gifts" => seed_boosts(session, &self.demo_sink, &self.demo_seq, true),
-                "admin-links" => seed_admin_links(session, &self.demo_sink, &self.demo_seq),
-                "link-requests" => seed_link_requests(session, &self.demo_sink, &self.demo_seq),
+                "boosts" => seed_boosts(session, &self.demo_ui.sink, &self.demo_ui.seq, false),
+                "gifts" => seed_boosts(session, &self.demo_ui.sink, &self.demo_ui.seq, true),
+                "admin-links" => seed_admin_links(session, &self.demo_ui.sink, &self.demo_ui.seq),
+                "link-requests" => {
+                    seed_link_requests(session, &self.demo_ui.sink, &self.demo_ui.seq)
+                }
                 _ => {}
             }
             session.open_chat(ChatId(CHAT));
@@ -238,7 +240,7 @@ impl QuillApp {
         match mode.as_str() {
             "usernames" | "boosts" | "gifts" => {
                 self.open_group_settings_dialog(ChatId(CHAT), cx);
-                if let Some(dialog) = self.group_settings_dialog.as_mut() {
+                if let Some(dialog) = self.admin.group_settings_dialog.as_mut() {
                     dialog.view = if mode == "usernames" {
                         GroupSettingsView::Usernames
                     } else {
@@ -247,12 +249,12 @@ impl QuillApp {
                 }
             }
             "qr" => {
-                self.invite_link_qr =
+                self.admin.invite_link_qr =
                     render_qr_image(LINK).map(|image| (ChatId(CHAT), LINK.to_owned(), image));
             }
             _ => {}
         }
-        self.invite_link_details = None;
-        self.status_note = "screenshot demo - admin links, boosts and usernames".into();
+        self.admin.invite_link_details = None;
+        self.connection.status_note = "screenshot demo - admin links, boosts and usernames".into();
     }
 }

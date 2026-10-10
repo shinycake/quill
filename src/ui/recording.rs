@@ -64,13 +64,13 @@ impl QuillApp {
     /// (TGX tap-to-switch, desktop-mapped). Ignored while recording.
     pub(super) fn toggle_record_mode(&mut self, cx: &mut Context<Self>) {
         if self.recording_active() {
-            self.status_note = "finish the recording first".into();
+            self.connection.status_note = "finish the recording first".into();
             cx.notify();
             return;
         }
         let next = !matches!(self.record_mode(), RecordMode::Video);
         self.set_media_pref(|prefs| prefs.prefer_video_mode = next, cx);
-        self.status_note = format!(
+        self.connection.status_note = format!(
             "{} — {}",
             if next {
                 "video note mode"
@@ -114,10 +114,10 @@ impl QuillApp {
                 self.recording.voice_capture = Some(capture);
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
-                self.status_note = "recording voice note".into();
+                self.connection.status_note = "recording voice note".into();
             }
             Err(err) => {
-                self.status_note = err;
+                self.connection.status_note = err;
             }
         }
         cx.notify();
@@ -135,7 +135,7 @@ impl QuillApp {
         if let Some((name, layer)) = self.open_secret_chat_peer_layer()
             && layer < 66
         {
-            self.status_note = format!(
+            self.connection.status_note = format!(
                 "{name}'s Telegram client doesn't support this feature. \
                  They need to install an update first."
             );
@@ -166,10 +166,10 @@ impl QuillApp {
                 self.recording.video_note_capture = Some(capture);
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
-                self.status_note = "recording video note".into();
+                self.connection.status_note = "recording video note".into();
             }
             Err(err) => {
-                self.status_note = err;
+                self.connection.status_note = err;
             }
         }
         cx.notify();
@@ -206,7 +206,7 @@ impl QuillApp {
 
     fn fail_recording(&mut self, reason: String, cx: &mut Context<Self>) {
         self.cancel_recording(cx);
-        self.status_note = reason;
+        self.connection.status_note = reason;
         cx.notify();
     }
 
@@ -234,7 +234,7 @@ impl QuillApp {
             return;
         }
         self.recording.locked = !self.recording.locked;
-        self.status_note = if self.recording.locked {
+        self.connection.status_note = if self.recording.locked {
             "recording locked — Esc won't cancel it".into()
         } else {
             "recording unlocked".into()
@@ -251,10 +251,10 @@ impl QuillApp {
         if capture.is_paused() {
             capture.resume();
             self.stop_record_preview();
-            self.status_note = "recording voice note".into();
+            self.connection.status_note = "recording voice note".into();
         } else {
             capture.pause();
-            self.status_note = "recording paused".into();
+            self.connection.status_note = "recording paused".into();
         }
         self.sync_voice_action();
         cx.notify();
@@ -274,7 +274,7 @@ impl QuillApp {
             return;
         };
         let Some(path) = capture.preview_path().map(std::path::Path::to_path_buf) else {
-            self.status_note = "getting the recording ready…".into();
+            self.connection.status_note = "getting the recording ready…".into();
             cx.notify();
             return;
         };
@@ -307,7 +307,7 @@ impl QuillApp {
             self.recording.preview = Some(clock);
             self.spawn_voice_tick(cx);
         } else {
-            self.status_note = "couldn't play the recording".into();
+            self.connection.status_note = "couldn't play the recording".into();
         }
         cx.notify();
     }
@@ -326,7 +326,7 @@ impl QuillApp {
     /// Switch "Play once" for the voice message being recorded.
     pub(super) fn toggle_record_once(&mut self, cx: &mut Context<Self>) {
         self.recording.once = !self.recording.once;
-        self.status_note = if self.recording.once {
+        self.connection.status_note = if self.recording.once {
             "The recipient will be able to listen only once.".into()
         } else {
             "play once off".into()
@@ -359,7 +359,7 @@ impl QuillApp {
         self.recording.locked = false;
         self.recording.discard_confirm = false;
         self.sync_voice_action();
-        self.status_note = if was_video {
+        self.connection.status_note = if was_video {
             "video recording cancelled".into()
         } else {
             "voice recording cancelled".into()
@@ -391,7 +391,7 @@ impl QuillApp {
             Ok(draft) => draft,
             Err(err) => {
                 self.sync_voice_action();
-                self.status_note = err;
+                self.connection.status_note = err;
                 cx.notify();
                 return;
             }
@@ -405,11 +405,11 @@ impl QuillApp {
                 reply_to,
                 play_once,
             );
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "sending voice note".into(),
                 Err(_) => "could not send voice note".into(),
             };
-            if self.status_note == "sending voice note" {
+            if self.connection.status_note == "sending voice note" {
                 self.composer_ui.pending_reply = None;
                 self.composer_ui.clear_draft_on_success = Some(
                     self.live
@@ -431,7 +431,8 @@ impl QuillApp {
             if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                 self.forget_local_draft(open);
             }
-            self.status_note = "demo voice note applied locally (no live Telegram)".into();
+            self.connection.status_note =
+                "demo voice note applied locally (no live Telegram)".into();
         }
         self.sync_voice_action();
         cx.notify();
@@ -499,7 +500,7 @@ impl QuillApp {
         let draft = match result {
             Ok(draft) => draft,
             Err(err) => {
-                self.status_note = err;
+                self.connection.status_note = err;
                 cx.notify();
                 return;
             }
@@ -513,11 +514,11 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .send_recorded_video_note(&draft, reply_to);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "sending video note".into(),
                 Err(_) => "could not send video note".into(),
             };
-            if self.status_note == "sending video note" {
+            if self.connection.status_note == "sending video note" {
                 self.composer_ui.pending_reply = None;
                 self.composer_ui.clear_draft_on_success = Some(
                     self.live
@@ -540,9 +541,11 @@ impl QuillApp {
                 if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                     self.forget_local_draft(open);
                 }
-                self.status_note = "demo video note applied locally (no live Telegram)".into();
+                self.connection.status_note =
+                    "demo video note applied locally (no live Telegram)".into();
             } else {
-                self.status_note = "demo: recorded clip is outside the sendable paths".into();
+                self.connection.status_note =
+                    "demo: recorded clip is outside the sendable paths".into();
             }
         }
         self.sync_voice_action();
@@ -560,11 +563,11 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.recognize_speech(chat_id, message_id) {
-                Ok(_) => self.status_note = "transcription requested".into(),
-                Err(_) => self.status_note = "couldn't request transcription".into(),
+                Ok(_) => self.connection.status_note = "transcription requested".into(),
+                Err(_) => self.connection.status_note = "couldn't request transcription".into(),
             }
         } else {
-            self.status_note = "demo: transcription needs a live connection".into();
+            self.connection.status_note = "demo: transcription needs a live connection".into();
         }
         cx.notify();
     }
@@ -573,7 +576,7 @@ impl QuillApp {
     /// status-note feedback the toggle gave.
     pub(super) fn set_hq_round_videos(&mut self, on: bool, cx: &mut Context<Self>) {
         self.set_media_pref(|prefs| prefs.hq_round_videos = on, cx);
-        self.status_note = if on {
+        self.connection.status_note = if on {
             "HQ round videos on — 480px captures".into()
         } else {
             "HQ round videos off — 280px captures".into()
@@ -593,7 +596,7 @@ impl QuillApp {
         let Some(chat_id) = session.open_chat else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let id = -(session.view_generation.0 as i64);
         let path = draft.path.to_string_lossy();
         let file = demo_file_json(910, &path, true);
@@ -614,7 +617,7 @@ impl QuillApp {
             serde_json::to_string(&waveform).unwrap_or_else(|_| "\"\"".into()),
             serde_json::to_string(caption).unwrap_or_else(|_| "\"\"".into()),
         );
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }

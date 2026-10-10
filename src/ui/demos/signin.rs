@@ -203,36 +203,37 @@ fn code_step_started() -> std::time::Instant {
 impl QuillApp {
     /// The phone step's country list and IP guess, as fixtures.
     fn demo_phone_countries(&mut self) {
-        self.signin.demo_countries = crate::ui::signin_ui::demo_country_fixtures();
-        self.signin.demo_guess = Some("US".into());
+        self.auth_ui.signin.demo_countries = crate::ui::signin_ui::demo_country_fixtures();
+        self.auth_ui.signin.demo_guess = Some("US".into());
     }
 
     fn demo_wait_phone_country(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_phone_countries();
-        self.signin.picker_open = true;
-        self.signin
+        self.auth_ui.signin.picker_open = true;
+        self.auth_ui
+            .signin
             .search
             .update(cx, |input, cx| input.set_value("uni", window, cx));
     }
 
     fn demo_wait_phone_formatted(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_phone_countries();
-        self.signin.touched = true;
-        self.signin.phone_text = "+1 555 010 0199".into();
-        self.phone_input.update(cx, |input, cx| {
+        self.auth_ui.signin.touched = true;
+        self.auth_ui.signin.phone_text = "+1 555 010 0199".into();
+        self.auth_ui.phone_input.update(cx, |input, cx| {
             input.set_value("+1 555 010 0199", window, cx)
         });
     }
 
     fn demo_wait_phone_banned(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_phone_countries();
-        self.signin.touched = true;
-        self.signin.phone_text = "+1 555 010 0199".into();
-        self.signin.submitted_phone = "+1 555 010 0199".into();
-        self.phone_input.update(cx, |input, cx| {
+        self.auth_ui.signin.touched = true;
+        self.auth_ui.signin.phone_text = "+1 555 010 0199".into();
+        self.auth_ui.signin.submitted_phone = "+1 555 010 0199".into();
+        self.auth_ui.phone_input.update(cx, |input, cx| {
             input.set_value("+1 555 010 0199", window, cx)
         });
-        self.signin.demo_error = Some(quill::state::AuthRequestError {
+        self.auth_ui.signin.demo_error = Some(quill::state::AuthRequestError {
             purpose: quill::state::RequestPurpose::SetPhoneNumber,
             class: quill::telegram::envelope::ErrorClass::PhoneBanned,
             flood_wait_secs: None,
@@ -240,13 +241,13 @@ impl QuillApp {
     }
 
     fn demo_typed_code(&mut self, code: TypedCode) {
-        self.signin.submitted_phone = "+1 555 010 0199".into();
-        self.signin.code_clock = Some((typed_code_delivery(code), code_step_started()));
+        self.auth_ui.signin.submitted_phone = "+1 555 010 0199".into();
+        self.auth_ui.signin.code_clock = Some((typed_code_delivery(code), code_step_started()));
     }
 
     fn demo_wait_code_resend(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.signin.submitted_phone = "+1 555 010 0199".into();
+        self.auth_ui.signin.submitted_phone = "+1 555 010 0199".into();
         // 18 seconds into the 60-second wait.
-        self.signin.code_clock = Some((resend_delivery(), code_step_started()));
+        self.auth_ui.signin.code_clock = Some((resend_delivery(), code_step_started()));
     }
 }

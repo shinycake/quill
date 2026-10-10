@@ -55,11 +55,11 @@ impl QuillApp {
             DeepLinkUi::StickerSet { set_id } => self.view_message_sticker_set(set_id, cx),
             DeepLinkUi::Share { text } => {
                 self.share.link_text = Some(text);
-                self.status_note = "choose a chat to share to".into();
+                self.connection.status_note = "choose a chat to share to".into();
             }
             DeepLinkUi::Proxy { link } => {
                 if !self.handle_proxy_link(&link, cx) {
-                    self.deep_link_dialog = Some("This proxy link is not valid.".into());
+                    self.links.deep_link_dialog = Some("This proxy link is not valid.".into());
                 }
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
@@ -67,10 +67,11 @@ impl QuillApp {
             DeepLinkUi::Settings(target) => {
                 match settings_action(target) {
                     Some(action) => self.navigate(action, window, cx),
-                    None => self.settings_open = true,
+                    None => self.settings.open = true,
                 }
                 if target == SettingsTarget::Unsupported {
-                    self.status_note = "that settings page isn't supported by Quill yet".into();
+                    self.connection.status_note =
+                        "that settings page isn't supported by Quill yet".into();
                 }
             }
         }
@@ -95,7 +96,7 @@ impl QuillApp {
                 self.open_info_panel_target(InfoPanelTarget::Supergroup(id), window, cx);
                 self.refresh_boost_status(chat_id, cx);
             }
-            None => self.status_note = "this chat can't be boosted".into(),
+            None => self.connection.status_note = "this chat can't be boosted".into(),
         }
     }
 
@@ -103,7 +104,8 @@ impl QuillApp {
     /// composer. Never sent; the user confirms (tdesktop `shareUrl`).
     fn choose_share_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(text) = self.share.link_text.take() {
-            self.pending_deep_link_open = Some((chat_id, DeepLinkAction::ShareDraft { text }));
+            self.links.pending_deep_link_open =
+                Some((chat_id, DeepLinkAction::ShareDraft { text }));
         }
         cx.notify();
     }

@@ -165,7 +165,7 @@ impl QuillApp {
         if let Err(err) =
             quill::settings::save_spellcheck_languages(&Self::appearance_paths(), &prefs)
         {
-            self.status_note = format!("Couldn't save spelling languages: {err}");
+            self.connection.status_note = format!("Couldn't save spelling languages: {err}");
         }
         let (checker, info) = Self::build_spell_engine(&chosen);
         checker.set_app_words(self.spell.checker.app_words());
@@ -356,7 +356,7 @@ impl QuillApp {
         };
         if let Err(err) = quill::settings::save_spellcheck_words(&Self::appearance_paths(), &prefs)
         {
-            self.status_note = format!("Couldn't save dictionary: {err}");
+            self.connection.status_note = format!("Couldn't save dictionary: {err}");
         }
     }
 

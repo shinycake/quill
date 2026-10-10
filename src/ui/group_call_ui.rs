@@ -51,7 +51,7 @@ impl QuillApp {
         let frame = if let Some(live) = self.live.as_ref() {
             live.driver.latest_video_frame(call.id, true)
         } else {
-            self.demo_local_frame.clone()
+            self.demo_ui.local_frame.clone()
         };
         let MessageSender::User { user_id } = participant.participant_id else {
             return div().child(initials_avatar(name, 56.)).into_any_element();

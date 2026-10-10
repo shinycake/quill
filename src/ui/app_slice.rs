@@ -259,7 +259,7 @@ impl QuillApp {
     pub(super) fn sidebar_slot(&self) -> AnyElement {
         let column = div()
             .relative()
-            .w(self.sidebar_width + px(self.folder_rail_width()))
+            .w(self.frame.sidebar_width + px(self.folder_rail_width()))
             .flex_none()
             .h_full();
         match &self.slices.sidebar {

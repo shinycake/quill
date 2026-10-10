@@ -17,7 +17,7 @@ impl QuillApp {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.global.story_menu = Some((chat_id, position));
+        self.chat_list.global.story_menu = Some((chat_id, position));
         cx.notify();
     }
 
@@ -45,7 +45,7 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.set_chat_active_stories_list(id, hide));
-                self.status_note = match sent {
+                self.connection.status_note = match sent {
                     Some(Ok(_)) if hide => "Hiding stories…".into(),
                     Some(Ok(_)) => "Showing stories…".into(),
                     Some(Err(_)) => "Could not change the stories list".into(),
@@ -121,7 +121,7 @@ impl QuillApp {
                     .child(Icon::new(icon).size(px(16.)))
                     .child(entry.label)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.global.story_menu = None;
+                        this.chat_list.global.story_menu = None;
                         this.run_story_menu_action(chat_id, entry.action, window, cx);
                     }))
                     .into_any_element()
@@ -142,7 +142,7 @@ impl QuillApp {
             .children(rows);
         div()
             .id("story-menu-overlay")
-            .track_focus(&self.context_menu_focus)
+            .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()
             .top_0()
@@ -159,7 +159,7 @@ impl QuillApp {
                     .right_0()
                     .bottom_0()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.global.story_menu = None;
+                        this.chat_list.global.story_menu = None;
                         cx.notify();
                     })),
             )
@@ -169,7 +169,7 @@ impl QuillApp {
                     .snap_to_window_with_margin(px(8.))
                     .child(panel),
             )
-            .focus_trap("story-menu-focus", &self.context_menu_focus)
+            .focus_trap("story-menu-focus", &self.frame.context_menu_focus)
             .into_any_element()
     }
 }

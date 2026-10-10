@@ -66,7 +66,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(single) = ForwardDraft::from_message(chat_id, message_id, pending) else {
-            self.status_note = "cannot forward this message".into();
+            self.connection.status_note = "cannot forward this message".into();
             cx.notify();
             return;
         };
@@ -106,7 +106,7 @@ impl QuillApp {
                     ForwardDraft::from_message(chat_id, message_id, pending);
             }
         }
-        self.status_note = match self.share.pending_forward.as_ref().map(|d| d.count()) {
+        self.connection.status_note = match self.share.pending_forward.as_ref().map(|d| d.count()) {
             Some(1) => "1 message selected".into(),
             Some(n) => format!("{n} messages selected"),
             None => "selection cleared".into(),
@@ -132,7 +132,7 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.status_note = "forward to…".into();
+        self.connection.status_note = "forward to…".into();
         cx.notify();
     }
 
@@ -142,7 +142,7 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.status_note = "forward picker closed".into();
+        self.connection.status_note = "forward picker closed".into();
         cx.notify();
     }
 
@@ -155,7 +155,7 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.status_note = "forward cancelled".into();
+        self.connection.status_note = "forward cancelled".into();
         cx.notify();
     }
 
@@ -184,7 +184,7 @@ impl QuillApp {
     }
 
     pub(super) fn present_forward_result(&mut self, result: ForwardResult, cx: &mut Context<Self>) {
-        self.status_note = result.success_label();
+        self.connection.status_note = result.success_label();
         self.share.forward_result = Some(result);
         self.share.pending_forward = None;
         self.share.forward_bar_dest = None;

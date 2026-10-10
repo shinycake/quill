@@ -789,7 +789,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(()) => format!("folder {} added", spec.name),
             Err(err) => format!("could not add folder: {err:?}"),
         };
@@ -800,7 +800,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_recommended_chat_folders()
         {
-            self.status_note = format!("could not load recommended folders: {err:?}");
+            self.connection.status_note = format!("could not load recommended folders: {err:?}");
         }
         self.folders.manage_open = true;
         self.folders.editor = None;
@@ -841,7 +841,7 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder(folder_id)
         {
-            self.status_note = format!("could not load folder: {err:?}");
+            self.connection.status_note = format!("could not load folder: {err:?}");
         }
         self.folders.editor = Some(dialog);
         cx.notify();
@@ -919,7 +919,7 @@ impl QuillApp {
         match result {
             Ok(()) => {
                 self.folders.editor = None;
-                self.status_note = if folder_id.is_some() {
+                self.connection.status_note = if folder_id.is_some() {
                     "folder updated".into()
                 } else {
                     "folder created".into()
@@ -953,7 +953,7 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id)
         {
-            self.status_note = format!("could not load folder chats: {err:?}");
+            self.connection.status_note = format!("could not load folder chats: {err:?}");
         }
         cx.notify();
     }
@@ -982,7 +982,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(()) => "folder deleted".into(),
             Err(err) => format!("could not delete folder: {err:?}"),
         };
@@ -1012,7 +1012,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(()) => "folders reordered".into(),
             Err(err) => format!("could not reorder folders: {err:?}"),
         };
@@ -1033,7 +1033,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(()) if enabled => "folder tags on".into(),
             Ok(()) => "folder tags off".into(),
             Err(err) => format!("could not toggle folder tags: {err:?}"),
@@ -1046,7 +1046,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
         {
-            self.status_note = format!("could not load folder options: {err:?}");
+            self.connection.status_note = format!("could not load folder options: {err:?}");
         }
         cx.notify();
     }
@@ -1082,7 +1082,7 @@ impl QuillApp {
             None => Ok(()),
         };
         let toast = self.membership_toast(chat_id, folder_id, true);
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(()) => toast,
             Err(err) => format!("could not add chat to folder: {err:?}"),
         };
@@ -1101,7 +1101,7 @@ impl QuillApp {
             None => Ok(()),
         };
         let toast = self.membership_toast(chat_id, folder_id, false);
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(()) => toast,
             Err(err) => format!("could not remove chat from folder: {err:?}"),
         };
@@ -1203,7 +1203,8 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.unarchive_chat(chat_id)
                             {
-                                this.status_note = format!("could not move chat: {err:?}");
+                                this.connection.status_note =
+                                    format!("could not move chat: {err:?}");
                             }
                             this.folders.menu_open = false;
                             cx.notify();
@@ -1212,7 +1213,8 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.archive_chat(chat_id)
                             {
-                                this.status_note = format!("could not archive chat: {err:?}");
+                                this.connection.status_note =
+                                    format!("could not archive chat: {err:?}");
                             }
                             this.folders.menu_open = false;
                             cx.notify();

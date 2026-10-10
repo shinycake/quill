@@ -19,7 +19,7 @@ impl QuillApp {
     pub(super) fn open_emoji_sets(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_emoji_sets().is_err() {
-                self.status_note = "could not load emoji packs".into();
+                self.connection.status_note = "could not load emoji packs".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.emoji.open = true;
@@ -37,7 +37,7 @@ impl QuillApp {
     fn select_emoji_sets_tab(&mut self, tab: EmojiSetTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_emoji_set_tab(tab).is_err() {
-                self.status_note = "could not load emoji packs".into();
+                self.connection.status_note = "could not load emoji packs".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.emoji.tab = tab;
@@ -48,13 +48,13 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.preview_emoji_pack(id).is_err()
         {
-            self.status_note = "could not load emoji pack".into();
+            self.connection.status_note = "could not load emoji pack".into();
         }
         cx.notify();
     }
     fn install_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.set_emoji_pack_installed(id, true) {
+            self.connection.status_note = match live.driver.set_emoji_pack_installed(id, true) {
                 Ok(Some(_)) => "installing emoji pack…".into(),
                 Ok(None) => "an emoji pack is already updating".into(),
                 Err(_) => "could not install emoji pack".into(),
@@ -72,14 +72,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.search_emoji_packs(&query).is_err()
         {
-            self.status_note = "could not search emoji packs".into();
+            self.connection.status_note = "could not search emoji packs".into();
         }
         cx.notify();
     }
     fn change_emoji_status(&mut self, id: Option<i64>, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let duration = live.driver.session.emoji.status_duration_secs;
-            self.status_note = match live.driver.change_emoji_status(id, duration) {
+            self.connection.status_note = match live.driver.change_emoji_status(id, duration) {
                 Ok(Some(_)) => "Updating emoji status…".into(),
                 Ok(None) => "An emoji status is already updating.".into(),
                 Err(_) => "Could not update emoji status. Retry the action.".into(),
@@ -113,7 +113,7 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut()
                             && live.driver.load_emoji_status_choices().is_err()
                         {
-                            this.status_note =
+                            this.connection.status_note =
                                 "Could not load emoji statuses. Retry the action.".into();
                         }
                         cx.notify();
@@ -180,7 +180,7 @@ impl QuillApp {
                                 live.driver.session.emoji.status_duration_secs = secs;
                             }
                         } else {
-                            this.status_note =
+                            this.connection.status_note =
                                 "Enter positive whole hours within the supported date range."
                                     .into();
                         }
@@ -272,13 +272,14 @@ impl QuillApp {
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.status_note = match live.driver.clear_recent_emoji_statuses() {
-                                Ok(Some(_)) => "Clearing recent statuses…".into(),
-                                Ok(None) => "An emoji status is already updating.".into(),
-                                Err(_) => {
-                                    "Could not clear recent statuses. Retry the action.".into()
-                                }
-                            };
+                            this.connection.status_note =
+                                match live.driver.clear_recent_emoji_statuses() {
+                                    Ok(Some(_)) => "Clearing recent statuses…".into(),
+                                    Ok(None) => "An emoji status is already updating.".into(),
+                                    Err(_) => {
+                                        "Could not clear recent statuses. Retry the action.".into()
+                                    }
+                                };
                         }
                         cx.notify();
                     })),
@@ -394,7 +395,7 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut()
                             && live.driver.more_trending_emoji_packs().is_err()
                         {
-                            this.status_note = "could not load more emoji packs".into();
+                            this.connection.status_note = "could not load more emoji packs".into();
                         }
                         cx.notify();
                     })),
@@ -443,7 +444,8 @@ impl QuillApp {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.status_note = match live.driver.download_emoji_pack(id) {
+                            this.connection.status_note = match live.driver.download_emoji_pack(id)
+                            {
                                 Ok(()) => "Emoji pack download requested.".into(),
                                 Err(_) => {
                                     "Could not download emoji pack. Refresh the preview and retry."

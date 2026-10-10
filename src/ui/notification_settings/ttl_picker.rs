@@ -65,7 +65,7 @@ impl QuillApp {
                 }
             }));
         let custom_row = (!is_secret).then(|| {
-            let secs = self.ttl_custom_secs;
+            let secs = self.notify.ttl_custom_secs;
             let mut row = div()
                 .id("ttl-custom")
                 .flex()
@@ -78,11 +78,11 @@ impl QuillApp {
                         .label("Custom\u{2026}")
                         .outline()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.ttl_custom_open = !this.ttl_custom_open;
+                            this.notify.ttl_custom_open = !this.notify.ttl_custom_open;
                             cx.notify();
                         })),
                 );
-            if self.ttl_custom_open {
+            if self.notify.ttl_custom_open {
                 row = row
                     .child(
                         Button::new("ttl-custom-minus")
@@ -91,8 +91,8 @@ impl QuillApp {
                             .label("\u{2212}")
                             .accessibility_label("Shorter")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.ttl_custom_secs =
-                                    quill::auto_delete::step(this.ttl_custom_secs, -1);
+                                this.notify.ttl_custom_secs =
+                                    quill::auto_delete::step(this.notify.ttl_custom_secs, -1);
                                 cx.notify();
                             })),
                     )
@@ -104,8 +104,8 @@ impl QuillApp {
                             .label("+")
                             .accessibility_label("Longer")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.ttl_custom_secs =
-                                    quill::auto_delete::step(this.ttl_custom_secs, 1);
+                                this.notify.ttl_custom_secs =
+                                    quill::auto_delete::step(this.notify.ttl_custom_secs, 1);
                                 cx.notify();
                             })),
                     )
@@ -115,7 +115,7 @@ impl QuillApp {
                             .label("Enable auto-delete")
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if let Some(chat_id) = open_chat {
-                                    let secs = this.ttl_custom_secs;
+                                    let secs = this.notify.ttl_custom_secs;
                                     this.apply_chat_ttl(chat_id, secs, cx);
                                 }
                             })),
@@ -153,7 +153,7 @@ impl QuillApp {
                             .accessibility_label("Close")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.ttl_picker_open = false;
+                                this.notify.ttl_picker_open = false;
                                 cx.notify();
                             })),
                     ),

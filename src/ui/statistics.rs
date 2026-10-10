@@ -490,7 +490,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.refresh_chat_statistics(ChatId(chat_id), false)
         {
-            self.status_note = format!("statistics refresh failed: {err:?}");
+            self.connection.status_note = format!("statistics refresh failed: {err:?}");
         }
         cx.notify();
     }

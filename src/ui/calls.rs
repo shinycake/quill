@@ -478,7 +478,8 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| !live.driver.has_call_engine())
         {
-            self.status_note = "Calls are unavailable. The audio component could not start.".into();
+            self.connection.status_note =
+                "Calls are unavailable. The audio component could not start.".into();
             cx.notify();
             return;
         }
@@ -489,7 +490,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.session.is_offline())
         {
-            self.status_note = "You're offline — can't start a call".into();
+            self.connection.status_note = "You're offline — can't start a call".into();
             cx.notify();
             return;
         }
@@ -517,7 +518,7 @@ impl QuillApp {
                 .session
                 .is_offline()
             {
-                self.status_note = "You're offline — can't start a call".into();
+                self.connection.status_note = "You're offline — can't start a call".into();
                 cx.notify();
                 return;
             }
@@ -527,7 +528,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .start_call(user_id, is_video);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => {
                     if is_video {
                         "starting video call…".into()
@@ -538,7 +539,7 @@ impl QuillApp {
                 Err(_) => "could not start the call".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo: call start (no live Telegram)".into();
+            self.connection.status_note = "demo: call start (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -575,11 +576,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.call_prefs = prefs;
             if let Err(err) = live.driver.save_call_prefs() {
-                self.status_note = format!("couldn’t save call settings: {err}");
+                self.connection.status_note = format!("couldn’t save call settings: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.call_prefs = prefs;
-            self.status_note = "demo: call settings are not saved".into();
+            self.connection.status_note = "demo: call settings are not saved".into();
         }
         self.sync_ptt_with_call(cx);
         cx.notify();
@@ -593,7 +594,7 @@ impl QuillApp {
                 .active_call
                 .as_ref()
                 .is_some_and(|call| !call.muted);
-            self.status_note = match live.driver.set_call_muted(muted) {
+            self.connection.status_note = match live.driver.set_call_muted(muted) {
                 Ok(()) => {
                     if muted {
                         "microphone muted".into()
@@ -624,23 +625,24 @@ impl QuillApp {
             };
             let (call_id, camera_on) = (call.id, !call.camera_on);
             let ready = live.driver.call_video_ready();
-            self.status_note = match live.driver.set_call_camera(call_id, camera_on && ready) {
-                Ok(()) => {
-                    if camera_on {
-                        "camera on".into()
-                    } else {
-                        "camera off".into()
+            self.connection.status_note =
+                match live.driver.set_call_camera(call_id, camera_on && ready) {
+                    Ok(()) => {
+                        if camera_on {
+                            "camera on".into()
+                        } else {
+                            "camera off".into()
+                        }
                     }
-                }
-                Err(err) => format!("could not change camera state: {err}"),
-            };
+                    Err(err) => format!("could not change camera state: {err}"),
+                };
         } else if let Some(call) = self
             .demo_session
             .as_mut()
             .and_then(|session| session.active_call.as_mut())
         {
             call.camera_on = !call.camera_on;
-            self.status_note = "demo: camera toggle (no live Telegram)".into();
+            self.connection.status_note = "demo: camera toggle (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -656,7 +658,8 @@ impl QuillApp {
                 return;
             };
             let (call_id, sharing) = (call.id, !call.screen_sharing);
-            self.status_note = match live.driver.set_call_screen_share(call_id, sharing) {
+            self.connection.status_note = match live.driver.set_call_screen_share(call_id, sharing)
+            {
                 Ok(()) => {
                     if sharing {
                         "screen share on".into()
@@ -672,7 +675,7 @@ impl QuillApp {
             .and_then(|session| session.active_call.as_mut())
         {
             call.screen_sharing = !call.screen_sharing;
-            self.status_note = "demo: screen share toggle (no live Telegram)".into();
+            self.connection.status_note = "demo: screen share toggle (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -687,11 +690,11 @@ impl QuillApp {
             // Phase C2e: camera selection goes to the driver, which
             // stores it and re-applies the camera on the active call.
             if kind == quill::calls::engine::MediaDeviceKind::Camera {
-                self.status_note = match live.driver.select_call_camera(Some(device_id.to_string()))
-                {
-                    Ok(()) => "camera selected".into(),
-                    Err(err) => format!("could not select camera: {err}"),
-                };
+                self.connection.status_note =
+                    match live.driver.select_call_camera(Some(device_id.to_string())) {
+                        Ok(()) => "camera selected".into(),
+                        Err(err) => format!("could not select camera: {err}"),
+                    };
                 cx.notify();
                 return;
             }
@@ -705,20 +708,21 @@ impl QuillApp {
                 }
                 _ => return,
             };
-            self.status_note = match live.driver.select_call_devices(microphone, speaker) {
+            self.connection.status_note = match live.driver.select_call_devices(microphone, speaker)
+            {
                 Ok(()) => "audio device selected".into(),
                 Err(err) => format!("could not select audio device: {err}"),
             };
         } else {
             match kind {
                 quill::calls::engine::MediaDeviceKind::Microphone => {
-                    self.demo_selected_devices.0 = Some(device_id.into())
+                    self.demo_ui.selected_devices.0 = Some(device_id.into())
                 }
                 quill::calls::engine::MediaDeviceKind::Speaker => {
-                    self.demo_selected_devices.1 = Some(device_id.into())
+                    self.demo_ui.selected_devices.1 = Some(device_id.into())
                 }
                 quill::calls::engine::MediaDeviceKind::Camera => {
-                    self.demo_selected_camera = Some(device_id.into())
+                    self.demo_ui.selected_camera = Some(device_id.into())
                 }
                 _ => return,
             }
@@ -730,12 +734,12 @@ impl QuillApp {
     pub(super) fn accept_incoming_call(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {
             let result = self.live.as_mut().expect("live").driver.accept_call();
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "answering…".into(),
                 Err(_) => "could not answer the call".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo: call accept (no live Telegram)".into();
+            self.connection.status_note = "demo: call accept (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -745,12 +749,12 @@ impl QuillApp {
     pub(super) fn hang_up_call(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {
             let result = self.live.as_mut().expect("live").driver.discard_call();
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "hanging up…".into(),
                 Err(_) => "could not hang up the call".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo: call hang up (no live Telegram)".into();
+            self.connection.status_note = "demo: call hang up (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -764,18 +768,18 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.rating_detail = Some(RatingDetail {
+        self.dialogs.rating_detail = Some(RatingDetail {
             stars: rating,
             problems: [false; 9],
         });
-        self.rating_comment_input.update(cx, |input, cx| {
+        self.dialogs.rating_comment_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
         cx.notify();
     }
 
     pub(super) fn toggle_rating_problem(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(detail) = self.rating_detail.as_mut() {
+        if let Some(detail) = self.dialogs.rating_detail.as_mut() {
             detail.problems[index] = !detail.problems[index];
         }
         cx.notify();
@@ -785,14 +789,19 @@ impl QuillApp {
     /// 1.8.67 :14234). Sends only from the detail editor's Submit
     /// button — `open_rating_detail` never sends on its own.
     pub(super) fn submit_call_rating(&mut self, cx: &mut Context<Self>) {
-        let detail = match self.rating_detail.take() {
+        let detail = match self.dialogs.rating_detail.take() {
             Some(detail) => detail,
             None => {
                 cx.notify();
                 return;
             }
         };
-        let comment = self.rating_comment_input.read(cx).value().to_string();
+        let comment = self
+            .dialogs
+            .rating_comment_input
+            .read(cx)
+            .value()
+            .to_string();
         let problems: Vec<&str> = CALL_PROBLEMS
             .iter()
             .enumerate()
@@ -807,12 +816,12 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .send_call_rating(stars, &comment, &problems);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "thanks for your feedback".into(),
                 Err(_) => "could not send the rating".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo: call rating (no live Telegram)".into();
+            self.connection.status_note = "demo: call rating (no live Telegram)".into();
             if let Some(session) = self.demo_session.as_mut()
                 && let Some(summary) = session.call_summary.as_mut()
             {
@@ -824,7 +833,7 @@ impl QuillApp {
 
     pub(super) fn upload_call_diagnostics(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.send_call_debug_information() {
+            self.connection.status_note = match live.driver.send_call_debug_information() {
                 Ok(_) => "diagnostics upload sent".into(),
                 Err(_) => "could not upload diagnostics".into(),
             };
@@ -835,7 +844,7 @@ impl QuillApp {
         {
             summary.debug_information_sent = true;
             summary.debug_information_error = None;
-            self.status_note = "demo: diagnostics upload (no live Telegram)".into();
+            self.connection.status_note = "demo: diagnostics upload (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -844,7 +853,7 @@ impl QuillApp {
     /// ended call's log file (schema 1.8.67 :14240).
     pub(super) fn upload_call_log(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.send_call_log() {
+            self.connection.status_note = match live.driver.send_call_log() {
                 Ok(_) => "call log upload sent".into(),
                 Err(_) => "could not upload the call log".into(),
             };
@@ -855,7 +864,7 @@ impl QuillApp {
         {
             summary.log_sent = true;
             summary.log_error = None;
-            self.status_note = "demo: call log upload (no live Telegram)".into();
+            self.connection.status_note = "demo: call log upload (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -1044,7 +1053,7 @@ impl QuillApp {
     pub(super) fn answer_swap_call(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {
             let result = self.live.as_mut().expect("live").driver.accept_swap_call();
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "ending current call, answering…".into(),
                 Err(_) => "could not answer the call".into(),
             };
@@ -1075,7 +1084,7 @@ impl QuillApp {
                     remote_screen: quill::calls::engine::RemoteVideoState::Inactive,
                 });
             }
-            self.status_note = "demo: swap accepted (no live Telegram)".into();
+            self.connection.status_note = "demo: swap accepted (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -1084,13 +1093,13 @@ impl QuillApp {
     pub(super) fn decline_swap_call(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {
             let result = self.live.as_mut().expect("live").driver.decline_swap_call();
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "incoming call declined".into(),
                 Err(_) => "could not decline the call".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.call_swap_pending = None;
-            self.status_note = "demo: swap declined (no live Telegram)".into();
+            self.connection.status_note = "demo: swap declined (no live Telegram)".into();
         }
         cx.notify();
     }
@@ -1283,7 +1292,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.session.is_offline())
         {
-            self.status_note = "You're offline — can't start a call".into();
+            self.connection.status_note = "You're offline — can't start a call".into();
             cx.notify();
             return;
         }
@@ -1348,7 +1357,8 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.fetch_call_history()
                             {
-                                this.status_note = format!("call history request failed: {err:?}");
+                                this.connection.status_note =
+                                    format!("call history request failed: {err:?}");
                             }
                             cx.notify();
                         })),
@@ -1380,7 +1390,8 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.fetch_more_call_history()
                             {
-                                this.status_note = format!("call history request failed: {err:?}");
+                                this.connection.status_note =
+                                    format!("call history request failed: {err:?}");
                             }
                             cx.notify();
                         })),

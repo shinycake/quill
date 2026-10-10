@@ -232,7 +232,7 @@ impl QuillApp {
                 .toggle_view_as_topics(chat_id, view_as_topics)
                 .is_err()
             {
-                self.status_note = "could not change the view".into();
+                self.connection.status_note = "could not change the view".into();
             } else if view_as_topics && live.driver.session.is_saved_messages(chat_id) {
                 let _ = live.driver.load_saved_topics();
             }
@@ -245,7 +245,7 @@ impl QuillApp {
     pub(super) fn open_saved_sublist_ui(&mut self, topic_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_saved_sublist(topic_id).is_err() {
-                self.status_note = "could not open the saved chat".into();
+                self.connection.status_note = "could not open the saved chat".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_saved_sublist(topic_id);
@@ -260,10 +260,10 @@ impl QuillApp {
                 .toggle_saved_topic_pinned(topic_id, pinned)
                 .is_err()
             {
-                self.status_note = "could not pin the saved chat".into();
+                self.connection.status_note = "could not pin the saved chat".into();
             }
         } else {
-            self.status_note = "pinning needs a live connection (demo)".into();
+            self.connection.status_note = "pinning needs a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -276,7 +276,7 @@ impl QuillApp {
         match (self.live.as_mut(), tag) {
             (Some(live), Some(tag)) => {
                 if live.driver.filter_saved_by_tag(tag).is_err() {
-                    self.status_note = "could not filter by tag".into();
+                    self.connection.status_note = "could not filter by tag".into();
                 }
             }
             (Some(live), None) => live.driver.clear_saved_tag_filter(),
@@ -657,31 +657,33 @@ impl QuillApp {
                 .submit_on_enter(false)
         });
         input.update(cx, |input, cx| input.set_value(current, window, cx));
-        self.saved_tag_dialog = Some(SavedTagDialog { tag, input });
+        self.dialogs.saved_tag_dialog = Some(SavedTagDialog { tag, input });
         cx.notify();
     }
 
     fn close_saved_tag_dialog(&mut self, cx: &mut Context<Self>) {
-        self.saved_tag_dialog = None;
+        self.dialogs.saved_tag_dialog = None;
         cx.notify();
     }
 
     fn submit_saved_tag_name(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.saved_tag_dialog.as_ref() else {
+        let Some(dialog) = self.dialogs.saved_tag_dialog.as_ref() else {
             return;
         };
         let tag = dialog.tag.clone();
         let label = clean_tag_label(dialog.input.read(cx).value().as_ref());
         match self.live.as_mut() {
             Some(live) => {
-                self.status_note = match live.driver.set_saved_tag_label(&tag, &label) {
+                self.connection.status_note = match live.driver.set_saved_tag_label(&tag, &label) {
                     Ok(_) => "tag name saved".into(),
                     Err(_) => "could not rename the tag".into(),
                 };
             }
-            None => self.status_note = "naming tags needs a live connection (demo)".into(),
+            None => {
+                self.connection.status_note = "naming tags needs a live connection (demo)".into()
+            }
         }
-        self.saved_tag_dialog = None;
+        self.dialogs.saved_tag_dialog = None;
         cx.notify();
     }
 
@@ -696,7 +698,7 @@ impl QuillApp {
                 this.close_saved_tag_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(state) = this.saved_tag_dialog.as_ref() else {
+            let Some(state) = this.dialogs.saved_tag_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
             let premium = this
@@ -805,7 +807,7 @@ fn tag_name(choices: &[SavedMessagesTag], all: &[SavedMessagesTag], tag: &Reacti
 crate::ui::shell::register_dialogs! {
     SavedTagName => DialogSpec::new(
         5300,
-        |app| app.saved_tag_dialog.is_some(),
+        |app| app.dialogs.saved_tag_dialog.is_some(),
         QuillApp::build_saved_tag_dialog,
     ),
 }
