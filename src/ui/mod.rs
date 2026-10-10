@@ -73,6 +73,7 @@ pub(crate) use story_page::{StoryPage, apply_ready_story_albums};
 
 mod actions;
 mod activity_indicator;
+mod admin_extras_demo;
 mod app;
 mod app_demo;
 mod app_render;
@@ -209,6 +210,7 @@ mod send_button_ui;
 mod service_demo;
 mod service_media_demo;
 mod service_row;
+mod settings_account_ui;
 mod settings_ui;
 mod share_box_ui;
 mod share_content_ui;

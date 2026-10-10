@@ -516,6 +516,9 @@ pub struct Session {
     /// Phase C2i: "who can call me"
     /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
     pub call_privacy_allow_calls: Option<PrivacyWho>,
+    /// `getSupportUser` answer waiting for the driver to open the chat
+    /// (Settings > Ask a Question).
+    pub support_user_ready: Option<i64>,
     /// Phase C2i: peer-to-peer calls
     /// (`userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67 :9009).
     pub call_privacy_p2p: Option<PrivacyWho>,
@@ -949,6 +952,9 @@ pub struct Session {
     /// Slice G2: per-chat event-log text search (the `query` parameter of
     /// `getChatEventLog`, schema 1.8.67, line 15252). Absent = no search.
     pub event_log_queries: HashMap<i64, String>,
+    /// Per-chat admin filter: the `user_ids` of `getChatEventLog` (the server
+    /// filters, so the admin list stays complete). Empty or absent = everyone.
+    pub event_log_users: HashMap<i64, Vec<i64>>,
     /// Slice G2: `supergroup.sign_messages` (schema 1.8.67, line 2746),
     /// keyed by supergroup id. Drives the channel "Sign messages" toggle.
     pub supergroup_sign_messages: HashMap<i64, bool>,
@@ -1400,6 +1406,7 @@ impl Session {
             recent_calls_loading: false,
             recent_calls_error: false,
             call_privacy_allow_calls: None,
+            support_user_ready: None,
             call_privacy_p2p: None,
             call_privacy_loading: false,
             call_privacy_pending: 0,
@@ -1548,6 +1555,7 @@ impl Session {
             event_logs: HashMap::new(),
             event_log_filters: HashMap::new(),
             event_log_queries: HashMap::new(),
+            event_log_users: HashMap::new(),
             supergroup_sign_messages: HashMap::new(),
             supergroup_show_message_sender: HashMap::new(),
             supergroup_anti_spam_enabled: HashMap::new(),
