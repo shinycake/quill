@@ -1295,3 +1295,29 @@ fn b14_story_parses_profile_and_statistics_flags() {
     assert!(crate::story_extras::can_share_story(story));
     assert!(crate::story_extras::can_save_story(story));
 }
+
+#[test]
+fn story_custom_emoji_stickers_are_bounded() {
+    use crate::telegram::envelope::{StickerFormat, StickerItem};
+    let (mut session, _) = session();
+    let sticker = |id: i64| StickerItem {
+        custom_emoji_id: Some(id),
+        id,
+        set_id: 1,
+        emoji: String::new(),
+        width: 64,
+        height: 64,
+        format: StickerFormat::Webp,
+        file_id: crate::ids::FileId(1),
+        thumb_file_id: None,
+        thumb_width: 0,
+        thumb_height: 0,
+        requires_premium: false,
+    };
+    let total = crate::state::STORY_CUSTOM_EMOJI_CAP as i64 * 3;
+    for id in 1..=total {
+        session.accept_story_custom_emoji_stickers(vec![sticker(id)]);
+        assert!(session.story_custom_emoji_stickers.len() <= crate::state::STORY_CUSTOM_EMOJI_CAP);
+    }
+    assert!(session.story_custom_emoji_stickers.contains_key(&total));
+}

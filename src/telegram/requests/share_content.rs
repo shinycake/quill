@@ -28,6 +28,19 @@ pub fn dice_emoji(text: &str) -> Option<&'static str> {
     DICE_EMOJIS.iter().copied().find(|emoji| *emoji == trimmed)
 }
 
+/// Like [`dice_emoji`], against the list the server sent in
+/// `updateDiceEmojis`; the built-in list stands in until it arrives.
+pub fn dice_emoji_in(text: &str, server_list: &[String]) -> Option<String> {
+    if server_list.is_empty() {
+        return dice_emoji(text).map(str::to_string);
+    }
+    let trimmed = text.trim().trim_end_matches('\u{FE0F}');
+    server_list
+        .iter()
+        .find(|emoji| emoji.trim_end_matches('\u{FE0F}') == trimmed)
+        .cloned()
+}
+
 /// What a shared contact carries (`contact`, schema 1.8.67 line 640).
 /// `user_id` is 0 for a bare phone number.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,6 +213,23 @@ mod tests {
 
     fn parse(json: &str) -> Value {
         serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn dice_emoji_in_prefers_the_server_list() {
+        let list = vec!["\u{1F3B2}".to_string(), "\u{1F3B3}".to_string()];
+        assert_eq!(
+            dice_emoji_in(" \u{1F3B3}\u{FE0F}", &list).as_deref(),
+            Some("\u{1F3B3}")
+        );
+        // Not in the server's list: sends as text.
+        assert_eq!(dice_emoji_in("\u{1F3B0}", &list), None);
+        // No list yet: the built-in one decides.
+        assert_eq!(
+            dice_emoji_in("\u{1F3B0}", &[]).as_deref(),
+            Some("\u{1F3B0}")
+        );
+        assert_eq!(dice_emoji_in("hi", &[]), None);
     }
 
     #[test]

@@ -34,4 +34,5 @@ mod story_insights;
 mod subsection_tabs;
 mod threads;
 mod unread_totals;
+mod updates_sync;
 mod users;

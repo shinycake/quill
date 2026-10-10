@@ -513,6 +513,10 @@ impl QuillApp {
             PaneMode::Connecting => false,
             PaneMode::Ready => {
                 let session = self.session();
+                // A frozen account is read-only everywhere.
+                if session.is_some_and(|s| s.is_frozen()) {
+                    return false;
+                }
                 let open = session.and_then(|s| s.open_chat);
                 let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
                 // Parity slice 4: posting into a forum topic is supported —
@@ -569,6 +573,14 @@ impl QuillApp {
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
             PaneMode::Connecting => Some("Sign in to send messages.".to_string()),
+            PaneMode::Ready
+                if composer.is_none() && self.session().is_some_and(|s| s.is_frozen()) =>
+            {
+                Some(
+                    "Your account is frozen and read-only. Open the banner at the top for details."
+                        .to_string(),
+                )
+            }
             PaneMode::Ready if composer.is_none() => {
                 let open = self.session().and_then(|s| s.open_chat);
                 let in_topic = self.session().is_some_and(|s| s.open_topic.is_some());

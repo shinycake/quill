@@ -1,0 +1,8 @@
+# updates-sync: landed in full, verified by tests and demo captures
+# (dice emoji is left out: animated emoji click updates are not handled)
+parity:updates-chat-flags
+parity:updates-downloads-sync
+parity:updates-live-location
+parity:updates-freeze-state
+parity:updates-speech-trial
+parity:updates-age-verification
