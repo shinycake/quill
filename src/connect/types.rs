@@ -10,7 +10,7 @@ use crate::settings::AccountPaths;
 use crate::state::Session;
 use crate::telegram::ffi::LibraryOrigin;
 use crate::telegram::requests::SendReply;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -243,6 +243,11 @@ pub struct ConnectDriver<S: JsonSender> {
     /// pump drops the retained screen frames so no stale picture can
     /// render.
     pub(crate) screen_state_outbox: VideoStateOutbox,
+    /// Engine-emitted peer 1:1 microphone states `(call id, muted)`
+    /// (worker thread -> driver pump).
+    pub(crate) audio_state_outbox: Arc<Mutex<VecDeque<(i32, bool)>>>,
+    /// Your own microphone level in a group call (`connect::call_audio`).
+    pub(crate) call_audio: super::call_audio::CallAudio,
     /// Phase C2e: latest decoded video frame per (call id, is_local,
     /// is_screen).
     pub(crate) video_frame_slots: VideoFrameSlots,

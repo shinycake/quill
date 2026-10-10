@@ -1073,6 +1073,7 @@ impl QuillApp {
                     screen_sharing: false,
                     remote_video: quill::calls::engine::RemoteVideoState::Inactive,
                     remote_screen: quill::calls::engine::RemoteVideoState::Inactive,
+                    remote_audio_muted: false,
                 });
             }
             self.status_note = "demo: swap accepted (no live Telegram)".into();

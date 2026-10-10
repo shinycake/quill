@@ -124,8 +124,9 @@ fn mute_state(call: &ActiveGroupCall) -> MuteState {
 }
 
 /// A member's status line and its color (tdesktop's member row).
-fn member_status(p: &ParsedGroupCallParticipant) -> (&'static str, u32) {
-    if p.is_speaking {
+/// `speaking` is TDLib's flag, or your own level tap for your row.
+fn member_status(p: &ParsedGroupCallParticipant, speaking: bool) -> (&'static str, u32) {
+    if speaking {
         ("speaking", MEMBER_ACTIVE)
     } else if p.is_hand_raised {
         ("wants to speak", MEMBER_INACTIVE_STATUS)
@@ -143,6 +144,22 @@ impl QuillApp {
             return div().size_full().bg(rgb(BG)).into_any_element();
         };
         let state = mute_state(&call);
+        // Your own microphone: the halo follows the level while live.
+        let (self_level, self_speaking) = self.group_call_self_level();
+        let level_reach = (state == MuteState::Live).then(|| {
+            let now = self.group_call_now_ms();
+            if (self_level - self.group_call.level_seen).abs() > f32::EPSILON {
+                self.group_call.level_seen = self_level;
+                self.group_call
+                    .level_anim
+                    .retarget(self_level.clamp(0.0, 1.0), now);
+            }
+            let value = self.group_call.level_anim.value(now);
+            if self.group_call.level_anim.is_running(now) || value > 0.0 {
+                self.request_animation_tick(30, cx);
+            }
+            quill::calls::audio_level::halo_reach(value)
+        });
         let title = if call.title.is_empty() {
             if call.is_video_chat {
                 "Video Chat"
@@ -200,7 +217,7 @@ impl QuillApp {
         let rows: Vec<AnyElement> = call
             .participants
             .iter()
-            .map(|participant| self.group_member_row(&call, participant, cx))
+            .map(|participant| self.group_member_row(&call, participant, self_speaking, cx))
             .collect();
 
         let members = div()
@@ -445,7 +462,7 @@ impl QuillApp {
             .children(stream)
             .children(self.group_call_join_as_row(&call, cx))
             .child(members)
-            .child(self.group_call_controls(&call, state, cx))
+            .child(self.group_call_controls(&call, state, level_reach, cx))
             .children(invite)
             .children(rename)
             .into_any_element()
@@ -457,6 +474,7 @@ impl QuillApp {
         &mut self,
         call: &ActiveGroupCall,
         participant: &ParsedGroupCallParticipant,
+        self_speaking: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let name = self.group_call_participant_name(&participant.participant_id);
@@ -471,7 +489,8 @@ impl QuillApp {
         .and_then(|path| {
             quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
         });
-        let (status, status_color) = member_status(participant);
+        let speaking = participant.is_speaking || (participant.is_current_user && self_speaking);
+        let (status, status_color) = member_status(participant, speaking);
         let force_muted = participant.is_muted_for_all_users && !participant.can_unmute_self;
         let (mic, mic_color) = if participant.is_hand_raised {
             (IconName::Hand, MEMBER_INACTIVE_STATUS)
@@ -479,7 +498,7 @@ impl QuillApp {
             (IconName::MicOff, MEMBER_MUTED_ICON)
         } else if participant.is_muted_for_all_users {
             (IconName::MicOff, MEMBER_INACTIVE_ICON)
-        } else if participant.is_speaking {
+        } else if speaking {
             (IconName::Mic, MEMBER_ACTIVE)
         } else {
             (IconName::Mic, MEMBER_INACTIVE_ICON)
@@ -721,6 +740,7 @@ impl QuillApp {
         &self,
         call: &ActiveGroupCall,
         state: MuteState,
+        level_reach: Option<f32>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let (from, to) = state.colors();
@@ -806,6 +826,16 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_center()
+                    // Your voice: a ring that grows with the level
+                    // (tdesktop's blobs follow `setLevel`).
+                    .children(level_reach.map(|reach| {
+                        div()
+                            .absolute()
+                            .inset(px(-reach))
+                            .rounded_full()
+                            .bg(rgb(to))
+                            .opacity(0.22)
+                    }))
                     // The breathing halo (tdesktop's blobs).
                     .child({
                         let halo = div().absolute().inset_0().rounded_full().bg(rgb(to));
@@ -1200,10 +1230,10 @@ mod tests {
     #[test]
     fn member_statuses_read_like_tdesktop() {
         let mut p = me(false, true, false);
-        assert_eq!(member_status(&p).0, "listening");
+        assert_eq!(member_status(&p, p.is_speaking).0, "listening");
         p.is_hand_raised = true;
-        assert_eq!(member_status(&p).0, "wants to speak");
+        assert_eq!(member_status(&p, p.is_speaking).0, "wants to speak");
         p.is_speaking = true;
-        assert_eq!(member_status(&p).0, "speaking");
+        assert_eq!(member_status(&p, p.is_speaking).0, "speaking");
     }
 }

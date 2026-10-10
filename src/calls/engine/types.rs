@@ -44,6 +44,11 @@ pub type VideoFrameCallback = Arc<dyn Fn(i32, VideoFrame) + Send + Sync + 'stati
 
 pub type RemoteVideoStateCallback = Arc<dyn Fn(i32, RemoteVideoState) + Send + Sync + 'static>;
 
+/// The peer's microphone in a 1:1 call: `(call id, muted)`, from the
+/// MediaState signaling message (ntgcalls `p2p_call.cpp` reports it as
+/// the remote `Microphone` source going idle or active).
+pub type RemoteAudioStateCallback = Arc<dyn Fn(i32, bool) + Send + Sync + 'static>;
+
 /// Phase C2g: extract the audio channel SSRC from ntgcalls' group join
 /// offer (a raw SDP offer per the ntgcalls API docs: `create(chatId)`
 /// "returns a WebRTC offer (SDP)"). TDLib's `groupCallJoinParameters`
@@ -207,6 +212,8 @@ pub(crate) struct CallbackShared {
     pub(crate) remote_video_hook: Mutex<Option<RemoteVideoStateCallback>>,
     /// Phase C2j: peer 1:1 screen-share state hook.
     pub(crate) remote_screen_hook: Mutex<Option<RemoteVideoStateCallback>>,
+    /// The peer's 1:1 microphone on/off hook.
+    pub(crate) remote_audio_hook: Mutex<Option<RemoteAudioStateCallback>>,
     pub(crate) frame_seq: AtomicU64,
     /// Phase C2g: group-call callback routing: native `chat_id` -> the
     /// TDLib group call id the driver assigned, and the ssrc map that
@@ -346,6 +353,7 @@ mod callback_tests {
             frame_hook: Mutex::new(None),
             remote_video_hook: Mutex::new(None),
             remote_screen_hook: Mutex::new(None),
+            remote_audio_hook: Mutex::new(None),
             frame_seq: AtomicU64::new(0),
             group_chat_to_call: Mutex::new(HashMap::new()),
             group_video_ssrc_to_user: Mutex::new(HashMap::new()),

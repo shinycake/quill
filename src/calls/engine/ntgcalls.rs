@@ -71,6 +71,7 @@ impl NtgcallsEngine {
                 frame_hook: Mutex::new(None),
                 remote_video_hook: Mutex::new(None),
                 remote_screen_hook: Mutex::new(None),
+                remote_audio_hook: Mutex::new(None),
                 frame_seq: AtomicU64::new(0),
                 group_chat_to_call: Mutex::new(HashMap::new()),
                 group_video_ssrc_to_user: Mutex::new(HashMap::new()),
@@ -586,6 +587,14 @@ impl CallEngine for NtgcallsEngine {
             .remote_screen_hook
             .lock()
             .expect("ntgcalls remote screen state hook") = Some(callback);
+    }
+
+    fn set_remote_audio_state_callback(&mut self, callback: RemoteAudioStateCallback) {
+        *self
+            .callback
+            .remote_audio_hook
+            .lock()
+            .expect("ntgcalls remote audio state hook") = Some(callback);
     }
 
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {

@@ -24,6 +24,8 @@ struct MockInner {
     remote_video_hook: Option<RemoteVideoStateCallback>,
     /// Phase C2j: peer 1:1 screen-share state hook (replace semantics).
     remote_screen_hook: Option<RemoteVideoStateCallback>,
+    /// The peer's 1:1 microphone hook (replace semantics).
+    remote_audio_hook: Option<RemoteAudioStateCallback>,
     camera_changes: Vec<(i32, bool, Option<String>)>,
     /// Phase C2i: 1:1 screen-share toggle recording for driver tests.
     p2p_screen_share_changes: Vec<(i32, bool)>,
@@ -270,6 +272,19 @@ impl MockEngine {
         }
     }
 
+    /// Deliver a synthetic peer microphone state to the hook.
+    pub fn emit_remote_audio_muted(&self, call_id: i32, muted: bool) {
+        let hook = self
+            .inner
+            .lock()
+            .expect("mock call engine")
+            .remote_audio_hook
+            .clone();
+        if let Some(hook) = hook {
+            hook(call_id, muted);
+        }
+    }
+
     /// Phase C2j: deliver a synthetic peer screen-share state to the hook.
     pub fn emit_remote_screen_state(&self, call_id: i32, state: RemoteVideoState) {
         let hook = self
@@ -373,6 +388,13 @@ impl CallEngine for MockEngine {
             .lock()
             .expect("mock call engine")
             .remote_screen_hook = Some(callback);
+    }
+
+    fn set_remote_audio_state_callback(&mut self, callback: RemoteAudioStateCallback) {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .remote_audio_hook = Some(callback);
     }
 
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {

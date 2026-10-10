@@ -100,6 +100,7 @@ mod bots_extras;
 mod bots_extras_demo;
 mod bubble_header;
 mod bubble_header_demo;
+mod call_audio_ui;
 mod call_panel;
 mod call_sounds;
 mod call_tones;

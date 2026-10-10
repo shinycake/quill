@@ -52,6 +52,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
             screen_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            audio_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            call_audio: Default::default(),
             video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
             group_video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
             group_camera_state: HashMap::new(),
@@ -608,6 +610,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;
+        self.pump_call_audio()?;
         self.maybe_send_parameters()?;
         self.maybe_probe_channel_membership()?;
         // Slice G2: chain `boostChat` once the slots answer arrives.

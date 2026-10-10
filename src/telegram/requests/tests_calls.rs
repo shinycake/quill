@@ -490,3 +490,22 @@ fn group_call_participant_management_shapes_match_1_8_67() {
     assert_eq!(v["participant_id"]["user_id"], 42);
     assert_eq!(v["volume_level"], 15000);
 }
+
+#[test]
+fn set_group_call_participant_is_speaking_shape() {
+    // `setGroupCallParticipantIsSpeaking group_call_id:int32
+    // audio_source:int32 is_speaking:Bool = MessageSender`
+    // (`schema/td_api.tl:14819`).
+    let v: serde_json::Value = serde_json::from_str(&set_group_call_participant_is_speaking(
+        RequestId(34),
+        555,
+        123456,
+        true,
+    ))
+    .unwrap();
+    assert_eq!(v["@type"], "setGroupCallParticipantIsSpeaking");
+    assert_eq!(v["@extra"], "34");
+    assert_eq!(v["group_call_id"], 555);
+    assert_eq!(v["audio_source"], 123456);
+    assert_eq!(v["is_speaking"], true);
+}
