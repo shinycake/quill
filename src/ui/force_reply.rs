@@ -57,7 +57,7 @@ impl QuillApp {
     /// The active custom keyboard for one chat (live or demo session).
     fn chat_custom_keyboard(&self, chat_id: ChatId) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
         self.session()?
-            .custom_keyboard_for_chat(chat_id, &self.dismissed_keyboards)
+            .custom_keyboard_for_chat(chat_id, &self.message_ui.dismissed_keyboards)
     }
 
     /// The force-reply bar target for the open chat, if any: the live
@@ -75,7 +75,7 @@ impl QuillApp {
         let session = self.session()?;
         let chat_id = session.open_chat?;
         let history = session.histories.get(&chat_id.0)?;
-        let pending = self.pending_reply.as_ref()?;
+        let pending = self.composer_ui.pending_reply.as_ref()?;
         let force_reply_placeholder = |message_id: MessageId| {
             history
                 .messages
@@ -87,6 +87,7 @@ impl QuillApp {
                 })
                 .filter(|_| {
                     !self
+                        .message_ui
                         .dismissed_keyboards
                         .contains(&(chat_id.0, message_id.0))
                 })
@@ -97,7 +98,7 @@ impl QuillApp {
             return Some((chat_id, pending.message_id, placeholder));
         }
         let (kb_chat, kb_message, placeholder) =
-            active_force_reply(&history.messages, &self.dismissed_keyboards)?;
+            active_force_reply(&history.messages, &self.message_ui.dismissed_keyboards)?;
         (pending.chat_id == kb_chat && pending.message_id == kb_message).then_some((
             kb_chat,
             kb_message,

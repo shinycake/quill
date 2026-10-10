@@ -492,7 +492,7 @@ impl QuillApp {
         self.passcode_ui.lock_error = None;
         self.passcode_ui.logout_confirm = false;
         // tdesktop closes the media viewer and call panels when it locks.
-        self.media_viewer.close();
+        self.viewer.state.close();
         self.stories.viewer.close();
         self.close_context_menus(cx);
         cx.notify();

@@ -430,6 +430,7 @@ impl QuillApp {
         // A reply aimed at this chat from another one survives the draft
         // restore below ("Reply in Another Chat").
         let carried_reply = self
+            .composer_ui
             .pending_reply
             .clone()
             .filter(|reply| reply.target_chat == Some(chat_id));
@@ -438,34 +439,38 @@ impl QuillApp {
         // Phase B4: the TTL picker belongs to the previous chat.
         self.ttl_picker_open = false;
         if self
+            .composer_ui
             .pending_reply
             .as_ref()
             .is_some_and(|reply| !reply.belongs_to(chat_id))
         {
-            self.pending_reply = None;
+            self.composer_ui.pending_reply = None;
         }
         if self
+            .composer_ui
             .pending_edit
             .as_ref()
             .is_some_and(|edit| edit.chat_id != chat_id)
         {
-            self.pending_edit = None;
-            self.saved_edit_draft.clear();
-            self.saved_edit_reply = None;
+            self.composer_ui.pending_edit = None;
+            self.composer_ui.saved_edit_draft.clear();
+            self.composer_ui.saved_edit_reply = None;
         }
         if self
+            .message_ui
             .pending_delete
             .as_ref()
             .is_some_and(|confirm| confirm.chat_id != chat_id)
         {
-            self.pending_delete = None;
+            self.message_ui.pending_delete = None;
         }
         // B4: a pending stop-poll confirm belongs to its own chat.
         if self
+            .message_ui
             .pending_stop_poll
             .is_some_and(|(id, _, _)| id != chat_id)
         {
-            self.pending_stop_poll = None;
+            self.message_ui.pending_stop_poll = None;
         }
         self.dismiss_forward_for_chat(chat_id);
         if self.recording_active() {
@@ -474,7 +479,7 @@ impl QuillApp {
         // Voice notes and music keep playing across chats (the player bar
         // follows, as in Telegram Desktop).
         self.stop_animation_playback();
-        self.autoplayed_gifs.clear();
+        self.playback.autoplayed_gifs.clear();
         self.stop_sticker_playback();
         self.stop_video_playback();
         if self.gif_panel_open() {
@@ -507,7 +512,7 @@ impl QuillApp {
         }
         self.restore_open_draft(window, cx);
         if carried_reply.is_some() {
-            self.pending_reply = carried_reply;
+            self.composer_ui.pending_reply = carried_reply;
         }
         let text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&text);
@@ -1322,7 +1327,7 @@ impl QuillApp {
                         self.story_compact_stack(cx)
                     };
                     list = list.child(self.sidebar_search_field(story_stack, cx));
-                    if self.new_secret_picker_open {
+                    if self.share.new_secret_picker_open {
                         list = list.child(self.new_secret_picker_panel(cx));
                     }
                     if self.search_is_open() {

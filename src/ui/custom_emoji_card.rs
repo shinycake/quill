@@ -42,7 +42,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.custom_emoji_preview = None;
         }
-        self.custom_emoji_card_seen = None;
+        self.message_ui.custom_emoji_card_seen = None;
         cx.notify();
     }
 
@@ -50,13 +50,13 @@ impl QuillApp {
     /// its own timer.
     pub(super) fn custom_emoji_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let preview: CustomEmojiPreview = self.session()?.custom_emoji_preview.clone()?;
-        if self.custom_emoji_card_seen.as_ref() != Some(&preview) {
-            self.custom_emoji_card_seen = Some(preview.clone());
+        if self.message_ui.custom_emoji_card_seen.as_ref() != Some(&preview) {
+            self.message_ui.custom_emoji_card_seen = Some(preview.clone());
             let shown = preview.clone();
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(CARD_LIFETIME).await;
                 let _ = this.update(cx, |this, cx| {
-                    if this.custom_emoji_card_seen.as_ref() == Some(&shown) {
+                    if this.message_ui.custom_emoji_card_seen.as_ref() == Some(&shown) {
                         this.clear_custom_emoji_preview(cx);
                     }
                 });

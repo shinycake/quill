@@ -521,7 +521,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<InlineFrame> {
         if !super::native_video::supported()
-            || self.media_viewer.is_open()
+            || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
         {
             return None;
@@ -580,12 +580,13 @@ impl QuillApp {
             return None;
         }
         let (chat_id, message_id) = (message.chat_id, message.id);
-        let frame = self
-            .inline_videos
-            .borrow_mut()
-            .frame(chat_id.0, message_id.0, tile, || {
-                self.playable_clip_path(chat_id, message_id, file_id)
-            });
+        let frame =
+            self.playback
+                .inline_videos
+                .borrow_mut()
+                .frame(chat_id.0, message_id.0, tile, || {
+                    self.playable_clip_path(chat_id, message_id, file_id)
+                });
         // A muted loop in the conversation is drawn by its animation layer
         // (which keeps it playing) while the history replays; a clip with
         // sound or a seek ring stays with the history, ticking it.
@@ -595,7 +596,7 @@ impl QuillApp {
             && self.slices.in_conversation()
             && super::anim_layer::current().is_some();
         if !layered {
-            let videos = self.inline_videos.borrow();
+            let videos = self.playback.inline_videos.borrow();
             if videos.active() {
                 // Seek rings spring in and out more smoothly at 60.
                 let fps = if videos.seek_animating() { 60 } else { 30 };
@@ -609,7 +610,7 @@ impl QuillApp {
         // Masks over the video blend into the history behind it.
         let backdrop = self.wallpaper_backdrop(cx);
         let live = layered.then(|| LiveSource {
-            videos: self.inline_videos.clone(),
+            videos: self.playback.inline_videos.clone(),
             key: (chat_id.0, message_id.0),
             backdrop,
         });

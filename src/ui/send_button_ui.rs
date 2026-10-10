@@ -36,12 +36,12 @@ impl QuillApp {
     /// What the button should be right now.
     pub(super) fn send_button_kind_now(&self, can_record: bool, sendable: bool) -> SendButtonKind {
         send_button_kind(SendButtonInputs {
-            editing: self.pending_edit.is_some(),
+            editing: self.composer_ui.pending_edit.is_some(),
             sendable,
             can_record,
             record_video: self.record_mode() == RecordMode::Video,
             scheduled: !matches!(
-                self.composer_scheduling,
+                self.composer_ui.scheduling,
                 quill::composer::ComposerScheduling::None
             ),
             slow_mode_wait: self.slow_mode_wait_secs(),
@@ -52,7 +52,7 @@ impl QuillApp {
     fn submit_from_send_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
         if !text.trim().is_empty()
-            || !self.pending_attachments.is_empty()
+            || !self.composer_ui.pending_attachments.is_empty()
             || self.forward_bar_here()
         {
             let markup = self.composer_markup(cx);
@@ -71,9 +71,13 @@ impl QuillApp {
         let wait = self.slow_mode_wait_secs();
 
         let now = now_ms();
-        let mut morph = self.send_morph.get().unwrap_or(SendMorph::new(kind));
+        let mut morph = self
+            .composer_ui
+            .send_morph
+            .get()
+            .unwrap_or(SendMorph::new(kind));
         morph.set(kind, now);
-        self.send_morph.set(Some(morph));
+        self.composer_ui.send_morph.set(Some(morph));
         let progress = morph.progress(now);
         let animating = morph.is_animating(now);
         if animating {

@@ -143,7 +143,7 @@ impl QuillApp {
         // Reactions lead the menu (Telegram Desktop): the chat's quick
         // strip in its own pill above the menu, expandable to every
         // reaction it allows.
-        let page = self.message_menu_ui.page;
+        let page = self.message_ui.menu_ui.page;
         let strip = (message.can_react() && page == MessageMenuPage::Main)
             .then(|| self.reaction_strip(chat_id, message_id, &message, cx));
         // Telegram Desktop's message menu: left-aligned rows with an icon,
@@ -180,7 +180,7 @@ impl QuillApp {
         }
         // Over a text selection, Reply quotes it and Copy copies it
         // (Telegram Desktop: "Quote & Reply", "Copy Selected Text").
-        let selection = self.message_menu_selection.clone();
+        let selection = self.message_ui.menu_selection.clone();
         if can_reply {
             let quote = selection.clone();
             item!(
@@ -202,19 +202,19 @@ impl QuillApp {
                         }
                         None => this.begin_reply_from_message(chat_id, message_id, window, cx),
                     }
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
         }
         // A playing voice message also offers a reply stamped with where the
         // player is (Telegram Desktop `AddTimecodeAction`).
-        let playing_here = self.playing_voice == Some(message_id);
+        let playing_here = self.playback.playing_voice == Some(message_id);
         if quill::message_menu::timecode_offered(
             effective_content(&message.content, message.ephemeral.as_ref()),
             playing_here,
             can_reply,
-        ) && let Some(position) = self.playback_clock.as_ref().map(|c| c.elapsed_secs())
+        ) && let Some(position) = self.playback.clock.as_ref().map(|c| c.elapsed_secs())
         {
             let timecode = quill::message_menu::timecode_text(position);
             let label_timecode = timecode.clone();
@@ -245,7 +245,7 @@ impl QuillApp {
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.reply_with_timecode(chat_id, message_id, window, cx);
-                        this.message_menu = None;
+                        this.message_ui.menu = None;
                         cx.notify();
                     }))
                     .into_any_element(),
@@ -267,7 +267,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     this.begin_reply_elsewhere(chat_id, message_id, window, cx);
                 }
             );
@@ -300,7 +300,7 @@ impl QuillApp {
                 cx,
                 {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -309,7 +309,8 @@ impl QuillApp {
         // message's own text (Telegram Desktop: both can show; the second
         // only while the chat is not already shown translated).
         if let Some(selected) = self
-            .message_menu_selection
+            .message_ui
+            .menu_selection
             .clone()
             .filter(|selected| self.translate_menu_offered(chat_id, selected))
         {
@@ -322,7 +323,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     this.open_translate_selection(chat_id, selected.clone(), window, cx);
                 }
             );
@@ -352,7 +353,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     this.open_translate_message(chat_id, message_id, window, cx);
                 }
             );
@@ -360,7 +361,7 @@ impl QuillApp {
         // Over a link, the menu leads with what Telegram Desktop adds for it:
         // a copy entry named for the kind of link (`copyToClipboardContextItemText`),
         // and, for web links, Open.
-        if let Some(link) = self.message_menu_link.clone() {
+        if let Some(link) = self.message_ui.menu_link.clone() {
             let msg_key = (chat_id.0, message_id.0 as u64);
             if matches!(link, quill::text::LinkTarget::Url { .. }) {
                 let open = link.clone();
@@ -373,7 +374,7 @@ impl QuillApp {
                     _window,
                     cx,
                     {
-                        this.message_menu = None;
+                        this.message_ui.menu = None;
                         this.queue_link(open.clone(), msg_key, cx);
                     }
                 );
@@ -391,7 +392,7 @@ impl QuillApp {
                     _window,
                     cx,
                     {
-                        this.message_menu = None;
+                        this.message_ui.menu = None;
                         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                         cx.notify();
                     }
@@ -415,7 +416,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_forward_one(chat_id, message_id, message.pending, window, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -429,7 +430,7 @@ impl QuillApp {
                 cx,
                 {
                     this.toggle_forward_select(chat_id, message_id, message.pending, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -444,7 +445,7 @@ impl QuillApp {
                     cx,
                     {
                         this.select_up_to(chat_id, message_id, cx);
-                        this.message_menu = None;
+                        this.message_ui.menu = None;
                         cx.notify();
                     }
                 );
@@ -462,7 +463,7 @@ impl QuillApp {
                 cx,
                 {
                     this.copy_game_link(chat_id, message_id, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -487,7 +488,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_edit(edit.clone(), window, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -505,7 +506,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     this.open_fact_check(chat_id, message_id, existing.clone(), window, cx);
                 }
             );
@@ -525,7 +526,7 @@ impl QuillApp {
                 _window,
                 cx,
                 {
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     this.request_toggle_pin(chat_id, message_id, _window, cx);
                     cx.notify();
                 }
@@ -542,7 +543,7 @@ impl QuillApp {
                 cx,
                 {
                     this.share_message_link(chat_id, message_id, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -566,7 +567,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_stop_poll(chat_id, message_id, is_quiz, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -587,7 +588,7 @@ impl QuillApp {
                 cx,
                 {
                     this.retract_poll_vote(chat_id, message_id, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -607,7 +608,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_poll_stats_dialog(chat_id, message_id, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -635,7 +636,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_thread_view(chat_id, message_id, window, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -651,7 +652,7 @@ impl QuillApp {
                 cx,
                 {
                     this.retry_failed_message(chat_id, message_id, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -680,7 +681,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_delete_dialog_with(confirm.clone(), moderation.clone(), window, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             );
@@ -702,7 +703,7 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     this.cancel_message_upload(chat_id, message_id, cx);
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 },
             );
@@ -770,7 +771,7 @@ impl QuillApp {
                     .child(div().font_semibold().child(bold))
                     .child(after)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.message_menu = None;
+                        this.message_ui.menu = None;
                         this.view_message_sticker_set(first, cx);
                     }))
                     .into_any_element(),
@@ -826,7 +827,7 @@ impl QuillApp {
                     false,
                     cx,
                     |this, _, cx| {
-                        this.message_menu_ui.page = MessageMenuPage::Main;
+                        this.message_ui.menu_ui.page = MessageMenuPage::Main;
                         cx.notify();
                     },
                 )];
@@ -871,7 +872,7 @@ impl QuillApp {
                     .right_0()
                     .bottom_0()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.message_menu = None;
+                        this.message_ui.menu = None;
                         cx.notify();
                     })),
             )
@@ -1747,14 +1748,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.inline_bot_alert_shown && self.open_chat_is_secret() {
-            self.pending_inline_bot_alert = Some(query.to_string());
+        if !self.composer_ui.inline_bot_alert_shown && self.open_chat_is_secret() {
+            self.composer_ui.pending_inline_bot_alert = Some(query.to_string());
             cx.notify();
             return;
         }
         // A stash left over from another chat (the open chat changed
         // since the gated press) never survives an ungated insert.
-        self.pending_inline_bot_alert = None;
+        self.composer_ui.pending_inline_bot_alert = None;
         let next = quill::composer::insert_switch_inline_text(&self.composer_markup(cx), query);
         self.set_composer_markup(&next, window, cx);
         self.sync_command_menu(cx);
@@ -1769,10 +1770,10 @@ impl QuillApp {
         if !self.open_chat_is_secret() {
             return;
         }
-        let Some(query) = self.pending_inline_bot_alert.take() else {
+        let Some(query) = self.composer_ui.pending_inline_bot_alert.take() else {
             return;
         };
-        self.inline_bot_alert_shown = true;
+        self.composer_ui.inline_bot_alert_shown = true;
         if !query.is_empty() {
             let next =
                 quill::composer::insert_switch_inline_text(&self.composer_markup(cx), &query);

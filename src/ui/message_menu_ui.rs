@@ -309,7 +309,7 @@ impl QuillApp {
                             this.save_message_tone(target.file_id, cx)
                         }
                         MediaAction::SaveTo => {
-                            this.message_menu_ui.page = MessageMenuPage::SaveTo;
+                            this.message_ui.menu_ui.page = MessageMenuPage::SaveTo;
                             cx.notify();
                             return;
                         }
@@ -322,7 +322,7 @@ impl QuillApp {
                             }
                         }
                     }
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 },
             ));
@@ -493,11 +493,11 @@ impl QuillApp {
 
     /// "View Sticker Set" / "Add Stickers": the set in a dialog.
     pub(super) fn view_message_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        self.message_menu_ui.sticker_set_open = true;
+        self.message_ui.menu_ui.sticker_set_open = true;
         if let Some(live) = self.live.as_mut()
             && live.driver.view_sticker_set(set_id).is_err()
         {
-            self.message_menu_ui.sticker_set_open = false;
+            self.message_ui.menu_ui.sticker_set_open = false;
             self.status_note = "could not open the sticker set".into();
         }
         cx.notify();
@@ -510,7 +510,7 @@ impl QuillApp {
             if result.is_ok() {
                 // The dialog stays; the set's state follows TDLib's update.
                 live.driver.session.sticker_set_view = None;
-                self.message_menu_ui.sticker_set_open = false;
+                self.message_ui.menu_ui.sticker_set_open = false;
                 self.status_note = if install {
                     "sticker set added".into()
                 } else {
@@ -536,7 +536,7 @@ impl QuillApp {
     ) {
         self.close_sticker_set_dialog(cx);
         self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
-        self.share_link_text = Some(link);
+        self.share.link_text = Some(link);
         self.status_note = "choose a chat to share to".into();
         cx.notify();
     }
@@ -565,7 +565,7 @@ impl QuillApp {
             match live.driver.manage_sticker_set(set_id, false, true) {
                 Ok(_) => {
                     live.driver.session.sticker_set_view = None;
-                    self.message_menu_ui.sticker_set_open = false;
+                    self.message_ui.menu_ui.sticker_set_open = false;
                     self.status_note = ARCHIVED_NOTE.into();
                     self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
                 }
@@ -578,7 +578,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_sticker_set_dialog(&mut self, cx: &mut Context<Self>) {
-        self.message_menu_ui.sticker_set_open = false;
+        self.message_ui.menu_ui.sticker_set_open = false;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.sticker_set_view = None;
         }
@@ -838,7 +838,7 @@ impl QuillApp {
                     } else {
                         this.status_note = "demo — saving to the profile needs live TDLib".into();
                     }
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 }
             },
@@ -863,7 +863,7 @@ impl QuillApp {
                     } else {
                         this.status_note = "demo — Saved Messages needs live TDLib".into();
                     }
-                    this.message_menu = None;
+                    this.message_ui.menu = None;
                     cx.notify();
                 },
             ));
@@ -877,7 +877,7 @@ impl QuillApp {
             cx,
             move |this, _, cx| {
                 this.save_message_media_as(chat_id, message_id, cx);
-                this.message_menu = None;
+                this.message_ui.menu = None;
                 cx.notify();
             },
         ));
@@ -1014,8 +1014,8 @@ impl QuillApp {
                             }),
                         ))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.message_menu_ui.page = MessageMenuPage::Audience;
-                            this.message_menu_ui.audience_tab = None;
+                            this.message_ui.menu_ui.page = MessageMenuPage::Audience;
+                            this.message_ui.menu_ui.audience_tab = None;
                             cx.notify();
                         }))
                         .into_any_element(),
@@ -1058,8 +1058,8 @@ impl QuillApp {
             .and_then(|s| s.histories.get(&menu.chat_id.0))
             .and_then(|h| h.messages.get(&menu.message_id.0))
             .is_some_and(|m| m.reaction_chips().len() > 1);
-        self.message_menu_ui.page = MessageMenuPage::Audience;
-        self.message_menu_ui.audience_tab = several.then(|| reaction.clone());
+        self.message_ui.menu_ui.page = MessageMenuPage::Audience;
+        self.message_ui.menu_ui.audience_tab = several.then(|| reaction.clone());
         if several && let Some(live) = self.live.as_mut() {
             live.driver.session.wanted_reactor_tab =
                 Some((menu.chat_id, menu.message_id, reaction));
@@ -1080,7 +1080,7 @@ impl QuillApp {
                 .driver
                 .fetch_reactors_tab(chat_id, message_id, tab.as_ref(), false);
         }
-        self.message_menu_ui.audience_tab = tab;
+        self.message_ui.menu_ui.audience_tab = tab;
         cx.notify();
     }
 
@@ -1190,7 +1190,7 @@ impl QuillApp {
                         )
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.message_menu = None;
+                        this.message_ui.menu = None;
                         this.open_avatar_profile(sender, window, cx);
                     }))
                     .into_any_element(),
@@ -1215,7 +1215,7 @@ impl QuillApp {
         let mut ix = 0u64;
         // Tabs per reaction (tdesktop `Ui::ReactionsList` / the "All" tab
         // and one tab per reaction when there is more than one).
-        let tab = self.message_menu_ui.audience_tab.clone();
+        let tab = self.message_ui.menu_ui.audience_tab.clone();
         let chips: Vec<(ReactionType, i32)> = message
             .reaction_chips()
             .into_iter()
@@ -1377,15 +1377,15 @@ impl QuillApp {
         message_ids: Vec<MessageId>,
         cx: &mut Context<Self>,
     ) {
-        self.message_menu = None;
-        self.message_menu_ui.report_open = true;
+        self.message_ui.menu = None;
+        self.message_ui.menu_ui.report_open = true;
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver
                 .report_messages(chat_id, &message_ids, "", "", None)
                 .is_err()
             {
-                self.message_menu_ui.report_open = false;
+                self.message_ui.menu_ui.report_open = false;
                 self.status_note = "could not start the report".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -1395,7 +1395,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_message_report(&mut self, cx: &mut Context<Self>) {
-        self.message_menu_ui.report_open = false;
+        self.message_ui.menu_ui.report_open = false;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.clear_message_report();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -1457,7 +1457,8 @@ impl QuillApp {
         let text = if skip {
             String::new()
         } else {
-            self.message_menu_ui
+            self.message_ui
+                .menu_ui
                 .report_text
                 .read(cx)
                 .value()
@@ -1477,7 +1478,8 @@ impl QuillApp {
         {
             self.status_note = "could not send the report".into();
         }
-        self.message_menu_ui
+        self.message_ui
+            .menu_ui
             .report_text
             .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
@@ -1599,7 +1601,7 @@ impl QuillApp {
                                 .child("Please help us by telling what is wrong with the message you have selected"),
                         )
                         .child(
-                            Textarea::new(&this.message_menu_ui.report_text)
+                            Textarea::new(&this.message_ui.menu_ui.report_text)
                                 .aria_label(if is_optional {
                                     "Add Comment (Optional)"
                                 } else {
@@ -1774,14 +1776,14 @@ crate::ui::shell::register_dialogs! {
     /// The message menu's Report flow.
     MessageReport => DialogSpec::new(
         5600,
-        |app| app.message_menu_ui.report_open,
+        |app| app.message_ui.menu_ui.report_open,
         QuillApp::build_message_report_dialog,
     ),
 
     /// "View Sticker Set" / "Add Stickers" from a sticker message.
     StickerSet => DialogSpec::new(
         5700,
-        |app| app.message_menu_ui.sticker_set_open,
+        |app| app.message_ui.menu_ui.sticker_set_open,
         QuillApp::build_sticker_set_dialog,
     ),
 }

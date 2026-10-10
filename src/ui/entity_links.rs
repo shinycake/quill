@@ -71,14 +71,14 @@ impl QuillApp {
         msg_key: (i64, u64),
         cx: &mut Context<Self>,
     ) {
-        self.link_tooltip = None;
-        self.pending_link = Some(PendingLink { link, msg_key });
+        self.message_ui.link_tooltip = None;
+        self.message_ui.pending_link = Some(PendingLink { link, msg_key });
         cx.notify();
     }
 
     /// Render-time half of [`Self::queue_link`].
     pub(super) fn run_pending_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(PendingLink { link, msg_key }) = self.pending_link.take() else {
+        let Some(PendingLink { link, msg_key }) = self.message_ui.pending_link.take() else {
             return;
         };
         let chat_id = ChatId(msg_key.0);
@@ -95,7 +95,7 @@ impl QuillApp {
                     shown,
                     suspicious,
                 } => {
-                    self.open_link_confirm = Some(OpenLinkConfirm {
+                    self.message_ui.open_link_confirm = Some(OpenLinkConfirm {
                         url,
                         shown,
                         suspicious,
@@ -128,7 +128,7 @@ impl QuillApp {
                 };
             }
             LinkTarget::Phone(_) | LinkTarget::BankCard(_) | LinkTarget::DateTime { .. } => {
-                self.link_popup = Some(LinkPopup {
+                self.message_ui.link_popup = Some(LinkPopup {
                     position: window.mouse_position(),
                     link,
                 });
@@ -169,13 +169,15 @@ impl QuillApp {
         if in_chat {
             self.open_chat_search_ui(window, cx);
             let query = tag.to_string();
-            self.chat_search_input
+            self.search_ui
+                .chat_input
                 .update(cx, |input, cx| input.set_value(&query, window, cx));
             self.sync_chat_search_query(tag, cx);
         } else {
             self.open_search_ui(window, cx);
             let query = tag.to_string();
-            self.search_input
+            self.search_ui
+                .input
                 .update(cx, |input, cx| input.set_value(&query, window, cx));
             self.sync_search_query(tag, cx);
         }
@@ -270,9 +272,9 @@ impl QuillApp {
                 let (file_id, listened, duration) =
                     (voice.file_id, voice.is_listened, voice.duration);
                 let secs = clamp_seek(seconds, duration);
-                self.playback_positions.insert(target_id, secs);
-                if self.playing_voice == Some(target_id)
-                    && self.player.chat.is_none_or(|c| c == chat_id)
+                self.playback.positions.insert(target_id, secs);
+                if self.playback.playing_voice == Some(target_id)
+                    && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
@@ -289,9 +291,9 @@ impl QuillApp {
             (MessageContent::Audio(audio), SeekTarget::Audio) => {
                 let (file_id, duration) = (audio.file_id, audio.duration);
                 let secs = clamp_seek(seconds, duration);
-                self.playback_positions.insert(target_id, secs);
-                if self.playing_audio == Some(target_id)
-                    && self.player.chat.is_none_or(|c| c == chat_id)
+                self.playback.positions.insert(target_id, secs);
+                if self.playback.playing_audio == Some(target_id)
+                    && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
@@ -305,7 +307,7 @@ impl QuillApp {
                 }
             }
             (MessageContent::Video(video), SeekTarget::Video) => {
-                self.pending_viewer_seek = Some((target_id, clamp_seek(seconds, video.duration)));
+                self.viewer.pending_seek = Some((target_id, clamp_seek(seconds, video.duration)));
                 self.open_media_viewer(chat_id, target_id, cx);
             }
             (_, SeekTarget::Web(url)) => self.open_message_url(&url, cx),
@@ -316,8 +318,8 @@ impl QuillApp {
     /// Remember a right-press on a link; the message menu picks it up if
     /// it opens at this very point.
     pub(super) fn note_right_clicked_link(&mut self, position: Point<Pixels>, link: LinkTarget) {
-        self.link_tooltip = None;
-        self.right_clicked_link = Some((position, link));
+        self.message_ui.link_tooltip = None;
+        self.message_ui.right_clicked_link = Some((position, link));
     }
 
     /// The link under the right-click that opened a menu at `position`.
@@ -325,7 +327,8 @@ impl QuillApp {
         &mut self,
         position: Point<Pixels>,
     ) -> Option<LinkTarget> {
-        self.right_clicked_link
+        self.message_ui
+            .right_clicked_link
             .take()
             .filter(|(at, _)| *at == position)
             .map(|(_, link)| link)
@@ -339,8 +342,8 @@ impl QuillApp {
     ) {
         match hover {
             Some((position, text)) => {
-                let token = self.link_tooltip.as_ref().map_or(0, |t| t.token) + 1;
-                self.link_tooltip = Some(LinkTooltip {
+                let token = self.message_ui.link_tooltip.as_ref().map_or(0, |t| t.token) + 1;
+                self.message_ui.link_tooltip = Some(LinkTooltip {
                     position,
                     text: text.into(),
                     token,
@@ -349,7 +352,7 @@ impl QuillApp {
                 cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(TOOLTIP_DELAY).await;
                     let _ = this.update(cx, |this, cx| {
-                        if let Some(tooltip) = this.link_tooltip.as_mut()
+                        if let Some(tooltip) = this.message_ui.link_tooltip.as_mut()
                             && tooltip.token == token
                         {
                             tooltip.shown = true;
@@ -360,7 +363,7 @@ impl QuillApp {
                 .detach();
             }
             None => {
-                if self.link_tooltip.take().is_some_and(|t| t.shown) {
+                if self.message_ui.link_tooltip.take().is_some_and(|t| t.shown) {
                     cx.notify();
                 }
             }
@@ -369,7 +372,7 @@ impl QuillApp {
 
     /// The link tooltip, once the pointer has rested on the link.
     pub(super) fn link_tooltip_overlay(&self) -> Option<AnyElement> {
-        let tooltip = self.link_tooltip.as_ref().filter(|t| t.shown)?;
+        let tooltip = self.message_ui.link_tooltip.as_ref().filter(|t| t.shown)?;
         Some(
             div()
                 .id("link-tooltip")
@@ -392,7 +395,7 @@ impl QuillApp {
 
     /// The menu of a phone number, card number or date.
     pub(super) fn link_popup_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let popup = self.link_popup.clone()?;
+        let popup = self.message_ui.link_popup.clone()?;
         let (label, text) = match &popup.link {
             LinkTarget::Phone(number) => ("Copy Phone Number", number.clone()),
             LinkTarget::BankCard(number) => ("Copy Card Number", number.clone()),
@@ -419,7 +422,7 @@ impl QuillApp {
                         .absolute()
                         .inset_0()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.link_popup = None;
+                            this.message_ui.link_popup = None;
                             cx.notify();
                         })),
                 )
@@ -459,7 +462,7 @@ impl QuillApp {
                                         )
                                         .child(label)
                                         .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.link_popup = None;
+                                            this.message_ui.link_popup = None;
                                             this.copy_entity_text(text.clone(), cx);
                                         })),
                                 ),
@@ -478,15 +481,19 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::OpenLink, |this, _, cx| {
-                this.open_link_confirm = None;
+                this.message_ui.open_link_confirm = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let confirm = this.open_link_confirm.clone().unwrap_or(OpenLinkConfirm {
-                url: String::new(),
-                shown: String::new(),
-                suspicious: Vec::new(),
-            });
+            let confirm = this
+                .message_ui
+                .open_link_confirm
+                .clone()
+                .unwrap_or(OpenLinkConfirm {
+                    url: String::new(),
+                    shown: String::new(),
+                    suspicious: Vec::new(),
+                });
             let marked = !confirm.suspicious.is_empty();
             let mut highlights: Vec<(Range<usize>, HighlightStyle)> = confirm
                 .suspicious
@@ -551,7 +558,7 @@ impl QuillApp {
                         .label("Cancel")
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_link_confirm = None;
+                            this.message_ui.open_link_confirm = None;
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::OpenLink, window, cx);
                         })),
@@ -561,7 +568,7 @@ impl QuillApp {
                         .label("Open")
                         .primary()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_link_confirm = None;
+                            this.message_ui.open_link_confirm = None;
                             this.open_message_url(&url, cx);
                             this.close_kit_dialog_if_done(DialogKind::OpenLink, window, cx);
                         })),
@@ -589,7 +596,7 @@ crate::ui::shell::register_dialogs! {
     /// "Open this link?" for a hidden or look-alike message link.
     OpenLink => DialogSpec::new(
         3300,
-        |app| app.open_link_confirm.is_some(),
+        |app| app.message_ui.open_link_confirm.is_some(),
         QuillApp::build_open_link_dialog,
     ),
 }

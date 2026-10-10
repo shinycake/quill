@@ -120,10 +120,10 @@ impl QuillApp {
         else {
             return;
         };
-        if self.slow_mode_tick_chat == Some(chat_id) {
+        if self.composer_ui.slow_mode_tick_chat == Some(chat_id) {
             return;
         }
-        self.slow_mode_tick_chat = Some(chat_id);
+        self.composer_ui.slow_mode_tick_chat = Some(chat_id);
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -135,8 +135,8 @@ impl QuillApp {
                             cx.notify();
                             true
                         } else {
-                            if this.slow_mode_tick_chat == Some(chat_id) {
-                                this.slow_mode_tick_chat = None;
+                            if this.composer_ui.slow_mode_tick_chat == Some(chat_id) {
+                                this.composer_ui.slow_mode_tick_chat = None;
                             }
                             false
                         }

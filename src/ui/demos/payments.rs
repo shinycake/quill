@@ -143,9 +143,9 @@ impl QuillApp {
         // `viewer_demo_sync_frames` suppresses the async extraction that
         // `open_media_viewer` would otherwise start. The audio
         // engine is skipped (demo), like the audio slice.
-        self.viewer_demo_sync_frames = true;
+        self.viewer.demo_sync_frames = true;
         self.open_media_viewer(ChatId(11), MessageId(204), cx);
-        if let Some(item) = self.media_viewer.current().cloned()
+        if let Some(item) = self.viewer.state.current().cloned()
             && let Some(path) = self.viewer_clip_path(&item)
         {
             // Demo caches use negative IDs, outside TDLib’s live file-ID range.
@@ -162,11 +162,11 @@ impl QuillApp {
                 duration,
             ) && let Ok(decoded) = Self::decode_viewer_frames(&viewer_frames.frames)
             {
-                self.viewer_video_frames = decoded;
-                self.viewer_video_fps = viewer_frames.fps;
-                self.viewer_frame_cache_file = Some(file_id);
+                self.viewer.video_frames = decoded;
+                self.viewer.video_fps = viewer_frames.fps;
+                self.viewer.frame_cache_file = Some(file_id);
                 self.play_viewer_video(&item, &path, cx);
-                if let Some(clock) = self.viewer_clock.as_mut() {
+                if let Some(clock) = self.viewer.clock.as_mut() {
                     clock.seek(5.0);
                 }
             }
@@ -175,7 +175,7 @@ impl QuillApp {
         // races the synchronously decoded frames.
         self.status_note = "screenshot demo — in-viewer video playback".into();
         if demo == VideoPlaybackDemo::VideoPip {
-            if let Some(clock) = self.viewer_clock.as_mut() {
+            if let Some(clock) = self.viewer.clock.as_mut() {
                 clock.seek(0.0);
             }
             let weak = cx.entity().downgrade();

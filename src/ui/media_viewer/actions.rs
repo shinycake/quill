@@ -28,15 +28,15 @@ impl QuillApp {
         change: impl FnOnce(&mut ViewerOrientation),
         cx: &mut Context<Self>,
     ) {
-        let item = self.media_viewer.current().cloned();
+        let item = self.viewer.state.current().cloned();
         let Some(item) = item else { return };
         if item.kind != MediaViewerKind::Photo {
             return;
         }
-        let previous = (self.viewer_orientation, self.viewer_rotated.clone());
-        change(&mut self.viewer_orientation);
-        self.viewer_rotated = None;
-        if self.viewer_orientation.is_identity() {
+        let previous = (self.viewer.orientation, self.viewer.rotated.clone());
+        change(&mut self.viewer.orientation);
+        self.viewer.rotated = None;
+        if self.viewer.orientation.is_identity() {
             cx.notify();
             return;
         }
@@ -44,20 +44,20 @@ impl QuillApp {
             self.session().map(|s| s.files.clone()).unwrap_or_default();
         let roots = self.media_display_roots();
         let path = viewer_display_path(&item, &files, &roots);
-        let orientation = self.viewer_orientation;
+        let orientation = self.viewer.orientation;
         match path {
             Some(path) => match Self::rotated_render_image(&path, orientation) {
                 Some(image) => {
-                    self.viewer_rotated = Some((path, orientation.code(), image));
+                    self.viewer.rotated = Some((path, orientation.code(), image));
                 }
                 None => {
                     self.status_note = "couldn't rotate this photo".into();
-                    (self.viewer_orientation, self.viewer_rotated) = previous;
+                    (self.viewer.orientation, self.viewer.rotated) = previous;
                 }
             },
             None => {
                 self.status_note = "download the photo first to rotate it".into();
-                (self.viewer_orientation, self.viewer_rotated) = previous;
+                (self.viewer.orientation, self.viewer.rotated) = previous;
             }
         }
         cx.notify();
@@ -85,7 +85,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(item) = self.media_viewer.current() else {
+        let Some(item) = self.viewer.state.current() else {
             return;
         };
         let (chat_id, message_id) = (item.chat_id, item.message_id);
@@ -101,7 +101,7 @@ impl QuillApp {
     /// the largest local size; videos save the full clip when local,
     /// else the thumbnail.
     pub(in crate::ui) fn save_viewer_media(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.media_viewer.current().cloned() else {
+        let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
         if self.refuse_protected_copy(item.chat_id, cx) {
@@ -161,16 +161,16 @@ impl QuillApp {
             quill::media_viewer::downloads_dir().as_deref(),
             video,
         );
-        self.viewer_extra.saved_toast = Some(quill::viewer_extras::SavedToast { dest, text });
-        self.viewer_extra.saved_toast_gen += 1;
-        let generation = self.viewer_extra.saved_toast_gen;
+        self.viewer.extra.saved_toast = Some(quill::viewer_extras::SavedToast { dest, text });
+        self.viewer.extra.saved_toast_gen += 1;
+        let generation = self.viewer.extra.saved_toast_gen;
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(quill::viewer_extras::SAVED_TOAST_MS))
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.viewer_extra.saved_toast_gen == generation {
-                    this.viewer_extra.saved_toast = None;
+                if this.viewer.extra.saved_toast_gen == generation {
+                    this.viewer.extra.saved_toast = None;
                     cx.notify();
                 }
             });
@@ -181,7 +181,7 @@ impl QuillApp {
 
     /// The toast's folder link: show the saved file in the file manager.
     pub(super) fn reveal_saved_toast_file(&mut self, cx: &mut Context<Self>) {
-        let Some(toast) = self.viewer_extra.saved_toast.take() else {
+        let Some(toast) = self.viewer.extra.saved_toast.take() else {
             return;
         };
         if !quill::platform::reveal_in_file_manager(&toast.dest) {
@@ -193,7 +193,7 @@ impl QuillApp {
     /// The delete confirmation for the current viewer item, when the
     /// message may be deleted (same gate as the message menu).
     pub(in crate::ui) fn viewer_delete_confirm(&self) -> Option<quill::composer::DeleteConfirm> {
-        let item = self.media_viewer.current()?;
+        let item = self.viewer.state.current()?;
         let session = self.session()?;
         let chat_id = item.chat_id;
         let message = session
@@ -249,12 +249,12 @@ impl QuillApp {
         // Shared Media items reach past the loaded history; absence there
         // does not mean deleted.
         if matches!(
-            self.media_viewer.source(),
+            self.viewer.state.source(),
             ViewerSource::SharedMedia | ViewerSource::Profile
         ) {
             return;
         }
-        let mut viewer = std::mem::take(&mut self.media_viewer);
+        let mut viewer = std::mem::take(&mut self.viewer.state);
         let changed = match self.session() {
             Some(session) => viewer.retain(|item| {
                 session
@@ -264,11 +264,11 @@ impl QuillApp {
             }),
             None => false,
         };
-        self.media_viewer = viewer;
+        self.viewer.state = viewer;
         if !changed {
             return;
         }
-        if self.media_viewer.is_open() {
+        if self.viewer.state.is_open() {
             self.reset_viewer_item_state(cx);
         } else {
             self.stop_viewer_video();
@@ -279,7 +279,7 @@ impl QuillApp {
     /// Cmd+C: copy the current photo to the clipboard as an image (with
     /// the viewer's rotation and flips applied).
     pub(in crate::ui) fn copy_viewer_photo(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.media_viewer.current().cloned() else {
+        let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
         if item.kind != MediaViewerKind::Photo {
@@ -293,7 +293,7 @@ impl QuillApp {
         let files: HashMap<i32, ParsedFile> =
             self.session().map(|s| s.files.clone()).unwrap_or_default();
         let roots = self.media_display_roots();
-        let orientation = self.viewer_orientation;
+        let orientation = self.viewer.orientation;
         let png = viewer_display_path(&item, &files, &roots)
             .ok_or("download the photo first to copy it")
             .and_then(|path| {
@@ -328,7 +328,7 @@ impl QuillApp {
     /// the in-viewer frames; a native-surface or still-loading clip says
     /// so instead of copying a thumbnail.
     pub(in crate::ui) fn copy_viewer_frame(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.media_viewer.current().cloned() else {
+        let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
         if self.refuse_protected_copy(item.chat_id, cx) {
@@ -469,36 +469,36 @@ impl QuillApp {
         over_controls: bool,
         cx: &mut Context<Self>,
     ) {
-        self.viewer_last_activity = std::time::Instant::now();
-        self.viewer_over_controls = over_controls;
-        if self.viewer_controls_hidden {
-            self.viewer_controls_hidden = false;
-            self.viewer_controls_gen += 1;
+        self.viewer.last_activity = std::time::Instant::now();
+        self.viewer.over_controls = over_controls;
+        if self.viewer.controls_hidden {
+            self.viewer.controls_hidden = false;
+            self.viewer.controls_gen += 1;
             cx.notify();
         }
         // Captures render once, after the idle wait: keep the controls up.
-        if self.viewer_hide_timer || still_frame() {
+        if self.viewer.hide_timer || still_frame() {
             return;
         }
-        self.viewer_hide_timer = true;
+        self.viewer.hide_timer = true;
         cx.spawn(async move |this, cx| {
             loop {
                 let wait = this
                     .update(cx, |this, cx| {
-                        let idle = this.viewer_last_activity.elapsed().as_millis() as u64;
-                        let done = !this.media_viewer.is_open() || this.viewer_controls_hidden;
-                        if !done && controls_should_hide(idle, this.viewer_over_controls) {
-                            this.viewer_controls_hidden = true;
-                            this.viewer_controls_gen += 1;
+                        let idle = this.viewer.last_activity.elapsed().as_millis() as u64;
+                        let done = !this.viewer.state.is_open() || this.viewer.controls_hidden;
+                        if !done && controls_should_hide(idle, this.viewer.over_controls) {
+                            this.viewer.controls_hidden = true;
+                            this.viewer.controls_gen += 1;
                             cx.notify();
                         } else if !done {
-                            return Some(if this.viewer_over_controls {
+                            return Some(if this.viewer.over_controls {
                                 VIEWER_WAIT_HIDE_MS
                             } else {
                                 controls_hide_wait_ms(idle).max(16)
                             });
                         }
-                        this.viewer_hide_timer = false;
+                        this.viewer.hide_timer = false;
                         None
                     })
                     .ok()
@@ -521,17 +521,18 @@ impl QuillApp {
     /// the sticker set dialog.
     pub(in crate::ui) fn show_viewer_attached_stickers(&mut self, cx: &mut Context<Self>) {
         let Some(file_id) = self
-            .media_viewer
+            .viewer
+            .state
             .current()
             .map(|item| item.download_file_id)
         else {
             return;
         };
-        self.message_menu_ui.sticker_set_open = true;
+        self.message_ui.menu_ui.sticker_set_open = true;
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
-            self.message_menu_ui.sticker_set_open = false;
+            self.message_ui.menu_ui.sticker_set_open = false;
             self.status_note = "could not load the attached stickers".into();
         }
         cx.notify();
@@ -540,7 +541,7 @@ impl QuillApp {
     /// MED1: "Show in chat" — close the viewer and jump to the source
     /// message (the reply-jump machinery, reused).
     pub(in crate::ui) fn show_viewer_in_chat(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.media_viewer.current() else {
+        let Some(item) = self.viewer.state.current() else {
             return;
         };
         let message_id = item.message_id;
@@ -554,7 +555,7 @@ impl QuillApp {
     /// member is pinned the action unpins the pinned members instead.
     /// Rights-gated on `ChatSummary::can_pin_messages`.
     pub(in crate::ui) fn toggle_viewer_album_pin(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, album_id) = match self.media_viewer.current() {
+        let (chat_id, album_id) = match self.viewer.state.current() {
             Some(item) => (item.chat_id, self.viewer_album_id(item.message_id)),
             None => return,
         };
@@ -630,7 +631,7 @@ impl QuillApp {
     /// MED1: the `media_album_id` of the history message behind the viewer
     /// item (`None` when the message is not in an album).
     pub(in crate::ui) fn viewer_album_id(&self, message_id: MessageId) -> Option<i64> {
-        let item = self.media_viewer.current()?;
+        let item = self.viewer.state.current()?;
         self.session()?
             .histories
             .get(&item.chat_id.0)?
