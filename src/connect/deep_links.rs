@@ -11,9 +11,9 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{DeepLinkAction, DeepLinkState, RequestPurpose};
 use crate::telegram::requests::{
-    check_chat_invite_link, create_private_chat, get_chat, get_deep_link_info,
-    get_internal_link_type, get_message_link_info, join_chat_by_invite_link, search_public_chat,
-    search_sticker_set_by_name, search_user_by_phone_number,
+    check_chat_invite_link, create_private_chat, get_chat, get_chat_boost_link_info,
+    get_deep_link_info, get_internal_link_type, get_message_link_info, join_chat_by_invite_link,
+    search_public_chat, search_sticker_set_by_name, search_user_by_phone_number,
 };
 use crate::text::{TextEntity, TextEntityKind};
 
@@ -373,6 +373,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 search_public_chat(extra, domain)
             }
             DeepLinkAction::MessageLink { url } => get_message_link_info(extra, url),
+            DeepLinkAction::BoostLink { url } => get_chat_boost_link_info(extra, url),
+            DeepLinkAction::OpenChannelBoost { chat_id } => get_chat(extra, ChatId(*chat_id)),
             DeepLinkAction::StickerSet { name } => search_sticker_set_by_name(extra, name),
             DeepLinkAction::UserPhone { phone, .. } => search_user_by_phone_number(extra, phone),
             DeepLinkAction::OpenChatById { chat_id, .. } => get_chat(extra, ChatId(*chat_id)),

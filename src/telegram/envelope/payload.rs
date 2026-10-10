@@ -2566,6 +2566,9 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_str)
                 == Some("inviteLinkChatTypeChannel"),
         }),
+        "chatBoostLinkInfo" => Ok(EnvelopePayload::ChatBoostLinkInfo {
+            chat_id: int53_or_zero(value.get("chat_id")),
+        }),
         "messageLinkInfo" => Ok(EnvelopePayload::MessageLinkInfo {
             chat_id: int53_or_zero(value.get("chat_id")),
             message_id: int53_or_zero(value.get("message").and_then(|m| m.get("id"))),
