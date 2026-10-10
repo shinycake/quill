@@ -2,6 +2,7 @@
 //! requests, the boosts list and boost link, and supergroup usernames.
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::GroupsPurpose;
 use crate::state::{
     AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, INVITE_ADMIN_PAGE_SIZE, InviteLinkFetch,
     LinkRequestsState, RequestPurpose,
@@ -234,14 +235,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if [true, false].into_iter().any(|other| {
             self.session.requests.has_purpose_for_chat(
-                RequestPurpose::ProcessLinkJoinRequests { approve: other },
+                RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { approve: other }),
                 chat_id,
             )
         }) {
             return Ok(None);
         }
         let extra = self.session.request(
-            RequestPurpose::ProcessLinkJoinRequests { approve },
+            RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { approve }),
             Some(chat_id),
         );
         let payload = process_chat_join_requests(extra, chat_id.0, &link, approve);

@@ -4,6 +4,7 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::premium_hub::TxFilter;
+use crate::state::PaymentsPurpose;
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests_premium::{
@@ -75,9 +76,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             String::new()
         };
         let filter = self.session.hub.filter;
-        let extra = self
-            .session
-            .request(RequestPurpose::GetStarTransactions { append }, None);
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append }),
+            None,
+        );
         self.session.hub.tx_loading = true;
         self.session.hub.tx_error = None;
         self.session.hub.tx_request = extra.0;
@@ -135,9 +137,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             String::new()
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::GetReceivedGifts { append }, None);
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }),
+            None,
+        );
         self.session.hub.gifts_loading = true;
         self.session.hub.gifts_request = extra.0;
         let json = get_received_gifts(extra, owner, &offset, GIFT_PAGE);
@@ -178,9 +181,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::ToggleGiftSaved { saved }, None);
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved }),
+            None,
+        );
         self.session.hub.gift_mutating = true;
         self.session.hub.gifts_error = None;
         let json = toggle_gift_is_saved(extra, received_gift_id, saved);

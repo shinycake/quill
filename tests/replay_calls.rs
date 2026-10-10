@@ -1,6 +1,7 @@
 //! Call signaling replay tests.
 //! Split from `tests/replay.rs` — pure code motion.
 mod replay_common;
+use quill::state::CallsPurpose;
 use replay_common::*;
 
 /// Phase C1: the full call-signaling lifecycle through the reducer —
@@ -93,7 +94,10 @@ fn replay_call_signaling_lifecycle() {
 
     // A rejected `createCall` surfaces the error (TDLib's message text
     // is never stored — it can contain secrets).
-    let extra = session.request_for_user(RequestPurpose::CreateCall { is_video: false }, 41);
+    let extra = session.request_for_user(
+        RequestPurpose::Calls(CallsPurpose::CreateCall { is_video: false }),
+        41,
+    );
     apply_all_seq(
         &mut session,
         &sink,
@@ -110,7 +114,10 @@ fn replay_call_signaling_lifecycle() {
     assert!(!error.contains("PHONE_CALL_PROTOCOL_ERROR"));
 
     // The `callId` answer starts tracking the outgoing call.
-    let extra = session.request_for_user(RequestPurpose::CreateCall { is_video: false }, 41);
+    let extra = session.request_for_user(
+        RequestPurpose::Calls(CallsPurpose::CreateCall { is_video: false }),
+        41,
+    );
     apply_all_seq(
         &mut session,
         &sink,
@@ -182,7 +189,10 @@ fn replay_video_call_signaling() {
 
     // Outgoing video `createCall`: the `callId` answer starts tracking
     // with `is_video` derived from the request args.
-    let extra = session.request_for_user(RequestPurpose::CreateCall { is_video: true }, 41);
+    let extra = session.request_for_user(
+        RequestPurpose::Calls(CallsPurpose::CreateCall { is_video: true }),
+        41,
+    );
     apply_all_seq(
         &mut session,
         &sink,
@@ -325,7 +335,10 @@ fn replay_group_call_signaling() {
 
     // Join: `updateGroupCall` flips `is_joined`; the `joinVideoChat`
     // `text` answer is stored, never consumed.
-    let extra = session.request(RequestPurpose::JoinVideoChat { group_call_id: 555 }, None);
+    let extra = session.request(
+        RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id: 555 }),
+        None,
+    );
     apply_all_seq(
         &mut session,
         &sink,
@@ -494,7 +507,7 @@ fn replay_get_group_call_bare_response_populates_tracker() {
     // Register the in-flight `getGroupCall` exactly like the driver does.
     let req_id = session.requests.register(
         quill::ids::AccountGeneration(1),
-        RequestPurpose::GetGroupCall { group_call_id: 555 },
+        RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id: 555 }),
         None,
         None,
     );
@@ -519,7 +532,10 @@ fn replay_get_group_call_bare_response_populates_tracker() {
     assert!(
         session
             .requests
-            .pending_extra_for(RequestPurpose::GetGroupCall { group_call_id: 555 }, None)
+            .pending_extra_for(
+                RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id: 555 }),
+                None
+            )
             .is_none()
     );
 }

@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
 use quill::local_path::sandboxed_display_path;
+use quill::state::StickersPurpose;
 use quill::state::{RequestPurpose, StickerTab};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -428,13 +429,13 @@ impl QuillApp {
             [(true, false), (false, true), (false, false)]
                 .into_iter()
                 .any(|(installed, archived)| {
-                    session
-                        .requests
-                        .has_purpose(RequestPurpose::ManageStickerSet {
+                    session.requests.has_purpose(RequestPurpose::Stickers(
+                        StickersPurpose::ManageStickerSet {
                             set_id,
                             installed,
                             archived,
-                        })
+                        },
+                    ))
                 })
         });
         let button = Button::new(format!("sticker-{prefix}-action-{set_id}"))

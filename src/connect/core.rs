@@ -4,6 +4,7 @@ use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{ComposerLinkPreview, InstantViewPage, RequestPurpose, Session, ShutdownPhase};
+use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, EnvelopePayload, MessageContent, RichMessageContent, UsernameCheckResult,
@@ -165,7 +166,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && matches!(
                 view_purpose,
                 Some(
-                    RequestPurpose::ManageStickerSet { .. }
+                    RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
                         | RequestPurpose::ReorderInstalledStickerSets
                 )
             );
@@ -173,7 +174,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             == Some(RequestPurpose::GetInstalledStickerSets)
             && matches!(owned.envelope.payload, EnvelopePayload::StickerSets { .. });
         let archive_catalog_changed = sticker_set_changed
-            && matches!(view_purpose, Some(RequestPurpose::ManageStickerSet { .. }));
+            && matches!(
+                view_purpose,
+                Some(RequestPurpose::Stickers(
+                    StickersPurpose::ManageStickerSet { .. }
+                ))
+            );
         let emoji_trending_answer = view_purpose == Some(RequestPurpose::GetTrendingEmojiSets)
             && matches!(
                 owned.envelope.payload,
@@ -241,10 +247,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .extra
                     .and_then(|id| self.session.requests.purpose(id))
                     .and_then(|purpose| match purpose {
-                        RequestPurpose::GetFullRichMessage {
+                        RequestPurpose::Messages(MessagesPurpose::GetFullRichMessage {
                             chat_id,
                             message_id,
-                        } => Some((chat_id, message_id, rich.clone())),
+                        }) => Some((chat_id, message_id, rich.clone())),
                         _ => None,
                     }),
                 _ => None,
@@ -321,10 +327,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
                 .and_then(|purpose| match purpose {
-                    RequestPurpose::GetMessageLinkProperties {
+                    RequestPurpose::Messages(MessagesPurpose::GetMessageLinkProperties {
                         chat_id,
                         message_id,
-                    } => Some((chat_id, message_id, actions.can_get_link)),
+                    }) => Some((chat_id, message_id, actions.can_get_link)),
                     _ => None,
                 }),
             _ => None,
@@ -338,10 +344,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .extra
                     .and_then(|id| self.session.requests.purpose(id))
                     .and_then(|purpose| match purpose {
-                        RequestPurpose::GetMessageMenuActions {
+                        RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
                             chat_id,
                             message_id,
-                        } => Some((chat_id, message_id, *actions)),
+                        }) => Some((chat_id, message_id, *actions)),
                         _ => None,
                     }),
                 _ => None,
@@ -457,14 +463,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|id| self.session.requests.get(id))
             .and_then(|pending| match pending.purpose {
                 RequestPurpose::CreateForumTopic
-                | RequestPurpose::EditForumTopic { .. }
-                | RequestPurpose::ToggleForumTopicClosed { .. }
-                | RequestPurpose::ToggleForumTopicPinned { .. }
-                | RequestPurpose::DeleteForumTopic { .. }
+                | RequestPurpose::Threads(ThreadsPurpose::EditForumTopic { .. })
+                | RequestPurpose::Threads(ThreadsPurpose::ToggleForumTopicClosed { .. })
+                | RequestPurpose::Threads(ThreadsPurpose::ToggleForumTopicPinned { .. })
+                | RequestPurpose::Threads(ThreadsPurpose::DeleteForumTopic { .. })
                 | RequestPurpose::ToggleGeneralForumTopicHidden
                 | RequestPurpose::AddChatWelcomeMessage
-                | RequestPurpose::EditChatWelcomeMessage { .. }
-                | RequestPurpose::DeleteChatWelcomeMessage { .. }
+                | RequestPurpose::Groups(GroupsPurpose::EditChatWelcomeMessage { .. })
+                | RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage { .. })
                 | RequestPurpose::BoostChat => {
                     pending.chat_id.map(|chat_id| (pending.purpose, chat_id))
                 }
@@ -601,18 +607,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some((purpose, chat_id)) = mutation_refetch {
             match purpose {
                 RequestPurpose::CreateForumTopic
-                | RequestPurpose::EditForumTopic { .. }
-                | RequestPurpose::ToggleForumTopicClosed { .. }
-                | RequestPurpose::ToggleForumTopicPinned { .. }
-                | RequestPurpose::DeleteForumTopic { .. }
+                | RequestPurpose::Threads(ThreadsPurpose::EditForumTopic { .. })
+                | RequestPurpose::Threads(ThreadsPurpose::ToggleForumTopicClosed { .. })
+                | RequestPurpose::Threads(ThreadsPurpose::ToggleForumTopicPinned { .. })
+                | RequestPurpose::Threads(ThreadsPurpose::DeleteForumTopic { .. })
                 | RequestPurpose::ToggleGeneralForumTopicHidden
                     if !self.session.forum_topics.contains_key(&chat_id.0) =>
                 {
                     let _ = self.refresh_forum_topics(chat_id);
                 }
                 RequestPurpose::AddChatWelcomeMessage
-                | RequestPurpose::EditChatWelcomeMessage { .. }
-                | RequestPurpose::DeleteChatWelcomeMessage { .. }
+                | RequestPurpose::Groups(GroupsPurpose::EditChatWelcomeMessage { .. })
+                | RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage { .. })
                     if !self.session.welcome_messages.contains_key(&chat_id.0) =>
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);

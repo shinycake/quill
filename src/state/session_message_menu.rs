@@ -395,28 +395,28 @@ impl Session {
     /// The audience request failed (privacy, too old, not a group...).
     pub(crate) fn fail_audience(&mut self, purpose: RequestPurpose) {
         match purpose {
-            RequestPurpose::GetMessageViewers {
+            RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
                 chat_id,
                 message_id,
-            } => {
+            }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
                     a.viewers = Audience::Failed;
                 }
             }
-            RequestPurpose::GetMessageReadDate {
+            RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate {
                 chat_id,
                 message_id,
-            } => {
+            }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
                     a.read_date = Audience::Failed;
                 }
             }
-            RequestPurpose::GetMessageAddedReactions {
+            RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
                 chat_id,
                 message_id,
                 filter,
                 append,
-            } => {
+            }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
                     a.more_loading.remove(&filter);
                     // A failed next page keeps what was already listed.

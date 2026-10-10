@@ -1335,10 +1335,10 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
     session.scheduled_messages.push(scheduled_entry(70, 1000));
     session.scheduled_messages.push(scheduled_entry(71, 2000));
     let extra = session.request(
-        RequestPurpose::EditMessageSchedulingState {
+        RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
             message_id: MessageId(70),
             scheduling: ComposerScheduling::SendAtDate(5000),
-        },
+        }),
         Some(ChatId(7)),
     );
     apply_json(
@@ -1365,10 +1365,10 @@ fn send_now_ok_drops_the_scheduled_entry() {
     session.scheduled_messages.push(scheduled_entry(70, 1000));
     session.scheduled_messages.push(scheduled_entry(71, 2000));
     let extra = session.request(
-        RequestPurpose::EditMessageSchedulingState {
+        RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
             message_id: MessageId(70),
             scheduling: ComposerScheduling::None,
-        },
+        }),
         Some(ChatId(7)),
     );
     apply_json(
@@ -1388,10 +1388,10 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
     let seq = AtomicU64::new(0);
     session.scheduled_messages.push(scheduled_entry(70, 1000));
     let extra = session.request(
-        RequestPurpose::EditMessageSchedulingState {
+        RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
             message_id: MessageId(70),
             scheduling: ComposerScheduling::None,
-        },
+        }),
         Some(ChatId(7)),
     );
     apply_json(

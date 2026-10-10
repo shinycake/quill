@@ -548,6 +548,7 @@ mod tests {
     use super::*;
     use crate::diagnostics::{DiagnosticSink, MemorySink};
     use crate::ids::{AccountKey, ChatId};
+    use crate::state::StickersPurpose;
     use crate::telegram::client::copy_and_parse;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
@@ -895,7 +896,7 @@ mod tests {
         assert!(with_purpose.stickers.found_sets.is_empty());
 
         let extra = with_purpose.request(
-            RequestPurpose::GetArchivedEmojiSets { first_page: true },
+            RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: true }),
             None,
         );
         apply_json(
@@ -909,7 +910,7 @@ mod tests {
             ),
         );
         let extra = with_purpose.request(
-            RequestPurpose::GetArchivedEmojiSets { first_page: false },
+            RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: false }),
             None,
         );
         apply_json(

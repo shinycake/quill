@@ -123,7 +123,7 @@ impl Session {
     /// Failure of this block's purposes.
     pub(crate) fn apply_privacy_data_error(&mut self, purpose: RequestPurpose, err: &TdError) {
         match purpose {
-            RequestPurpose::HideSuggestedAction { action } => {
+            RequestPurpose::Settings(SettingsPurpose::HideSuggestedAction { action }) => {
                 self.suggestions.actions.insert(action.to_string());
                 self.chat_action_error = Some(format!(
                     "could not hide the suggestion (error {})",
@@ -146,7 +146,7 @@ impl Session {
             RequestPurpose::GetNewChatPrivacy => {
                 data.new_chat = Some(NewChatPrivacyState::Failed);
             }
-            RequestPurpose::SetNewChatPrivacy { previous_allow } => {
+            RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy { previous_allow }) => {
                 // Roll the optimistic choice back to what the server had.
                 if let Some(NewChatPrivacyState::Ready(current)) = data.new_chat {
                     data.new_chat = Some(NewChatPrivacyState::Ready(NewChatPrivacy {

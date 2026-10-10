@@ -166,7 +166,7 @@ impl RequestPurpose {
                 | RequestPurpose::SearchChats
                 | RequestPurpose::SearchPublicChats
                 | RequestPurpose::GetSharedMedia { .. }
-                | RequestPurpose::GetSharedMediaMore { .. }
+                | RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { .. })
                 | RequestPurpose::GetPinnedMessages
                 | RequestPurpose::GetUserFullInfo
                 | RequestPurpose::GetSupergroupFullInfo
@@ -930,8 +930,10 @@ impl RequestRegistry {
     /// cannot dedup across pages.
     pub fn has_event_log_in_flight(&self, chat_id: ChatId) -> bool {
         self.pending.values().any(|p| {
-            matches!(p.purpose, RequestPurpose::GetChatEventLog { .. })
-                && p.chat_id == Some(chat_id)
+            matches!(
+                p.purpose,
+                RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. })
+            ) && p.chat_id == Some(chat_id)
         })
     }
 
@@ -943,11 +945,11 @@ impl RequestRegistry {
         self.pending.values().any(|p| {
             matches!(
                 p.purpose,
-                RequestPurpose::GetInlineQueryResults {
+                RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
                     chat_id: c,
                     bot_user_id: b,
                     ..
-                } if c == chat_id && b == bot_user_id
+                }) if c == chat_id && b == bot_user_id
             )
         })
     }

@@ -750,7 +750,7 @@ fn cl3_report_and_block_errors_surface() {
         Some("could not report the chat (error 400)")
     );
     let extra = session.request(
-        RequestPurpose::SetMessageSenderBlockList { block: true },
+        RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { block: true }),
         Some(ChatId(14)),
     );
     apply_json(

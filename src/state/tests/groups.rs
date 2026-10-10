@@ -11,7 +11,7 @@ fn custom_title_failure_surfaces_in_member_dialog() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(
-        RequestPurpose::SetChatMemberTag { user_id: 42 },
+        RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -810,7 +810,7 @@ fn process_join_request_ok_drops_from_list() {
     );
 
     let process_extra = session.request(
-        RequestPurpose::ProcessChatJoinRequest { user_id: 7001 },
+        RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id: 7001 }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -989,7 +989,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
     };
 
     let extra = session.request(
-        RequestPurpose::GetChatEventLog { from_event_id: 0 },
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
         Some(ChatId(13)),
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[300, 299]));
@@ -1006,7 +1006,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
     // (100 events) keeps `has_more`.
     let full: Vec<i64> = (200..300).rev().collect();
     let extra = session.request(
-        RequestPurpose::GetChatEventLog { from_event_id: 299 },
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 299 }),
         Some(ChatId(13)),
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &full));
@@ -1021,7 +1021,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
 
     // A short final page clears `has_more`.
     let extra = session.request(
-        RequestPurpose::GetChatEventLog { from_event_id: 200 },
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 200 }),
         Some(ChatId(13)),
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[199]));
@@ -1033,7 +1033,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
 
     // A first-page refetch replaces everything (refresh semantics).
     let extra = session.request(
-        RequestPurpose::GetChatEventLog { from_event_id: 0 },
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
         Some(ChatId(13)),
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[500]));
@@ -1054,7 +1054,7 @@ fn event_log_failure_states() {
     let seq = AtomicU64::new(0);
 
     let extra = session.request(
-        RequestPurpose::GetChatEventLog { from_event_id: 0 },
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -1074,7 +1074,7 @@ fn event_log_failure_states() {
 
     // Load one page, then fail the older page: the loaded page stays.
     let extra = session.request(
-        RequestPurpose::GetChatEventLog { from_event_id: 0 },
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -1087,7 +1087,7 @@ fn event_log_failure_states() {
         ),
     );
     let extra = session.request(
-        RequestPurpose::GetChatEventLog { from_event_id: 50 },
+        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 50 }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -1188,10 +1188,10 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
         }]),
     );
     let extra = session.request(
-        RequestPurpose::SetChatMemberStatus {
+        RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
             user_id: 888,
             kind: MemberStatusChange::Demote,
-        },
+        }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -1258,7 +1258,7 @@ fn get_admin_rights_response_caches_rights() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(
-        RequestPurpose::GetAdminRights { user_id: 888 },
+        RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 888 }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -1284,9 +1284,9 @@ fn supergroup_members_fetch_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(
-        RequestPurpose::GetSupergroupMembers {
+        RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
             filter: MemberListFilter::Recent,
-        },
+        }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -1672,7 +1672,7 @@ fn g2_forum_mutation_ok_drops_topic_cache() {
     let seq = AtomicU64::new(0);
     session.forum_topics.insert(13, Vec::new());
     let extra = session.request(
-        RequestPurpose::DeleteForumTopic { forum_topic_id: 5 },
+        RequestPurpose::Threads(ThreadsPurpose::DeleteForumTopic { forum_topic_id: 5 }),
         Some(ChatId(13)),
     );
     apply_json(
@@ -1695,9 +1695,9 @@ fn g2_welcome_delete_ok_drops_pack() {
         .welcome_message_fetches
         .insert(13, WelcomeMessagesFetch::Loaded);
     let extra = session.request(
-        RequestPurpose::DeleteChatWelcomeMessage {
+        RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage {
             welcome_message_id: 7,
-        },
+        }),
         Some(ChatId(13)),
     );
     apply_json(

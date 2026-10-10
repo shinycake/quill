@@ -3,6 +3,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
+use crate::state::ThreadsPurpose;
 use crate::subsection_tabs::SubsectionTabsMode;
 use crate::telegram::envelope::{EnvelopePayload, MUTE_FOREVER};
 use crate::telegram::requests::{
@@ -71,7 +72,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.forum_topics.contains_key(&chat_id.0) {
             return;
         }
-        let purpose = RequestPurpose::GetForumTopic { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::GetForumTopic { forum_topic_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return;
         }
@@ -105,7 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
-        let purpose = RequestPurpose::ReadForumTopic { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::ReadForumTopic { forum_topic_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -154,7 +155,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .clone()
                 .with_mute_for(if muted { MUTE_FOREVER } else { 0 });
         let previous = std::mem::replace(&mut topic.notification_settings, settings.clone());
-        let purpose = RequestPurpose::SetForumTopicNotificationSettings { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::SetForumTopicNotificationSettings {
+            forum_topic_id,
+        });
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self
             .sender

@@ -3,6 +3,7 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::ChatId;
 use crate::platform::MemorySecretStore;
+use crate::state::BotsPurpose;
 use crate::state::{RequestPurpose, unix_ms_now};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::AuthorizationState;
@@ -138,14 +139,11 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
     assert!(copy_and_parse(&malformed.to_string(), &seq, &sink).is_none());
     driver.session.auth = AuthorizationState::WaitPhoneNumber;
     assert!(driver.stop_pending_bot_message(ChatId(7), 0, 15).is_err());
-    assert!(
-        !driver
-            .session
-            .requests
-            .has_purpose(RequestPurpose::StopPendingMessage {
-                topic_id: 0,
-                draft_id: 15
-            })
-    );
+    assert!(!driver.session.requests.has_purpose(RequestPurpose::Bots(
+        BotsPurpose::StopPendingMessage {
+            topic_id: 0,
+            draft_id: 15
+        }
+    )));
     let _ = std::fs::remove_dir_all(dir);
 }

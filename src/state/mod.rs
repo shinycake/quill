@@ -60,6 +60,7 @@ mod account_notices;
 mod call_types;
 mod chat_activity;
 mod chat_types;
+mod domains;
 mod history_calendar;
 mod history_trim;
 mod history_types;
@@ -127,6 +128,7 @@ pub use account_notices::*;
 pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;
+pub use domains::*;
 pub use history_calendar::*;
 pub use history_trim::{
     HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, RowWindowShift, WindowEnd, row_window_shift,

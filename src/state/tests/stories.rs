@@ -1108,7 +1108,10 @@ fn set_account_ttl_ok_stores_confirmed_days() {
     let seq = AtomicU64::new(0);
     session.account_ttl_days = Some(90);
     session.account_mutating = true;
-    let extra = session.request(RequestPurpose::SetAccountTtl { days: 365 }, None);
+    let extra = session.request(
+        RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,

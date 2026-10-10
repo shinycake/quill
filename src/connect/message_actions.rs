@@ -2,6 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::settings::InstantViewMode;
+use crate::state::MessagesPurpose;
 use crate::state::{ComposerLinkPreview, RequestPurpose, UnreadJumpKind};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
@@ -277,7 +278,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let purpose = RequestPurpose::JumpToUnread { kind };
+        let purpose = RequestPurpose::Messages(MessagesPurpose::JumpToUnread { kind });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(());
         }
@@ -320,9 +321,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::ReadAllUnreadMarkers { kind }, Some(chat_id));
+        let extra = self.session.request(
+            RequestPurpose::Messages(MessagesPurpose::ReadAllUnreadMarkers { kind }),
+            Some(chat_id),
+        );
         let json = match kind {
             // B15: `readAllChatPollVotes` (schema 1.8.67, line 13308).
             UnreadJumpKind::PollVote => {
@@ -441,10 +443,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::GetMessageLinkProperties {
+            RequestPurpose::Messages(MessagesPurpose::GetMessageLinkProperties {
                 chat_id,
                 message_id,
-            },
+            }),
             Some(chat_id),
         );
         let json = get_message_properties(extra, chat_id, message_id);

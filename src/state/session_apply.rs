@@ -699,7 +699,9 @@ impl Session {
                 members,
             } => {
                 if let Some(pending) = pending
-                    && let RequestPurpose::GetChatInviteLinkMembers { append } = pending.purpose
+                    && let RequestPurpose::Groups(GroupsPurpose::GetChatInviteLinkMembers {
+                        append,
+                    }) = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.invite_link_members.get_mut(&chat_id.0)
                     && state.request == Some(pending.id)
@@ -788,8 +790,9 @@ impl Session {
                     && pending.purpose == RequestPurpose::SearchFromMembers
                 {
                     self.apply_from_members(pending.id, &members);
-                } else if let Some(RequestPurpose::GetSupergroupMembers { filter }) =
-                    pending.map(|p| p.purpose)
+                } else if let Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
+                    filter,
+                })) = pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.supergroup_members.insert(
@@ -871,7 +874,8 @@ impl Session {
             // `has_more`; a short page exhausts the log.
             EnvelopePayload::ChatEvents { events } => {
                 if let Some(pending) = pending
-                    && let RequestPurpose::GetChatEventLog { from_event_id } = pending.purpose
+                    && let RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id }) =
+                        pending.purpose
                     && let Some(chat_id) = pending.chat_id
                 {
                     let has_more = events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE;
@@ -1098,7 +1102,8 @@ impl Session {
             // the `updateGroupCall` is delayed; the update remains the
             // source of truth.
             EnvelopePayload::GroupCallId { id } => {
-                if let Some(RequestPurpose::CreateVideoChat { .. }) = pending.map(|p| p.purpose)
+                if let Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChat { .. })) =
+                    pending.map(|p| p.purpose)
                     && !self.group_call_fetch_queue.contains(&id)
                 {
                     self.group_call_fetch_queue.push(id);
@@ -1191,8 +1196,8 @@ impl Session {
             // call whose chat the request targeted.
             EnvelopePayload::RtmpUrl { url, stream_key } => {
                 if let Some(
-                    RequestPurpose::GetVideoChatRtmpUrl { chat_id }
-                    | RequestPurpose::ReplaceVideoChatRtmpUrl { chat_id },
+                    RequestPurpose::Calls(CallsPurpose::GetVideoChatRtmpUrl { chat_id })
+                    | RequestPurpose::Calls(CallsPurpose::ReplaceVideoChatRtmpUrl { chat_id }),
                 ) = pending.map(|p| p.purpose)
                 {
                     let call_id = self
@@ -1305,10 +1310,10 @@ impl Session {
             }
             // B15: `getPollVoteStatistics` answer — cached per message.
             EnvelopePayload::PollVoteStatistics { graph } => {
-                if let Some(RequestPurpose::GetPollVoteStatistics {
+                if let Some(RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics {
                     chat_id,
                     message_id,
-                }) = pending.map(|p| p.purpose)
+                })) = pending.map(|p| p.purpose)
                 {
                     self.poll_stats
                         .insert((chat_id.0, message_id.0), PollStatsFetch::Loaded(graph));
@@ -1384,30 +1389,30 @@ impl Session {
             }
             // The message menu's "N Seen" / "Seen at" / "N Reacted" rows.
             EnvelopePayload::MessageViewers(viewers) => {
-                if let Some(RequestPurpose::GetMessageViewers {
+                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
                     chat_id,
                     message_id,
-                }) = pending.map(|p| p.purpose)
+                })) = pending.map(|p| p.purpose)
                 {
                     self.accept_message_viewers(chat_id, message_id, viewers);
                 }
             }
             EnvelopePayload::MessageReadDate(date) => {
-                if let Some(RequestPurpose::GetMessageReadDate {
+                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate {
                     chat_id,
                     message_id,
-                }) = pending.map(|p| p.purpose)
+                })) = pending.map(|p| p.purpose)
                 {
                     self.accept_message_read_date(chat_id, message_id, date);
                 }
             }
             EnvelopePayload::AddedReactions(page) => {
-                if let Some(RequestPurpose::GetMessageAddedReactions {
+                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
                     chat_id,
                     message_id,
                     filter,
                     append,
-                }) = pending.map(|p| p.purpose)
+                })) = pending.map(|p| p.purpose)
                 {
                     self.accept_added_reactions(chat_id, message_id, filter, append, page);
                 }
@@ -1704,8 +1709,9 @@ impl Session {
                 allow_custom_emoji,
             } => {
                 if let Some(pending) = pending
-                    && let RequestPurpose::GetMessageAvailableReactions { message_id } =
-                        pending.purpose
+                    && let RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
+                        message_id,
+                    }) = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                 {
                     self.accept_message_reaction_options(
@@ -2104,7 +2110,7 @@ impl Session {
             EnvelopePayload::UserPrivacySettingRules { rules } => {
                 if let Some(purpose) = pending.map(|p| p.purpose) {
                     match purpose {
-                        RequestPurpose::GetCallPrivacyRules { setting } => {
+                        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }) => {
                             let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
                             let who = PrivacyWho::from_rule_names(&names);
                             match setting {
@@ -2115,7 +2121,7 @@ impl Session {
                             }
                             self.privacy_roundtrip_done();
                         }
-                        RequestPurpose::GetPrivacyRules { key } => {
+                        RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }) => {
                             let detail = PrivacyRuleDetail::from_rules(&rules);
                             self.mirror_call_privacy(key, &detail);
                             self.privacy.insert(key, PrivacyKeyState::Ready(detail));
@@ -2155,12 +2161,14 @@ impl Session {
                 sender_ids,
                 senders,
             } => {
-                if let Some(RequestPurpose::GetVideoChatAvailableParticipants { group_call_id }) =
-                    pending.map(|p| p.purpose)
+                if let Some(RequestPurpose::Calls(
+                    CallsPurpose::GetVideoChatAvailableParticipants { group_call_id },
+                )) = pending.map(|p| p.purpose)
                 {
                     self.set_group_call_join_as_options(group_call_id, senders);
-                } else if let Some(RequestPurpose::GetBlockedSenders { offset }) =
-                    pending.map(|p| p.purpose)
+                } else if let Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
+                    offset,
+                })) = pending.map(|p| p.purpose)
                 {
                     self.blocked_total = total_count;
                     if offset == 0 {
@@ -2173,7 +2181,7 @@ impl Session {
                 }
             }
             EnvelopePayload::Count { count } => {
-                if let Some(RequestPurpose::GetChatMessageCount { filter }) =
+                if let Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { filter })) =
                     pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
@@ -2371,7 +2379,10 @@ impl Session {
             }
             EnvelopePayload::ForumTopicAnswer(topic) => {
                 if let Some(pending) = pending
-                    && matches!(pending.purpose, RequestPurpose::GetForumTopic { .. })
+                    && matches!(
+                        pending.purpose,
+                        RequestPurpose::Threads(ThreadsPurpose::GetForumTopic { .. })
+                    )
                     && let Some(chat_id) = pending.chat_id
                 {
                     self.replace_forum_topic(chat_id, topic);
@@ -2465,7 +2476,9 @@ impl Session {
             EnvelopePayload::StickerSets { sets, .. } => {
                 if matches!(
                     pending.map(|p| p.purpose),
-                    Some(RequestPurpose::GetAttachedStickerSets { .. })
+                    Some(RequestPurpose::Stickers(
+                        StickersPurpose::GetAttachedStickerSets { .. }
+                    ))
                 ) {
                     // B11: "Attached Stickers" of a photo or video.
                     self.stickers.attached_answer = Some(sets.first().map(|set| set.id));
@@ -2483,8 +2496,9 @@ impl Session {
                 {
                     // Slice S10: emoji `stickerSets` land in the emoji panel (see emoji.rs).
                     self.accept_installed_emoji_sets(sets);
-                } else if let Some(RequestPurpose::GetArchivedEmojiSets { first_page }) =
-                    pending.map(|p| p.purpose)
+                } else if let Some(RequestPurpose::Stickers(
+                    StickersPurpose::GetArchivedEmojiSets { first_page },
+                )) = pending.map(|p| p.purpose)
                 {
                     self.accept_archived_emoji_sets(sets, first_page);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchEmojiSets) {
@@ -2596,7 +2610,7 @@ impl Session {
                 is_custom_emoji,
                 ..
             } => {
-                if let Some(RequestPurpose::DeepLinkResolve { generation }) =
+                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
                         &self.deep_link,
@@ -2611,8 +2625,9 @@ impl Session {
                     self.deep_link = Some(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::StickerSet { set_id: id },
                     ));
-                } else if let Some(RequestPurpose::ViewStickerSet { set_id }) =
-                    pending.map(|p| p.purpose)
+                } else if let Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {
+                    set_id,
+                })) = pending.map(|p| p.purpose)
                 {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(
@@ -2623,18 +2638,22 @@ impl Session {
                         is_custom_emoji,
                         stickers,
                     );
-                } else if let Some(RequestPurpose::CustomEmojiPack { emoji_id, set_id }) =
-                    pending.map(|p| p.purpose)
+                } else if let Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack {
+                    emoji_id,
+                    set_id,
+                })) = pending.map(|p| p.purpose)
                 {
                     self.accept_custom_emoji_preview(emoji_id, set_id, title);
-                } else if let Some(RequestPurpose::EmojiPackTitle { set_id }) =
-                    pending.map(|p| p.purpose)
+                } else if let Some(RequestPurpose::Stickers(StickersPurpose::EmojiPackTitle {
+                    set_id,
+                })) = pending.map(|p| p.purpose)
                 {
                     if !title.is_empty() {
                         self.emoji_pack_titles.insert(set_id, title);
                     }
-                } else if let Some(RequestPurpose::LoadLibrarySet { set_id }) =
-                    pending.map(|p| p.purpose)
+                } else if let Some(RequestPurpose::Stickers(StickersPurpose::LoadLibrarySet {
+                    set_id,
+                })) = pending.map(|p| p.purpose)
                 {
                     self.remember_files(&files);
                     self.accept_library_set(set_id, stickers);
@@ -2704,8 +2723,9 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.accept_owner_after_leaving(chat_id.0, user_id);
-                } else if let Some(RequestPurpose::DeepLinkResolve { generation }) =
-                    pending.map(|p| p.purpose)
+                } else if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve {
+                    generation,
+                })) = pending.map(|p| p.purpose)
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::UserPhone { draft, .. },
                         generation: slot,
@@ -2722,8 +2742,9 @@ impl Session {
                 }
             }
             EnvelopePayload::InternalLinkType(link) => {
-                if let Some(RequestPurpose::DeepLinkInternalType { generation }) =
-                    pending.map(|p| p.purpose)
+                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType {
+                    generation,
+                })) = pending.map(|p| p.purpose)
                     && matches!(
                         &self.deep_link,
                         Some(DeepLinkState::ResolvingInfo { generation: slot }) if *slot == generation
@@ -2750,7 +2771,7 @@ impl Session {
                 media_timestamp,
                 thread_id,
             } => {
-                if let Some(RequestPurpose::DeepLinkResolve { generation }) =
+                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
                         &self.deep_link,
@@ -2780,7 +2801,7 @@ impl Session {
                 }
             }
             EnvelopePayload::ChatBoostLinkInfo { chat_id } => {
-                if let Some(RequestPurpose::DeepLinkResolve { generation }) =
+                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
                         &self.deep_link,
@@ -2812,7 +2833,8 @@ impl Session {
                 // Phase D3b: `getChatMember` for one administrator's rights
                 // (edit dialog). Only an administrator status carries a
                 // rights block worth caching.
-                if let Some(RequestPurpose::GetAdminRights { user_id }) = pending.map(|p| p.purpose)
+                if let Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) =
+                    pending.map(|p| p.purpose)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                     && let Some(rights) = member.admin_rights
@@ -2899,7 +2921,7 @@ impl Session {
                 // `parity:platform-deep-links`: `joinChatByInviteLink`
                 // answer for a deep-link invite. Success opens the chat;
                 // the other variants surface as an honest note.
-                if let Some(RequestPurpose::DeepLinkJoin { generation }) =
+                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation })) =
                     pending.map(|p| p.purpose)
                     && let Some(DeepLinkState::ResolvingChat {
                         action,
@@ -2935,7 +2957,7 @@ impl Session {
                 creates_join_request,
                 is_channel,
             } => {
-                if let Some(RequestPurpose::DeepLinkCheckInvite { generation }) =
+                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })) =
                     pending.map(|p| p.purpose)
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::JoinInvite { hash },
@@ -2963,7 +2985,7 @@ impl Session {
                 need_update,
                 entities,
             } => {
-                if let Some(RequestPurpose::DeepLinkInfo { generation }) =
+                if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
                         &self.deep_link,
@@ -3126,7 +3148,9 @@ impl Session {
                 // by `@extra`). Follow-up pages append; a fresh fetch
                 // replaces.
                 if let Some(p) = pending
-                    && let RequestPurpose::GetStarSubscriptions { append } = p.purpose
+                    && let RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions {
+                        append,
+                    }) = p.purpose
                 {
                     self.star_subscriptions_loading = false;
                     self.star_subscriptions_error = None;
@@ -3143,7 +3167,8 @@ impl Session {
             }
             EnvelopePayload::StarTransactions(page) => {
                 if let Some(p) = pending
-                    && let RequestPurpose::GetStarTransactions { append } = p.purpose
+                    && let RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append }) =
+                        p.purpose
                     && p.id.0 == self.hub.tx_request
                 {
                     self.hub.apply_transactions(page, append);
@@ -3151,7 +3176,8 @@ impl Session {
             }
             EnvelopePayload::ReceivedGifts(page) => {
                 if let Some(p) = pending
-                    && let RequestPurpose::GetReceivedGifts { append } = p.purpose
+                    && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
+                        p.purpose
                     && p.id.0 == self.hub.gifts_request
                 {
                     let files: Vec<ParsedFile> = page
@@ -3268,7 +3294,9 @@ impl Session {
             EnvelopePayload::EmailCodeInfo { pattern, .. } => {
                 // Batch 6: only our own in-flight 2FA step takes the
                 // answer (matched by `@extra`).
-                if let Some(RequestPurpose::PasswordStateOp { op }) = pending.map(|p| p.purpose) {
+                if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
+                    pending.map(|p| p.purpose)
+                {
                     self.password_state_loading = false;
                     self.password_op_error = None;
                     self.apply_email_code_info(op, pattern);
@@ -3277,9 +3305,9 @@ impl Session {
             EnvelopePayload::ResetPasswordResult(outcome) => {
                 if matches!(
                     pending.map(|p| p.purpose),
-                    Some(RequestPurpose::PasswordStateOp {
+                    Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp {
                         op: PasswordOp::ResetPassword
-                    })
+                    }))
                 ) {
                     self.password_state_loading = false;
                     self.password_op_error = None;
@@ -3294,12 +3322,13 @@ impl Session {
                 // optimistic mutation ever happens client-side.
                 if matches!(
                     pending.map(|p| p.purpose),
-                    Some(RequestPurpose::PasswordStateOp { .. })
+                    Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { .. }))
                 ) {
                     self.password_state = Some(state);
                     self.password_state_loading = false;
                     self.password_op_error = None;
-                    if let Some(RequestPurpose::PasswordStateOp { op }) = pending.map(|p| p.purpose)
+                    if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
+                        pending.map(|p| p.purpose)
                     {
                         self.apply_password_state_op(op);
                     }
@@ -3456,18 +3485,21 @@ impl Session {
                         self.guessed_country_iso = Some(iso);
                     }
                 }
-                Some(RequestPurpose::JoinVideoChat { group_call_id }) => {
+                Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })) => {
                     self.set_group_call_join_payload(group_call_id, text);
                 }
-                Some(RequestPurpose::StartGroupCallScreenSharing { group_call_id }) => {
+                Some(RequestPurpose::Calls(CallsPurpose::StartGroupCallScreenSharing {
+                    group_call_id,
+                })) => {
                     self.set_group_call_screen_share_answer(group_call_id, text);
                 }
                 _ => {}
             },
             // Phase C3a: `getVideoChatInviteLink` returns `httpUrl`.
             EnvelopePayload::HttpUrl { url } => {
-                if let Some(RequestPurpose::GetVideoChatInviteLink { group_call_id }) =
-                    pending.map(|p| p.purpose)
+                if let Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
+                    group_call_id,
+                })) = pending.map(|p| p.purpose)
                 {
                     self.set_group_call_invite_link(group_call_id, url);
                 // B1: `getLoginUrl` returns `httpUrl` too (schema 1.8.67,
@@ -3493,10 +3525,14 @@ impl Session {
             EnvelopePayload::FormattedText { text, entities }
                 if matches!(
                     pending.map(|p| p.purpose),
-                    Some(RequestPurpose::TranslateJob { .. })
+                    Some(RequestPurpose::Messages(
+                        MessagesPurpose::TranslateJob { .. }
+                    ))
                 ) =>
             {
-                if let Some(RequestPurpose::TranslateJob { job }) = pending.map(|p| p.purpose) {
+                if let Some(RequestPurpose::Messages(MessagesPurpose::TranslateJob { job })) =
+                    pending.map(|p| p.purpose)
+                {
                     self.finish_translation(job, Translation::Done { text, entities });
                 }
             }
@@ -3515,10 +3551,10 @@ impl Session {
             // `getMessageLink` on `can_get_link` before `apply` takes
             // the pending request; nothing to reduce here.
             EnvelopePayload::MessageProperties(actions) => {
-                if let Some(RequestPurpose::GetMessageMenuActions {
+                if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
                     chat_id,
                     message_id,
-                }) = pending.map(|p| p.purpose)
+                })) = pending.map(|p| p.purpose)
                 {
                     self.message_menu_actions = Some((chat_id, message_id, actions));
                 }
@@ -3530,7 +3566,9 @@ impl Session {
             EnvelopePayload::InviteGroupCallParticipantResult(result) => {
                 if matches!(
                     pending.map(|p| p.purpose),
-                    Some(RequestPurpose::InviteGroupCallParticipant { .. })
+                    Some(RequestPurpose::Calls(
+                        CallsPurpose::InviteGroupCallParticipant { .. }
+                    ))
                 ) {
                     self.group_call_error = match result {
                         InviteGroupCallParticipantResult::Success { .. } => None,

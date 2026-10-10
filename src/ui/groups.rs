@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, RequestId};
+use quill::state::GroupsPurpose;
 use quill::state::{MemberListFilter, RequestPurpose, Session, WelcomeMessagesFetch};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
@@ -333,9 +334,9 @@ pub(super) fn apply_ready_group_manage(
     let me_extra = session.request(RequestPurpose::GetMe, None);
     let member_extra = session.request(RequestPurpose::GetChatMember, Some(ChatId(chat_id)));
     let members_extra = session.request(
-        RequestPurpose::GetSupergroupMembers {
+        RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
             filter: MemberListFilter::Recent,
-        },
+        }),
         Some(ChatId(chat_id)),
     );
     // TDLib 1.8.67 `chatAdministratorRights` field order.
