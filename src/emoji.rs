@@ -431,6 +431,8 @@ impl Session {
             }
             ids.extend(viewer_caption_custom_emoji(&message.content));
         }
+        // The emoji repeated behind reply strips.
+        ids.extend(self.reply_background_emoji_ids());
         // Captions of the Shared Media lists the viewer pages over.
         for item in self
             .shared_media

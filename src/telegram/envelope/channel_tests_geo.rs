@@ -48,7 +48,7 @@ fn message_live_location_parses_live_fields() {
             assert_eq!(content.location.accuracy_m, 0);
             assert_eq!(
                 live.status_label(),
-                "Live · expires in 10:00 · heading 90° · proximity alert ≤ 500 m"
+                "Live · expires in 10 min · heading 90° · proximity alert ≤ 500 m"
             );
             assert_eq!(message.content.preview(), "📍 Live location");
         }
@@ -173,6 +173,98 @@ fn message_dice_slot_machine_has_no_single_final_sticker() {
     };
     assert_eq!(dice.value, 64);
     assert!(dice.final_sticker.is_none());
+}
+
+fn slot_sticker(id: i32) -> String {
+    format!(
+        r#"{{"@type":"sticker","id":{id},"set_id":3,"width":512,"height":512,"emoji":"🎰","format":{{"@type":"stickerFormatTgs"}},"sticker":{{"@type":"file","id":{id},"size":4000,"local":{{"@type":"localFile","path":"","is_downloading_completed":false}},"remote":{{"@type":"remoteFile","id":"r{id}"}}}}}}"#
+    )
+}
+
+fn slot_machine_message(layers: &[&str], value: i32) -> String {
+    let parts: Vec<String> = layers
+        .iter()
+        .zip(80..)
+        .map(|(key, id)| format!(r#""{key}":{}"#, slot_sticker(id)))
+        .collect();
+    format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":118,"chat_id":17,"is_outgoing":false,"content":{{"@type":"messageDice","initial_state":{{"@type":"diceStickersSlotMachine"}},"final_state":{{"@type":"diceStickersSlotMachine",{}}},"emoji":"🎰","value":{value},"success_animation_frame_number":0}}}}}}"#,
+        parts.join(",")
+    )
+}
+
+const SLOT_KEYS: [&str; 5] = [
+    "background",
+    "left_reel",
+    "center_reel",
+    "right_reel",
+    "lever",
+];
+
+#[test]
+fn message_dice_slot_machine_keeps_its_five_layers_in_draw_order() {
+    let env = parse_envelope(&slot_machine_message(&SLOT_KEYS, 64)).unwrap();
+    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Dice(dice) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    assert!(dice.is_slot_machine());
+    let ids: Vec<i32> = dice.slot_layers.iter().map(|s| s.file_id.0).collect();
+    assert_eq!(ids, [80, 81, 82, 83, 84]);
+    assert!(
+        (80..=84).all(|id| message.files.iter().any(|file| file.id.0 == id)),
+        "the layers' files reach the downloader"
+    );
+}
+
+#[test]
+fn message_dice_slot_machine_missing_a_layer_falls_back_to_the_emoji() {
+    let env = parse_envelope(&slot_machine_message(&SLOT_KEYS[..4], 3)).unwrap();
+    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Dice(dice) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    assert!(dice.slot_layers.is_empty());
+    assert_eq!(dice.face(), "🎰");
+}
+
+#[test]
+fn slot_machine_values_decode_to_reel_symbols() {
+    use SlotSymbol::{Bar, Grapes, Lemon, Seven};
+    assert_eq!(slot_symbols(1), Some([Bar, Bar, Bar]));
+    assert_eq!(slot_symbols(2), Some([Grapes, Bar, Bar]));
+    assert_eq!(slot_symbols(3), Some([Lemon, Bar, Bar]));
+    assert_eq!(slot_symbols(4), Some([Seven, Bar, Bar]));
+    assert_eq!(slot_symbols(5), Some([Bar, Grapes, Bar]));
+    assert_eq!(slot_symbols(22), Some([Grapes, Grapes, Grapes]));
+    assert_eq!(slot_symbols(43), Some([Lemon, Lemon, Lemon]));
+    assert_eq!(slot_symbols(64), Some([Seven, Seven, Seven]));
+    assert_eq!(slot_symbols(0), None);
+    assert_eq!(slot_symbols(65), None);
+}
+
+#[test]
+fn dice_result_lines_state_the_roll() {
+    let dice = |emoji: &str, value| DiceContent {
+        emoji: emoji.into(),
+        value,
+        final_sticker: None,
+        slot_layers: Vec::new(),
+    };
+    assert_eq!(dice("🎲", 4).result_line(), "Rolled 4");
+    assert_eq!(dice("🎯", 6).result_line(), "Rolled 6");
+    assert_eq!(
+        dice("🎰", 64).result_line(),
+        "Seven · Seven · Seven, jackpot!"
+    );
+    assert_eq!(dice("🎰", 22).result_line(), "Grapes · Grapes · Grapes");
+    assert_eq!(dice("🎰", 3).result_line(), "Lemon · Bar · Bar");
+    // A value outside the machine's range is shown as a plain number.
+    assert_eq!(dice("🎰", 99).result_line(), "Rolled 99");
 }
 
 // Phase 4.4 safe rule: `value` is required — a missing (or

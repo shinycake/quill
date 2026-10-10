@@ -60,6 +60,7 @@ pub mod local_time;
 pub mod main_menu;
 pub mod marketplace;
 pub mod media_session;
+pub mod media_timestamp;
 pub mod media_tools;
 pub mod media_viewer;
 pub mod message_menu;

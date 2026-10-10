@@ -696,6 +696,9 @@ pub struct QuillApp {
     /// ticking (`Some` exactly while the 1s tick task runs). Mirrors
     /// `slow_mode_tick_chat`.
     pub(super) self_destruct_tick_chat: Option<ChatId>,
+    /// The open chat whose live-location countdowns are being refreshed
+    /// (`Some` exactly while that task runs; see `live_location_tick`).
+    pub(super) live_location_tick_chat: Option<ChatId>,
     /// Phase C1: whether the call-duration 1s tick task is running
     /// (keeps the overlay's ringing/connected clock fresh). Mirrors
     /// `voice_tick`.

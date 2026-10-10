@@ -151,6 +151,9 @@ impl Render for QuillApp {
         // open chat has a live `self_destruct_in` timer (same 1s task
         // pattern as slow mode).
         self.ensure_self_destruct_tick(cx);
+        // Live-location countdowns: refreshed at the pace their labels
+        // change, only while the open chat shows a running one.
+        self.ensure_live_location_tick(cx);
         // Phase C1: keep the call overlay's ringing / connected clock
         // fresh while a call is tracked (same 1s task pattern).
         self.ensure_call_tick(cx);
