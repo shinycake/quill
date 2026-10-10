@@ -133,7 +133,8 @@ gpui_kit::assets::icon_assets!(
         Briefcase,
         BellPlus,
         Tag,
-        TagX
+        TagX,
+        FaceSlightlySmilingPlus
     ]
 );
 
@@ -697,6 +698,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-chat-ttl", ReadyChatTtl),
         ("ready-chats", ReadyChats),
         ("ready-chats-composer", ReadyChatsComposer),
+        ("ready-code-language", ReadyCodeLanguage),
         ("ready-community-create", ReadyCommunityCreate),
         ("ready-community-hub", ReadyCommunityHub),
         ("ready-community-info", ReadyCommunityInfo),
@@ -710,6 +712,8 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-dice", ReadyDice),
         ("ready-downloads", ReadyDownloads),
         ("ready-drafts", ReadyDrafts),
+        ("ready-drop-folder", ReadyDropFolder),
+        ("ready-drop-zones", ReadyDropZones),
         ("ready-edit-delete", ReadyEditDelete),
         ("ready-edit-media", ReadyEditMedia),
         ("ready-emoji-packs", ReadyEmojiPacks),
@@ -1103,6 +1107,9 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyGameCard => ".quill-ready-ready-game-card",
         ScreenshotDemo::ReadyLinkPreview => ".quill-ready-ready-link-preview",
         ScreenshotDemo::ReadyComposerPreview => ".quill-ready-ready-composer-preview",
+        ScreenshotDemo::ReadyCodeLanguage => ".quill-ready-ready-code-language",
+        ScreenshotDemo::ReadyDropFolder => ".quill-ready-ready-drop-folder",
+        ScreenshotDemo::ReadyDropZones => ".quill-ready-ready-drop-zones",
         ScreenshotDemo::ReadyPreviewCards => ".quill-ready-ready-preview-cards",
         ScreenshotDemo::ReadyCaptionPosition => ".quill-ready-ready-caption-position",
         ScreenshotDemo::ReadyGifs => ".quill-ready-ready-gifs",

@@ -1,3 +1,0 @@
-# Scheme registration works on macOS, Linux and Windows; login code links fill the code step.
-parity:deeplink-scheme-registration
-parity:deeplink-login-code

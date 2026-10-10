@@ -1,0 +1,4 @@
+parity:stickers-tap-opens-set
+parity:stickers-set-box-actions
+parity:stickers-custom-emoji-toast
+parity:reactions-who-reacted
