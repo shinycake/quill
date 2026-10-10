@@ -574,7 +574,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Forums, Saved Messages & threads
 
 - [x] Topic icon picker with default icons, custom emoji and color <!-- parity:forum-topic-icon-picker -->
-- [ ] Forum topics as a second column next to the chat list <!-- parity:forum-second-column -->
+- [x] Forum topics as a second column next to the chat list <!-- parity:forum-second-column -->
 - [x] View as topics or as messages toggle <!-- parity:forum-view-as-topics -->
 - [x] Copy topic link, reorder pinned topics, read all mentions and reactions in a topic, unpin all in a topic <!-- parity:forum-topic-extras -->
 - [x] Saved Messages sublists by original chat, pinned sublists, delete a sublist <!-- parity:saved-sublists -->
