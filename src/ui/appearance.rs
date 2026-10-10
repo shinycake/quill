@@ -153,9 +153,19 @@ impl QuillApp {
         } else {
             ThemeMode::Light
         };
-        let accent = self.appearance.accent_rgb;
+        // Power saving: the switches gate animations as they are drawn; the
+        // interface-animations one also folds into GPUI's reduced motion.
+        quill::power_saving::set(self.appearance.power_saving);
+        cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
+        let accent = quill::system_accent::effective(
+            self.appearance.accent_rgb,
+            self.appearance.system_accent,
+            self.system_accent,
+        );
         let scale = self.appearance.interface_scale_pct;
-        if self.appearance_applied == Some((mode, accent, hc, scale)) {
+        let family = super::appearance_power::interface_font(&self.appearance.font_family, cx);
+        let applied = (mode, accent, hc, scale, family.clone());
+        if self.appearance_applied.as_ref() == Some(&applied) {
             return;
         }
         set_theme_mode(mode, None, cx);
@@ -188,6 +198,7 @@ impl QuillApp {
             // zooms whole windows instead (below), so scaling rems too
             // would apply it twice.
             theme.font_size = px(BASE_REM_PX);
+            theme.font_family = family.into();
         });
         // Interface scale: every window is drawn `zoom` times larger
         // (`interface_zoom`). GPUI re-lays the windows out through their
@@ -195,7 +206,7 @@ impl QuillApp {
         // update.
         let zoom = super::interface_zoom::zoom_for_percent(scale);
         cx.defer(move |_| super::interface_zoom::set_zoom(zoom));
-        self.appearance_applied = Some((mode, accent, hc, scale));
+        self.appearance_applied = Some(applied);
         cx.notify();
     }
 
@@ -334,9 +345,16 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
+            if !this.system_accent_probed {
+                this.refresh_system_accent(cx);
+            }
             let mut body = div().flex().flex_col().gap_3();
             if this.translate_ui.settings_only {
                 body = body.child(this.translate_settings_section(cx));
+            } else if this.appearance_power_screenshot {
+                body = body.child(this.appearance_accent_section(cx));
+                body = body.child(this.appearance_font_family_section(cx));
+                body = body.child(this.appearance_power_section(cx));
             } else if this.keybindings_screenshot {
                 body = body.child(
                     div()
@@ -366,8 +384,10 @@ impl QuillApp {
                 body = body.child(this.appearance_wallpaper_section(cx));
                 body = body.child(this.appearance_telegram_wallpapers_section(cx));
                 body = body.child(this.appearance_font_section(cx));
+                body = body.child(this.appearance_font_family_section(cx));
                 body = body.child(this.appearance_bubble_section(cx));
                 body = body.child(this.appearance_chat_list_section(cx));
+                body = body.child(this.appearance_power_section(cx));
                 body = body.child(this.appearance_send_key_section(cx));
                 // Batch 7: Show Translate Button / Translate Entire Chats /
                 // Do Not Translate.
@@ -658,7 +678,13 @@ impl QuillApp {
     }
 
     fn appearance_accent_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = self.appearance.accent_rgb;
+        // The system color counts as chosen only while the OS reports one.
+        let system = self.system_accent.filter(|_| self.appearance.system_accent);
+        let current = if system.is_some() {
+            u32::MAX
+        } else {
+            self.appearance.accent_rgb
+        };
         let mut row = div()
             .flex()
             .gap_2()
@@ -668,8 +694,25 @@ impl QuillApp {
                 "Default",
                 current == 0,
                 cx,
-                |this, cx| this.set_appearance(cx, |a| a.accent_rgb = 0),
+                |this, cx| {
+                    this.set_appearance(cx, |a| {
+                        a.accent_rgb = 0;
+                        a.system_accent = false;
+                    })
+                },
             ));
+        // tdesktop's "System accent color" (settings_chat.cpp), shown only
+        // where the OS reports an accent.
+        if let Some(color) = self.system_accent {
+            row = row.child(self.appearance_swatch(
+                "appearance-accent-system",
+                color,
+                "System",
+                system.is_some(),
+                cx,
+                |this, cx| this.set_appearance(cx, |a| a.system_accent = true),
+            ));
+        }
         for &(color, name) in ACCENT_PRESETS {
             row = row.child(self.appearance_swatch(
                 format!("appearance-accent-{color:06x}"),
@@ -677,7 +720,12 @@ impl QuillApp {
                 name,
                 current == color,
                 cx,
-                move |this, cx| this.set_appearance(cx, |a| a.accent_rgb = color),
+                move |this, cx| {
+                    this.set_appearance(cx, |a| {
+                        a.accent_rgb = color;
+                        a.system_accent = false;
+                    })
+                },
             ));
         }
         // tdesktop's last accent circle opens a free-form color editor;
@@ -702,8 +750,14 @@ impl QuillApp {
         self.appearance_section(
             cx,
             "Accent color",
-            "Highlights, selections and links across the app. Custom colors are \
-             kept light enough on dark themes and dark enough on light ones.",
+            if self.system_accent.is_some() {
+                "Highlights, selections and links across the app. System follows \
+                 your operating system's accent. Custom colors are kept light \
+                 enough on dark themes and dark enough on light ones."
+            } else {
+                "Highlights, selections and links across the app. Custom colors are \
+                 kept light enough on dark themes and dark enough on light ones."
+            },
             div()
                 .flex()
                 .flex_col()
@@ -741,7 +795,10 @@ impl QuillApp {
                     picker.update(cx, |picker, cx| picker.set_value(limited, window, cx));
                 }
                 let value = accent_rgb_from(limited);
-                this.set_appearance(cx, |a| a.accent_rgb = value);
+                this.set_appearance(cx, |a| {
+                    a.accent_rgb = value;
+                    a.system_accent = false;
+                });
             },
         )
         .detach();
@@ -1020,7 +1077,7 @@ impl QuillApp {
 
     /// A labeled toggle row: title + hint on the left, kit `Switch` on
     /// the right (the data-storage dialog pattern).
-    fn appearance_switch_row(
+    pub(super) fn appearance_switch_row(
         &self,
         cx: &mut Context<Self>,
         id: &'static str,
@@ -1039,12 +1096,14 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .child(div().text_sm().child(title.to_string()))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(hint.to_string()),
-                    ),
+                    .when(!hint.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(hint.to_string()),
+                        )
+                    }),
             )
             .child(
                 Switch::new(id)
@@ -1124,8 +1183,9 @@ impl QuillApp {
         self.appearance_section(
             cx,
             "Chat list quick action",
-            "Swipe a chat left with two fingers on a trackpad to run this action; \
-             past the threshold it runs when you lift your fingers.",
+            "Middle-click a chat, or swipe it left with two fingers on a trackpad, \
+             to run this action. A swipe runs it once you pass the threshold and \
+             lift your fingers.",
             control.into_any_element(),
         )
     }

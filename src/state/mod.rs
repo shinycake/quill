@@ -109,6 +109,7 @@ mod session_share;
 mod session_sponsored;
 mod session_stickers;
 mod session_stories;
+pub use session_stories::STORY_CUSTOM_EMOJI_CAP;
 mod session_subsection_tabs;
 mod session_thread;
 mod session_translate;
@@ -118,6 +119,7 @@ mod sticker_gif_types;
 mod story_insights;
 mod story_types;
 mod thread_types;
+mod updates_sync;
 
 pub use account_notices::*;
 pub use call_types::*;
@@ -165,6 +167,7 @@ pub use sticker_gif_types::*;
 pub use story_insights::*;
 pub use story_types::*;
 pub use thread_types::*;
+pub use updates_sync::*;
 
 #[cfg(test)]
 mod tests;

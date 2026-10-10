@@ -11,6 +11,7 @@ mod accounts;
 mod anim_layer;
 mod app_slice;
 mod appearance;
+mod appearance_power;
 mod auth_recovery;
 mod autoscroll_ui;
 mod bidi_line;
@@ -45,6 +46,8 @@ mod shortcut_pack;
 mod story_areas;
 mod synthetic;
 mod updates;
+mod updates_sync_demo;
+mod updates_sync_ui;
 mod vanish;
 
 pub(crate) use account_lifecycle::*;

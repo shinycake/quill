@@ -298,9 +298,10 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         // the AI arm in `apply_error` phrases this for the user; this
         // is the fallback for any generic path.
         ErrorClass::AiComposeFloodPremium => "AI request limit reached".to_string(),
-        ErrorClass::StickersForbidden | ErrorClass::GifsForbidden => {
-            err.send_permission_notice().unwrap().to_string()
-        }
+        ErrorClass::StickersForbidden | ErrorClass::GifsForbidden => err
+            .send_permission_notice()
+            .unwrap_or("You don't have permission to send this in this chat.")
+            .to_string(),
         ErrorClass::Other => format!("error {}", err.code),
     }
 }

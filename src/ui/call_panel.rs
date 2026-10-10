@@ -566,21 +566,26 @@ fn call_button(
                 // The answer button breathes while it rings (tdesktop's
                 // outer ring).
                 .when(style == ButtonLook::Answer, |this| {
-                    this.relative().child(
-                        div()
-                            .absolute()
-                            .inset(px(-6.))
-                            .rounded_full()
-                            .border_2()
-                            .border_color(rgba(0x50eb4140))
-                            .with_animation(
-                                "answer-pulse",
-                                Animation::new(Duration::from_millis(1400))
-                                    .repeat()
-                                    .with_easing(pulsating_between(0.2, 1.0)),
-                                |ring, delta| ring.opacity(delta),
-                            ),
-                    )
+                    let ring = div()
+                        .absolute()
+                        .inset(px(-6.))
+                        .rounded_full()
+                        .border_2()
+                        .border_color(rgba(0x50eb4140));
+                    // Battery and animations: a still ring.
+                    let ring = if quill::power_saving::on(quill::power_saving::Flag::Calls) {
+                        ring.opacity(0.6).into_any_element()
+                    } else {
+                        ring.with_animation(
+                            "answer-pulse",
+                            Animation::new(Duration::from_millis(1400))
+                                .repeat()
+                                .with_easing(pulsating_between(0.2, 1.0)),
+                            |ring, delta| ring.opacity(delta),
+                        )
+                        .into_any_element()
+                    };
+                    this.relative().child(ring)
                 }),
         )
         .child(
@@ -773,11 +778,17 @@ impl Render for CallPanel {
             // A ring turns around the photo until the call connects
             // (tdesktop `callConnectingRadial`).
             .when(snap.connecting, |this| {
-                this.child(div().absolute().inset(px(-8.)).with_animation(
-                    "call-connecting",
-                    Animation::new(Duration::from_millis(1400)).repeat(),
-                    |ring, delta| ring.child(connecting_arc(delta)),
-                ))
+                let ring = div().absolute().inset(px(-8.));
+                if quill::power_saving::on(quill::power_saving::Flag::Calls) {
+                    // Battery and animations: the arc holds still.
+                    this.child(ring.child(connecting_arc(0.)))
+                } else {
+                    this.child(ring.with_animation(
+                        "call-connecting",
+                        Animation::new(Duration::from_millis(1400)).repeat(),
+                        |ring, delta| ring.child(connecting_arc(delta)),
+                    ))
+                }
             });
 
         let name = div()

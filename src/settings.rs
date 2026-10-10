@@ -487,6 +487,18 @@ pub struct AppearancePrefs {
     /// Accent color as 0xRRGGBB; 0 = the theme's default accent.
     #[serde(default)]
     pub accent_rgb: u32,
+    /// tdesktop `systemAccentColorEnabled`: use the operating system's
+    /// accent color instead of `accent_rgb` while the OS reports one.
+    #[serde(default)]
+    pub system_accent: bool,
+    /// tdesktop `customFontFamily`: the interface font; empty = the
+    /// platform default.
+    #[serde(default)]
+    pub font_family: String,
+    /// `power_saving` flags that are on (animations kept still); 0 = all
+    /// animations play, tdesktop's default.
+    #[serde(default)]
+    pub power_saving: u32,
     /// Chat wallpaper as 0xRRGGBB; None = the theme background.
     #[serde(default)]
     pub wallpaper_rgb: Option<u32>,
@@ -572,6 +584,9 @@ impl Default for AppearancePrefs {
             night_start_minutes: default_night_start(),
             night_end_minutes: default_night_end(),
             accent_rgb: 0,
+            system_accent: false,
+            font_family: String::new(),
+            power_saving: 0,
             wallpaper_rgb: None,
             telegram_wallpaper: false,
             interface_scale_pct: INTERFACE_SCALE_DEFAULT,
@@ -601,6 +616,8 @@ pub fn load_appearance_prefs(paths: &AccountPaths) -> AppearancePrefs {
     let mut prefs: AppearancePrefs = load_json_prefs(paths, "appearance_prefs.json");
     prefs.font_size_px = clamp_font_size(prefs.font_size_px);
     prefs.interface_scale_pct = clamp_interface_scale(prefs.interface_scale_pct);
+    prefs.font_family = crate::font_choice::clean_family(&prefs.font_family);
+    prefs.power_saving = crate::power_saving::sanitize(prefs.power_saving);
     prefs.preview_lines = crate::chatlist_style::clamp_preview_lines(prefs.preview_lines);
     prefs.night_start_minutes %= 24 * 60;
     prefs.night_end_minutes %= 24 * 60;
@@ -1370,6 +1387,9 @@ mod tests {
             night_start_minutes: 23 * 60,
             night_end_minutes: 6 * 60,
             accent_rgb: 0x2f81f7,
+            system_accent: true,
+            font_family: "Avenir".into(),
+            power_saving: crate::power_saving::Flag::StickersChat.bit(),
             wallpaper_rgb: Some(0x0e1621),
             telegram_wallpaper: true,
             interface_scale_pct: 150,
@@ -1476,6 +1496,17 @@ mod tests {
         assert_eq!(prefs.font_size_px, 16);
         assert_eq!(prefs.night_start_minutes, 1380);
         assert_eq!(prefs.night_end_minutes, 420);
+
+        // Power saving keeps only the known bits; the font loses control
+        // characters.
+        fs::write(
+            paths.root.join("appearance_prefs.json"),
+            br#"{"power_saving": 4294967295, "font_family": " Fira\nCode "}"#,
+        )
+        .unwrap();
+        let prefs = load_appearance_prefs(&paths);
+        assert_eq!(prefs.power_saving, crate::power_saving::ALL_BITS);
+        assert_eq!(prefs.font_family, "FiraCode");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

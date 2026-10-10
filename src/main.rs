@@ -348,7 +348,8 @@ fn ui_main(args: &[String]) {
         // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
         ui::set_high_contrast(std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"));
         // kit Phase 9: honor the OS reduce-motion preference.
-        cx.set_reduce_motion(os_prefers_reduced_motion());
+        quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
+        cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
         ui::bind_keys(cx);
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
@@ -374,10 +375,41 @@ fn ui_main(args: &[String]) {
                     if window.focused(cx).is_none() {
                         window.focus(&view.focus_handle(cx), cx);
                     }
-                    if start_in_tray && !quill::tray::tray_available() {
-                        // No tray host must never leave the only window inaccessible.
-                        cx.activate(true);
-                        window.activate_window();
+                    if start_in_tray {
+                        // No tray host must never leave the only window
+                        // inaccessible. Registration runs off-thread; poll its
+                        // outcome without blocking launch.
+                        let watch = view.downgrade();
+                        let handle = window.window_handle();
+                        cx.spawn(async move |cx| {
+                            let mut waited = 0u64;
+                            loop {
+                                let state = watch.update(cx, |this, _| {
+                                    quill::tray::sync_tray(this.session());
+                                    quill::tray::tray_startup_reveal(
+                                        quill::tray::tray_available(),
+                                        quill::tray::tray_registering(),
+                                        waited,
+                                    )
+                                });
+                                match state {
+                                    Ok(None) => {}
+                                    Ok(Some(true)) => {
+                                        let _ = handle.update(cx, |_, window, cx| {
+                                            cx.activate(true);
+                                            window.activate_window();
+                                        });
+                                        break;
+                                    }
+                                    _ => break,
+                                }
+                                cx.background_executor()
+                                    .timer(std::time::Duration::from_millis(100))
+                                    .await;
+                                waited += 100;
+                            }
+                        })
+                        .detach();
                     }
                     // The shell adds Quill's dialog hit-test barrier; Root
                     // hosts the kit dialog and notification layers.
@@ -651,6 +683,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-albums", ReadyAlbums),
         ("ready-animated-emoji", ReadyAnimatedEmoji),
         ("ready-appearance", ReadyAppearance),
+        ("ready-appearance-power", ReadyAppearancePower),
         ("ready-appearance-wallpapers", ReadyAppearanceWallpapers),
         ("ready-archive-bar", ReadyArchiveBar),
         ("ready-archive-hint", ReadyArchiveHint),
@@ -897,6 +930,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-update-changelog", ReadyUpdateChangelog),
         ("ready-update-failure", ReadyUpdateFailure),
         ("ready-update-install", ReadyUpdateInstall),
+        ("ready-updates-sync", ReadyUpdatesSync),
         ("ready-username", ReadyUsername),
         ("ready-video", ReadyVideo),
         ("ready-video-note", ReadyVideoNote),
@@ -910,6 +944,10 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-voice", ReadyVoice),
         ("ready-web-sessions", ReadyWebSessions),
         ("wait-code", WaitCode),
+        ("wait-code-firebase", WaitCodeFirebase),
+        ("wait-code-flash", WaitCodeFlash),
+        ("wait-code-fragment", WaitCodeFragment),
+        ("wait-code-missed", WaitCodeMissed),
         ("wait-code-resend", WaitCodeResend),
         ("wait-password", WaitPassword),
         ("wait-phone", WaitPhone),
@@ -1050,6 +1088,10 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::WaitCode => ".quill-ready-wait-code",
         ScreenshotDemo::WaitPhoneCountry => ".quill-ready-wait-phone-country",
         ScreenshotDemo::WaitPhoneFormatted => ".quill-ready-wait-phone-formatted",
+        ScreenshotDemo::WaitCodeFirebase => ".quill-ready-wait-code-firebase",
+        ScreenshotDemo::WaitCodeFlash => ".quill-ready-wait-code-flash",
+        ScreenshotDemo::WaitCodeFragment => ".quill-ready-wait-code-fragment",
+        ScreenshotDemo::WaitCodeMissed => ".quill-ready-wait-code-missed",
         ScreenshotDemo::WaitCodeResend => ".quill-ready-wait-code-resend",
         ScreenshotDemo::WaitPhoneBanned => ".quill-ready-wait-phone-banned",
         ScreenshotDemo::WaitPassword => ".quill-ready-wait-password",
@@ -1246,6 +1288,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySecretBotAlert => ".quill-ready-ready-secret-bot-alert",
         ScreenshotDemo::ReadyStorageUsage => ".quill-ready-ready-storage-usage",
         ScreenshotDemo::ReadyAppearance => ".quill-ready-ready-appearance",
+        ScreenshotDemo::ReadyAppearancePower => ".quill-ready-ready-appearance-power",
         ScreenshotDemo::ReadyAppearanceWallpapers => ".quill-ready-ready-appearance-wallpapers",
         ScreenshotDemo::ReadyChatLook => ".quill-ready-ready-chat-look",
         ScreenshotDemo::ReadyChatTheme => ".quill-ready-ready-chat-theme",
@@ -1309,6 +1352,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyProfilePanels => ".quill-ready-ready-profile-panels",
         ScreenshotDemo::ReadyMemberModeration => ".quill-ready-ready-member-moderation",
         ScreenshotDemo::ReadyGroupAdminSettings => ".quill-ready-ready-group-admin-settings",
+        ScreenshotDemo::ReadyUpdatesSync => ".quill-ready-ready-updates-sync",
         ScreenshotDemo::ReadyUsername => ".quill-ready-ready-username",
         ScreenshotDemo::ReadyShortcuts => ".quill-ready-ready-shortcuts",
         ScreenshotDemo::ReadyProxy => ".quill-ready-ready-proxy",
@@ -1368,7 +1412,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                 std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
             );
             // kit Phase 9: honor the OS reduce-motion preference.
-            cx.set_reduce_motion(os_prefers_reduced_motion());
+            quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
+            cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {

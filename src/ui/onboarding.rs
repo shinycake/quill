@@ -173,6 +173,23 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.request_qr_login(cx))),
             );
         }
+        if matches!(auth.action, AuthAction::PremiumRequired)
+            && let AuthorizationState::WaitPremiumPurchase {
+                support_email_address,
+                support_email_subject,
+                ..
+            } = &state
+            && let Some(mailto) =
+                quill::signin::premium_support_mailto(support_email_address, support_email_subject)
+        {
+            form = form.child(
+                Button::new("premium-support")
+                    .label("Email Telegram support")
+                    .ghost()
+                    .w_full()
+                    .on_click(move |_, _, cx| cx.open_url(&mailto)),
+            );
+        }
         if matches!(auth.action, AuthAction::Closed) && retry_available {
             form = form.child(
                 Button::new("retry-connection")
@@ -197,7 +214,10 @@ impl QuillApp {
             || show_password
             || show_qr
             || (matches!(auth.action, AuthAction::Closed) && retry_available)
-            || matches!(auth.action, AuthAction::UnsupportedHalt { .. });
+            || matches!(
+                auth.action,
+                AuthAction::UnsupportedHalt { .. } | AuthAction::PremiumRequired
+            );
         if has_form {
             card = card.child(form);
         }

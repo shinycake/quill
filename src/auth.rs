@@ -57,6 +57,9 @@ pub enum AuthAction {
     EnterCode,
     EnterPassword,
     WaitOtherDevice,
+    /// `authorizationStateWaitPremiumPurchase`: explain, offer QR sign-in
+    /// and the support address. Quill takes no store purchase.
+    PremiumRequired,
     UnsupportedHalt {
         reason: &'static str,
     },
@@ -106,17 +109,16 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
         },
         AuthorizationState::WaitOtherDeviceConfirmation { .. } => AuthView {
             title: "Confirm on another device",
-            body: "Scan this code with Telegram on a device where you're already signed in."
-                .into(),
+            body: "Scan this code with Telegram on a device where you're already signed in.".into(),
             action: AuthAction::WaitOtherDevice,
             blocking: true,
         },
-        AuthorizationState::WaitPremiumPurchase => AuthView {
-            title: "Premium required for sign-in",
-            body: "Telegram requires an in-store Premium purchase for phone sign-in. If you are already signed in on another device, try QR sign-in. Otherwise, complete the purchase in an official Telegram app; Quill cannot process store payments.".into(),
-            action: AuthAction::UnsupportedHalt {
-                reason: "premium-purchase",
-            },
+        AuthorizationState::WaitPremiumPurchase {
+            premium_day_count, ..
+        } => AuthView {
+            title: "Premium required to sign in",
+            body: crate::signin::premium_explainer(*premium_day_count),
+            action: AuthAction::PremiumRequired,
             blocking: true,
         },
         AuthorizationState::WaitEmailAddress => AuthView {
@@ -140,7 +142,8 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
         },
         AuthorizationState::WaitRegistration { .. } => AuthView {
             title: "Create Telegram account",
-            body: "Enter your name and review any Telegram terms before creating your account.".into(),
+            body: "Enter your name and review any Telegram terms before creating your account."
+                .into(),
             action: AuthAction::Register,
             blocking: true,
         },
@@ -186,7 +189,7 @@ pub fn can_request_qr_login(state: &AuthorizationState) -> bool {
     matches!(
         state,
         AuthorizationState::WaitPhoneNumber
-            | AuthorizationState::WaitPremiumPurchase
+            | AuthorizationState::WaitPremiumPurchase { .. }
             | AuthorizationState::WaitEmailAddress
             | AuthorizationState::WaitEmailCode { .. }
             | AuthorizationState::WaitCode { .. }
@@ -221,14 +224,24 @@ mod tests {
 
     #[test]
     fn unsupported_auth_does_not_auto_act() {
-        for state in [
-            AuthorizationState::WaitPremiumPurchase,
-            AuthorizationState::Unknown("authorizationStateWaitSomethingNew".into()),
-        ] {
-            let view = view_for(&state);
-            assert!(matches!(view.action, AuthAction::UnsupportedHalt { .. }));
-            assert!(view.blocking);
-        }
+        let state = AuthorizationState::Unknown("authorizationStateWaitSomethingNew".into());
+        let view = view_for(&state);
+        assert!(matches!(view.action, AuthAction::UnsupportedHalt { .. }));
+        assert!(view.blocking);
+    }
+
+    #[test]
+    fn premium_purchase_state_explains_and_still_allows_qr() {
+        let state = AuthorizationState::WaitPremiumPurchase {
+            premium_day_count: 30,
+            support_email_address: String::new(),
+            support_email_subject: String::new(),
+        };
+        let view = view_for(&state);
+        assert_eq!(view.action, AuthAction::PremiumRequired);
+        assert!(view.blocking);
+        assert!(view.body.contains("30 days"));
+        assert!(can_request_qr_login(&state));
     }
 
     #[test]

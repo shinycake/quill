@@ -74,6 +74,22 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sign-in phone step (injected auth, no live Telegram)".into(),
             AuthorizationState::WaitPhoneNumber,
         ),
+        ScreenshotDemo::WaitCodeFirebase
+        | ScreenshotDemo::WaitCodeFlash
+        | ScreenshotDemo::WaitCodeFragment
+        | ScreenshotDemo::WaitCodeMissed => (
+            None,
+            ConnectUiStatus::DemoWaitCode,
+            "screenshot demo — WaitCode by call/Fragment/Firebase (injected auth)".into(),
+            AuthorizationState::WaitCode {
+                code_length: match demo {
+                    ScreenshotDemo::WaitCodeFlash => None,
+                    ScreenshotDemo::WaitCodeMissed => Some(6),
+                    _ => Some(5),
+                },
+                delivery: typed_code_delivery(Some(demo)),
+            },
+        ),
         ScreenshotDemo::WaitCodeResend => (
             None,
             ConnectUiStatus::DemoWaitCode,
@@ -84,6 +100,7 @@ pub(super) fn demo_seed_for(
                     kind: quill::telegram::envelope::CodeKind::TelegramMessage,
                     next: Some(quill::telegram::envelope::CodeKind::Sms),
                     timeout_secs: 60,
+                    detail: Default::default(),
                 },
             },
         ),
@@ -105,7 +122,11 @@ pub(super) fn demo_seed_for(
             None,
             ConnectUiStatus::DemoWaitPhone,
             "screenshot demo — WaitPremiumPurchase (injected auth, no live Telegram)".into(),
-            AuthorizationState::WaitPremiumPurchase,
+            AuthorizationState::WaitPremiumPurchase {
+                premium_day_count: 365,
+                support_email_address: "premium-support@example.invalid".into(),
+                support_email_subject: "Premium sign-in".into(),
+            },
         ),
         ScreenshotDemo::WaitQr => (
             None,
@@ -117,7 +138,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearancePower | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -659,6 +680,18 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — group and channel settings (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyUpdatesSync => (
+            Some(
+                if super::updates_sync_demo::demo_sync_mode() == "downloads" {
+                    seed_ready_downloads_session
+                } else {
+                    seed_ready_chats_session
+                } as fn(Arc<MemorySink>) -> Session,
+            ),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — account sync updates (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyProfilePanels => (
@@ -1460,6 +1493,7 @@ impl QuillApp {
         });
         let appearance_prefs = Self::load_appearance();
         let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
+        let font_picker = Self::new_font_picker(&appearance_prefs.font_family, window, cx);
         let emoji_status_hours_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Custom duration in hours")
@@ -1592,6 +1626,20 @@ impl QuillApp {
                     flood_wait_secs: None,
                 });
             }
+            Some(
+                ScreenshotDemo::WaitCodeFirebase
+                | ScreenshotDemo::WaitCodeFlash
+                | ScreenshotDemo::WaitCodeFragment
+                | ScreenshotDemo::WaitCodeMissed,
+            ) => {
+                signin.submitted_phone = "+1 555 010 0199".into();
+                signin.code_clock = Some((
+                    typed_code_delivery(demo),
+                    std::time::Instant::now()
+                        .checked_sub(Duration::from_secs(18))
+                        .unwrap_or_else(std::time::Instant::now),
+                ));
+            }
             Some(ScreenshotDemo::WaitCodeResend) => {
                 signin.submitted_phone = "+1 555 010 0199".into();
                 // 18 seconds into the 60-second wait.
@@ -1600,6 +1648,7 @@ impl QuillApp {
                         kind: quill::telegram::envelope::CodeKind::TelegramMessage,
                         next: Some(quill::telegram::envelope::CodeKind::Sms),
                         timeout_secs: 60,
+                        detail: Default::default(),
                     },
                     std::time::Instant::now()
                         .checked_sub(Duration::from_secs(18))
@@ -2145,6 +2194,10 @@ impl QuillApp {
                         | ScreenshotDemo::WaitPhoneFormatted
                         | ScreenshotDemo::WaitPhoneBanned
                         | ScreenshotDemo::WaitCodeResend
+                        | ScreenshotDemo::WaitCodeFirebase
+                        | ScreenshotDemo::WaitCodeFlash
+                        | ScreenshotDemo::WaitCodeFragment
+                        | ScreenshotDemo::WaitCodeMissed
                         | ScreenshotDemo::WaitCode
                         | ScreenshotDemo::WaitPassword
                         | ScreenshotDemo::WaitPremium
@@ -2174,6 +2227,10 @@ impl QuillApp {
             composer_self_destruct: None,
             composer_caption_above: false,
             composer_silent: false,
+            composer_loud_chat: None,
+            freeze_info_open: false,
+            age_verify_open: false,
+            age_verify_started: false,
             composer_preview_disabled: false,
             composer_preview_above: false,
             composer_preview_media: PreviewMediaSize::Auto,
@@ -2230,7 +2287,11 @@ impl QuillApp {
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
             keybindings_screenshot: false,
+            appearance_power_screenshot: false,
             appearance_applied: None,
+            system_accent: None,
+            system_accent_probed: false,
+            font_picker,
             accent_picker,
             // codex:spellcheck-native: platform engine + persisted app words.
             spellchecker,
@@ -2544,6 +2605,7 @@ impl QuillApp {
         app.demo_setup_bot_extras(demo, window, cx);
         app.demo_setup_proxy(demo, window, cx);
         app.demo_setup_profile_panels(demo, window, cx);
+        app.demo_setup_updates_sync(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
         app.demo_setup_admin_extras(demo, window, cx);
@@ -2798,6 +2860,9 @@ impl QuillApp {
         {
             app.appearance.interface_scale_pct = pct;
         }
+        if app.appearance.system_accent && demo.is_none() {
+            app.refresh_system_accent(cx);
+        }
         app.apply_appearance(cx);
         app.init_slices(cx);
         // Animations stop behind another app and resume on activation:
@@ -2806,6 +2871,12 @@ impl QuillApp {
             let active = window.is_window_active() || super::frame_clock::assume_active();
             this.window_active.set(active);
             this.inline_videos.borrow_mut().set_window_active(active);
+            // The system accent may have changed while another app was in
+            // front.
+            if active && this.appearance.system_accent {
+                this.refresh_system_accent(cx);
+                this.apply_appearance(cx);
+            }
             cx.notify();
         })
         .detach();
@@ -2852,7 +2923,12 @@ impl QuillApp {
                     .timer(Duration::from_secs(60))
                     .await;
                 let alive = this
-                    .update(cx, |this, cx| this.apply_appearance(cx))
+                    .update(cx, |this, cx| {
+                        if this.appearance.system_accent {
+                            this.refresh_system_accent(cx);
+                        }
+                        this.apply_appearance(cx)
+                    })
                     .is_ok();
                 if !alive {
                     break;
@@ -2914,5 +2990,42 @@ impl QuillApp {
             participant_user_id: None,
             is_screen: true,
         }
+    }
+}
+
+/// Fake `authenticationCodeInfo` for the typed-delivery code demos: a fake
+/// +1 555 number and example.invalid-style hosts, never contacting anyone.
+fn typed_code_delivery(demo: Option<ScreenshotDemo>) -> quill::telegram::envelope::CodeDelivery {
+    use quill::telegram::envelope::{CodeDelivery, CodeDetail, CodeKind};
+    let (kind, detail) = match demo {
+        Some(ScreenshotDemo::WaitCodeFlash) => (
+            CodeKind::FlashCall,
+            CodeDetail {
+                call_number: "+155501*****".into(),
+                ..CodeDetail::default()
+            },
+        ),
+        Some(ScreenshotDemo::WaitCodeMissed) => (
+            CodeKind::MissedCall,
+            CodeDetail {
+                call_number: "+155501".into(),
+                missed_digits: Some(6),
+                ..CodeDetail::default()
+            },
+        ),
+        Some(ScreenshotDemo::WaitCodeFragment) => (
+            CodeKind::Fragment,
+            CodeDetail {
+                url: "https://fragment.example.invalid/login".into(),
+                ..CodeDetail::default()
+            },
+        ),
+        _ => (CodeKind::Firebase, CodeDetail::default()),
+    };
+    CodeDelivery {
+        kind,
+        next: Some(CodeKind::Sms),
+        timeout_secs: 60,
+        detail,
     }
 }
