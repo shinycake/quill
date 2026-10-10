@@ -16,6 +16,7 @@ mod groups;
 mod history_window_cap;
 mod messages;
 mod notifications;
+mod notify_os;
 mod payments;
 mod premium_hub;
 mod profile_panels;

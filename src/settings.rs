@@ -1507,6 +1507,12 @@ mod tests {
 ///   muted chats do; this toggle is a Quill-only opt-out)
 /// - `count_messages`: sum unread messages vs count unread chats
 ///   (default: messages)
+/// - `include_muted_folders`: tdesktop `includeMutedCounterFolders`, the
+///   same choice for the folder tab counters (default ON)
+/// - `flash_bounce`: tdesktop `flashBounceNotify`, bounce the Dock icon /
+///   flash the taskbar / mark the window urgent for a new message
+///   (default ON). It rides along in this file because it is the other
+///   per-account "how loudly do I count" preference.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BadgePrefs {
     #[serde(default = "default_true")]
@@ -1515,6 +1521,10 @@ pub struct BadgePrefs {
     pub include_archived: bool,
     #[serde(default = "default_true")]
     pub count_messages: bool,
+    #[serde(default = "default_true")]
+    pub include_muted_folders: bool,
+    #[serde(default = "default_true")]
+    pub flash_bounce: bool,
 }
 
 impl Default for BadgePrefs {
@@ -1523,6 +1533,8 @@ impl Default for BadgePrefs {
             include_muted: true,
             include_archived: true,
             count_messages: true,
+            include_muted_folders: true,
+            flash_bounce: true,
         }
     }
 }
@@ -1556,6 +1568,16 @@ mod badge_prefs_tests {
         assert!(prefs.include_muted);
         assert!(prefs.include_archived);
         assert!(prefs.count_messages);
+        assert!(prefs.include_muted_folders);
+        assert!(prefs.flash_bounce);
+    }
+
+    #[test]
+    fn old_badge_prefs_file_gets_new_defaults() {
+        let prefs: BadgePrefs =
+            serde_json::from_str(r#"{"include_muted":false,"include_archived":true}"#).unwrap();
+        assert!(!prefs.include_muted);
+        assert!(prefs.include_muted_folders && prefs.flash_bounce);
     }
 
     #[test]
@@ -1564,6 +1586,8 @@ mod badge_prefs_tests {
             include_muted: false,
             include_archived: true,
             count_messages: false,
+            include_muted_folders: false,
+            flash_bounce: false,
         };
         let json = serde_json::to_string(&prefs).unwrap();
         assert_eq!(serde_json::from_str::<BadgePrefs>(&json).unwrap(), prefs);

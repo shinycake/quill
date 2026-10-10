@@ -534,6 +534,13 @@ pub enum ScreenshotDemo {
     /// fixture) and the per-chat notifications panel is open with the sound
     /// picker expanded (parity slice: notification sounds).
     ReadyNotificationSound,
+    /// Notification settings (parity cluster notify-os): the defaults
+    /// dialog with the flash/bounce switch, the Events section and the
+    /// folder-counter switch (injected, English fixtures).
+    ReadyNotifyOs,
+    /// Folder tabs with unread-chat counters, one of them muted-only
+    /// (parity cluster notify-os, "Include muted chats in folder counters").
+    ReadyFolderBadges,
     /// Phase A1: slow-mode enforcement (injected, no live Telegram) — a
     /// dedicated supergroup (id 17) with `slow_mode_delay: 30` and
     /// `slow_mode_delay_expires_in: 25.0`, the viewer a plain member (no
