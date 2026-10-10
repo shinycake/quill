@@ -69,8 +69,75 @@ pub fn effective(custom_rgb: u32, use_system: bool, system: Option<u32>) -> u32 
 }
 
 /// The OS accent as 0xRRGGBB (never 0), if the platform reports one.
+///
+/// macOS and Windows read it directly (cheap calls). Linux runs `gdbus` and
+/// `gsettings`, so it never waits for them: this returns the last value a
+/// background thread stored, starts a refresh when none is running, and
+/// gives up for good after one failed read (neither tool, or no accent), as
+/// the idle-time read in `passcode` does. Poll [`pending`] to learn when a
+/// refresh has finished.
 pub fn read() -> Option<u32> {
-    read_native().map(|rgb| rgb.max(1))
+    #[cfg(target_os = "linux")]
+    {
+        linux_cached()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        read_native().map(|rgb| rgb.max(1))
+    }
+}
+
+/// Whether a background read is still running (Linux only).
+pub fn pending() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        LINUX.lock().is_ok_and(|state| state.running)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct LinuxState {
+    value: Option<u32>,
+    running: bool,
+    /// A read found nothing; never retried.
+    failed: bool,
+}
+
+#[cfg(target_os = "linux")]
+static LINUX: std::sync::Mutex<LinuxState> = std::sync::Mutex::new(LinuxState {
+    value: None,
+    running: false,
+    failed: false,
+});
+
+#[cfg(target_os = "linux")]
+fn linux_cached() -> Option<u32> {
+    let mut state = LINUX.lock().ok()?;
+    if !state.running && !state.failed {
+        state.running = true;
+        let spawned = std::thread::Builder::new()
+            .name("system-accent".into())
+            .spawn(|| {
+                let value = read_native().map(|rgb| rgb.max(1));
+                if let Ok(mut state) = LINUX.lock() {
+                    state.running = false;
+                    state.failed = value.is_none();
+                    if value.is_some() {
+                        state.value = value;
+                    }
+                }
+            });
+        if spawned.is_err() {
+            state.running = false;
+            state.failed = true;
+        }
+    }
+    state.value
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]

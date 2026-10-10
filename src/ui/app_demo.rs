@@ -2756,7 +2756,7 @@ impl QuillApp {
             app.appearance.interface_scale_pct = pct;
         }
         if app.appearance.system_accent && demo.is_none() {
-            app.refresh_system_accent();
+            app.refresh_system_accent(cx);
         }
         app.apply_appearance(cx);
         app.init_slices(cx);
@@ -2769,7 +2769,7 @@ impl QuillApp {
             // The system accent may have changed while another app was in
             // front.
             if active && this.appearance.system_accent {
-                this.refresh_system_accent();
+                this.refresh_system_accent(cx);
                 this.apply_appearance(cx);
             }
             cx.notify();
@@ -2820,7 +2820,7 @@ impl QuillApp {
                 let alive = this
                     .update(cx, |this, cx| {
                         if this.appearance.system_accent {
-                            this.refresh_system_accent();
+                            this.refresh_system_accent(cx);
                         }
                         this.apply_appearance(cx)
                     })

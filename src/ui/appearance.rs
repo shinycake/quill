@@ -346,7 +346,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             if !this.system_accent_probed {
-                this.refresh_system_accent();
+                this.refresh_system_accent(cx);
             }
             let mut body = div().flex().flex_col().gap_3();
             if this.translate_ui.settings_only {

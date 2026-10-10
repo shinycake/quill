@@ -45,17 +45,32 @@ fn flag_id(flag: Flag) -> &'static str {
 }
 
 impl QuillApp {
-    /// Read the operating system's accent color (a no-op reading on
-    /// desktops that report none). Cheap on macOS and Windows; Linux runs
-    /// `gdbus`, so callers use it only when the option is on or the dialog
-    /// opens.
-    pub(super) fn refresh_system_accent(&mut self) {
+    /// Refresh the operating system's accent color. macOS and Windows read
+    /// it right away. On Linux the read runs on a background thread (it
+    /// spawns `gdbus`), so this only requests it and returns the cached
+    /// value; a short poll applies the result once it lands.
+    pub(super) fn refresh_system_accent(&mut self, cx: &mut Context<Self>) {
         // Screenshot demos keep their fixture accent.
         if self.demo_session.is_some() {
             return;
         }
         self.system_accent = quill::system_accent::read();
         self.system_accent_probed = true;
+        if quill::system_accent::pending() {
+            cx.spawn(async move |this, cx| {
+                while quill::system_accent::pending() {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(100))
+                        .await;
+                }
+                let _ = this.update(cx, |this, cx| {
+                    this.system_accent = quill::system_accent::read();
+                    this.apply_appearance(cx);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
     }
 
     /// The font family picker state: "Default" first, then the installed
