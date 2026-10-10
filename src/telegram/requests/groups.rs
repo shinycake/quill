@@ -754,8 +754,13 @@ pub fn message_topic_thread_value(message_thread_id: i64) -> Value {
 /// or reply thread `message_thread_id`: `topic_id` becomes
 /// `messageTopicThread` and a send without an explicit reply replies to the
 /// thread root, as Telegram clients do. Requests without a `topic_id` field
-/// pass through unchanged.
-pub fn route_into_thread(json: &str, message_thread_id: i64) -> String {
+/// pass through unchanged. In a forum topic (`forum_topic_id`) the topic
+/// stays `messageTopicForum`.
+pub fn route_into_thread(
+    json: &str,
+    message_thread_id: i64,
+    forum_topic_id: Option<i32>,
+) -> String {
     let Ok(mut value) = serde_json::from_str::<Value>(json) else {
         return json.to_owned();
     };
@@ -765,9 +770,14 @@ pub fn route_into_thread(json: &str, message_thread_id: i64) -> String {
     if !object.contains_key("topic_id") {
         return json.to_owned();
     }
+    // Inside a forum topic the message stays in the topic and only replies
+    // to the thread root.
     object.insert(
         "topic_id".to_owned(),
-        message_topic_thread_value(message_thread_id),
+        match forum_topic_id {
+            Some(_) => super::messages::message_topic_value(forum_topic_id),
+            None => message_topic_thread_value(message_thread_id),
+        },
     );
     if object.get("reply_to").is_some_and(Value::is_null) {
         object.insert(

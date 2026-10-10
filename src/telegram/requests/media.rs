@@ -462,6 +462,9 @@ pub struct VoiceNoteSend<'a> {
     pub reply_to: Option<SendReply>,
     /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
     pub topic_id: Option<i32>,
+    /// "Play once": `messageSelfDestructTypeImmediately` (private chats
+    /// only; the driver strips it elsewhere). `None` sends a normal note.
+    pub self_destruct: Option<SelfDestructSend>,
 }
 
 /// `sendMessage` + `inputMessageVoiceNote` / `inputVoiceNote` / `inputFileLocal`.
@@ -497,7 +500,7 @@ pub fn send_voice_note(extra: RequestId, chat_id: ChatId, voice: VoiceNoteSend<'
                 "waveform": voice.waveform_b64
             },
             "caption": caption_json,
-            "self_destruct_type": Value::Null
+            "self_destruct_type": self_destruct_type_value(voice.self_destruct)
         }
     })
     .to_string()

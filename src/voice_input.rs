@@ -13,7 +13,7 @@ use crate::voice_opus::Resampler;
 
 /// An open, running input stream. Dropping it stops the microphone.
 pub struct MicStream {
-    _stream: Stream,
+    stream: Stream,
     /// Set by the stream's error callback (device unplugged, …).
     pub error: Arc<Mutex<Option<String>>>,
 }
@@ -48,10 +48,20 @@ pub fn open_default(out: Sender<Vec<f32>>) -> Result<MicStream, String> {
         other => Err(format!("Unsupported microphone format ({other:?}).")),
     }?;
     stream.play().map_err(|err| friendly(&err.to_string()))?;
-    Ok(MicStream {
-        _stream: stream,
-        error,
-    })
+    Ok(MicStream { stream, error })
+}
+
+impl MicStream {
+    /// Release the microphone for now. A backend that cannot pause leaves
+    /// the stream running; the encoder drops its audio either way.
+    pub fn pause(&self) {
+        let _ = self.stream.pause();
+    }
+
+    /// Listen again after [`Self::pause`].
+    pub fn play(&self) {
+        let _ = self.stream.play();
+    }
 }
 
 fn build<T>(

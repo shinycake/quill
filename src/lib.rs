@@ -91,6 +91,7 @@ pub mod schedule;
 pub mod search_filters;
 pub mod selection_pin;
 pub mod send_button;
+pub mod send_rights;
 pub mod service_text;
 #[cfg(test)]
 mod service_text_tests;

@@ -90,6 +90,7 @@ mod session_chatlist;
 mod session_date_jump;
 mod session_files;
 mod session_forum;
+pub use session_forum::{FORUM_COLUMN_COLLAPSE_BELOW, FORUM_COLUMN_WIDTH, ForumColumn};
 mod session_forward;
 mod session_group_admin;
 mod session_history_window;

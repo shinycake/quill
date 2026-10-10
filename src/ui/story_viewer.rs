@@ -5,6 +5,7 @@ use super::chat_row::initials_avatar;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::message_media::{file_is_downloading, story_viewer_display_path};
 use super::message_text::rich_text_line;
+use super::nested_click::SwallowPress;
 use super::pressable::PressableDiv;
 use super::search_ui::chat_search_jump_note;
 use super::story_composer::apply_ready_story_post;
@@ -1886,6 +1887,10 @@ impl QuillApp {
                     .text_color(rgb(0xffffff))
                     .px_2()
                     .child(label)
+                    // tdesktop only pauses on a press that is not on a
+                    // clickable area (`ClickHandler::getPressed()`); keep
+                    // the press from reaching the media's hold-to-pause.
+                    .swallow_press()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.story_area_click(&kind, cx);
                     }))

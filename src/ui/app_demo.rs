@@ -416,7 +416,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sticker panel + sticker in history".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVoice => (
+        ScreenshotDemo::ReadyRestrictedComposer => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — restricted composer".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyVoice | ScreenshotDemo::ReadyVoicePause => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — voice record bar + history playback".into(),
@@ -817,6 +823,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — comments and threads".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyForumColumn => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — forum topic column and topic threads".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyForumThreadStories => (
@@ -2153,6 +2165,8 @@ impl QuillApp {
             story_stats_open: false,
             topic_info_open: false,
             thread_info_open: false,
+            forum_chats_peek: false,
+            forum_column_shown: false,
             story_report_open: false,
             story_report_text_input,
             story_page: None,
@@ -2379,6 +2393,8 @@ impl QuillApp {
             video_note_capture: None,
             record_locked: false,
             record_discard_confirm: false,
+            record_preview: None,
+            record_once: false,
             drop_paths: Vec::new(),
             drop_state: None,
             drop_preview: None,

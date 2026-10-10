@@ -207,6 +207,12 @@ pub enum ScreenshotDemo {
     ReadyDropZones,
     /// Composer core: the "Code Language" box over a fenced block.
     ReadyCodeLanguage,
+    /// Composer leftovers: a group that restricts the viewer replaces the
+    /// composer with the reason (`QUILL_DEMO_RESTRICTION`).
+    ReadyRestrictedComposer,
+    /// Composer leftovers: a paused voice recording with its preview and
+    /// the Play once switch.
+    ReadyVoicePause,
     /// Composer core: a dragged folder offers its files or one archive.
     ReadyDropFolder,
     /// MED4: embedded-player + album `linkPreview` cards in bubbles
@@ -381,6 +387,10 @@ pub enum ScreenshotDemo {
     /// and public story search (injected, no live Telegram):
     /// `QUILL_DEMO_FTS_VIEW=topic|thread|stats|search` (default `topic`).
     ReadyForumThreadStories,
+    /// The forum topic column next to the chat list, a topic with replies and
+    /// its thread (injected, no live Telegram):
+    /// `QUILL_DEMO_FORUM_COLUMN_VIEW=topics|topic|thread` (default `topics`).
+    ReadyForumColumn,
     /// Forums and Saved Messages sublists (injected, no live Telegram):
     /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
     /// sublist list, one sublist, a tag filter, or the forum topic editor
