@@ -599,6 +599,10 @@ impl Session {
                 self.recent_calls_loading = false;
                 self.recent_calls_error = true;
             }
+            Some(RequestPurpose::DeleteAllCallMessages) => {
+                self.recent_calls_clearing = false;
+                self.chat_action_error = Some(crate::chatlist_calls::clear_failed(err.code));
+            }
             Some(RequestPurpose::GetCallPrivacyRules { .. }) => {
                 self.privacy_roundtrip_done();
                 self.call_privacy_error = true;

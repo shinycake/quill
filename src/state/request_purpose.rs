@@ -1390,6 +1390,9 @@ pub enum RequestPurpose {
     /// Phase C2i: `searchCallMessages`. Response is `foundMessages`;
     /// drives the Recent-calls tab.
     SearchCallMessages,
+    /// `deleteAllCallMessages` ("Clear all" on the Calls list). The
+    /// answer is `ok`; the cached list is emptied then.
+    DeleteAllCallMessages,
     /// Phase C2i: `getUserPrivacySettingRules`. Response is
     /// `userPrivacySettingRules`; `setting` selects which of the two
     /// call privacy settings is fetched.

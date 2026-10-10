@@ -1280,14 +1280,7 @@ impl QuillApp {
             }
             PaneMode::Ready => {
                 if self.contacts_tab_open {
-                    list = list.child(
-                        div()
-                            .id("contacts-scroll")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .child(self.contacts_list(cx)),
-                    );
+                    list = list.child(self.contacts_panel(cx));
                 } else if self.calls_tab_open {
                     list = list.child(
                         div()

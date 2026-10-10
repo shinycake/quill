@@ -118,6 +118,10 @@ pub enum ScreenshotDemo {
     ReadyArchiveRow,
     /// Chat-list rows: the Archive's "How does it work?" box.
     ReadyArchiveHint,
+    /// Contacts by name with section headers and the index bar.
+    ReadyChatlistContactsIndex,
+    /// Calls list with the Clear calls confirm box.
+    ReadyChatlistCallsClear,
     /// Chat-list rows: video chat badge and emoji status on rows.
     ReadyChatBadges,
     /// Chat-list rows: the folder editor's chat sections.

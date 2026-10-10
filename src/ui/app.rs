@@ -325,6 +325,8 @@ pub struct QuillApp {
     pub(super) chat_menu: Option<ChatMenuState>,
     /// Right-click menu of the "Archived chats" row (window position).
     pub(super) archive_menu: Option<Point<Pixels>>,
+    /// Contacts tab, stories menu, suggestions and search tabs.
+    pub(super) global: super::chatlist_global::ChatlistGlobal,
     /// Pinned-chat drag in progress (or its release slide), see
     /// `quill::pin_reorder`; `pin_reorder_archived` says which pinned list.
     pub(super) pin_reorder: Option<quill::pin_reorder::PinReorder>,

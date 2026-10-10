@@ -27,6 +27,12 @@ impl Session {
                 message_id,
                 scheduling,
             }) => self.finish_scheduling_edit(message_id, scheduling),
+            Some(RequestPurpose::DeleteAllCallMessages) => {
+                self.recent_calls.clear();
+                self.recent_calls_offset.clear();
+                self.recent_calls_error = false;
+                self.recent_calls_clearing = false;
+            }
             Some(RequestPurpose::AddProfileAudio) => {
                 self.message_action_note = Some("saved to your profile".into());
             }

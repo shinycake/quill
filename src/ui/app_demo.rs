@@ -295,6 +295,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — chat list: archive settings dialog".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyChatlistContactsIndex | ScreenshotDemo::ReadyChatlistCallsClear => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyArchiveHint
         | ScreenshotDemo::ReadyChatBadges
         | ScreenshotDemo::ReadyFoldersChats
@@ -1590,6 +1596,7 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
+        let global = super::chatlist_global::ChatlistGlobal::new(window, cx);
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search")
@@ -2112,6 +2119,7 @@ impl QuillApp {
             message_menu: None,
             chat_menu: None,
             archive_menu: None,
+            global,
             pin_reorder: None,
             pin_reorder_archived: false,
             pin_drag_anchor: None,
