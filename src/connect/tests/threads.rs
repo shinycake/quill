@@ -301,3 +301,61 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
     assert_eq!(driver.close_thread(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A thread opened from a forum topic stays in the topic: sends keep
+/// `messageTopicForum` and reply to the thread root.
+#[test]
+fn forum_topic_thread_routes_sends_into_the_topic() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
+    );
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#,
+    );
+    driver.select_chat(ChatId(16)).unwrap();
+    driver.session.select_topic(ChatId(16), 7);
+    let extra = driver
+        .open_thread(ChatId(16), MessageId(120))
+        .unwrap()
+        .unwrap();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":16,"message_thread_id":120,"reply_info":null,"unread_message_count":0,"messages":[{}]}}"#,
+            extra.0,
+            text_message(120, 16, 120, "root")
+        ),
+    );
+    driver.start_thread_in_open_chat().unwrap();
+    assert_eq!(
+        driver.session.thread.as_ref().unwrap().forum_topic_id,
+        Some(7)
+    );
+    let send = crate::telegram::requests::send_text(
+        crate::ids::RequestId(9),
+        ChatId(16),
+        Some(7),
+        "hi",
+        None,
+        &crate::composer::SendOptions::default(),
+    );
+    let routed: Value = serde_json::from_str(&driver.thread_routed(ChatId(16), send)).unwrap();
+    assert_eq!(routed["topic_id"]["@type"], "messageTopicForum");
+    assert_eq!(routed["topic_id"]["forum_topic_id"], 7);
+    assert_eq!(routed["reply_to"]["message_id"], 120);
+    let _ = std::fs::remove_dir_all(&dir);
+}

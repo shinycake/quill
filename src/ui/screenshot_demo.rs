@@ -12,6 +12,14 @@ pub enum ScreenshotDemo {
     WaitPhoneFormatted,
     /// Sign-in polish: code step with the resend countdown and "Wrong number?".
     WaitCodeResend,
+    /// Code step for `authenticationCodeTypeFirebase*` (official apps only).
+    WaitCodeFirebase,
+    /// Code step for `authenticationCodeTypeFlashCall`.
+    WaitCodeFlash,
+    /// Code step for `authenticationCodeTypeFragment` with "Open Fragment".
+    WaitCodeFragment,
+    /// Code step for `authenticationCodeTypeMissedCall`.
+    WaitCodeMissed,
     /// Sign-in polish: tdesktop's banned-number box (with Help).
     WaitPhoneBanned,
     WaitPassword,
@@ -379,6 +387,10 @@ pub enum ScreenshotDemo {
     /// and public story search (injected, no live Telegram):
     /// `QUILL_DEMO_FTS_VIEW=topic|thread|stats|search` (default `topic`).
     ReadyForumThreadStories,
+    /// The forum topic column next to the chat list, a topic with replies and
+    /// its thread (injected, no live Telegram):
+    /// `QUILL_DEMO_FORUM_COLUMN_VIEW=topics|topic|thread` (default `topics`).
+    ReadyForumColumn,
     /// Forums and Saved Messages sublists (injected, no live Telegram):
     /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
     /// sublist list, one sublist, a tag filter, or the forum topic editor
@@ -656,6 +668,9 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Appearance cluster: system accent, font family and the Battery and
+    /// animations switches.
+    ReadyAppearancePower,
     /// Appearance slice: Appearance with Telegram wallpapers and interface scale.
     ReadyAppearanceWallpapers,
     /// Per-chat theme and wallpaper picker open over a private chat.

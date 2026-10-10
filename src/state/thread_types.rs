@@ -41,6 +41,10 @@ pub struct ThreadView {
     pub needs_chat_switch: bool,
     /// The thread chat is open and the first history page was requested.
     pub reading_started: bool,
+    /// The forum topic the thread was opened from. Sends and typing stay in
+    /// that topic (`messageTopicForum`) and reply to the thread root;
+    /// `None` outside forums, where a thread is its own `messageTopicThread`.
+    pub forum_topic_id: Option<i32>,
 }
 
 impl ThreadView {
@@ -60,6 +64,7 @@ impl ThreadView {
             root_jump_serial: 0,
             needs_chat_switch: false,
             reading_started: false,
+            forum_topic_id: None,
         }
     }
 
@@ -99,7 +104,14 @@ impl ThreadView {
         }
         message.thread_id == Some(self.thread_id)
             || message.reply_to.as_ref().is_some_and(|reply| {
-                reply.message_id.0 == self.thread_id && reply.is_same_chat(self.chat_id)
+                reply.is_same_chat(self.chat_id)
+                    && (reply.message_id.0 == self.thread_id
+                        // A reply to a reply stays in the thread (forum
+                        // topics tag their messages with the topic, not the
+                        // thread).
+                        || (self.forum_topic_id.is_some()
+                            && message.topic_id == self.forum_topic_id
+                            && self.history.messages.contains_key(&reply.message_id.0)))
             })
     }
 

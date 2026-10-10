@@ -135,11 +135,25 @@ pub enum CodeKind {
 
 /// `authenticationCodeInfo` reduced to what the code screen needs: how the
 /// code was sent, how it can be sent next and after how many seconds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CodeDelivery {
     pub kind: CodeKind,
     pub next: Option<CodeKind>,
     pub timeout_secs: i32,
+    /// Per-type fields of the current `type` (call pattern, Fragment URL).
+    pub detail: CodeDetail,
+}
+
+/// The type-specific payload of `authenticationCodeType*` that the code
+/// screen shows or opens. Empty strings mean "not supplied".
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CodeDetail {
+    /// `FlashCall.pattern` or `MissedCall.phone_number_prefix`.
+    pub call_number: String,
+    /// `MissedCall.length`: digits to type, excluding the prefix.
+    pub missed_digits: Option<i32>,
+    /// `Fragment.url`; only a plain https URL is kept.
+    pub url: String,
 }
 
 /// `EmailAddressResetState` of the email-code step.
@@ -158,7 +172,13 @@ pub enum EmailResetState {
 pub enum AuthorizationState {
     WaitTdlibParameters,
     WaitPhoneNumber,
-    WaitPremiumPurchase,
+    /// `authorizationStateWaitPremiumPurchase`. Quill cannot take an
+    /// in-store purchase, so only what the explainer shows is kept.
+    WaitPremiumPurchase {
+        premium_day_count: i32,
+        support_email_address: String,
+        support_email_subject: String,
+    },
     WaitEmailAddress,
     WaitEmailCode {
         email_pattern: String,
@@ -240,11 +260,43 @@ fn parse_code_kind(value: Option<&Value>) -> Option<CodeKind> {
     })
 }
 
+fn parse_code_detail(ty: Option<&Value>) -> CodeDetail {
+    let Some(ty) = ty.filter(|v| !v.is_null()) else {
+        return CodeDetail::default();
+    };
+    let kind = ty.get("@type").and_then(Value::as_str).unwrap_or_default();
+    let mut detail = CodeDetail::default();
+    match kind {
+        "authenticationCodeTypeFlashCall" => {
+            detail.call_number = json_field_str(ty, "pattern");
+        }
+        "authenticationCodeTypeMissedCall" => {
+            detail.call_number = json_field_str(ty, "phone_number_prefix");
+            detail.missed_digits = ty
+                .get("length")
+                .and_then(Value::as_i64)
+                .and_then(|n| i32::try_from(n).ok())
+                .filter(|n| *n > 0);
+        }
+        "authenticationCodeTypeFragment" => {
+            let url = json_field_str(ty, "url");
+            // The URL comes from the server and is opened in the browser:
+            // accept https only.
+            if url.starts_with("https://") && !url.chars().any(char::is_whitespace) {
+                detail.url = url;
+            }
+        }
+        _ => {}
+    }
+    detail
+}
+
 pub(crate) fn parse_code_delivery(info: Option<&Value>) -> CodeDelivery {
     let Some(info) = info else {
         return CodeDelivery::default();
     };
     CodeDelivery {
+        detail: parse_code_detail(info.get("type")),
         kind: parse_code_kind(info.get("type")).unwrap_or_default(),
         next: parse_code_kind(info.get("next_type")),
         timeout_secs: info
@@ -282,7 +334,14 @@ pub(crate) fn parse_auth(value: &Value) -> AuthorizationState {
     match ty {
         "authorizationStateWaitTdlibParameters" => AuthorizationState::WaitTdlibParameters,
         "authorizationStateWaitPhoneNumber" => AuthorizationState::WaitPhoneNumber,
-        "authorizationStateWaitPremiumPurchase" => AuthorizationState::WaitPremiumPurchase,
+        "authorizationStateWaitPremiumPurchase" => AuthorizationState::WaitPremiumPurchase {
+            premium_day_count: value
+                .get("premium_day_count")
+                .and_then(Value::as_i64)
+                .map_or(0, |n| n.clamp(0, i64::from(i32::MAX)) as i32),
+            support_email_address: json_field_str(value, "support_email_address"),
+            support_email_subject: json_field_str(value, "support_email_subject"),
+        },
         "authorizationStateWaitEmailAddress" => AuthorizationState::WaitEmailAddress,
         "authorizationStateWaitEmailCode" => AuthorizationState::WaitEmailCode {
             email_pattern: value

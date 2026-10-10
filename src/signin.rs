@@ -48,22 +48,115 @@ pub fn remaining_secs(total: i64, elapsed: i64) -> i64 {
     (total - elapsed.max(0)).max(0)
 }
 
-/// The sentence under the title that says where the code went.
-pub fn delivery_description(kind: CodeKind) -> &'static str {
-    match kind {
+/// The sentence under the title that says where the code went. `phone` is
+/// the number the code was requested for (may be empty).
+pub fn delivery_description(delivery: &CodeDelivery, phone: &str) -> String {
+    let detail = &delivery.detail;
+    match delivery.kind {
         CodeKind::TelegramMessage => {
-            "A code was sent via Telegram to your other devices, if you have any connected."
+            "A code was sent via Telegram to your other devices, if you have any connected.".into()
         }
         CodeKind::Sms | CodeKind::Other => {
-            "We've sent an activation code to your phone. Please enter it below."
+            "We've sent an activation code to your phone. Please enter it below.".into()
         }
-        CodeKind::Call => "Telegram will call you and read the code out loud.",
-        CodeKind::FlashCall | CodeKind::MissedCall => {
-            "Telegram is calling your number. The code is the last digits of the number that calls."
+        CodeKind::Call => "Telegram will call you and read the code out loud.".into(),
+        CodeKind::FlashCall => match detail.call_number.as_str() {
+            "" => "Telegram will call you and hang up right away. Don't answer. The code is the number that called.".into(),
+            pattern => format!(
+                "Telegram will call you from a number like {pattern} and hang up right away. Don't answer. The code is the full number that called."
+            ),
+        },
+        CodeKind::MissedCall => {
+            let digits = match detail.missed_digits {
+                Some(n) => format!("the last {n} digit{} of", if n == 1 { "" } else { "s" }),
+                None => "the last digits of".to_string(),
+            };
+            match detail.call_number.as_str() {
+                "" => format!("Telegram will call you and hang up right away. Don't answer. The code is {digits} the number that called."),
+                prefix => format!(
+                    "Telegram will call you from a number starting with {prefix} and hang up right away. Don't answer. The code is {digits} that number."
+                ),
+            }
         }
-        CodeKind::Fragment => "The code was sent via Fragment. Open it to see your code.",
-        CodeKind::Firebase => "We're verifying your device. The code arrives by SMS.",
+        // tdesktop `lng_intro_fragment_about`.
+        CodeKind::Fragment => {
+            if phone.is_empty() {
+                "Get the code in the Anonymous Numbers section on Fragment.".into()
+            } else {
+                format!("Get the code for {phone} in the Anonymous Numbers section on Fragment.")
+            }
+        }
+        CodeKind::Firebase => "Telegram wants to verify this device before it sends the code, and only the official Android and iOS apps can do that. Ask for the code another way below, or sign in with a QR code.".into(),
     }
+}
+
+/// The whole body of the code step: phone, delivery text, expected length.
+pub fn code_step_body(delivery: &CodeDelivery, code_length: Option<i32>, phone: &str) -> String {
+    let mut body = String::new();
+    // Fragment names the number itself.
+    if !phone.is_empty() && delivery.kind != CodeKind::Fragment {
+        body.push_str(&format!("Code for {phone}. "));
+    }
+    body.push_str(&delivery_description(delivery, phone));
+    // A missed call already says how many digits to type.
+    let counts = matches!(
+        delivery.kind,
+        CodeKind::TelegramMessage | CodeKind::Sms | CodeKind::Call | CodeKind::Other
+    );
+    if let (true, Some(len)) = (counts, code_length) {
+        body.push_str(&format!(" It has {len} digits."));
+    }
+    body
+}
+
+/// Title of the code step; Fragment gets tdesktop's `lng_intro_fragment_title`.
+pub fn code_step_title(kind: CodeKind) -> &'static str {
+    match kind {
+        CodeKind::Fragment => "Enter code",
+        _ => "Enter the code",
+    }
+}
+
+/// The Fragment link to open, when this delivery has a usable one.
+pub fn fragment_url(delivery: &CodeDelivery) -> Option<&str> {
+    (delivery.kind == CodeKind::Fragment && !delivery.detail.url.is_empty())
+        .then_some(delivery.detail.url.as_str())
+}
+
+/// Explainer for `authorizationStateWaitPremiumPurchase`. Quill never takes
+/// the purchase, so this only says what Telegram asks and where to go.
+pub fn premium_explainer(premium_day_count: i32) -> String {
+    let grant = if premium_day_count > 0 {
+        format!(
+            " The purchase includes {}.",
+            format_wait_period(i64::from(premium_day_count) * 86_400)
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "Telegram asks for a Premium subscription before this phone number can sign in.{grant} Quill can't take store payments. Sign in with a QR code from a phone where you're already signed in, or buy Premium in the official Telegram app for your phone."
+    )
+}
+
+/// `mailto:` for the support address TDLib supplies with the premium state.
+/// `None` unless the address looks like a plain mailbox.
+pub fn premium_support_mailto(address: &str, subject: &str) -> Option<String> {
+    let (local, domain) = address.split_once('@')?;
+    let plain = |part: &str| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._-+".contains(c))
+    };
+    if !plain(local) || !plain(domain) || !domain.contains('.') || domain.contains("..") {
+        return None;
+    }
+    Some(if subject.is_empty() {
+        format!("mailto:{address}")
+    } else {
+        format!("mailto:{address}?subject={}", url_encode(subject))
+    })
 }
 
 /// The resend control on the code screen.
@@ -89,6 +182,17 @@ pub fn resend_option(delivery: &CodeDelivery, elapsed: i64) -> Option<ResendOpti
         }
         (CodeKind::Sms, true) => "Send code via SMS".to_string(),
         (CodeKind::Sms, false) => format!("Send code via SMS in {}", format_countdown(remaining)),
+        (CodeKind::FlashCall | CodeKind::MissedCall, true) => "Call me".to_string(),
+        (CodeKind::FlashCall | CodeKind::MissedCall, false) => {
+            format!("Telegram will call you in {}", format_countdown(remaining))
+        }
+        (CodeKind::Fragment, true) => "Get the code from Fragment".to_string(),
+        (CodeKind::Fragment, false) => {
+            format!(
+                "Get the code from Fragment in {}",
+                format_countdown(remaining)
+            )
+        }
         (_, true) => "Send the code again".to_string(),
         (_, false) => format!("Send the code again in {}", format_countdown(remaining)),
     };
@@ -188,15 +292,18 @@ pub fn add_account_blocker(existing: usize, premium_accounts: usize) -> Option<S
 mod tests {
     use super::{
         BANNED_HELP_EMAIL, CodeDelivery, CodeKind, EmailResetState, add_account_blocker,
-        auth_error_line, banned_help_mailto, delivery_description, email_reset_label,
-        flood_remaining, format_countdown, format_wait_period, max_accounts, resend_option,
+        auth_error_line, banned_help_mailto, code_step_body, code_step_title, delivery_description,
+        email_reset_label, flood_remaining, format_countdown, format_wait_period, fragment_url,
+        max_accounts, premium_explainer, premium_support_mailto, resend_option,
     };
+    use crate::telegram::envelope::CodeDetail;
 
     fn delivery(next: Option<CodeKind>, timeout: i32) -> CodeDelivery {
         CodeDelivery {
             kind: CodeKind::TelegramMessage,
             next,
             timeout_secs: timeout,
+            detail: CodeDetail::default(),
         }
     }
 
@@ -235,7 +342,7 @@ mod tests {
             "Telegram will call you in 2:00"
         );
         assert_eq!(resend_option(&call, 120).unwrap().label, "Call me");
-        let other = delivery(Some(CodeKind::Fragment), 0);
+        let other = delivery(Some(CodeKind::Firebase), 0);
         assert_eq!(
             resend_option(&other, 0).unwrap().label,
             "Send the code again"
@@ -249,9 +356,13 @@ mod tests {
 
     #[test]
     fn delivery_text_names_the_channel() {
-        assert!(delivery_description(CodeKind::TelegramMessage).contains("via Telegram"));
-        assert!(delivery_description(CodeKind::Sms).contains("your phone"));
-        assert!(delivery_description(CodeKind::Call).contains("call"));
+        let of = |kind| CodeDelivery {
+            kind,
+            ..delivery(None, 0)
+        };
+        assert!(delivery_description(&of(CodeKind::TelegramMessage), "").contains("via Telegram"));
+        assert!(delivery_description(&of(CodeKind::Sms), "").contains("your phone"));
+        assert!(delivery_description(&of(CodeKind::Call), "").contains("call"));
     }
 
     #[test]
@@ -345,5 +456,114 @@ mod tests {
         assert_eq!(add_account_blocker(3, 1), None);
         let full = add_account_blocker(6, 6).unwrap();
         assert!(full.contains("up to 6") && !full.contains("Premium"));
+    }
+
+    fn typed(kind: CodeKind, call_number: &str, missed: Option<i32>, url: &str) -> CodeDelivery {
+        CodeDelivery {
+            kind,
+            detail: CodeDetail {
+                call_number: call_number.into(),
+                missed_digits: missed,
+                url: url.into(),
+            },
+            ..delivery(None, 0)
+        }
+    }
+
+    #[test]
+    fn flash_call_names_the_pattern_and_the_whole_number() {
+        let flash = typed(CodeKind::FlashCall, "+1555*****", None, "");
+        let text = code_step_body(&flash, None, "+1 555 010 0199");
+        assert!(text.starts_with("Code for +1 555 010 0199. "));
+        assert!(text.contains("like +1555*****"));
+        assert!(text.contains("full number that called"));
+        assert!(!text.contains("digits."));
+    }
+
+    #[test]
+    fn missed_call_counts_digits_without_repeating_the_length() {
+        let missed = typed(CodeKind::MissedCall, "+1555", Some(6), "");
+        let text = code_step_body(&missed, Some(6), "");
+        assert!(text.contains("starting with +1555"));
+        assert!(text.contains("last 6 digits of that number"));
+        assert!(!text.contains("It has"));
+        let one = typed(CodeKind::MissedCall, "", Some(1), "");
+        assert!(delivery_description(&one, "").contains("last 1 digit of the number"));
+    }
+
+    #[test]
+    fn fragment_matches_tdesktop_and_opens_only_https() {
+        let fragment = typed(CodeKind::Fragment, "", None, "https://fragment.com/login");
+        assert_eq!(
+            delivery_description(&fragment, "+1 555 010 0199"),
+            "Get the code for +1 555 010 0199 in the Anonymous Numbers section on Fragment."
+        );
+        // Fragment names the number once, not twice.
+        assert!(!code_step_body(&fragment, Some(5), "+1 555 010 0199").contains("Code for"));
+        assert_eq!(fragment_url(&fragment), Some("https://fragment.com/login"));
+        assert_eq!(code_step_title(CodeKind::Fragment), "Enter code");
+        assert_eq!(fragment_url(&typed(CodeKind::Fragment, "", None, "")), None);
+        assert_eq!(
+            fragment_url(&typed(CodeKind::Sms, "", None, "https://x.y")),
+            None
+        );
+    }
+
+    #[test]
+    fn firebase_is_honest_about_needing_an_official_app() {
+        let text = delivery_description(&typed(CodeKind::Firebase, "", None, ""), "");
+        assert!(text.contains("official Android and iOS apps"));
+        assert!(text.contains("QR"));
+    }
+
+    #[test]
+    fn call_resend_labels_cover_every_call_kind() {
+        for next in [CodeKind::FlashCall, CodeKind::MissedCall] {
+            let wait = resend_option(&delivery(Some(next), 90), 30).unwrap();
+            assert_eq!(wait.label, "Telegram will call you in 1:00");
+            assert!(!wait.ready);
+            assert_eq!(
+                resend_option(&delivery(Some(next), 90), 90).unwrap().label,
+                "Call me"
+            );
+        }
+        assert_eq!(
+            resend_option(&delivery(Some(CodeKind::Fragment), 0), 0)
+                .unwrap()
+                .label,
+            "Get the code from Fragment"
+        );
+    }
+
+    #[test]
+    fn premium_explainer_states_the_grant_and_never_offers_a_purchase() {
+        let with_days = premium_explainer(365);
+        assert!(with_days.contains("includes 365 days"));
+        assert!(with_days.contains("Quill can't take store payments"));
+        assert!(with_days.contains("QR code"));
+        assert!(!premium_explainer(0).contains("includes"));
+    }
+
+    #[test]
+    fn premium_support_mailto_accepts_only_plain_mailboxes() {
+        assert_eq!(
+            premium_support_mailto("support@example.com", "Premium sign-in").as_deref(),
+            Some("mailto:support@example.com?subject=Premium%20sign-in")
+        );
+        assert_eq!(
+            premium_support_mailto("support@example.com", "").as_deref(),
+            Some("mailto:support@example.com")
+        );
+        for bad in [
+            "",
+            "no-at",
+            "a@b",
+            "a b@example.com",
+            "a@example.com?bcc=x",
+            "a@@b.c",
+            "<a@b.c>",
+        ] {
+            assert_eq!(premium_support_mailto(bad, "s"), None, "{bad}");
+        }
     }
 }

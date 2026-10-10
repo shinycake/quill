@@ -79,7 +79,7 @@ Without credentials, `cargo run --features ui` opens a synthetic demo chat. To s
 
 On Linux, building the UI also needs the GTK 3 and ALSA development packages (`libgtk-3-dev` and `libasound2-dev` on Debian and Ubuntu).
 
-Toolchain: Rust 1.98.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.1. TDLib: 1.8.68.
+Toolchain: Rust 1.99.0, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.1. TDLib: 1.8.68.
 
 ## Status
 
@@ -94,10 +94,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Resend the login code: "Resend code" on the code screen sends resendAuthenticationCode (reason resendCodeReasonUserRequest); no invented local cooldown — a too-early resend fails server-side (429) and surfaces via the auth-error line <!-- parity:auth-code-resend -->
 - [x] Two-step password entry on login <!-- parity:auth-2fa-password --> (auth.rs:52; telegram/requests.rs:81)
 - [x] Log in via QR code: "Sign in with QR code" on the phone screen sends requestQrCodeAuthentication; the link from authorizationStateWaitOtherDeviceConfirmation renders as a real QR bitmap (never logged) <!-- parity:auth-qr-login -->
-- [ ] "Link desktop device": show QR so another device can log in as this account <!-- parity:auth-qr-authorize-other -->
+- [x] "Link desktop device": confirm a QR login for another device (camera scan or pasted tg://login link) <!-- parity:auth-qr-authorize-other -->
 - [x] New-user registration: first/last name + terms <!-- parity:auth-registration -->
 - [x] Email-based login flow <!-- parity:auth-email-login -->
-- [ ] Premium-purchase-gated login state (partial: explicit UnsupportedHalt, auth.rs:66) <!-- parity:auth-premium-login -->
+- [x] Premium-purchase-gated login state (partial: explicit UnsupportedHalt, auth.rs:66) <!-- parity:auth-premium-login -->
 - [x] Enable / change / disable the two-step password: "Two-Step Verification" overlay (TGX wording) shows the authoritative getPasswordState; setPassword enable (empty old, optional recovery email in the same call), change, and disable (empty new); no optimistic mutations, one op in flight, passwords zeroized and never logged <!-- parity:auth-2fa-manage -->
 - [x] Set / change recovery email, pending-confirmation state, abort setup: setRecoveryEmailAddress (current password required), pending pattern card (TGX PendingEmailText), resend (resendRecoveryEmailAddressCode, no invented cooldown) and "Abort recovery email setup" (TGX AbortRecoveryEmail verbatim) <!-- parity:auth-recovery-email -->
 - [x] Password recovery via emailed code: "Forgot password?" on the 2FA screen sends requestAuthenticationPasswordRecovery (resend re-issues it — no invented cooldown, 429 surfaces), recovery-code entry sends recoverAuthenticationPassword (code zeroized, never stored — the A2 rule; new password empty, re-enable 2FA in Settings); recovery removes 2FA and TDLib continues auth <!-- parity:auth-password-recovery --> (A10: requests.rs; state.rs:RequestPurpose; connect.rs:request_password_recovery/submit_recovery_code; ui/mod.rs)
@@ -315,10 +315,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Translate bar at the top of a chat (partial: translate actions exist; no bar or per-chat toggle) <!-- parity:chrome-translate-bar -->
 - [ ] Similar channels suggestions after leaving a channel <!-- parity:chrome-similar-channels -->
 - [ ] Business bot manage bar <!-- parity:chrome-business-bot-bar -->
-- [ ] Pin message from the pinned bar and hide-all confirmation wording <!-- parity:chrome-pinned-bar-confirm -->
+- [x] Pinned bar unpin and hide-all confirmation wording <!-- parity:chrome-pinned-bar-confirm -->
 - [x] Top "now playing" bar for voice and music with play, prev, next, speed and close <!-- parity:chrome-now-playing-bar -->
 - [x] Emoji status and premium badge beside the chat title <!-- parity:chrome-header-status -->
-- [x] Restricted, Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
+- [x] Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
 - [ ] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
 - [x] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
 - [x] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
@@ -414,12 +414,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Members list inline in the group info panel with online first and admin badges <!-- parity:profile-members-inline -->
 - [x] Member context menu: Mention, Search messages, Promote, Restrict, Ban, Remove <!-- parity:profile-member-menu -->
 - [x] Remove from group (kick) as distinct from ban <!-- parity:profile-remove-member -->
-- [ ] Add a bot to a group or channel as admin with chosen rights <!-- parity:profile-add-bot-to-group -->
+- [x] Add a bot to a group or channel as admin with chosen rights <!-- parity:profile-add-bot-to-group -->
 - [ ] Bot "Open App" main mini-app button <!-- parity:profile-bot-open-app -->
 - [ ] Profile action row: Message, Mute, Call, Video, Gift, More <!-- parity:profile-action-row -->
 - [x] Unofficial-client warning on a profile <!-- parity:profile-unofficial-warning -->
 - [ ] Fragment number note in the phone context menu <!-- parity:profile-fragment-note -->
-- [ ] Topic and thread info panels <!-- parity:profile-topic-info -->
+- [x] Topic and thread info panels <!-- parity:profile-topic-info -->
 
 ### Media
 
@@ -569,13 +569,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
 - [ ] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
 - [x] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
-- [ ] Recent actions: server-side admin filter, export and explainer <!-- parity:admin-log-extras -->
-- [ ] Typed confirmation before deleting a large group or channel <!-- parity:admin-delete-confirm-typing -->
+- [x] Recent actions: server-side admin filter and explainer <!-- parity:admin-log-extras -->
 
 ### Forums, Saved Messages & threads
 
 - [x] Topic icon picker with default icons, custom emoji and color <!-- parity:forum-topic-icon-picker -->
-- [ ] Forum topics as a second column next to the chat list <!-- parity:forum-second-column -->
+- [x] Forum topics as a second column next to the chat list <!-- parity:forum-second-column -->
 - [x] View as topics or as messages toggle <!-- parity:forum-view-as-topics -->
 - [x] Copy topic link, reorder pinned topics, read all mentions and reactions in a topic, unpin all in a topic <!-- parity:forum-topic-extras -->
 - [x] Saved Messages sublists by original chat, pinned sublists, delete a sublist <!-- parity:saved-sublists -->
@@ -667,8 +666,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Close friends list editor <!-- parity:stories-close-friends-editor -->
 - [x] Hide and unhide a contact's stories <!-- parity:stories-hide-peer -->
 - [ ] Story replies with stickers, emoji or voice <!-- parity:stories-reply-media -->
-- [ ] Search stories by hashtag, location or venue <!-- parity:stories-search -->
-- [ ] Story statistics and public forwards <!-- parity:stories-statistics -->
+- [x] Search stories by hashtag, location or venue <!-- parity:stories-search -->
+- [x] Story statistics and public forwards <!-- parity:stories-statistics -->
 - [ ] Live story stream playback (deferred: low impact) <!-- parity:stories-live-stream-playback -->
 
 ### Calls
@@ -869,11 +868,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Signed gifts: personal comment when buying a collectible gift via Marketplace (sendResoldGift text) <!-- parity:gifts-signed-comment --> (merged #292: price-bound Stars/TON quotes, personal comment and receiver-only/public visibility; core and native AX checks passed; live purchase unverified)
 - [ ] Signed gifts: custom signature on Marketplace gift purchase (blocked: no TDLib/raw API for a gift signature field — concept-level search: sendResoldGift/inputInvoiceStarGiftResale carry text/message only) <!-- parity:gifts-signed-signature -->
 - [ ] Mini Apps in an in-app window (blocked: needs a per-platform web view; GPUI has none) <!-- parity:bots-miniapp-inline -->
-- [ ] Add a bot to a group or channel with admin rights <!-- parity:bots-add-to-group -->
+- [x] Add a bot to a group or channel with admin rights <!-- parity:bots-add-to-group -->
 - [ ] Bot verification badges and verify via bot <!-- parity:bots-verification-badge -->
-- [ ] Share a game to a chat <!-- parity:bots-share-game -->
+- [x] Share a game to a chat <!-- parity:bots-share-game -->
 - [ ] Allow-messages consent for web apps (write access) <!-- parity:bots-allow-write -->
-- [ ] Keys 1 to 9 press inline buttons <!-- parity:bots-fast-buttons -->
+- [x] Keys 1 to 9 press inline buttons <!-- parity:bots-fast-buttons -->
 - [ ] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
 - [ ] Bot earnings and affiliate programs (deferred: low impact) <!-- parity:bots-earn-affiliate -->
 - [ ] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
@@ -960,14 +959,14 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Server popups (service notifications) are shown <!-- parity:updates-service-notification -->
 - [x] Updated Terms of Service can be read and accepted <!-- parity:updates-terms-of-service -->
 - [ ] Server-defined chat themes, backgrounds and accent colors are applied <!-- parity:updates-theme-colors -->
-- [ ] Chat sender, view-as-topics and default-disable-notification changes apply live <!-- parity:updates-chat-flags -->
-- [ ] Downloads list stays in sync with file download updates <!-- parity:updates-downloads-sync -->
+- [x] Chat sender, view-as-topics and default-disable-notification changes apply live <!-- parity:updates-chat-flags -->
+- [x] Downloads list stays in sync with file download updates <!-- parity:updates-downloads-sync -->
 - [ ] Dice emoji list and animated emoji click updates <!-- parity:updates-dice-emoji -->
-- [ ] Frozen-account banner <!-- parity:updates-freeze-state -->
-- [ ] Free transcription quota hints <!-- parity:updates-speech-trial -->
+- [x] Frozen-account banner <!-- parity:updates-freeze-state -->
+- [x] Free transcription quota hints <!-- parity:updates-speech-trial -->
 - [ ] Owned Stars count and chat boost updates <!-- parity:updates-stars-boosts -->
-- [ ] Active live location and viewed-live-location updates <!-- parity:updates-live-location -->
-- [ ] Age verification parameters <!-- parity:updates-age-verification -->
+- [x] Active live location and viewed-live-location updates <!-- parity:updates-live-location -->
+- [x] Age verification parameters <!-- parity:updates-age-verification -->
 
 ### Business
 
@@ -1064,20 +1063,20 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 - [ ] Wallpapers: gallery, patterns, from file, blur, motion, tile, remove <!-- parity:appearance-wallpapers -->
 - [ ] Built-in themes (Day, Classic, Tinted, Night), custom and cloud themes, theme editor <!-- parity:appearance-themes -->
-- [ ] System accent color option <!-- parity:appearance-system-accent -->
+- [x] System accent color option <!-- parity:appearance-system-accent -->
 - [x] Interface scale <!-- parity:appearance-scale -->
-- [ ] Font family choice <!-- parity:appearance-font -->
+- [x] Font family choice <!-- parity:appearance-font -->
 - [ ] Interface language packs (English only today) <!-- parity:appearance-localization -->
 - [ ] Adaptive layout for wide screens (centered column) <!-- parity:appearance-wide-layout -->
 - [ ] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
-- [ ] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
-- [ ] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
+- [x] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
+- [x] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
 
 ### Settings: data, proxy & advanced
 
 - [x] Clear cache removes TDLib cached files <!-- parity:data-clear-cache-real -->
-- [ ] Storage limits: total size, media cache, clear older than <!-- parity:data-storage-limits -->
-- [ ] Clear storage per file type and per chat from the breakdown <!-- parity:data-clear-per-type -->
+- [x] Storage limits: total size, media cache, clear older than <!-- parity:data-storage-limits -->
+- [x] Clear storage per file type and per chat from the breakdown <!-- parity:data-clear-per-type -->
 - [x] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->

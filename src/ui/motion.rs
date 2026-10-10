@@ -93,6 +93,11 @@ pub(crate) fn held() -> bool {
     hold().is_some()
 }
 
+/// Whether the user turned interface animations off (power saving).
+pub(crate) fn interface_animations_off() -> bool {
+    quill::power_saving::on(quill::power_saving::Flag::Animations)
+}
+
 /// Time since `since`, or the frozen time under `QUILL_MOTION_HOLD_MS`.
 pub(crate) fn elapsed_since(since: Instant, now: Instant) -> Duration {
     hold().unwrap_or_else(|| now.saturating_duration_since(since))
@@ -144,6 +149,8 @@ impl Glide {
         self.from = from;
         self.to = to;
         self.since = now;
+        // "Interface animations" off in Battery and animations: snap.
+        let animate = animate && !interface_animations_off();
         self.duration = if animate {
             full.mul_f32((to - from).abs().clamp(0., 1.))
         } else {
@@ -288,6 +295,9 @@ impl Default for MotionState {
 impl MotionState {
     /// Start (or extend) a reveal of rows from `first_row`.
     pub(crate) fn start_reveal(&self, first_row: usize, now: Instant) {
+        if interface_animations_off() {
+            return;
+        }
         let mut slot = self.reveal.borrow_mut();
         let carry = slot.as_ref().map_or(0., |r| {
             reveal_shift(elapsed_since(r.started, now), self.reveal_total(r))

@@ -1208,8 +1208,19 @@ impl QuillApp {
                     && !tabs_used
                     && open.is_some_and(|id| session.is_some_and(|s| s.chat_views_as_topics(id)))
                 {
-                    // Phase 5.1: opening a forum supergroup shows its topics.
-                    self.forum_topics_pane(open, cx).into_any_element()
+                    // Phase 5.1: opening a forum supergroup shows its topics;
+                    // with the topic column on screen the pane only asks for
+                    // a choice.
+                    if self.forum_column_shown {
+                        pane_placeholder(
+                            "Choose a topic",
+                            "Pick a topic from the list to read and write in it.",
+                            cx,
+                        )
+                        .into_any_element()
+                    } else {
+                        self.forum_topics_pane(open, cx).into_any_element()
+                    }
                 } else if has_topics && open_topic.is_some() {
                     // Phase 5.1: per-topic history — same history component,
                     // fed from the topic history store (`searchChatMessages`
@@ -2174,8 +2185,13 @@ impl QuillApp {
                 // history.
                 let covered = !self.spoiler_revealed.contains(&key);
                 let fading = super::spoiler_fx::reveal_fade(key).is_some();
-                if spoiler && (fading || (covered && super::anim_layer::current().is_none())) {
-                    self.request_animation_tick(super::spoiler_fx::SPECKS_FPS, cx);
+                if spoiler
+                    && (fading
+                        || (covered
+                            && super::anim_layer::current().is_none()
+                            && !super::spoiler_fx::still()))
+                {
+                    self.request_animation_tick(30, cx);
                 }
                 let row = session_history_row(
                     message,
