@@ -253,6 +253,9 @@ pub enum ScreenshotDemo {
     /// loaded `chatEvents` fixture covering the handled action types, so
     /// the info panel's "Recent actions" section renders directly.
     ReadyAdminLog,
+    /// Admin extras (`QUILL_DEMO_ADMIN_EXTRAS=log|title|broadcast|warning|
+    /// delete`; injected data, no live Telegram).
+    ReadyAdminExtras,
     /// Slice G2: channel-management surface (no live TDLib): like
     /// `ReadyAdminLog` (demo channel id 13, viewer 777 is an admin), plus
     /// signature flags (`sign_messages` on, `show_message_sender` off),
