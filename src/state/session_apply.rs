@@ -2473,7 +2473,9 @@ impl Session {
                 stickers,
                 files,
                 title,
+                name,
                 is_installed,
+                is_custom_emoji,
                 ..
             } => {
                 if let Some(RequestPurpose::DeepLinkResolve { generation }) =
@@ -2495,7 +2497,18 @@ impl Session {
                     pending.map(|p| p.purpose)
                 {
                     self.remember_files(&files);
-                    self.accept_sticker_set_view(set_id, title, is_installed, stickers);
+                    self.accept_sticker_set_view(
+                        set_id,
+                        title,
+                        name,
+                        is_installed,
+                        is_custom_emoji,
+                        stickers,
+                    );
+                } else if let Some(RequestPurpose::CustomEmojiPack { emoji_id, set_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.accept_custom_emoji_preview(emoji_id, set_id, title);
                 } else if let Some(RequestPurpose::LoadLibrarySet { set_id }) =
                     pending.map(|p| p.purpose)
                 {

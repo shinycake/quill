@@ -911,6 +911,8 @@ pub enum EnvelopePayload {
         name: String,
         /// `stickerSet.is_installed`: the set is in the user's collection.
         is_installed: bool,
+        /// `stickerSet.sticker_type` is `stickerTypeCustomEmoji`.
+        is_custom_emoji: bool,
         stickers: Vec<StickerItem>,
         files: Vec<ParsedFile>,
     },

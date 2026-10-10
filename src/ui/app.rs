@@ -286,6 +286,9 @@ pub struct QuillApp {
     /// keystroke bumps it so only the latest quiet window fires (schema:
     /// "Do not call this function too often"; TGX rate-limits 400ms).
     pub(super) composer_preview_token: u64,
+    /// The composer text before the last keystroke, for "Replace emoji
+    /// automatically" (it only reacts to one typed character).
+    pub(super) composer_prev_text: String,
     /// M1: scheduling choice (`messageSchedulingState*`, schema 1.8.67
     /// lines 5902/5905). Reset to `None` after each successful send.
     pub(super) composer_scheduling: ComposerScheduling,
@@ -772,6 +775,8 @@ pub struct QuillApp {
     pub(super) pending_deep_link_ui: Option<quill::deep_link_types::DeepLinkUi>,
     /// Text of a share link while its chat chooser is open.
     pub(super) share_link_text: Option<String>,
+    /// The custom emoji card already on screen (it times itself out).
+    pub(super) custom_emoji_card_seen: Option<quill::state::CustomEmojiPreview>,
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, polls waited).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, u32)>,

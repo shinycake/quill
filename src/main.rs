@@ -133,7 +133,8 @@ gpui_kit::assets::icon_assets!(
         Briefcase,
         BellPlus,
         Tag,
-        TagX
+        TagX,
+        FaceSlightlySmilingPlus
     ]
 );
 

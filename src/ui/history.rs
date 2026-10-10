@@ -290,14 +290,15 @@ pub(super) fn album_history_row(
     )
 }
 
-/// Round "…" button shown beside a bubble on hover; opens the message menu.
-fn message_actions_button(
-    chat_id: ChatId,
-    message_id: MessageId,
+/// A round button shown beside a bubble on hover.
+fn corner_button(
+    id: String,
+    icon: gpui_kit::assets::IconName,
+    label: &'static str,
     cx: &mut Context<QuillApp>,
 ) -> Button {
-    Button::new(format!("message-actions-{}", message_id.0))
-        .icon(IconName::Ellipsis)
+    Button::new(id)
+        .icon(icon)
         .xsmall()
         .rounded_full()
         .custom(
@@ -306,19 +307,96 @@ fn message_actions_button(
                 .foreground(cx.theme().foreground)
                 .hover(cx.theme().background),
         )
-        .tooltip("Message actions")
-        .accessibility_label("Message actions")
-        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-            this.open_message_menu(
-                MessageMenuState {
-                    chat_id,
-                    message_id,
-                    position: event.position(),
-                },
-                window,
+        .tooltip(label)
+        .accessibility_label(label)
+}
+
+/// The hover buttons beside a bubble: reply and react (Settings, "Reply
+/// button on messages" and "Reaction button on messages"; tdesktop
+/// `cornerReply` and `cornerReaction`), then the "…" button. Returns them
+/// with the room they take.
+fn message_corner_actions(
+    chat_id: ChatId,
+    message_id: MessageId,
+    message: &HistoryMessage,
+    session: Option<&Session>,
+    cx: &mut Context<QuillApp>,
+) -> (AnyElement, Pixels) {
+    let more = message_actions_button(chat_id, message_id, cx);
+    let (reply, react) = quill::corner_buttons::visible(
+        session.map(|s| (s.media_prefs.corner_reply, s.media_prefs.corner_reaction)),
+        !message.pending && message.id.0 > 0,
+        message.can_react(),
+    );
+    if !reply && !react {
+        return (
+            more.into_any_element(),
+            px(quill::corner_buttons::span(false, false)),
+        );
+    }
+    let mut row = div().flex().items_center().gap_1();
+    if reply {
+        row = row.child(
+            corner_button(
+                format!("message-reply-{}", message_id.0),
+                gpui_kit::assets::IconName::Reply,
+                "Reply",
                 cx,
-            );
-        }))
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.begin_reply_from_message(chat_id, message_id, window, cx);
+            })),
+        );
+    }
+    if react {
+        row = row.child(
+            corner_button(
+                format!("message-react-{}", message_id.0),
+                gpui_kit::assets::IconName::FaceSlightlySmilingPlus,
+                "React",
+                cx,
+            )
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                // The menu leads with the reaction strip.
+                this.open_message_menu(
+                    MessageMenuState {
+                        chat_id,
+                        message_id,
+                        position: event.position(),
+                    },
+                    window,
+                    cx,
+                );
+            })),
+        );
+    }
+    let span = quill::corner_buttons::span(reply, react);
+    (row.child(more).into_any_element(), px(span))
+}
+
+/// Round "…" button shown beside a bubble on hover; opens the message menu.
+fn message_actions_button(
+    chat_id: ChatId,
+    message_id: MessageId,
+    cx: &mut Context<QuillApp>,
+) -> Button {
+    corner_button(
+        format!("message-actions-{}", message_id.0),
+        gpui_kit::assets::IconName::Ellipsis,
+        "Message actions",
+        cx,
+    )
+    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+        this.open_message_menu(
+            MessageMenuState {
+                chat_id,
+                message_id,
+                position: event.position(),
+            },
+            window,
+            cx,
+        );
+    }))
 }
 
 pub(super) fn album_tile(
@@ -721,7 +799,8 @@ pub(super) fn session_history_row(
     };
     let chat_id = message.chat_id;
     let message_id = message.id;
-    let more_btn = message_actions_button(chat_id, message_id, cx);
+    let (more_btn, actions_span) =
+        message_corner_actions(chat_id, message_id, message, session, cx);
     // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
     // official clients' post footer. Renders whenever views exist; only
     // channel posts carry a view count in practice.
@@ -763,6 +842,11 @@ pub(super) fn session_history_row(
         .as_ref()
         .and_then(|info| info.reactions.as_ref())
         .is_some_and(|reactions| reactions.are_tags);
+    let can_list_reactors = message
+        .interaction_info
+        .as_ref()
+        .and_then(|info| info.reactions.as_ref())
+        .is_some_and(|reactions| reactions.can_get_added_reactions);
     let has_chips = !chips.is_empty();
     // Channel posts open their comments, group messages their replies
     // (tdesktop `paintCommentsButton`). Inside the open thread itself the
@@ -841,8 +925,42 @@ pub(super) fn session_history_row(
                 quill::state::ReactionChoice::CustomEmoji(_) => format!("Custom emoji {count}"),
             };
             let tag_type = chip.reaction_type.clone();
+            // Hover names who reacted; right-click opens the full list.
+            let hover_text = (!are_tags).then(|| {
+                let names: Vec<String> = chip
+                    .recent_senders
+                    .iter()
+                    .map(|sender| reactor_avatar(sender, session, media_roots).0)
+                    .collect();
+                quill::reaction_who::tooltip_text(&names, count)
+            });
+            let list_type = quill::reaction_who::chip_opens_list(can_list_reactors, are_tags)
+                .then(|| chip.reaction_type.clone());
             let chip_el = div()
                 .id(("reaction-chip", message_id.0 as u64 * 64 + index as u64))
+                .when_some(hover_text.filter(|text| !text.is_empty()), |this, text| {
+                    this.tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+                    })
+                })
+                .when_some(list_type, |this, reaction| {
+                    this.on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            this.open_reactors_menu(
+                                MessageMenuState {
+                                    chat_id,
+                                    message_id,
+                                    position: event.position,
+                                },
+                                reaction.clone(),
+                                window,
+                                cx,
+                            );
+                        }),
+                    )
+                })
                 .flex()
                 .items_center()
                 .gap_1()
@@ -1025,15 +1143,33 @@ pub(super) fn session_history_row(
             None,
             cx,
         )),
-        MessageContent::Sticker(sticker) => Some(sticker_attachment(
-            message.id.0 as u64,
-            sticker,
-            files,
-            downloading,
-            media_roots,
-            sticker_frame,
-            cx,
-        )),
+        MessageContent::Sticker(sticker) => {
+            let attachment = sticker_attachment(
+                message.id.0 as u64,
+                sticker,
+                files,
+                downloading,
+                media_roots,
+                sticker_frame,
+                cx,
+            );
+            // A tap opens the sticker's set (tdesktop `StickerSetBox`).
+            let set_id = sticker.set_id;
+            Some(if set_id != 0 && !message.pending {
+                div()
+                    .id(("sticker-open-set", message.id.0 as u64))
+                    .cursor_pointer()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label("Open sticker set")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.view_message_sticker_set(set_id, cx);
+                    }))
+                    .child(attachment)
+                    .into_any_element()
+            } else {
+                attachment
+            })
+        }
         MessageContent::VoiceNote(note) => Some(voice_note_row(
             message.chat_id,
             message.id,
@@ -1514,7 +1650,8 @@ pub(super) fn session_history_row(
         }
         chrome.media_led = media_led;
         chrome.media_width = media_width;
-        chrome.actions = more_btn.take().map(IntoElement::into_any_element);
+        chrome.actions = more_btn.take();
+        chrome.actions_span = actions_span;
         chrome.bottom_bar = reply_bar_el.take();
         chrome
     };

@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::menu_states::MessageMenuState;
 use super::*;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -198,6 +199,44 @@ impl QuillApp {
                     .child("Double-click a message to react with it"),
             )
             .child(strip)
+            .into_any_element()
+    }
+
+    /// Settings: the reply and reaction buttons beside a hovered message
+    /// (tdesktop "Reply button on messages" / "Reaction button on
+    /// messages").
+    pub(super) fn corner_button_switches(&self, cx: &mut Context<Self>) -> AnyElement {
+        let (reply, react) = self.session().map_or((true, true), |s| {
+            (s.media_prefs.corner_reply, s.media_prefs.corner_reaction)
+        });
+        let row = || div().flex().items_center().gap_2().px_2().py_1();
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                row()
+                    .child(
+                        Switch::new("media-pref-corner-reply")
+                            .checked(reply)
+                            .accessibility_label("Reply button on messages")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_media_pref(|prefs| prefs.corner_reply = on, cx);
+                            })),
+                    )
+                    .child(div().text_sm().child("Reply button on messages")),
+            )
+            .child(
+                row()
+                    .child(
+                        Switch::new("media-pref-corner-reaction")
+                            .checked(react)
+                            .accessibility_label("Reaction button on messages")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_media_pref(|prefs| prefs.corner_reaction = on, cx);
+                            })),
+                    )
+                    .child(div().text_sm().child("Reaction button on messages")),
+            )
             .into_any_element()
     }
 

@@ -36,6 +36,8 @@ enum DemoDialog {
     StickerSet,
     ModeratedDelete,
     FactCheck,
+    /// The card under a tapped custom emoji (seeded in the session).
+    CustomEmojiCard,
 }
 
 struct Scenario {
@@ -101,6 +103,15 @@ fn scenario(name: &str) -> Scenario {
         "moderate" => Scenario {
             dialog: DemoDialog::ModeratedDelete,
             ..at(31, 3102, 340., 240.)
+        },
+        // The reactor list opened from a reaction chip: the thumbs-up tab.
+        "group-reactors-tab" => Scenario {
+            page: MessageMenuPage::Audience,
+            ..at(31, 3101, 340., 200.)
+        },
+        "custom-emoji-card" => Scenario {
+            dialog: DemoDialog::CustomEmojiCard,
+            ..at(11, 906, 380., 260.)
         },
         "voice-tone" => at(11, 910, 380., 260.),
         "voice-timecode" => at(11, 908, 380., 260.),
@@ -507,6 +518,29 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
         session.message_audience = Some(audience);
     }
 
+    if scenario_name() == "custom-emoji-card" {
+        let custom = StickerItem {
+            custom_emoji_id: Some(5001),
+            id: 5001,
+            set_id: 77,
+            emoji: "\u{1F600}".into(),
+            width: 100,
+            height: 100,
+            format: StickerFormat::Webp,
+            file_id: quill::ids::FileId(9100),
+            thumb_file_id: Some(quill::ids::FileId(9061)),
+            thumb_width: 128,
+            thumb_height: 128,
+            requires_premium: false,
+        };
+        session.emoji.custom_emoji_stickers.push(custom);
+        session.custom_emoji_preview = Some(quill::state::CustomEmojiPreview {
+            emoji_id: 5001,
+            set_id: 77,
+            title: "Cozy Cats".into(),
+        });
+    }
+
     // The sticker's set is not installed yet; favorites are loaded.
     if chosen.message_id == 906 {
         session.stickers.sets.clear();
@@ -614,7 +648,9 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
                 set_id: 77,
                 stage: StickerSetViewStage::Ready {
                     title: "Cozy Cats".into(),
+                    name: "CozyCats".into(),
                     installed: false,
+                    is_emoji: false,
                     stickers: (1..=10).map(sticker).collect(),
                 },
                 files_requested: true,
@@ -653,12 +689,16 @@ impl QuillApp {
                     position: point(px(chosen.position.0), px(chosen.position.1)),
                 });
                 self.message_menu_ui.page = chosen.page;
+                if scenario_name() == "group-reactors-tab" {
+                    self.message_menu_ui.audience_tab = Some(ReactionType::emoji("\u{1F44D}"));
+                }
             }
             DemoDialog::ReportPick
             | DemoDialog::ReportSub
             | DemoDialog::ReportText
             | DemoDialog::ReportDone => self.message_menu_ui.report_open = true,
             DemoDialog::StickerSet => self.message_menu_ui.sticker_set_open = true,
+            DemoDialog::CustomEmojiCard => {}
             DemoDialog::FactCheck => {
                 let existing = self
                     .session()

@@ -859,6 +859,7 @@ impl Render for QuillApp {
                         ),
                 )
             })
+            .children(self.custom_emoji_card(cx))
             .children(self.photo_editor_overlay(cx))
             // Phase 9.1: story viewer overlay above the media viewer.
             .when(self.story_viewer.is_open(), |this| {
@@ -1074,7 +1075,14 @@ fn status_note_is_toast(note: &str) -> bool {
         "limit",
         "will send when",
     ];
-    const CONFIRMATION: [&str; 5] = ["copied", "saved to", "exported", "downloaded", "link"];
+    const CONFIRMATION: [&str; 6] = [
+        "copied",
+        "saved to",
+        "exported",
+        "downloaded",
+        "link",
+        "archived",
+    ];
     FAILURE
         .iter()
         .chain(RESTRICTION.iter())
