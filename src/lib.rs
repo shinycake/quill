@@ -76,6 +76,7 @@ pub mod service_text;
 #[cfg(test)]
 mod service_text_tests;
 pub mod settings;
+pub mod settings_account;
 pub mod share_box;
 pub mod signin;
 pub mod single_instance;

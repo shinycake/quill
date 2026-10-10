@@ -508,6 +508,9 @@ pub struct Session {
     /// Phase C2i: "who can call me"
     /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
     pub call_privacy_allow_calls: Option<PrivacyWho>,
+    /// `getSupportUser` answer waiting for the driver to open the chat
+    /// (Settings > Ask a Question).
+    pub support_user_ready: Option<i64>,
     /// Phase C2i: peer-to-peer calls
     /// (`userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67 :9009).
     pub call_privacy_p2p: Option<PrivacyWho>,
@@ -1389,6 +1392,7 @@ impl Session {
             recent_calls_loading: false,
             recent_calls_error: false,
             call_privacy_allow_calls: None,
+            support_user_ready: None,
             call_privacy_p2p: None,
             call_privacy_loading: false,
             call_privacy_pending: 0,

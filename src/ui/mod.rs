@@ -205,6 +205,7 @@ mod send_button_ui;
 mod service_demo;
 mod service_media_demo;
 mod service_row;
+mod settings_account_ui;
 mod settings_ui;
 mod share_box_ui;
 mod share_content_ui;

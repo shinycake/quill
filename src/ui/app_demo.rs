@@ -1298,7 +1298,11 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyPrivacy | ScreenshotDemo::ReadyPrivacyGifts => (
+        ScreenshotDemo::ReadyPrivacy
+        | ScreenshotDemo::ReadyPrivacyGifts
+        | ScreenshotDemo::ReadyPrivacyCalls
+        | ScreenshotDemo::ReadySettingsHelp
+        | ScreenshotDemo::ReadyAskQuestion => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — privacy settings (injected, no live Telegram)".into(),
