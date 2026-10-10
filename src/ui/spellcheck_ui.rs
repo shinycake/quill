@@ -70,6 +70,16 @@ impl SpellInfo {
 }
 
 impl QuillApp {
+    /// Where Hunspell dictionaries are searched: the ones downloaded in
+    /// Appearance → Spelling first, then the system folders.
+    #[cfg(not(target_os = "macos"))]
+    fn spell_dictionary_dirs() -> Vec<std::path::PathBuf> {
+        quill::spell_catalog::with_managed_dir(
+            quill::settings::safe_app_root().as_deref(),
+            quill::spell_dict::standard_dictionary_dirs_from_env(),
+        )
+    }
+
     /// The platform engine and what it reports: macOS NSSpellChecker,
     /// Windows ISpellChecker, else Hunspell dictionaries from disk
     /// (`quill::spell_dict`); with none of those, checking is off.
@@ -95,7 +105,7 @@ impl QuillApp {
             let locales = quill::spell_win::user_locale_tags();
             let system = quill::spell_win::WindowsSpellBackend::new(&locales, chosen);
             let mut engine = quill::spell_dict::hunspell_engine(
-                &quill::spell_dict::standard_dictionary_dirs_from_env(),
+                &Self::spell_dictionary_dirs(),
                 &locales,
                 chosen,
             );
@@ -116,7 +126,7 @@ impl QuillApp {
         #[cfg(not(any(target_os = "macos", windows)))]
         {
             let engine = quill::spell_dict::hunspell_engine(
-                &quill::spell_dict::standard_dictionary_dirs_from_env(),
+                &Self::spell_dictionary_dirs(),
                 &quill::spell_dict::system_locales(),
                 chosen,
             );
