@@ -374,10 +374,41 @@ fn ui_main(args: &[String]) {
                     if window.focused(cx).is_none() {
                         window.focus(&view.focus_handle(cx), cx);
                     }
-                    if start_in_tray && !quill::tray::tray_available() {
-                        // No tray host must never leave the only window inaccessible.
-                        cx.activate(true);
-                        window.activate_window();
+                    if start_in_tray {
+                        // No tray host must never leave the only window
+                        // inaccessible. Registration runs off-thread; poll its
+                        // outcome without blocking launch.
+                        let watch = view.downgrade();
+                        let handle = window.window_handle();
+                        cx.spawn(async move |cx| {
+                            let mut waited = 0u64;
+                            loop {
+                                let state = watch.update(cx, |this, _| {
+                                    quill::tray::sync_tray(this.session());
+                                    quill::tray::tray_startup_reveal(
+                                        quill::tray::tray_available(),
+                                        quill::tray::tray_registering(),
+                                        waited,
+                                    )
+                                });
+                                match state {
+                                    Ok(None) => {}
+                                    Ok(Some(true)) => {
+                                        let _ = handle.update(cx, |_, window, cx| {
+                                            cx.activate(true);
+                                            window.activate_window();
+                                        });
+                                        break;
+                                    }
+                                    _ => break,
+                                }
+                                cx.background_executor()
+                                    .timer(std::time::Duration::from_millis(100))
+                                    .await;
+                                waited += 100;
+                            }
+                        })
+                        .detach();
                     }
                     // The shell adds Quill's dialog hit-test barrier; Root
                     // hosts the kit dialog and notification layers.

@@ -140,28 +140,111 @@ thread_local! {
         RefCell::new(Lru::new(CACHE_TILES));
 }
 
-fn mask_for(path: &Path) -> Option<Arc<Vec<u8>>> {
-    if let Some(hit) = MASKS.with(|m| m.borrow_mut().get(&path.to_path_buf())) {
-        return hit;
+/// Background mask loads, shared with the UI thread: which files are being
+/// rasterised and which results are waiting to be picked up.
+struct LoadBoard<K, V> {
+    inflight: std::collections::HashSet<K>,
+    done: std::collections::HashMap<K, V>,
+}
+
+impl<K: std::hash::Hash + Eq + Clone, V> LoadBoard<K, V> {
+    fn new() -> Self {
+        Self {
+            inflight: std::collections::HashSet::new(),
+            done: std::collections::HashMap::new(),
+        }
     }
-    let mask = std::fs::read(path)
-        .ok()
-        .and_then(|data| render_mask(&data, TILE_EDGE))
-        .map(Arc::new);
-    MASKS.with(|m| m.borrow_mut().insert(path.to_path_buf(), mask.clone()));
-    mask
+
+    /// A finished result for `key`, if the worker delivered one.
+    fn take_done(&mut self, key: &K) -> Option<V> {
+        self.done.remove(key)
+    }
+
+    /// Claim the load for `key`; false when a worker already has it.
+    fn claim(&mut self, key: &K) -> bool {
+        self.inflight.insert(key.clone())
+    }
+
+    fn finish(&mut self, key: K, value: V) {
+        self.inflight.remove(&key);
+        self.done.insert(key, value);
+    }
+}
+
+type MaskBoard = LoadBoard<PathBuf, Option<Arc<Vec<u8>>>>;
+
+fn mask_board() -> &'static std::sync::Mutex<MaskBoard> {
+    static BOARD: std::sync::OnceLock<std::sync::Mutex<MaskBoard>> = std::sync::OnceLock::new();
+    BOARD.get_or_init(|| std::sync::Mutex::new(LoadBoard::new()))
+}
+
+/// The mask for a file: `Some(result)` once loaded (inner `None` = missing or
+/// unreadable), `None` while a worker thread is still reading and
+/// rasterising it. Never touches the disk on the calling thread.
+fn mask_for(path: &Path) -> Option<Option<Arc<Vec<u8>>>> {
+    if let Some(hit) = MASKS.with(|m| m.borrow_mut().get(&path.to_path_buf())) {
+        return Some(hit);
+    }
+    let key = path.to_path_buf();
+    let spawn = {
+        let mut board = mask_board().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(mask) = board.take_done(&key) {
+            drop(board);
+            MASKS.with(|m| m.borrow_mut().insert(key, mask.clone()));
+            return Some(mask);
+        }
+        board.claim(&key)
+    };
+    if spawn {
+        let worker_key = key.clone();
+        let started = std::thread::Builder::new()
+            .name("quill-pattern-mask".into())
+            .spawn(move || {
+                let mask = std::fs::read(&worker_key)
+                    .ok()
+                    .and_then(|data| render_mask(&data, TILE_EDGE))
+                    .map(Arc::new);
+                mask_board()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .finish(worker_key, mask);
+            });
+        if started.is_err() {
+            mask_board()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .finish(key, None);
+        }
+    }
+    None
+}
+
+/// Result of asking for a pattern tile.
+pub(super) enum TileState {
+    /// Still reading/rasterising off-thread; show the plain fill and repaint.
+    Pending,
+    /// Missing or unreadable file; nothing to draw.
+    Missing,
+    Ready(Arc<RenderImage>),
 }
 
 /// The tile for a pattern file and ink; rasterised once per (file, ink) and
-/// kept in a bounded cache. `None` while the file is missing or unreadable.
-pub(super) fn tile_for(path: &Path, ink: PatternInk) -> Option<Arc<RenderImage>> {
+/// kept in a bounded cache. The file is read off the UI thread.
+pub(super) fn tile_for(path: &Path, ink: PatternInk) -> TileState {
     let key = (path.to_path_buf(), ink);
     if let Some(hit) = TILES.with(|t| t.borrow_mut().get(&key)) {
-        return Some(hit);
+        return TileState::Ready(hit);
     }
-    let mask = mask_for(path)?;
+    let Some(mask) = mask_for(path) else {
+        return TileState::Pending;
+    };
+    let Some(mask) = mask else {
+        return TileState::Missing;
+    };
     let bgra = compose_tile(&mask, ink);
-    let buffer = image::RgbaImage::from_raw(TILE_EDGE, TILE_EDGE, bgra)?;
+    let Some(buffer) = image::RgbaImage::from_raw(TILE_EDGE, TILE_EDGE, bgra) else {
+        return TileState::Missing;
+    };
     let render = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
         image::Frame::new(buffer),
     ])));
@@ -170,7 +253,7 @@ pub(super) fn tile_for(path: &Path, ink: PatternInk) -> Option<Arc<RenderImage>>
             image_budget::retire_all([old]);
         }
     });
-    Some(render)
+    TileState::Ready(render)
 }
 
 /// Tile columns across `width` for tiles `tile` wide: odd, so one tile sits
@@ -188,7 +271,14 @@ pub(super) fn pattern_layer(path: PathBuf, ink: PatternInk) -> impl IntoElement 
     canvas(
         move |_, _, _| tile_for(&path, ink),
         move |bounds, tile, window, _| {
-            let Some(tile) = tile else { return };
+            let tile = match tile {
+                TileState::Ready(tile) => tile,
+                TileState::Pending => {
+                    window.request_animation_frame();
+                    return;
+                }
+                TileState::Missing => return,
+            };
             let edge = bounds.size.height;
             if edge <= px(1.) {
                 return;
@@ -218,7 +308,22 @@ pub(super) fn pattern_layer(path: PathBuf, ink: PatternInk) -> impl IntoElement 
 
 #[cfg(test)]
 mod tests {
-    use super::{PatternInk, compose_tile, pattern_ink, render_mask, tile_columns};
+    use super::{LoadBoard, PatternInk, compose_tile, pattern_ink, render_mask, tile_columns};
+
+    #[test]
+    fn load_board_claims_once_and_hands_over_the_result() {
+        let mut board: LoadBoard<&str, u8> = LoadBoard::new();
+        assert!(board.claim(&"a"));
+        assert!(!board.claim(&"a"), "second claim while in flight");
+        assert_eq!(board.take_done(&"a"), None);
+        board.finish("a", 7);
+        assert_eq!(board.take_done(&"a"), Some(7));
+        assert_eq!(board.take_done(&"a"), None);
+        assert!(
+            board.claim(&"a"),
+            "claimable again after the result is taken"
+        );
+    }
 
     const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="0" width="5" height="10"/></svg>"#;
 
