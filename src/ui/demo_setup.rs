@@ -2229,8 +2229,9 @@ impl QuillApp {
         // media on offer so the size toggle renders too.
         if matches!(demo, Some(ScreenshotDemo::ReadyCodeLanguage)) {
             let text = "Here is the fix:\n```\nfn main() {\n    println!(\"hi\");\n}\n```";
+            // The fence becomes a code block in the field.
+            self.set_composer_markup(text, window, cx);
             self.composer.update(cx, |input, cx| {
-                input.set_value(text, window, cx);
                 input.set_selected_range(40..40, cx);
             });
             self.open_code_language_dialog(window, cx);
@@ -2240,6 +2241,34 @@ impl QuillApp {
                     .update(cx, |input, cx| input.set_value("rust", window, cx));
             }
             self.status_note = "screenshot demo — code language".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyComposerWysiwyg)) {
+            // codex:composer-input: formats, a mention tag and a custom emoji
+            // (id 4242 resolves in this seed) shown in the field.
+            let variant = std::env::var("QUILL_DEMO_WYSIWYG").unwrap_or_default();
+            let markup = match variant.as_str() {
+                "rtl" => {
+                    "سلام **دوستان**، پیش‌نویس با _قالب‌بندی_ و ![😀](tg://emoji?id=4242) آماده است\nنسخهٔ ۲ برای [Ann](tg://user?id=777) ارسال شد"
+                }
+                "wrap" => {
+                    "**A long bold line that has to wrap inside the composer, measured with the bold font so no word sticks out past the edge** and plain text after it"
+                }
+                _ => {
+                    "Release notes: **bold**, _italic_, __underline__, ~~struck~~, ||spoiler||, `code` and a [link](https://telegram.org)\nThanks [Ann](tg://user?id=777) for the ![😀](tg://emoji?id=4242) review!\n> Quoted feedback stays a quote"
+                }
+            };
+            self.set_composer_markup(markup, window, cx);
+            let select = variant == "select";
+            self.composer.update(cx, |input, cx| {
+                input.focus(window, cx);
+                if select {
+                    input.set_selected_range(15..43, cx);
+                } else {
+                    let end = input.value().len();
+                    input.set_selected_range(end..end, cx);
+                }
+            });
+            self.status_note = "screenshot demo — formatted composer".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyComposerPreview)) {
             self.composer.update(cx, |input, cx| {

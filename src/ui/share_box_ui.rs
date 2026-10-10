@@ -245,8 +245,7 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.select_listed_chat(dest, window, cx);
         if !comment.is_empty() {
-            self.composer
-                .update(cx, |input, cx| input.set_value(comment, window, cx));
+            self.set_composer_markup(&comment, window, cx);
         }
         self.status_note = "forward bar ready — press Send".into();
         cx.notify();

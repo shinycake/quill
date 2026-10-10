@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// changes that only change formatting spans are recorded, and coalesced
+// typing merges span snapshots. See third_party/gpui-base/QUILL-CHANGES.md.
 use super::auto_close::AutoClosedPairs;
 use crate::input::change::Change;
 
@@ -102,6 +105,7 @@ impl UndoManager {
             return false;
         }
         if change.token_delta.is_none()
+            && change.spans.is_none()
             && change.old_range == change.new_range
             && change.old_text == change.new_text
         {
@@ -213,6 +217,8 @@ impl UndoManager {
                     .truncate(change.old_range.start - last.new_range.start);
                 last.new_text.push_str(&change.new_text);
                 last.new_range.end = change.new_range.end;
+                last.spans =
+                    super::text_spans::SpanSnapshot::merge(last.spans.take(), change.spans.clone());
                 return;
             }
             previous.changes.extend(changes);
@@ -389,7 +395,10 @@ impl UndoTransaction {
 /// Changes that do not form such a chain (multi-cursor batches, for one) always
 /// report `false`, so this only ever collapses the single-region case.
 fn is_noop_batch(changes: &[Change]) -> bool {
-    if changes.iter().any(|c| c.token_delta.is_some()) {
+    if changes
+        .iter()
+        .any(|c| c.token_delta.is_some() || c.spans.is_some())
+    {
         return false;
     }
     let Some(first) = changes.first() else {
@@ -437,7 +446,11 @@ fn is_adjacent_batch(intent: EditIntent, previous: &[Change], current: &[Change]
 }
 
 fn is_adjacent(intent: EditIntent, previous: &Change, current: &Change) -> bool {
-    if previous.token_delta.is_some() || current.token_delta.is_some() {
+    if previous.token_delta.is_some()
+        || current.token_delta.is_some()
+        || previous.is_span_only()
+        || current.is_span_only()
+    {
         return false;
     }
     match intent {

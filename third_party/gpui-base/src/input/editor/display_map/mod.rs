@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
+// bidirectional text support and inline tokens in bidi rows. See third_party/gpui-base/QUILL-CHANGES.md.
 /// Display mapping system for Editor/Input.
 ///
 /// This module implements a layered display mapping architecture:
@@ -12,7 +12,7 @@
 mod display_map;
 mod bidi;
 mod inline_line;
-pub(crate) use bidi::{BidiLine, Paragraph, mirror_neutral_run, needs_bidi};
+pub(crate) use bidi::{BidiLine, Cluster, Fragment, Paragraph, mirror_neutral_run, needs_bidi};
 pub(crate) use inline_line::{InlineFragment, InputLine, fragment_from_shaped};
 mod fold_map;
 mod folding;

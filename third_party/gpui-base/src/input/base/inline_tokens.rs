@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// content carries formatting spans, and an insertion can carry several tokens.
+// See third_party/gpui-base/QUILL-CHANGES.md.
 //! Document annotations for atomic inline objects. Coordinates are always source bytes.
 use std::ops::Range;
 
@@ -90,13 +93,39 @@ impl InlineTokenSpan {
 pub struct InputContent {
     text: SharedString,
     tokens: Vec<InlineTokenSpan>,
+    /// Formatting spans over the text (Quill patch, `text_spans.rs`).
+    spans: Vec<super::TextSpan>,
 }
 impl InputContent {
     pub fn new(text: impl Into<SharedString>) -> Self {
         Self {
             text: text.into(),
             tokens: vec![],
+            spans: vec![],
         }
+    }
+    /// Attach a formatting span to a half-open UTF-8 byte range of the text.
+    /// The range must be nonempty and sit on character boundaries; spans may
+    /// overlap, and touching or overlapping spans of one tag merge.
+    pub fn with_span(
+        mut self,
+        range: Range<usize>,
+        tag: impl Into<SharedString>,
+    ) -> Result<Self, InlineTokenError> {
+        let tag = tag.into();
+        if range.is_empty() || range.end > self.text.len() || tag.is_empty() {
+            return Err(InlineTokenError::InvalidRange);
+        }
+        if !self.text.is_char_boundary(range.start) || !self.text.is_char_boundary(range.end) {
+            return Err(InlineTokenError::InvalidBoundary);
+        }
+        self.spans.push(super::TextSpan::new(range, tag));
+        super::text_spans::normalize(&mut self.spans);
+        Ok(self)
+    }
+    /// The formatting spans, sorted by start.
+    pub fn spans(&self) -> &[super::TextSpan] {
+        &self.spans
     }
     /// Attach a token to a half-open UTF-8 byte range of the text. The range
     /// must be nonempty, sit on grapheme boundaries, contain exactly the
@@ -288,16 +317,25 @@ impl<M: InputModeKind> InputBaseState<M> {
         if self.replaying_history {
             return None;
         }
-        let inserted = self.pending_token.take().map(|token| InlineTokenSpan {
-            range: 0..new_len,
-            token,
-        });
-        if inserted.is_some() && self.inline_tokens.is_none() {
+        let mut inserted: Vec<InlineTokenSpan> = self
+            .pending_token
+            .take()
+            .map(|token| InlineTokenSpan {
+                range: 0..new_len,
+                token,
+            })
+            .into_iter()
+            .collect();
+        // Content inserted with its own tokens (Quill patch: rich paste).
+        if let Some(tokens) = self.pending_tokens.take() {
+            inserted.extend(tokens.into_iter().filter(|t| t.range.end <= new_len));
+        }
+        if !inserted.is_empty() && self.inline_tokens.is_none() {
             self.inline_tokens = Some(Box::default());
         }
         self.inline_tokens
             .as_mut()?
-            .replace(range, new_len, inserted.as_slice())
+            .replace(range, new_len, &inserted)
     }
     pub(super) fn replay_tokens(
         &mut self,
@@ -417,6 +455,7 @@ macro_rules! token_api {
                 InputContent {
                     text: self.value(),
                     tokens: self.token_spans().to_vec(),
+                    spans: self.text_spans.to_vec(),
                 }
             }
         }

@@ -24,6 +24,7 @@ pub mod checklist;
 pub mod code_language;
 pub mod community_mode;
 pub mod composer;
+pub mod composer_doc;
 pub mod connect;
 pub mod connect_smoke;
 pub mod contacts_index;

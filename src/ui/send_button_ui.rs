@@ -55,7 +55,8 @@ impl QuillApp {
             || !self.pending_attachments.is_empty()
             || self.forward_bar_here()
         {
-            self.submit_composer(text, window, cx);
+            let markup = self.composer_markup(cx);
+            self.submit_composer(markup, window, cx);
         }
     }
 

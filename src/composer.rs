@@ -934,11 +934,13 @@ pub fn send_started_note(offline: bool, scheduling: ComposerScheduling, online_n
 /// is authored as lightweight markup (Telegram X `InputView` format menu /
 /// tdesktop markdown behavior) and converted to TDLib `textEntities` on
 /// the send path by `parse_format_markup`. Paired delimiters only;
-/// unmatched delimiters stay literal; no nesting (documented, keeps the
-/// parser a single pass):
+/// unmatched delimiters stay literal; inline spans nest (`**a *b* c**`),
+/// code stays literal:
 /// `**bold**` `*italic*` (or `_italic_`) `__underline__` `~~strike~~`
-/// `` `code` `` `||spoiler||` `[label](url)`; fenced ` ```lang? ` blocks;
-/// `> ` line prefix for quotes.
+/// `` `code` `` `||spoiler||` `[label](url)`, `[name](tg://user?id=N)` for a
+/// mention of a user without a username; fenced ` ```lang? ` blocks;
+/// `> ` line prefix for quotes. The composer field itself shows formatting
+/// as you type (`composer_doc`); markup is how its content travels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatKind {
     Bold,
@@ -953,6 +955,9 @@ pub enum FormatKind {
     /// `![😀](tg://emoji?id=…)` — a custom emoji over its fallback emoji
     /// (`url` keeps the `tg://emoji?id=` link).
     CustomEmoji,
+    /// `[Name](tg://user?id=N)` — a mention of a user without a username,
+    /// sent as `textEntityTypeMentionName` (`url` keeps the link).
+    MentionName,
 }
 
 /// M1: one parsed entity. Offsets are UTF-16 code units — the units TDLib
@@ -1166,94 +1171,7 @@ pub fn parse_format_markup(text: &str) -> (String, Vec<ComposerEntity>) {
 /// Telegram. Kinds the markup can't express (URLs, mentions, …) stay plain
 /// text; TDLib detects those again on send.
 pub fn entities_to_markup(text: &str, entities: &[crate::text::TextEntity]) -> String {
-    use crate::text::TextEntityKind as K;
-    // (byte position, is_open, key, marker), sorted by position, closes
-    // before opens, then key descending: opens key on their end (outer
-    // span opens first), closes on their start (inner span closes first).
-    let mut inserts: Vec<(usize, bool, usize, String)> = Vec::new();
-    // The markup has no nesting (inner markers stay literal), so keep a
-    // set of non-overlapping spans: custom emoji first, then links, then
-    // longer spans.
-    let rank = |kind: &K| match kind {
-        K::CustomEmoji { .. } => 0,
-        K::TextUrl { .. } => 1,
-        _ => 2,
-    };
-    let mut ordered: Vec<&crate::text::TextEntity> = entities
-        .iter()
-        .filter(|e| {
-            e.utf8_start < e.utf8_end
-                && e.utf8_end <= text.len()
-                && text.is_char_boundary(e.utf8_start)
-                && text.is_char_boundary(e.utf8_end)
-                && matches!(
-                    e.kind,
-                    K::Bold
-                        | K::Italic
-                        | K::Underline
-                        | K::Strikethrough
-                        | K::Spoiler
-                        | K::Code
-                        | K::Pre
-                        | K::PreCode { .. }
-                        | K::TextUrl { .. }
-                        | K::CustomEmoji { .. }
-                        | K::BlockQuote
-                        | K::ExpandableBlockQuote
-                )
-        })
-        .collect();
-    ordered.sort_by_key(|e| (rank(&e.kind), std::cmp::Reverse(e.utf8_end - e.utf8_start)));
-    let mut kept: Vec<&crate::text::TextEntity> = Vec::new();
-    for entity in ordered {
-        if kept
-            .iter()
-            .all(|k| entity.utf8_end <= k.utf8_start || entity.utf8_start >= k.utf8_end)
-        {
-            kept.push(entity);
-        }
-    }
-    for entity in kept {
-        let (start, end) = (entity.utf8_start, entity.utf8_end);
-        let pair = match &entity.kind {
-            K::Bold => ("**".to_string(), "**".to_string()),
-            K::Italic => ("*".to_string(), "*".to_string()),
-            K::Underline => ("__".to_string(), "__".to_string()),
-            K::Strikethrough => ("~~".to_string(), "~~".to_string()),
-            K::Spoiler => ("||".to_string(), "||".to_string()),
-            K::Code => ("`".to_string(), "`".to_string()),
-            K::Pre => ("```\n".to_string(), "\n```".to_string()),
-            K::PreCode { language } => (format!("```{language}\n"), "\n```".to_string()),
-            K::TextUrl { url } => ("[".to_string(), format!("]({url})")),
-            K::CustomEmoji { custom_emoji_id } => (
-                "![".to_string(),
-                format!("](tg://emoji?id={custom_emoji_id})"),
-            ),
-            K::BlockQuote | K::ExpandableBlockQuote => {
-                inserts.push((start, true, end, "> ".to_string()));
-                for (offset, _) in text[start..end].match_indices('\n') {
-                    let line = start + offset + 1;
-                    if line < end {
-                        inserts.push((line, true, end, "> ".to_string()));
-                    }
-                }
-                continue;
-            }
-            _ => continue,
-        };
-        inserts.push((start, true, end, pair.0));
-        inserts.push((end, false, start, pair.1));
-    }
-    inserts.sort_by(|a, b| (a.0, a.1, b.2).cmp(&(b.0, b.1, a.2)));
-    let mut out = String::with_capacity(text.len() + inserts.len() * 4);
-    let mut at = 0;
-    for (pos, _, _, marker) in inserts {
-        out.push_str(&text[at..pos]);
-        out.push_str(&marker);
-        at = pos;
-    }
-    out.push_str(&text[at..]);
-    out
+    crate::composer_doc::ComposerDoc::from_entities(text, entities).to_markup()
 }
 
 /// The `@name` being typed at the end of the composer: the text after an
@@ -1392,19 +1310,47 @@ struct MarkupParser<'a> {
 
 impl<'a> MarkupParser<'a> {
     fn parse_top(&mut self) {
+        self.parse_span(0, self.text.len(), true);
+        // Consecutive `> ` lines are one quote, newlines included.
+        let mut merged: Vec<ComposerEntity> = Vec::with_capacity(self.entities.len());
+        for entity in self.entities.drain(..) {
+            if entity.kind == FormatKind::BlockQuote
+                && let Some(prev) = merged
+                    .iter_mut()
+                    .rev()
+                    .find(|e| e.kind == FormatKind::BlockQuote)
+                && prev.offset + prev.length + 1 == entity.offset
+                && self
+                    .out
+                    .as_bytes()
+                    .get(utf16_to_byte(&self.out, prev.offset + prev.length))
+                    == Some(&b'\n')
+            {
+                prev.length = entity.offset + entity.length - prev.offset;
+                continue;
+            }
+            merged.push(entity);
+        }
+        merged.sort_by_key(|e| (e.offset, std::cmp::Reverse(e.length)));
+        self.entities = merged;
+    }
+
+    /// Parse `self.text[from..to]`. Block syntax (`> ` quote lines) only at
+    /// the top level; inline spans nest (`**a *b* c**`), except inside code,
+    /// which stays literal.
+    fn parse_span(&mut self, from: usize, to: usize, top: bool) {
         let bytes = self.text.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
+        let mut i = from;
+        while i < to {
             let line_start = i == 0 || bytes[i - 1] == b'\n';
-            if line_start && self.text[i..].starts_with("> ") {
+            if top && line_start && self.text[i..to].starts_with("> ") {
                 let content_start = i + 2;
-                let line_end = self.text[content_start..]
+                let line_end = self.text[content_start..to]
                     .find('\n')
                     .map(|k| content_start + k)
-                    .unwrap_or(self.text.len());
-                let inner = &self.text[content_start..line_end];
+                    .unwrap_or(to);
                 let entity_start = self.out16;
-                self.push_str(inner);
+                self.parse_span(content_start, line_end, false);
                 let entity_len = self.out16 - entity_start;
                 if entity_len > 0 {
                     self.entities.push(ComposerEntity {
@@ -1418,15 +1364,15 @@ impl<'a> MarkupParser<'a> {
                 i = line_end;
                 continue;
             }
-            if let Some(consumed) = self.try_inline(i) {
+            if let Some(consumed) = self.try_inline(i, to) {
                 i = consumed;
                 continue;
             }
-            if let Some(consumed) = self.try_custom_emoji(i) {
+            if let Some(consumed) = self.try_custom_emoji(i, to) {
                 i = consumed;
                 continue;
             }
-            if let Some(consumed) = self.try_link(i) {
+            if let Some(consumed) = self.try_link(i, to) {
                 i = consumed;
                 continue;
             }
@@ -1440,8 +1386,8 @@ impl<'a> MarkupParser<'a> {
     /// past the closing delimiter on success. Check order matters: longer
     /// delimiters first (`**` before `*`, `__` before `_`, ` ``` ` before
     /// `` ` ``).
-    fn try_inline(&mut self, i: usize) -> Option<usize> {
-        let rest = &self.text[i..];
+    fn try_inline(&mut self, i: usize, to: usize) -> Option<usize> {
+        let rest = &self.text[i..to];
         // Fenced code block first (may span lines, optional language).
         if let Some(after) = rest.strip_prefix("```") {
             return self.try_fenced(i, after);
@@ -1466,10 +1412,15 @@ impl<'a> MarkupParser<'a> {
                 let line_end = after_open.find('\n').unwrap_or(after_open.len());
                 let searchable = &after_open[..line_end];
                 if let Some(close_rel) = searchable.find(open) {
-                    let inner = &searchable[..close_rel];
-                    if !inner.is_empty() {
+                    let inner_start = i + open.len();
+                    let inner_end = inner_start + close_rel;
+                    if inner_end > inner_start {
                         let entity_start = self.out16;
-                        self.push_str(inner);
+                        if kind == FormatKind::Code {
+                            self.push_str(&self.text[inner_start..inner_end]);
+                        } else {
+                            self.parse_span(inner_start, inner_end, false);
+                        }
                         self.entities.push(ComposerEntity {
                             offset: entity_start,
                             length: self.out16 - entity_start,
@@ -1477,7 +1428,7 @@ impl<'a> MarkupParser<'a> {
                             url: String::new(),
                             language: String::new(),
                         });
-                        return Some(i + open.len() + close_rel + open.len());
+                        return Some(inner_end + open.len());
                     }
                 }
                 return None;
@@ -1515,8 +1466,8 @@ impl<'a> MarkupParser<'a> {
     }
 
     /// `![emoji](tg://emoji?id=N)` — Telegram's markup for a custom emoji.
-    fn try_custom_emoji(&mut self, i: usize) -> Option<usize> {
-        let rest = &self.text[i..];
+    fn try_custom_emoji(&mut self, i: usize, to: usize) -> Option<usize> {
+        let rest = &self.text[i..to];
         let after_bang = rest.strip_prefix("![")?;
         let close_bracket = after_bang.find("](")?;
         let fallback = &after_bang[..close_bracket];
@@ -1539,9 +1490,10 @@ impl<'a> MarkupParser<'a> {
         Some(i + 2 + close_bracket + 2 + close_paren + 1)
     }
 
-    /// `[label](url)` — label stays plain (no nesting).
-    fn try_link(&mut self, i: usize) -> Option<usize> {
-        let rest = &self.text[i..];
+    /// `[label](url)`; a `tg://user?id=N` target is a mention of a user
+    /// without a username. The label may hold other inline formatting.
+    fn try_link(&mut self, i: usize, to: usize) -> Option<usize> {
+        let rest = &self.text[i..to];
         let after_bracket = rest.strip_prefix('[')?;
         let close_bracket = after_bracket.find("](")?;
         let after_paren = &after_bracket[close_bracket + 2..];
@@ -1553,12 +1505,17 @@ impl<'a> MarkupParser<'a> {
         if label.is_empty() || url.is_empty() {
             return None;
         }
+        let kind = if mention_user_id(url).is_some() {
+            FormatKind::MentionName
+        } else {
+            FormatKind::TextUrl
+        };
         let entity_start = self.out16;
-        self.push_str(label);
+        self.parse_span(i + 1, i + 1 + close_bracket, false);
         self.entities.push(ComposerEntity {
             offset: entity_start,
             length: self.out16 - entity_start,
-            kind: FormatKind::TextUrl,
+            kind,
             url: url.to_string(),
             language: String::new(),
         });
@@ -1575,6 +1532,26 @@ impl<'a> MarkupParser<'a> {
         self.out.push(ch);
         self.out16 += ch.len_utf16() as i32;
     }
+}
+
+/// The byte offset of the UTF-16 offset `units` in `text` (clamped).
+fn utf16_to_byte(text: &str, units: i32) -> usize {
+    let mut count = 0;
+    for (ix, ch) in text.char_indices() {
+        if count >= units {
+            return ix;
+        }
+        count += ch.len_utf16() as i32;
+    }
+    text.len()
+}
+
+/// The user id of a `tg://user?id=N` mention link.
+pub fn mention_user_id(url: &str) -> Option<i64> {
+    url.strip_prefix("tg://user?id=")?
+        .parse::<i64>()
+        .ok()
+        .filter(|id| *id > 0)
 }
 
 /// M1: strip markup without producing entities (clear-formatting).
@@ -2868,12 +2845,28 @@ mod tests {
     }
 
     #[test]
-    fn markup_does_not_nest() {
-        // Documented single-pass behavior: the inner marker pair is literal.
+    fn markup_nests_inline_spans() {
+        // The WYSIWYG composer can put italic inside bold, and its markup
+        // says so; code stays literal.
         let (text, entities) = parse_format_markup("**a *b* c**");
-        assert_eq!(text, "a *b* c");
+        assert_eq!(text, "a b c");
+        let spans: Vec<_> = entities
+            .iter()
+            .map(|e| (e.kind, e.offset, e.length))
+            .collect();
+        assert_eq!(
+            spans,
+            [(FormatKind::Bold, 0, 5), (FormatKind::Italic, 2, 1)]
+        );
+        let (text, entities) = parse_format_markup("`a **b**`");
+        assert_eq!(text, "a **b**");
         assert_eq!(entities.len(), 1);
-        assert_eq!(entities[0].kind, FormatKind::Bold);
+        // A mention of a user without a username.
+        let (text, entities) = parse_format_markup("hi [Ann **B**](tg://user?id=12)");
+        assert_eq!(text, "hi Ann B");
+        assert_eq!(entities[0].kind, FormatKind::MentionName);
+        assert_eq!((entities[0].offset, entities[0].length), (3, 5));
+        assert_eq!(entities[1].kind, FormatKind::Bold);
     }
 
     #[test]
@@ -2993,7 +2986,7 @@ mod entities_to_markup_tests {
         let markup = entities_to_markup(text, &entities);
         assert_eq!(
             markup,
-            "hi **very bold text** ![🔠](tg://emoji?id=42) [link](https://t.me)"
+            "hi **very _bold_ text** ![🔠](tg://emoji?id=42) [link](https://t.me)"
         );
         let (clean, parsed) = parse_format_markup(&markup);
         assert_eq!(clean, text);
@@ -3001,7 +2994,8 @@ mod entities_to_markup_tests {
         assert!(kinds.contains(&FormatKind::CustomEmoji));
         assert!(kinds.contains(&FormatKind::Bold));
         assert!(kinds.contains(&FormatKind::TextUrl));
-        // The markup can't nest: a custom emoji inside bold keeps the emoji.
+        // Formatting nests: a custom emoji inside bold keeps both, and so
+        // does italic inside bold (written with `_`).
         let text = "a 🔠 b";
         let markup = entities_to_markup(
             text,
@@ -3010,7 +3004,11 @@ mod entities_to_markup_tests {
                 entity(text, "🔠", K::CustomEmoji { custom_emoji_id: 7 }),
             ],
         );
-        assert_eq!(markup, "a ![🔠](tg://emoji?id=7) b");
+        assert_eq!(markup, "**a ![🔠](tg://emoji?id=7) b**");
+        let text = "x name y";
+        let markup =
+            entities_to_markup(text, &[entity(text, "name", K::MentionName { user_id: 3 })]);
+        assert_eq!(markup, "x [name](tg://user?id=3) y");
     }
 
     #[test]
