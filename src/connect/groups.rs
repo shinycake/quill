@@ -319,12 +319,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Ok(());
         };
-        if !self
-            .session
-            .chats
-            .get(&chat_id.0)
-            .is_some_and(|chat| chat.is_channel())
-        {
+        // Broadcast channels need the status for the composer gate;
+        // supergroups need the viewer's own restriction (`getChatMember`).
+        if !self.session.chats.get(&chat_id.0).is_some_and(|chat| {
+            chat.is_channel() || matches!(chat.kind, ChatKind::Supergroup { .. })
+        }) {
             return Ok(());
         }
         let Some(my_id) = self.session.my_user_id else {
@@ -340,12 +339,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self.session.requests.take(extra);
                 });
         };
-        if self
-            .session
-            .chats
-            .get(&chat_id.0)
-            .is_some_and(|chat| chat.my_member_status.is_some())
-        {
+        if self.session.chats.get(&chat_id.0).is_some_and(|chat| {
+            if chat.is_channel() {
+                chat.my_member_status.is_some()
+            } else {
+                chat.my_rights_fetched
+            }
+        }) {
             return Ok(());
         }
         if self

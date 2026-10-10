@@ -22,6 +22,7 @@ use super::message_text::{
     FooterMeta, caption_above_media, message_chrome, message_footer_meta, message_rich_block,
     message_text_block, rich_text_reserving,
 };
+use super::nested_click::SwallowPress;
 use super::pressable::PressableDiv;
 use super::synthetic::{BubbleLook, footer_reserve, session_bubble_quoted, session_bubble_rich};
 use super::*;
@@ -419,9 +420,9 @@ pub(super) fn album_tile(
     let chat_id = message.chat_id;
     let message_id = message.id;
     // Parity slice 5: tiles open the fullscreen media viewer. The Play
-    // button inside video tiles keeps its history-row playback — the
-    // component button stops propagation on mouse-down, so the tile click
-    // never double-fires.
+    // button inside video tiles keeps its history-row playback — its
+    // handler stops propagation, so the tile click never double-fires
+    // (kit buttons do not).
     let frame = div()
         .id(("album-tile", row_id))
         .absolute()
@@ -558,6 +559,9 @@ pub(super) fn album_tile(
                     Button::new(format!("album-play-{row_id}"))
                         .label("Play")
                         .ghost()
+                        // Kit buttons let the press bubble: without this the
+                        // tile's own click also opens the viewer.
+                        .swallow_press()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_video_playback(
                                 message_id,

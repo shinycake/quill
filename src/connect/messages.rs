@@ -942,6 +942,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         draft: &VoiceDraft,
         caption: &str,
         reply_to: Option<SendReply>,
+        play_once: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -964,6 +965,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
         let topic_id = self.send_topic(chat_id);
+        // "Play once" is a self-destruct type, which TDLib accepts in
+        // private chats only (the same gate as photos and videos).
+        let self_destruct = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .filter(|chat| matches!(chat.kind, ChatKind::Private { .. }))
+            .and(play_once.then_some(crate::telegram::requests::SelfDestructSend::Immediately));
         let json = send_voice_note(
             extra,
             chat_id,
@@ -974,6 +983,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 caption,
                 reply_to,
                 topic_id,
+                self_destruct,
             },
         );
         let json = self.thread_routed(chat_id, json);

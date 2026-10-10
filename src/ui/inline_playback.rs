@@ -534,6 +534,7 @@ impl QuillApp {
                 let cont = this
                     .update(cx, |this, cx| {
                         this.check_recording(cx);
+                        this.check_record_preview();
                         let recording = this.recording_active();
                         if let Some(capture) = this.voice_capture.as_mut() {
                             capture.sample_bar();

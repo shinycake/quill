@@ -8,6 +8,8 @@ pub(crate) enum GroupSettingsView {
     Discussion,
     ConfirmUpgrade,
     ConfirmUnlink,
+    Usernames,
+    Boosts,
 }
 
 /// B7: the group / channel settings dialog (topics, history, join to

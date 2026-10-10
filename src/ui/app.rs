@@ -672,6 +672,10 @@ pub struct QuillApp {
     pub(super) record_locked: bool,
     /// MED2: the record bar is showing the discard-confirmation row.
     pub(super) record_discard_confirm: bool,
+    /// The paused recording is being played back (position of the preview).
+    pub(super) record_preview: Option<PlaybackClock>,
+    /// "Play once": the voice message goes out as a one-time message.
+    pub(super) record_once: bool,
     /// Files being dragged over the conversation, and what they hold
     /// (`drop_zones`).
     pub(super) drop_paths: Vec<std::path::PathBuf>,
@@ -800,6 +804,8 @@ pub struct QuillApp {
     pub(super) invite_link_details: Option<(ChatId, String)>,
     /// B8: whether the revoked-links list is expanded.
     pub(super) revoked_links_open: bool,
+    /// The invite link whose QR code is showing.
+    pub(super) invite_link_qr: Option<(ChatId, String, Arc<RenderImage>)>,
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     pub(super) admin_dialog: Option<AdminDialog>,
@@ -1028,6 +1034,12 @@ pub struct QuillApp {
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.
     pub(super) thread_info_open: bool,
+    /// On a narrow window the forum's topic column replaces the chat list;
+    /// this brings the list back until another forum opens.
+    pub(super) forum_chats_peek: bool,
+    /// The forum topic column is on screen this frame, so the conversation
+    /// shows a hint instead of repeating the topic list.
+    pub(super) forum_column_shown: bool,
     /// Phase 9.5: report flow UI open in the viewer overlay
     /// (`reportStory`).
     pub(super) story_report_open: bool,

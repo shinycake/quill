@@ -500,11 +500,18 @@ impl QuillApp {
                 // hidden.
                 let topic = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
                 let in_topic = session.is_some_and(|s| s.open_topic.is_some());
+                // A group that lets the viewer send nothing swaps the
+                // composer for the reason (`composer_restriction`).
+                let restricted = self.composer_restriction().is_some();
                 match (chat, topic) {
-                    (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
+                    (Some(c), Some(t)) => {
+                        c.can_post() && !t.is_closed && c.can_send_basic_messages && !restricted
+                    }
                     // Saved sublists and tag filters are read-only views.
                     (Some(_), None) if self.saved_readonly() => false,
-                    (Some(c), None) if !in_topic => c.can_post() && self.bottom_action().is_none(),
+                    (Some(c), None) if !in_topic => {
+                        c.can_post() && !restricted && self.bottom_action().is_none()
+                    }
                     // In a topic whose info hasn't loaded yet: hide the
                     // composer until it arrives (the note says "Loading
                     // topic…").
@@ -567,6 +574,8 @@ impl QuillApp {
                     // The join/leave footer replaces the plain note for
                     // channels; Saved sublists and tag filters need none.
                     None
+                } else if let Some(reason) = self.composer_restriction() {
+                    Some(reason)
                 } else if in_topic {
                     // Parity slice 4: closed topics and a missing send
                     // permission hide the composer with an explanatory note.
@@ -926,13 +935,18 @@ impl QuillApp {
                 )
             })
             .when_some(composer_note.filter(|_| part.bottom()), |this, note| {
+                // A rights restriction is centered like tdesktop's
+                // `TextErrorSendRestriction`; other notes stay left.
+                let centered = self.composer_restriction().is_some();
                 this.child(
                     div()
+                        .id("composer-note")
                         .p_3()
                         .border_t_1()
                         .border_color(cx.theme().border)
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
+                        .when(centered, |this| this.text_center())
                         .child(note),
                 )
             })
@@ -1168,8 +1182,19 @@ impl QuillApp {
                     && !tabs_used
                     && open.is_some_and(|id| session.is_some_and(|s| s.chat_views_as_topics(id)))
                 {
-                    // Phase 5.1: opening a forum supergroup shows its topics.
-                    self.forum_topics_pane(open, cx).into_any_element()
+                    // Phase 5.1: opening a forum supergroup shows its topics;
+                    // with the topic column on screen the pane only asks for
+                    // a choice.
+                    if self.forum_column_shown {
+                        pane_placeholder(
+                            "Choose a topic",
+                            "Pick a topic from the list to read and write in it.",
+                            cx,
+                        )
+                        .into_any_element()
+                    } else {
+                        self.forum_topics_pane(open, cx).into_any_element()
+                    }
                 } else if has_topics && open_topic.is_some() {
                     // Phase 5.1: per-topic history — same history component,
                     // fed from the topic history store (`searchChatMessages`

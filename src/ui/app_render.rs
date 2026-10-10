@@ -56,6 +56,9 @@ impl Render for QuillApp {
             .borrow_mut()
             .frame_start(history_drawn, window.scale_factor());
         let active = window.is_window_active() || super::frame_clock::assume_active();
+        // The forum's topic list is a column of its own (tdesktop shows it
+        // where the chat list was).
+        let forum_column = self.forum_column_layout(window);
         if self.window_active.replace(active) != active {
             self.inline_videos.borrow_mut().set_window_active(active);
         }
@@ -808,7 +811,9 @@ impl Render for QuillApp {
                             // Ready: the chat list and the conversation are
                             // cached slices, redrawn on their own (`app_slice`).
                             .map(|this| {
-                                if self.pane_mode() == super::app::PaneMode::Ready {
+                                if forum_column == quill::state::ForumColumn::Replacing {
+                                    this
+                                } else if self.pane_mode() == super::app::PaneMode::Ready {
                                     this.child(self.sidebar_slot())
                                 } else {
                                     this.child(self.sidebar(
@@ -821,7 +826,18 @@ impl Render for QuillApp {
                                     ))
                                 }
                             })
-                            .child(self.sidebar_resize_handle(cx))
+                            .when(
+                                forum_column != quill::state::ForumColumn::Replacing,
+                                |this| this.child(self.sidebar_resize_handle(cx)),
+                            )
+                            .when(forum_column != quill::state::ForumColumn::Hidden, |this| {
+                                let open = self.session().and_then(|s| s.open_chat);
+                                this.child(self.forum_column_view(
+                                    open,
+                                    forum_column == quill::state::ForumColumn::Replacing,
+                                    cx,
+                                ))
+                            })
                             .child(self.conversation_slot(cx))
                             // Phase 6: user / group info panel beside the conversation.
                             .when_some(self.info_panel(cx), |this, panel| this.child(panel))
