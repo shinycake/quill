@@ -52,6 +52,8 @@ mod users;
 #[cfg(test)]
 mod account_change_tests;
 #[cfg(test)]
+mod channel_tests_admin;
+#[cfg(test)]
 mod channel_tests_geo;
 #[cfg(test)]
 mod channel_tests_members;
