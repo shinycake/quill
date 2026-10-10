@@ -406,6 +406,37 @@ impl QuillApp {
                 "Loaded photo",
             ));
         }
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyReplyElsewhere
+                    | ScreenshotDemo::ReadyReplyExternal
+                    | ScreenshotDemo::ReadyReplyQuote
+            )
+        ) && let Some(session) = self.demo_session.as_mut()
+        {
+            use super::reply_options_demo as reply_demo;
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            reply_demo::apply_ready_reply_elsewhere(session, &self.demo_sink, &self.demo_seq);
+            match demo {
+                Some(ScreenshotDemo::ReadyReplyElsewhere) => {
+                    self.pending_reply = Some(reply_demo::reply_to_choose());
+                    self.reply_elsewhere_open = true;
+                }
+                Some(ScreenshotDemo::ReadyReplyQuote) => {
+                    self.pending_reply = Some(reply_demo::reply_with_quote());
+                    self.reply_quote_open = true;
+                }
+                _ => {
+                    session.open_chat(reply_demo::TARGET_CHAT);
+                    self.pending_reply = Some(reply_demo::reply_in_target());
+                    self.composer.update(cx, |input, cx| {
+                        input.set_value("I will send them tonight.", window, cx);
+                        input.focus(window, cx);
+                    });
+                }
+            }
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyEditMedia)) {
             let content = self
                 .demo_session

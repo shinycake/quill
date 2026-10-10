@@ -233,6 +233,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         cx.notify();
     }),
     layer!(
+        "reply-panels",
+        |app| (app.reply_elsewhere_open || app.reply_quote_open) && app.pending_reply.is_some(),
+        |app, window, cx| app.close_reply_panels(window, cx)
+    ),
+    layer!(
         "forward-picker",
         |app| app.forward_picker_open,
         |app, window, cx| app.close_forward_picker(window, cx)

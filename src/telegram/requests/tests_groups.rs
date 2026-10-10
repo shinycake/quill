@@ -642,6 +642,7 @@ fn g1_send_reply_quote_rides_send_text() {
     let reply = SendReply {
         message_id: MessageId(101),
         quote: Some(("sel".to_string(), 7)),
+        source_chat: None,
     };
     let json = send_text(
         RequestId(1),
@@ -668,6 +669,55 @@ fn g1_send_reply_quote_rides_send_text() {
     );
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(v["reply_to"]["quote"].is_null());
+}
+
+#[test]
+fn external_reply_rides_send_text_with_its_quote() {
+    // "Reply in Another Chat": `inputMessageReplyToExternalMessage`
+    // (schema `td_api.tl:3404`) carries the source chat and the quote.
+    let reply = SendReply::external(ChatId(12), MessageId(40), Some(("sel".to_string(), 7)));
+    let json = send_text(
+        RequestId(1),
+        ChatId(7),
+        None,
+        "hi",
+        Some(reply),
+        &SendOptions::default(),
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["chat_id"], 7);
+    assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToExternalMessage");
+    assert_eq!(v["reply_to"]["chat_id"], 12);
+    assert_eq!(v["reply_to"]["message_id"], 40);
+    assert_eq!(v["reply_to"]["quote"]["@type"], "inputTextQuote");
+    assert_eq!(v["reply_to"]["quote"]["text"]["text"], "sel");
+    assert_eq!(v["reply_to"]["quote"]["position"], 7);
+    assert_eq!(v["reply_to"]["checklist_task_id"], 0);
+    assert_eq!(v["reply_to"]["poll_option_id"], "");
+    // Without a quote the field is null, like the same-chat variant.
+    let plain = input_message_reply_to_external(ChatId(12), MessageId(40), None);
+    assert!(plain["quote"].is_null());
+    // The constructors are in the bundled schema.
+    let schema = include_str!("../../../schema/td_api.tl");
+    assert!(schema.contains(
+        "inputMessageReplyToExternalMessage chat_id:int53 message_id:int53 quote:inputTextQuote checklist_task_id:int32 poll_option_id:string = InputMessageReplyTo;"
+    ));
+    assert!(schema.contains(
+        "inputMessageReplyToMessage message_id:int53 quote:inputTextQuote checklist_task_id:int32 poll_option_id:string = InputMessageReplyTo;"
+    ));
+}
+
+#[test]
+fn external_reply_value_is_shared_by_every_send_builder() {
+    let reply = SendReply::external(ChatId(12), MessageId(40), None);
+    let value = send_reply_value(Some(&reply));
+    assert_eq!(value["@type"], "inputMessageReplyToExternalMessage");
+    assert!(value["quote"].is_null());
+    assert!(send_reply_value(None).is_null());
+    assert_eq!(
+        send_reply_value(Some(&SendReply::plain(MessageId(40))))["@type"],
+        "inputMessageReplyToMessage"
+    );
 }
 
 #[test]

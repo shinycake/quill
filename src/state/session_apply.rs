@@ -2627,6 +2627,12 @@ impl Session {
                     pending.map(|p| p.purpose)
                 {
                     self.accept_custom_emoji_preview(emoji_id, set_id, title);
+                } else if let Some(RequestPurpose::EmojiPackTitle { set_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    if !title.is_empty() {
+                        self.emoji_pack_titles.insert(set_id, title);
+                    }
                 } else if let Some(RequestPurpose::LoadLibrarySet { set_id }) =
                     pending.map(|p| p.purpose)
                 {

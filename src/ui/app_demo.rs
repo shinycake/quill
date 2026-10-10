@@ -266,6 +266,24 @@ pub(super) fn demo_seed_for(
             "screenshot demo — reply bar with a media thumbnail (injected)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyReplyElsewhere => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — choosing a chat for a reply (injected)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyReplyExternal => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — a reply carried into another chat (injected)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyReplyQuote => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — picking the part to quote (injected)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyEditMedia => (
             Some(seed_ready_send_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2053,7 +2071,11 @@ impl QuillApp {
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                         quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
-                        this.activate_first_forward_destination(cx);
+                        if this.reply_elsewhere_open {
+                            this.choose_first_reply_chat(window, cx);
+                        } else {
+                            this.activate_first_forward_destination(cx);
+                        }
                     }
                 }
             },
@@ -2374,6 +2396,8 @@ impl QuillApp {
             selection_focus: None,
             drag_select_from: None,
             forward_picker_open: false,
+            reply_elsewhere_open: false,
+            reply_quote_open: false,
             share_selection: quill::share_box::ShareSelection::default(),
             forward_bar_dest: None,
             send_as_open: false,

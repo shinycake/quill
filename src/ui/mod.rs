@@ -217,6 +217,8 @@ mod reactions;
 mod recording;
 mod render_followups_demo;
 mod rendering_demo;
+mod reply_options_demo;
+mod reply_options_ui;
 mod reply_pattern;
 mod request_share;
 mod round_record;
