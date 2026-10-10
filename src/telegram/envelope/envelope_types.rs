@@ -1119,6 +1119,11 @@ pub enum EnvelopePayload {
         added: Vec<String>,
         removed: Vec<String>,
     },
+    /// `updateContactCloseBirthdays` (schema 1.8.67): contacts whose
+    /// birthday is yesterday, today or tomorrow.
+    UpdateContactCloseBirthdays {
+        users: Vec<crate::chatlist_suggestions::CloseBirthday>,
+    },
     /// `parity:proxy-settings`: `addedProxies` — `getProxies` answer.
     AddedProxies {
         proxies: Vec<crate::proxy::ProxyEntry>,

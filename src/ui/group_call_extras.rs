@@ -261,6 +261,24 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Show the pinned stream across the whole window (the tile's
+    /// full-screen button).
+    pub(super) fn enter_group_call_stage(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !window.is_fullscreen() {
+            window.toggle_fullscreen();
+        }
+        cx.notify();
+    }
+
+    /// Leave full screen (the stage's button, or Esc).
+    pub(super) fn leave_group_call_stage(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if window.is_fullscreen() {
+            window.toggle_fullscreen();
+        }
+        self.demo_group_stage = false;
+        cx.notify();
+    }
+
     /// Choose the identity to join as, and remember it for the chat.
     pub(super) fn choose_group_call_join_as(
         &mut self,

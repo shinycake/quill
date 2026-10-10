@@ -2078,6 +2078,31 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 removed: names("removed_actions"),
             })
         }
+        "updateContactCloseBirthdays" => {
+            let users = value
+                .get("close_birthday_users")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|entry| {
+                            let user_id = entry.get("user_id").and_then(Value::as_i64)?;
+                            let date = entry.get("birthdate")?;
+                            Some(crate::chatlist_suggestions::CloseBirthday {
+                                user_id,
+                                day: date.get("day").and_then(Value::as_u64)? as u8,
+                                month: date.get("month").and_then(Value::as_u64)? as u8,
+                                year: date
+                                    .get("year")
+                                    .and_then(Value::as_i64)
+                                    .filter(|year| *year > 0)
+                                    .map(|year| year as i32),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(EnvelopePayload::UpdateContactCloseBirthdays { users })
+        }
         // Slice A4: `connectedWebsites` — the `getConnectedWebsites`
         // answer (schema 1.8.67, lines 9171/15124). Unparseable websites
         // are skipped rather than failing the whole list (a website id

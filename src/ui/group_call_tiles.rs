@@ -11,7 +11,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::calls::tile_pin::TileKey;
+use quill::calls::tile_pin::{TileKey, stage_tile};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
 
@@ -29,6 +29,7 @@ impl QuillApp {
         call: &ActiveGroupCall,
         participant: &ParsedGroupCallParticipant,
         screen: bool,
+        contain: bool,
     ) -> Option<AnyElement> {
         let MessageSender::User { user_id } = participant.participant_id else {
             return None;
@@ -43,18 +44,19 @@ impl QuillApp {
         Some(
             img(ImageSource::Render(image))
                 .size_full()
-                .rounded(px(10.))
-                .object_fit(ObjectFit::Cover)
+                .rounded(px(if contain { 0. } else { 10. }))
+                .object_fit(if contain {
+                    ObjectFit::Contain
+                } else {
+                    ObjectFit::Cover
+                })
                 .into_any_element(),
         )
     }
 
-    /// The video area: the pinned tile large, the rest in a wrapped strip.
-    pub(super) fn group_call_tiles(
-        &mut self,
-        call: &ActiveGroupCall,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    /// Every stream of the call as a tile. `contain` fits video without
+    /// cropping (the full-screen stage).
+    fn collect_group_tiles(&mut self, call: &ActiveGroupCall, contain: bool) -> Vec<Tile> {
         let mut built: Vec<Tile> = Vec::new();
         for participant in &call.participants {
             let name = self.group_call_participant_name(&participant.participant_id);
@@ -75,7 +77,7 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|info| info.is_paused);
                 if let Some(picture) =
-                    self.stream_or_placeholder(call, participant, false, &name, paused)
+                    self.stream_or_placeholder(call, participant, false, &name, paused, contain)
                 {
                     built.push(Tile {
                         key: TileKey {
@@ -94,7 +96,7 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|info| info.is_paused);
                 if let Some(picture) =
-                    self.stream_or_placeholder(call, participant, true, &name, paused)
+                    self.stream_or_placeholder(call, participant, true, &name, paused, contain)
                 {
                     built.push(Tile {
                         key: TileKey {
@@ -108,6 +110,16 @@ impl QuillApp {
                 }
             }
         }
+        built
+    }
+
+    /// The video area: the pinned tile large, the rest in a wrapped strip.
+    pub(super) fn group_call_tiles(
+        &mut self,
+        call: &ActiveGroupCall,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let built = self.collect_group_tiles(call, false);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
         // The pin lasts only as long as its stream does.
         self.group_call_pin.retain_available(&keys);
@@ -137,6 +149,21 @@ impl QuillApp {
         )
     }
 
+    /// The pinned stream across the whole window (full screen), or `None`
+    /// when nothing is pinned or the stream is gone.
+    pub(super) fn group_call_stage(
+        &mut self,
+        call: &ActiveGroupCall,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let built = self.collect_group_tiles(call, true);
+        let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
+        self.group_call_pin.retain_available(&keys);
+        let stage = stage_tile(&self.group_call_pin, &keys)?;
+        let tile = built.into_iter().find(|t| t.key == stage)?;
+        Some(stage_view(tile, cx))
+    }
+
     /// The decoded frame, or (only while paused) the avatar standing in.
     fn stream_or_placeholder(
         &mut self,
@@ -145,8 +172,9 @@ impl QuillApp {
         screen: bool,
         name: &str,
         paused: bool,
+        contain: bool,
     ) -> Option<AnyElement> {
-        self.group_stream_picture(call, participant, screen)
+        self.group_stream_picture(call, participant, screen, contain)
             .or_else(|| paused.then(|| initials_avatar(name, 56.).into_any_element()))
     }
 }
@@ -211,6 +239,29 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                 .text_color(rgba(0xffffffe0))
                 .child(tile.name),
         )
+        .when(pinned, |this| {
+            this.child(
+                div()
+                    .id("group-tile-fullscreen")
+                    .absolute()
+                    .right(px(36.))
+                    .top(px(6.))
+                    .size(px(24.))
+                    .rounded_full()
+                    .bg(rgba(0x00000099))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(white())
+                    .role(Role::Button)
+                    .aria_label("Full screen")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.enter_group_call_stage(window, cx)
+                    }))
+                    .child(Icon::new(IconName::Maximize).with_size(px(14.))),
+            )
+        })
         .child(
             div()
                 .absolute()
@@ -231,6 +282,103 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                     })
                     .with_size(px(14.)),
                 ),
+        )
+        .into_any_element()
+}
+
+/// One round overlay button on the stage.
+fn stage_button(
+    id: &'static str,
+    label: &'static str,
+    icon: IconName,
+    cx: &mut Context<QuillApp>,
+    on_click: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .size(px(34.))
+        .rounded_full()
+        .bg(rgba(0x00000099))
+        .hover(|style| style.bg(rgba(0x000000cc)))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(white())
+        .role(Role::Button)
+        .aria_label(label)
+        .on_click(cx.listener(move |this, _, window, cx| on_click(this, window, cx)))
+        .child(Icon::new(icon).with_size(px(18.)))
+}
+
+/// The full-screen stage: the pinned video on black, name bottom-left,
+/// unpin and leave-full-screen top-right (Esc also leaves).
+fn stage_view(tile: Tile, cx: &mut Context<QuillApp>) -> AnyElement {
+    let key = tile.key;
+    div()
+        .id("group-call-stage")
+        .relative()
+        .size_full()
+        .bg(rgb(0x000000))
+        .overflow_hidden()
+        .child(
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(tile.picture),
+        )
+        .when(tile.paused, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(rgba(0x000000a0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(white())
+                    .text_size(px(15.))
+                    .child(if key.screen {
+                        "Screen sharing paused"
+                    } else {
+                        "Camera paused"
+                    }),
+            )
+        })
+        .child(
+            div()
+                .absolute()
+                .left(px(16.))
+                .bottom(px(14.))
+                .max_w(relative(0.7))
+                .truncate()
+                .text_size(px(14.))
+                .text_color(rgba(0xffffffe0))
+                .child(tile.name),
+        )
+        .child(
+            div()
+                .absolute()
+                .right(px(14.))
+                .top(px(14.))
+                .flex()
+                .gap(px(8.))
+                .child(stage_button(
+                    "group-stage-unpin",
+                    "Unpin",
+                    IconName::PinOff,
+                    cx,
+                    move |this, _, cx| this.toggle_group_call_tile_pin(key, cx),
+                ))
+                .child(stage_button(
+                    "group-stage-exit",
+                    "Exit full screen",
+                    IconName::Minimize,
+                    cx,
+                    |this, window, cx| this.leave_group_call_stage(window, cx),
+                )),
         )
         .into_any_element()
 }

@@ -510,6 +510,10 @@ pub struct Session {
     pub recent_calls_loading: bool,
     /// The last `searchCallMessages` request failed.
     pub recent_calls_error: bool,
+    /// A `deleteAllCallMessages` request is in flight.
+    pub recent_calls_clearing: bool,
+    /// What the chat-list suggestions block shows from.
+    pub suggestions: crate::chatlist_suggestions::SuggestionFacts,
     /// Phase C2i: "who can call me"
     /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
     pub call_privacy_allow_calls: Option<PrivacyWho>,
@@ -1405,6 +1409,8 @@ impl Session {
             recent_calls_offset: String::new(),
             recent_calls_loading: false,
             recent_calls_error: false,
+            recent_calls_clearing: false,
+            suggestions: Default::default(),
             call_privacy_allow_calls: None,
             support_user_ready: None,
             call_privacy_p2p: None,

@@ -3207,6 +3207,11 @@ impl Session {
                     }
                 }
             }
+            EnvelopePayload::UpdateContactCloseBirthdays { users } => {
+                // A new list (also an empty one) re-enables the suggestion.
+                self.suggestions.close_birthdays = users;
+                self.suggestions.birthdays_hidden = false;
+            }
             EnvelopePayload::AddedProxies { proxies } => {
                 self.apply_added_proxies(pending, proxies);
             }
