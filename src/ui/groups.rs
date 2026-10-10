@@ -920,7 +920,7 @@ impl QuillApp {
             chat_id,
             TextPromptKind::CustomTitle { user_id },
             current,
-            "Custom title (0-16 characters, no emoji; empty = remove)",
+            quill::admin_extras::custom_title_placeholder(false),
         ));
         cx.notify();
     }
@@ -959,7 +959,7 @@ impl QuillApp {
             TextPromptKind::CustomTitle { user_id } => {
                 // 0-16 characters, no emoji — schema line 13597, TGX
                 // `EditRightsController` enforces the same client-side.
-                let too_long = value.chars().count() > 16;
+                let too_long = !quill::admin_extras::custom_title_fits(&value);
                 let has_emoji = value.chars().any(looks_like_emoji);
                 if too_long || has_emoji {
                     self.username_dialog = Some(dialog);
@@ -1173,6 +1173,15 @@ impl QuillApp {
         } else {
             None
         };
+        // The conversion asks twice (tdesktop): the intro leads to the warning.
+        if matches!(dialog.action, GroupConfirmAction::BroadcastIntro) {
+            self.group_confirm_dialog = Some(GroupConfirmDialog {
+                chat_id: dialog.chat_id,
+                action: GroupConfirmAction::BroadcastUpgrade,
+            });
+            cx.notify();
+            return;
+        }
         let note = match self.live.as_mut() {
             Some(live) => {
                 let result = match dialog.action {
@@ -1184,6 +1193,8 @@ impl QuillApp {
                         .driver
                         .leave_channel(dialog.chat_id)
                         .map(|_| "left the chat".to_string()),
+                    // Handled above; never reaches the driver.
+                    GroupConfirmAction::BroadcastIntro => Ok("".to_string()),
                     GroupConfirmAction::BroadcastUpgrade => live
                         .driver
                         .upgrade_to_broadcast_group(dialog.chat_id)
@@ -1530,7 +1541,7 @@ impl QuillApp {
                 ),
                 TextPromptKind::CustomTitle { .. } => (
                     "Custom title",
-                    "Admin title shown instead of \"admin\" — empty removes it",
+                    "A title that members will see instead of 'Admin'. Empty removes it.",
                 ),
                 // Slice G8: group/channel info editing reuses the text
                 // prompt — each kind gets its own title and hint.
@@ -1549,6 +1560,20 @@ impl QuillApp {
                     "Shown in the communities hub and info panel",
                 ),
             };
+            // Admin titles show a live counter once fewer than half the
+            // limit is left, like tdesktop's length-limited fields.
+            let counter = matches!(dialog_state.kind, TextPromptKind::CustomTitle { .. })
+                .then(|| {
+                    let count = dialog_state.input.read(cx).value().trim().chars().count();
+                    quill::admin_extras::length_counter(
+                        count,
+                        quill::admin_extras::CUSTOM_TITLE_LIMIT,
+                    )
+                })
+                .flatten();
+            let over_limit = counter
+                .as_ref()
+                .is_some_and(|text| text.starts_with('\u{2212}'));
             let body = div()
                 .flex()
                 .flex_col()
@@ -1560,11 +1585,30 @@ impl QuillApp {
                         .child(hint),
                 )
                 .child(
-                    div().flex_1().child(
-                        Textarea::new(&dialog_state.input)
-                            .aria_label("Public username")
-                            .h(px(40.)),
-                    ),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div().flex_1().child(
+                                Textarea::new(&dialog_state.input)
+                                    .aria_label("Public username")
+                                    .h(px(40.)),
+                            ),
+                        )
+                        .when_some(counter, |row, text| {
+                            row.child(
+                                div()
+                                    .id("custom-title-counter")
+                                    .text_sm()
+                                    .text_color(if over_limit {
+                                        cx.theme().danger
+                                    } else {
+                                        cx.theme().muted_foreground
+                                    })
+                                    .child(text),
+                            )
+                        }),
                 )
                 .into_any_element();
             let footer = div()
@@ -1626,11 +1670,18 @@ impl QuillApp {
             };
             let (title, message, confirm_label): (String, String, String) =
                 match dialog_state.action {
-                    GroupConfirmAction::DeleteChat => (
-                        "Delete group".to_string(),
-                        "Delete this group for everyone? This cannot be undone.".to_string(),
-                        "Delete".to_string(),
-                    ),
+                    GroupConfirmAction::DeleteChat => {
+                        let is_channel = this
+                            .session()
+                            .and_then(|session| session.chats.get(&dialog_state.chat_id.0))
+                            .is_some_and(|chat| chat.is_channel());
+                        (
+                            if is_channel { "Delete channel" } else { "Delete group" }
+                                .to_string(),
+                            quill::admin_extras::delete_chat_text(is_channel).to_string(),
+                            "Delete".to_string(),
+                        )
+                    }
                     GroupConfirmAction::RemoveFromList => (
                         "Delete chat".to_string(),
                         "Delete this chat and its history from your chat list?".to_string(),
@@ -1668,11 +1719,14 @@ impl QuillApp {
                         "Leave this chat? You can rejoin with an invite link.".to_string(),
                         "Leave".to_string(),
                     ),
+                    GroupConfirmAction::BroadcastIntro => (
+                        "Broadcast Groups".to_string(),
+                        quill::admin_extras::broadcast_features_text(),
+                        "Convert".to_string(),
+                    ),
                     GroupConfirmAction::BroadcastUpgrade => (
-                        "Convert to broadcast group".to_string(),
-                        "Only admins will be able to post. Non-admin members become \
-                         subscribers. This cannot be undone."
-                            .to_string(),
+                        "Are you sure?".to_string(),
+                        quill::admin_extras::BROADCAST_WARNING.to_string(),
                         "Convert".to_string(),
                     ),
                     GroupConfirmAction::ClearHistory { revoke } => (
@@ -1915,28 +1969,47 @@ impl QuillApp {
             ),
             // Subscribers can't post: the bar mutes / unmutes the channel.
             // Leaving lives in the info panel (with confirmation).
-            Some(ChannelMemberStatus::Member) => Some(
-                footer
-                    .child(
-                        Button::new("channel-mute-toggle")
-                            .label(if muted { "Unmute" } else { "Mute" })
-                            .ghost()
-                            .w_full()
-                            .max_w(px(360.))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.apply_chat_mute(
-                                    open,
-                                    if muted {
-                                        0
-                                    } else {
-                                        quill::telegram::envelope::MUTE_FOREVER
-                                    },
-                                    cx,
-                                );
-                            })),
-                    )
-                    .into_any_element(),
-            ),
+            Some(ChannelMemberStatus::Member) => {
+                // "Discuss" opens the linked discussion group, next to the
+                // mute toggle.
+                let discussion = session.discussion_chat_id(open);
+                Some(
+                    footer
+                        .child(
+                            Button::new("channel-mute-toggle")
+                                .label(
+                                    quill::chat_bottom_bar::BottomBar::MuteUnmute { muted }.label(),
+                                )
+                                .ghost()
+                                .w_full()
+                                .max_w(px(360.))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.apply_chat_mute(
+                                        open,
+                                        if muted {
+                                            0
+                                        } else {
+                                            quill::telegram::envelope::MUTE_FOREVER
+                                        },
+                                        cx,
+                                    );
+                                })),
+                        )
+                        .when_some(discussion, |this, discussion| {
+                            this.child(
+                                Button::new("channel-discuss")
+                                    .label("Discuss")
+                                    .ghost()
+                                    .tooltip("Open the discussion group")
+                                    .accessibility_label("Discuss")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.select_listed_chat(ChatId(discussion), window, cx);
+                                    })),
+                            )
+                        })
+                        .into_any_element(),
+                )
+            }
             Some(ChannelMemberStatus::Administrator) => {
                 let can_post = chat.channel_admin_can_post();
                 let note = if can_post {

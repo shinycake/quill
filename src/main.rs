@@ -645,6 +645,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-2fa-reset", Ready2faReset),
         ("ready-account", ReadyAccountLifecycle),
         ("ready-accounts", ReadyAccounts),
+        ("ready-admin-extras", ReadyAdminExtras),
         ("ready-admin-log", ReadyAdminLog),
         ("ready-admin-management", ReadyAdminManagement),
         ("ready-albums", ReadyAlbums),
@@ -655,6 +656,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-archive-hint", ReadyArchiveHint),
         ("ready-archive-menu", ReadyArchiveMenu),
         ("ready-archive-row", ReadyArchiveRow),
+        ("ready-ask-question", ReadyAskQuestion),
         ("ready-audio", ReadyAudio),
         ("ready-auto-delete", ReadyAutoDelete),
         ("ready-avatar-profile", ReadyAvatarProfile),
@@ -686,6 +688,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-channels-admin", ReadyChannelsAdmin),
         ("ready-chat-avatars", ReadyChatAvatars),
         ("ready-chat-badges", ReadyChatBadges),
+        ("ready-chat-header", ReadyChatHeader),
         ("ready-chat-list", ReadyChatListMenu),
         ("ready-chat-list-2", ReadyChatList),
         ("ready-chat-list-3", ReadyChatList3),
@@ -794,6 +797,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-premium", ReadyPremium),
         ("ready-preview-cards", ReadyPreviewCards),
         ("ready-privacy", ReadyPrivacy),
+        ("ready-privacy-calls", ReadyPrivacyCalls),
         ("ready-privacy-gifts", ReadyPrivacyGifts),
         ("ready-profile-edit", ReadyProfileEdit),
         ("ready-profile-panels", ReadyProfilePanels),
@@ -836,6 +840,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-session-details", ReadySessionDetails),
         ("ready-session-toggles", ReadySessionToggles),
         ("ready-sessions", ReadySessions),
+        ("ready-settings-help", ReadySettingsHelp),
         ("ready-share-box", ReadyShareBox),
         ("ready-shared-media", ReadySharedMedia),
         ("ready-shortcuts", ReadyShortcuts),
@@ -1096,6 +1101,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyStoriesCollapsed => ".quill-ready-ready-stories-collapsed",
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
+        ScreenshotDemo::ReadyChatHeader => ".quill-ready-ready-chat-header",
         ScreenshotDemo::ReadyChatRows => ".quill-ready-ready-chat-rows",
         ScreenshotDemo::ReadyJoinBar => ".quill-ready-ready-join-bar",
         ScreenshotDemo::ReadyTopBars => ".quill-ready-ready-top-bars",
@@ -1133,6 +1139,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyChannelStats => ".quill-ready-ready-channel-stats",
         ScreenshotDemo::ReadyInviteLinks => ".quill-ready-ready-invite-links",
         ScreenshotDemo::ReadyAdminManagement => ".quill-ready-ready-admin-management",
+        ScreenshotDemo::ReadyAdminExtras => ".quill-ready-ready-admin-extras",
         ScreenshotDemo::ReadyAdminLog => ".quill-ready-ready-admin-log",
         ScreenshotDemo::ReadyGroups2 => ".quill-ready-ready-groups2",
         ScreenshotDemo::ReadyGroupManage => ".quill-ready-ready-group-manage",
@@ -1266,6 +1273,9 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyCallsSettings => ".quill-ready-ready-calls-settings",
         ScreenshotDemo::ReadyPrivacy => ".quill-ready-ready-privacy",
         ScreenshotDemo::ReadyPrivacyGifts => ".quill-ready-ready-privacy-gifts",
+        ScreenshotDemo::ReadyPrivacyCalls => ".quill-ready-ready-privacy-calls",
+        ScreenshotDemo::ReadySettingsHelp => ".quill-ready-ready-settings-help",
+        ScreenshotDemo::ReadyAskQuestion => ".quill-ready-ready-ask-question",
         ScreenshotDemo::ReadySessionDetails => ".quill-ready-ready-session-details",
         ScreenshotDemo::ReadyFileOpenConfirm => ".quill-ready-ready-file-open-confirm",
         ScreenshotDemo::ReadyRichMessage => ".quill-ready-ready-rich-message",
@@ -1422,6 +1432,61 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 cx.background_executor()
                                     .timer(Duration::from_millis(ms))
                                     .await;
+                            }
+                            continue;
+                        }
+                        // `mid:x,y` clicks the middle button (press, short
+                        // pause, release), to start middle-click autoscroll.
+                        if let Some(at) = point.strip_prefix("mid:") {
+                            if let Some((x, y)) = at.split_once(',')
+                                && let (Ok(x), Ok(y)) =
+                                    (x.trim().parse::<f32>(), y.trim().parse::<f32>())
+                            {
+                                use gpui_kit::gpui::{
+                                    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+                                    MouseUpEvent, PlatformInput, point, px,
+                                };
+                                let position = point(px(x), px(y));
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        window.dispatch_event(
+                                            PlatformInput::MouseMove(MouseMoveEvent {
+                                                position,
+                                                pressed_button: None,
+                                                modifiers: Modifiers::default(),
+                                            }),
+                                            cx,
+                                        );
+                                        window.dispatch_event(
+                                            PlatformInput::MouseDown(MouseDownEvent {
+                                                button: MouseButton::Middle,
+                                                position,
+                                                modifiers: Modifiers::default(),
+                                                click_count: 1,
+                                                first_mouse: false,
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
+                                cx.background_executor()
+                                    .timer(Duration::from_millis(60))
+                                    .await;
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        window.dispatch_event(
+                                            PlatformInput::MouseUp(MouseUpEvent {
+                                                button: MouseButton::Middle,
+                                                position,
+                                                modifiers: Modifiers::default(),
+                                                click_count: 1,
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
                             }
                             continue;
                         }

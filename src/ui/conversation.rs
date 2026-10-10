@@ -245,6 +245,20 @@ impl QuillApp {
         } else {
             (ttl_line.clone(), false)
         };
+        // Verified check, Premium status or star, SCAM / FAKE chip after the
+        // title. Threads, Saved Messages and topic views title the header
+        // with something else, so they carry none.
+        let badges = if thread_header.is_some() || saved || saved_header.is_some() {
+            Vec::new()
+        } else {
+            actions
+                .and_then(|(chat_id, _, _, _)| {
+                    let session = self.session()?;
+                    let chat = session.chats.get(&chat_id.0)?;
+                    Some(session.chat_header_badges(chat))
+                })
+                .unwrap_or_default()
+        };
         let identity = div()
             .id("conversation-identity")
             .flex()
@@ -258,9 +272,25 @@ impl QuillApp {
                     .min_w_0()
                     .child(
                         div()
-                            .font_semibold()
-                            .truncate()
-                            .child(super::bidi_line::one_line_plain(title_text)),
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .truncate()
+                                    .child(super::bidi_line::one_line_plain(title_text)),
+                            )
+                            .children(badges.into_iter().map(|badge| {
+                                let emoji = match badge {
+                                    quill::peer_badge::TitleBadge::EmojiStatus(id) => {
+                                        self.custom_emoji_still(id)
+                                    }
+                                    _ => None,
+                                };
+                                super::chat_row::title_badge_element(badge, emoji, cx)
+                            })),
                     )
                     .when_some(status_line, |this, line| {
                         this.child(
@@ -496,7 +526,7 @@ impl QuillApp {
                     (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
                     // Saved sublists and tag filters are read-only views.
                     (Some(_), None) if self.saved_readonly() => false,
-                    (Some(c), None) if !in_topic => c.can_post(),
+                    (Some(c), None) if !in_topic => c.can_post() && self.bottom_action().is_none(),
                     // In a topic whose info hasn't loaded yet: hide the
                     // composer until it arrives (the note says "Loading
                     // topic…").
@@ -547,7 +577,7 @@ impl QuillApp {
                         .and_then(|s| s.chats.get(&id.0).map(|c| c.is_channel()))
                         .unwrap_or(false)
                 });
-                if is_channel || self.saved_readonly() {
+                if is_channel || self.saved_readonly() || self.bottom_action().is_some() {
                     // The join/leave footer replaces the plain note for
                     // channels; Saved sublists and tag filters need none.
                     None
@@ -925,6 +955,12 @@ impl QuillApp {
                     .then(|| self.channel_footer(cx))
                     .flatten(),
                 |this, footer| this.child(footer),
+            )
+            .when_some(
+                (part.bottom() && !self.thread_pending())
+                    .then(|| self.bottom_action_bar(cx))
+                    .flatten(),
+                |this, bar| this.child(bar),
             )
             // A deleted message's dust drifts over everything.
             .children(dust.map(super::anim_layer::occluder))
@@ -1888,7 +1924,21 @@ impl QuillApp {
                     .relative()
                     // kit Phase 7: screen-reader landmark for the message history.
                     .role(Role::Log)
-                    .aria_label(format!("Message history — {sender_name}")),
+                    .aria_label(format!("Message history — {sender_name}"))
+                    // Middle-click autoscroll (`ui/widgets/middle_click_autoscroll`).
+                    .on_mouse_down(
+                        MouseButton::Middle,
+                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                            this.autoscroll_press(event.position, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Middle,
+                        cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                            this.autoscroll_release(cx);
+                        }),
+                    ),
                 // The chat's wallpaper, else the account's (None keeps the
                 // theme background).
                 look.wallpaper.as_ref(),

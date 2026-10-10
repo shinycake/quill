@@ -41,6 +41,7 @@ mod search;
 mod secret_chats;
 mod sender;
 mod settings;
+mod settings_account;
 mod share;
 mod share_content;
 mod stickers;

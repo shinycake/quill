@@ -630,18 +630,8 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child("Bot"),
             );
-        // Slice B2: START button — pressing sends `sendBotStartMessage`
-        // with the deep-link parameter (schema 1.8.67, line 12216;
-        // Telegram X shows it until the chat gains messages).
-        if let Some(parameter) = start_param {
-            panel = panel.child(
-                Button::new("bot-start")
-                    .label("START")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.press_bot_start(open, bot_id, parameter.clone(), cx);
-                    })),
-            );
-        }
+        // The Start button lives in the bar that replaces the composer
+        // (`bottom_action`), as in Telegram Desktop.
         if !info.description.is_empty() {
             panel = panel.child(div().text_sm().child(info.description.clone()));
         }

@@ -1,5 +1,6 @@
 //! Connect-driver integration tests (TDLib JSON injection via `RecordingSender`).
 mod account_hygiene;
+mod admin_extras;
 mod ai_tools;
 mod bot_pending;
 mod bots;
@@ -38,6 +39,7 @@ mod reply_keyboard;
 mod search;
 mod search_upgrades;
 mod settings;
+mod settings_account;
 mod share;
 mod share_content;
 mod signin_polish;

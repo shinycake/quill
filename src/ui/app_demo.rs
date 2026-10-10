@@ -363,6 +363,7 @@ pub(super) fn demo_seed_for(
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyJoinBar
+        | ScreenshotDemo::ReadyChatHeader
         | ScreenshotDemo::ReadyTopBars
         | ScreenshotDemo::ReadySearchPreviews
         | ScreenshotDemo::ReadyMultilineRows => (
@@ -557,6 +558,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — admin management".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyAdminExtras => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — admin extras (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyAdminLog => (
@@ -1312,7 +1319,11 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyPrivacy | ScreenshotDemo::ReadyPrivacyGifts => (
+        ScreenshotDemo::ReadyPrivacy
+        | ScreenshotDemo::ReadyPrivacyGifts
+        | ScreenshotDemo::ReadyPrivacyCalls
+        | ScreenshotDemo::ReadySettingsHelp
+        | ScreenshotDemo::ReadyAskQuestion => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — privacy settings (injected, no live Telegram)".into(),
@@ -2168,7 +2179,6 @@ impl QuillApp {
             share_content_dialog: None,
             welcome_dialog: None,
             event_log_search: None,
-            event_log_admin_filter: None,
             storage_usage_open: false,
             appearance: appearance_prefs,
             chat_prefs,
@@ -2231,6 +2241,8 @@ impl QuillApp {
             animation_sound: Default::default(),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             window_active: std::cell::Cell::new(true),
+            window_title_shown: Default::default(),
+            autoscroll: Default::default(),
             presence: Default::default(),
             login_prevented: None,
             terms_step: Default::default(),
@@ -2491,6 +2503,7 @@ impl QuillApp {
         app.demo_setup_profile_panels(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
+        app.demo_setup_admin_extras(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);
         }
