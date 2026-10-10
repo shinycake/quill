@@ -139,6 +139,10 @@ static IMAGE_FIELD: LazyLock<Vec<Particle>> = LazyLock::new(|| particles(&IMAGE,
 
 /// Milliseconds into the shared loop: every spoiler on screen moves as one.
 fn loop_ms() -> f32 {
+    if still() {
+        // A fixed moment of the loop: a few specks showing, none moving.
+        return LOOP_MS / 2.;
+    }
     static CLOCK: OnceLock<Instant> = OnceLock::new();
     let elapsed = CLOCK.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.;
     (elapsed % f64::from(LOOP_MS)) as f32
@@ -296,7 +300,7 @@ pub(super) fn paint_text_specks(
     color: Hsla,
     window: &mut Window,
 ) {
-    TEXT_PAINTED.with(|painted| painted.set(true));
+    TEXT_PAINTED.with(|painted| painted.set(!still()));
     draw_text_specks(rect, origin, color, window);
 }
 
@@ -320,7 +324,7 @@ pub(super) fn layer_text_specks(
     layer.paint_now(
         super::anim_layer::Content::Paint {
             paint,
-            fps: SPECKS_FPS,
+            fps: specks_fps(),
         },
         rect,
         window,
@@ -328,7 +332,18 @@ pub(super) fn layer_text_specks(
 }
 
 /// lib_ui redraws spoiler specks every 33 ms.
-pub(super) const SPECKS_FPS: u32 = 30;
+const SPECKS_FPS: u32 = 30;
+
+/// Battery and animations: "Animated spoiler effect" is off, so the specks
+/// hold still and nothing asks for redraws.
+pub(super) fn still() -> bool {
+    quill::power_saving::on(quill::power_saving::Flag::ChatSpoiler)
+}
+
+/// The rate the specks are redrawn at: 0 while they hold still.
+pub(super) fn specks_fps() -> u32 {
+    if still() { 0 } else { SPECKS_FPS }
+}
 
 fn draw_text_specks(rect: Bounds<Pixels>, origin: Point<Pixels>, color: Hsla, window: &mut Window) {
     let now = loop_ms();

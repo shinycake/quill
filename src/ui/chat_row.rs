@@ -653,6 +653,17 @@ pub(super) fn session_chat_row(
                 cx.notify();
             }),
         )
+        // tdesktop's quick action also runs on a middle click
+        // (`dialogs_inner_widget.cpp`, `Qt::MiddleButton`); a no-op while
+        // the setting is Disabled.
+        .on_mouse_up(
+            MouseButton::Middle,
+            cx.listener(move |this, _, _, cx| {
+                if !selecting {
+                    this.perform_swipe_action(id, cx);
+                }
+            }),
+        )
         // Slice CL: long-press (press-and-hold) peeks at the chat's
         // recent messages without opening it (tdesktop shows the same
         // preview on hover). A quick release is still a plain click.

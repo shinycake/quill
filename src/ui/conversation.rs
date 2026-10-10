@@ -2160,8 +2160,13 @@ impl QuillApp {
                 // history.
                 let covered = !self.spoiler_revealed.contains(&key);
                 let fading = super::spoiler_fx::reveal_fade(key).is_some();
-                if spoiler && (fading || (covered && super::anim_layer::current().is_none())) {
-                    self.request_animation_tick(super::spoiler_fx::SPECKS_FPS, cx);
+                if spoiler
+                    && (fading
+                        || (covered
+                            && super::anim_layer::current().is_none()
+                            && !super::spoiler_fx::still()))
+                {
+                    self.request_animation_tick(30, cx);
                 }
                 let row = session_history_row(
                     message,
