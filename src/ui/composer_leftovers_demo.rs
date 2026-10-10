@@ -129,11 +129,11 @@ impl QuillApp {
         let mut capture =
             VoiceCapture::preview(demo_media_allowlist().join("demo-voice.ogg"), 7, bars);
         capture.pause();
-        self.voice_capture = Some(capture);
+        self.recording.voice_capture = Some(capture);
         let mut clock = quill::playback::PlaybackClock::new(7.0);
         clock.seek(3.0);
-        self.record_preview = Some(clock);
-        self.record_once = true;
+        self.recording.preview = Some(clock);
+        self.recording.once = true;
         self.status_note = "screenshot demo — recording paused · previewing · play once".into();
     }
 }

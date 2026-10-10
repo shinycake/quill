@@ -95,18 +95,18 @@ impl QuillApp {
         match demo {
             ShareDemo::ShareBox => {
                 draft.toggle(ChatId(11), MessageId(103), false);
-                self.pending_forward = Some(draft);
-                self.forward_picker_open = true;
-                self.share_selection.toggle(ChatId(21));
-                self.share_selection.toggle(ChatId(22));
-                self.share_comment_input.update(cx, |input, cx| {
+                self.share.pending_forward = Some(draft);
+                self.share.forward_picker_open = true;
+                self.share.selection.toggle(ChatId(21));
+                self.share.selection.toggle(ChatId(22));
+                self.share.comment_input.update(cx, |input, cx| {
                     input.set_value("Thought you'd like this", window, cx);
                 });
                 self.status_note = "screenshot demo — share box (two chats ticked)".into();
             }
             ShareDemo::ForwardBar => {
-                self.pending_forward = Some(draft);
-                self.forward_bar_dest = Some(ChatId(21));
+                self.share.pending_forward = Some(draft);
+                self.share.forward_bar_dest = Some(ChatId(21));
                 self.composer.update(cx, |input, cx| {
                     input.set_value("Check this out", window, cx);
                     input.focus(window, cx);
@@ -114,7 +114,7 @@ impl QuillApp {
                 self.status_note = "screenshot demo — forward bar in the destination".into();
             }
             ShareDemo::SendAs => {
-                self.send_as_open = true;
+                self.composer_ui.send_as_open = true;
                 self.status_note = "screenshot demo — send as".into();
             }
         }

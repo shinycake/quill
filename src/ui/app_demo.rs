@@ -12,10 +12,9 @@ use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::composer::{ComposerScheduling, PreviewMediaSize, should_send_on_enter};
+use quill::composer::should_send_on_enter;
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
-use quill::media_viewer::{MediaViewer, ViewerZoom};
 use quill::telegram::envelope::AuthorizationState;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -62,16 +61,6 @@ impl QuillApp {
         let appearance_prefs = Self::load_appearance();
         let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
         let font_picker = Self::new_font_picker(&appearance_prefs.font_family, window, cx);
-        let emoji_status_hours_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Custom duration in hours")
-                .auto_grow(1, 1)
-        });
-        let emoji_set_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search emoji packs")
-                .auto_grow(1, 1)
-        });
         let emoji_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search emoji")
@@ -110,17 +99,6 @@ impl QuillApp {
             }
         })
         .detach();
-        let gif_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search GIFs")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        let sticker_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search stickers and sets")
-                .auto_grow(1, 1)
-        });
         let registration_first_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("First name")
@@ -193,12 +171,6 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
-        let share_comment_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Add a comment")
-                .auto_grow(1, 3)
-                .submit_on_enter(false)
-        });
         let stories = super::stories_state::StoryUi::new(window, cx);
         cx.subscribe_in(
             &composer,
@@ -206,20 +178,21 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 let mut text = state.read(cx).value().to_string();
                 if matches!(event, InputEvent::Change) {
-                    let prev = this.composer_prev_text.clone();
+                    let prev = this.composer_ui.prev_text.clone();
                     if this
+                        .composer_ui
                         .markdown_revert
                         .as_ref()
                         .is_some_and(|revert| revert.text != text)
                     {
-                        this.markdown_revert = None;
+                        this.composer_ui.markdown_revert = None;
                     }
                     if let Some(replaced) = this.apply_instant_replace(&text, window, cx) {
                         text = replaced;
                     } else if this.apply_markdown_replacement(&prev, window, cx) {
                         // `**bold**` typed: the markers became formatting.
                         text = state.read(cx).value().to_string();
-                        this.composer_prev_text = text.clone();
+                        this.composer_ui.prev_text = text.clone();
                     }
                     this.sync_composer_typing(&text);
                     this.note_open_draft(true, cx);
@@ -261,7 +234,7 @@ impl QuillApp {
                         } else if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
                         } else if !text.trim().is_empty()
-                            || !this.pending_attachments.is_empty()
+                            || !this.composer_ui.pending_attachments.is_empty()
                             || this.forward_bar_here()
                         {
                             let markup = this.composer_markup(cx);
@@ -416,7 +389,7 @@ impl QuillApp {
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                         quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
-                        if this.reply_elsewhere_open {
+                        if this.share.reply_elsewhere_open {
                             this.choose_first_reply_chat(window, cx);
                         } else {
                             this.activate_first_forward_destination(cx);
@@ -494,21 +467,13 @@ impl QuillApp {
             scroll_top_probe: Default::default(),
             scroll_view_probe: Default::default(),
             group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
-            command_menu_open: false,
-            command_menu_selected: 0,
-            mention_selected: 0,
-            suggest: super::composer_suggest::SuggestUi::load(),
-            inline_results_open: false,
-            inline_results_selected: 0,
-            inline_query_token: 0,
-            inline_query_armed: None,
-            sticker_search_input,
-            media_panel: super::media_panel::MediaPanel::default(),
-            emoji_search_input,
-            reaction_search_input,
-            emoji_set_search_input,
-            emoji_status_hours_input,
-            gif_search_input,
+            composer_ui: super::composer_state::ComposerUi::new(pending_attachments),
+            pickers: super::pickers_state::PickerUi::new(
+                window,
+                cx,
+                emoji_search_input,
+                reaction_search_input,
+            ),
             marketplace_open: false,
             marketplace_name_input: cx.new(|cx| {
                 TextareaState::new(window, cx)
@@ -545,10 +510,8 @@ impl QuillApp {
             exception_picker_open: false,
             block_picker_open: false,
             unblock_confirm: None,
-            search_input,
-            chat_search_input,
-            forward_search_input,
-            share_comment_input,
+            search_ui: super::search_state::SearchUi::new(search_input, chat_search_input),
+            share: super::share_state::ShareUi::new(window, cx, forward_search_input),
             topic_info_open: false,
             thread_info_open: false,
             forum_chats_peek: false,
@@ -581,29 +544,10 @@ impl QuillApp {
             demo_sink,
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notify_inflight: Arc::new(AtomicUsize::new(0)),
-            pending_attachments,
-            composer_self_destruct: None,
-            composer_caption_above: false,
-            composer_silent: false,
-            composer_loud_chat: None,
             freeze_info_open: false,
             age_verify_open: false,
             age_verify_started: false,
-            composer_preview_disabled: false,
-            composer_preview_above: false,
-            composer_preview_media: PreviewMediaSize::Auto,
-            composer_preview_link: 0,
-            edit_replace_as_file: false,
-            composer_preview_token: 0,
-            composer_prev_text: String::new(),
-            markdown_revert: None,
-            composer_scheduling: ComposerScheduling::None,
-            schedule_popup_open: false,
-            schedule_picker: None,
-            scheduled_dialog_open: false,
-            scheduled_selected: Vec::new(),
-            rich_editor_open: false,
-            message_menu: None,
+            message_ui: super::message_state::MessageUi::new(window, cx),
             chat_menu: None,
             archive_menu: None,
             global,
@@ -614,24 +558,9 @@ impl QuillApp {
             profile_modal: None,
             preview_press: None,
             selected_chats: HashSet::new(),
-            swipe_reply_start: None,
-            pending_reply: None,
-            clear_draft_on_success: None,
-            pending_edit: None,
-            saved_edit_draft: String::new(),
-            saved_edit_reply: None,
-            pending_delete: None,
-            pending_stop_poll: None,
             pending_close_secret_chat: None,
-            pending_inline_bot_alert: None,
-            inline_bot_alert_shown: false,
             forum_manage_dialog: None,
             saved_tag_dialog: None,
-            fact_check_dialog: None,
-            poll_voters_dialog: None,
-            poll_add_option: None,
-            checklist_dialog: None,
-            share_content_dialog: None,
             welcome_dialog: None,
             event_log_search: None,
             storage_usage_open: false,
@@ -652,14 +581,7 @@ impl QuillApp {
             system_accent_probed: false,
             font_picker,
             accent_picker,
-            // codex:spellcheck-native: platform engine + persisted app words.
-            spellchecker,
-            spell_info,
-            dict_manager: Default::default(),
-            dict_filter_input,
-            spell_misspellings: Vec::new(),
-            spell_checked_text: String::new(),
-            spell_task: None,
+            spell: super::spell_state::SpellUi::new(spellchecker, spell_info, dict_filter_input),
             shortcuts_open: false,
             proxy_ui: Default::default(),
             sticker_settings_open: false,
@@ -674,20 +596,6 @@ impl QuillApp {
             websites_open: false,
             websites_confirm: None,
             chat_filter: ChatListFilter::All,
-            new_secret_picker_open: false,
-            pending_forward: None,
-            selection_anchor: None,
-            selection_drag: None,
-            selection_focus: None,
-            drag_select_from: None,
-            forward_picker_open: false,
-            reply_elsewhere_open: false,
-            reply_quote_open: false,
-            share_selection: quill::share_box::ShareSelection::default(),
-            forward_bar_dest: None,
-            send_as_open: false,
-            forward_result: None,
-            reactions_expanded: false,
             mute_menu_open: false,
             mute_custom_open: false,
             mute_custom: quill::mute_menu::CustomMute::default(),
@@ -697,7 +605,7 @@ impl QuillApp {
             pinned_cursor: HashMap::new(),
             hidden_pinned: HashMap::new(),
             pinned_list_open: false,
-            inline_videos: Default::default(),
+            playback: super::playback_state::PlaybackUi::new(&audio_output),
             animation_demand: Default::default(),
             row_fx: Default::default(),
             animation_targets: Default::default(),
@@ -714,9 +622,6 @@ impl QuillApp {
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
             motion: Default::default(),
-            composer_link_dialog: None,
-            composer_code_language: None,
-            send_morph: Default::default(),
             slices: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),
@@ -726,62 +631,13 @@ impl QuillApp {
             defaults_sound_picker: None,
             defaults_exceptions_scope: None,
             notifications_confirm: None,
-            voice_capture: None,
-            video_note_capture: None,
-            record_locked: false,
-            record_discard_confirm: false,
-            record_preview: None,
-            record_once: false,
-            drop_paths: Vec::new(),
-            drop_state: None,
-            drop_preview: None,
-            voice_tick: false,
-            recording_auto_send: false,
-            round_preview: Default::default(),
-            slow_mode_tick_chat: None,
+            recording: super::recording_state::RecordingUi::new(),
             self_destruct_tick_chat: None,
             live_location_tick_chat: None,
             quit_guard: Default::default(),
             quit_clock: std::time::Instant::now(),
             demo_group_stage: false,
-            player: Default::default(),
-            playing_voice: None,
-            playing_audio: None,
-            pending_audio_play: None,
-            pending_voice_play: None,
-            audio: super::audio::AudioEngine::new(audio_output.clone()),
             notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
-            playback_clock: None,
-            playback_path: None,
-            seek_slider: None,
-            seek_scrubbing: false,
-            seek_preview_secs: None,
-            playback_tick: false,
-            playback_positions: HashMap::new(),
-            sticker_playback: Default::default(),
-            emoji_playback: Default::default(),
-            playing_animation: None,
-            animation_frames: Vec::new(),
-            autoplayed_gifs: Default::default(),
-            animation_frame: 0,
-            animation_tick: false,
-            animation_fps: 8.0,
-            animation_started_at: None,
-            animation_extract_child: None,
-            animation_extract_cancel: None,
-            animation_extract_epoch: 0,
-            animation_cache_file: None,
-            pending_gif_play: None,
-            playing_video: None,
-            video_frames: Vec::new(),
-            video_frame: 0,
-            video_tick: false,
-            video_cache_file: None,
-            pending_video_play: None,
-            sponsored_about_open: false,
-            rendered_sponsored: std::cell::RefCell::new(Vec::new()),
-            spoiler_revealed: HashSet::new(),
-            poll_dialog: None,
             payment_dialog: None,
             invite_link_dialog: None,
             invite_link_details: None,
@@ -796,20 +652,8 @@ impl QuillApp {
             deep_link_dialog: None,
             deep_link_invite: None,
             pending_deep_link_ui: None,
-            share_link_text: None,
-            custom_emoji_card_seen: None,
-            pending_media_seek: None,
             pending_deep_link_open: None,
-            pending_link: None,
-            right_clicked_link: None,
-            message_menu_link: None,
-            link_tooltip: None,
-            open_link_confirm: None,
-            link_popup: None,
-            pending_viewer_seek: None,
-            dismissed_keyboards: std::collections::HashSet::new(),
-            collapsed_keyboards: std::collections::HashSet::new(),
-            request_share: None,
+            viewer: super::viewer_state::ViewerUi::new(&audio_output),
             mini_apps: Default::default(),
             permissions_dialog: None,
             username_dialog: None,
@@ -817,51 +661,9 @@ impl QuillApp {
             restrict_dialog: None,
             ownership_dialog: None,
             group_confirm_dialog: None,
-            message_menu_selection: None,
-            message_menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
-            media_viewer: MediaViewer::closed(),
-            photo_editor: None,
-            viewer_zoom: ViewerZoom::new(),
-            viewer_frame: (720.0, 480.0),
-            viewer_drag: None,
-            viewer_video: None,
-            pip_window: None,
-            viewer_video_path: None,
-            viewer_audio: super::audio::AudioEngine::new(audio_output.clone()),
-            viewer_clock: None,
             capture_blocked: false,
             capture_notice_dismissed: false,
-            viewer_tick: false,
-            viewer_pending_play: None,
-            viewer_orientation: Default::default(),
-            viewer_rotated: None,
-            viewer_open_gen: 0,
-            viewer_last_activity: std::time::Instant::now(),
-            viewer_controls_hidden: false,
-            viewer_controls_gen: 0,
-            viewer_over_controls: false,
-            viewer_hide_timer: false,
-            viewer_extra: Default::default(),
-            viewer_seek_slider: None,
-            viewer_seek_scrubbing: false,
-            viewer_seek_preview_secs: None,
-            viewer_volume_slider: None,
-            viewer_volume_scrubbing: false,
-            playback_speed: 1.0,
-            playback_volume: 1.0,
-            playback_unmuted_volume: 1.0,
-            playback_error: None,
-            composer_group_media: None,
-            viewer_video_frames: Vec::new(),
-            viewer_native: None,
             status_traced: String::new(),
-            viewer_video_fps: 0.0,
-            viewer_frame_cache_file: None,
-            viewer_extracting: false,
-            viewer_extract_child: None,
-            viewer_extract_cancel: None,
-            viewer_extract_epoch: 0,
-            viewer_demo_sync_frames: false,
             pending_story_open: None,
             contacts_tab_open: false,
             calls_tab_open: false,
@@ -897,7 +699,7 @@ impl QuillApp {
             if !capturing {
                 let menu_handled = menu_app
                     .update(cx, |this, cx| {
-                        if this.message_menu.is_none()
+                        if this.message_ui.menu.is_none()
                             && this.chat_menu.is_none()
                             && this.archive_menu.is_none()
                             && this.folders.tab_menu.is_none()
@@ -905,7 +707,7 @@ impl QuillApp {
                             return false;
                         }
                         if event.keystroke.key == "escape" {
-                            this.message_menu = None;
+                            this.message_ui.menu = None;
                             this.chat_menu = None;
                             this.archive_menu = None;
                             this.folders.tab_menu = None;
@@ -1159,7 +961,10 @@ impl QuillApp {
         cx.observe_window_activation(window, |this, window, cx| {
             let active = window.is_window_active() || super::frame_clock::assume_active();
             this.window_active.set(active);
-            this.inline_videos.borrow_mut().set_window_active(active);
+            this.playback
+                .inline_videos
+                .borrow_mut()
+                .set_window_active(active);
             // The system accent may have changed while another app was in
             // front.
             if active && this.appearance.system_accent {

@@ -332,7 +332,7 @@ impl QuillApp {
             input.set_selected_range(40..40, cx);
         });
         self.open_code_language_dialog(window, cx);
-        if let Some(dialog) = self.composer_code_language.as_ref() {
+        if let Some(dialog) = self.composer_ui.code_language.as_ref() {
             dialog
                 .input_for_demo()
                 .update(cx, |input, cx| input.set_value("rust", window, cx));
@@ -406,7 +406,7 @@ impl QuillApp {
                 self.stories.stats_open = true;
             }
             "search" => {
-                self.search_input.update(cx, |input, cx| {
+                self.search_ui.input.update(cx, |input, cx| {
                     input.set_value("#sunset", window, cx);
                 });
             }
@@ -608,7 +608,7 @@ impl QuillApp {
             );
         }
         if view == "search" {
-            self.search_input.update(cx, |input, cx| {
+            self.search_ui.input.update(cx, |input, cx| {
                 input.set_value("שלום", window, cx);
                 input.focus(window, cx);
             });
@@ -689,12 +689,12 @@ impl QuillApp {
                         allow_custom_emoji: false,
                     });
                 }
-                self.message_menu = Some(MessageMenuState {
+                self.message_ui.menu = Some(MessageMenuState {
                     chat_id: ChatId(sc::HIKERS),
                     message_id: MessageId(sc::HIKERS_FIRST_MESSAGE),
                     position: point(px(560.), px(150.)),
                 });
-                self.reactions_expanded = true;
+                self.message_ui.reactions_expanded = true;
             }
             "viewer" => {
                 self.open_media_viewer(ChatId(sc::HIKERS), MessageId(sc::HIKERS_PHOTO_MESSAGE), cx);
@@ -775,8 +775,8 @@ impl QuillApp {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_note_send(session, &self.demo_sink, &self.demo_seq);
         }
-        self.playing_video = Some(MessageId(721));
-        self.video_frames = vec![
+        self.playback.playing_video = Some(MessageId(721));
+        self.playback.video_frames = vec![
             demo_media_allowlist().join("demo-gif-1.png"),
             demo_media_allowlist().join("demo-gif-2.png"),
         ];
@@ -792,8 +792,8 @@ impl QuillApp {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_send(session, &self.demo_sink, &self.demo_seq);
         }
-        self.playing_video = Some(MessageId(701));
-        self.video_frames = vec![
+        self.playback.playing_video = Some(MessageId(701));
+        self.playback.video_frames = vec![
             demo_media_allowlist().join("demo-gif-1.png"),
             demo_media_allowlist().join("demo-gif-2.png"),
         ];

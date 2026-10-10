@@ -359,8 +359,11 @@ impl QuillApp {
             list = list.child(self.sponsored_report_panel(&flight, cx));
         }
         if let Some(ad) = ad {
-            self.rendered_sponsored.borrow_mut().push(ad.message_id);
-            if self.sponsored_about_open {
+            self.message_ui
+                .rendered_sponsored
+                .borrow_mut()
+                .push(ad.message_id);
+            if self.message_ui.sponsored_about_open {
                 list = list.child(self.sponsored_about_panel(cx));
             }
             list = list.child(sponsored_message_row(
@@ -370,7 +373,7 @@ impl QuillApp {
                 &downloading,
                 &failed,
                 &media_roots,
-                &self.spoiler_revealed,
+                &self.message_ui.spoiler_revealed,
                 look,
                 cx,
             ));
@@ -427,7 +430,7 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_sponsored_about(&mut self, cx: &mut Context<Self>) {
-        self.sponsored_about_open = !self.sponsored_about_open;
+        self.message_ui.sponsored_about_open = !self.message_ui.sponsored_about_open;
         cx.notify();
     }
 
@@ -435,7 +438,7 @@ impl QuillApp {
     /// last frame painted are on screen, so tell TDLib. The session counts
     /// each ad once, so this is cheap to call every frame.
     pub(super) fn report_visible_sponsored(&mut self, window_active: bool) {
-        let shown = std::mem::take(&mut *self.rendered_sponsored.borrow_mut());
+        let shown = std::mem::take(&mut *self.message_ui.rendered_sponsored.borrow_mut());
         if !window_active || shown.is_empty() {
             return;
         }

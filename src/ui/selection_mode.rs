@@ -25,7 +25,8 @@ pub(super) struct SelectionRow {
 impl QuillApp {
     /// Whether selection mode is on in `chat_id`.
     pub(super) fn selecting_in(&self, chat_id: ChatId) -> bool {
-        self.pending_forward
+        self.share
+            .pending_forward
             .as_ref()
             .is_some_and(|draft| draft.from_chat_id == chat_id && !draft.message_ids.is_empty())
     }
@@ -37,7 +38,7 @@ impl QuillApp {
         let now = std::time::Instant::now();
         let on = self.selecting_in(chat_id);
         let mut fx = self.motion.selection.borrow_mut();
-        if on && let Some(draft) = self.pending_forward.as_ref() {
+        if on && let Some(draft) = self.share.pending_forward.as_ref() {
             fx.last_count = draft.count();
         }
         fx.sync_mode(on, self.window_active.get(), now);
@@ -60,6 +61,7 @@ impl QuillApp {
     ) -> SelectionRow {
         let (mode, _) = self.selection_motion(chat_id, cx);
         let selected = self
+            .share
             .pending_forward
             .as_ref()
             .is_some_and(|draft| draft.contains(message_id));
@@ -74,7 +76,7 @@ impl QuillApp {
             now,
         );
         let interactive = self.selecting_in(chat_id);
-        let focused = interactive && self.selection_focus == Some(message_id);
+        let focused = interactive && self.message_ui.selection_focus == Some(message_id);
         let ring_color = cx.theme().ring;
         let overlay = (mode > 0.).then(|| {
             let ring = cx.theme().background;
@@ -112,16 +114,20 @@ impl QuillApp {
                             if event.pressed_button == Some(MouseButton::Left) {
                                 this.selection_drag_over(chat_id, message_id, pending, cx);
                             } else {
-                                this.selection_drag = None;
+                                this.message_ui.selection_drag = None;
                             }
                         }))
                         .on_mouse_up(
                             MouseButton::Left,
-                            cx.listener(|this, _: &MouseUpEvent, _, _| this.selection_drag = None),
+                            cx.listener(|this, _: &MouseUpEvent, _, _| {
+                                this.message_ui.selection_drag = None
+                            }),
                         )
                         .on_mouse_up_out(
                             MouseButton::Left,
-                            cx.listener(|this, _: &MouseUpEvent, _, _| this.selection_drag = None),
+                            cx.listener(|this, _: &MouseUpEvent, _, _| {
+                                this.message_ui.selection_drag = None
+                            }),
                         )
                 })
                 .child(super::anim_layer::occluder(
@@ -258,7 +264,7 @@ impl QuillApp {
                         .ghost()
                         .tooltip("Unpin Selected")
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            if let Some(draft) = this.pending_forward.clone() {
+                            if let Some(draft) = this.share.pending_forward.clone() {
                                 this.confirm_unpin(
                                     draft.from_chat_id,
                                     draft.message_ids,
@@ -305,23 +311,24 @@ impl QuillApp {
         shift: bool,
         cx: &mut Context<Self>,
     ) {
-        self.selection_focus = Some(message_id);
-        let anchor = self.selection_anchor.filter(|_| shift);
+        self.message_ui.selection_focus = Some(message_id);
+        let anchor = self.message_ui.selection_anchor.filter(|_| shift);
         if let Some(anchor) = anchor {
             let ids = self.loaded_selectable_ids(chat_id);
             let range = quill::selection_pin::range_between(&ids, anchor, message_id);
             self.add_to_selection(chat_id, range);
-            self.selection_drag = None;
+            self.message_ui.selection_drag = None;
             cx.notify();
             return;
         }
         let selected = self
+            .share
             .pending_forward
             .as_ref()
             .is_some_and(|draft| draft.contains(message_id));
         self.toggle_forward_select(chat_id, message_id, pending, cx);
-        self.selection_anchor = Some(message_id);
-        self.selection_drag = Some(!selected);
+        self.message_ui.selection_anchor = Some(message_id);
+        self.message_ui.selection_drag = Some(!selected);
     }
 
     /// The pointer crossed a row while pressed: give it the drag's state.
@@ -332,31 +339,33 @@ impl QuillApp {
         pending: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(want) = self.selection_drag else {
+        let Some(want) = self.message_ui.selection_drag else {
             return;
         };
-        if self.selection_anchor == Some(message_id) {
+        if self.message_ui.selection_anchor == Some(message_id) {
             return;
         }
         let selected = self
+            .share
             .pending_forward
             .as_ref()
             .is_some_and(|draft| draft.contains(message_id));
         let full = self
+            .share
             .pending_forward
             .as_ref()
             .is_some_and(|draft| quill::selection_pin::room_for(draft.count()) == 0);
         if selected != want && !(want && full) {
             self.toggle_forward_select(chat_id, message_id, pending, cx);
         }
-        self.selection_anchor = Some(message_id);
-        self.selection_focus = Some(message_id);
+        self.message_ui.selection_anchor = Some(message_id);
+        self.message_ui.selection_focus = Some(message_id);
     }
 
     /// Select `ids` that are not selected yet, up to the selection limit
     /// (`Data::MaxSelectedItems`).
     pub(super) fn add_to_selection(&mut self, chat_id: ChatId, ids: Vec<MessageId>) {
-        let Some(draft) = self.pending_forward.as_mut() else {
+        let Some(draft) = self.share.pending_forward.as_mut() else {
             return;
         };
         let room = quill::selection_pin::room_for(draft.count());
@@ -378,7 +387,7 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        let Some(draft) = self.pending_forward.as_ref() else {
+        let Some(draft) = self.share.pending_forward.as_ref() else {
             return;
         };
         let ids = self.loaded_selectable_ids(chat_id);
@@ -389,8 +398,8 @@ impl QuillApp {
             quill::selection_pin::room_for(draft.count()),
         );
         self.add_to_selection(chat_id, span);
-        self.selection_anchor = Some(message_id);
-        self.selection_focus = Some(message_id);
+        self.message_ui.selection_anchor = Some(message_id);
+        self.message_ui.selection_focus = Some(message_id);
         cx.notify();
     }
 
@@ -398,7 +407,7 @@ impl QuillApp {
     /// selection is on in the chat and the message is not part of it, with
     /// a selected message among the loaded ones.
     pub(super) fn can_select_up_to(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        let Some(draft) = self.pending_forward.as_ref() else {
+        let Some(draft) = self.share.pending_forward.as_ref() else {
             return false;
         };
         draft.from_chat_id == chat_id
@@ -426,9 +435,9 @@ impl QuillApp {
             return;
         }
         self.toggle_forward_select(chat_id, from, false, cx);
-        self.selection_anchor = Some(from);
-        self.selection_focus = Some(from);
-        self.selection_drag = Some(true);
+        self.message_ui.selection_anchor = Some(from);
+        self.message_ui.selection_focus = Some(from);
+        self.message_ui.selection_drag = Some(true);
         self.selection_drag_over(chat_id, to, false, cx);
     }
 
@@ -462,7 +471,7 @@ impl QuillApp {
 
     /// The media messages of the selection, oldest first.
     fn selected_media(&self) -> Vec<(MessageId, quill::message_menu::MediaTarget)> {
-        let Some(draft) = self.pending_forward.as_ref() else {
+        let Some(draft) = self.share.pending_forward.as_ref() else {
             return Vec::new();
         };
         let Some(history) = self
@@ -505,7 +514,7 @@ impl QuillApp {
     /// "Download Selected": start the downloads of every selected media
     /// message that is not on disk yet (Save then copies them out).
     fn download_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.pending_forward.as_ref().map(|d| d.from_chat_id) else {
+        let Some(chat_id) = self.share.pending_forward.as_ref().map(|d| d.from_chat_id) else {
             return;
         };
         if self.refuse_protected_copy(chat_id, cx) {
@@ -528,7 +537,7 @@ impl QuillApp {
     /// "Save Selected": pick a folder and copy the downloaded media of the
     /// selection into it; media still downloading is requested first.
     fn save_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.pending_forward.as_ref().map(|d| d.from_chat_id) else {
+        let Some(chat_id) = self.share.pending_forward.as_ref().map(|d| d.from_chat_id) else {
             return;
         };
         if self.refuse_protected_copy(chat_id, cx) {
@@ -606,7 +615,7 @@ impl QuillApp {
     /// messages in a chat that is not Saved Messages (Telegram Desktop's
     /// `suggestReport`).
     pub(super) fn selection_reportable(&self, chat_id: ChatId) -> bool {
-        let Some(draft) = self.pending_forward.as_ref() else {
+        let Some(draft) = self.share.pending_forward.as_ref() else {
             return false;
         };
         let Some(session) = self.session() else {
@@ -629,7 +638,7 @@ impl QuillApp {
 
     /// "Report N": the Report flow for every selected message.
     pub(super) fn report_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(draft) = self.pending_forward.clone() else {
+        let Some(draft) = self.share.pending_forward.clone() else {
             return;
         };
         let mut ids = draft.message_ids.clone();
@@ -642,7 +651,7 @@ impl QuillApp {
     /// single message as its text; several as "[date time] Name: text"
     /// lines, oldest first.
     pub(super) fn selected_messages_text(&self) -> Option<(ChatId, String)> {
-        let draft = self.pending_forward.as_ref()?;
+        let draft = self.share.pending_forward.as_ref()?;
         let session = self.session()?;
         let history = session.histories.get(&draft.from_chat_id.0)?;
         let mut ids = draft.message_ids.clone();
@@ -688,7 +697,7 @@ impl QuillApp {
     /// "delete for everyone" (checked by default) when every selected
     /// message is yours and the chat isn't Saved Messages.
     pub(super) fn confirm_delete_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(draft) = self.pending_forward.as_ref() else {
+        let Some(draft) = self.share.pending_forward.as_ref() else {
             return;
         };
         let (chat_id, ids) = (draft.from_chat_id, draft.message_ids.clone());
@@ -770,8 +779,8 @@ impl QuillApp {
                 self.apply_demo_delete(chat_id, *id);
             }
         }
-        self.pending_forward = None;
-        self.forward_picker_open = false;
+        self.share.pending_forward = None;
+        self.share.forward_picker_open = false;
         cx.notify();
     }
 
@@ -938,7 +947,7 @@ impl QuillApp {
                                 picked,
                             );
                         }
-                        this.pending_delete = Some(confirm);
+                        this.message_ui.pending_delete = Some(confirm);
                         this.confirm_delete(cx);
                     });
                     true

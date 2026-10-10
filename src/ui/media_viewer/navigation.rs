@@ -32,8 +32,8 @@ impl QuillApp {
         let Some(index) = index else {
             return;
         };
-        self.media_viewer = MediaViewer::open(items, index);
-        self.viewer_open_gen += 1;
+        self.viewer.state = MediaViewer::open(items, index);
+        self.viewer.open_gen += 1;
         self.viewer_note_activity(false, cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
@@ -72,10 +72,10 @@ impl QuillApp {
             return false;
         };
         debug_assert!(items.iter().all(|item| item.chat_id == chat_id));
-        self.media_viewer = MediaViewer::open_shared(items, index, total);
-        self.viewer_extra.shared_tab = tab;
-        self.viewer_extra.shared_seen = loaded;
-        self.viewer_open_gen += 1;
+        self.viewer.state = MediaViewer::open_shared(items, index, total);
+        self.viewer.extra.shared_tab = tab;
+        self.viewer.extra.shared_seen = loaded;
+        self.viewer.open_gen += 1;
         self.viewer_note_activity(false, cx);
         self.reset_viewer_item_state(cx);
         self.sync_shared_media_viewer(cx);
@@ -87,11 +87,11 @@ impl QuillApp {
     /// that landed, and ask for the next one when the viewer nears the
     /// start of the loaded list.
     pub(in crate::ui) fn sync_shared_media_viewer(&mut self, cx: &mut Context<Self>) {
-        if self.media_viewer.source() != ViewerSource::SharedMedia {
+        if self.viewer.state.source() != ViewerSource::SharedMedia {
             return;
         }
-        let tab = self.viewer_extra.shared_tab;
-        let seen = self.viewer_extra.shared_seen;
+        let tab = self.viewer.extra.shared_tab;
+        let seen = self.viewer.extra.shared_seen;
         let grown = self.session().and_then(|session| {
             let state = &session.shared_media.tabs[tab.index()];
             (state.items.len() != seen).then(|| {
@@ -109,12 +109,12 @@ impl QuillApp {
             })
         });
         if let Some((items, total, loaded)) = grown {
-            self.viewer_extra.shared_seen = loaded;
-            if self.media_viewer.merge_older(items, total) > 0 {
+            self.viewer.extra.shared_seen = loaded;
+            if self.viewer.state.merge_older(items, total) > 0 {
                 cx.notify();
             }
         }
-        if self.media_viewer.wants_older()
+        if self.viewer.state.wants_older()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.fetch_more_shared_media(tab);
@@ -125,20 +125,20 @@ impl QuillApp {
     /// and the download / delete-permission lookups for the new current
     /// item. Shared by open, step, and "the current item was deleted".
     pub(in crate::ui) fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
-        self.viewer_zoom.reset();
-        self.viewer_drag = None;
+        self.viewer.zoom.reset();
+        self.viewer.drag = None;
         // MED1: orientation and playback error are per-item state.
-        self.viewer_orientation = Default::default();
-        self.viewer_rotated = None;
-        self.playback_error = None;
-        self.viewer_extra.inactive_paused = false;
+        self.viewer.orientation = Default::default();
+        self.viewer.rotated = None;
+        self.playback.error = None;
+        self.viewer.extra.inactive_paused = false;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.maybe_autoplay_viewer_video(cx);
         // What TDLib allows for this message (Delete in the toolbar).
         // Profile photos are not messages.
-        if self.media_viewer.source() != ViewerSource::Profile
-            && let (Some(item), Some(live)) = (self.media_viewer.current(), self.live.as_mut())
+        if self.viewer.state.source() != ViewerSource::Profile
+            && let (Some(item), Some(live)) = (self.viewer.state.current(), self.live.as_mut())
         {
             let _ = live
                 .driver
@@ -149,16 +149,16 @@ impl QuillApp {
     pub(in crate::ui) fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
         self.viewer_leave_video_fullscreen();
         self.stop_viewer_video();
-        self.viewer_extra.saved_toast = None;
-        self.media_viewer.close();
+        self.viewer.extra.saved_toast = None;
+        self.viewer.state.close();
         cx.notify();
     }
 
     pub(in crate::ui) fn step_media_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
         if delta < 0 {
-            self.media_viewer.prev();
+            self.viewer.state.prev();
         } else {
-            self.media_viewer.next();
+            self.viewer.state.next();
         }
         self.viewer_note_activity(false, cx);
         self.reset_viewer_item_state(cx);
@@ -170,7 +170,7 @@ impl QuillApp {
     /// the clip itself). Reuses `request_media_download`; no live request
     /// happens in demo mode (it only sets a status note).
     pub(in crate::ui) fn ensure_viewer_download(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.media_viewer.current().cloned() else {
+        let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
         let roots = self.media_display_roots();

@@ -27,12 +27,12 @@ pub(super) struct RoundPreview {
 impl QuillApp {
     /// The recording circle, while a video message records.
     pub(super) fn round_record_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let capture = self.video_note_capture.as_ref()?;
+        let capture = self.recording.video_note_capture.as_ref()?;
         self.request_animation_tick(30, cx);
         let progress = capture.progress();
         let frames = capture.preview();
         let (image, stale) = {
-            let mut preview = self.round_preview.borrow_mut();
+            let mut preview = self.recording.round_preview.borrow_mut();
             if let Ok(latest) = frames.lock()
                 && latest.0 != preview.seq
                 && let Some(buffer) = image::RgbaImage::from_raw(

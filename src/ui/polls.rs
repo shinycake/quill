@@ -203,13 +203,13 @@ impl QuillApp {
         is_quiz: bool,
         cx: &mut Context<Self>,
     ) {
-        self.pending_stop_poll = Some((chat_id, message_id, is_quiz));
+        self.message_ui.pending_stop_poll = Some((chat_id, message_id, is_quiz));
         self.status_note = "confirm stop poll".into();
         cx.notify();
     }
 
     pub(super) fn cancel_stop_poll(&mut self, cx: &mut Context<Self>) {
-        self.pending_stop_poll = None;
+        self.message_ui.pending_stop_poll = None;
         self.status_note = "stop cancelled".into();
         cx.notify();
     }
@@ -217,7 +217,7 @@ impl QuillApp {
     /// B4: confirm `stopPoll` (schema 1.8.67 line 12953). The closed
     /// poll arrives via `updatePoll`; demo mode flips it locally.
     pub(super) fn confirm_stop_poll(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, message_id, _)) = self.pending_stop_poll.take() else {
+        let Some((chat_id, message_id, _)) = self.message_ui.pending_stop_poll.take() else {
             return;
         };
         if self.live.is_some() {
@@ -260,7 +260,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.poll_voters_dialog = Some(PollVotersDialog {
+        self.message_ui.poll_voters_dialog = Some(PollVotersDialog {
             chat_id,
             message_id,
             selected_option: None,
@@ -294,7 +294,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.poll_voters_dialog = Some(PollVotersDialog {
+        self.message_ui.poll_voters_dialog = Some(PollVotersDialog {
             chat_id,
             message_id,
             selected_option: None,
@@ -315,7 +315,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_poll_voters_dialog(&mut self, cx: &mut Context<Self>) {
-        self.poll_voters_dialog = None;
+        self.message_ui.poll_voters_dialog = None;
         cx.notify();
     }
 
@@ -325,7 +325,7 @@ impl QuillApp {
         option_index: usize,
         cx: &mut Context<Self>,
     ) {
-        let Some(dialog) = self.poll_voters_dialog.as_mut() else {
+        let Some(dialog) = self.message_ui.poll_voters_dialog.as_mut() else {
             return;
         };
         dialog.selected_option = Some(option_index);
@@ -343,7 +343,7 @@ impl QuillApp {
 
     /// B4: next `getPollVoters` page for the dialog's selected option.
     pub(super) fn load_more_poll_voters(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.poll_voters_dialog.as_ref() else {
+        let Some(dialog) = self.message_ui.poll_voters_dialog.as_ref() else {
             return;
         };
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
@@ -380,7 +380,7 @@ impl QuillApp {
     /// option's voters with a "Load more" button while the server
     /// reports more than loaded.
     pub(super) fn poll_voters_dialog_body(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(dialog) = self.poll_voters_dialog.as_ref() else {
+        let Some(dialog) = self.message_ui.poll_voters_dialog.as_ref() else {
             return div().into_any_element();
         };
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
@@ -452,6 +452,7 @@ impl QuillApp {
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             let index = this
+                                .message_ui
                                 .poll_voters_dialog
                                 .as_ref()
                                 .and_then(|dialog| dialog.selected_option)
@@ -624,8 +625,8 @@ impl QuillApp {
         if self.deny_send(quill::send_rights::SendKind::Polls, cx) {
             return;
         }
-        self.poll_dialog = Some(PollDialog::new(window, cx));
-        if let Some(dialog) = &self.poll_dialog {
+        self.composer_ui.poll_dialog = Some(PollDialog::new(window, cx));
+        if let Some(dialog) = &self.composer_ui.poll_dialog {
             dialog
                 .question_input
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -634,7 +635,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_poll_dialog(&mut self, cx: &mut Context<Self>) {
-        self.poll_dialog = None;
+        self.composer_ui.poll_dialog = None;
         cx.notify();
     }
 
@@ -642,11 +643,12 @@ impl QuillApp {
     /// the inline discard confirmation instead of closing silently.
     pub(super) fn request_close_poll_dialog(&mut self, cx: &mut Context<Self>) {
         let dirty = self
+            .composer_ui
             .poll_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.is_dirty(cx));
         if dirty {
-            if let Some(dialog) = self.poll_dialog.as_mut() {
+            if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
                 dialog.confirming_discard = true;
             }
             cx.notify();
@@ -677,6 +679,7 @@ impl QuillApp {
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(
                     if this
+                        .message_ui
                         .poll_voters_dialog
                         .as_ref()
                         .is_some_and(|dialog| dialog.show_stats)
@@ -703,7 +706,7 @@ impl QuillApp {
     }
 
     pub(super) fn add_poll_option_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.poll_dialog.as_mut() else {
+        let Some(dialog) = self.composer_ui.poll_dialog.as_mut() else {
             return;
         };
         if dialog.option_inputs.len() >= POLL_OPTIONS_MAX {
@@ -720,7 +723,7 @@ impl QuillApp {
     }
 
     pub(super) fn remove_poll_option_row(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(dialog) = self.poll_dialog.as_mut() else {
+        let Some(dialog) = self.composer_ui.poll_dialog.as_mut() else {
             return;
         };
         if dialog.option_inputs.len() <= POLL_OPTIONS_MIN || index >= dialog.option_inputs.len() {
@@ -744,7 +747,7 @@ impl QuillApp {
     /// through the driver (same `sendMessage` path as the composer). The
     /// pending reply (if any) is attached like a normal send.
     pub(super) fn submit_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let draft = match self.poll_dialog.as_ref() {
+        let draft = match self.composer_ui.poll_dialog.as_ref() {
             Some(dialog) => dialog.draft(cx),
             None => return,
         };
@@ -769,6 +772,7 @@ impl QuillApp {
         }
         // Slice G1: the poll carries the composer's quote, if any.
         let reply_to = self
+            .composer_ui
             .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_target(chat_id));
@@ -776,8 +780,8 @@ impl QuillApp {
             let result = live.driver.send_poll_draft(chat_id, &draft, reply_to);
             match result {
                 Ok(_) => {
-                    self.poll_dialog = None;
-                    self.pending_reply = None;
+                    self.composer_ui.poll_dialog = None;
+                    self.composer_ui.pending_reply = None;
                     self.status_note = "sending poll…".into();
                 }
                 Err(_) => {
@@ -789,7 +793,7 @@ impl QuillApp {
         }
         // Screenshot demos have no live driver; close the dialog honestly.
         let _ = window;
-        self.poll_dialog = None;
+        self.composer_ui.poll_dialog = None;
         self.status_note = "polls need a live connection (demo)".into();
         cx.notify();
     }
@@ -799,6 +803,7 @@ impl QuillApp {
     /// vote afterwards, and the action can't be undone.
     pub(super) fn stop_poll_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_quiz = self
+            .message_ui
             .pending_stop_poll
             .is_some_and(|(_, _, is_quiz)| is_quiz);
         let title = if is_quiz {
@@ -864,7 +869,7 @@ impl QuillApp {
     /// fields, anonymous / multiple-answers / revoting / shuffle / quiz
     /// toggles, discard confirmation, Create / Cancel.
     pub(super) fn poll_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.poll_dialog.as_ref()?;
+        let dialog = self.composer_ui.poll_dialog.as_ref()?;
         let mut panel = div()
             .id("poll-dialog")
             .flex()
@@ -911,7 +916,7 @@ impl QuillApp {
                             index + 1
                         ))
                         .on_click(cx.listener(move |this, &on, _, cx| {
-                            if let Some(dialog) = this.poll_dialog.as_mut() {
+                            if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
                                 dialog.quiz_correct_row = if on { Some(index) } else { None };
                             }
                             cx.notify();
@@ -996,7 +1001,7 @@ impl QuillApp {
                                 .label("Keep editing")
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(dialog) = this.poll_dialog.as_mut() {
+                                    if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
                                         dialog.confirming_discard = false;
                                     }
                                     cx.notify();
@@ -1029,7 +1034,8 @@ impl QuillApp {
     /// single-answer and no revoting, mirroring Telegram X's
     /// `CreatePollController` quiz toggle.
     pub(super) fn poll_toggle_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (is_quiz, anonymous, multiple, revoting, shuffle) = match &self.poll_dialog {
+        let (is_quiz, anonymous, multiple, revoting, shuffle) = match &self.composer_ui.poll_dialog
+        {
             Some(dialog) => (
                 dialog.is_quiz,
                 dialog.is_anonymous,
@@ -1039,15 +1045,16 @@ impl QuillApp {
             ),
             None => (false, true, false, true, false),
         };
-        let (add_options, hide_results, subscribers, has_deadline) = match &self.poll_dialog {
-            Some(dialog) => (
-                dialog.allow_adding_options,
-                dialog.hide_results_until_closes,
-                dialog.members_only,
-                dialog.deadline.is_some(),
-            ),
-            None => (false, false, false, false),
-        };
+        let (add_options, hide_results, subscribers, has_deadline) =
+            match &self.composer_ui.poll_dialog {
+                Some(dialog) => (
+                    dialog.allow_adding_options,
+                    dialog.hide_results_until_closes,
+                    dialog.members_only,
+                    dialog.deadline.is_some(),
+                ),
+                None => (false, false, false, false),
+            };
         // tdesktop offers "Restrict to Subscribers" in broadcast channels only.
         let in_channel = self
             .session()
@@ -1061,7 +1068,7 @@ impl QuillApp {
                     .checked(on)
                     .label(label)
                     .on_click(cx.listener(move |this, &on, _, cx| {
-                        if let Some(dialog) = this.poll_dialog.as_mut() {
+                        if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
                             set(dialog, on);
                         }
                         cx.notify();
@@ -1163,7 +1170,7 @@ impl QuillApp {
                     .checked(has_deadline)
                     .label("Close at a set date and time")
                     .on_click(cx.listener(|this, &on: &bool, window, cx| {
-                        if let Some(dialog) = this.poll_dialog.as_mut() {
+                        if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
                             dialog.deadline = on.then(|| poll_deadline_picker(window, cx));
                         }
                         cx.notify();
@@ -1175,7 +1182,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     PollVoters => DialogSpec::new(
         5500,
-        |app| app.poll_voters_dialog.is_some(),
+        |app| app.message_ui.poll_voters_dialog.is_some(),
         QuillApp::build_poll_voters_dialog,
     ),
 }

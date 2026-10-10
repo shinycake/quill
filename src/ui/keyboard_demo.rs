@@ -83,7 +83,8 @@ impl QuillApp {
         let message = MessageId(KEYBOARD_MESSAGE);
         match view.as_str() {
             "hidden" => {
-                self.collapsed_keyboards
+                self.message_ui
+                    .collapsed_keyboards
                     .insert((BOT_CHAT, KEYBOARD_MESSAGE));
             }
             "phone" => self.open_request_share(

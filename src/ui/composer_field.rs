@@ -166,7 +166,7 @@ impl QuillApp {
     /// The composer's content as markup, for sending, drafts and edits.
     pub(super) fn composer_markup(&self, cx: &App) -> String {
         let state = self.composer.read(cx);
-        if self.rich_editor_open {
+        if self.composer_ui.rich_editor_open {
             return state.value().to_string();
         }
         field_doc(state).to_markup()
@@ -179,12 +179,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let content = if self.rich_editor_open {
+        let content = if self.composer_ui.rich_editor_open {
             InputContent::new(markup.to_string())
         } else {
             doc_content(&ComposerDoc::from_markup(markup))
         };
-        self.markdown_revert = None;
+        self.composer_ui.markdown_revert = None;
         self.composer
             .update(cx, |input, cx| input.set_value(content, window, cx));
     }
@@ -233,7 +233,7 @@ impl QuillApp {
     ) {
         let range = self.composer.read(cx).selected_range();
         let fallback = if fallback.is_empty() { "⭐" } else { fallback };
-        let content = if self.rich_editor_open {
+        let content = if self.composer_ui.rich_editor_open {
             InputContent::new(quill::composer::custom_emoji_markup(
                 fallback,
                 custom_emoji_id,
@@ -266,7 +266,7 @@ impl QuillApp {
         let range = text.len() - query.len() - 1..text.len();
         let content = if !username.is_empty() {
             InputContent::new(format!("@{username} "))
-        } else if self.rich_editor_open {
+        } else if self.composer_ui.rich_editor_open {
             InputContent::new(quill::moderation::mention_text(user_id, "", name))
         } else {
             mention_content(user_id, name)
@@ -283,7 +283,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.markdown_revert = None;
+        self.composer_ui.markdown_revert = None;
         self.composer.update(cx, |input, cx| {
             let doc = field_doc(input);
             let range = input.selected_range();
@@ -315,7 +315,7 @@ impl QuillApp {
     /// "Clear formatting": the selection loses every format; with nothing
     /// selected, the next typed text is plain.
     pub(super) fn clear_composer_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.markdown_revert = None;
+        self.composer_ui.markdown_revert = None;
         self.composer.update(cx, |input, cx| {
             let range = input.selected_range();
             if range.is_empty() {
@@ -375,7 +375,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.rich_editor_open {
+        if self.composer_ui.rich_editor_open {
             return false;
         }
         let revert = self
@@ -383,7 +383,7 @@ impl QuillApp {
             .update(cx, |input, cx| apply_markdown(input, prev, window, cx));
         let replaced = revert.is_some();
         if replaced {
-            self.markdown_revert = revert;
+            self.composer_ui.markdown_revert = revert;
         }
         replaced
     }
@@ -395,7 +395,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(revert) = self.markdown_revert.take() else {
+        let Some(revert) = self.composer_ui.markdown_revert.take() else {
             return false;
         };
         let state = self.composer.read(cx);

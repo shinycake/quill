@@ -23,41 +23,43 @@ impl QuillApp {
     pub(super) fn file_drop_enabled(&self) -> bool {
         matches!(self.pane_mode(), PaneMode::Ready)
             && self.composer_available(PaneMode::Ready)
-            && self.pending_edit.is_none()
-            && !self.rich_editor_open
+            && self.composer_ui.pending_edit.is_none()
+            && !self.composer_ui.rich_editor_open
             && !self.recording_active()
     }
 
     /// A file drag moved over the conversation: remember what it holds.
     pub(super) fn note_file_drag(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        if !self.file_drop_enabled() || self.drop_paths == paths {
+        if !self.file_drop_enabled() || self.composer_ui.drop_paths == paths {
             return;
         }
-        self.drop_paths = paths.to_vec();
+        self.composer_ui.drop_paths = paths.to_vec();
         let entries: Vec<DragEntry> = paths.iter().map(|path| DragEntry::probe(path)).collect();
-        self.drop_state = classify(&entries);
+        self.composer_ui.drop_state = classify(&entries);
         cx.notify();
     }
 
     /// The zones to draw now: a live file drag, or a demo's fixed state.
     pub(super) fn visible_drop_state(&mut self, cx: &App) -> Option<DragState> {
-        if self.drop_preview.is_some() {
-            return self.drop_preview;
+        if self.composer_ui.drop_preview.is_some() {
+            return self.composer_ui.drop_preview;
         }
         if !cx.has_active_drag() {
-            self.drop_state = None;
-            self.drop_paths.clear();
+            self.composer_ui.drop_state = None;
+            self.composer_ui.drop_paths.clear();
         }
-        self.drop_state.filter(|_| self.file_drop_enabled())
+        self.composer_ui
+            .drop_state
+            .filter(|_| self.file_drop_enabled())
     }
 
     /// Files dropped on the conversation outside any zone, or while the
     /// zones are off (editing): the usual attach, which picks media or
     /// documents by what was dropped.
     pub(super) fn drop_files_plain(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        self.drop_state = None;
-        self.drop_paths.clear();
-        if self.file_drop_enabled() || self.pending_edit.is_some() {
+        self.composer_ui.drop_state = None;
+        self.composer_ui.drop_paths.clear();
+        if self.file_drop_enabled() || self.composer_ui.pending_edit.is_some() {
             self.attach_dropped_files(paths, cx);
         }
     }
@@ -69,8 +71,8 @@ impl QuillApp {
         paths: &[PathBuf],
         cx: &mut Context<Self>,
     ) {
-        self.drop_state = None;
-        self.drop_paths.clear();
+        self.composer_ui.drop_state = None;
+        self.composer_ui.drop_paths.clear();
         if !self.file_drop_enabled() {
             return;
         }
@@ -81,7 +83,7 @@ impl QuillApp {
         match plan_drop(action, paths, &folder_files) {
             DropPlan::Attach(planned) => {
                 self.status_note = match ComposerAttachment::append_planned(
-                    &mut self.pending_attachments,
+                    &mut self.composer_ui.pending_attachments,
                     &planned,
                 ) {
                     Ok(count) => format!("Attached {count} files. Send to upload."),
@@ -130,7 +132,7 @@ impl QuillApp {
                     return;
                 }
                 self.status_note = match ComposerAttachment::append_planned(
-                    &mut self.pending_attachments,
+                    &mut self.composer_ui.pending_attachments,
                     &[(path, AttachmentKind::Document)],
                 ) {
                     Ok(_) => "Attached the archive. Send to upload.".into(),

@@ -1012,14 +1012,14 @@ impl QuillApp {
         if clears.is_empty() {
             return;
         }
-        let idle = self.pending_edit.is_none()
-            && self.pending_reply.is_none()
+        let idle = self.composer_ui.pending_edit.is_none()
+            && self.composer_ui.pending_reply.is_none()
             && self.composer.read(cx).value().trim().is_empty();
         for chat_id in clears {
-            if self.clear_draft_on_success != Some(chat_id) {
+            if self.composer_ui.clear_draft_on_success != Some(chat_id) {
                 continue;
             }
-            self.clear_draft_on_success = None;
+            self.composer_ui.clear_draft_on_success = None;
             if !idle {
                 continue;
             }

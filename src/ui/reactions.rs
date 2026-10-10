@@ -50,16 +50,16 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.message_menu = Some(menu);
-        self.message_menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
-        self.message_menu_link = self.take_right_clicked_link(menu.position);
-        self.link_tooltip = None;
+        self.message_ui.menu = Some(menu);
+        self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
+        self.message_ui.menu_link = self.take_right_clicked_link(menu.position);
+        self.message_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
-        self.message_menu_selection = super::selectable_text::selected_message_text(window, cx)
+        self.message_ui.menu_selection = super::selectable_text::selected_message_text(window, cx)
             .filter(|(key, _)| *key == (menu.chat_id.0, menu.message_id.0 as u64))
             .map(|(_, text)| text);
-        self.reactions_expanded = false;
+        self.message_ui.reactions_expanded = false;
         if let Some(live) = self.live.as_mut() {
             let _ = live
                 .driver
@@ -105,10 +105,10 @@ impl QuillApp {
     /// full screen it only leaves full screen first (tdesktop
     /// `handleKeyPress`, media_view_overlay_widget.cpp:7384).
     pub(super) fn close_media_viewer_on_escape(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.media_viewer.is_open() {
+        if !self.viewer.state.is_open() {
             return false;
         }
-        if self.viewer_extra.video_fullscreen {
+        if self.viewer.extra.video_fullscreen {
             self.viewer_leave_video_fullscreen();
             cx.notify();
             return true;
@@ -119,10 +119,10 @@ impl QuillApp {
 
     /// Escape closes an open message or chat context menu first.
     pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.message_menu.is_none() && self.chat_menu.is_none() {
+        if self.message_ui.menu.is_none() && self.chat_menu.is_none() {
             return false;
         }
-        self.message_menu = None;
+        self.message_ui.menu = None;
         self.chat_menu = None;
         cx.notify();
         true
@@ -425,7 +425,7 @@ impl QuillApp {
             .aria_label(label)
             .child(self.reaction_glyph(&choice, STRIP_GLYPH))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.message_menu = None;
+                this.message_ui.menu = None;
                 this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
             }))
             .into_any_element()
@@ -466,7 +466,7 @@ impl QuillApp {
                 .into_any_element();
         };
         let mut container = div().id("reaction-strip").flex().flex_col().px_1().py_1();
-        if !self.reactions_expanded {
+        if !self.message_ui.reactions_expanded {
             let mut row = div().flex().items_center().gap(px(2.));
             for (ix, choice) in options.top.iter().take(7).enumerate() {
                 let chosen = message.chosen_reaction(choice);
@@ -505,7 +505,7 @@ impl QuillApp {
                                 .session()
                                 .and_then(|s| s.message_reaction_options.as_ref())
                                 .is_some_and(|o| o.allow_custom_emoji);
-                            let position = this.message_menu.map(|menu| menu.position);
+                            let position = this.message_ui.menu.map(|menu| menu.position);
                             match position {
                                 Some(position) if custom => {
                                     this.open_reaction_selector(
@@ -513,7 +513,7 @@ impl QuillApp {
                                     );
                                 }
                                 _ => {
-                                    this.reactions_expanded = true;
+                                    this.message_ui.reactions_expanded = true;
                                     cx.notify();
                                 }
                             }

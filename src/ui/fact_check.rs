@@ -44,7 +44,7 @@ impl QuillApp {
         input.update(cx, |input, cx| {
             input.set_value(existing.clone(), window, cx)
         });
-        self.fact_check_dialog = Some(FactCheckDialog {
+        self.message_ui.fact_check_dialog = Some(FactCheckDialog {
             chat_id,
             message_id,
             existing,
@@ -54,12 +54,12 @@ impl QuillApp {
     }
 
     fn close_fact_check(&mut self, cx: &mut Context<Self>) {
-        self.fact_check_dialog = None;
+        self.message_ui.fact_check_dialog = None;
         cx.notify();
     }
 
     fn submit_fact_check(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.fact_check_dialog.take() else {
+        let Some(dialog) = self.message_ui.fact_check_dialog.take() else {
             return;
         };
         let text: String = dialog
@@ -112,7 +112,7 @@ impl QuillApp {
                 this.close_fact_check(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(state) = this.fact_check_dialog.as_ref() else {
+            let Some(state) = this.message_ui.fact_check_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
             let adding = state.existing.is_empty();
@@ -179,7 +179,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     FactCheck => DialogSpec::new(
         5400,
-        |app| app.fact_check_dialog.is_some(),
+        |app| app.message_ui.fact_check_dialog.is_some(),
         QuillApp::build_fact_check_dialog,
     ),
 }

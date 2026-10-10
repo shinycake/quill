@@ -756,7 +756,7 @@ fn paint_text_run(
             .aria_label("Reveal spoiler")
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.spoiler_revealed.insert(key);
+                this.message_ui.spoiler_revealed.insert(key);
                 super::spoiler_fx::mark_revealed(key);
                 cx.notify();
             }))
@@ -994,10 +994,10 @@ fn quote_block(
                 .label(label)
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if this.spoiler_revealed.contains(&key) {
-                        this.spoiler_revealed.remove(&key);
+                    if this.message_ui.spoiler_revealed.contains(&key) {
+                        this.message_ui.spoiler_revealed.remove(&key);
                     } else {
-                        this.spoiler_revealed.insert(key);
+                        this.message_ui.spoiler_revealed.insert(key);
                     }
                     cx.notify();
                 })),
@@ -1314,7 +1314,7 @@ fn inline_paragraph(
             InlineAction::Link(link) => this.queue_link(link, msg_key, cx),
             InlineAction::CopyCode(text) => this.copy_entity_text(text, cx),
             InlineAction::RevealSpoiler(key) => {
-                this.spoiler_revealed.insert(key);
+                this.message_ui.spoiler_revealed.insert(key);
                 super::spoiler_fx::mark_revealed(key);
                 cx.notify();
             }

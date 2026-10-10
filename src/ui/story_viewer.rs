@@ -1944,7 +1944,7 @@ impl QuillApp {
                 &item.caption_entities,
                 (item.chat_id.0, item.story_id as u64),
                 true,
-                &self.spoiler_revealed,
+                &self.message_ui.spoiler_revealed,
                 // Settings → Appearance: captions follow the message font size.
                 self.msg_font(),
                 // Captions don't resolve custom emoji in this slice (text fallback).

@@ -1249,7 +1249,7 @@ impl QuillApp {
                 shown,
                 suspicious,
             } => {
-                self.open_link_confirm = Some(super::entity_links::OpenLinkConfirm {
+                self.message_ui.open_link_confirm = Some(super::entity_links::OpenLinkConfirm {
                     url,
                     shown,
                     suspicious,

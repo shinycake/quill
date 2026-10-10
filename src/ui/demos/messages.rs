@@ -180,9 +180,10 @@ impl QuillApp {
             input.set_value("Reply from the session reducer.", window, cx);
             input.focus(window, cx);
         });
-        self.pending_edit = edit;
-        self.saved_edit_draft = "unrelated draft stays".into();
-        self.pending_delete = DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
+        self.composer_ui.pending_edit = edit;
+        self.composer_ui.saved_edit_draft = "unrelated draft stays".into();
+        self.message_ui.pending_delete =
+            DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
     }
 
     fn demo_ready_edit_media(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -192,7 +193,7 @@ impl QuillApp {
             .and_then(|session| session.histories.get(&11))
             .and_then(|history| history.messages.get(&302))
             .map(|message| message.content.clone());
-        self.pending_edit = content.and_then(|content| {
+        self.composer_ui.pending_edit = content.and_then(|content| {
             ComposerEdit::from_own_content(ChatId(11), MessageId(302), true, false, &content)
         });
         self.composer.update(cx, |input, cx| {
@@ -202,7 +203,7 @@ impl QuillApp {
         // B5: "Replace attachment" staged with a new photo, caption
         // moved above the media.
         self.set_edit_replacement(&demo_media_allowlist().join("demo-thumb.png"), cx);
-        if let Some(edit) = self.pending_edit.as_mut() {
+        if let Some(edit) = self.composer_ui.pending_edit.as_mut() {
             edit.caption_above = true;
         }
     }
@@ -211,14 +212,14 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_forward(session, &self.demo_sink, &self.demo_seq);
-            self.forward_result = session.last_forward.clone();
+            self.share.forward_result = session.last_forward.clone();
         }
         let mut draft =
             ForwardDraft::from_message(ChatId(11), MessageId(101), false).expect("forward 101");
         draft.toggle(ChatId(11), MessageId(102), false);
-        self.pending_forward = Some(draft);
-        self.forward_picker_open = true;
-        self.forward_search_input.update(cx, |input, cx| {
+        self.share.pending_forward = Some(draft);
+        self.share.forward_picker_open = true;
+        self.share.search_input.update(cx, |input, cx| {
             input.set_value("Demo chat B", window, cx);
             input.focus(window, cx);
         });
@@ -269,12 +270,12 @@ impl QuillApp {
                 allow_custom_emoji: false,
             });
         }
-        self.message_menu = Some(MessageMenuState {
+        self.message_ui.menu = Some(MessageMenuState {
             chat_id: ChatId(11),
             message_id: MessageId(101),
             position: point(px(420.), px(200.)),
         });
-        self.reactions_expanded = true;
+        self.message_ui.reactions_expanded = true;
         self.status_note = "screenshot demo — react · unreact · chips".into();
     }
 
@@ -286,7 +287,7 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_reply(session, &self.demo_sink, &self.demo_seq);
-            self.pending_reply = Some(ComposerReplyTo::new(
+            self.composer_ui.pending_reply = Some(ComposerReplyTo::new(
                 ChatId(11),
                 MessageId(101),
                 "Hello from injected JSON.",
@@ -299,7 +300,7 @@ impl QuillApp {
             input.set_value("nice shot", window, cx);
             input.focus(window, cx);
         });
-        self.pending_reply = Some(ComposerReplyTo::new(
+        self.composer_ui.pending_reply = Some(ComposerReplyTo::new(
             ChatId(11),
             MessageId(201),
             "Loaded photo",
@@ -349,11 +350,11 @@ impl QuillApp {
             }
             crate::ui::scheduled_demo::ScheduledView::List
             | crate::ui::scheduled_demo::ScheduledView::ReminderList => {
-                self.scheduled_dialog_open = true;
+                self.composer_ui.scheduled_dialog_open = true;
             }
             crate::ui::scheduled_demo::ScheduledView::ListSelected => {
-                self.scheduled_dialog_open = true;
-                self.scheduled_selected =
+                self.composer_ui.scheduled_dialog_open = true;
+                self.composer_ui.scheduled_selected =
                     vec![quill::ids::MessageId(501), quill::ids::MessageId(503)];
             }
             crate::ui::scheduled_demo::ScheduledView::Button => {}
@@ -362,7 +363,7 @@ impl QuillApp {
     }
 
     fn demo_ready_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search_input.update(cx, |input, cx| {
+        self.search_ui.input.update(cx, |input, cx| {
             input.set_value("hello", window, cx);
             input.focus(window, cx);
         });
@@ -373,7 +374,7 @@ impl QuillApp {
     }
 
     fn demo_ready_search_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search_input.update(cx, |input, cx| {
+        self.search_ui.input.update(cx, |input, cx| {
             input.set_value("hello", window, cx);
             input.focus(window, cx);
         });
@@ -389,12 +390,13 @@ impl QuillApp {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_search_frequent(session, &self.demo_sink, &self.demo_seq);
         }
-        self.search_input
+        self.search_ui
+            .input
             .update(cx, |input, cx| input.focus(window, cx));
     }
 
     fn demo_ready_search_in_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.chat_search_input.update(cx, |input, cx| {
+        self.search_ui.chat_input.update(cx, |input, cx| {
             input.set_value("hello", window, cx);
             input.focus(window, cx);
         });
@@ -405,7 +407,7 @@ impl QuillApp {
     }
 
     fn demo_ready_search_public(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search_input.update(cx, |input, cx| {
+        self.search_ui.input.update(cx, |input, cx| {
             input.set_value("#dune", window, cx);
             input.focus(window, cx);
         });
@@ -419,9 +421,9 @@ impl QuillApp {
         let mut draft =
             ForwardDraft::from_message(ChatId(11), MessageId(201), false).expect("select 201");
         draft.toggle(ChatId(11), MessageId(203), false);
-        self.pending_forward = Some(draft);
-        self.selection_anchor = Some(MessageId(201));
-        self.selection_focus = Some(MessageId(201));
+        self.share.pending_forward = Some(draft);
+        self.message_ui.selection_anchor = Some(MessageId(201));
+        self.message_ui.selection_focus = Some(MessageId(201));
         self.status_note = "screenshot demo — keyboard selection".into();
     }
 
@@ -429,7 +431,7 @@ impl QuillApp {
         let mut draft =
             ForwardDraft::from_message(ChatId(11), MessageId(101), false).expect("select 101");
         draft.toggle(ChatId(11), MessageId(102), false);
-        self.pending_forward = Some(draft);
+        self.share.pending_forward = Some(draft);
         self.status_note = "screenshot demo — selection mode".into();
     }
 
@@ -451,7 +453,8 @@ impl QuillApp {
                 _ => apply_ready_search_from_hits(session, &self.demo_sink, &self.demo_seq),
             }
             if !matches!(demo, FindInHistoryDemo::JumpDate) {
-                self.chat_search_input
+                self.search_ui
+                    .chat_input
                     .update(cx, |input, cx| input.focus(window, cx));
             }
             self.status_note = "screenshot demo — find in history".into();

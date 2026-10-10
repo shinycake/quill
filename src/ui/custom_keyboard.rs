@@ -16,7 +16,7 @@ impl QuillApp {
     pub(super) fn open_chat_custom_keyboard(&self) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
         let session = self.session()?;
         let chat_id = session.open_chat?;
-        session.custom_keyboard_for_chat(chat_id, &self.dismissed_keyboards)
+        session.custom_keyboard_for_chat(chat_id, &self.message_ui.dismissed_keyboards)
     }
 
     /// The composer's keyboard button: shows or hides the bot keyboard
@@ -25,6 +25,7 @@ impl QuillApp {
     pub(super) fn keyboard_toggle_button(&self, cx: &mut Context<Self>) -> Option<Button> {
         let (chat_id, message_id, _) = self.open_chat_custom_keyboard()?;
         let hidden = self
+            .message_ui
             .collapsed_keyboards
             .contains(&(chat_id.0, message_id.0));
         let label = if hidden {
@@ -44,8 +45,8 @@ impl QuillApp {
                 .accessibility_label(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let key = (chat_id.0, message_id.0);
-                    if !this.collapsed_keyboards.remove(&key) {
-                        this.collapsed_keyboards.insert(key);
+                    if !this.message_ui.collapsed_keyboards.remove(&key) {
+                        this.message_ui.collapsed_keyboards.insert(key);
                     }
                     cx.notify();
                 })),
@@ -59,6 +60,7 @@ impl QuillApp {
     pub(super) fn custom_keyboard_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (chat_id, message_id, keyboard) = self.open_chat_custom_keyboard()?;
         if self
+            .message_ui
             .collapsed_keyboards
             .contains(&(chat_id.0, message_id.0))
         {
@@ -131,7 +133,9 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        self.dismissed_keyboards.insert((chat_id.0, message_id.0));
+        self.message_ui
+            .dismissed_keyboards
+            .insert((chat_id.0, message_id.0));
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.delete_chat_reply_markup(chat_id, message_id);
         }
@@ -161,7 +165,7 @@ impl QuillApp {
         let Some(preview) = ready else {
             return;
         };
-        if self.pending_reply.is_some() {
+        if self.composer_ui.pending_reply.is_some() {
             return;
         }
         self.begin_reply_to(

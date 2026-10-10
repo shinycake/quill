@@ -159,6 +159,7 @@ impl QuillApp {
     pub(super) fn can_send_when_online(&self) -> bool {
         // The share box schedules to several chats at once.
         if self
+            .composer_ui
             .schedule_picker
             .as_ref()
             .is_some_and(|picker| picker.target == ScheduleTarget::Share)
@@ -189,7 +190,7 @@ impl QuillApp {
     ) {
         let now = now_unix();
         let existing = match target {
-            ScheduleTarget::Composer => match self.composer_scheduling {
+            ScheduleTarget::Composer => match self.composer_ui.scheduling {
                 ComposerScheduling::SendAtDate(date) => Some(date),
                 _ => None,
             },
@@ -210,23 +211,23 @@ impl QuillApp {
             .filter(|date| validate_send_date(*date, now).is_ok())
             .unwrap_or_else(|| default_schedule_time(now));
         let date = new_date_time_picker(window, cx, initial, MAX_SCHEDULE_SECS);
-        self.schedule_picker = Some(SchedulePicker {
+        self.composer_ui.schedule_picker = Some(SchedulePicker {
             target,
             date,
             error: None,
         });
-        self.schedule_popup_open = true;
+        self.composer_ui.schedule_popup_open = true;
         cx.notify();
     }
 
     /// Closes the picker; a reschedule returns to the scheduled list.
     pub(super) fn close_schedule_picker(&mut self, cx: &mut Context<Self>) {
         let reopen = matches!(
-            self.schedule_picker.as_ref().map(|p| p.target),
+            self.composer_ui.schedule_picker.as_ref().map(|p| p.target),
             Some(ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected)
         );
-        self.schedule_popup_open = false;
-        self.schedule_picker = None;
+        self.composer_ui.schedule_popup_open = false;
+        self.composer_ui.schedule_picker = None;
         if reopen {
             self.open_scheduled_dialog(cx);
         }
@@ -236,7 +237,7 @@ impl QuillApp {
     /// Reads the picker, validates it like `ChooseDateTimeBox::collect`
     /// and applies it.
     pub(super) fn confirm_schedule_picker(&mut self, cx: &mut Context<Self>) {
-        let Some(picker) = self.schedule_picker.as_ref() else {
+        let Some(picker) = self.composer_ui.schedule_picker.as_ref() else {
             return;
         };
         let target = picker.target;
@@ -248,7 +249,7 @@ impl QuillApp {
                 self.apply_schedule(target, ComposerScheduling::SendAtDate(send_date), cx)
             }
             Err(err) => {
-                if let Some(picker) = self.schedule_picker.as_mut() {
+                if let Some(picker) = self.composer_ui.schedule_picker.as_mut() {
                     picker.error = Some(err.message());
                 }
                 cx.notify();
@@ -264,11 +265,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let kind = self.schedule_kind();
-        self.schedule_popup_open = false;
-        self.schedule_picker = None;
+        self.composer_ui.schedule_popup_open = false;
+        self.composer_ui.schedule_picker = None;
         match target {
             ScheduleTarget::Composer => {
-                self.composer_scheduling = scheduling;
+                self.composer_ui.scheduling = scheduling;
                 self.status_note = match (scheduling, kind) {
                     (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => {
                         format!("reminder set for {}", format_unix_date_time(date))
@@ -285,7 +286,7 @@ impl QuillApp {
                 self.open_scheduled_dialog(cx);
             }
             ScheduleTarget::RescheduleSelected => {
-                for id in std::mem::take(&mut self.scheduled_selected) {
+                for id in std::mem::take(&mut self.composer_ui.scheduled_selected) {
                     self.edit_scheduled_state(id, scheduling, cx);
                 }
                 self.open_scheduled_dialog(cx);
@@ -337,7 +338,7 @@ impl QuillApp {
     /// `ScheduleBox`): title, date and time field, "Send when online" where
     /// the chat allows it, Cancel and Schedule/Remind.
     pub(super) fn schedule_popup(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(picker) = self.schedule_picker.as_ref() else {
+        let Some(picker) = self.composer_ui.schedule_picker.as_ref() else {
             return div().into_any_element();
         };
         let kind = self.schedule_kind();
@@ -428,7 +429,7 @@ impl QuillApp {
                 .tooltip(title)
                 .accessibility_label(title)
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.scheduled_selected.clear();
+                    this.composer_ui.scheduled_selected.clear();
                     this.open_scheduled_dialog(cx);
                 }))
                 .into_any_element(),
@@ -446,7 +447,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Scheduled, |this, _, cx| {
-                this.scheduled_dialog_open = false;
+                this.composer_ui.scheduled_dialog_open = false;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -474,7 +475,7 @@ impl QuillApp {
 
     /// The scheduled messages that are ticked and still scheduled.
     fn selected_scheduled(&self) -> Vec<MessageId> {
-        let mut selected = self.scheduled_selected.clone();
+        let mut selected = self.composer_ui.scheduled_selected.clone();
         let existing: Vec<MessageId> = self
             .session()
             .map(|s| s.scheduled_messages.iter().map(|m| m.id).collect())
@@ -505,7 +506,7 @@ impl QuillApp {
                         for id in ids {
                             this.edit_scheduled_state(id, ComposerScheduling::None, cx);
                         }
-                        this.scheduled_selected.clear();
+                        this.composer_ui.scheduled_selected.clear();
                         cx.notify();
                     });
                     true
@@ -535,7 +536,7 @@ impl QuillApp {
                         for id in ids {
                             this.delete_scheduled_message(id, cx);
                         }
-                        this.scheduled_selected.clear();
+                        this.composer_ui.scheduled_selected.clear();
                         cx.notify();
                     });
                     true
@@ -578,7 +579,7 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.scheduled_dialog_open = false;
+                        this.composer_ui.scheduled_dialog_open = false;
                         this.open_schedule_picker(ScheduleTarget::RescheduleSelected, window, cx);
                         this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                     })),
@@ -598,7 +599,7 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.scheduled_selected.clear();
+                        this.composer_ui.scheduled_selected.clear();
                         cx.notify();
                     })),
             )
@@ -663,7 +664,7 @@ impl QuillApp {
                         .label("Reschedule")
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.scheduled_dialog_open = false;
+                            this.composer_ui.scheduled_dialog_open = false;
                             this.open_schedule_picker(ScheduleTarget::Reschedule(id), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -674,7 +675,7 @@ impl QuillApp {
                         .label("Edit")
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.scheduled_dialog_open = false;
+                            this.composer_ui.scheduled_dialog_open = false;
                             this.begin_edit(edit.clone(), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -708,7 +709,7 @@ impl QuillApp {
                                     .checked(selected.contains(&id))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         quill::selection_pin::toggle_id(
-                                            &mut this.scheduled_selected,
+                                            &mut this.composer_ui.scheduled_selected,
                                             id,
                                         );
                                         cx.notify();
@@ -745,7 +746,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Scheduled => DialogSpec::new(
         300,
-        |app| app.scheduled_dialog_open,
+        |app| app.composer_ui.scheduled_dialog_open,
         QuillApp::build_scheduled_dialog,
     ),
 }

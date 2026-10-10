@@ -128,7 +128,7 @@ impl QuillApp {
                 });
             }
             NavigationAction::Secret => {
-                self.new_secret_picker_open = !self.new_secret_picker_open;
+                self.share.new_secret_picker_open = !self.share.new_secret_picker_open;
                 cx.notify();
             }
             NavigationAction::Downloads => {
