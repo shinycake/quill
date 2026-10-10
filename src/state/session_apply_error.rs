@@ -1385,7 +1385,9 @@ impl Session {
                 | RequestPurpose::SetContactJoinedNotifications
                 | RequestPurpose::GetNetworkStatistics
                 | RequestPurpose::ResetNetworkStatistics
-                | RequestPurpose::CheckRememberedPassword),
+                | RequestPurpose::CheckRememberedPassword
+                | RequestPurpose::HideSuggestedAction { .. }
+                | RequestPurpose::HideContactCloseBirthdays),
             ) => self.apply_privacy_data_error(purpose, &err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;

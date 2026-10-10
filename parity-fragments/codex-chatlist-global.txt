@@ -1,0 +1,5 @@
+parity:chatlist-clear-calls
+parity:chatlist-contacts-extras
+parity:chatlist-stories-menu
+parity:chatlist-suggestions
+parity:settings-birthday-contacts

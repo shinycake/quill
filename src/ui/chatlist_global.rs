@@ -26,6 +26,8 @@ pub(super) struct ChatlistGlobal {
     /// The "Clear calls" confirm box and its "Delete for everyone" box.
     pub clear_calls_open: bool,
     pub clear_calls_revoke: bool,
+    /// Right-click menu of a stories-strip tile: chat id and pointer.
+    pub story_menu: Option<(i64, Point<Pixels>)>,
 }
 
 impl ChatlistGlobal {
@@ -55,6 +57,7 @@ impl ChatlistGlobal {
             index_current: None,
             clear_calls_open: false,
             clear_calls_revoke: false,
+            story_menu: None,
         }
     }
 }

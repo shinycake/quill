@@ -1442,6 +1442,13 @@ pub enum RequestPurpose {
     CheckRememberedPassword,
     /// B13: `hideSuggestedAction(suggestedActionCheckPassword)`.
     HideCheckPasswordSuggestion,
+    /// `hideSuggestedAction` for another chat-list suggestion. Response
+    /// is `ok`; the update that follows removes the action.
+    HideSuggestedAction {
+        action: &'static str,
+    },
+    /// `hideContactCloseBirthdays`. Response is `ok`.
+    HideContactCloseBirthdays,
     /// Slice S3: `getReadDatePrivacySettings`. Response is
     /// `readDatePrivacySettings`.
     GetReadDatePrivacy,

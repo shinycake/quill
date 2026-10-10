@@ -1293,6 +1293,7 @@ impl QuillApp {
                 } else {
                     // Searching spans every chat: the folder tabs step aside.
                     if !self.search_is_open() {
+                        list = list.children(self.suggestion_card(cx));
                         list = list.child(self.folder_tabs_with_community_banner(cx));
                         // A shared folder whose owner added chats.
                         list = list.children(self.folder_new_chats_bar(cx));

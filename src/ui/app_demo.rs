@@ -295,7 +295,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — chat list: archive settings dialog".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyChatlistContactsIndex | ScreenshotDemo::ReadyChatlistCallsClear => (
+        ScreenshotDemo::ReadyChatlistContactsIndex
+        | ScreenshotDemo::ReadyChatlistCallsClear
+        | ScreenshotDemo::ReadyChatlistStoriesMenu
+        | ScreenshotDemo::ReadyChatlistBirthdays
+        | ScreenshotDemo::ReadyChatlistSuggestions
+        | ScreenshotDemo::ReadyChatlistSuggestionsPhone => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)".into(),

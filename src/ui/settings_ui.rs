@@ -312,6 +312,7 @@ impl QuillApp {
                             })),
                     ),
             );
+        section = section.children(self.birthday_contacts_block(cx));
         if let Some(notice) = notice {
             section = section.child(
                 div()
