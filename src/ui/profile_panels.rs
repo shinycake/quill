@@ -15,7 +15,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -45,10 +45,10 @@ enum RowAction {
 /// A copy action: the text for the clipboard, the context-menu label and
 /// the toast shown afterwards.
 #[derive(Clone)]
-struct CopyAction {
-    text: String,
-    menu: &'static str,
-    toast: &'static str,
+pub(super) struct CopyAction {
+    pub(super) text: String,
+    pub(super) menu: &'static str,
+    pub(super) toast: &'static str,
 }
 
 /// One value-over-label row of the profile details card.
@@ -60,12 +60,33 @@ struct DetailRow {
     action: RowAction,
     /// Muted value (an "Add …" call to action on your own profile).
     hint: bool,
+    /// A second right-click item (the username row also copies its link).
+    extra_copy: Option<CopyAction>,
 }
 
 /// The `+digits` form copied from the phone row.
 fn copyable_phone(raw: &str) -> String {
     let digits: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
     format!("+{digits}")
+}
+
+/// A context menu with one item per copy action (tdesktop's profile rows:
+/// Copy Username, Copy Link).
+pub(super) fn copy_menu<'a>(
+    mut menu: PopupMenu,
+    owner: &gpui_kit::WeakEntity<QuillApp>,
+    actions: impl IntoIterator<Item = &'a CopyAction>,
+) -> PopupMenu {
+    for copy in actions {
+        let owner = owner.clone();
+        let copy = copy.clone();
+        menu = menu.item(PopupMenuItem::new(copy.menu).on_click(move |_, _, cx| {
+            let _ = owner.update(cx, |this, cx| {
+                this.copy_profile_text(&copy.text, copy.toast, cx);
+            });
+        }));
+    }
+    menu
 }
 
 impl QuillApp {
@@ -103,6 +124,7 @@ impl QuillApp {
                 label: "Bio",
                 action: RowAction::None,
                 hint: false,
+                extra_copy: None,
             });
         }
         if !user.phone_number.is_empty() {
@@ -117,6 +139,7 @@ impl QuillApp {
                 }),
                 action: RowAction::None,
                 hint: false,
+                extra_copy: None,
             });
         }
         if !user.username.is_empty() {
@@ -131,6 +154,11 @@ impl QuillApp {
                 }),
                 action: RowAction::None,
                 hint: false,
+                extra_copy: Some(CopyAction {
+                    text: profile_link(&user.username),
+                    menu: "Copy Link",
+                    toast: "Link copied to clipboard",
+                }),
             });
             let link = profile_link(&user.username);
             rows.push(DetailRow {
@@ -144,6 +172,7 @@ impl QuillApp {
                 }),
                 action: RowAction::None,
                 hint: false,
+                extra_copy: None,
             });
         }
         match info.and_then(|i| i.extras.birthdate) {
@@ -158,6 +187,7 @@ impl QuillApp {
                     RowAction::None
                 },
                 hint: false,
+                extra_copy: None,
             }),
             None if is_self => rows.push(DetailRow {
                 id: "info-birthday",
@@ -166,6 +196,7 @@ impl QuillApp {
                 copy: None,
                 action: RowAction::EditBirthday,
                 hint: true,
+                extra_copy: None,
             }),
             None => {}
         }
@@ -185,6 +216,7 @@ impl QuillApp {
                     RowAction::OpenChat(ChatId(personal))
                 },
                 hint: false,
+                extra_copy: None,
             }),
             None if is_self => rows.push(DetailRow {
                 id: "info-personal-channel",
@@ -193,6 +225,7 @@ impl QuillApp {
                 copy: None,
                 action: RowAction::PickPersonalChannel,
                 hint: true,
+                extra_copy: None,
             }),
             None => {}
         }
@@ -215,6 +248,7 @@ impl QuillApp {
                     RowAction::None
                 },
                 hint: false,
+                extra_copy: None,
             });
         }
         if rows.is_empty() {
@@ -269,18 +303,13 @@ impl QuillApp {
                 }
                 RowAction::EditNote(user_id) => this.open_edit_contact_dialog(*user_id, window, cx),
             }));
+            let extra_copy = row.extra_copy.clone();
             let element = match row.copy {
                 Some(copy) => {
                     let owner = cx.entity().downgrade();
                     tapped
                         .context_menu(move |menu, _, _| {
-                            let owner = owner.clone();
-                            let copy = copy.clone();
-                            menu.item(PopupMenuItem::new(copy.menu).on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.copy_profile_text(&copy.text, copy.toast, cx);
-                                });
-                            }))
+                            copy_menu(menu, &owner, std::iter::once(&copy).chain(&extra_copy))
                         })
                         .into_any_element()
                 }
@@ -735,6 +764,26 @@ impl QuillApp {
             .and_then(|s| s.my_user_id.and_then(|me| s.user_full_info(me)))
             .and_then(|i| i.extras.birthdate)
             .map(|b| (b.day, b.month, b.year));
+        self.show_birthday_dialog(current, window, cx);
+    }
+
+    /// The suggested-birthday card's "View": the same form, filled with
+    /// the suggested date (tdesktop opens its edit box the same way).
+    pub(super) fn open_suggested_birthday(
+        &mut self,
+        parts: (u8, u8, Option<i32>),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_birthday_dialog(Some(parts), window, cx);
+    }
+
+    fn show_birthday_dialog(
+        &mut self,
+        current: Option<(u8, u8, Option<i32>)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let dialog = BirthdayDialog::new(window, cx, current);
         dialog
             .day_input

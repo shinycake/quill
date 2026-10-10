@@ -173,6 +173,57 @@ fn photo_tile(
     }
 }
 
+/// A suggested birthday: the Day / Month / Year table under the pill and,
+/// on an incoming suggestion, a "View" button that opens the birthday form
+/// filled with the suggested date (tdesktop `GenerateSuggetsBirthdayMedia`).
+fn birthday_card(
+    row_id: u64,
+    day: i32,
+    month: i32,
+    year: i32,
+    outgoing: bool,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let mut table = div().flex().gap_5().justify_center();
+    for (label, value) in quill::service_text::birthday_table(day, month, year) {
+        table = table.child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(div().text_xs().text_color(text_muted()).child(label))
+                .child(div().text_sm().font_semibold().child(value)),
+        );
+    }
+    let parts = quill::service_text::birthday_form_parts(day, month, year);
+    div()
+        .id(("service-birthday", row_id))
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_2()
+        .px_4()
+        .py_2()
+        .rounded_xl()
+        .bg(cx.theme().secondary.opacity(0.85))
+        .text_color(cx.theme().secondary_foreground)
+        .child(table)
+        .when(!outgoing && parts.is_some(), |this| {
+            this.child(
+                Button::new(format!("suggested-birthday-view-{row_id}"))
+                    .label("View")
+                    .small()
+                    .primary()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if let Some(parts) = parts {
+                            this.open_suggested_birthday(parts, window, cx);
+                        }
+                    })),
+            )
+        })
+        .into_any_element()
+}
+
 /// A service message as a centered row: the pill, plus the photo for
 /// photo-change actions.
 pub(super) fn service_message_row(
@@ -243,6 +294,20 @@ pub(super) fn service_message_row(
                 )
             })
     });
+    let birthday = match &message.content {
+        MessageContent::Action(action) => match action.as_ref() {
+            ServiceAction::SuggestBirthdate { day, month, year } => Some(birthday_card(
+                row_id,
+                *day,
+                *month,
+                *year,
+                message.is_outgoing,
+                cx,
+            )),
+            _ => None,
+        },
+        _ => None,
+    };
     let card = super::premium_ui::gift_card_of(&message.content).map(|(inner, card)| {
         let roots = media_roots;
         super::premium_ui::gift_card_element(row_id, inner, card, session, files, roots, cx)
@@ -256,6 +321,7 @@ pub(super) fn service_message_row(
         .py_1()
         .child(pill(("service-pill", row_id), &text, cx))
         .when_some(photo, |this, photo| this.child(photo))
+        .when_some(birthday, |this, birthday| this.child(birthday))
         .when_some(card, |this, card| this.child(card))
         .when_some(buttons, |this, buttons| this.child(buttons))
         .into_any_element()
