@@ -32,4 +32,4 @@
 - Unit tests: `shows_call_badge`, archive hint wording, folder toast text, picker search, counters and limit gating, row menu extras.
 - Demo captures (English fixtures, light), all viewed: `ready-chat-badges` (call badge and emoji status), `ready-archive-hint`, `ready-folders-chats`, `ready-folders-chat-picker`, `ready-folders-toast`, and `ready-chat-list` (View profile in the row menu).
 - The username context menus are native popups and cannot be captured in the demo harness, so they are unverified visually.
-- No live account. The gate's UI clippy step fails on files this change does not touch (new lints from the current toolchain); core clippy, formatting and both test suites pass.
+- No live account. The gate passes (core 2611, UI 210 tests) after merging origin/main.
