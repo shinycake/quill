@@ -135,7 +135,7 @@ impl QuillApp {
             return;
         }
         let theme = session.chat_theme_names.get(&chat_id).cloned();
-        self.chat_look_dialog = Some(ChatLookDialog {
+        self.dialogs.chat_look_dialog = Some(ChatLookDialog {
             target: LookTarget::Chat(chat_id),
             theme,
             background: None,
@@ -155,11 +155,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.background_error = None;
             if live.driver.search_background(&name).is_err() {
-                self.status_note = "could not open the wallpaper link".into();
+                self.connection.status_note = "could not open the wallpaper link".into();
                 return;
             }
         }
-        self.chat_look_dialog = Some(ChatLookDialog {
+        self.dialogs.chat_look_dialog = Some(ChatLookDialog {
             target: LookTarget::Link { name },
             theme: None,
             background: None,
@@ -171,7 +171,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_chat_look_dialog(&mut self, cx: &mut Context<Self>) {
-        self.chat_look_dialog = None;
+        self.dialogs.chat_look_dialog = None;
         if let Some(session) = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_mut(),
@@ -184,7 +184,7 @@ impl QuillApp {
 
     /// Send (or, in the screenshot demo, apply) the pending changes.
     fn apply_chat_look(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.chat_look_dialog.clone() else {
+        let Some(dialog) = self.dialogs.chat_look_dialog.clone() else {
             return;
         };
         let LookTarget::Chat(chat_id) = dialog.target else {
@@ -231,7 +231,7 @@ impl QuillApp {
                         }
                     }
                 }
-                if let Some(d) = self.chat_look_dialog.as_mut() {
+                if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
                     d.awaiting = (sent > 0).then_some(LookWait { base, sent });
                 }
                 // Nothing in flight and no error: nothing to wait for.
@@ -280,7 +280,12 @@ impl QuillApp {
     /// Poll-loop half of Apply: close the dialog once its requests are
     /// acknowledged; on a failure keep it open (the error shows inline).
     pub(super) fn drain_chat_look(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(wait) = self.chat_look_dialog.as_ref().and_then(|d| d.awaiting) else {
+        let Some(wait) = self
+            .dialogs
+            .chat_look_dialog
+            .as_ref()
+            .and_then(|d| d.awaiting)
+        else {
             return false;
         };
         let Some(session) = self.session() else {
@@ -297,7 +302,7 @@ impl QuillApp {
                 true
             }
             LookProgress::Failed(_) => {
-                if let Some(d) = self.chat_look_dialog.as_mut() {
+                if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
                     d.awaiting = None;
                 }
                 cx.notify();
@@ -316,7 +321,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.set_default_background(background.id, dark) {
-                    self.status_note = format!("could not set the wallpaper: {err:?}");
+                    self.connection.status_note = format!("could not set the wallpaper: {err:?}");
                     return;
                 }
             }
@@ -354,7 +359,8 @@ impl QuillApp {
 
     pub(super) fn set_wallpaper_from_file(&mut self, path: &Path, cx: &mut Context<Self>) {
         if !is_wallpaper_image(path) {
-            self.status_note = "choose a JPEG, PNG or WebP image for the wallpaper".into();
+            self.connection.status_note =
+                "choose a JPEG, PNG or WebP image for the wallpaper".into();
             cx.notify();
             return;
         }
@@ -366,7 +372,7 @@ impl QuillApp {
             .driver
             .set_default_background_local(&path.to_string_lossy(), dark)
         {
-            self.status_note = format!("could not set the wallpaper: {err:?}");
+            self.connection.status_note = format!("could not set the wallpaper: {err:?}");
             cx.notify();
             return;
         }
@@ -462,7 +468,7 @@ impl QuillApp {
                 .tab_index(0)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(d) = this.chat_look_dialog.as_mut() {
+                    if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                         d.theme = None;
                     }
                     cx.notify();
@@ -510,7 +516,7 @@ impl QuillApp {
                     .tab_index(0)
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(d) = this.chat_look_dialog.as_mut() {
+                        if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                             d.theme = Some(name.clone());
                         }
                         cx.notify();
@@ -559,7 +565,7 @@ impl QuillApp {
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(d) = this.chat_look_dialog.as_mut() {
+                    if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                         d.background = Some(id);
                         d.remove_wallpaper = false;
                     }
@@ -581,7 +587,7 @@ impl QuillApp {
                 this.close_chat_look_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(state) = this.chat_look_dialog.clone() else {
+            let Some(state) = this.dialogs.chat_look_dialog.clone() else {
                 return dialog
                     .overlay(true)
                     .title(super::shell::dialog_title("Chat look"))
@@ -662,7 +668,7 @@ impl QuillApp {
                                 cx,
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(d) = this.chat_look_dialog.as_mut() {
+                                if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                                     d.remove_wallpaper = !d.remove_wallpaper;
                                     d.background = None;
                                 }
@@ -676,7 +682,7 @@ impl QuillApp {
                                 .checked(state.both)
                                 .label(format!("Also set for {name}"))
                                 .on_click(cx.listener(|this, &on, _, cx| {
-                                    if let Some(d) = this.chat_look_dialog.as_mut() {
+                                    if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                                         d.both = on;
                                     }
                                     cx.notify();
@@ -821,7 +827,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ChatLook => DialogSpec::new(
         2100,
-        |app| app.chat_look_dialog.is_some(),
+        |app| app.dialogs.chat_look_dialog.is_some(),
         QuillApp::build_chat_look_dialog,
     ),
 }

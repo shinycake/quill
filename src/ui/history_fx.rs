@@ -197,7 +197,7 @@ impl QuillApp {
     /// Highlight tint for a jump target at render time: starts the fade on
     /// a new jump, asks for frames while it runs. `None` once finished.
     pub(super) fn jump_highlight_alpha(&self, cx: &mut Context<Self>) -> Option<f32> {
-        let (_, started) = self.highlight_fade?;
+        let (_, started) = self.history.highlight_fade?;
         let elapsed = started.elapsed();
         if !jump_fade_active(elapsed) {
             return None;
@@ -215,6 +215,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<(SharedString, ReactionFlyFrame)> {
         let fly = self
+            .history
             .reaction_fly
             .as_ref()
             .filter(|fly| fly.chat_id == chat_id && fly.message_id == message_id)?;
@@ -228,14 +229,14 @@ impl QuillApp {
     /// it runs (asking for frames), `None` once settled, when the user
     /// scrolled away, or when the window is inactive.
     pub(super) fn history_reveal(&self, cx: &mut Context<Self>) -> Option<(f32, f32)> {
-        let list = self.history_scroller.read(cx);
+        let list = self.history.scroller.read(cx);
         // (A list with no rows yet has not anchored: not "scrolled away".)
         let scrolled_away = list.item_count() > 0 && !list.is_following_tail();
-        if (!self.window_active.get() && !super::motion::held()) || scrolled_away {
-            self.motion.cancel_reveal();
+        if (!self.frame.window_active.get() && !super::motion::held()) || scrolled_away {
+            self.frame.motion.cancel_reveal();
             return None;
         }
-        let reveal = self.motion.reveal_now(Instant::now())?;
+        let reveal = self.frame.motion.reveal_now(Instant::now())?;
         self.request_animation_tick(60, cx);
         Some(reveal)
     }
@@ -243,10 +244,10 @@ impl QuillApp {
     /// The history list scrolled (or its rows moved): refresh the pill.
     pub(super) fn note_history_scroll(&mut self, cx: &mut Context<Self>) {
         // Pinned to the live edge, rows only move because messages arrive.
-        if self.history_scroller.read(cx).is_following_tail() {
+        if self.history.scroller.read(cx).is_following_tail() {
             return;
         }
-        self.scroll_date.scrolled(Instant::now(), false);
+        self.history.scroll_date.scrolled(Instant::now(), false);
         // The pill lives in the conversation: the chat list can replay.
         self.notify_conversation(cx);
     }
@@ -254,33 +255,35 @@ impl QuillApp {
     /// Resolve the probed top row to its day; a changed day while the pill
     /// is up holds it longer.
     fn refresh_scroll_date_top(&mut self) {
-        let Some((ix, separator)) = self.scroll_top_probe.get() else {
+        let Some((ix, separator)) = self.history.scroll_top_probe.get() else {
             return;
         };
-        let Some(last) = self.history_rows.len().checked_sub(1) else {
+        let Some(last) = self.history.rows.len().checked_sub(1) else {
             return;
         };
-        let label = self.history_rows[..=ix.min(last)]
+        let label = self.history.rows[..=ix.min(last)]
             .iter()
             .rev()
             .find_map(|row| row.day_label().map(str::to_string));
-        if self.scroll_date.top_label.is_some() && self.scroll_date.top_label != label {
-            self.scroll_date.hold_for_day_change();
+        if self.history.scroll_date.top_label.is_some()
+            && self.history.scroll_date.top_label != label
+        {
+            self.history.scroll_date.hold_for_day_change();
         }
-        self.scroll_date.top_label = label;
-        self.scroll_date.separator_at_top = separator;
+        self.history.scroll_date.top_label = label;
+        self.history.scroll_date.separator_at_top = separator;
     }
 
     /// The floating pill, absolutely positioned at the top center.
     pub(super) fn scroll_date_pill(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.refresh_scroll_date_top();
-        let alpha = self.scroll_date.opacity(Instant::now());
+        let alpha = self.history.scroll_date.opacity(Instant::now());
         if alpha <= 0. {
             return None;
         }
         self.request_animation_tick(30, cx);
-        let label = self.scroll_date.top_label.clone()?;
-        if self.scroll_date.separator_at_top {
+        let label = self.history.scroll_date.top_label.clone()?;
+        if self.history.scroll_date.separator_at_top {
             return None;
         }
         Some(

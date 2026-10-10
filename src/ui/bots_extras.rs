@@ -180,7 +180,7 @@ impl QuillApp {
                             quill::fast_buttons::set_enabled(user_id, next);
                             // Rows are cached per message revision; the
                             // digits appear on the next history refresh.
-                            this.history_rows_key = None;
+                            this.history.rows_key = None;
                             cx.notify();
                         })),
                 ),
@@ -198,7 +198,7 @@ impl QuillApp {
             // The rights a bot asks for ride on its full info.
             let _ = live.driver.fetch_user_full_info(bot_id);
         }
-        self.profile_dialog = Some(ProfileDialog::AddBot {
+        self.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
             bot_id,
             invite,
             target: None,
@@ -224,7 +224,7 @@ impl QuillApp {
                     Plan::Member => ChatAdminRights::default(),
                 })
         });
-        self.profile_dialog = Some(ProfileDialog::AddBot {
+        self.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
             bot_id,
             invite,
             target: Some(chat_id),
@@ -273,7 +273,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: adding a bot needs a live session.".into();
+            self.connection.status_note = "Demo mode: adding a bot needs a live session.".into();
             cx.notify();
             return true;
         };
@@ -306,7 +306,7 @@ impl QuillApp {
             .get(&chat_id)
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.status_note = match sent {
+        self.connection.status_note = match sent {
             Ok(Some(_)) => format!("Adding the bot to {title}"),
             Ok(None) => "You can't add the bot to this chat.".into(),
             Err(_) => "Couldn't reach Telegram; try again.".into(),
@@ -326,7 +326,7 @@ impl QuillApp {
             invite,
             target,
             rights,
-        }) = self.profile_dialog.as_ref()
+        }) = self.dialogs.profile_dialog.as_ref()
         else {
             return None;
         };
@@ -391,7 +391,7 @@ impl QuillApp {
                                 .label(ADMIN_RIGHT_LABELS[index])
                                 .on_click(cx.listener(move |this, &on: &bool, window, cx| {
                                     if let Some(ProfileDialog::AddBot { rights, .. }) =
-                                        &mut this.profile_dialog
+                                        &mut this.dialogs.profile_dialog
                                     {
                                         admin_right_set(rights, index, on);
                                     }
@@ -439,7 +439,7 @@ impl QuillApp {
                     )
                     .child(Button::new("add-bot-back").label("Back").ghost().on_click(
                         cx.listener(move |this, _, window, cx| {
-                            this.profile_dialog = Some(ProfileDialog::AddBot {
+                            this.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
                                 bot_id,
                                 invite: back_invite.clone(),
                                 target: None,
@@ -504,7 +504,7 @@ impl QuillApp {
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.profile_dialog = Some(ProfileDialog::AddBot {
+                    this.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
                         bot_id,
                         invite: row_invite.clone(),
                         target: Some(chat_id),
@@ -536,7 +536,7 @@ impl QuillApp {
         game_short_name: String,
         cx: &mut Context<Self>,
     ) {
-        self.profile_dialog = Some(ProfileDialog::ShareGame {
+        self.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
             bot_id,
             game_short_name,
             target: None,
@@ -585,7 +585,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: sharing needs a live session.".into();
+            self.connection.status_note = "Demo mode: sharing needs a live session.".into();
             cx.notify();
             return true;
         };
@@ -594,11 +594,11 @@ impl QuillApp {
             .send_game_message(ChatId(chat_id), bot_id, game_short_name)
         {
             Ok(_) => {
-                self.status_note = "Game sent".into();
+                self.connection.status_note = "Game sent".into();
                 true
             }
             Err(_) => {
-                self.status_note = "Couldn't send the game here.".into();
+                self.connection.status_note = "Couldn't send the game here.".into();
                 cx.notify();
                 false
             }
@@ -614,7 +614,7 @@ impl QuillApp {
             bot_id,
             game_short_name,
             target,
-        }) = self.profile_dialog.as_ref()
+        }) = self.dialogs.profile_dialog.as_ref()
         else {
             return None;
         };
@@ -661,7 +661,7 @@ impl QuillApp {
                         .label("Back")
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.profile_dialog = Some(ProfileDialog::ShareGame {
+                            this.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
                                 bot_id,
                                 game_short_name: back_name.clone(),
                                 target: None,
@@ -702,7 +702,7 @@ impl QuillApp {
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.profile_dialog = Some(ProfileDialog::ShareGame {
+                    this.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
                         bot_id,
                         game_short_name: name.clone(),
                         target: Some(id),

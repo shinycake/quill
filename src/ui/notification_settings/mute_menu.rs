@@ -4,16 +4,16 @@ use super::*;
 
 impl QuillApp {
     pub(in crate::ui) fn close_mute_menu(&mut self, cx: &mut Context<Self>) {
-        self.mute_menu_open = false;
-        self.mute_custom_open = false;
-        self.notif_sound_picker_open = false;
+        self.notify.mute_menu_open = false;
+        self.notify.mute_custom_open = false;
+        self.notify.notif_sound_picker_open = false;
         cx.notify();
     }
 
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
-        self.mute_menu_open = true;
-        self.mute_custom_open = false;
-        self.status_note = "mute for…".into();
+        self.notify.mute_menu_open = true;
+        self.notify.mute_custom_open = false;
+        self.connection.status_note = "mute for…".into();
         cx.notify();
     }
 
@@ -23,7 +23,7 @@ impl QuillApp {
         mute_for: i32,
         cx: &mut Context<Self>,
     ) {
-        self.mute_menu_open = false;
+        self.notify.mute_menu_open = false;
         if self.live.is_some() {
             let result = self
                 .live
@@ -31,7 +31,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .set_chat_mute_for(chat_id, mute_for);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) if mute_for == 0 => "unmuting…".into(),
                 Ok(_) => "muting…".into(),
                 Err(_) => "could not change mute".into(),
@@ -47,7 +47,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.status_note = if mute_for == 0 {
+            self.connection.status_note = if mute_for == 0 {
                 "unmuted".into()
             } else {
                 "muted".into()
@@ -114,8 +114,8 @@ impl QuillApp {
             ("Forever", MUTE_FOREVER),
         ];
         let sound_disabled = !chat_settings.use_default_sound && chat_settings.sound_id == 0;
-        let custom_open = self.mute_custom_open;
-        let custom = self.mute_custom;
+        let custom_open = self.notify.mute_custom_open;
+        let custom = self.notify.mute_custom;
         let mut preset_row = div().id("mute-presets").flex().flex_wrap().gap_1();
         for (label, seconds) in presets {
             preset_row = preset_row.child(
@@ -139,7 +139,7 @@ impl QuillApp {
                 .label("Custom\u{2026}")
                 .outline()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.mute_custom_open = !this.mute_custom_open;
+                    this.notify.mute_custom_open = !this.notify.mute_custom_open;
                     cx.notify();
                 })),
         );
@@ -164,10 +164,10 @@ impl QuillApp {
                     .ghost()
                     .label(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.mute_custom = if hours {
-                            this.mute_custom.step_hours(delta)
+                        this.notify.mute_custom = if hours {
+                            this.notify.mute_custom.step_hours(delta)
                         } else {
-                            this.mute_custom.step_days(delta)
+                            this.notify.mute_custom.step_days(delta)
                         };
                         cx.notify();
                     }))
@@ -198,8 +198,8 @@ impl QuillApp {
                         .label(format!("Mute for {}", custom.label()))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(chat_id) = open_chat {
-                                let mute_for = this.mute_custom.mute_for();
-                                this.mute_custom_open = false;
+                                let mute_for = this.notify.mute_custom.mute_for();
+                                this.notify.mute_custom_open = false;
                                 this.apply_chat_mute(chat_id, mute_for, cx);
                             }
                         })),
@@ -302,15 +302,16 @@ impl QuillApp {
                     .child(
                         Button::new("notif-sound-picker-toggle")
                             .small()
-                            .label(if self.notif_sound_picker_open {
+                            .label(if self.notify.notif_sound_picker_open {
                                 "Hide"
                             } else {
                                 "Change"
                             })
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.notif_sound_picker_open = !this.notif_sound_picker_open;
-                                if this.notif_sound_picker_open
+                                this.notify.notif_sound_picker_open =
+                                    !this.notify.notif_sound_picker_open;
+                                if this.notify.notif_sound_picker_open
                                     && let Some(live) = this.live.as_mut()
                                 {
                                     let _ = live.driver.maybe_fetch_notification_sounds();
@@ -319,7 +320,7 @@ impl QuillApp {
                             })),
                     ),
             );
-        if self.notif_sound_picker_open
+        if self.notify.notif_sound_picker_open
             && let Some(chat_id) = open_chat
         {
             let current = if chat_settings.use_default_sound {
@@ -389,15 +390,16 @@ impl QuillApp {
                 .child(
                     Button::new("notif-story-sound-picker-toggle")
                         .small()
-                        .label(if self.story_sound_picker_open {
+                        .label(if self.notify.story_sound_picker_open {
                             "Hide"
                         } else {
                             "Change"
                         })
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.story_sound_picker_open = !this.story_sound_picker_open;
-                            if this.story_sound_picker_open
+                            this.notify.story_sound_picker_open =
+                                !this.notify.story_sound_picker_open;
+                            if this.notify.story_sound_picker_open
                                 && let Some(live) = this.live.as_mut()
                             {
                                 let _ = live.driver.maybe_fetch_notification_sounds();
@@ -406,7 +408,7 @@ impl QuillApp {
                         })),
                 ),
         );
-        if self.story_sound_picker_open
+        if self.notify.story_sound_picker_open
             && let Some(chat_id) = open_chat
         {
             let current = if chat_settings.use_default_story_sound {
@@ -429,7 +431,7 @@ impl QuillApp {
                 .label("Defaults for all chats\u{2026}")
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.notification_defaults_open = true;
+                    this.notify.notification_defaults_open = true;
                     if let Some(live) = this.live.as_mut() {
                         let _ = live.driver.maybe_fetch_scope_notification_settings();
                         let _ = live.driver.maybe_fetch_notification_sounds();

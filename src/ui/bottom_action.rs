@@ -93,7 +93,7 @@ impl QuillApp {
             BottomBar::Start => self.start_bot_from_bar(chat_id, cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
                 self.join_channel(chat_id, cx);
-                self.status_note = if bar == BottomBar::ApplyToJoin {
+                self.connection.status_note = if bar == BottomBar::ApplyToJoin {
                     "join request sent".into()
                 } else {
                     "joining group…".into()
@@ -118,7 +118,7 @@ impl QuillApp {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.blocked = false;
             }
-            self.status_note = "unblocked (demo)".into();
+            self.connection.status_note = "unblocked (demo)".into();
         }
         if restart {
             self.start_bot_from_bar(chat_id, cx);
@@ -141,7 +141,7 @@ impl QuillApp {
         if self.live.is_some() {
             self.press_bot_start(chat_id, bot_id, parameter, cx);
         } else {
-            self.status_note = "bot started (demo)".into();
+            self.connection.status_note = "bot started (demo)".into();
         }
     }
 }

@@ -17,7 +17,7 @@ impl QuillApp {
             // `updateReactionNotificationSettings` instead.
             let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
             else {
-                self.status_note = "reaction settings still loading…".into();
+                self.connection.status_note = "reaction settings still loading…".into();
                 cx.notify();
                 return;
             };
@@ -27,7 +27,7 @@ impl QuillApp {
                 ReactionSourceKind::PollVote => settings.poll_vote_source = source,
             }
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "reaction notification setting updated…".into(),
                 Err(_) => "could not change reaction notification setting".into(),
             };
@@ -43,7 +43,7 @@ impl QuillApp {
                 ReactionSourceKind::PollVote => settings.poll_vote_source = source,
             }
             session.reaction_notification_settings = Some(settings);
-            self.status_note = "reaction notification setting updated".into();
+            self.connection.status_note = "reaction notification setting updated".into();
         }
         cx.notify();
     }
@@ -51,20 +51,20 @@ impl QuillApp {
     /// Parity slice: apply the reaction-notification sound
     /// (`setReactionNotificationSettings`).
     pub(in crate::ui) fn apply_reaction_sound(&mut self, sound_id: i64, cx: &mut Context<Self>) {
-        self.defaults_sound_picker = None;
+        self.notify.defaults_sound_picker = None;
         if let Some(live) = self.live.as_mut() {
             // Guard: never send schema-defaults as current state — no
             // getter exists, so wait for the first
             // `updateReactionNotificationSettings` instead.
             let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
             else {
-                self.status_note = "reaction settings still loading…".into();
+                self.connection.status_note = "reaction settings still loading…".into();
                 cx.notify();
                 return;
             };
             settings.sound_id = sound_id;
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "reaction sound updated…".into(),
                 Err(_) => "could not change reaction sound".into(),
             };
@@ -76,7 +76,7 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.sound_id = sound_id;
             session.reaction_notification_settings = Some(settings);
-            self.status_note = "reaction sound updated".into();
+            self.connection.status_note = "reaction sound updated".into();
         }
         cx.notify();
     }
@@ -94,13 +94,13 @@ impl QuillApp {
             // `updateReactionNotificationSettings` instead.
             let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
             else {
-                self.status_note = "reaction settings still loading…".into();
+                self.connection.status_note = "reaction settings still loading…".into();
                 cx.notify();
                 return;
             };
             settings.show_preview = show_preview;
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "reaction preview updated…".into(),
                 Err(_) => "could not change reaction preview".into(),
             };
@@ -112,7 +112,7 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.show_preview = show_preview;
             session.reaction_notification_settings = Some(settings);
-            self.status_note = "reaction preview updated".into();
+            self.connection.status_note = "reaction preview updated".into();
         }
         cx.notify();
     }
@@ -221,7 +221,9 @@ impl QuillApp {
                         Button::new("reaction-sound-toggle")
                             .small()
                             .label(
-                                if self.defaults_sound_picker == Some(SoundPickerTarget::Reaction) {
+                                if self.notify.defaults_sound_picker
+                                    == Some(SoundPickerTarget::Reaction)
+                                {
                                     "Hide"
                                 } else {
                                     "Change"
@@ -229,18 +231,19 @@ impl QuillApp {
                             )
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.defaults_sound_picker = if this.defaults_sound_picker
-                                    == Some(SoundPickerTarget::Reaction)
-                                {
-                                    None
-                                } else {
-                                    Some(SoundPickerTarget::Reaction)
-                                };
+                                this.notify.defaults_sound_picker =
+                                    if this.notify.defaults_sound_picker
+                                        == Some(SoundPickerTarget::Reaction)
+                                    {
+                                        None
+                                    } else {
+                                        Some(SoundPickerTarget::Reaction)
+                                    };
                                 cx.notify();
                             })),
                     ),
             );
-        if self.defaults_sound_picker == Some(SoundPickerTarget::Reaction) {
+        if self.notify.defaults_sound_picker == Some(SoundPickerTarget::Reaction) {
             section = section.child(self.notification_sound_picker(
                 cx,
                 SoundPickerTarget::Reaction,

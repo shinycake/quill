@@ -143,7 +143,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.forum_manage_dialog = Some(ForumManageDialog::new(window, cx, chat_id));
+        self.admin.forum_manage_dialog = Some(ForumManageDialog::new(window, cx, chat_id));
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.refresh_forum_topics(chat_id);
         }
@@ -151,7 +151,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_forum_manage_dialog(&mut self, cx: &mut Context<Self>) {
-        self.forum_manage_dialog = None;
+        self.admin.forum_manage_dialog = None;
         cx.notify();
     }
 
@@ -164,7 +164,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.forum_manage_dialog.is_none() {
+        if self.admin.forum_manage_dialog.is_none() {
             self.open_forum_manage_dialog(chat_id, window, cx);
         }
         self.begin_topic_editor(topic_id, window, cx);
@@ -179,7 +179,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.forum_manage_dialog.as_ref().map(|d| d.chat_id) else {
+        let Some(chat_id) = self.admin.forum_manage_dialog.as_ref().map(|d| d.chat_id) else {
             return;
         };
         let topics = self
@@ -202,7 +202,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.load_forum_topic_icons();
         }
-        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
+        if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.name_input.update(cx, |input, cx| {
                 input.set_value(name, window, cx);
             });
@@ -220,6 +220,7 @@ impl QuillApp {
     /// new and has no custom emoji (tdesktop `ChooseNextColorId`).
     fn cycle_topic_editor_color(&mut self, cx: &mut Context<Self>) {
         if let Some(editor) = self
+            .admin
             .forum_manage_dialog
             .as_mut()
             .and_then(|d| d.editor.as_mut())
@@ -232,6 +233,7 @@ impl QuillApp {
 
     fn set_topic_editor_emoji(&mut self, custom_emoji_id: i64, cx: &mut Context<Self>) {
         if let Some(editor) = self
+            .admin
             .forum_manage_dialog
             .as_mut()
             .and_then(|d| d.editor.as_mut())
@@ -243,7 +245,7 @@ impl QuillApp {
 
     /// Leave the editor without sending anything.
     fn cancel_topic_editor(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
+        if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.editor = None;
         }
         cx.notify();
@@ -252,7 +254,7 @@ impl QuillApp {
     /// Create or save the topic (`createForumTopic` / `editForumTopic`
     /// with the chosen icon); an empty name is refused up front.
     pub(super) fn submit_topic_editor(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, editor, name)) = self.forum_manage_dialog.as_ref().and_then(|d| {
+        let Some((chat_id, editor, name)) = self.admin.forum_manage_dialog.as_ref().and_then(|d| {
             Some((
                 d.chat_id,
                 d.editor.clone()?,
@@ -262,7 +264,7 @@ impl QuillApp {
             return;
         };
         if name.is_empty() {
-            self.status_note = "topic name cannot be empty".into();
+            self.connection.status_note = "topic name cannot be empty".into();
             cx.notify();
             return;
         }
@@ -290,16 +292,16 @@ impl QuillApp {
                         .edit_forum_topic_with_icon(chat_id, id, &name, editor.icon_emoji)
                 }
             };
-            self.status_note = match (result, editor.target) {
+            self.connection.status_note = match (result, editor.target) {
                 (Ok(_), None) => "topic created".into(),
                 (Ok(_), Some(_)) => "topic saved".into(),
                 (Err(_), None) => "could not create topic".into(),
                 (Err(_), Some(_)) => "could not save topic".into(),
             };
         } else {
-            self.status_note = "topics need a live connection (demo)".into();
+            self.connection.status_note = "topics need a live connection (demo)".into();
         }
-        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
+        if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.editor = None;
         }
         cx.notify();
@@ -340,12 +342,12 @@ impl QuillApp {
                 // The topic list refetches after the server confirms
                 // (the render path reloads when the cache is dropped).
                 Ok(_) => {
-                    self.status_note = "topic updated".into();
+                    self.connection.status_note = "topic updated".into();
                 }
-                Err(_) => self.status_note = "could not update topic".into(),
+                Err(_) => self.connection.status_note = "could not update topic".into(),
             }
         } else {
-            self.status_note = "topics need a live connection (demo)".into();
+            self.connection.status_note = "topics need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -363,7 +365,7 @@ impl QuillApp {
                 this.close_forum_manage_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(dialog_state) = this.forum_manage_dialog.as_ref() else {
+            let Some(dialog_state) = this.admin.forum_manage_dialog.as_ref() else {
                 return dialog.overlay(true).on_close(on_close);
             };
             let chat_id = dialog_state.chat_id;
@@ -434,7 +436,7 @@ impl QuillApp {
     /// The create / edit form (tdesktop `EditForumTopicBox`): the icon
     /// preview next to the name, then the icon choices, then the buttons.
     fn topic_editor_body(&self, editor: &TopicEditor, cx: &mut Context<Self>) -> AnyElement {
-        let Some(dialog) = self.forum_manage_dialog.as_ref() else {
+        let Some(dialog) = self.admin.forum_manage_dialog.as_ref() else {
             return div().into_any_element();
         };
         let session = self.session();
@@ -741,7 +743,7 @@ impl QuillApp {
                     .tooltip("Topic info")
                     .accessibility_label("Topic info")
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.topic_info_open = !this.topic_info_open;
+                        this.history.topic_info_open = !this.history.topic_info_open;
                         cx.notify();
                     })),
             )
@@ -972,16 +974,16 @@ impl QuillApp {
         let layout = self
             .session()
             .map_or(quill::state::ForumColumn::Hidden, |s| {
-                s.forum_column(width, self.forum_chats_peek)
+                s.forum_column(width, self.chat_list.forum_chats_peek)
             });
-        if self.forum_chats_peek
+        if self.chat_list.forum_chats_peek
             && self
                 .session()
                 .is_some_and(|s| s.forum_column(width, false) == quill::state::ForumColumn::Hidden)
         {
-            self.forum_chats_peek = false;
+            self.chat_list.forum_chats_peek = false;
         }
-        self.forum_column_shown = layout != quill::state::ForumColumn::Hidden;
+        self.chat_list.forum_column_shown = layout != quill::state::ForumColumn::Hidden;
         layout
     }
 
@@ -1029,7 +1031,7 @@ impl QuillApp {
                                 .tooltip("Show chats")
                                 .accessibility_label("Show chats")
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.forum_chats_peek = true;
+                                    this.chat_list.forum_chats_peek = true;
                                     cx.notify();
                                 })),
                         )
@@ -1074,7 +1076,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .select_topic(forum_topic_id);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "topic selected".into(),
                 Err(_) => "could not open topic".into(),
             };
@@ -1093,7 +1095,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.deselect_topic();
         }
-        self.status_note = "back to topics".into();
+        self.connection.status_note = "back to topics".into();
         cx.notify();
     }
 }
@@ -1138,7 +1140,7 @@ fn letter_icon(name: &str, color: i32, size: f32) -> AnyElement {
 crate::ui::shell::register_dialogs! {
     ForumManage => DialogSpec::new(
         5200,
-        |app| app.forum_manage_dialog.is_some(),
+        |app| app.admin.forum_manage_dialog.is_some(),
         QuillApp::build_forum_manage_dialog,
     ),
 }

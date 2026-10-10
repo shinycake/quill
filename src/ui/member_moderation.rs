@@ -171,7 +171,7 @@ impl QuillApp {
                 if let Some(AdminDialog {
                     kind: AdminDialogKind::Promote { selected_user, .. },
                     ..
-                }) = self.admin_dialog.as_mut()
+                }) = self.admin.admin_dialog.as_mut()
                 {
                     *selected_user = Some(user_id);
                 }
@@ -207,7 +207,7 @@ impl QuillApp {
             .and_then(|s| s.user(user_id))
             .map(|user| (user.username.clone(), user.display_name()))
         else {
-            self.status_note = "can't mention this member yet".into();
+            self.connection.status_note = "can't mention this member yet".into();
             cx.notify();
             return;
         };

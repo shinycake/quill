@@ -81,9 +81,9 @@ impl QuillApp {
             .current()
             .is_some_and(|item| self.chat_is_secret(item.chat_id.0));
         let blocked = should_block(self.open_chat_is_secret(), viewer_chat_secret);
-        if blocked != self.capture_blocked {
+        if blocked != self.frame.capture_blocked {
             apply_sharing(window, blocked);
-            self.capture_blocked = blocked;
+            self.frame.capture_blocked = blocked;
         }
     }
 
@@ -91,7 +91,10 @@ impl QuillApp {
     /// session: a quiet, dismissible line above the history.
     pub(super) fn capture_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use gpui_kit::component::{ActiveTheme, Sizable};
-        if CAPTURE_BLOCK_SUPPORTED || self.capture_notice_dismissed || !self.open_chat_is_secret() {
+        if CAPTURE_BLOCK_SUPPORTED
+            || self.frame.capture_notice_dismissed
+            || !self.open_chat_is_secret()
+        {
             return None;
         }
         Some(
@@ -114,7 +117,7 @@ impl QuillApp {
                         .label("Got it")
                         .xsmall()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.capture_notice_dismissed = true;
+                            this.frame.capture_notice_dismissed = true;
                             cx.notify();
                         })),
                 )

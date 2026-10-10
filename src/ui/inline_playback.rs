@@ -186,7 +186,7 @@ impl QuillApp {
         {
             return;
         }
-        let Some(super::history_row::HistoryRow::Single(row)) = self.history_rows.get(ix) else {
+        let Some(super::history_row::HistoryRow::Single(row)) = self.history.rows.get(ix) else {
             return;
         };
         let Some(session) = self.session() else {
@@ -273,7 +273,7 @@ impl QuillApp {
                             && this.playback.animation_frames.len() > 1;
                         // Muted GIFs hold still behind another app, like
                         // tdesktop; activation redraws.
-                        if playing && this.window_active.get() {
+                        if playing && this.frame.window_active.get() {
                             let elapsed = this
                                 .playback
                                 .animation_started_at
@@ -311,7 +311,7 @@ impl QuillApp {
         self.playback.autoplayed_gifs.insert(message_id);
         if self.playback.playing_animation == Some(message_id) {
             self.stop_animation_playback();
-            self.status_note = "GIF paused".into();
+            self.connection.status_note = "GIF paused".into();
             cx.notify();
             return;
         }
@@ -330,7 +330,7 @@ impl QuillApp {
         self.playback.pending_gif_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.status_note = "GIF file is outside the account files".into();
+            self.connection.status_note = "GIF file is outside the account files".into();
             cx.notify();
             return;
         };
@@ -343,7 +343,7 @@ impl QuillApp {
         let cache = quill::animation::gif_frame_cache_dir(file_id.0).join(epoch.to_string());
         self.playback.animation_cache_file = Some(file_id.0);
         self.playback.playing_animation = Some(message_id);
-        self.status_note = "Loading GIF playback…".into();
+        self.connection.status_note = "Loading GIF playback…".into();
         let slot = Arc::new(std::sync::Mutex::new(None));
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.playback.animation_extract_child = Some(slot.clone());
@@ -368,11 +368,11 @@ impl QuillApp {
                         this.playback.animation_fps = fps;
                         this.playback.animation_frame = 0;
                         this.spawn_animation_tick(cx);
-                        this.status_note = "Playing GIF".into();
+                        this.connection.status_note = "Playing GIF".into();
                     }
                     Err(_) => {
                         this.stop_animation_playback();
-                        this.status_note = "Could not play GIF. Check that ffmpeg and ffprobe are installed, then retry.".into();
+                        this.connection.status_note = "Could not play GIF. Check that ffmpeg and ffprobe are installed, then retry.".into();
                     }
                 }
                 cx.notify();
@@ -407,7 +407,7 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         let playing = this.playback.playing_video.is_some()
                             && this.playback.video_frames.len() > 1;
-                        if playing && this.window_active.get() {
+                        if playing && this.frame.window_active.get() {
                             this.playback.video_frame =
                                 (this.playback.video_frame + 1) % this.playback.video_frames.len();
                             // Only the history shows the clip.
@@ -438,7 +438,7 @@ impl QuillApp {
     ) {
         if self.playback.playing_video == Some(message_id) {
             self.stop_video_playback();
-            self.status_note = "video paused".into();
+            self.connection.status_note = "video paused".into();
             cx.notify();
             return;
         }
@@ -458,7 +458,7 @@ impl QuillApp {
         self.playback.pending_video_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.status_note = "video file is outside the account files".into();
+            self.connection.status_note = "video file is outside the account files".into();
             cx.notify();
             return;
         };
@@ -486,10 +486,10 @@ impl QuillApp {
                 if let Some(chat_id) = mark_opened {
                     self.mark_voice_opened(chat_id, message_id);
                 }
-                self.status_note = "playing video".into();
+                self.connection.status_note = "playing video".into();
             }
             _ => {
-                self.status_note = "could not play video".into();
+                self.connection.status_note = "could not play video".into();
             }
         }
         cx.notify();

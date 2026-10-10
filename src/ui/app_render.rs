@@ -45,8 +45,11 @@ impl Render for QuillApp {
         self.sync_window_title(window);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
-        self.report_visible_history(window.is_window_active() && !self.passcode_ui.locked, cx);
-        self.report_visible_sponsored(window.is_window_active() && !self.passcode_ui.locked);
+        self.report_visible_history(
+            window.is_window_active() && !self.account.passcode.locked,
+            cx,
+        );
+        self.report_visible_sponsored(window.is_window_active() && !self.account.passcode.locked);
         // A conversation replayed from its cache (`app_slice`) still shows
         // its clips: only a conversation that rendered (or a frame without
         // one) and swept no player orphans them.
@@ -60,7 +63,7 @@ impl Render for QuillApp {
         // The forum's topic list is a column of its own (tdesktop shows it
         // where the chat list was).
         let forum_column = self.forum_column_layout(window);
-        if self.window_active.replace(active) != active {
+        if self.frame.window_active.replace(active) != active {
             self.playback
                 .inline_videos
                 .borrow_mut()
@@ -70,7 +73,7 @@ impl Render for QuillApp {
         if std::mem::take(&mut self.viewer.extra.restore_fullscreen) && window.is_fullscreen() {
             window.toggle_fullscreen();
         }
-        self.media_roots_frame.borrow_mut().take();
+        self.frame.media_roots_frame.borrow_mut().take();
         // Spoiler specks painted last frame keep drifting.
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
@@ -81,23 +84,23 @@ impl Render for QuillApp {
         let status_toast = self.status_toast_visible(cx);
         let viewer_open = self.viewer.state.is_open();
         let menu_open = self.message_ui.menu.is_some()
-            || self.chat_menu.is_some()
-            || self.archive_menu.is_some()
-            || self.global.story_menu.is_some()
+            || self.chat_list.menu.is_some()
+            || self.chat_list.archive_menu.is_some()
+            || self.chat_list.global.story_menu.is_some()
             || self.folders.tab_menu.is_some();
-        if menu_open && !self.context_menu_was_open {
-            self.context_menu_previous_focus = window.focused(cx);
-            window.focus(&self.context_menu_focus, cx);
-        } else if !menu_open && self.context_menu_was_open {
+        if menu_open && !self.frame.context_menu_was_open {
+            self.frame.context_menu_previous_focus = window.focused(cx);
+            window.focus(&self.frame.context_menu_focus, cx);
+        } else if !menu_open && self.frame.context_menu_was_open {
             // A menu action may already have focused an editor or a dialog.
-            if self.context_menu_focus.contains_focused(window, cx)
-                && let Some(previous) = self.context_menu_previous_focus.as_ref()
+            if self.frame.context_menu_focus.contains_focused(window, cx)
+                && let Some(previous) = self.frame.context_menu_previous_focus.as_ref()
             {
                 window.focus(previous, cx);
             }
-            self.context_menu_previous_focus = None;
+            self.frame.context_menu_previous_focus = None;
         }
-        self.context_menu_was_open = menu_open;
+        self.frame.context_menu_was_open = menu_open;
         // Phase 8.1: feed OS window focus into the notification decision, then
         // dispatch any notifications the reducer queued since the last frame.
         if let Some(live) = self.live.as_mut() {
@@ -109,7 +112,7 @@ impl Render for QuillApp {
         // first frame after the form answer lands. (This can't live in
         // `poll_live`: prefill needs a `&mut Window` for the inputs.)
         let payment_form = self.session().and_then(|s| s.payment_form.clone());
-        if let (Some(dialog), Some(form)) = (self.payment_dialog.as_mut(), payment_form)
+        if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form)
             && !dialog.prefilled
         {
             dialog.prefill_from_form(&form, window, cx);
@@ -137,7 +140,7 @@ impl Render for QuillApp {
             && open_chat == Some(chat_id)
         {
             self.set_composer_markup(&text, window, cx);
-            self.status_note = "AI updated the draft".into();
+            self.connection.status_note = "AI updated the draft".into();
         }
         if let Some((chat_id, rich, note)) = ai_blocks
             && open_chat == Some(chat_id)
@@ -146,7 +149,7 @@ impl Render for QuillApp {
             self.composer.update(cx, |input, cx| {
                 input.set_value(&text, window, cx);
             });
-            self.status_note = note.into();
+            self.connection.status_note = note.into();
         }
         // Phase A1: keep the slow-mode countdown ticking while the open
         // chat is gated (spawns at most one 1s task per open chat).
@@ -173,21 +176,21 @@ impl Render for QuillApp {
         // Parity slice: prefill the folder editor once its `getChatFolder`
         // spec arrives.
         self.maybe_prefill_folder_editor(window, cx);
-        if let Some((chat_id, story_id)) = self.pending_story_open {
+        if let Some((chat_id, story_id)) = self.chat_list.pending_story_open {
             let ready = self
                 .session()
                 .is_some_and(|s| s.stories.contains_key(&(chat_id, story_id)));
             if ready {
-                self.pending_story_open = None;
+                self.chat_list.pending_story_open = None;
                 self.rebuild_story_viewer(ChatId(chat_id), story_id, cx);
             }
         }
         // `parity:platform-deep-links`: open the chat the deep link
         // resolved to (take-once; render owns the `Window`).
-        if let Some((chat_id, action)) = self.pending_deep_link_open.take() {
+        if let Some((chat_id, action)) = self.links.pending_deep_link_open.take() {
             self.open_deep_link_chat(chat_id, &action, window, cx);
         }
-        if let Some(ui) = self.pending_deep_link_ui.take() {
+        if let Some(ui) = self.links.pending_deep_link_ui.take() {
             self.run_deep_link_ui(ui, window, cx);
         }
         // A clicked mention, hashtag, command or link (`entity_links`).
@@ -274,7 +277,7 @@ impl Render for QuillApp {
             self.stories.viewer.close();
             self.stories.reaction_picker_open = false;
             self.stories.reply_open = false;
-            self.status_note = "Story deleted".into();
+            self.connection.status_note = "Story deleted".into();
         }
         // Phase 4.6: push the playback clock into the seek slider entity so
         // the thumb follows elapsed time (the tick has no `&mut Window`).
@@ -282,7 +285,7 @@ impl Render for QuillApp {
         self.sync_signin(window, cx);
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
-        let inputs_live = self.live.is_some() || self.demo_auth_inputs;
+        let inputs_live = self.live.is_some() || self.auth_ui.demo_inputs;
         let show_phone = inputs_live && matches!(auth.action, AuthAction::EnterPhone);
         let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
         let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
@@ -331,13 +334,15 @@ impl Render for QuillApp {
                 #[cfg(target_os = "macos")]
                 {
                     use quill::quit_guard::QuitDecision;
-                    let now = u64::try_from(this.quit_clock.elapsed().as_millis()).unwrap_or(0);
+                    let now =
+                        u64::try_from(this.frame.quit_clock.elapsed().as_millis()).unwrap_or(0);
                     match this
+                        .frame
                         .quit_guard
                         .press(now, this.appearance.mac_warn_before_quit)
                     {
                         QuitDecision::Warn => {
-                            this.status_note = quill::quit_guard::WARNING.to_string();
+                            this.connection.status_note = quill::quit_guard::WARNING.to_string();
                             cx.notify();
                             return;
                         }
@@ -405,7 +410,7 @@ impl Render for QuillApp {
                 cx.open_url("https://github.com/shinycake/quill");
             }))
             .on_action(cx.listener(|this, _: &OpenShortcuts, _, cx| {
-                this.shortcuts_open = true;
+                this.settings.shortcuts_open = true;
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &NextChat, window, cx| {
@@ -735,10 +740,10 @@ impl Render for QuillApp {
             .children(self.unconfirmed_login_banner(cx))
             .when(
                 matches!(
-                    self.update_state,
+                    self.settings.update_state,
                     quill::updater::UpdateState::Available(_)
                         | quill::updater::UpdateState::Installed(_)
-                ) && !self.update_banner_dismissed,
+                ) && !self.settings.update_banner_dismissed,
                 |this| this.child(self.update_banner(cx)),
             )
             // Slice parity:platform-offline-indicator — slim connection
@@ -860,7 +865,7 @@ impl Render for QuillApp {
             // (`QUILL_DEMO_HIDE_STATUS=1` hides it, for recordings).
             .when(
                 self.live.is_none()
-                    && !self.status_note.is_empty()
+                    && !self.connection.status_note.is_empty()
                     && std::env::var_os("QUILL_DEMO_HIDE_STATUS").is_none(),
                 |this| {
                     this.child(
@@ -870,10 +875,10 @@ impl Render for QuillApp {
                             .min_h(px(24.))
                             .px_3()
                             .role(Role::Label)
-                            .aria_label(self.status_note.clone())
+                            .aria_label(self.connection.status_note.clone())
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(self.status_note.clone()),
+                            .child(self.connection.status_note.clone()),
                     )
                 },
             )
@@ -898,7 +903,7 @@ impl Render for QuillApp {
                             div()
                                 .id("status-toast")
                                 .role(Role::Label)
-                                .aria_label(self.status_note.clone())
+                                .aria_label(self.connection.status_note.clone())
                                 .max_w(px(520.))
                                 .px_3()
                                 .py_1p5()
@@ -910,7 +915,7 @@ impl Render for QuillApp {
                                 .shadow_md()
                                 .text_sm()
                                 .truncate()
-                                .child(self.status_note.clone()),
+                                .child(self.connection.status_note.clone()),
                         ),
                 )
             })
@@ -959,7 +964,7 @@ impl Render for QuillApp {
             // the shell sync — render wiring deleted.
             // Slice S3: privacy overlay (Settings → Privacy) plus the
             // per-rule editor and the always/never exception list.
-            .when(self.privacy_open, |this| {
+            .when(self.privacy.open, |this| {
                 this.child(self.privacy_overlay(cx))
             })
             .when_some(self.privacy_editor_overlay(cx), |this, overlay| {
@@ -1022,13 +1027,16 @@ impl Render for QuillApp {
                 )
             })
             // Slice CL1: right-click chat-row context menu.
-            .when_some(self.chat_menu, |this, menu| {
+            .when_some(self.chat_list.menu, |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
-            .when_some(self.global.story_menu, |this, (chat_id, position)| {
-                this.child(self.story_menu_overlay(chat_id, position, cx))
-            })
-            .when_some(self.archive_menu, |this, position| {
+            .when_some(
+                self.chat_list.global.story_menu,
+                |this, (chat_id, position)| {
+                    this.child(self.story_menu_overlay(chat_id, position, cx))
+                },
+            )
+            .when_some(self.chat_list.archive_menu, |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })
             .when_some(self.folders.tab_menu, |this, menu| {
@@ -1038,7 +1046,7 @@ impl Render for QuillApp {
             // messages beside the pressed chat-list row. Rendered above
             // the row menu; any click or the long-press release closes
             // it.
-            .when_some(self.chat_preview, |this, preview| {
+            .when_some(self.chat_list.preview, |this, preview| {
                 this.child(self.chat_preview_overlay(preview, cx))
             })
             // MED4: Instant View reader overlay (above the menu).
@@ -1059,7 +1067,7 @@ impl Render for QuillApp {
                 )
             });
         // The lock screen covers the whole window, above every overlay.
-        let root = root.when(self.passcode_ui.locked, |this| {
+        let root = root.when(self.account.passcode.locked, |this| {
             this.child(self.lock_overlay(cx))
         });
         match image_cache {
@@ -1076,39 +1084,42 @@ impl QuillApp {
     fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> bool {
         // `QUILL_TRACE_STATUS=1`: print every status note (toasted or not)
         // to stderr, for diagnosing a live session.
-        if self.status_note != self.status_traced {
-            self.status_traced = self.status_note.clone();
-            if !self.status_note.is_empty() && std::env::var_os("QUILL_TRACE_STATUS").is_some() {
-                eprintln!("status: {}", self.status_note);
+        if self.connection.status_note != self.connection.status_traced {
+            self.connection.status_traced = self.connection.status_note.clone();
+            if !self.connection.status_note.is_empty()
+                && std::env::var_os("QUILL_TRACE_STATUS").is_some()
+            {
+                eprintln!("status: {}", self.connection.status_note);
             }
         }
         if self.live.is_none()
-            || self.status_note.is_empty()
-            || !status_note_is_toast(&self.status_note)
+            || self.connection.status_note.is_empty()
+            || !status_note_is_toast(&self.connection.status_note)
         {
             return false;
         }
-        if self.status_note != self.status_seen {
-            self.status_seen = self.status_note.clone();
-            self.status_shown_at = Some(std::time::Instant::now());
-            let duration = status_toast_duration(&self.status_note);
-            let shown = self.status_note.clone();
+        if self.connection.status_note != self.connection.status_seen {
+            self.connection.status_seen = self.connection.status_note.clone();
+            self.connection.status_shown_at = Some(std::time::Instant::now());
+            let duration = status_toast_duration(&self.connection.status_note);
+            let shown = self.connection.status_note.clone();
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(duration).await;
                 let _ = this.update(cx, |this, cx| {
                     // Expired and unchanged: clear it, so the same message
                     // set again later (a repeated failure) shows again.
-                    if this.status_note == shown {
-                        this.status_note.clear();
-                        this.status_seen.clear();
+                    if this.connection.status_note == shown {
+                        this.connection.status_note.clear();
+                        this.connection.status_seen.clear();
                     }
                     cx.notify();
                 });
             })
             .detach();
         }
-        self.status_shown_at
-            .is_some_and(|at| at.elapsed() < status_toast_duration(&self.status_note))
+        self.connection
+            .status_shown_at
+            .is_some_and(|at| at.elapsed() < status_toast_duration(&self.connection.status_note))
     }
 }
 

@@ -375,7 +375,7 @@ impl QuillApp {
             Ok(image) => {
                 self.viewer.photo_editor = Some(PhotoEditor::new(index, image.to_rgba8()));
             }
-            Err(_) => self.status_note = "Couldn't open this image for editing.".into(),
+            Err(_) => self.connection.status_note = "Couldn't open this image for editing.".into(),
         }
         cx.notify();
     }
@@ -417,7 +417,7 @@ impl QuillApp {
                 attachment.file_name = format!("{stem}.png");
                 attachment.kind = quill::composer::AttachmentKind::Photo;
             }
-            _ => self.status_note = "Couldn't save the edited photo.".into(),
+            _ => self.connection.status_note = "Couldn't save the edited photo.".into(),
         }
         cx.notify();
     }
@@ -896,7 +896,8 @@ impl QuillApp {
                                     this.photo_editor_mut(|editor| editor.place(image), cx)
                                 }
                                 None => {
-                                    this.status_note = "Couldn't draw that emoji.".into();
+                                    this.connection.status_note =
+                                        "Couldn't draw that emoji.".into();
                                     cx.notify();
                                 }
                             }
@@ -955,14 +956,14 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.download_file(file_id, 16);
             }
-            self.status_note = "Downloading the sticker…".into();
+            self.connection.status_note = "Downloading the sticker…".into();
             cx.notify();
             return;
         };
         match super::editor_art::sticker_pixels(std::path::Path::new(&path), format) {
             Some(image) => self.photo_editor_mut(|editor| editor.place(image), cx),
             None => {
-                self.status_note = "Couldn't use that sticker.".into();
+                self.connection.status_note = "Couldn't use that sticker.".into();
                 cx.notify();
             }
         }

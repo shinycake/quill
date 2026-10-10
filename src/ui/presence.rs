@@ -59,7 +59,7 @@ impl QuillApp {
     /// Send `online` when "window active and not idle" changed. Restarts
     /// of the connection (auth not Ready) forget what was sent.
     pub(super) fn sync_presence(&mut self) {
-        let active = self.window_active.get();
+        let active = self.frame.window_active.get();
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -67,15 +67,15 @@ impl QuillApp {
             live.driver.session.auth,
             quill::telegram::envelope::AuthorizationState::Ready
         ) {
-            self.presence.reset();
+            self.connection.presence.reset();
             return;
         }
         // A locked window is not in use: offline until unlocked.
-        let desired = should_be_online(active && !self.passcode_ui.locked, idle_ms());
-        if let Some(value) = self.presence.next(desired)
+        let desired = should_be_online(active && !self.account.passcode.locked, idle_ms());
+        if let Some(value) = self.connection.presence.next(desired)
             && live.driver.set_online(value).is_err()
         {
-            self.presence.reset();
+            self.connection.presence.reset();
         }
     }
 }

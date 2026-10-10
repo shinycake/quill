@@ -76,7 +76,7 @@ impl QuillApp {
         }
         match self.live.as_mut() {
             Some(live) => {
-                self.status_note =
+                self.connection.status_note =
                     match live
                         .driver
                         .set_fact_check(dialog.chat_id, dialog.message_id, &text)
@@ -95,7 +95,7 @@ impl QuillApp {
                 {
                     message.extras.fact_check = text.clone();
                 }
-                self.status_note = "fact check saved (demo)".into();
+                self.connection.status_note = "fact check saved (demo)".into();
             }
         }
         cx.notify();

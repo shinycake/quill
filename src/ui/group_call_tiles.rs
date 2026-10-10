@@ -39,7 +39,7 @@ impl QuillApp {
             live.driver
                 .latest_group_video_frame(call.id, user_id, screen)
         } else {
-            self.demo_group_frames.get(&(user_id, screen)).cloned()
+            self.demo_ui.group_frames.get(&(user_id, screen)).cloned()
         }?;
         let image = self.cached_group_video_image(call.id, user_id, screen, &frame)?;
         Some(

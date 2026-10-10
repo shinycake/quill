@@ -282,42 +282,42 @@ enum PremiumGiftsDemo {
 impl QuillApp {
     fn demo_ready_albums(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_albums(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_albums(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer.update(cx, |input, cx| {
             input.set_value("album caption", window, cx);
         });
-        self.status_note = "screenshot demo — received album · own album".into();
+        self.connection.status_note = "screenshot demo — received album · own album".into();
     }
 
     fn demo_ready_blockquote_expandable(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_blockquote_expandable(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_blockquote_expandable(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — expandable block quotes".into();
+        self.connection.status_note = "screenshot demo — expandable block quotes".into();
     }
 
     fn demo_ready_bubble_headers(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::bubble_header_demo::apply_ready_bubble_headers(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
             );
         }
-        self.status_note = "screenshot demo — bubble headers".into();
+        self.connection.status_note = "screenshot demo — bubble headers".into();
     }
 
     fn demo_ready_caption_position(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // MED4: caption above vs below the media.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_caption_position(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_caption_position(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — caption position".into();
+        self.connection.status_note = "screenshot demo — caption position".into();
     }
 
     fn demo_ready_code_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -337,7 +337,7 @@ impl QuillApp {
                 .input_for_demo()
                 .update(cx, |input, cx| input.set_value("rust", window, cx));
         }
-        self.status_note = "screenshot demo — code language".into();
+        self.connection.status_note = "screenshot demo — code language".into();
     }
 
     fn demo_ready_composer_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -368,39 +368,39 @@ impl QuillApp {
                 })),
             });
         }
-        self.status_note = "screenshot demo — composer preview chip".into();
+        self.connection.status_note = "screenshot demo — composer preview chip".into();
     }
 
     fn demo_ready_drafts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_drafts(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_drafts(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.restore_open_draft(window, cx);
-        self.status_note = "screenshot demo — draft restored".into();
+        self.connection.status_note = "screenshot demo — draft restored".into();
     }
 
     fn demo_ready_file_open_confirm(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.privacy_ui.file_open = Some(crate::ui::privacy_extra::FileOpenConfirm {
+        self.privacy.extra.file_open = Some(crate::ui::privacy_extra::FileOpenConfirm {
             path: std::path::PathBuf::from("invoice-2026.bin"),
             warning: quill::file_prefs::OpenWarning::Executable,
         });
-        self.status_note = "screenshot demo — file open warning".into();
+        self.connection.status_note = "screenshot demo — file open warning".into();
     }
 
     fn demo_ready_forum_thread_stories(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = std::env::var("QUILL_DEMO_FTS_VIEW").unwrap_or_default();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::forum_thread_stories_demo::apply_ready_forum_thread_stories(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 &view,
             );
         }
         match view.as_str() {
-            "thread" => self.thread_info_open = true,
+            "thread" => self.history.thread_info_open = true,
             "stats" => {
                 self.open_story_viewer(ChatId(11), 5, cx);
                 self.stories.stats_open = true;
@@ -410,41 +410,42 @@ impl QuillApp {
                     input.set_value("#sunset", window, cx);
                 });
             }
-            _ => self.topic_info_open = true,
+            _ => self.history.topic_info_open = true,
         }
-        self.status_note = "screenshot demo — topic info, story statistics and search".into();
+        self.connection.status_note =
+            "screenshot demo — topic info, story statistics and search".into();
     }
 
     fn demo_ready_forums_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = std::env::var("QUILL_DEMO_FORUMS_SAVED_VIEW").unwrap_or_default();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::forums_saved_demo::apply_ready_forums_saved(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 &view,
             );
         }
         if view == "editor" {
             self.open_forum_topic_editor(ChatId(16), None, window, cx);
         }
-        self.status_note = "screenshot demo — forums and saved sublists".into();
+        self.connection.status_note = "screenshot demo — forums and saved sublists".into();
     }
 
     fn demo_ready_link_preview(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_link_preview(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_link_preview(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — link preview".into();
+        self.connection.status_note = "screenshot demo — link preview".into();
     }
 
     fn demo_ready_mentions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
-                self.demo_sink.clone();
+                self.demo_ui.sink.clone();
             for (id, first, last, username) in [
                 (901, "Ada", "Lovelace", "ada"),
                 (902, "Alan", "Turing", ""),
@@ -455,7 +456,7 @@ impl QuillApp {
                     id % 7
                 );
                 if let Some(owned) =
-                    quill::telegram::client::copy_and_parse(&json, &self.demo_seq, &dyn_sink)
+                    quill::telegram::client::copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink)
                 {
                     session.apply(owned);
                 }
@@ -471,26 +472,26 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_value("Thanks @a", window, cx);
         });
-        self.status_note = "screenshot demo — @ member suggestions".into();
+        self.connection.status_note = "screenshot demo — @ member suggestions".into();
     }
 
     fn demo_ready_preview_cards(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // MED4: embedded-player + album preview cards.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_preview_cards(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_preview_cards(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — preview cards".into();
+        self.connection.status_note = "screenshot demo — preview cards".into();
     }
 
     fn demo_ready_rendering_leftovers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = std::env::var("QUILL_DEMO_RENDERING_VIEW").unwrap_or_default();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::rendering_demo::apply_ready_rendering_leftovers(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 &view,
             );
         }
@@ -506,7 +507,7 @@ impl QuillApp {
             "location" => self.open_share_location_panel(window, cx),
             _ => {}
         }
-        self.status_note = "screenshot demo — rendering leftovers".into();
+        self.connection.status_note = "screenshot demo — rendering leftovers".into();
     }
 
     fn demo_ready_reply_keyboard(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -530,9 +531,9 @@ impl QuillApp {
         // Right-to-left bubbles beside the composer: an incoming Hebrew
         // message (wraps) and an outgoing mixed one.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
-                self.demo_sink.clone();
+                self.demo_ui.sink.clone();
             let chat = session.open_chat.unwrap_or(ChatId(11));
             for (id, outgoing, body) in [
                 (
@@ -577,7 +578,7 @@ impl QuillApp {
                     chat.0
                 );
                 if let Some(owned) =
-                    quill::telegram::client::copy_and_parse(&json, &self.demo_seq, &dyn_sink)
+                    quill::telegram::client::copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink)
                 {
                     session.apply(owned);
                 }
@@ -593,17 +594,17 @@ impl QuillApp {
                 input.set_selected_range(range, cx);
             }
         });
-        self.status_note = "screenshot demo — RTL composer".into();
+        self.connection.status_note = "screenshot demo — RTL composer".into();
     }
 
     fn demo_ready_rtl_polish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = std::env::var("QUILL_DEMO_RTL_VIEW").unwrap_or_default();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::rtl_demo::apply_ready_rtl_polish(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 &view,
             );
         }
@@ -613,45 +614,45 @@ impl QuillApp {
                 input.focus(window, cx);
             });
         }
-        self.status_note = "screenshot demo — RTL polish".into();
+        self.connection.status_note = "screenshot demo — RTL polish".into();
     }
 
     fn demo_ready_service_media(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::service_media_demo::apply_ready_service_media(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
             );
         }
-        self.status_note = "screenshot demo — service and media cards".into();
+        self.connection.status_note = "screenshot demo — service and media cards".into();
     }
 
     fn demo_ready_service_messages(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::service_demo::apply_ready_service_messages(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
             );
         }
-        self.status_note = "screenshot demo — service messages".into();
+        self.connection.status_note = "screenshot demo — service messages".into();
     }
 
     fn demo_ready_session_details(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // B13: session details view and the file-open warning.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             session.sessions = Some(demo_sessions());
             session.sessions_loading = false;
             session.sessions_error = None;
             session.privacy_data.inactive_session_ttl_days = Some(180);
         }
-        self.sessions_open = true;
-        self.privacy_ui.session_details = Some(123456789);
-        self.status_note = "screenshot demo — session details".into();
+        self.privacy.sessions_open = true;
+        self.privacy.extra.session_details = Some(123456789);
+        self.connection.status_note = "screenshot demo — session details".into();
     }
 
     fn demo_ready_showcase(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -664,8 +665,8 @@ impl QuillApp {
             _ => sc::Scene::Hikers,
         };
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            sc::apply_ready_showcase(session, &self.demo_sink, &self.demo_seq, scene);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            sc::apply_ready_showcase(session, &self.demo_ui.sink, &self.demo_ui.seq, scene);
         }
         match view.as_str() {
             "reactions" => {
@@ -714,7 +715,7 @@ impl QuillApp {
                 self.appearance.theme = ThemeChoice::Dark;
                 self.appearance.accent_rgb = 0x8b5cf6;
                 self.appearance.wallpaper_rgb = Some(0x1b1230);
-                self.appearance_open = true;
+                self.settings.appearance_open = true;
             }
             "accent" => {
                 self.appearance.accent_rgb = 0x8b5cf6;
@@ -722,29 +723,29 @@ impl QuillApp {
             _ => {}
         }
         // The README captures carry no debug caption.
-        self.status_note = String::new();
+        self.connection.status_note = String::new();
     }
 
     fn demo_ready_text_entities(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_text_entities(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_text_entities(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — text entities".into();
+        self.connection.status_note = "screenshot demo — text entities".into();
     }
 
     fn demo_ready_threads(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             let view = std::env::var("QUILL_DEMO_THREADS_VIEW").unwrap_or_default();
             crate::ui::threads_demo::apply_ready_threads(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 &view,
             );
         }
-        self.status_note = "screenshot demo — comments and threads".into();
+        self.connection.status_note = "screenshot demo — comments and threads".into();
     }
 
     fn demo_ready_translate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -753,15 +754,15 @@ impl QuillApp {
 
     fn demo_ready_unsupported_message(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
-                self.demo_sink.clone();
+                self.demo_ui.sink.clone();
             for json in [
                 r#"{"@type":"updateNewMessage","message":{"id":110,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageFutureFeature"}}}"#,
                 r#"{"@type":"updateNewMessage","message":{"id":111,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageExpiredPhoto"}}}"#,
             ] {
                 if let Some(message) =
-                    quill::telegram::client::copy_and_parse(json, &self.demo_seq, &sink)
+                    quill::telegram::client::copy_and_parse(json, &self.demo_ui.seq, &sink)
                 {
                     session.apply(message);
                 }
@@ -772,8 +773,8 @@ impl QuillApp {
 
     fn demo_ready_video_note_send(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_video_note_send(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_video_note_send(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.playback.playing_video = Some(MessageId(721));
         self.playback.video_frames = vec![
@@ -781,7 +782,7 @@ impl QuillApp {
             demo_media_allowlist().join("demo-gif-2.png"),
         ];
         self.spawn_video_tick(cx);
-        self.status_note = "screenshot demo — video note attach · own round note".into();
+        self.connection.status_note = "screenshot demo — video note attach · own round note".into();
     }
 
     fn demo_ready_video_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -789,8 +790,8 @@ impl QuillApp {
             input.set_value("sending a clip", window, cx);
         });
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_video_send(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_video_send(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.playback.playing_video = Some(MessageId(701));
         self.playback.video_frames = vec![
@@ -798,28 +799,29 @@ impl QuillApp {
             demo_media_allowlist().join("demo-gif-2.png"),
         ];
         self.spawn_video_tick(cx);
-        self.status_note = "screenshot demo — attach video · own clip playing".into();
+        self.connection.status_note = "screenshot demo — attach video · own clip playing".into();
     }
 
     fn demo_privacy(&mut self, demo: PrivacyDemo, _window: &mut Window, _cx: &mut Context<Self>) {
         // Slice S3: Privacy overlay with injected rules, the read-date
         // setting, and the blocked list (no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_privacy(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_privacy(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.privacy_open = true;
+        self.privacy.open = true;
         if matches!(demo, PrivacyDemo::PrivacyGifts) {
-            self.privacy_editor = Some(PrivacyEditorTarget::Rule(
+            self.privacy.editor = Some(PrivacyEditorTarget::Rule(
                 quill::telegram::requests_privacy::PrivacySettingKey::AutosaveGifts,
             ));
         }
         if matches!(demo, PrivacyDemo::PrivacyCalls) {
-            self.privacy_editor = Some(PrivacyEditorTarget::Rule(
+            self.privacy.editor = Some(PrivacyEditorTarget::Rule(
                 quill::telegram::requests_privacy::PrivacySettingKey::AllowCalls,
             ));
         }
-        self.status_note = "screenshot demo — privacy settings (injected, no live Telegram)".into();
+        self.connection.status_note =
+            "screenshot demo — privacy settings (injected, no live Telegram)".into();
     }
 
     fn demo_settings_help(
@@ -828,11 +830,12 @@ impl QuillApp {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) {
-        self.settings_open = true;
+        self.settings.open = true;
         if matches!(demo, SettingsHelpDemo::AskQuestion) {
-            self.settings_page = Some(crate::ui::settings_account_ui::ASK_QUESTION_PAGE);
+            self.settings.page = Some(crate::ui::settings_account_ui::ASK_QUESTION_PAGE);
         }
-        self.status_note = "screenshot demo — settings help (injected, no live Telegram)".into();
+        self.connection.status_note =
+            "screenshot demo — settings help (injected, no live Telegram)".into();
     }
 
     fn demo_premium_gifts(
@@ -842,8 +845,8 @@ impl QuillApp {
         _cx: &mut Context<Self>,
     ) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            let (sink, seq) = (&self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            let (sink, seq) = (&self.demo_ui.sink, &self.demo_ui.seq);
             match demo {
                 PremiumGiftsDemo::Stars => {
                     crate::ui::premium_demo::apply_ready_stars(session, sink, seq)
@@ -855,7 +858,8 @@ impl QuillApp {
                 PremiumGiftsDemo::Premium => crate::ui::premium_demo::apply_ready_premium(session),
                 _ => crate::ui::premium_demo::apply_ready_gift_cards(session, sink, seq),
             }
-            self.status_note = "screenshot demo \u{2014} Stars, gifts and Premium (fixture)".into();
+            self.connection.status_note =
+                "screenshot demo \u{2014} Stars, gifts and Premium (fixture)".into();
         }
     }
 }

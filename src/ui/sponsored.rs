@@ -461,11 +461,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.hide_sponsored_messages(chat_id, message_id) {
-                Ok(Some(_)) => "hiding ads…".into(),
-                Ok(None) => self.status_note.clone(),
-                Err(_) => "could not hide ads".into(),
-            };
+            self.connection.status_note =
+                match live.driver.hide_sponsored_messages(chat_id, message_id) {
+                    Ok(Some(_)) => "hiding ads…".into(),
+                    Ok(None) => self.connection.status_note.clone(),
+                    Err(_) => "could not hide ads".into(),
+                };
         } else if let Some(session) = self.demo_session.as_mut()
             && session.begin_sponsored_hide(chat_id, message_id) == Some(true)
         {
@@ -528,7 +529,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live
+            self.connection.status_note = match live
                 .driver
                 .report_sponsored_message(chat_id, message_id, "")
             {
@@ -547,13 +548,13 @@ impl QuillApp {
                     r#"{{"@type":"reportSponsoredResultOptionRequired","@extra":"{}","title":"Why are you reporting this ad?","options":[{{"@type":"reportOption","id":"bWlzLWxlYWQ=","text":"Misleading or scam"}},{{"@type":"reportOption","id":"c3BhbQ==","text":"Spam"}}]}}"#,
                     extra.0
                 );
-                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-                if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+                if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                     session.apply(owned);
                 }
-                self.status_note = "demo — report options injected".into();
+                self.connection.status_note = "demo — report options injected".into();
             } else {
-                self.status_note = "report not available for this row".into();
+                self.connection.status_note = "report not available for this row".into();
             }
         }
         cx.notify();
@@ -567,7 +568,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.report_sponsored_message(
+            self.connection.status_note = match live.driver.report_sponsored_message(
                 flight.chat_id,
                 flight.message_id,
                 option_id,
@@ -584,11 +585,11 @@ impl QuillApp {
                 r#"{{"@type":"reportSponsoredResultOk","@extra":"{}"}}"#,
                 extra.0
             );
-            let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-            if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                 session.apply(owned);
             }
-            self.status_note = "demo — report sent".into();
+            self.connection.status_note = "demo — report sent".into();
         }
         cx.notify();
     }

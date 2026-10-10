@@ -221,7 +221,7 @@ impl QuillApp {
             return;
         };
         if let Err(err) = remove(&dir, code) {
-            self.status_note = format!("Couldn't remove the dictionary: {err}");
+            self.connection.status_note = format!("Couldn't remove the dictionary: {err}");
         }
         let chosen: Vec<String> = self
             .spell

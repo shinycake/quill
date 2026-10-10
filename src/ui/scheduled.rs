@@ -270,7 +270,7 @@ impl QuillApp {
         match target {
             ScheduleTarget::Composer => {
                 self.composer_ui.scheduling = scheduling;
-                self.status_note = match (scheduling, kind) {
+                self.connection.status_note = match (scheduling, kind) {
                     (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => {
                         format!("reminder set for {}", format_unix_date_time(date))
                     }
@@ -317,14 +317,14 @@ impl QuillApp {
             .edit_scheduled_message(chat_id, message_id, scheduling)
         {
             Ok(_) => {
-                self.status_note = if sending_now {
+                self.connection.status_note = if sending_now {
                     "sending…".into()
                 } else {
                     "rescheduling…".into()
                 };
             }
             Err(_) => {
-                self.status_note = if sending_now {
+                self.connection.status_note = if sending_now {
                     "could not send the message now".into()
                 } else {
                     "could not reschedule the message".into()

@@ -71,8 +71,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_ui.menu = None;
-        self.chat_menu = None;
-        self.archive_menu = None;
+        self.chat_list.menu = None;
+        self.chat_list.archive_menu = None;
         self.folders.tab_menu = Some(FolderTabMenu {
             folder_id,
             position,
@@ -103,7 +103,7 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.mark_folder_as_read(folder_id) {
-                self.status_note = format!("mark as read failed: {err:?}");
+                self.connection.status_note = format!("mark as read failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             for chat in session.chats.values_mut() {
@@ -234,7 +234,7 @@ impl QuillApp {
             .children(rows);
         div()
             .id("folder-tab-menu-overlay")
-            .track_focus(&self.context_menu_focus)
+            .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()
             .top_0()
@@ -268,7 +268,7 @@ impl QuillApp {
                     .snap_to_window_with_margin(px(8.))
                     .child(panel),
             )
-            .focus_trap("folder-tab-menu-focus", &self.context_menu_focus)
+            .focus_trap("folder-tab-menu-focus", &self.frame.context_menu_focus)
             .into_any_element()
     }
 
@@ -361,7 +361,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.process_folder_new_chats(folder_id, &[]) {
-                    self.status_note = format!("could not hide new chats: {err:?}");
+                    self.connection.status_note = format!("could not hide new chats: {err:?}");
                 }
             }
             None => {
@@ -399,13 +399,15 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => match live.driver.process_folder_new_chats(dialog.folder_id, &ids) {
                 Ok(_) => {
-                    self.status_note = match ids.len() {
+                    self.connection.status_note = match ids.len() {
                         0 => "new chats hidden".into(),
                         1 => "joining 1 chat…".into(),
                         n => format!("joining {n} chats…"),
                     }
                 }
-                Err(err) => self.status_note = format!("could not join the chats: {err:?}"),
+                Err(err) => {
+                    self.connection.status_note = format!("could not join the chats: {err:?}")
+                }
             },
             None => {
                 if let Some(session) = self.demo_session.as_mut() {

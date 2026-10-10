@@ -43,7 +43,7 @@ impl ChatlistGlobal {
             window,
             |this, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
-                    this.global.index_current = None;
+                    this.chat_list.global.index_current = None;
                     this.notify_sidebar(cx);
                 }
             },
@@ -65,8 +65,9 @@ impl ChatlistGlobal {
 impl QuillApp {
     /// The whole Contacts tab: toolbar, list and index bar.
     pub(super) fn contacts_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let sort = self.global.contacts_sort;
+        let sort = self.chat_list.global.contacts_sort;
         let query = self
+            .chat_list
             .global
             .contacts_search
             .read(cx)
@@ -87,7 +88,7 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         div().flex_1().child(
-                            Textarea::new(&self.global.contacts_search)
+                            Textarea::new(&self.chat_list.global.contacts_search)
                                 .aria_label("Search contacts")
                                 .h(px(40.)),
                         ),
@@ -102,11 +103,13 @@ impl QuillApp {
                             .tooltip(sort.switch_label())
                             .accessibility_label(sort.switch_label())
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.global.contacts_sort = this.global.contacts_sort.toggled();
-                                this.global
+                                this.chat_list.global.contacts_sort =
+                                    this.chat_list.global.contacts_sort.toggled();
+                                this.chat_list
+                                    .global
                                     .contacts_scroll
                                     .set_offset(point(px(0.), px(0.)));
-                                this.global.index_cursor = None;
+                                this.chat_list.global.index_cursor = None;
                                 cx.notify();
                             })),
                     ),
@@ -122,7 +125,7 @@ impl QuillApp {
             .id("contacts-scroll")
             .size_full()
             .overflow_y_scroll()
-            .track_scroll(&self.global.contacts_scroll)
+            .track_scroll(&self.chat_list.global.contacts_scroll)
             .on_scroll_wheel(cx.listener(|this, _, _, cx| this.notify_sidebar(cx)))
             .child(self.contacts_list(items, cx));
         scroll = scroll.pr(px(if index::index_shown(&stops) {
@@ -152,12 +155,12 @@ impl QuillApp {
     /// The ordered, filtered and sectioned contacts.
     fn contact_items(&self, query: &str) -> Vec<ListItem> {
         let rows = self.session().map(|s| s.contact_rows()).unwrap_or_default();
-        index::arrange(&rows, self.global.contacts_sort, query)
+        index::arrange(&rows, self.chat_list.global.contacts_sort, query)
     }
 
     fn copy_invitation(&mut self, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(index::INVITE_TEXT.to_string()));
-        self.status_note = "Invitation copied to the clipboard".into();
+        self.connection.status_note = "Invitation copied to the clipboard".into();
         cx.notify();
     }
 
@@ -168,14 +171,14 @@ impl QuillApp {
         total: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let handle = &self.global.contacts_scroll;
+        let handle = &self.chat_list.global.contacts_scroll;
         let bounds = handle.bounds();
         let height = f32::from(bounds.size.height);
         let layout = index::bar_layout(stops, height);
         let scroll = -f32::from(handle.offset().y);
         let visible = index::visible_letters(stops, total, scroll, height);
         let width = BAR_WIDTH + BAR_APPROACH;
-        let cursor = self.global.index_cursor;
+        let cursor = self.chat_list.global.index_cursor;
         let scales: Vec<f32> = layout
             .slots
             .iter()
@@ -195,7 +198,8 @@ impl QuillApp {
             .role(gpui_kit::Role::Group)
             .aria_label("Alphabet index");
         for (i, slot) in layout.slots.iter().enumerate() {
-            let on = self.global.index_current == Some(i) || visible.contains(&slot.letter);
+            let on =
+                self.chat_list.global.index_current == Some(i) || visible.contains(&slot.letter);
             bar = bar.child(
                 div()
                     .absolute()
@@ -227,14 +231,14 @@ impl QuillApp {
         .on_mouse_up(
             MouseButton::Left,
             cx.listener(|this, _, _, cx| {
-                this.global.index_current = None;
+                this.chat_list.global.index_current = None;
                 this.notify_sidebar(cx);
             }),
         )
         .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
             if !*hovered {
-                this.global.index_cursor = None;
-                this.global.index_current = None;
+                this.chat_list.global.index_cursor = None;
+                this.chat_list.global.index_current = None;
                 this.notify_sidebar(cx);
             }
         }))
@@ -251,21 +255,22 @@ impl QuillApp {
         held: bool,
         cx: &mut Context<Self>,
     ) {
-        let bounds = self.global.contacts_scroll.bounds();
+        let bounds = self.chat_list.global.contacts_scroll.bounds();
         let height = f32::from(bounds.size.height);
         let left = f32::from(bounds.right()) - (BAR_WIDTH + BAR_APPROACH);
         let x = f32::from(position.x) - left;
         let y = f32::from(position.y - bounds.origin.y);
-        self.global.index_cursor = Some((x, y));
+        self.chat_list.global.index_cursor = Some((x, y));
         if held {
             let layout = index::bar_layout(stops, height);
             if let Some(slot) = index::slot_at(&layout, y)
-                && self.global.index_current != Some(slot)
+                && self.chat_list.global.index_current != Some(slot)
             {
-                self.global.index_current = Some(slot);
+                self.chat_list.global.index_current = Some(slot);
                 let stop = &stops[layout.slots[slot].source];
                 let offset = index::jump_offset(stop, total, height);
-                self.global
+                self.chat_list
+                    .global
                     .contacts_scroll
                     .set_offset(point(px(0.), px(-offset)));
             }

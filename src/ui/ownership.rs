@@ -71,7 +71,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.ownership_dialog = Some(OwnershipDialog::new(window, cx, chat_id, stage));
+        self.admin.ownership_dialog = Some(OwnershipDialog::new(window, cx, chat_id, stage));
         if let Some(live) = self.live.as_mut() {
             let session = &mut live.driver.session;
             session.ownership.transfer_error = None;
@@ -94,7 +94,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_ownership_dialog(&mut self, cx: &mut Context<Self>) {
-        self.ownership_dialog = None;
+        self.admin.ownership_dialog = None;
         cx.notify();
     }
 
@@ -131,7 +131,7 @@ impl QuillApp {
     }
 
     fn set_ownership_stage(&mut self, stage: OwnershipStage, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.ownership_dialog.as_mut() {
+        if let Some(dialog) = self.admin.ownership_dialog.as_mut() {
             dialog.stage = stage;
         }
         if let Some(live) = self.live.as_mut() {
@@ -149,6 +149,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some((chat_id, input)) = self
+            .admin
             .ownership_dialog
             .as_ref()
             .map(|d| (d.chat_id, d.password_input.clone()))
@@ -162,7 +163,7 @@ impl QuillApp {
         });
         input.update(cx, |input, cx| input.set_value("", window, cx));
         drop(password);
-        self.status_note = match sent {
+        self.connection.status_note = match sent {
             Some(Ok(Some(_))) => "transferring ownership…".into(),
             Some(_) => "ownership can't be transferred right now".into(),
             None => "transferring ownership needs a live connection (demo)".into(),
@@ -194,7 +195,7 @@ impl QuillApp {
             return false;
         };
         let leave_after = matches!(
-            self.ownership_dialog.as_ref().map(|d| d.stage),
+            self.admin.ownership_dialog.as_ref().map(|d| d.stage),
             Some(OwnershipStage::Confirm {
                 leave_after: true,
                 ..
@@ -206,8 +207,8 @@ impl QuillApp {
         } else {
             "group"
         };
-        self.status_note = format!("{name} is now the owner of the {place}.");
-        self.ownership_dialog = None;
+        self.connection.status_note = format!("{name} is now the owner of the {place}.");
+        self.admin.ownership_dialog = None;
         if leave_after {
             self.leave_channel(ChatId(done.chat_id), cx);
         }
@@ -228,7 +229,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some((chat_id, stage, password_input)) = this
-                .ownership_dialog
+                .admin.ownership_dialog
                 .as_ref()
                 .map(|d| (d.chat_id, d.stage, d.password_input.clone()))
             else {
@@ -446,7 +447,7 @@ crate::ui::shell::register_dialogs! {
     /// Transfer ownership / the owner's leave box.
     Ownership => DialogSpec::new(
         4700,
-        |app| app.ownership_dialog.is_some(),
+        |app| app.admin.ownership_dialog.is_some(),
         QuillApp::build_ownership_dialog,
     ),
 }

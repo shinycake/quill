@@ -11,7 +11,7 @@ impl QuillApp {
     /// it changed.
     pub(super) fn sync_window_title(&self, window: &mut Window) {
         let title = self.compute_window_title();
-        if *self.window_title_shown.borrow() == title {
+        if *self.frame.window_title_shown.borrow() == title {
             return;
         }
         window.set_window_title(&title);
@@ -23,12 +23,12 @@ impl QuillApp {
                 window.window_title()
             );
         }
-        *self.window_title_shown.borrow_mut() = title;
+        *self.frame.window_title_shown.borrow_mut() = title;
     }
 
     fn compute_window_title(&self) -> String {
         // A locked app shows no chat name (tdesktop: `locked ? nullptr`).
-        if self.passcode_ui.locked {
+        if self.account.passcode.locked {
             return window_title(None, 0, None);
         }
         let Some(session) = self.session() else {

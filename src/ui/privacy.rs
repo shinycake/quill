@@ -65,12 +65,12 @@ impl QuillApp {
     /// first blocked page (unguarded: always fresh on open). Demo: the
     /// `ReadyPrivacy` fixture seeds state directly.
     pub(crate) fn open_privacy(&mut self, cx: &mut Context<Self>) {
-        self.privacy_open = true;
-        self.privacy_editor = None;
-        self.privacy_exceptions = None;
-        self.exception_picker_open = false;
-        self.block_picker_open = false;
-        self.unblock_confirm = None;
+        self.privacy.open = true;
+        self.privacy.editor = None;
+        self.privacy.exceptions = None;
+        self.privacy.exception_picker_open = false;
+        self.privacy.block_picker_open = false;
+        self.privacy.unblock_confirm = None;
         if let Some(live) = self.live.as_mut() {
             for key in PrivacySettingKey::all() {
                 let _ = live.driver.fetch_privacy_rules(key);
@@ -90,15 +90,15 @@ impl QuillApp {
     /// exceptions-picker → editor → main overlay), like TGX's back stack.
     #[allow(clippy::if_same_then_else)]
     pub(super) fn close_privacy_top(&mut self, cx: &mut Context<Self>) {
-        if self.exception_picker_open || self.block_picker_open {
-            self.exception_picker_open = false;
-            self.block_picker_open = false;
-        } else if self.privacy_exceptions.take().is_some() {
-        } else if self.privacy_editor.take().is_some() {
+        if self.privacy.exception_picker_open || self.privacy.block_picker_open {
+            self.privacy.exception_picker_open = false;
+            self.privacy.block_picker_open = false;
+        } else if self.privacy.exceptions.take().is_some() {
+        } else if self.privacy.editor.take().is_some() {
         } else {
-            self.privacy_open = false;
+            self.privacy.open = false;
         }
-        self.unblock_confirm = None;
+        self.privacy.unblock_confirm = None;
         cx.notify();
     }
 
@@ -319,8 +319,8 @@ impl QuillApp {
                     .child(value),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.privacy_editor = Some(target);
-                this.exception_picker_open = false;
+                this.privacy.editor = Some(target);
+                this.privacy.exception_picker_open = false;
                 cx.notify();
             }))
             .into_any_element()
@@ -364,7 +364,7 @@ impl QuillApp {
                         .label("Block…")
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.block_picker_open = true;
+                            this.privacy.block_picker_open = true;
                             if let Some(live) = this.live.as_mut() {
                                 let _ = live.driver.fetch_contacts();
                             }
@@ -415,7 +415,7 @@ impl QuillApp {
                     })),
             );
         }
-        if self.block_picker_open {
+        if self.privacy.block_picker_open {
             section = section.child(self.block_picker(cx, &list));
         }
         section.into_any_element()
@@ -429,7 +429,7 @@ impl QuillApp {
             .and_then(|s| s.users.get(&user_id))
             .map(|u| u.display_name())
             .unwrap_or_else(|| format!("User {user_id}"));
-        let confirming = self.unblock_confirm == Some(user_id);
+        let confirming = self.privacy.unblock_confirm == Some(user_id);
         let mut row = div()
             .id(format!("privacy-blocked-{user_id}"))
             .flex()
@@ -457,7 +457,7 @@ impl QuillApp {
                             .label("Cancel")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.unblock_confirm = None;
+                                this.privacy.unblock_confirm = None;
                                 cx.notify();
                             })),
                     ),
@@ -469,7 +469,7 @@ impl QuillApp {
                     .label("Unblock")
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.unblock_confirm = Some(user_id);
+                        this.privacy.unblock_confirm = Some(user_id);
                         cx.notify();
                     })),
             );
@@ -529,14 +529,14 @@ impl QuillApp {
     /// Slice S3: block a user (`setMessageSenderBlockList` with
     /// `blockListMain`). Optimistic; the `ok`/error confirms or fails it.
     fn block_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        self.block_picker_open = false;
+        self.privacy.block_picker_open = false;
         if self.live.is_some() {
             let result = {
                 let live = self.live.as_mut().expect("live checked above");
                 live.driver.block_sender(user_id)
             };
             if let Err(err) = result {
-                self.status_note = format!("block failed: {err:?}");
+                self.connection.status_note = format!("block failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             let list = demo.blocked_senders.get_or_insert_with(Vec::new);
@@ -551,14 +551,14 @@ impl QuillApp {
     /// Slice S3: unblock a user (`setMessageSenderBlockList` with a null
     /// block list — TGX `Tdlib.unblockSender`). Optimistic.
     fn unblock_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        self.unblock_confirm = None;
+        self.privacy.unblock_confirm = None;
         if self.live.is_some() {
             let result = {
                 let live = self.live.as_mut().expect("live checked above");
                 live.driver.unblock_sender(user_id)
             };
             if let Err(err) = result {
-                self.status_note = format!("unblock failed: {err:?}");
+                self.connection.status_note = format!("unblock failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut()
             && let Some(list) = demo.blocked_senders.as_mut()
@@ -577,7 +577,7 @@ impl QuillApp {
     /// me by my number" choice under a hidden phone number, and the gift
     /// settings under Gifts.
     pub(crate) fn privacy_editor_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let target = self.privacy_editor?;
+        let target = self.privacy.editor?;
         match target {
             PrivacyEditorTarget::NewChat => return Some(self.new_chat_editor(cx)),
             PrivacyEditorTarget::FileOpen => return Some(self.file_open_editor(cx)),
@@ -736,7 +736,7 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.premium_option == Some(true))
         {
-            self.status_note =
+            self.connection.status_note =
                 "Restricting who can send you voice messages needs Telegram Premium.".into();
             cx.notify();
             return;
@@ -760,7 +760,7 @@ impl QuillApp {
                 }
             };
             if let Err(err) = result {
-                self.status_note = format!("privacy update failed: {err:?}");
+                self.connection.status_note = format!("privacy update failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             match target {
@@ -811,8 +811,8 @@ impl QuillApp {
                     }),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.privacy_exceptions = Some((target, kind));
-                this.exception_picker_open = false;
+                this.privacy.exceptions = Some((target, kind));
+                this.privacy.exception_picker_open = false;
                 cx.notify();
             }))
             .into_any_element()
@@ -875,7 +875,7 @@ impl QuillApp {
                 live.driver.set_read_date_privacy(next)
             };
             if let Err(err) = result {
-                self.status_note = format!("read-date update failed: {err:?}");
+                self.connection.status_note = format!("read-date update failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.read_date_show = Some(next);
@@ -888,7 +888,7 @@ impl QuillApp {
     /// rows where tdesktop offers them, then users and groups with Remove
     /// and Add pickers.
     pub(crate) fn privacy_exceptions_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (target, kind) = self.privacy_exceptions?;
+        let (target, kind) = self.privacy.exceptions?;
         let session = self.session()?;
         let PrivacyEditorTarget::Rule(key) = target else {
             return None;
@@ -1005,8 +1005,8 @@ impl QuillApp {
                         .label("Add user…")
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.exception_picker_open = true;
-                            this.privacy_ui.exception_picker_groups = false;
+                            this.privacy.exception_picker_open = true;
+                            this.privacy.extra.exception_picker_groups = false;
                             if let Some(live) = this.live.as_mut() {
                                 let _ = live.driver.fetch_contacts();
                             }
@@ -1019,14 +1019,14 @@ impl QuillApp {
                         .label("Add group…")
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.exception_picker_open = true;
-                            this.privacy_ui.exception_picker_groups = true;
+                            this.privacy.exception_picker_open = true;
+                            this.privacy.extra.exception_picker_groups = true;
                             cx.notify();
                         })),
                 ),
         );
-        if self.exception_picker_open {
-            body = if self.privacy_ui.exception_picker_groups {
+        if self.privacy.exception_picker_open {
+            body = if self.privacy.extra.exception_picker_groups {
                 body.child(self.exception_group_picker(cx, target, kind, &detail))
             } else {
                 body.child(self.exception_picker(cx, target, kind, &detail))
@@ -1231,7 +1231,7 @@ impl QuillApp {
                 live.driver.set_privacy_rules(key, detail)
             };
             if let Err(err) = result {
-                self.status_note = format!("privacy update failed: {err:?}");
+                self.connection.status_note = format!("privacy update failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.privacy.insert(key, PrivacyKeyState::Ready(detail));
@@ -1272,7 +1272,7 @@ impl QuillApp {
             cx,
         );
         if add {
-            self.exception_picker_open = false;
+            self.privacy.exception_picker_open = false;
         }
         cx.notify();
     }
@@ -1313,7 +1313,7 @@ impl QuillApp {
             cx,
         );
         if add {
-            self.exception_picker_open = false;
+            self.privacy.exception_picker_open = false;
         }
         cx.notify();
     }

@@ -29,7 +29,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .map(|c| c.title.clone())
             .unwrap_or_else(|| "chat".to_string());
-        self.chat_export_dialog = Some(ChatExportDraft {
+        self.dialogs.chat_export_dialog = Some(ChatExportDraft {
             chat_id,
             title,
             options: ChatExportOptions::default(),
@@ -49,7 +49,7 @@ impl QuillApp {
                 .start_chat_export(draft.chat_id, draft.title, draft.options)
                 .is_ok()
         });
-        self.status_note = if started {
+        self.connection.status_note = if started {
             "Exporting chat history…".into()
         } else if protected {
             "This chat's content is protected and can't be exported.".into()
@@ -67,11 +67,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::ChatExport, |this, _, cx| {
-                this.chat_export_dialog = None;
+                this.dialogs.chat_export_dialog = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let Some(draft) = this.chat_export_dialog.clone() else {
+            let Some(draft) = this.dialogs.chat_export_dialog.clone() else {
                 return finish_dialog(
                     dialog,
                     "Export chat history".into(),
@@ -90,7 +90,7 @@ impl QuillApp {
                     Radio::new("chat-export-json").label("JSON"),
                 ])
                 .on_click(cx.listener(|this, &ix, _, cx| {
-                    if let Some(draft) = this.chat_export_dialog.as_mut() {
+                    if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
                         draft.options.format = if ix == 0 {
                             ExportFormat::Html
                         } else {
@@ -108,7 +108,7 @@ impl QuillApp {
                         .map(|(i, r)| Radio::new(("chat-export-range-item", i)).label(r.label())),
                 )
                 .on_click(cx.listener(|this, &ix, _, cx| {
-                    if let Some(draft) = this.chat_export_dialog.as_mut() {
+                    if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
                         draft.options.range = ExportRange::ALL[ix];
                     }
                     cx.notify();
@@ -122,7 +122,7 @@ impl QuillApp {
                         .checked(options.only_mine)
                         .accessibility_label("Only my messages")
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(draft) = this.chat_export_dialog.as_mut() {
+                            if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
                                 draft.options.only_mine = on;
                             }
                             cx.notify();
@@ -158,7 +158,7 @@ impl QuillApp {
                         .label("Cancel")
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.chat_export_dialog = None;
+                            this.dialogs.chat_export_dialog = None;
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
                         })),
@@ -167,7 +167,7 @@ impl QuillApp {
                     Button::new("chat-export-start")
                         .label("Export")
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(draft) = this.chat_export_dialog.take() {
+                            if let Some(draft) = this.dialogs.chat_export_dialog.take() {
                                 this.run_chat_export(draft, cx);
                             }
                             cx.notify();
@@ -189,7 +189,7 @@ crate::ui::shell::register_dialogs! {
     /// The "Export chat history" options box.
     ChatExport => DialogSpec::new(
         1500,
-        |app| app.chat_export_dialog.is_some(),
+        |app| app.dialogs.chat_export_dialog.is_some(),
         QuillApp::build_chat_export_dialog,
     ),
 }

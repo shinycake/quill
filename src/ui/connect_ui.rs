@@ -65,19 +65,19 @@ pub(super) fn live_status_for(auth: &AuthorizationState) -> String {
 
 impl super::app::QuillApp {
     pub(super) fn start_connection(&mut self, cx: &mut gpui_kit::Context<Self>) {
-        self.connection_generation += 1;
-        let generation = self.connection_generation;
+        self.connection.generation += 1;
+        let generation = self.connection.generation;
         let credentials = self.credentials.clone();
-        self.connect_status = ConnectUiStatus::Live;
-        self.auth_demo = AuthorizationState::WaitTdlibParameters;
-        self.status_note = "Connecting to Telegram…".into();
+        self.connection.status = ConnectUiStatus::Live;
+        self.auth_ui.demo_state = AuthorizationState::WaitTdlibParameters;
+        self.connection.status_note = "Connecting to Telegram…".into();
         let connect = cx
             .background_executor()
             .spawn(async move { prepare_startup(credentials) });
         cx.spawn(async move |this, cx| {
             let prepared = connect.await;
             let _ = this.update(cx, |this, cx| {
-                if generation != this.connection_generation {
+                if generation != this.connection.generation {
                     return;
                 }
                 let result = prepared.and_then(|(credentials, prepared)| {
@@ -86,13 +86,13 @@ impl super::app::QuillApp {
                 match result {
                     Ok(live) => this.live = Some(live),
                     Err(blocker) => {
-                        this.auth_demo = AuthorizationState::WaitPhoneNumber;
-                        this.connect_status = match blocker {
+                        this.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
+                        this.connection.status = match blocker {
                             ConnectBlocker::MissingCredentials => ConnectUiStatus::NeedCredentials,
                             ConnectBlocker::MissingTdjson => ConnectUiStatus::NeedTdjson,
                             _ => ConnectUiStatus::RestoreBlocked(blocker.user_message()),
                         };
-                        this.status_note = blocker.user_message().into();
+                        this.connection.status_note = blocker.user_message().into();
                     }
                 }
                 this.reload_account_keybindings(cx);

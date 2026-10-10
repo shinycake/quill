@@ -109,8 +109,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_badges(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_badges(session, &self.demo_ui.sink, &self.demo_ui.seq);
             if !matches!(
                 demo,
                 RowsDemo::ArchiveHint
@@ -118,26 +118,29 @@ impl QuillApp {
                     | RowsDemo::ChatExport
                     | RowsDemo::WindowSettings
             ) {
-                apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+                apply_ready_folders_share(session, &self.demo_ui.sink, &self.demo_ui.seq);
             }
         }
         match demo {
             RowsDemo::ArchiveHint => {
-                self.archive_hint_open = true;
-                self.status_note = "screenshot demo — the Archive's How does it work? box".into();
+                self.chat_list.archive_hint_open = true;
+                self.connection.status_note =
+                    "screenshot demo — the Archive's How does it work? box".into();
             }
             RowsDemo::ChatExport => {
                 self.start_chat_export(quill::ids::ChatId(52), cx);
-                self.status_note = "screenshot demo — the Export chat history box".into();
+                self.connection.status_note =
+                    "screenshot demo — the Export chat history box".into();
             }
             RowsDemo::WindowSettings => {
                 self.appearance.minimize_to_tray = true;
-                self.window_settings_screenshot = true;
-                self.appearance_open = true;
-                self.status_note = "screenshot demo — tray and window settings".into();
+                self.settings.window_settings_screenshot = true;
+                self.settings.appearance_open = true;
+                self.connection.status_note = "screenshot demo — tray and window settings".into();
             }
             RowsDemo::ChatBadges => {
-                self.status_note = "screenshot demo — video chat badge and emoji status".into();
+                self.connection.status_note =
+                    "screenshot demo — video chat badge and emoji status".into();
             }
             RowsDemo::FoldersChats | RowsDemo::FoldersChatPicker => {
                 let mut dialog = FolderEditorDialog::new(window, cx, None);

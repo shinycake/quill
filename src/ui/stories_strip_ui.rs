@@ -92,12 +92,12 @@ impl QuillApp {
     /// Pixel width of the strip (the chat list inside the sidebar's
     /// horizontal padding and border).
     fn story_strip_width(&self) -> f32 {
-        (f32::from(self.sidebar_width) - 25.).max(120.)
+        (f32::from(self.frame.sidebar_width) - 25.).max(120.)
     }
 
     /// How far the chat list is scrolled down, px.
     fn chat_list_scroll_top(&self) -> f32 {
-        -f32::from(self.chat_list_scroll.offset().y)
+        -f32::from(self.chat_list.scroll.offset().y)
     }
 
     /// The first list item: tdesktop's expanded strip, a row of 42 px
@@ -299,7 +299,7 @@ impl QuillApp {
                 .child(stack)
                 .on_click(cx.listener(|this, _, _, cx| {
                     // Expand: back to the top of the list.
-                    this.chat_list_scroll.set_offset(point(px(0.), px(0.)));
+                    this.chat_list.scroll.set_offset(point(px(0.), px(0.)));
                     this.notify_sidebar(cx);
                 }))
                 .into_any_element(),

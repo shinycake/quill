@@ -309,7 +309,7 @@ impl QuillApp {
         ix: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let item = self.chat_list_items.get(ix).cloned();
+        let item = self.chat_list.items.get(ix).cloned();
         match item {
             Some(ChatListItem::ArchiveRow { .. }) => self.archive_row_element(cx),
             Some(ChatListItem::ArchiveBar) => self.archive_bar_element(cx),
@@ -335,8 +335,8 @@ impl QuillApp {
                     .and_then(|path| sandboxed_display_path(path, &media_roots));
                 // Slice CL3: multi-select mode — rows toggle the check
                 // instead of opening the chat.
-                let selecting = !self.selected_chats.is_empty();
-                let checked = selecting && self.selected_chats.contains(&chat.id.0);
+                let selecting = !self.chat_list.selected.is_empty();
+                let checked = selecting && self.chat_list.selected.contains(&chat.id.0);
                 // Slice CL2: pin drag runs only on the unfiltered list with
                 // at least two pinned chats (TGX `ChatsAdapter`); the
                 // archive has its own pinned set.
@@ -344,13 +344,13 @@ impl QuillApp {
                 // chat, so only pinned rows pay for it.)
                 let draggable = if archived {
                     chat.archive_is_pinned
-                        && self.chat_filter == ChatListFilter::Archived
+                        && self.chat_list.filter == ChatListFilter::Archived
                         && self
                             .session()
                             .is_some_and(|s| s.pinned_chat_ids(true).len() >= 2)
                 } else {
                     chat.is_pinned
-                        && self.chat_filter == ChatListFilter::All
+                        && self.chat_list.filter == ChatListFilter::All
                         && self.folders.tab.is_none()
                         && self
                             .session()
@@ -366,8 +366,8 @@ impl QuillApp {
                 let online = !saved && self.session().is_some_and(|s| s.chat_peer_online(chat));
                 // Online dot and new-badge animations: 150 ms, only while
                 // the window is active (inactive windows snap).
-                let active = self.window_active.get();
-                let fx = self.row_fx.borrow_mut().observe(
+                let active = self.frame.window_active.get();
+                let fx = self.frame.row_fx.borrow_mut().observe(
                     chat.id.0,
                     online,
                     chat_unread_indicator(chat).is_some(),
@@ -404,7 +404,7 @@ impl QuillApp {
                 } else {
                     self.chat_swipe_label(chat)
                 };
-                let pin_slide = self.pin_reorder.as_ref().map(|r| {
+                let pin_slide = self.chat_list.pin_reorder.as_ref().map(|r| {
                     (
                         r.offset(chat.id.0, std::time::Instant::now()),
                         r.dragging() == Some(chat.id.0),
@@ -646,7 +646,7 @@ pub(super) fn session_chat_row(
         .on_mouse_down(
             MouseButton::Right,
             cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                this.chat_menu = Some(ChatMenuState {
+                this.chat_list.menu = Some(ChatMenuState {
                     chat_id: id,
                     position: event.position,
                 });
@@ -679,7 +679,7 @@ pub(super) fn session_chat_row(
         .on_mouse_up(
             MouseButton::Left,
             cx.listener(move |this, _, _, _| {
-                this.preview_press = None;
+                this.chat_list.preview_press = None;
             }),
         )
         // Release outside the row (e.g. press, drag off, let go) also
@@ -687,7 +687,7 @@ pub(super) fn session_chat_row(
         .on_mouse_up_out(
             MouseButton::Left,
             cx.listener(move |this, _, _, _| {
-                this.preview_press = None;
+                this.chat_list.preview_press = None;
             }),
         )
         .child(

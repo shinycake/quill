@@ -120,7 +120,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     live.driver.session.payment_form_loading = false;
                 }
-                self.status_note = "could not load the payment form".into();
+                self.connection.status_note = "could not load the payment form".into();
             }
         }
         cx.notify();
@@ -133,7 +133,7 @@ impl QuillApp {
         if let Some(form) = self.session().and_then(|s| s.payment_form.clone()) {
             dialog.prefill_from_form(&form, window, cx);
         }
-        self.payment_dialog = Some(dialog);
+        self.payments.dialog = Some(dialog);
     }
 
     /// Slice P1: close the checkout dialog, discarding the form answers.
@@ -141,7 +141,7 @@ impl QuillApp {
     /// here) — the answer reducers keep it so `validateOrderInfo` and
     /// `sendPaymentForm` still correlate after the form answer is applied.
     pub(super) fn close_payment_dialog(&mut self, cx: &mut Context<Self>) {
-        self.payment_dialog = None;
+        self.payments.dialog = None;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.payment_form = None;
             live.driver.session.payment_form_loading = false;
@@ -319,7 +319,7 @@ impl QuillApp {
                     .checked(checked)
                     .label("Remember order info")
                     .on_click(cx.listener(|this, &on, _, cx| {
-                        if let Some(dialog) = this.payment_dialog.as_mut() {
+                        if let Some(dialog) = this.payments.dialog.as_mut() {
                             dialog.allow_save_order = on;
                         }
                         cx.notify();
@@ -412,7 +412,7 @@ impl QuillApp {
                             )),
                     )
                     .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                        if let Some(dialog) = this.payment_dialog.as_mut() {
+                        if let Some(dialog) = this.payments.dialog.as_mut() {
                             dialog.credential_choice = match &cred_ids[ix] {
                                 Some(id) => PaymentCredentialChoice::Saved(id.clone()),
                                 None => PaymentCredentialChoice::NewToken,
@@ -443,7 +443,7 @@ impl QuillApp {
                         .checked(checked)
                         .label(format!("Save card{caption}"))
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(dialog) = this.payment_dialog.as_mut() {
+                            if let Some(dialog) = this.payments.dialog.as_mut() {
                                 dialog.allow_save_credentials = on;
                             }
                             cx.notify();
@@ -466,7 +466,7 @@ impl QuillApp {
                             .checked(checked)
                             .accessibility_label("I accept the terms of service")
                             .on_click(cx.listener(|this, &on, _, cx| {
-                                if let Some(dialog) = this.payment_dialog.as_mut() {
+                                if let Some(dialog) = this.payments.dialog.as_mut() {
                                     dialog.terms_accepted = on;
                                 }
                                 cx.notify();
@@ -534,7 +534,7 @@ impl QuillApp {
             live.driver.fetch_payment_receipt(chat_id, message_id)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.status_note = "could not load the receipt".into();
+            self.connection.status_note = "could not load the receipt".into();
         }
         cx.notify();
     }
@@ -543,16 +543,17 @@ impl QuillApp {
     /// (schema 1.8.67, line 15268). The answer carries the `order_info_id`
     /// and shipping options.
     pub(super) fn validate_payment_order(&mut self, cx: &mut Context<Self>) {
-        let order = self.payment_dialog.as_ref().map(|dialog| dialog.order(cx));
+        let order = self.payments.dialog.as_ref().map(|dialog| dialog.order(cx));
         let request = self
             .session()
             .and_then(|session| session.payment_request.clone());
         let allow_save = self
-            .payment_dialog
+            .payments
+            .dialog
             .as_ref()
             .is_some_and(|dialog| dialog.allow_save_order);
         let (Some(order), Some(request)) = (order, request) else {
-            self.status_note = "payment form not loaded".into();
+            self.connection.status_note = "payment form not loaded".into();
             cx.notify();
             return;
         };
@@ -566,7 +567,7 @@ impl QuillApp {
             )
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.status_note = "could not validate order info".into();
+            self.connection.status_note = "could not validate order info".into();
         }
         cx.notify();
     }
@@ -583,11 +584,11 @@ impl QuillApp {
                 session.payment_shipping_id.clone(),
             )
         });
-        let dialog = self.payment_dialog.as_ref();
+        let dialog = self.payments.dialog.as_ref();
         let (Some((Some(form), Some(request), validated, shipping_id)), Some(dialog)) =
             (snapshot, dialog)
         else {
-            self.status_note = "payment form not loaded".into();
+            self.connection.status_note = "payment form not loaded".into();
             cx.notify();
             return;
         };
@@ -600,7 +601,7 @@ impl QuillApp {
             || invoice.need_email_address
             || invoice.need_shipping_address;
         if needs_order && validated.is_none() {
-            self.status_note = "validate the order info first".into();
+            self.connection.status_note = "validate the order info first".into();
             cx.notify();
             return;
         }
@@ -633,7 +634,7 @@ impl QuillApp {
             sent
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.status_note = "could not submit the payment".into();
+            self.connection.status_note = "could not submit the payment".into();
         }
         cx.notify();
     }
@@ -658,7 +659,7 @@ impl QuillApp {
                 request_write_access,
             } => match request {
                 Some(request) => {
-                    self.login_url_confirm = Some(LoginUrlConfirm {
+                    self.links.login_url_confirm = Some(LoginUrlConfirm {
                         domain,
                         request_write_access,
                         request,
@@ -683,7 +684,7 @@ impl QuillApp {
     /// exactly this). Without a live connection the button's raw URL opens
     /// instead.
     pub(super) fn confirm_login_url(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.login_url_confirm.take() else {
+        let Some(confirm) = self.links.login_url_confirm.take() else {
             cx.notify();
             return;
         };
@@ -717,7 +718,7 @@ impl QuillApp {
             if session.payment_form.is_none() && !session.payment_form_loading {
                 return dialog.on_close(on_close.clone());
             }
-            let Some(dialog_state) = this.payment_dialog.as_ref() else {
+            let Some(dialog_state) = this.payments.dialog.as_ref() else {
                 return dialog.on_close(on_close.clone());
             };
             let mut body = div().flex().flex_col().gap_3();
@@ -1013,7 +1014,7 @@ impl QuillApp {
             live.driver.maybe_fetch_star_subscriptions()
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.status_note = "could not load subscriptions".into();
+            self.connection.status_note = "could not load subscriptions".into();
         }
         cx.notify();
     }
@@ -1035,7 +1036,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.fetch_more_star_subscriptions());
         if !matches!(sent, Some(Ok(_))) {
-            self.status_note = "could not load more subscriptions".into();
+            self.connection.status_note = "could not load more subscriptions".into();
         }
         cx.notify();
     }
@@ -1064,7 +1065,7 @@ impl QuillApp {
             live.driver.edit_star_subscription(&id, true)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.status_note = "could not cancel the subscription".into();
+            self.connection.status_note = "could not cancel the subscription".into();
         }
         cx.notify();
     }
@@ -1086,7 +1087,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.edit_star_subscription(&id, false));
         if !matches!(sent, Some(Ok(_))) {
-            self.status_note = "could not re-enable the subscription".into();
+            self.connection.status_note = "could not re-enable the subscription".into();
         }
         cx.notify();
     }
@@ -1100,7 +1101,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.reuse_star_subscription(&id));
         if !matches!(sent, Some(Ok(_))) {
-            self.status_note = "could not rejoin the subscription".into();
+            self.connection.status_note = "could not rejoin the subscription".into();
         }
         cx.notify();
     }
@@ -1271,7 +1272,7 @@ crate::ui::shell::register_dialogs! {
     PaymentForm => DialogSpec::new(
         3500,
         |app| {
-            app.payment_dialog.is_some()
+            app.payments.dialog.is_some()
                 && app.session().is_some_and(|s| s.payment_form.is_some() || s.payment_form_loading)
         },
         QuillApp::build_payment_dialog,

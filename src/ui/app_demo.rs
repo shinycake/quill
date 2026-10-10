@@ -1,25 +1,20 @@
 //! The `QuillApp` constructor; a screenshot demo (`ScreenshotDemo`) seeds
 //! the session and runs its registered setup at the end.
 
-use super::app::{ChatListFilter, QuillApp};
+use super::app::QuillApp;
 use super::connect_ui::ConnectUiStatus;
-use super::history::HistoryShared;
 use super::screenshot_demo::ScreenshotDemo;
 use super::synthetic::SyntheticChat;
 use super::*;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::AppMenuBar;
-use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::should_send_on_enter;
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
 use quill::telegram::envelope::AuthorizationState;
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::time::Duration;
 impl QuillApp {
     pub fn new_with_demo(
@@ -50,13 +45,6 @@ impl QuillApp {
                 .placeholder("Message the voice chat — Enter sends")
                 .auto_grow(1, 3)
                 .submit_on_enter(submit_on_enter)
-        });
-        // Phase C2i: comment field for the call-rating detail card.
-        let rating_comment_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("What went wrong? (optional)")
-                .auto_grow(1, 3)
-                .submit_on_enter(false)
         });
         let appearance_prefs = Self::load_appearance();
         let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
@@ -99,16 +87,6 @@ impl QuillApp {
             }
         })
         .detach();
-        let registration_first_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("First name")
-                .auto_grow(1, 1)
-        });
-        let registration_last_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Last name (optional)")
-                .auto_grow(1, 1)
-        });
         let email_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Email address")
@@ -121,7 +99,6 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
-        let signin = super::signin_ui::SignInUi::new(window, cx);
         // Group the digits as the user types or pastes.
         cx.subscribe_in(
             &phone_input,
@@ -152,7 +129,6 @@ impl QuillApp {
                 .submit_on_enter(true)
         });
         let twofa = super::twofa_state::TwoStepUi::new(window, cx);
-        let global = super::chatlist_global::ChatlistGlobal::new(window, cx);
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search")
@@ -424,48 +400,16 @@ impl QuillApp {
         super::audio::share_output_with_video(&audio_output);
         let (spellchecker, spell_info) = Self::new_spellchecker(true);
         let mut app = Self {
-            update_state: if demo.is_none() {
-                quill::update_install::startup_state()
-            } else {
-                quill::updater::UpdateState::Idle
-            },
-            update_banner_dismissed: false,
+            settings: super::settings_state::SettingsUi::new(cx, font_picker, accent_picker, demo),
             chat,
             composer,
             // kit Phase 7: in-window menu bar (menus installed by
             // `setup_app_menus` at startup).
             menu_bar: AppMenuBar::new(cx),
-            // kit Phase 3: chat list + message history virtualization.
-            chat_list_scroll: VirtualListScrollHandle::new(),
-            chat_list_items: Vec::new(),
-            chat_swipe: Default::default(),
+            chat_list: super::chat_list_state::ChatListUi::new(window, cx),
             stories,
-            history_scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
-            history_rows: Vec::new(),
-            rendered_history_rows: std::cell::RefCell::new(Vec::new()),
-            reported_visible: None,
-            history_window_active: false,
-            history_shared: HistoryShared::default(),
-            history_key: None,
-            thread_root_jump: false,
-            history_ends: None,
-            history_window_epoch: 0,
-            history_anchor_pending: false,
-            history_had_newer: false,
-            sidebar_width: px(quill::settings::load_window_state()
-                .map_or(quill::settings::DEFAULT_SIDEBAR_WIDTH, |state| {
-                    state.sidebar_width
-                })),
-            window_state_save_pending: false,
-            history_rows_key: None,
-            history_media_signature: (0, 0),
-            last_highlight: None,
-            highlight_fade: None,
-            reaction_fly: None,
-            scroll_date: Default::default(),
-            scroll_probe: Default::default(),
-            scroll_top_probe: Default::default(),
-            scroll_view_probe: Default::default(),
+            history: super::history_state::HistoryUi::new(cx),
+            frame: super::frame_state::FrameUi::new(cx),
             group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
             composer_ui: super::composer_state::ComposerUi::new(pending_attachments),
             pickers: super::pickers_state::PickerUi::new(
@@ -474,214 +418,45 @@ impl QuillApp {
                 emoji_search_input,
                 reaction_search_input,
             ),
-            marketplace_open: false,
-            marketplace_name_input: cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .placeholder("Collectible gift name, e.g. PlushPepe-123")
-            }),
-            marketplace_comment_input: cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .placeholder("Personal comment")
-                    .submit_on_enter(false)
-            }),
-            marketplace_private: true,
-            marketplace_error: None,
-            registration_first_input,
-            registration_last_input,
-            accepted_registration_terms: None,
-            registration_notify_contacts: false,
-            email_input,
-            phone_input,
-            signin,
-            code_input,
-            password_input,
-            recovery_code_input,
-            recovery_mode: false,
+            payments: super::payments_state::PaymentUi::new(window, cx),
+            auth_ui: super::auth_state::AuthUi::new(
+                window,
+                cx,
+                email_input,
+                phone_input,
+                code_input,
+                password_input,
+                recovery_code_input,
+                auth_demo,
+                demo,
+            ),
             twofa,
-            account_lifecycle: AccountLifecycleState::new(window, cx),
-            accounts_ui: AccountsUiState::new(window, cx),
-            passcode_ui: super::passcode::PasscodeUi::new(window, cx),
+            account: super::account_state::AccountUi::new(window, cx),
             credentials,
-            // Slice S3: privacy screen state.
-            privacy_open: false,
-            privacy_ui: super::privacy_extra::PrivacyUi::new(window, cx),
-            privacy_editor: None,
-            privacy_exceptions: None,
-            exception_picker_open: false,
-            block_picker_open: false,
-            unblock_confirm: None,
+            privacy: super::privacy_state::PrivacyState::new(window, cx),
             search_ui: super::search_state::SearchUi::new(search_input, chat_search_input),
             share: super::share_state::ShareUi::new(window, cx, forward_search_input),
-            topic_info_open: false,
-            thread_info_open: false,
-            forum_chats_peek: false,
-            forum_column_shown: false,
-            auth_demo,
             focus_sidebar: cx.focus_handle(),
-            context_menu_focus: cx.focus_handle(),
-            context_menu_was_open: false,
-            context_menu_previous_focus: None,
-            connect_status,
-            connection_generation: 0,
-            connection_lost: false,
+            connection: super::connection_state::ConnectionUi::new(connect_status, status_note),
             live,
-            status_note,
-            status_seen: String::new(),
-            status_shown_at: None,
-            demo_auth_inputs: demo.is_some_and(|d| d.auth_inputs()),
             demo_session,
-            demo_call_devices: None,
-            demo_selected_devices: (None, None),
-            demo_remote_frame: None,
-            demo_local_frame: None,
-            demo_screen_frame: None,
-            demo_selected_camera: None,
+            demo_ui: super::demo_state::DemoUi::new(demo_sink),
             calls: super::calls_state::CallUi::new(audio_output.clone()),
-            qr_login_cache: None,
-            group_video_images: HashMap::new(),
-            demo_group_frames: HashMap::new(),
-            demo_seq: AtomicU64::new(0),
-            demo_sink,
-            notify_clicks: Arc::new(Mutex::new(Vec::new())),
-            notify_inflight: Arc::new(AtomicUsize::new(0)),
-            freeze_info_open: false,
-            age_verify_open: false,
-            age_verify_started: false,
+            notify: super::notify_state::NotifyUi::new(&audio_output),
             message_ui: super::message_state::MessageUi::new(window, cx),
-            chat_menu: None,
-            archive_menu: None,
-            global,
-            pin_reorder: None,
-            pin_reorder_archived: false,
-            pin_drag_anchor: None,
-            chat_preview: None,
-            profile_modal: None,
-            preview_press: None,
-            selected_chats: HashSet::new(),
-            pending_close_secret_chat: None,
-            forum_manage_dialog: None,
-            saved_tag_dialog: None,
-            welcome_dialog: None,
-            event_log_search: None,
-            storage_usage_open: false,
+            dialogs: super::dialogs_state::DialogUi::new(window, cx),
+            admin: super::admin_state::AdminUi::new(),
             appearance: appearance_prefs,
             chat_prefs,
-            translate_ui: super::translate_ui::TranslateUi::load(),
-            appearance_open: false,
-            settings_open: false,
-            settings_page: None,
-            keybinding_capture: None,
-            keybinding_error: None,
-            keybinding_focus: cx.focus_handle(),
-            keybindings_applied: false,
-            keybindings_screenshot: false,
-            appearance_power_screenshot: false,
-            appearance_applied: None,
-            system_accent: None,
-            system_accent_probed: false,
-            font_picker,
-            accent_picker,
             spell: super::spell_state::SpellUi::new(spellchecker, spell_info, dict_filter_input),
-            shortcuts_open: false,
-            proxy_ui: Default::default(),
-            sticker_settings_open: false,
-            data_storage_editor: None,
-            storage_confirm: None,
-            storage_selected: Default::default(),
-            sessions_open: false,
-            device_qr_scanner: None,
-            device_login_qr: None,
-            device_link_notice: None,
-            sessions_confirm: None,
-            websites_open: false,
-            websites_confirm: None,
-            chat_filter: ChatListFilter::All,
-            mute_menu_open: false,
-            mute_custom_open: false,
-            mute_custom: quill::mute_menu::CustomMute::default(),
-            ttl_picker_open: false,
-            ttl_custom_open: false,
-            ttl_custom_secs: 86_400,
-            pinned_cursor: HashMap::new(),
-            hidden_pinned: HashMap::new(),
-            pinned_list_open: false,
             playback: super::playback_state::PlaybackUi::new(&audio_output),
-            animation_demand: Default::default(),
-            row_fx: Default::default(),
-            animation_targets: Default::default(),
-            animation_sound: Default::default(),
-            polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
-            window_active: std::cell::Cell::new(true),
-            window_title_shown: Default::default(),
-            autoscroll: Default::default(),
-            presence: Default::default(),
-            login_prevented: None,
-            terms_step: Default::default(),
-            terms_age_ok: false,
-            terms_age_error: false,
-            media_roots_frame: Default::default(),
-            frame_clock_running: Default::default(),
-            motion: Default::default(),
             slices: Default::default(),
-            stream_reveal: Default::default(),
-            vanishing: Default::default(),
-            notif_sound_picker_open: false,
-            story_sound_picker_open: false,
-            notification_defaults_open: false,
-            defaults_sound_picker: None,
-            defaults_exceptions_scope: None,
-            notifications_confirm: None,
             recording: super::recording_state::RecordingUi::new(),
-            self_destruct_tick_chat: None,
-            live_location_tick_chat: None,
-            quit_guard: Default::default(),
-            quit_clock: std::time::Instant::now(),
-            demo_group_stage: false,
-            notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
-            payment_dialog: None,
-            invite_link_dialog: None,
-            invite_link_details: None,
-            revoked_links_open: false,
-            invite_link_qr: None,
-            admin_dialog: None,
-            create_chat_dialog: None,
-            member_dialog: None,
-            callback_password_dialog: None,
-            login_url_confirm: None,
+            links: super::links_state::LinkUi::new(),
             pending_deep_link: None,
-            deep_link_dialog: None,
-            deep_link_invite: None,
-            pending_deep_link_ui: None,
-            pending_deep_link_open: None,
             viewer: super::viewer_state::ViewerUi::new(&audio_output),
             mini_apps: Default::default(),
-            permissions_dialog: None,
-            username_dialog: None,
-            community_ui: CommunityUi::default(),
-            restrict_dialog: None,
-            ownership_dialog: None,
-            group_confirm_dialog: None,
-            capture_blocked: false,
-            capture_notice_dismissed: false,
-            status_traced: String::new(),
-            pending_story_open: None,
-            contacts_tab_open: false,
-            calls_tab_open: false,
-            rating_detail: None,
-            rating_comment_input,
             folders: super::folders_state::FolderUi::new(),
-            chat_look_dialog: None,
-            archive_hint_open: false,
-            window_settings_screenshot: false,
-            chat_export_dialog: None,
-            add_contact_dialog: None,
-            block_bar_dialog: None,
-            join_requests_dialog: None,
-            edit_profile_dialog: None,
-            profile_dialog: None,
-            group_settings_dialog: None,
-            pending_profile_gallery: None,
-            import_contacts_dialog: None,
         };
 
         if let Some(demo) = demo {
@@ -700,16 +475,16 @@ impl QuillApp {
                 let menu_handled = menu_app
                     .update(cx, |this, cx| {
                         if this.message_ui.menu.is_none()
-                            && this.chat_menu.is_none()
-                            && this.archive_menu.is_none()
+                            && this.chat_list.menu.is_none()
+                            && this.chat_list.archive_menu.is_none()
                             && this.folders.tab_menu.is_none()
                         {
                             return false;
                         }
                         if event.keystroke.key == "escape" {
                             this.message_ui.menu = None;
-                            this.chat_menu = None;
-                            this.archive_menu = None;
+                            this.chat_list.menu = None;
+                            this.chat_list.archive_menu = None;
                             this.folders.tab_menu = None;
                             cx.notify();
                             return true;
@@ -920,7 +695,7 @@ impl QuillApp {
                 let action = quill::notify::NotificationAction::from_id(
                     response.action_id.as_ref().map(|id| id.as_ref()),
                 );
-                if let Ok(mut clicks) = this.notify_clicks.lock() {
+                if let Ok(mut clicks) = this.notify.notify_clicks.lock() {
                     clicks.push((chat_id, action));
                 }
                 cx.notify();
@@ -933,7 +708,7 @@ impl QuillApp {
                 let _ = window.update(cx, |_, window, _| window.activate_window());
             }
         });
-        if demo.is_none() && !app.passcode_ui.deferred_connect {
+        if demo.is_none() && !app.account.passcode.deferred_connect {
             // With a local passcode the database key is wrapped: the
             // connection starts after the first unlock (tdesktop starts locked).
             app.start_connection(cx);
@@ -960,7 +735,7 @@ impl QuillApp {
         // update the gate now and redraw (the content asks for ticks again).
         cx.observe_window_activation(window, |this, window, cx| {
             let active = window.is_window_active() || super::frame_clock::assume_active();
-            this.window_active.set(active);
+            this.frame.window_active.set(active);
             this.playback
                 .inline_videos
                 .borrow_mut()
@@ -1007,7 +782,7 @@ impl QuillApp {
         }
         if demo.is_none()
             && app.appearance.check_updates_on_launch
-            && app.update_state == quill::updater::UpdateState::Idle
+            && app.settings.update_state == quill::updater::UpdateState::Idle
         {
             app.check_for_updates(cx);
         }
@@ -1031,7 +806,7 @@ impl QuillApp {
         })
         .detach();
         // The scroller notifies on every scroll: drives the floating date.
-        cx.observe(&app.history_scroller, |this, _, cx| {
+        cx.observe(&app.history.scroller, |this, _, cx| {
             this.note_history_scroll(cx);
         })
         .detach();

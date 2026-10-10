@@ -140,7 +140,7 @@ impl PolledRedraw {
 
 impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
-        let generation = self.connection_generation;
+        let generation = self.connection.generation;
         cx.spawn(async move |this, cx| {
             // Adaptive cadence: drain quickly while updates are flowing,
             // back off when idle so a quiet app doesn't wake 25×/s.
@@ -151,7 +151,7 @@ impl QuillApp {
                 cx.background_executor().timer(delay).await;
                 let step = this
                     .update(cx, |this, cx| {
-                        if generation != this.connection_generation {
+                        if generation != this.connection.generation {
                             return None;
                         }
                         let busy = this.poll_live(cx);
@@ -171,15 +171,15 @@ impl QuillApp {
 
     pub(super) fn reload_account_keybindings(&mut self, cx: &mut Context<Self>) {
         super::keybindings::invalidate_account_keybindings(
-            &mut self.keybindings_applied,
-            &mut self.keybinding_capture,
-            &mut self.keybinding_error,
+            &mut self.settings.keybindings_applied,
+            &mut self.settings.keybinding_capture,
+            &mut self.settings.keybinding_error,
         );
         self.apply_pending_keybindings(cx);
     }
 
     fn apply_pending_keybindings(&mut self, cx: &mut Context<Self>) {
-        if self.keybindings_applied {
+        if self.settings.keybindings_applied {
             return;
         }
         let Some(live) = self.live.as_ref() else {
@@ -188,7 +188,7 @@ impl QuillApp {
         let customs = live.driver.load_custom_keybindings();
         // Empty prefs rebuild defaults too, replacing the previous account's chords.
         super::keybindings::apply_custom_bindings(cx, &customs);
-        self.keybindings_applied = true;
+        self.settings.keybindings_applied = true;
     }
 
     /// Redraw for what the TDLib poll applied, as urgently as it needs
@@ -203,12 +203,12 @@ impl QuillApp {
         deliver: bool,
         cx: &mut Context<Self>,
     ) {
-        let active = self.window_active.get();
+        let active = self.frame.window_active.get();
         let now = std::time::Instant::now();
         let action = if deliver {
-            self.polled_redraw.drawn(now)
+            self.notify.polled_redraw.drawn(now)
         } else {
-            self.polled_redraw.decide(need, active, now)
+            self.notify.polled_redraw.decide(need, active, now)
         };
         match action {
             PolledAction::Wait => {}
@@ -222,10 +222,10 @@ impl QuillApp {
     /// connection): compared before and after a poll.
     fn polled_chrome(&self) -> (String, bool, Option<i32>, bool) {
         (
-            self.status_note.clone(),
-            self.login_prevented.is_some(),
+            self.connection.status_note.clone(),
+            self.auth_ui.login_prevented.is_some(),
             self.folders.tab,
-            self.connection_lost,
+            self.connection.lost,
         )
     }
 
@@ -297,10 +297,10 @@ impl QuillApp {
         if bridge_lost(
             live.bridge.stopped_unexpectedly(),
             budget_hit,
-            self.connection_lost,
+            self.connection.lost,
         ) {
-            self.connection_lost = true;
-            self.status_note = "Connection to Telegram was closed".into();
+            self.connection.lost = true;
+            self.connection.status_note = "Connection to Telegram was closed".into();
             progressed = true;
             need = RedrawNeed::Now;
         }
@@ -337,9 +337,9 @@ impl QuillApp {
         }
         let err = live.driver.session.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
-        if !matches!(&new_auth, AuthorizationState::WaitRegistration { terms: Some(terms) } if self.accepted_registration_terms.as_ref() == Some(terms))
+        if !matches!(&new_auth, AuthorizationState::WaitRegistration { terms: Some(terms) } if self.auth_ui.accepted_registration_terms.as_ref() == Some(terms))
         {
-            self.accepted_registration_terms = None;
+            self.auth_ui.accepted_registration_terms = None;
         }
         // Slice auth-logout-warning: the `logOut` flow ends in Closed —
         // restart the live connection at the end of this poll so the user
@@ -349,15 +349,15 @@ impl QuillApp {
         let logged_out = logout_restart_trigger(saw_logging_out, &new_auth);
         // Slice A10: recovery-code entry only makes sense in WaitPassword.
         if !matches!(new_auth, AuthorizationState::WaitPassword { .. }) {
-            self.recovery_mode = false;
+            self.auth_ui.recovery_mode = false;
         }
         if send_failed {
-            self.status_note = "failed to send TDLib request".into();
+            self.connection.status_note = "failed to send TDLib request".into();
         } else if progressed {
             if let Some(err) = err {
-                self.status_note = err.user_message();
+                self.connection.status_note = err.user_message();
             } else if new_auth != prev_auth {
-                self.status_note = live_status_for(&new_auth);
+                self.connection.status_note = live_status_for(&new_auth);
             }
         }
         // From here on, `progressed` marks results the UI drains (status
@@ -407,7 +407,7 @@ impl QuillApp {
                 });
             if let Some(note) = note {
                 live.driver.session.chat_export = None;
-                self.status_note = note;
+                self.connection.status_note = note;
                 progressed = true;
             }
         }
@@ -426,7 +426,7 @@ impl QuillApp {
                 .live
                 .as_ref()
                 .is_some_and(|live| live.driver.session.message_link_public);
-            self.status_note = quill::message_menu::link_copied_note(public).into();
+            self.connection.status_note = quill::message_menu::link_copied_note(public).into();
             progressed = true;
         }
         // Batch 7: keep a translated chat's translations coming.
@@ -446,7 +446,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.message_link_error.take())
         {
-            self.status_note = err;
+            self.connection.status_note = err;
             progressed = true;
         }
         // Saved Messages: load the sublists and tags while it is open.
@@ -467,7 +467,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.chat_action_error.take())
         {
-            self.status_note = err;
+            self.connection.status_note = err;
             progressed = true;
         }
         // MED2 fix-up: a refused `recognizeSpeech` surfaces in the status
@@ -478,7 +478,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.recognize_speech_error.take())
         {
-            self.status_note = err;
+            self.connection.status_note = err;
             progressed = true;
         }
         // Slice msg-richtext-ai-tools: a failed AI request surfaces in
@@ -489,7 +489,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.ai_error.take())
         {
-            self.status_note = err;
+            self.connection.status_note = err;
             progressed = true;
         }
         if let Some(err) = self
@@ -497,7 +497,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.resend_error.take())
         {
-            self.status_note = err;
+            self.connection.status_note = err;
             progressed = true;
         }
         // TDLib 1.8.68 community management (rename / photo /
@@ -507,7 +507,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.community_error.take())
         {
-            self.status_note = err;
+            self.connection.status_note = err;
             progressed = true;
         }
         // Slice G1 fix-up: an invite-link mutation (create/edit/revoke/
@@ -518,7 +518,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.invite_link_error.take())
         {
-            self.status_note = err;
+            self.connection.status_note = err;
             progressed = true;
         }
         // Ban / delete-all / report-spam from the delete box, and "Save to
@@ -528,7 +528,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.message_action_note.take())
         {
-            self.status_note = note;
+            self.connection.status_note = note;
             progressed = true;
         }
         // The transfer-ownership dialog: a finished transfer closes it
@@ -543,7 +543,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.report_chat_outcome.take())
         {
-            self.status_note = note;
+            self.connection.status_note = note;
             progressed = true;
         }
         // Slice G1 fix-up: `updateChatMember` dropped the member-list
@@ -555,6 +555,7 @@ impl QuillApp {
             .map(|live| std::mem::take(&mut live.driver.session.member_list_stale))
             .unwrap_or_default();
         if self
+            .admin
             .member_dialog
             .as_ref()
             .is_some_and(|dialog| stale_chats.contains(&dialog.chat_id.0))
@@ -603,7 +604,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.payment_receipt_error.take())
         {
-            self.status_note = err;
+            self.connection.status_note = err;
             progressed = true;
         }
         if let Some(notice) = self
@@ -611,7 +612,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.send_permission_error.take())
         {
-            self.status_note = notice;
+            self.connection.status_note = notice;
             progressed = true;
         }
         if let Some(notice) = self
@@ -619,7 +620,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.flood_notice.take())
         {
-            self.status_note = notice;
+            self.connection.status_note = notice;
             progressed = true;
         }
         self.poll_folder_new_chats();
@@ -664,10 +665,10 @@ impl QuillApp {
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
-        self.connection_lost = false;
-        self.marketplace_open = false;
-        self.marketplace_error = None;
-        self.marketplace_private = true;
+        self.connection.lost = false;
+        self.payments.marketplace_open = false;
+        self.payments.marketplace_error = None;
+        self.payments.marketplace_private = true;
         let old = self.live.take();
         drop(old);
         // D2 fix-up: the warning promises "Downloaded media will be
@@ -684,6 +685,7 @@ impl QuillApp {
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
         let clicks: Vec<(ChatId, NotificationAction)> = self
+            .notify
             .notify_clicks
             .lock()
             .map(|mut guard| std::mem::take(&mut *guard))
@@ -756,7 +758,9 @@ impl QuillApp {
             .map(|live| std::mem::take(&mut live.driver.session.pending_sound_plays))
             .unwrap_or_default();
         for path in plays {
-            self.notification_sounds.play(NotificationSound::File(path));
+            self.notify
+                .notification_sounds
+                .play(NotificationSound::File(path));
         }
     }
 
@@ -821,7 +825,7 @@ impl QuillApp {
                 is_video,
                 app_active: cx.active_window().is_some(),
                 last_notified: self.calls.notified,
-                locked: self.passcode_ui.locked,
+                locked: self.account.passcode.locked,
             })
         else {
             return;
@@ -858,12 +862,13 @@ impl QuillApp {
         let Some(command) = quill::notify_call::build_call_command(&notification) else {
             return;
         };
-        if self.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS {
-            self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+        if self.notify.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS
+        {
+            self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
             return;
         }
         let clicks = self.calls.notify_clicks.clone();
-        let inflight = self.notify_inflight.clone();
+        let inflight = self.notify.notify_inflight.clone();
         let call_id = notification.call_id;
         let spawn = std::thread::Builder::new()
             .name("quill-call-notify".to_string())
@@ -877,7 +882,7 @@ impl QuillApp {
                 }
             });
         if spawn.is_err() {
-            self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+            self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
         }
     }
 
@@ -936,7 +941,7 @@ impl QuillApp {
             None => Some(NotificationSound::DefaultTone),
         };
         if let Some(sound) = sound {
-            self.notification_sounds.play(sound);
+            self.notify.notification_sounds.play(sound);
         }
     }
 
@@ -951,7 +956,7 @@ impl QuillApp {
     ) {
         // A locked app shows no sender or text (tdesktop hides the message
         // preview while the passcode lock is up).
-        let notification = if self.passcode_ui.locked {
+        let notification = if self.account.passcode.locked {
             queued.for_locked_display()
         } else {
             queued.for_display()
@@ -968,7 +973,7 @@ impl QuillApp {
                 title: notification.title.into(),
                 body: notification.body.into(),
                 // Locked: no buttons, a reply must not bypass the passcode.
-                actions: quill::notify::action_buttons(self.passcode_ui.locked)
+                actions: quill::notify::action_buttons(self.account.passcode.locked)
                     .into_iter()
                     .map(|(id, label)| SystemNotificationAction {
                         id: id.into(),
@@ -981,12 +986,13 @@ impl QuillApp {
         let Some(command) = quill::notify::build_notification_command(&notification) else {
             return;
         };
-        if self.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS {
-            self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+        if self.notify.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS
+        {
+            self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
             return;
         }
-        let clicks = self.notify_clicks.clone();
-        let inflight = self.notify_inflight.clone();
+        let clicks = self.notify.notify_clicks.clone();
+        let inflight = self.notify.notify_inflight.clone();
         let spawn = std::thread::Builder::new()
             .name("quill-notify".to_string())
             .spawn(move || {
@@ -999,7 +1005,7 @@ impl QuillApp {
                 }
             });
         if spawn.is_err() {
-            self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+            self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
         }
     }
 

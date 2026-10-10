@@ -39,7 +39,7 @@ impl QuillApp {
 
     pub(super) fn open_checklist_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.checklist_creation_allowed() {
-            self.status_note = PREMIUM_CREATE.into();
+            self.connection.status_note = PREMIUM_CREATE.into();
             cx.notify();
             return;
         }
@@ -61,7 +61,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !self.session().is_some_and(|s| s.my_is_premium()) {
-            self.status_note = PREMIUM_ADD.into();
+            self.connection.status_note = PREMIUM_ADD.into();
             cx.notify();
             return;
         }
@@ -126,20 +126,20 @@ impl QuillApp {
                 match result {
                     Ok(_) => {
                         self.composer_ui.checklist_dialog = None;
-                        self.status_note = "adding tasks…".into();
+                        self.connection.status_note = "adding tasks…".into();
                     }
-                    Err(_) => self.status_note = "could not add the tasks".into(),
+                    Err(_) => self.connection.status_note = "could not add the tasks".into(),
                 }
             } else {
                 self.apply_demo_checklist_tasks(chat_id, message_id, &draft.tasks);
                 self.composer_ui.checklist_dialog = None;
-                self.status_note = "tasks added (demo)".into();
+                self.connection.status_note = "tasks added (demo)".into();
             }
             cx.notify();
             return;
         }
         let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
-            self.status_note = "select a chat to send".into();
+            self.connection.status_note = "select a chat to send".into();
             cx.notify();
             return;
         };
@@ -156,13 +156,13 @@ impl QuillApp {
                 Ok(_) => {
                     self.composer_ui.checklist_dialog = None;
                     self.composer_ui.pending_reply = None;
-                    self.status_note = "sending checklist…".into();
+                    self.connection.status_note = "sending checklist…".into();
                 }
-                Err(_) => self.status_note = "could not send the checklist".into(),
+                Err(_) => self.connection.status_note = "could not send the checklist".into(),
             }
         } else {
             self.composer_ui.checklist_dialog = None;
-            self.status_note = "checklists need a live connection (demo)".into();
+            self.connection.status_note = "checklists need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -177,11 +177,11 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if !live.driver.session.my_is_premium() {
-                self.status_note = PREMIUM_MARK.into();
+                self.connection.status_note = PREMIUM_MARK.into();
                 cx.notify();
                 return;
             }
-            self.status_note = match live
+            self.connection.status_note = match live
                 .driver
                 .toggle_checklist_task(chat_id, message_id, task_id)
             {
@@ -193,7 +193,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_checklist_toggle(chat_id, message_id, task_id);
-            self.status_note = "checklist updated (demo)".into();
+            self.connection.status_note = "checklist updated (demo)".into();
             cx.notify();
         }
     }
@@ -496,10 +496,11 @@ impl QuillApp {
             match live.driver.add_poll_option(chat_id, message_id, &text) {
                 Ok(_) => {
                     self.message_ui.poll_add_option = None;
-                    self.status_note = "adding option…".into();
+                    self.connection.status_note = "adding option…".into();
                 }
                 Err(_) => {
-                    self.status_note = "Could not add the option. Please try again.".into();
+                    self.connection.status_note =
+                        "Could not add the option. Please try again.".into();
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -518,7 +519,7 @@ impl QuillApp {
                 });
             }
             self.message_ui.poll_add_option = None;
-            self.status_note = "option added (demo)".into();
+            self.connection.status_note = "option added (demo)".into();
         }
         cx.notify();
     }

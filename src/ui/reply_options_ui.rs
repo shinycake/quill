@@ -153,7 +153,7 @@ impl QuillApp {
             ReplyOption::UpdateQuote => {
                 self.share.reply_elsewhere_open = false;
                 self.share.reply_quote_open = true;
-                self.status_note = "pick the part to quote".into();
+                self.connection.status_note = "pick the part to quote".into();
             }
             ReplyOption::ReplyInAnotherChat => {
                 self.open_reply_elsewhere(window, cx);
@@ -193,7 +193,7 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.status_note = "reply in…".into();
+        self.connection.status_note = "reply in…".into();
         cx.notify();
     }
 
@@ -224,7 +224,8 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&dest.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         if secret {
-            self.status_note = "Replies from another chat can't go to secret chats.".into();
+            self.connection.status_note =
+                "Replies from another chat can't go to secret chats.".into();
             cx.notify();
             return;
         }
@@ -240,7 +241,7 @@ impl QuillApp {
         self.select_listed_chat(dest, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
-        self.status_note = "replying from another chat".into();
+        self.connection.status_note = "replying from another chat".into();
         cx.notify();
     }
 

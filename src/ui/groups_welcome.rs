@@ -21,24 +21,24 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.welcome_dialog = Some(WelcomeDialog::new(window, cx, chat_id));
+        self.admin.welcome_dialog = Some(WelcomeDialog::new(window, cx, chat_id));
         if let Some(live) = self.live.as_mut()
             && live.driver.load_chat_welcome_messages(chat_id).is_err()
         {
-            self.status_note = "could not load welcome messages".into();
+            self.connection.status_note = "could not load welcome messages".into();
         }
         cx.notify();
     }
 
     pub(super) fn close_welcome_dialog(&mut self, cx: &mut Context<Self>) {
-        self.welcome_dialog = None;
+        self.admin.welcome_dialog = None;
         cx.notify();
     }
 
     /// Slice G2: add the welcome message typed in the dialog
     /// (`addChatWelcomeMessage`); empty text is refused up front.
     pub(super) fn submit_welcome_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (chat_id, text) = match self.welcome_dialog.as_ref() {
+        let (chat_id, text) = match self.admin.welcome_dialog.as_ref() {
             Some(dialog) => (
                 dialog.chat_id,
                 dialog.new_input.read(cx).value().trim().to_string(),
@@ -46,19 +46,19 @@ impl QuillApp {
             None => return,
         };
         if text.is_empty() {
-            self.status_note = "welcome message cannot be empty".into();
+            self.connection.status_note = "welcome message cannot be empty".into();
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.add_chat_welcome_message(chat_id, &text) {
-                Ok(_) => self.status_note = "welcome message added".into(),
-                Err(_) => self.status_note = "could not add welcome message".into(),
+                Ok(_) => self.connection.status_note = "welcome message added".into(),
+                Err(_) => self.connection.status_note = "could not add welcome message".into(),
             }
         } else {
-            self.status_note = "welcome messages need a live connection (demo)".into();
+            self.connection.status_note = "welcome messages need a live connection (demo)".into();
         }
-        if let Some(dialog) = self.welcome_dialog.as_mut() {
+        if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
             dialog.new_input.update(cx, |input, cx| {
                 input.set_value("", window, cx);
             });
@@ -68,7 +68,7 @@ impl QuillApp {
 
     /// Slice G2: submit the inline welcome-message edit.
     pub(super) fn submit_welcome_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let (chat_id, welcome_id, text) = match self.welcome_dialog.as_ref() {
+        let (chat_id, welcome_id, text) = match self.admin.welcome_dialog.as_ref() {
             Some(dialog) => match dialog.editing {
                 Some(welcome_id) => (
                     dialog.chat_id,
@@ -80,7 +80,7 @@ impl QuillApp {
             None => return,
         };
         if text.is_empty() {
-            self.status_note = "welcome message cannot be empty".into();
+            self.connection.status_note = "welcome message cannot be empty".into();
             cx.notify();
             return;
         }
@@ -89,13 +89,13 @@ impl QuillApp {
                 .driver
                 .edit_chat_welcome_message(chat_id, welcome_id, &text)
             {
-                Ok(_) => self.status_note = "welcome message updated".into(),
-                Err(_) => self.status_note = "could not edit welcome message".into(),
+                Ok(_) => self.connection.status_note = "welcome message updated".into(),
+                Err(_) => self.connection.status_note = "could not edit welcome message".into(),
             }
         } else {
-            self.status_note = "welcome messages need a live connection (demo)".into();
+            self.connection.status_note = "welcome messages need a live connection (demo)".into();
         }
-        if let Some(dialog) = self.welcome_dialog.as_mut() {
+        if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
             dialog.editing = None;
         }
         cx.notify();
@@ -110,11 +110,11 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.delete_chat_welcome_message(chat_id, welcome_id) {
-                Ok(_) => self.status_note = "welcome message deleted".into(),
-                Err(_) => self.status_note = "could not delete welcome message".into(),
+                Ok(_) => self.connection.status_note = "welcome message deleted".into(),
+                Err(_) => self.connection.status_note = "could not delete welcome message".into(),
             }
         } else {
-            self.status_note = "welcome messages need a live connection (demo)".into();
+            self.connection.status_note = "welcome messages need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -135,7 +135,7 @@ impl QuillApp {
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title("Welcome message"));
-            let Some(dialog_state) = this.welcome_dialog.as_ref() else {
+            let Some(dialog_state) = this.admin.welcome_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
             let chat_id = dialog_state.chat_id;
@@ -268,6 +268,7 @@ impl QuillApp {
             .child(div().text_sm().child(text));
         if editing == Some(welcome_id) {
             let edit_input = self
+                .admin
                 .welcome_dialog
                 .as_ref()
                 .map(|dialog| dialog.edit_input.clone());
@@ -294,7 +295,7 @@ impl QuillApp {
                         .label("Cancel")
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(dialog) = this.welcome_dialog.as_mut() {
+                            if let Some(dialog) = this.admin.welcome_dialog.as_mut() {
                                 dialog.editing = None;
                             }
                             cx.notify();
@@ -322,7 +323,7 @@ impl QuillApp {
                                         Self::message_copyable_text(&message.content)
                                     })
                                     .unwrap_or_default();
-                                if let Some(dialog) = this.welcome_dialog.as_mut() {
+                                if let Some(dialog) = this.admin.welcome_dialog.as_mut() {
                                     dialog.editing = Some(welcome_id);
                                     dialog.edit_input.update(cx, |input, cx| {
                                         input.set_value(&text, window, cx);
@@ -348,7 +349,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Welcome => DialogSpec::new(
         5800,
-        |app| app.welcome_dialog.is_some(),
+        |app| app.admin.welcome_dialog.is_some(),
         QuillApp::build_welcome_dialog,
     ),
 }

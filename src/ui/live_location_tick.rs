@@ -31,10 +31,10 @@ impl QuillApp {
         }) else {
             return;
         };
-        if self.live_location_tick_chat == Some(chat_id) {
+        if self.history.live_location_tick_chat == Some(chat_id) {
             return;
         }
-        self.live_location_tick_chat = Some(chat_id);
+        self.history.live_location_tick_chat = Some(chat_id);
         cx.spawn(async move |this, cx| {
             loop {
                 let wait = this
@@ -52,7 +52,7 @@ impl QuillApp {
                         }
                         // A window behind another app catches up when it
                         // is activated again.
-                        if this.window_active.get() {
+                        if this.frame.window_active.get() {
                             cx.notify();
                         }
                         true
@@ -63,8 +63,8 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, cx| {
-                if this.live_location_tick_chat == Some(chat_id) {
-                    this.live_location_tick_chat = None;
+                if this.history.live_location_tick_chat == Some(chat_id) {
+                    this.history.live_location_tick_chat = None;
                 }
                 // The last share ended: draw its "ended" state.
                 cx.notify();

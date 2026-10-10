@@ -118,61 +118,61 @@ enum ProfileEditDemo {
 impl QuillApp {
     fn demo_ready_bot_chat(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_bot_chat(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — bot chat with info panel".into();
+        self.connection.status_note = "screenshot demo — bot chat with info panel".into();
     }
 
     fn demo_ready_bot_command_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_bot_command_menu(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_command_menu(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer.update(cx, |input, cx| {
             input.set_value("/", window, cx);
         });
         self.sync_command_menu(cx);
-        self.status_note = "screenshot demo — bot chat with / command menu".into();
+        self.connection.status_note = "screenshot demo — bot chat with / command menu".into();
     }
 
     fn demo_ready_bot_keyboard(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_bot_keyboard(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_keyboard(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — bot keyboards: inline buttons, custom keyboard, force reply".into();
     }
 
     fn demo_ready_bot_profile(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_bot_profile(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_profile(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — B2 bot profile actions".into();
+        self.connection.status_note = "screenshot demo — B2 bot profile actions".into();
     }
 
     fn demo_ready_inline_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::inline_mode::apply_ready_inline_results(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
             );
         }
         self.composer.update(cx, |input, cx| {
             input.set_value("@gif cats", window, cx);
         });
         self.sync_inline_mode(cx);
-        self.status_note = "screenshot demo — @bot inline results".into();
+        self.connection.status_note = "screenshot demo — @bot inline results".into();
     }
 
     fn demo_ready_rich_ai_tools(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_bot_chat(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer.update(cx, |input, cx| {
             input.set_value(
@@ -182,13 +182,14 @@ impl QuillApp {
             );
         });
         self.composer_ui.rich_editor_open = true;
-        self.status_note = "screenshot demo — rich editor AI tools: Fix · Rewrite · Create".into();
+        self.connection.status_note =
+            "screenshot demo — rich editor AI tools: Fix · Rewrite · Create".into();
     }
 
     fn demo_ready_rich_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_bot_chat(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.composer.update(cx, |input, cx| {
                 input.set_value(
@@ -198,21 +199,21 @@ impl QuillApp {
                 );
             });
         self.composer_ui.rich_editor_open = true;
-        self.status_note = "screenshot demo — rich editor".into();
+        self.connection.status_note = "screenshot demo — rich editor".into();
     }
 
     fn demo_ready_rich_message(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_rich_message(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_rich_message(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — rich message blocks".into();
+        self.connection.status_note = "screenshot demo — rich message blocks".into();
     }
 
     fn demo_ready_rich_premium_gate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_bot_chat(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // >3 lines so the ⛶ Rich editor button is visible; editor stays
         // closed and the status note shows the non-Premium refusal.
@@ -224,7 +225,7 @@ impl QuillApp {
             );
         });
         self.composer_ui.rich_editor_open = false;
-        self.status_note = "Rich messages require Telegram Premium".into();
+        self.connection.status_note = "Rich messages require Telegram Premium".into();
     }
 
     fn demo_profile_edit(
@@ -234,8 +235,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_profile_edit(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_profile_edit(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_edit_profile_dialog(window, cx);
         if matches!(demo, ProfileEditDemo::Username) {
@@ -243,12 +244,12 @@ impl QuillApp {
                 session.username_check =
                     Some(("newhandle".to_string(), UsernameCheckResult::Available));
             }
-            if let Some(dialog) = self.edit_profile_dialog.as_ref() {
+            if let Some(dialog) = self.dialogs.edit_profile_dialog.as_ref() {
                 dialog.username_input.update(cx, |input, cx| {
                     input.set_value("newhandle", window, cx);
                 });
             }
         }
-        self.status_note = "screenshot demo — edit profile dialog".into();
+        self.connection.status_note = "screenshot demo — edit profile dialog".into();
     }
 }

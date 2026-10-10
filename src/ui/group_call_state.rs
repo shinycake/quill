@@ -3,6 +3,8 @@
 use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub(crate) struct GroupCallUi {
@@ -30,6 +32,10 @@ pub(crate) struct GroupCallUi {
     pub(super) global_ptt_polling: bool,
     /// Locally pinned video tile of the group call (tdesktop viewport pin).
     pub(super) pin: quill::calls::tile_pin::TilePin,
+    /// Phase C2g: group-call video tiles cached by
+    /// `(group_call_id, user_id, is_screen)` → `(frame seq, image)`,
+    /// rebuilt only when that slot's frame sequence changes.
+    pub(super) video_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,
 }
 
 impl GroupCallUi {
@@ -49,6 +55,7 @@ impl GroupCallUi {
             global_ptt: Default::default(),
             global_ptt_polling: false,
             pin: quill::calls::tile_pin::TilePin::default(),
+            video_images: HashMap::new(),
         }
     }
 }

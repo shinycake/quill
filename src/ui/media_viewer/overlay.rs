@@ -45,7 +45,11 @@ impl QuillApp {
                 // ProMotion, even behind other apps). The sound keeps
                 // playing in the background like tdesktop's, but the picture
                 // only needs a trickle there.
-                let fps = if self.window_active.get() { 60 } else { 10 };
+                let fps = if self.frame.window_active.get() {
+                    60
+                } else {
+                    10
+                };
                 self.request_media_tick(fps, cx);
             }
         } else if loops

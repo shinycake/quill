@@ -13,7 +13,7 @@ impl QuillApp {
         let AuthorizationState::WaitRegistration { terms } = self.current_auth() else {
             return div().into_any_element();
         };
-        let accepted = terms.as_ref() == self.accepted_registration_terms.as_ref();
+        let accepted = terms.as_ref() == self.auth_ui.accepted_registration_terms.as_ref();
         let pending = self
             .session()
             .is_some_and(|s| s.requests.has_purpose(RequestPurpose::RegisterUser));
@@ -21,8 +21,8 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(Textarea::new(&self.registration_first_input).aria_label("First name"))
-            .child(Textarea::new(&self.registration_last_input).aria_label("Last name"));
+            .child(Textarea::new(&self.auth_ui.registration_first_input).aria_label("First name"))
+            .child(Textarea::new(&self.auth_ui.registration_last_input).aria_label("Last name"));
         if let Some(terms) = terms {
             let label = if terms.min_user_age > 0 {
                 format!(
@@ -47,7 +47,7 @@ impl QuillApp {
                         .checked(accepted)
                         .disabled(pending)
                         .on_click(cx.listener(move |this, &on: &bool, _, cx| {
-                            this.accepted_registration_terms = on.then(|| terms.clone());
+                            this.auth_ui.accepted_registration_terms = on.then(|| terms.clone());
                             cx.notify();
                         })),
                 );
@@ -55,10 +55,10 @@ impl QuillApp {
         form.child(
             Checkbox::new("registration-notify-contacts")
                 .label("Notify my contacts that I joined Telegram")
-                .checked(self.registration_notify_contacts)
+                .checked(self.auth_ui.registration_notify_contacts)
                 .disabled(pending)
                 .on_click(cx.listener(|this, &on, _, cx| {
-                    this.registration_notify_contacts = on;
+                    this.auth_ui.registration_notify_contacts = on;
                     cx.notify();
                 })),
         )
@@ -79,23 +79,35 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let mut first = self.registration_first_input.read(cx).value().to_string();
-        let mut last = self.registration_last_input.read(cx).value().to_string();
+        let mut first = self
+            .auth_ui
+            .registration_first_input
+            .read(cx)
+            .value()
+            .to_string();
+        let mut last = self
+            .auth_ui
+            .registration_last_input
+            .read(cx)
+            .value()
+            .to_string();
         let result = live.driver.register_user(
             &first,
             &last,
-            self.accepted_registration_terms.as_ref(),
-            self.registration_notify_contacts,
+            self.auth_ui.accepted_registration_terms.as_ref(),
+            self.auth_ui.registration_notify_contacts,
         );
         first.zeroize();
         last.zeroize();
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(_) => {
-                self.registration_first_input
+                self.auth_ui
+                    .registration_first_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.registration_last_input
+                self.auth_ui
+                    .registration_last_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.accepted_registration_terms = None;
+                self.auth_ui.accepted_registration_terms = None;
                 "registration submitted — waiting for Telegram".into()
             }
             Err(_) => "could not register — check your name and accept the current terms".into(),

@@ -66,8 +66,8 @@ impl QuillApp {
         };
         let now = Instant::now();
         let mut glide = Glide::settled(0., now, ease_out_circ);
-        glide.go(1., OPEN_FADE, self.window_active.get(), now);
-        self.profile_modal = Some(ProfileModal {
+        glide.go(1., OPEN_FADE, self.frame.window_active.get(), now);
+        self.dialogs.profile_modal = Some(ProfileModal {
             target,
             glide,
             closing: false,
@@ -77,7 +77,7 @@ impl QuillApp {
 
     /// Whether the modal is the presenter of the open info panel.
     pub(super) fn profile_modal_active(&self) -> bool {
-        self.profile_modal.as_ref().is_some_and(|modal| {
+        self.dialogs.profile_modal.as_ref().is_some_and(|modal| {
             self.session()
                 .is_some_and(|session| session.open_info_panel == Some(modal.target))
         })
@@ -86,8 +86,8 @@ impl QuillApp {
     /// Fade the modal out, then close its panel (snaps when the window is
     /// in the background).
     pub(super) fn close_profile_modal(&mut self, cx: &mut Context<Self>) {
-        let animate = self.window_active.get();
-        let Some(modal) = self.profile_modal.as_mut() else {
+        let animate = self.frame.window_active.get();
+        let Some(modal) = self.dialogs.profile_modal.as_mut() else {
             return;
         };
         if modal.closing {
@@ -97,7 +97,7 @@ impl QuillApp {
         modal.closing = true;
         modal.glide.go(0., CLOSE_FADE, animate, now);
         if !animate || !modal.glide.animating(now) {
-            self.profile_modal = None;
+            self.dialogs.profile_modal = None;
             self.close_info_panel(cx);
             return;
         }
@@ -106,11 +106,12 @@ impl QuillApp {
             cx.background_executor().timer(CLOSE_FADE).await;
             this.update(cx, |this, cx| {
                 if this
+                    .dialogs
                     .profile_modal
                     .as_ref()
                     .is_some_and(|modal| modal.closing && modal.target == target)
                 {
-                    this.profile_modal = None;
+                    this.dialogs.profile_modal = None;
                     this.close_info_panel(cx);
                 }
             })
@@ -123,7 +124,7 @@ impl QuillApp {
     /// Drop the modal without touching the info panel (a button inside it
     /// navigated elsewhere).
     pub(super) fn dismiss_profile_modal(&mut self) {
-        self.profile_modal = None;
+        self.dialogs.profile_modal = None;
     }
 
     /// The modal layer, above the window content.
@@ -135,7 +136,7 @@ impl QuillApp {
         if !self.profile_modal_active() {
             return None;
         }
-        let modal = self.profile_modal.as_ref()?;
+        let modal = self.dialogs.profile_modal.as_ref()?;
         let now = Instant::now();
         let shown = modal.glide.value(now).clamp(0., 1.);
         if modal.glide.animating(now) {

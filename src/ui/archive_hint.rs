@@ -16,7 +16,7 @@ use quill::chatlist_archive::{
 
 impl QuillApp {
     pub(super) fn open_archive_hint(&mut self, cx: &mut Context<Self>) {
-        self.archive_hint_open = true;
+        self.chat_list.archive_hint_open = true;
         // The wording depends on the account's archive settings.
         if let Some(live) = self.live.as_mut()
             && live.driver.session.archive_chat_list_settings.is_none()
@@ -34,7 +34,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::ArchiveHint, |this, _, cx| {
-                this.archive_hint_open = false;
+                this.chat_list.archive_hint_open = false;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -57,7 +57,7 @@ impl QuillApp {
                             .label("Tap to change")
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.archive_hint_open = false;
+                                this.chat_list.archive_hint_open = false;
                                 this.open_archive_settings(cx);
                                 this.close_kit_dialog_if_done(DialogKind::ArchiveHint, window, cx);
                             })),
@@ -90,7 +90,7 @@ impl QuillApp {
                 Button::new("archive-hint-got-it")
                     .label("Got it")
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.archive_hint_open = false;
+                        this.chat_list.archive_hint_open = false;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::ArchiveHint, window, cx);
                     })),
@@ -110,7 +110,7 @@ crate::ui::shell::register_dialogs! {
     /// The Archive menu's "How does it work?" box.
     ArchiveHint => DialogSpec::new(
         1400,
-        |app| app.archive_hint_open,
+        |app| app.chat_list.archive_hint_open,
         QuillApp::build_archive_hint_dialog,
     ),
 }

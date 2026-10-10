@@ -107,8 +107,8 @@ fn input(
 
 impl QuillApp {
     pub(super) fn open_proxy_list(&mut self, cx: &mut Context<Self>) {
-        self.proxy_ui.list_open = true;
-        self.proxy_ui.notice = None;
+        self.settings.proxy.list_open = true;
+        self.settings.proxy.notice = None;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_proxies();
         }
@@ -116,8 +116,8 @@ impl QuillApp {
     }
 
     fn close_proxy_list(&mut self, cx: &mut Context<Self>) {
-        self.proxy_ui.list_open = false;
-        self.proxy_ui.notice = None;
+        self.settings.proxy.list_open = false;
+        self.settings.proxy.notice = None;
         cx.notify();
     }
 
@@ -129,7 +129,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => Some(f(&mut live.driver)),
             None => {
-                self.status_note = "demo: proxy settings are not applied".into();
+                self.connection.status_note = "demo: proxy settings are not applied".into();
                 None
             }
         }
@@ -156,7 +156,7 @@ impl QuillApp {
         } else {
             draft.port.to_string()
         };
-        self.proxy_ui.editor = Some(ProxyEditor {
+        self.settings.proxy.editor = Some(ProxyEditor {
             id: existing.as_ref().map(|e| e.id),
             kind,
             enable_on_save,
@@ -169,7 +169,7 @@ impl QuillApp {
             secret: input(window, cx, "Secret", &draft.secret, false),
             error: None,
         });
-        if let Some(editor) = &self.proxy_ui.editor {
+        if let Some(editor) = &self.settings.proxy.editor {
             editor
                 .server
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -178,13 +178,13 @@ impl QuillApp {
     }
 
     fn close_proxy_editor(&mut self, cx: &mut Context<Self>) {
-        self.proxy_ui.editor = None;
+        self.settings.proxy.editor = None;
         cx.notify();
     }
 
     /// Validate the editor and send `addProxy` / `editProxy`.
     fn save_proxy_editor(&mut self, cx: &mut Context<Self>) {
-        let Some(editor) = self.proxy_ui.editor.as_ref() else {
+        let Some(editor) = self.settings.proxy.editor.as_ref() else {
             return;
         };
         let mut draft = ProxyDraft::empty(editor.kind);
@@ -204,7 +204,7 @@ impl QuillApp {
             editor.comment.clone(),
         );
         let fail = |this: &mut Self, message: String| {
-            if let Some(editor) = this.proxy_ui.editor.as_mut() {
+            if let Some(editor) = this.settings.proxy.editor.as_mut() {
                 editor.error = Some(message);
             }
         };
@@ -237,7 +237,7 @@ impl QuillApp {
             None => driver.add_proxy(&draft, enable_on_save, &comment),
         });
         match sent {
-            Some(Ok(_)) | None => self.proxy_ui.editor = None,
+            Some(Ok(_)) | None => self.settings.proxy.editor = None,
             Some(Err(_)) => fail(self, "Couldn't save the proxy. Try again.".into()),
         }
         cx.notify();
@@ -271,10 +271,10 @@ impl QuillApp {
         match link {
             Some(link) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(link));
-                self.proxy_ui.notice = Some("Link copied to clipboard.".into());
+                self.settings.proxy.notice = Some("Link copied to clipboard.".into());
             }
             None => {
-                self.proxy_ui.notice = Some("HTTP proxies can't be shared as a link.".into());
+                self.settings.proxy.notice = Some("HTTP proxies can't be shared as a link.".into());
             }
         }
         cx.notify();
@@ -296,7 +296,7 @@ impl QuillApp {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(links.join("\n")));
-        self.proxy_ui.notice = Some("Proxy List copied to clipboard.".into());
+        self.settings.proxy.notice = Some("Proxy List copied to clipboard.".into());
         cx.notify();
     }
 
@@ -326,7 +326,7 @@ impl QuillApp {
                 }
             }
         };
-        self.proxy_ui.notice = Some(notice);
+        self.settings.proxy.notice = Some(notice);
         cx.notify();
     }
 
@@ -376,26 +376,26 @@ impl QuillApp {
         };
         match parsed {
             Ok(draft) => {
-                self.proxy_ui.link = Some(ProxyLinkBox { draft, warn: false });
+                self.settings.proxy.link = Some(ProxyLinkBox { draft, warn: false });
                 if let Some(live) = self.live.as_mut() {
                     live.driver.session.proxy.pings.remove(&LINK_PING_ID);
                     let _ = live.driver.maybe_fetch_proxies();
                 }
             }
-            Err(issue) => self.deep_link_dialog = Some(issue.message().into()),
+            Err(issue) => self.links.deep_link_dialog = Some(issue.message().into()),
         }
         cx.notify();
         true
     }
 
     fn close_proxy_link(&mut self, cx: &mut Context<Self>) {
-        self.proxy_ui.link = None;
+        self.settings.proxy.link = None;
         cx.notify();
     }
 
     /// "Connect Proxy": enable the listed proxy, or add and enable it.
     fn connect_link_proxy(&mut self, cx: &mut Context<Self>) {
-        let Some(link) = self.proxy_ui.link.take() else {
+        let Some(link) = self.settings.proxy.link.take() else {
             return;
         };
         let existing = self.session().and_then(|s| {
@@ -413,8 +413,8 @@ impl QuillApp {
     }
 
     fn check_link_proxy(&mut self, cx: &mut Context<Self>) {
-        let acked = self.proxy_ui.ip_warning_acked;
-        let Some(link) = self.proxy_ui.link.as_mut() else {
+        let acked = self.settings.proxy.ip_warning_acked;
+        let Some(link) = self.settings.proxy.link.as_mut() else {
             return;
         };
         link.warn = !acked;
@@ -426,7 +426,7 @@ impl QuillApp {
     }
 
     fn confirm_link_ip_warning(&mut self, cx: &mut Context<Self>) {
-        self.proxy_ui.ip_warning_acked = true;
+        self.settings.proxy.ip_warning_acked = true;
         self.check_link_proxy(cx);
     }
 
@@ -766,7 +766,7 @@ impl QuillApp {
                         },
                     ),
             );
-            if let Some(notice) = this.proxy_ui.notice.clone() {
+            if let Some(notice) = this.settings.proxy.notice.clone() {
                 body = body.child(div().text_xs().text_color(text_muted()).child(notice));
             }
             let footer = div().flex().justify_end().child(
@@ -822,7 +822,7 @@ impl QuillApp {
                 this.close_proxy_editor(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(editor) = this.proxy_ui.editor.as_ref() else {
+            let Some(editor) = this.settings.proxy.editor.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Edit proxy"))
@@ -851,7 +851,7 @@ impl QuillApp {
                                 .label(kind_label(*k))
                         }))
                         .on_click(cx.listener(move |this, &ix, _, cx| {
-                            if let Some(editor) = this.proxy_ui.editor.as_mut() {
+                            if let Some(editor) = this.settings.proxy.editor.as_mut() {
                                 editor.kind = kinds[ix];
                                 editor.error = None;
                             }
@@ -992,7 +992,7 @@ impl QuillApp {
                 this.close_proxy_link(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(link) = this.proxy_ui.link.as_ref() else {
+            let Some(link) = this.settings.proxy.link.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Proxy Server"))
@@ -1203,7 +1203,7 @@ impl QuillApp {
             }
             _ => self.open_proxy_list(cx),
         }
-        self.status_note = "screenshot demo — proxy settings".into();
+        self.connection.status_note = "screenshot demo — proxy settings".into();
     }
 }
 
@@ -1211,13 +1211,13 @@ crate::ui::shell::register_dialogs! {
     ProxyEdit => DialogSpec::new(
         // The edit / link boxes open over the list, so they rank first.
         3000,
-        |app| app.proxy_ui.editor.is_some(),
+        |app| app.settings.proxy.editor.is_some(),
         QuillApp::build_proxy_edit_dialog,
     ),
 
     ProxyLink => DialogSpec::new(
         3100,
-        |app| app.proxy_ui.link.is_some(),
+        |app| app.settings.proxy.link.is_some(),
         QuillApp::build_proxy_link_dialog,
     ),
 
@@ -1225,7 +1225,7 @@ crate::ui::shell::register_dialogs! {
     /// `tg://proxy` link confirmation.
     ProxyList => DialogSpec::new(
         3200,
-        |app| app.proxy_ui.list_open,
+        |app| app.settings.proxy.list_open,
         QuillApp::build_proxy_list_dialog,
     ),
 }

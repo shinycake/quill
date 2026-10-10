@@ -69,13 +69,14 @@ impl QuillApp {
         }
         match live.driver.request_password_recovery() {
             Ok(_) => {
-                self.recovery_mode = true;
-                self.recovery_code_input
+                self.auth_ui.recovery_mode = true;
+                self.auth_ui
+                    .recovery_code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.status_note = "recovery code sent — check your email".into();
+                self.connection.status_note = "recovery code sent — check your email".into();
             }
             Err(_) => {
-                self.status_note = "could not request a recovery code".into();
+                self.connection.status_note = "could not request a recovery code".into();
             }
         }
         cx.notify();
@@ -92,19 +93,25 @@ impl QuillApp {
         ) {
             return;
         }
-        let mut code = self.recovery_code_input.read(cx).value().to_string();
+        let mut code = self
+            .auth_ui
+            .recovery_code_input
+            .read(cx)
+            .value()
+            .to_string();
         let result = live.driver.submit_recovery_code(&code);
         code.zeroize();
         match result {
             Ok(_) => {
-                self.recovery_code_input
+                self.auth_ui
+                    .recovery_code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.status_note =
+                self.connection.status_note =
                     "recovery code submitted — 2FA will be removed; re-enable it in Settings"
                         .into();
             }
             Err(_) => {
-                self.status_note = "could not submit recovery code".into();
+                self.connection.status_note = "could not submit recovery code".into();
             }
         }
         cx.notify();
@@ -112,7 +119,7 @@ impl QuillApp {
 
     /// Slice A10: leave recovery-code entry, back to password entry.
     pub(crate) fn cancel_password_recovery(&mut self, cx: &mut Context<Self>) {
-        self.recovery_mode = false;
+        self.auth_ui.recovery_mode = false;
         cx.notify();
     }
 
@@ -120,7 +127,7 @@ impl QuillApp {
     /// recovery-code entry when `recovery_mode` is set. "Forgot password?"
     /// only appears when the server advertised a recovery email.
     pub(crate) fn auth_password_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let recovery_mode = self.recovery_mode;
+        let recovery_mode = self.auth_ui.recovery_mode;
         let has_recovery_email = matches!(
             self.current_auth(),
             AuthorizationState::WaitPassword {
@@ -137,7 +144,7 @@ impl QuillApp {
                         .child("Recovery code"),
                 )
                 .child(
-                    Textarea::new(&self.recovery_code_input)
+                    Textarea::new(&self.auth_ui.recovery_code_input)
                         .aria_label("Password recovery code")
                         .h(px(40.)),
                 )
@@ -184,7 +191,7 @@ impl QuillApp {
                 .flex_col()
                 .gap_3()
                 .child(
-                    Input::new(&self.password_input)
+                    Input::new(&self.auth_ui.password_input)
                         .aria_label("Two-step verification password")
                         .content_type(InputContentType::Password)
                         .h(px(40.)),

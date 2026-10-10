@@ -256,7 +256,7 @@ impl QuillApp {
     fn bar_dismiss(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.dismiss_chat_action_bar(chat_id).is_err() {
-                self.status_note = "could not hide the bar".into();
+                self.connection.status_note = "could not hide the bar".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
@@ -275,7 +275,7 @@ impl QuillApp {
                 .is_ok();
             let _ = live.driver.dismiss_chat_action_bar(chat_id);
             if !(moved && reset) {
-                self.status_note = "could not unarchive the chat".into();
+                self.connection.status_note = "could not unarchive the chat".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
@@ -312,7 +312,8 @@ impl QuillApp {
                     let _ = app.update(cx, |this, cx| {
                         if let Some(live) = this.live.as_mut() {
                             if live.driver.share_phone_number(chat_id, user_id).is_err() {
-                                this.status_note = "could not share your phone number".into();
+                                this.connection.status_note =
+                                    "could not share your phone number".into();
                             }
                         } else if let Some(session) = this.demo_session.as_mut() {
                             session.set_chat_action_bar(chat_id.0, None);
@@ -355,7 +356,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let reported = live.driver.report_chat(chat_id);
             let left = live.driver.leave_channel(chat_id);
-            self.status_note = if reported.is_ok() && left.is_ok() {
+            self.connection.status_note = if reported.is_ok() && left.is_ok() {
                 "Thank you for your report".into()
             } else {
                 "could not report the chat".into()
@@ -368,7 +369,7 @@ impl QuillApp {
 
     fn open_block_bar_dialog(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
         // tdesktop pre-checks both boxes for a stranger's bar.
-        self.block_bar_dialog = Some(BlockBarDialog {
+        self.dialogs.block_bar_dialog = Some(BlockBarDialog {
             chat_id,
             user_id,
             report: true,
@@ -378,12 +379,12 @@ impl QuillApp {
     }
 
     pub(super) fn close_block_bar_dialog(&mut self, cx: &mut Context<Self>) {
-        self.block_bar_dialog = None;
+        self.dialogs.block_bar_dialog = None;
         cx.notify();
     }
 
     fn submit_block_bar_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.block_bar_dialog.take() else {
+        let Some(dialog) = self.dialogs.block_bar_dialog.take() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -394,7 +395,7 @@ impl QuillApp {
             if dialog.delete_chat {
                 ok &= live.driver.remove_chat_from_list(dialog.chat_id).is_ok();
             }
-            self.status_note = if ok {
+            self.connection.status_note = if ok {
                 format!(
                     "{} is now blocked",
                     self.contact_display_name(dialog.user_id)
@@ -421,7 +422,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
-            let Some(state) = this.block_bar_dialog.as_ref() else {
+            let Some(state) = this.dialogs.block_bar_dialog.as_ref() else {
                 return dialog
                     .title(crate::ui::shell::dialog_title("Block user"))
                     .on_close(on_close);
@@ -440,7 +441,7 @@ impl QuillApp {
                         .label("Report spam")
                         .checked(report)
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(d) = this.block_bar_dialog.as_mut() {
+                            if let Some(d) = this.dialogs.block_bar_dialog.as_mut() {
                                 d.report = on;
                             }
                             cx.notify();
@@ -451,7 +452,7 @@ impl QuillApp {
                         .label("Delete this chat")
                         .checked(delete_chat)
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(d) = this.block_bar_dialog.as_mut() {
+                            if let Some(d) = this.dialogs.block_bar_dialog.as_mut() {
                                 d.delete_chat = on;
                             }
                             cx.notify();
@@ -583,7 +584,7 @@ impl QuillApp {
                 }
             },
         );
-        self.join_requests_dialog = Some(JoinRequestsDialog {
+        self.admin.join_requests_dialog = Some(JoinRequestsDialog {
             chat_id,
             search,
             _search_subscription: subscription,
@@ -665,7 +666,7 @@ impl QuillApp {
         approve: bool,
         cx: &mut Context<Self>,
     ) {
-        self.status_note = match self.live.as_mut() {
+        self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.process_all_chat_join_requests(chat_id, approve) {
                 Ok(_) => "processing join requests".into(),
                 Err(_) => "could not process join requests".into(),
@@ -684,7 +685,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_join_requests_dialog(&mut self, cx: &mut Context<Self>) {
-        self.join_requests_dialog = None;
+        self.admin.join_requests_dialog = None;
         cx.notify();
     }
 
@@ -702,6 +703,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some((chat_id, search)) = this
+                .admin
                 .join_requests_dialog
                 .as_ref()
                 .map(|d| (d.chat_id, d.search.clone()))
@@ -1073,14 +1075,14 @@ crate::ui::shell::register_dialogs! {
     /// Batch 8: chat action bar's "Block {name}" box.
     BlockBar => DialogSpec::new(
         6300,
-        |app| app.block_bar_dialog.is_some(),
+        |app| app.dialogs.block_bar_dialog.is_some(),
         QuillApp::build_block_bar_dialog,
     ),
 
     /// Batch 8: the chat's pending join requests.
     JoinRequests => DialogSpec::new(
         6400,
-        |app| app.join_requests_dialog.is_some(),
+        |app| app.admin.join_requests_dialog.is_some(),
         QuillApp::build_join_requests_dialog,
     ),
 }

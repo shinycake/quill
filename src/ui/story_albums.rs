@@ -37,19 +37,19 @@ impl QuillApp {
         self.stories.page = Some(StoryPage::new(chat_id, window, cx));
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
-                self.status_note = format!("could not load story albums: {err:?}");
+                self.connection.status_note = format!("could not load story albums: {err:?}");
             }
             if let Err(err) = live
                 .driver
                 .get_chat_posted_to_chat_page_stories(chat_id, 0, 50)
             {
-                self.status_note = format!("could not load chat page stories: {err:?}");
+                self.connection.status_note = format!("could not load chat page stories: {err:?}");
             }
             if let Err(err) = live.driver.get_chat_archived_stories(chat_id, 0, 50) {
-                self.status_note = format!("could not load archived stories: {err:?}");
+                self.connection.status_note = format!("could not load archived stories: {err:?}");
             }
         } else {
-            self.status_note =
+            self.connection.status_note =
                 "demo — story albums, chat-page stories and the archive load with live TDLib"
                     .into();
         }
@@ -100,10 +100,10 @@ impl QuillApp {
                 .driver
                 .get_story_album_stories(chat_id, album_id, offset, 50)
             {
-                self.status_note = format!("could not load album stories: {err:?}");
+                self.connection.status_note = format!("could not load album stories: {err:?}");
             }
         } else {
-            self.status_note = "demo — album stories load with live TDLib".into();
+            self.connection.status_note = "demo — album stories load with live TDLib".into();
         }
         cx.notify();
     }
@@ -128,12 +128,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = format!("demo — {what} runs with live TDLib");
+            self.connection.status_note = format!("demo — {what} runs with live TDLib");
             cx.notify();
             return;
         };
         if let Err(err) = f(live) {
-            self.status_note = format!("could not {what}: {err:?}");
+            self.connection.status_note = format!("could not {what}: {err:?}");
         }
         cx.notify();
     }
@@ -154,7 +154,7 @@ impl QuillApp {
         };
         let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
         if !skipped.is_empty() {
-            self.status_note =
+            self.connection.status_note =
                 format!("skipped stories that can't be added to albums: {skipped:?}");
         }
         self.story_page_mutate(
@@ -292,19 +292,19 @@ impl QuillApp {
             None => return,
         };
         if story_ids.is_empty() {
-            self.status_note = "enter at least one story id".into();
+            self.connection.status_note = "enter at least one story id".into();
             cx.notify();
             return;
         }
         let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
         if story_ids.is_empty() {
-            self.status_note =
+            self.connection.status_note =
                 format!("none of these stories can be added to an album (skipped: {skipped:?})");
             cx.notify();
             return;
         }
         if !skipped.is_empty() {
-            self.status_note =
+            self.connection.status_note =
                 format!("skipped stories that can't be added to albums: {skipped:?}");
         }
         self.story_page_mutate(

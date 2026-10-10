@@ -220,8 +220,8 @@ impl QuillApp {
                 live.driver.latest_video_frame(call.id, true),
             ),
             None => (
-                self.demo_remote_frame.clone(),
-                self.demo_local_frame.clone(),
+                self.demo_ui.remote_frame.clone(),
+                self.demo_ui.local_frame.clone(),
             ),
         };
         let screen_frame = if call.remote_screen == RemoteVideoState::Inactive {
@@ -229,7 +229,7 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_ref() {
             live.driver.latest_screen_frame(call.id)
         } else {
-            self.demo_screen_frame.clone()
+            self.demo_ui.screen_frame.clone()
         };
         let remote = if !ready {
             None
@@ -377,7 +377,7 @@ impl QuillApp {
                 app.calls.window_opening = false;
                 match result {
                     Ok(handle) => app.calls.window = Some(handle.into()),
-                    Err(_) => app.status_note = "Couldn't open the call window".into(),
+                    Err(_) => app.connection.status_note = "Couldn't open the call window".into(),
                 }
                 cx.notify();
             });

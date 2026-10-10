@@ -119,11 +119,11 @@ impl QuillApp {
 
     /// Escape closes an open message or chat context menu first.
     pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.message_ui.menu.is_none() && self.chat_menu.is_none() {
+        if self.message_ui.menu.is_none() && self.chat_list.menu.is_none() {
             return false;
         }
         self.message_ui.menu = None;
-        self.chat_menu = None;
+        self.chat_list.menu = None;
         cx.notify();
         true
     }
@@ -275,7 +275,7 @@ impl QuillApp {
                     .is_some_and(|m| m.chosen_reaction(&choice) || has_reaction(m, &choice))
             })
         {
-            self.status_note = "Custom emoji reactions need Telegram Premium".into();
+            self.connection.status_note = "Custom emoji reactions need Telegram Premium".into();
             cx.notify();
             return;
         }
@@ -286,7 +286,7 @@ impl QuillApp {
             .and_then(|h| h.messages.get(&message_id.0))
             .is_some_and(|m| !m.chosen_reaction(&choice));
         if adding && let ReactionChoice::Emoji(emoji) = &choice {
-            self.reaction_fly = Some(super::history_fx::ReactionFly {
+            self.history.reaction_fly = Some(super::history_fx::ReactionFly {
                 chat_id: chat_id.0,
                 message_id: message_id.0,
                 glyph: emoji_presentation(emoji).into(),
@@ -294,7 +294,7 @@ impl QuillApp {
             });
         }
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live
+            self.connection.status_note = match live
                 .driver
                 .toggle_reaction_choice(chat_id, message_id, &choice)
             {
@@ -309,7 +309,7 @@ impl QuillApp {
                 self.toggle_emoji_reaction(chat_id, message_id, emoji, cx)
             }
             ReactionChoice::CustomEmoji(_) => {
-                self.status_note = "reaction updated".into();
+                self.connection.status_note = "reaction updated".into();
                 cx.notify();
             }
         }
@@ -329,7 +329,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .toggle_message_reaction(chat_id, message_id, &emoji);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "updating reaction…".into(),
                 Err(_) => "could not update reaction".into(),
             };
@@ -338,7 +338,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_reaction_toggle(chat_id, message_id, &emoji);
-            self.status_note = "reaction updated".into();
+            self.connection.status_note = "reaction updated".into();
             cx.notify();
         }
     }

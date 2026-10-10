@@ -1686,8 +1686,10 @@ pub(super) fn message_rich_block(
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(live) = this.live.as_mut() {
                         match live.driver.fetch_full_rich_message(chat_id, message_id) {
-                            Ok(_) => this.status_note = "loading full message…".into(),
-                            Err(_) => this.status_note = "could not load full message".into(),
+                            Ok(_) => this.connection.status_note = "loading full message…".into(),
+                            Err(_) => {
+                                this.connection.status_note = "could not load full message".into()
+                            }
                         }
                         cx.notify();
                     }

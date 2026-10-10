@@ -157,12 +157,12 @@ impl QuillApp {
     }
 
     fn set_translate_prefs(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut TranslatePrefs)) {
-        f(&mut self.translate_ui.prefs);
+        f(&mut self.settings.translate.prefs);
         if let Err(err) = quill::settings::save_translate_prefs(
             &Self::appearance_paths(),
-            &self.translate_ui.prefs,
+            &self.settings.translate.prefs,
         ) {
-            self.status_note = format!("Couldn't save translation settings: {err}");
+            self.connection.status_note = format!("Couldn't save translation settings: {err}");
         }
         cx.notify();
     }
@@ -178,7 +178,7 @@ impl QuillApp {
             revision: history.messages.revision(),
             skip: skip.to_vec(),
         };
-        if let Some((cached, value)) = self.translate_ui.offer.borrow().as_ref()
+        if let Some((cached, value)) = self.settings.translate.offer.borrow().as_ref()
             && *cached == key
         {
             return *value;
@@ -191,7 +191,7 @@ impl QuillApp {
             .filter_map(|message| translatable_content(&message.content).map(|(text, _)| text))
             .collect();
         let value = offer_language(texts, skip);
-        *self.translate_ui.offer.borrow_mut() = Some((key, value));
+        *self.settings.translate.offer.borrow_mut() = Some((key, value));
         value
     }
 
@@ -201,7 +201,7 @@ impl QuillApp {
     /// are not in a language to translate.
     pub(super) fn translate_bar_model(&self, chat_id: ChatId) -> Option<TranslateBarModel> {
         let session = self.session()?;
-        let prefs = &self.translate_ui.prefs;
+        let prefs = &self.settings.translate.prefs;
         let automatic = session.chat_auto_translate(chat_id);
         if !tracking_enabled(prefs.translate_chats, session.is_premium(), automatic)
             || !session.chat_is_translatable(chat_id)
@@ -231,7 +231,7 @@ impl QuillApp {
     /// The "Translate to" language for a box opened in `chat_id`.
     fn translate_target(&self, chat_id: ChatId) -> &'static str {
         let ui = self.translate_ui_language();
-        let prefs = &self.translate_ui.prefs;
+        let prefs = &self.settings.translate.prefs;
         let skip = prefs.skip(&ui);
         let from = self.translate_offer(chat_id, &skip);
         choose_translate_to(from, prefs.to_language(&ui), &skip)
@@ -260,7 +260,7 @@ impl QuillApp {
                 }
             },
         );
-        self.translate_ui.dialog = Some(TranslateDialog {
+        self.settings.translate.dialog = Some(TranslateDialog {
             view,
             source,
             to,
@@ -336,7 +336,8 @@ impl QuillApp {
     /// Settings → Do Not Translate.
     pub(super) fn open_translate_skip_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let to = self
-            .translate_ui
+            .settings
+            .translate
             .prefs
             .to_language(&self.translate_ui_language());
         self.new_translate_dialog(TranslateView::SkipList, None, to, window, cx);
@@ -351,25 +352,25 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.new_translate_dialog(TranslateView::ChooseTo, None, to, window, cx);
-        if let Some(dialog) = self.translate_ui.dialog.as_mut() {
+        if let Some(dialog) = self.settings.translate.dialog.as_mut() {
             dialog.close_after_choose = true;
         }
         cx.notify();
     }
 
     pub(super) fn close_translate_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(job) = self.translate_ui.dialog.as_ref().and_then(|d| d.job)
+        if let Some(job) = self.settings.translate.dialog.as_ref().and_then(|d| d.job)
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.drop_text_translation(job);
         }
-        self.translate_ui.dialog = None;
+        self.settings.translate.dialog = None;
         cx.notify();
     }
 
     /// Ask TDLib to translate what the box shows into its language.
     fn request_dialog_translation(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.translate_ui.dialog.as_mut() else {
+        let Some(dialog) = self.settings.translate.dialog.as_mut() else {
             return;
         };
         let to = dialog.to;
@@ -382,7 +383,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut()
                     && let Err(err) = live.driver.translate_message(chat_id, message_id, to)
                 {
-                    self.status_note = format!("Translate failed: {err:?}");
+                    self.connection.status_note = format!("Translate failed: {err:?}");
                 }
             }
             Some(TranslateSource::Selection { text, .. }) => {
@@ -392,7 +393,9 @@ impl QuillApp {
                     }
                     match live.driver.translate_selection(&text, to) {
                         Ok(job) => dialog.job = Some(job),
-                        Err(err) => self.status_note = format!("Translate failed: {err:?}"),
+                        Err(err) => {
+                            self.connection.status_note = format!("Translate failed: {err:?}")
+                        }
                     }
                 }
             }
@@ -404,12 +407,12 @@ impl QuillApp {
     /// A language was picked in the chooser.
     fn choose_translate_language(&mut self, code: &'static str, cx: &mut Context<Self>) {
         self.set_translate_prefs(cx, |prefs| prefs.translate_to = code.to_string());
-        let Some(dialog) = self.translate_ui.dialog.as_mut() else {
+        let Some(dialog) = self.settings.translate.dialog.as_mut() else {
             return;
         };
         dialog.to = code;
         if dialog.close_after_choose {
-            self.translate_ui.dialog = None;
+            self.settings.translate.dialog = None;
         } else {
             dialog.view = TranslateView::Box;
             self.request_dialog_translation(cx);
@@ -421,7 +424,7 @@ impl QuillApp {
         let ui = self.translate_ui_language();
         let mut accepted = true;
         self.set_translate_prefs(cx, |prefs| accepted = prefs.toggle_skip(code, &ui));
-        if let Some(dialog) = self.translate_ui.dialog.as_mut() {
+        if let Some(dialog) = self.settings.translate.dialog.as_mut() {
             dialog.note = (!accepted).then(|| {
                 "Please choose at least one language so that it can be used as the \"Translate to\" language."
                     .to_string()
@@ -445,7 +448,7 @@ impl QuillApp {
                 this.close_translate_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(view) = this.translate_ui.dialog.as_ref().map(|d| d.view) else {
+            let Some(view) = this.settings.translate.dialog.as_ref().map(|d| d.view) else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Translate"))
@@ -498,11 +501,12 @@ impl QuillApp {
                     .label(label)
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        let back_to_box = this.translate_ui.dialog.as_ref().is_some_and(|d| {
-                            d.view == TranslateView::ChooseTo && d.source.is_some()
-                        });
+                        let back_to_box =
+                            this.settings.translate.dialog.as_ref().is_some_and(|d| {
+                                d.view == TranslateView::ChooseTo && d.source.is_some()
+                            });
                         if back_to_box {
-                            if let Some(dialog) = this.translate_ui.dialog.as_mut() {
+                            if let Some(dialog) = this.settings.translate.dialog.as_mut() {
                                 dialog.view = TranslateView::Box;
                             }
                             cx.notify();
@@ -524,7 +528,7 @@ impl QuillApp {
                     .label("Language")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(dialog) = this.translate_ui.dialog.as_mut() {
+                        if let Some(dialog) = this.settings.translate.dialog.as_mut() {
                             dialog.view = TranslateView::ChooseTo;
                         }
                         cx.notify();
@@ -543,7 +547,7 @@ impl QuillApp {
 
     /// The translation the box shows right now.
     fn dialog_translation(&self) -> Option<Translation> {
-        let dialog = self.translate_ui.dialog.as_ref()?;
+        let dialog = self.settings.translate.dialog.as_ref()?;
         let session = self.session()?;
         match dialog.source.as_ref()? {
             TranslateSource::Message {
@@ -561,7 +565,7 @@ impl QuillApp {
     }
 
     fn translate_box_body(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(dialog) = self.translate_ui.dialog.as_ref() else {
+        let Some(dialog) = self.settings.translate.dialog.as_ref() else {
             return div().into_any_element();
         };
         let (chat_id, original, entities): (ChatId, String, Vec<TextEntity>) =
@@ -621,7 +625,7 @@ impl QuillApp {
                         .small()
                         .text_color(accent())
                         .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(dialog) = this.translate_ui.dialog.as_mut() {
+                            if let Some(dialog) = this.settings.translate.dialog.as_mut() {
                                 dialog.original_expanded = true;
                             }
                             cx.notify();
@@ -655,7 +659,7 @@ impl QuillApp {
                         .accessibility_label("Copy translation")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                            this.status_note = "translation copied".into();
+                            this.connection.status_note = "translation copied".into();
                             cx.notify();
                         })),
                 )
@@ -720,12 +724,12 @@ impl QuillApp {
     /// The searchable language list: one pick (the "Translate to" language)
     /// or several (the "Do Not Translate" languages).
     fn translate_language_list(&self, multi: bool, cx: &mut Context<Self>) -> AnyElement {
-        let Some(dialog) = self.translate_ui.dialog.as_ref() else {
+        let Some(dialog) = self.settings.translate.dialog.as_ref() else {
             return div().into_any_element();
         };
         let query = dialog.search.read(cx).value().to_string();
         let ui = self.translate_ui_language();
-        let skip = self.translate_ui.prefs.skip(&ui);
+        let skip = self.settings.translate.prefs.skip(&ui);
         let current = dialog.to;
         let theme = cx.theme();
         let (row_hover, border) = (theme.accent, theme.border);
@@ -811,7 +815,7 @@ impl QuillApp {
         !secret
             && !quill::translate::skip_translate(
                 text,
-                &self.translate_ui.prefs,
+                &self.settings.translate.prefs,
                 &self.translate_ui_language(),
             )
     }
@@ -933,7 +937,8 @@ impl QuillApp {
 
     fn translate_toast_view(&self, chat_id: ChatId, cx: &mut Context<Self>) -> Option<AnyElement> {
         let toast = self
-            .translate_ui
+            .settings
+            .translate
             .toast
             .as_ref()
             .filter(|toast| toast.chat_id == chat_id)?
@@ -960,7 +965,7 @@ impl QuillApp {
                         .small()
                         .text_color(accent())
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.translate_ui.toast = None;
+                            this.settings.translate.toast = None;
                             match action {
                                 ToastAction::ShowBar => {
                                     this.set_translate_bar_hidden(chat_id, false, cx)
@@ -984,9 +989,9 @@ impl QuillApp {
         action: ToastAction,
         cx: &mut Context<Self>,
     ) {
-        self.translate_ui.toast_seq += 1;
-        let id = self.translate_ui.toast_seq;
-        self.translate_ui.toast = Some(TranslateToast {
+        self.settings.translate.toast_seq += 1;
+        let id = self.settings.translate.toast_seq;
+        self.settings.translate.toast = Some(TranslateToast {
             chat_id,
             text,
             label,
@@ -996,8 +1001,14 @@ impl QuillApp {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(TOAST_DURATION).await;
             let _ = this.update(cx, |this, cx| {
-                if this.translate_ui.toast.as_ref().is_some_and(|t| t.id == id) {
-                    this.translate_ui.toast = None;
+                if this
+                    .settings
+                    .translate
+                    .toast
+                    .as_ref()
+                    .is_some_and(|t| t.id == id)
+                {
+                    this.settings.translate.toast = None;
                     cx.notify();
                 }
             });
@@ -1137,7 +1148,7 @@ impl QuillApp {
             return true;
         }
         let ui = self.translate_ui_language();
-        let skip = self.translate_ui.prefs.skip(&ui);
+        let skip = self.settings.translate.prefs.skip(&ui);
         let wanted: Vec<MessageId> = {
             let Some(session) = self.session() else {
                 return false;
@@ -1187,16 +1198,17 @@ impl QuillApp {
             view.as_str()
         };
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq
+            self.demo_ui
+                .seq
                 .store(session.last_seq, std::sync::atomic::Ordering::SeqCst);
             super::translate_demo::apply_ready_translate(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 view,
             );
         }
-        self.translate_ui.prefs = TranslatePrefs {
+        self.settings.translate.prefs = TranslatePrefs {
             translate_chats: true,
             ..TranslatePrefs::default()
         };
@@ -1226,19 +1238,19 @@ impl QuillApp {
                     text: "Я нашла отличное кафе рядом с метро".to_string(),
                 };
                 self.new_translate_dialog(TranslateView::Box, Some(source), "en", window, cx);
-                if let Some(dialog) = self.translate_ui.dialog.as_mut() {
+                if let Some(dialog) = self.settings.translate.dialog.as_mut() {
                     dialog.job = Some(1);
                 }
             }
             "chooser" => self.new_translate_dialog(TranslateView::ChooseTo, None, "en", window, cx),
             "skip" => self.open_translate_skip_list(window, cx),
             "settings" => {
-                self.translate_ui.settings_only = true;
-                self.appearance_open = true;
+                self.settings.translate.settings_only = true;
+                self.settings.appearance_open = true;
             }
             _ => {}
         }
-        self.status_note = "screenshot demo — translation".into();
+        self.connection.status_note = "screenshot demo — translation".into();
     }
 
     // ---------------------------------------------------------------------
@@ -1248,7 +1260,7 @@ impl QuillApp {
     /// Settings → Translation: Show Translate Button, Translate Entire Chats
     /// (Premium), Do Not Translate.
     pub(super) fn translate_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let prefs = &self.translate_ui.prefs;
+        let prefs = &self.settings.translate.prefs;
         let premium = self.session().is_some_and(Session::is_premium);
         let ui = self.translate_ui_language();
         let skip = prefs.skip(&ui);
@@ -1301,7 +1313,7 @@ impl QuillApp {
                 .accessibility_label("Translate Entire Chats")
                 .on_click(cx.listener(|this, &on, _, cx| {
                     if !this.session().is_some_and(Session::is_premium) {
-                        this.status_note =
+                        this.connection.status_note =
                             "Translating entire chats requires Telegram Premium".into();
                         cx.notify();
                         return;
@@ -1350,7 +1362,7 @@ crate::ui::shell::register_dialogs! {
         // Opened from the Appearance dialog's translation options: it
         // takes over and Appearance returns when it closes.
         6500,
-        |app| app.translate_ui.dialog.is_some(),
+        |app| app.settings.translate.dialog.is_some(),
         QuillApp::build_translate_dialog,
     ),
 }

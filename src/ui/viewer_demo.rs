@@ -131,8 +131,8 @@ impl QuillApp {
     fn demo_setup_viewer_extras(&mut self, demo: ViewerDemo, cx: &mut Context<Self>) {
         if demo == ViewerDemo::Gif {
             if let Some(session) = self.demo_session.as_mut() {
-                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                apply_viewer_gif(session, &self.demo_sink, &self.demo_seq);
+                self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+                apply_viewer_gif(session, &self.demo_ui.sink, &self.demo_ui.seq);
             }
             // As the video demo: frames are extracted and decoded here so the
             // capture is deterministic; the viewer then loops them for real.
@@ -159,12 +159,12 @@ impl QuillApp {
                     }
                 }
             }
-            self.status_note = "screenshot demo — GIF looping in the viewer".into();
+            self.connection.status_note = "screenshot demo — GIF looping in the viewer".into();
         }
         if demo == ViewerDemo::Extras {
             if let Some(session) = self.demo_session.as_mut() {
-                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                apply_viewer_extras(session, &self.demo_sink, &self.demo_seq);
+                self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+                apply_viewer_extras(session, &self.demo_ui.sink, &self.demo_ui.seq);
             }
             // As the video demo: decode the frames here so the capture is
             // deterministic, then play for real from the 5 s mark.
@@ -205,16 +205,17 @@ impl QuillApp {
             // caption and toast it would cover.
             self.viewer.extra.demo_speed_dial_open =
                 std::env::var_os("QUILL_DEMO_NO_DIAL").is_none();
-            self.status_note = "screenshot demo — viewer extras".into();
+            self.connection.status_note = "screenshot demo — viewer extras".into();
         }
         if demo == ViewerDemo::Shared {
             if let Some(session) = self.demo_session.as_mut() {
-                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                apply_viewer_shared(session, &self.demo_sink, &self.demo_seq);
+                self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+                apply_viewer_shared(session, &self.demo_ui.sink, &self.demo_ui.seq);
             }
             // The fourth item carries the custom emoji caption.
             self.open_shared_media_viewer(MessageId(290), cx);
-            self.status_note = "screenshot demo — viewer paging over Shared Media".into();
+            self.connection.status_note =
+                "screenshot demo — viewer paging over Shared Media".into();
         }
     }
 }

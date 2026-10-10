@@ -318,7 +318,7 @@ impl QuillApp {
                         MediaAction::CopyFilename => {
                             if let Some(name) = target.copy_name.clone() {
                                 cx.write_to_clipboard(ClipboardItem::new_string(name));
-                                this.status_note = "filename copied".into();
+                                this.connection.status_note = "filename copied".into();
                             }
                         }
                     }
@@ -384,7 +384,8 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&[target.file_id]);
             }
-            self.status_note = "downloading… choose Save As again when it finishes".into();
+            self.connection.status_note =
+                "downloading… choose Save As again when it finishes".into();
             cx.notify();
             return;
         };
@@ -405,7 +406,7 @@ impl QuillApp {
                 .spawn(async move { std::fs::copy(&path, &dest).map(|_| dest) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.status_note = match copied {
+                this.connection.status_note = match copied {
                     Ok(dest) => format!(
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
@@ -429,7 +430,7 @@ impl QuillApp {
             return;
         }
         let Some((_, path)) = self.menu_media_local(chat_id, message_id) else {
-            self.status_note = "download the photo first to copy it".into();
+            self.connection.status_note = "download the photo first to copy it".into();
             cx.notify();
             return;
         };
@@ -439,9 +440,9 @@ impl QuillApp {
                     gpui_kit::ImageFormat::Png,
                     bytes,
                 )));
-                self.status_note = "photo copied".into();
+                self.connection.status_note = "photo copied".into();
             }
-            Err(note) => self.status_note = note.into(),
+            Err(note) => self.connection.status_note = note.into(),
         }
         cx.notify();
     }
@@ -449,12 +450,12 @@ impl QuillApp {
     /// "Add to GIFs" (`addSavedAnimation`).
     fn save_message_gif(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.set_gif_saved(file_id, true) {
+            self.connection.status_note = match live.driver.set_gif_saved(file_id, true) {
                 Ok(_) => "saving GIF…".into(),
                 Err(_) => "could not save GIF".into(),
             };
         } else {
-            self.status_note = "demo — GIFs save with live TDLib".into();
+            self.connection.status_note = "demo — GIFs save with live TDLib".into();
         }
         cx.notify();
     }
@@ -462,12 +463,12 @@ impl QuillApp {
     /// "Save for Notifications" (`addSavedNotificationSound`).
     fn save_message_tone(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.save_notification_tone(file_id) {
+            self.connection.status_note = match live.driver.save_notification_tone(file_id) {
                 Ok(_) => "saving sound…".into(),
                 Err(_) => "could not save the sound".into(),
             };
         } else {
-            self.status_note = "Sound added!".into();
+            self.connection.status_note = "Sound added!".into();
         }
         cx.notify();
     }
@@ -480,13 +481,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.set_favorite_sticker(file_id, favorite) {
+            self.connection.status_note = match live.driver.set_favorite_sticker(file_id, favorite)
+            {
                 Ok(_) if favorite => "added to favorites".into(),
                 Ok(_) => "removed from favorites".into(),
                 Err(_) => "could not change favorites".into(),
             };
         } else {
-            self.status_note = "demo — favorites change with live TDLib".into();
+            self.connection.status_note = "demo — favorites change with live TDLib".into();
         }
         cx.notify();
     }
@@ -498,7 +500,7 @@ impl QuillApp {
             && live.driver.view_sticker_set(set_id).is_err()
         {
             self.message_ui.menu_ui.sticker_set_open = false;
-            self.status_note = "could not open the sticker set".into();
+            self.connection.status_note = "could not open the sticker set".into();
         }
         cx.notify();
     }
@@ -511,16 +513,16 @@ impl QuillApp {
                 // The dialog stays; the set's state follows TDLib's update.
                 live.driver.session.sticker_set_view = None;
                 self.message_ui.menu_ui.sticker_set_open = false;
-                self.status_note = if install {
+                self.connection.status_note = if install {
                     "sticker set added".into()
                 } else {
                     "sticker set removed".into()
                 };
             } else {
-                self.status_note = "could not change the sticker set".into();
+                self.connection.status_note = "could not change the sticker set".into();
             }
         } else {
-            self.status_note = "demo — sticker sets change with live TDLib".into();
+            self.connection.status_note = "demo — sticker sets change with live TDLib".into();
         }
         cx.notify();
     }
@@ -537,7 +539,7 @@ impl QuillApp {
         self.close_sticker_set_dialog(cx);
         self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
         self.share.link_text = Some(link);
-        self.status_note = "choose a chat to share to".into();
+        self.connection.status_note = "choose a chat to share to".into();
         cx.notify();
     }
 
@@ -549,7 +551,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         cx.write_to_clipboard(ClipboardItem::new_string(link));
-        self.status_note = copied_note(kind).into();
+        self.connection.status_note = copied_note(kind).into();
         cx.notify();
     }
 
@@ -566,13 +568,13 @@ impl QuillApp {
                 Ok(_) => {
                     live.driver.session.sticker_set_view = None;
                     self.message_ui.menu_ui.sticker_set_open = false;
-                    self.status_note = ARCHIVED_NOTE.into();
+                    self.connection.status_note = ARCHIVED_NOTE.into();
                     self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
                 }
-                Err(_) => self.status_note = "could not archive the sticker set".into(),
+                Err(_) => self.connection.status_note = "could not archive the sticker set".into(),
             }
         } else {
-            self.status_note = "demo: sticker sets archive with live TDLib".into();
+            self.connection.status_note = "demo: sticker sets archive with live TDLib".into();
         }
         cx.notify();
     }
@@ -774,7 +776,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.cancel_upload(chat_id, message_id) {
+            self.connection.status_note = match live.driver.cancel_upload(chat_id, message_id) {
                 Ok(_) => {
                     self.begin_vanish(chat_id, &[message_id]);
                     "upload canceled".into()
@@ -782,7 +784,7 @@ impl QuillApp {
                 Err(_) => "could not cancel the upload".into(),
             };
         } else {
-            self.status_note = "demo — uploads cancel with live TDLib".into();
+            self.connection.status_note = "demo — uploads cancel with live TDLib".into();
         }
         cx.notify();
     }
@@ -826,7 +828,7 @@ impl QuillApp {
                 let target = target.clone();
                 move |this, _, cx| {
                     if let Some(live) = this.live.as_mut() {
-                        this.status_note = match live.driver.save_audio_to_profile(
+                        this.connection.status_note = match live.driver.save_audio_to_profile(
                             target.file_id,
                             target.duration,
                             &target.title,
@@ -836,7 +838,8 @@ impl QuillApp {
                             Err(_) => "could not save to your profile".into(),
                         };
                     } else {
-                        this.status_note = "demo — saving to the profile needs live TDLib".into();
+                        this.connection.status_note =
+                            "demo — saving to the profile needs live TDLib".into();
                     }
                     this.message_ui.menu = None;
                     cx.notify();
@@ -856,12 +859,14 @@ impl QuillApp {
                     let draft =
                         quill::composer::ForwardDraft::from_message(chat_id, message_id, false);
                     if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
-                        this.status_note = match live.driver.forward_messages(ChatId(me), &draft) {
-                            Ok(_) => "saved to Saved Messages".into(),
-                            Err(_) => "could not save to Saved Messages".into(),
-                        };
+                        this.connection.status_note =
+                            match live.driver.forward_messages(ChatId(me), &draft) {
+                                Ok(_) => "saved to Saved Messages".into(),
+                                Err(_) => "could not save to Saved Messages".into(),
+                            };
                     } else {
-                        this.status_note = "demo — Saved Messages needs live TDLib".into();
+                        this.connection.status_note =
+                            "demo — Saved Messages needs live TDLib".into();
                     }
                     this.message_ui.menu = None;
                     cx.notify();
@@ -1386,7 +1391,7 @@ impl QuillApp {
                 .is_err()
             {
                 self.message_ui.menu_ui.report_open = false;
-                self.status_note = "could not start the report".into();
+                self.connection.status_note = "could not start the report".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.begin_message_report(chat_id, message_ids);
@@ -1432,7 +1437,7 @@ impl QuillApp {
                 )
                 .is_err()
         {
-            self.status_note = "could not send the report".into();
+            self.connection.status_note = "could not send the report".into();
         }
         cx.notify();
     }
@@ -1466,7 +1471,7 @@ impl QuillApp {
                 .to_string()
         };
         if text.is_empty() && !is_optional {
-            self.status_note = "add a comment to send the report".into();
+            self.connection.status_note = "add a comment to send the report".into();
             cx.notify();
             return;
         }
@@ -1476,7 +1481,7 @@ impl QuillApp {
                 .report_messages(flow.chat_id, &flow.message_ids, &option_id, &text, None)
                 .is_err()
         {
-            self.status_note = "could not send the report".into();
+            self.connection.status_note = "could not send the report".into();
         }
         self.message_ui
             .menu_ui
@@ -1681,7 +1686,7 @@ impl QuillApp {
         sender: MessageSender,
         cx: &mut Context<Self>,
     ) {
-        self.status_note = match self.live.as_mut() {
+        self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live
                 .driver
                 .delete_message_reactions_from(chat_id, message_id, sender)

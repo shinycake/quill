@@ -76,18 +76,18 @@ impl QuillApp {
                 .child(size_text);
             section = section.child(match category.file_type {
                 Some(file_type) => {
-                    let checked = self.storage_selected.contains(file_type);
+                    let checked = self.settings.storage_selected.contains(file_type);
                     row.child(
                         Checkbox::new(format!("local-storage-type-{file_type}"))
                             .label(label)
                             .checked(checked)
                             .on_click(cx.listener(move |this, &on: &bool, _, cx| {
                                 if on {
-                                    this.storage_selected.insert(file_type);
+                                    this.settings.storage_selected.insert(file_type);
                                 } else {
-                                    this.storage_selected.remove(file_type);
+                                    this.settings.storage_selected.remove(file_type);
                                 }
-                                this.storage_confirm = None;
+                                this.settings.storage_confirm = None;
                                 cx.notify();
                             })),
                     )
@@ -100,7 +100,7 @@ impl QuillApp {
             .iter()
             .filter(|c| {
                 c.file_type
-                    .is_some_and(|t| self.storage_selected.contains(t))
+                    .is_some_and(|t| self.settings.storage_selected.contains(t))
             })
             .map(|c| c.size)
             .sum();
@@ -155,7 +155,7 @@ impl QuillApp {
         selected_size: i64,
         clearing: bool,
     ) -> Div {
-        let Some(pending) = self.storage_confirm else {
+        let Some(pending) = self.settings.storage_confirm else {
             return div()
                 .flex()
                 .flex_wrap()
@@ -166,7 +166,7 @@ impl QuillApp {
                         .outline()
                         .disabled(selected.is_empty() || clearing)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.storage_confirm = Some(StorageClear::Selected);
+                            this.settings.storage_confirm = Some(StorageClear::Selected);
                             cx.notify();
                         })),
                 )
@@ -176,7 +176,7 @@ impl QuillApp {
                         .outline()
                         .disabled(clearing)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.storage_confirm = Some(StorageClear::All);
+                            this.settings.storage_confirm = Some(StorageClear::All);
                             cx.notify();
                         })),
                 );
@@ -218,7 +218,7 @@ impl QuillApp {
                             .label("Keep")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.storage_confirm = None;
+                                this.settings.storage_confirm = None;
                                 cx.notify();
                             })),
                     ),
@@ -236,16 +236,19 @@ impl QuillApp {
 
     /// Send the confirmed clear (`optimizeStorage`).
     fn run_storage_clear(&mut self, cx: &mut Context<Self>) {
-        let Some(pending) = self.storage_confirm.take() else {
+        let Some(pending) = self.settings.storage_confirm.take() else {
             return;
         };
         let (types, chats): (Vec<&'static str>, Vec<i64>) = match pending {
             StorageClear::All => (Vec::new(), Vec::new()),
-            StorageClear::Selected => (self.storage_selected.iter().copied().collect(), Vec::new()),
+            StorageClear::Selected => (
+                self.settings.storage_selected.iter().copied().collect(),
+                Vec::new(),
+            ),
             StorageClear::Chat(chat_id) => (Vec::new(), vec![chat_id]),
         };
         if pending == StorageClear::Selected {
-            self.storage_selected.clear();
+            self.settings.storage_selected.clear();
         }
         if let Some(live) = self.live.as_mut() {
             // Send failures land on `data_storage_error`, shown on this
@@ -303,7 +306,8 @@ impl QuillApp {
                                 .small()
                                 .disabled(clearing)
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.storage_confirm = Some(StorageClear::Chat(chat_id));
+                                    this.settings.storage_confirm =
+                                        Some(StorageClear::Chat(chat_id));
                                     cx.notify();
                                 })),
                         )
@@ -416,5 +420,5 @@ impl QuillApp {
 }
 
 fn categories_selected(app: &QuillApp) -> Vec<&'static str> {
-    app.storage_selected.iter().copied().collect()
+    app.settings.storage_selected.iter().copied().collect()
 }

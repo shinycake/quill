@@ -65,7 +65,7 @@ fn icon_for(label: SwipeLabel) -> IconName {
 
 impl QuillApp {
     fn swipe_now_ms(&self) -> u64 {
-        self.chat_swipe.epoch.elapsed().as_millis() as u64
+        self.chat_list.swipe.epoch.elapsed().as_millis() as u64
     }
 
     /// The facts the action label depends on for one chat.
@@ -110,8 +110,8 @@ impl QuillApp {
             return row;
         }
         let now = self.swipe_now_ms();
-        let swiped = self.chat_swipe.machine.row(id.0, now);
-        if self.chat_swipe.machine.animating(now) {
+        let swiped = self.chat_list.swipe.machine.row(id.0, now);
+        if self.chat_list.swipe.machine.animating(now) {
             self.request_animation_tick(60, cx);
         }
         let inner = match swiped {
@@ -227,7 +227,7 @@ impl QuillApp {
             TouchPhase::Cancelled => Phase::Cancelled,
         };
         let now = self.swipe_now_ms();
-        let feed = self.chat_swipe.machine.feed(
+        let feed = self.chat_list.swipe.machine.feed(
             phase,
             f32::from(delta.x),
             f32::from(delta.y),
@@ -241,17 +241,17 @@ impl QuillApp {
         if feed.redraw {
             self.notify_sidebar(cx);
         }
-        if self.chat_swipe.machine.swiping() || self.chat_swipe.machine.animating(now) {
+        if self.chat_list.swipe.machine.swiping() || self.chat_list.swipe.machine.animating(now) {
             self.schedule_swipe_poll(cx);
         }
     }
 
     /// Start the active-swipe timer unless it runs.
     fn schedule_swipe_poll(&mut self, cx: &mut Context<Self>) {
-        if self.chat_swipe.poll.is_some() {
+        if self.chat_list.swipe.poll.is_some() {
             return;
         }
-        self.chat_swipe.poll = Some(cx.spawn(async move |this, cx| {
+        self.chat_list.swipe.poll = Some(cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(POLL_MS))
@@ -263,7 +263,7 @@ impl QuillApp {
                     break;
                 }
             }
-            let _ = this.update(cx, |this, _| this.chat_swipe.poll = None);
+            let _ = this.update(cx, |this, _| this.chat_list.swipe.poll = None);
         }));
     }
 
@@ -271,7 +271,7 @@ impl QuillApp {
     /// trackpad gesture that has not ended.
     pub(super) fn demo_hold_swipe(&mut self, chat: i64, ratio: f32) {
         let now = self.swipe_now_ms();
-        let m = &mut self.chat_swipe.machine;
+        let m = &mut self.chat_list.swipe.machine;
         m.feed(Phase::Started, 0.0, 0.0, Some(chat), now);
         m.feed(Phase::Moved, -1.0, 0.0, Some(chat), now);
         m.feed(Phase::Moved, -20.0, 0.0, Some(chat), now);
@@ -283,12 +283,12 @@ impl QuillApp {
     /// Returns whether the timer must keep running.
     fn poll_swipe(&mut self, cx: &mut Context<Self>) -> bool {
         let now = self.swipe_now_ms();
-        if let Some(chat) = self.chat_swipe.machine.poll(now) {
+        if let Some(chat) = self.chat_list.swipe.machine.poll(now) {
             self.perform_swipe_action(ChatId(chat), cx);
         }
         // The last spring-back frame must paint the settled row.
         self.notify_sidebar(cx);
-        self.chat_swipe.machine.swiping() || self.chat_swipe.machine.animating(now)
+        self.chat_list.swipe.machine.swiping() || self.chat_list.swipe.machine.animating(now)
     }
 
     /// The configured action on a chat (`PerformQuickDialogAction`). All of
@@ -319,9 +319,9 @@ impl QuillApp {
         if !matches!(
             label,
             SwipeLabel::Pin | SwipeLabel::Unpin | SwipeLabel::Delete
-        ) && !self.status_note.starts_with("could not")
+        ) && !self.connection.status_note.starts_with("could not")
         {
-            self.status_note = label.toast().into();
+            self.connection.status_note = label.toast().into();
         }
         cx.notify();
     }
