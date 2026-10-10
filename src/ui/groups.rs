@@ -1915,28 +1915,47 @@ impl QuillApp {
             ),
             // Subscribers can't post: the bar mutes / unmutes the channel.
             // Leaving lives in the info panel (with confirmation).
-            Some(ChannelMemberStatus::Member) => Some(
-                footer
-                    .child(
-                        Button::new("channel-mute-toggle")
-                            .label(if muted { "Unmute" } else { "Mute" })
-                            .ghost()
-                            .w_full()
-                            .max_w(px(360.))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.apply_chat_mute(
-                                    open,
-                                    if muted {
-                                        0
-                                    } else {
-                                        quill::telegram::envelope::MUTE_FOREVER
-                                    },
-                                    cx,
-                                );
-                            })),
-                    )
-                    .into_any_element(),
-            ),
+            Some(ChannelMemberStatus::Member) => {
+                // "Discuss" opens the linked discussion group, next to the
+                // mute toggle.
+                let discussion = session.discussion_chat_id(open);
+                Some(
+                    footer
+                        .child(
+                            Button::new("channel-mute-toggle")
+                                .label(
+                                    quill::chat_bottom_bar::BottomBar::MuteUnmute { muted }.label(),
+                                )
+                                .ghost()
+                                .w_full()
+                                .max_w(px(360.))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.apply_chat_mute(
+                                        open,
+                                        if muted {
+                                            0
+                                        } else {
+                                            quill::telegram::envelope::MUTE_FOREVER
+                                        },
+                                        cx,
+                                    );
+                                })),
+                        )
+                        .when_some(discussion, |this, discussion| {
+                            this.child(
+                                Button::new("channel-discuss")
+                                    .label("Discuss")
+                                    .ghost()
+                                    .tooltip("Open the discussion group")
+                                    .accessibility_label("Discuss")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.select_listed_chat(ChatId(discussion), window, cx);
+                                    })),
+                            )
+                        })
+                        .into_any_element(),
+                )
+            }
             Some(ChannelMemberStatus::Administrator) => {
                 let can_post = chat.channel_admin_can_post();
                 let note = if can_post {

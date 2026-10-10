@@ -683,6 +683,19 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — non-member channel".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatHeader)) {
+            let variant = std::env::var("QUILL_DEMO_HEADER").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::chat_header_demo::apply_ready_chat_header(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &variant,
+                );
+            }
+            self.status_note = "screenshot demo — chat header".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyTopBars)) {
             let variant = std::env::var("QUILL_DEMO_BAR").unwrap_or_default();
             if let Some(session) = self.demo_session.as_mut() {

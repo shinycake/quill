@@ -52,6 +52,33 @@ pub fn title_badge(
     is_premium.then_some(TitleBadge::PremiumStar)
 }
 
+/// The chat header's badges (`bothVerifyAndStatus`): unlike a chat row it
+/// shows the emoji status and the verified check side by side, status
+/// first. A scam or fake label still stands alone.
+pub fn header_badges(
+    verification: VerificationStatus,
+    is_premium: bool,
+    emoji_status_id: i64,
+) -> Vec<TitleBadge> {
+    if verification.is_scam {
+        return vec![TitleBadge::Scam];
+    }
+    if verification.is_fake {
+        return vec![TitleBadge::Fake];
+    }
+    let mut badges = Vec::new();
+    let status = is_premium && emoji_status_id != 0;
+    if status {
+        badges.push(TitleBadge::EmojiStatus(emoji_status_id));
+    }
+    if verification.is_verified {
+        badges.push(TitleBadge::Verified);
+    } else if is_premium && !status {
+        badges.push(TitleBadge::PremiumStar);
+    }
+    badges
+}
+
 impl TitleBadge {
     /// The label text for the bordered badges.
     pub fn label(self) -> Option<&'static str> {
@@ -65,7 +92,7 @@ impl TitleBadge {
 
 #[cfg(test)]
 mod tests {
-    use super::{TitleBadge, VerificationStatus, title_badge};
+    use super::{TitleBadge, VerificationStatus, header_badges, title_badge};
 
     const NONE: VerificationStatus = VerificationStatus {
         is_verified: false,
@@ -119,5 +146,35 @@ mod tests {
         assert_eq!(TitleBadge::Scam.label(), Some("SCAM"));
         assert_eq!(TitleBadge::Fake.label(), Some("FAKE"));
         assert_eq!(TitleBadge::Verified.label(), None);
+    }
+
+    #[test]
+    fn header_shows_status_and_check_together() {
+        let verified = VerificationStatus {
+            is_verified: true,
+            ..NONE
+        };
+        assert_eq!(
+            header_badges(verified, true, 5),
+            vec![TitleBadge::EmojiStatus(5), TitleBadge::Verified]
+        );
+        assert_eq!(header_badges(verified, true, 0), vec![TitleBadge::Verified]);
+        assert_eq!(header_badges(NONE, true, 0), vec![TitleBadge::PremiumStar]);
+        assert!(header_badges(NONE, false, 9).is_empty());
+    }
+
+    #[test]
+    fn header_scam_and_fake_stand_alone() {
+        let scam = VerificationStatus {
+            is_verified: true,
+            is_scam: true,
+            is_fake: false,
+        };
+        assert_eq!(header_badges(scam, true, 5), vec![TitleBadge::Scam]);
+        let fake = VerificationStatus {
+            is_fake: true,
+            ..NONE
+        };
+        assert_eq!(header_badges(fake, false, 0), vec![TitleBadge::Fake]);
     }
 }

@@ -39,6 +39,7 @@ impl Render for QuillApp {
         }
         self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
+        self.sync_window_title(window);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(window.is_window_active() && !self.passcode_ui.locked, cx);
@@ -959,6 +960,19 @@ impl Render for QuillApp {
             // MED4: Instant View reader overlay (above the menu).
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
                 this.child(overlay)
+            })
+            // Middle-click autoscroll: the anchor mark, and any other press
+            // ends the mode (`ListWidget::mousePressEvent`).
+            .when_some(self.autoscroll_mark(cx), |this, mark| this.child(mark))
+            .when(self.autoscroll_active(), |this| {
+                this.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.autoscroll_stop(cx)),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _, _, cx| this.autoscroll_stop(cx)),
+                )
             });
         // The lock screen covers the whole window, above every overlay.
         let root = root.when(self.passcode_ui.locked, |this| {

@@ -145,6 +145,9 @@ pub enum ScreenshotDemo {
     /// Premium / SCAM / FAKE title badges, online dot (injected, no live
     /// Telegram).
     ReadyChatRows,
+    /// Chat header badges and the bars that replace the composer
+    /// (`QUILL_DEMO_HEADER=<variant>`; see `chat_header_demo`).
+    ReadyChatHeader,
     /// Non-member public channel opened from search: the bottom bar must
     /// resolve to "Join channel" (injected, no live Telegram).
     ReadyJoinBar,
