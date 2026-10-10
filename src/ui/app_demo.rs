@@ -295,6 +295,16 @@ pub(super) fn demo_seed_for(
             "screenshot demo — chat list: archive settings dialog".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyArchiveHint
+        | ScreenshotDemo::ReadyChatBadges
+        | ScreenshotDemo::ReadyFoldersChats
+        | ScreenshotDemo::ReadyFoldersChatPicker
+        | ScreenshotDemo::ReadyFoldersToast => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyArchiveRow
         | ScreenshotDemo::ReadyArchiveBar
         | ScreenshotDemo::ReadyArchiveMenu
@@ -2383,6 +2393,7 @@ impl QuillApp {
             folder_tab_menu: None,
             folder_new_chats_dialog: None,
             folder_limit_box: None,
+            archive_hint_open: false,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,

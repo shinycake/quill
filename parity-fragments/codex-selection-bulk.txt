@@ -1,4 +1,0 @@
-# selection-bulk: items that fully match tdesktop
-parity:selection-bulk-actions
-parity:menu-noforwards-note
-parity:scheduled-select-many

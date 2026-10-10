@@ -1084,6 +1084,8 @@ pub struct QuillApp {
     pub(super) folder_new_chats_dialog: Option<super::folder_extras::FolderNewChatsDialog>,
     /// A folder limit box (or the tag Premium notice).
     pub(super) folder_limit_box: Option<quill::folder_limits::FolderLimitKind>,
+    /// The Archive menu's "How does it work?" box is open.
+    pub(super) archive_hint_open: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
