@@ -720,8 +720,30 @@ impl QuillApp {
             .as_mut()
             .map(|live| std::mem::take(&mut live.driver.session.pending_notifications))
             .unwrap_or_default();
+        // tdesktop skips its own sound and the Dock bounce / taskbar flash
+        // while the system is in Do Not Disturb; the OS banner is the OS's.
+        let dnd = quill::notify_focus::dnd_active();
+        let wants_attention = self
+            .live
+            .as_mut()
+            .is_some_and(|live| std::mem::take(&mut live.driver.session.pending_attention));
+        if wants_attention
+            && quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
+                flash_enabled: true,
+                sound_wanted: false,
+                dnd,
+            })
+            .flash
+        {
+            window.request_attention();
+        }
         for queued in queued {
-            if let Some(kind) = queued.sound {
+            let plan = quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
+                flash_enabled: false,
+                sound_wanted: queued.sound.is_some(),
+                dnd,
+            });
+            if let (true, Some(kind)) = (plan.sound, queued.sound) {
                 self.play_notification_sound(kind);
             }
             self.spawn_os_notification(queued, cx);

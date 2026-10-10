@@ -60,7 +60,7 @@ use super::message_text::{
     apply_ready_blockquote_expandable, apply_ready_caption_position, apply_ready_link_preview,
     apply_ready_preview_cards, apply_ready_text_entities,
 };
-use super::notification_settings::apply_ready_notification_sound;
+use super::notification_settings::{apply_ready_folder_badges, apply_ready_notification_sound};
 use super::payments::apply_ready_payments;
 use super::polls::apply_ready_poll;
 use super::profile::apply_ready_profile_edit;
@@ -288,6 +288,11 @@ impl QuillApp {
                 | super::scheduled_demo::ScheduledView::ReminderList => {
                     self.scheduled_dialog_open = true;
                 }
+                super::scheduled_demo::ScheduledView::ListSelected => {
+                    self.scheduled_dialog_open = true;
+                    self.scheduled_selected =
+                        vec![quill::ids::MessageId(501), quill::ids::MessageId(503)];
+                }
                 super::scheduled_demo::ScheduledView::Button => {}
             }
             self.status_note = "screenshot demo — scheduled messages".into();
@@ -370,6 +375,15 @@ impl QuillApp {
                 input.focus(window, cx);
             });
             self.status_note = "screenshot demo — select → pick dest → forwarded".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySelectKeyboard)) {
+            let mut draft =
+                ForwardDraft::from_message(ChatId(11), MessageId(201), false).expect("select 201");
+            draft.toggle(ChatId(11), MessageId(203), false);
+            self.pending_forward = Some(draft);
+            self.selection_anchor = Some(MessageId(201));
+            self.selection_focus = Some(MessageId(201));
+            self.status_note = "screenshot demo — keyboard selection".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadySelectMode)) {
             let mut draft =
@@ -1103,6 +1117,20 @@ impl QuillApp {
                 },
             });
             self.status_note = "screenshot demo — block user confirm".into();
+        }
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadyNotifyOs | ScreenshotDemo::ReadyFolderBadges)
+        ) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_folders(session, &self.demo_sink, &self.demo_seq);
+                apply_ready_folder_badges(session, &self.demo_sink, &self.demo_seq);
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyNotifyOs)) {
+                self.notification_defaults_open = true;
+            }
+            self.status_note = "screenshot demo — notification settings · folder counters".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyFolders)) {
             if let Some(session) = self.demo_session.as_mut() {

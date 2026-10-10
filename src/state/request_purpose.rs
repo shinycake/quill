@@ -1428,6 +1428,9 @@ pub enum RequestPurpose {
     /// B13: `setOption(ignore_sensitive_content_restrictions)`. The truth
     /// arrives as `updateOption`.
     SetSensitiveContent,
+    /// `setOption(disable_contact_registered_notifications)`. The truth
+    /// arrives as `updateOption`.
+    SetContactJoinedNotifications,
     /// B13: `getNetworkStatistics`. Response is `networkStatistics`.
     GetNetworkStatistics,
     /// B13: `resetNetworkStatistics`. Response is `ok`.

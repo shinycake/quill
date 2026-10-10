@@ -74,6 +74,9 @@ pub enum ScreenshotDemo {
     /// Message selection mode: check circles, selection tint and the
     /// Forward N / Delete N / Cancel header (injected, no live Telegram).
     ReadySelectMode,
+    /// Selection mode over a photo and a document that is not downloaded
+    /// yet: keyboard focus ring and the Download / Save buttons.
+    ReadySelectKeyboard,
     /// Reply bar above the composer for a photo message, with its thumbnail.
     ReadyReplyMedia,
     /// Edit bar above the composer for an outgoing photo (caption edit).
@@ -531,6 +534,13 @@ pub enum ScreenshotDemo {
     /// fixture) and the per-chat notifications panel is open with the sound
     /// picker expanded (parity slice: notification sounds).
     ReadyNotificationSound,
+    /// Notification settings (parity cluster notify-os): the defaults
+    /// dialog with the flash/bounce switch, the Events section and the
+    /// folder-counter switch (injected, English fixtures).
+    ReadyNotifyOs,
+    /// Folder tabs with unread-chat counters, one of them muted-only
+    /// (parity cluster notify-os, "Include muted chats in folder counters").
+    ReadyFolderBadges,
     /// Phase A1: slow-mode enforcement (injected, no live Telegram) — a
     /// dedicated supergroup (id 17) with `slow_mode_delay: 30` and
     /// `slow_mode_delay_expires_in: 25.0`, the viewer a plain member (no
@@ -796,7 +806,7 @@ pub enum ScreenshotDemo {
     /// (`QUILL_DEMO_PROXY=list|edit|link|link-bad`; injected data, no live
     /// Telegram, no real proxy).
     ReadyProxy,
-    /// Scheduled messages; `QUILL_DEMO_SCHEDULED=button|picker|list|reminder|reminder-list`
+    /// Scheduled messages; `QUILL_DEMO_SCHEDULED=button|picker|list|list-selected|reminder|reminder-list`
     /// (composer button, date+time picker, list with Send now / Reschedule,
     /// Saved Messages reminder wording; injected, no live Telegram).
     ReadyScheduled,

@@ -113,7 +113,7 @@ pub(super) fn render_mask(data: &[u8], edge: u32) -> Option<Vec<u8>> {
         }
         return Some(mask);
     }
-    // `Tree::from_data` unzips SVGZ / TGV itself.
+    // `Tree::from_data` unzips SVGZ / TGV itself (resvg feature `svgz`).
     let tree = resvg::usvg::Tree::from_data(data, &resvg::usvg::Options::default()).ok()?;
     let size = tree.size();
     if size.width() <= 0.0 || size.height() <= 0.0 {

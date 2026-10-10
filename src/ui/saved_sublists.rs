@@ -822,7 +822,10 @@ mod tests {
             label: "Love".into(),
             count: 2,
         };
-        assert_eq!(tag_name(&[], &[named.clone()], &heart), "\u{2764} Love");
+        assert_eq!(
+            tag_name(&[], std::slice::from_ref(&named), &heart),
+            "\u{2764} Love"
+        );
         assert_eq!(tag_name(&[], &[], &heart), "\u{2764}");
         assert_eq!(
             tag_name(&[], &[], &ReactionType::CustomEmoji { custom_emoji_id: 5 }),

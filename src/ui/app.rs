@@ -310,6 +310,9 @@ pub struct QuillApp {
     pub(super) spell_task: Option<Task<()>>,
     /// M1: the scheduled-messages dialog (view/delete).
     pub(super) scheduled_dialog_open: bool,
+    /// Scheduled messages ticked in the dialog (send now, reschedule or
+    /// delete together).
+    pub(super) scheduled_selected: Vec<MessageId>,
     /// M2: the rich editor is open — the composer textarea is interpreted
     /// as block markup (`quill::rich::markup_to_blocks`) and sends via
     /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
@@ -555,6 +558,11 @@ pub struct QuillApp {
     pub(super) selection_anchor: Option<MessageId>,
     /// A drag over rows is selecting (`true`) or deselecting (`false`).
     pub(super) selection_drag: Option<bool>,
+    /// The row keyboard selection acts on (Cmd/Ctrl+Space, Up / Down).
+    pub(super) selection_focus: Option<MessageId>,
+    /// A left press on a row outside text: dragging onto another row
+    /// starts selecting messages.
+    pub(super) drag_select_from: Option<(ChatId, MessageId)>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
     pub(super) forward_picker_open: bool,
     /// Destinations ticked in the share box.

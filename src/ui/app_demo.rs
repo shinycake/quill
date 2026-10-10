@@ -227,6 +227,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — share box, forward bar and send as (injected)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadySelectKeyboard => (
+            Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — keyboard selection over media (injected)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadySelectMode => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -941,6 +947,13 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — block user confirm".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyNotifyOs | ScreenshotDemo::ReadyFolderBadges => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — notification settings and folder counters (injected, no live Telegram)"
+                .into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyFolders => (
@@ -2084,6 +2097,7 @@ impl QuillApp {
             schedule_popup_open: false,
             schedule_picker: None,
             scheduled_dialog_open: false,
+            scheduled_selected: Vec::new(),
             rich_editor_open: false,
             message_menu: None,
             chat_menu: None,
@@ -2154,6 +2168,8 @@ impl QuillApp {
             pending_forward: None,
             selection_anchor: None,
             selection_drag: None,
+            selection_focus: None,
+            drag_select_from: None,
             forward_picker_open: false,
             share_selection: quill::share_box::ShareSelection::default(),
             forward_bar_dest: None,

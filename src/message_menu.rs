@@ -497,6 +497,23 @@ pub fn noforwards_info(is_channel: bool, is_group: bool, is_bot: bool, mine: boo
     }
 }
 
+/// [`noforwards_info`] with the peer named in a private chat the other
+/// side restricted (`lng_context_noforwards_info_his`).
+pub fn noforwards_text(
+    is_channel: bool,
+    is_group: bool,
+    is_bot: bool,
+    mine: bool,
+    peer: Option<&str>,
+) -> String {
+    match peer {
+        Some(name) if !is_channel && !is_group && !is_bot && !mine => {
+            format!("{name} disabled copying and forwarding in this chat.")
+        }
+        _ => noforwards_info(is_channel, is_group, is_bot, mine).to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::local_time::civil_at;
@@ -887,5 +904,34 @@ mod tests {
     fn link_wording() {
         assert_eq!(copy_link_label(true), "Copy Post Link");
         assert_eq!(copy_link_label(false), "Copy Message Link");
+    }
+
+    #[test]
+    fn noforwards_line_names_the_chat() {
+        use crate::message_menu::noforwards_text;
+        assert_eq!(
+            noforwards_text(true, false, false, false, None),
+            "Copying and forwarding is not allowed in this channel."
+        );
+        assert_eq!(
+            noforwards_text(false, true, false, false, None),
+            "Copying and forwarding is not allowed in this group."
+        );
+        assert_eq!(
+            noforwards_text(false, false, true, false, Some("Bot")),
+            "Copying and forwarding is not allowed from this bot."
+        );
+        assert_eq!(
+            noforwards_text(false, false, false, true, Some("Mom")),
+            "You disabled copying and forwarding in this chat."
+        );
+        assert_eq!(
+            noforwards_text(false, false, false, false, Some("Mom")),
+            "Mom disabled copying and forwarding in this chat."
+        );
+        assert_eq!(
+            noforwards_text(false, false, false, false, None),
+            "Copying and forwarding is not allowed in this chat."
+        );
     }
 }

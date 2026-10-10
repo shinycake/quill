@@ -281,6 +281,14 @@ pub struct Session {
     /// Chats whose OS notification should be withdrawn (read elsewhere or
     /// removed by TDLib); drained by the UI, which dismisses the toast.
     pub pending_notification_clears: Vec<ChatId>,
+    /// A notification-worthy message arrived: the UI bounces the Dock icon /
+    /// flashes the taskbar (when the user wants it and the OS is not in
+    /// Do Not Disturb). Set independently of the "Desktop notifications"
+    /// switch, like tdesktop's alert.
+    pub pending_attention: bool,
+    /// TDLib option `disable_contact_registered_notifications`: the inverse
+    /// of tdesktop's "Contact joined Telegram" event switch.
+    pub disable_contact_registered_notifications: bool,
     /// Chats with an OS notification we showed (or TDLib reports active
     /// from a previous launch); only these produce a clear.
     pub shown_notification_chats: std::collections::HashSet<ChatId>,
@@ -557,6 +565,8 @@ pub struct Session {
     /// lists (`updateUnreadMessageCount` / `updateUnreadChatCount`); the
     /// badge uses these instead of summing the (paginated) loaded chats.
     pub unread_totals: UnreadTotals,
+    /// `updateUnreadChatCount` for each chat folder (tab counters).
+    pub folder_unread_chats: HashMap<i32, UnreadPair>,
     /// Slice parity:settings-language: the app language tag sent in
     /// `setTdlibParameters`, persisted via `settings::LanguagePrefs`.
     /// Loaded at startup like `call_prefs`; the UI saves on change.
@@ -1310,6 +1320,8 @@ impl Session {
             desktop_notifications: true,
             pending_notifications: Vec::new(),
             pending_notification_clears: Vec::new(),
+            pending_attention: false,
+            disable_contact_registered_notifications: false,
             shown_notification_chats: std::collections::HashSet::new(),
             default_auto_delete_secs: None,
             default_auto_delete_busy: false,
@@ -1394,6 +1406,7 @@ impl Session {
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),
             unread_totals: UnreadTotals::default(),
+            folder_unread_chats: HashMap::new(),
             language_prefs: LanguagePrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),

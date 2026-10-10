@@ -391,6 +391,22 @@ impl QuillApp {
                     cx.notify();
                 }
             );
+            if self.can_select_up_to(chat_id, message_id) {
+                item!(
+                    71,
+                    gpui_kit::assets::IconName::CircleCheck,
+                    "menu-select-up-to",
+                    "Select up to this message",
+                    this,
+                    _window,
+                    cx,
+                    {
+                        this.select_up_to(chat_id, message_id, cx);
+                        this.message_menu = None;
+                        cx.notify();
+                    }
+                );
+            }
         }
         if let Some(edit) = quill::composer::ComposerEdit::from_own_content(
             chat_id,
@@ -666,15 +682,28 @@ impl QuillApp {
                 chat_kind,
                 Some(ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. })
             );
+            // A private chat names the peer, or says it is a bot.
+            let peer = match chat_kind {
+                Some(ChatKind::Private { user_id }) => self
+                    .session()
+                    .map(|s| (s.is_bot_user(user_id.0), s.user(user_id.0))),
+                _ => None,
+            };
+            let is_bot = peer.is_some_and(|(bot, _)| bot);
+            let peer_name = peer
+                .and_then(|(_, user)| user)
+                .map(|user| user.first_name.trim().to_string())
+                .filter(|name| !name.is_empty());
             rows.push(info_row(
                 order::SELECT,
                 "menu-noforwards",
                 None,
-                quill::message_menu::noforwards_info(
+                quill::message_menu::noforwards_text(
                     is_channel_post,
                     is_group && !is_channel_post,
-                    false,
+                    is_bot,
                     message.is_outgoing,
+                    peer_name.as_deref(),
                 ),
             ));
         }
@@ -1789,7 +1818,7 @@ impl QuillApp {
                     confirm(
                         window,
                         cx,
-                        "Do you want to unpin all messages?",
+                        quill::selection_pin::UNPIN_ALL_QUESTION,
                         "Unpin",
                         move |cx| {
                             let _ = app.update(cx, |this, cx| {
@@ -1895,7 +1924,7 @@ fn confirm_hide_pinned(
     confirm(
         window,
         cx,
-        "Do you want to hide the pinned message bar? It will stay hidden until a new message is pinned.",
+        quill::selection_pin::HIDE_PINNED_QUESTION,
         "Hide",
         move |cx| {
             let _ = app.update(cx, |this, cx| {
