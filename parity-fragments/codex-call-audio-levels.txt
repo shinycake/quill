@@ -1,2 +1,0 @@
-# Call audio: your microphone level, speaking detection (docs/decisions/codex-call-audio-levels.md)
-parity:calls-speaking-detection
