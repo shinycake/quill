@@ -391,6 +391,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Suggestions block: birthdays, set a photo, check phone or password, Premium <!-- parity:chatlist-suggestions -->
 - [ ] Story strip context menu: Hide stories, View profile, Mute <!-- parity:chatlist-stories-menu -->
 - [ ] Contacts: sort by last seen, Invite friends, search <!-- parity:chatlist-contacts-extras -->
+- [ ] Alphabetical section index bar on long peer lists (contacts, add members) <!-- parity:chatlist-contacts-index -->
 - [ ] Clear all call history from the Calls list <!-- parity:chatlist-clear-calls -->
 - [x] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
 - [ ] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
@@ -399,6 +400,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Profiles & shared media
 
 - [ ] Profile photo gallery with Set as Main, report and "photo set by you" <!-- parity:profile-photo-gallery -->
+- [ ] "Copy Mention" in the profile and user-info context menus <!-- parity:profile-copy-mention -->
 - [x] Edit contact and Share contact from a profile <!-- parity:profile-contact-actions -->
 - [x] Copy phone, name, username and link from profile rows <!-- parity:profile-copy-rows -->
 - [ ] Set or suggest a personal photo for a contact <!-- parity:profile-personal-photo -->
@@ -1012,6 +1014,9 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 ### Settings: account & profile
 
 - [ ] Set or remove your birthday and open birthday privacy <!-- parity:settings-birthday -->
+- [ ] Contacts with upcoming birthdays list and birthday privacy row in Settings > Privacy <!-- parity:settings-birthday-contacts -->
+- [ ] Large emoji: send a lone emoji as a big glyph, with a Chat settings toggle <!-- parity:settings-large-emoji -->
+- [ ] "Pull to next channel" chat setting <!-- parity:settings-pull-next-channel -->
 - [ ] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
 - [ ] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
 - [ ] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
