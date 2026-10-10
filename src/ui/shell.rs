@@ -147,6 +147,8 @@ pub enum DialogKind {
     FolderNewChats,
     /// A folder limit box / the folder tag Premium notice.
     FolderLimit,
+    /// The Archive menu's "How does it work?" box.
+    ArchiveHint,
     CallConfirm,
     /// Swap prompt: incoming call while another call is active.
     CallSwap,
@@ -270,6 +272,7 @@ impl QuillShell {
             DialogKind::ChatLook => app.chat_look_dialog.is_some(),
             DialogKind::FolderNewChats => app.folder_new_chats_dialog.is_some(),
             DialogKind::FolderLimit => app.folder_limit_box.is_some(),
+            DialogKind::ArchiveHint => app.archive_hint_open,
             DialogKind::CallConfirm => app.call_confirm.is_some(),
             DialogKind::CallSwap => app.session().is_some_and(|s| s.call_swap_pending.is_some()),
             DialogKind::NotificationDefaults => app.notification_defaults_open,
@@ -345,6 +348,7 @@ impl QuillShell {
             DialogKind::ChatLook => QuillApp::build_chat_look_dialog,
             DialogKind::FolderNewChats => QuillApp::build_folder_new_chats_dialog,
             DialogKind::FolderLimit => QuillApp::build_folder_limit_dialog,
+            DialogKind::ArchiveHint => QuillApp::build_archive_hint_dialog,
             DialogKind::CallConfirm => QuillApp::build_call_confirm_dialog,
             DialogKind::CallSwap => QuillApp::build_call_swap_dialog,
             DialogKind::NotificationDefaults => QuillApp::build_notification_defaults_dialog,
@@ -398,6 +402,7 @@ impl QuillShell {
         // Swap prompt is call-urgent: same priority band as CallConfirm.
         DialogKind::CallSwap,
         DialogKind::FolderLimit,
+        DialogKind::ArchiveHint,
         DialogKind::FolderEditor,
         DialogKind::FolderDelete,
         DialogKind::FolderShare,

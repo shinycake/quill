@@ -151,9 +151,56 @@ impl ArchiveRowSummary {
     }
 }
 
+/// Title of the "How does it work?" box (`lng_archive_hint_title`).
+pub const ARCHIVE_HINT_TITLE: &str = "This is your Archive";
+
+/// The three sections of the box (`lng_archive_hint_section_*`).
+pub const ARCHIVE_HINT_SECTIONS: [(&str, &str); 3] = [
+    (
+        "Archived Chats",
+        "Move any chat into your Archive and back by swiping on it.",
+    ),
+    (
+        "Hiding Archive",
+        "Hide the Archive from your Main screen by swiping on it.",
+    ),
+    (
+        "Stories",
+        "Archive Stories from your contacts separately from chats with them.",
+    ),
+];
+
+/// Whether a new message pulls an unmuted archived chat back to the list.
+/// tdesktop passes `unarchiveOnNewMessageCurrent() != None`, which is the
+/// inverse of TDLib's `keep_unmuted_chats_archived`. Until the settings
+/// arrive the account default (not kept) applies.
+pub fn unarchive_on_new_message(keep_unmuted_chats_archived: Option<bool>) -> bool {
+    !keep_unmuted_chats_archived.unwrap_or(false)
+}
+
+/// The explanation under the title (`lng_archive_hint_about` and
+/// `lng_archive_hint_about_unmuted`, without the trailing link).
+pub fn archive_hint_about(unarchive_on_new_message: bool) -> &'static str {
+    if unarchive_on_new_message {
+        "When you receive a new message, muted chats will remain in the Archive, while unmuted chats will be moved to Chats."
+    } else {
+        "Archived chats will remain in the Archive when you receive a new message."
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_hint_text_follows_the_setting() {
+        assert!(unarchive_on_new_message(None));
+        assert!(unarchive_on_new_message(Some(false)));
+        assert!(!unarchive_on_new_message(Some(true)));
+        assert!(archive_hint_about(true).contains("unmuted chats will be moved"));
+        assert!(archive_hint_about(false).starts_with("Archived chats will remain"));
+        assert_eq!(ARCHIVE_HINT_SECTIONS.len(), 3);
+    }
 
     fn chat(title: &str, date: i32, unread: bool) -> ArchivedChat {
         ArchivedChat {
