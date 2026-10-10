@@ -801,6 +801,8 @@ pub struct QuillApp {
     pub(super) invite_link_details: Option<(ChatId, String)>,
     /// B8: whether the revoked-links list is expanded.
     pub(super) revoked_links_open: bool,
+    /// The invite link whose QR code is showing.
+    pub(super) invite_link_qr: Option<(ChatId, String, Arc<RenderImage>)>,
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     pub(super) admin_dialog: Option<AdminDialog>,

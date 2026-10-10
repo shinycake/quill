@@ -882,6 +882,10 @@ pub enum ScreenshotDemo {
     /// (`QUILL_DEMO_GROUP_ADMIN=group|channel|basic|reactions|discussion|
     /// linked|confirm`; injected data, no live Telegram).
     ReadyGroupAdminSettings,
+    /// Admin links, boosts and usernames
+    /// (`QUILL_DEMO_LINKS_BOOSTS=usernames|boosts|gifts|admin-links|
+    /// link-requests|qr`; injected data, no live Telegram).
+    ReadyLinksBoosts,
     /// Slice A5: like `ReadyProfileEdit`, but the username field holds a
     /// freshly-checked value with a seeded `checkChatUsernameResultOk`
     /// verdict — intended for a taller capture

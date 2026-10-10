@@ -603,8 +603,27 @@ impl Session {
                 }),
             );
         }
+        // A single request handled from one link's list leaves that list too.
+        if let Some(RequestPurpose::ProcessChatJoinRequest { user_id }) = pending.map(|p| p.purpose)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+            && let Some(state) = self.link_join_requests.get_mut(&chat_id.0)
+        {
+            let before = state.requests.len();
+            state.requests.retain(|r| r.user_id != user_id);
+            if state.requests.len() < before {
+                state.total_count = state.total_count.saturating_sub(1);
+            }
+        }
         // B8: bulk join-request processing and revoked-link deletion.
         match pending.map(|p| (p.purpose, p.id, p.chat_id)) {
+            Some((RequestPurpose::ProcessLinkJoinRequests { .. }, _, Some(chat_id))) => {
+                if let Some(state) = self.link_join_requests.get_mut(&chat_id.0) {
+                    state.requests.clear();
+                    state.total_count = 0;
+                }
+                // The requests list and badge may now be stale; refetch.
+                self.join_requests.remove(&chat_id.0);
+            }
             Some((RequestPurpose::ProcessAllChatJoinRequests { .. }, _, Some(chat_id))) => {
                 self.join_requests.insert(
                     chat_id.0,
@@ -628,6 +647,18 @@ impl Session {
                         list.total_count = list.total_count.saturating_sub(1);
                     }
                 }
+            }
+            Some((RequestPurpose::DeleteAllRevokedChatInviteLinks, _, Some(chat_id)))
+                if pending.and_then(|p| p.user_id).is_some() =>
+            {
+                // Another admin's revoked links were deleted.
+                if let Some(state) = self.admin_invite_links.get_mut(&chat_id.0) {
+                    state.revoked = InviteLinkFetch::Loaded(InviteLinkList {
+                        total_count: 0,
+                        links: Vec::new(),
+                    });
+                }
+                self.invite_link_counts.remove(&chat_id.0);
             }
             Some((RequestPurpose::DeleteAllRevokedChatInviteLinks, _, Some(chat_id))) => {
                 self.revoked_invite_links.insert(
