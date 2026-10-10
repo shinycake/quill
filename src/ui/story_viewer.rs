@@ -207,21 +207,21 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let current = items.get(index).map(|item| (item.chat_id, item.story_id));
-        self.story_viewer = StoryViewer::open(items, index);
+        self.stories.viewer = StoryViewer::open(items, index);
         // Phase 9.5: viewers list and report flow are per-story.
-        self.story_viewers_open = false;
-        self.story_report_open = false;
-        self.story_stats_open = false;
+        self.stories.viewers_open = false;
+        self.stories.report_open = false;
+        self.stories.stats_open = false;
         if let (Some(live), Some((chat_id, story_id))) = (self.live.as_mut(), current) {
             let _ = live.driver.open_story(chat_id, story_id);
         }
         // Phase 9.6: (re)start the playback clock + tick whenever the
         // viewer (re)opens — also covers the deferred `pending_story_open`
         // path, which funnels through here.
-        self.story_playback.start(Instant::now());
-        self.story_pause.reset();
-        self.story_native_failed = None;
-        self.story_video_wait_since = Some(Instant::now());
+        self.stories.playback.start(Instant::now());
+        self.stories.pause.reset();
+        self.stories.native_failed = None;
+        self.stories.video_wait_since = Some(Instant::now());
         self.sync_story_video();
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
@@ -232,7 +232,7 @@ impl QuillApp {
     /// state and interaction counts arrive via `updateStory` without the
     /// viewer items being rebuilt).
     pub(super) fn current_story(&self) -> Option<ParsedStory> {
-        let item = self.story_viewer.current()?;
+        let item = self.stories.viewer.current()?;
         self.session()
             .and_then(|session| session.stories.get(&(item.chat_id.0, item.story_id)))
             .cloned()
@@ -243,7 +243,7 @@ impl QuillApp {
     /// `setStoryReaction` (`schema/td_api.tl:13809`). Removing sends
     /// `reaction_type: null`.
     pub(super) fn quick_react_story(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let chosen = self
@@ -272,7 +272,7 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             self.status_note = "demo — setStoryReaction runs with live TDLib".into();
         }
-        self.story_reaction_picker_open = false;
+        self.stories.reaction_picker_open = false;
         cx.notify();
     }
 
@@ -301,8 +301,8 @@ impl QuillApp {
     /// open on a live connection fetches `getStoryAvailableReactions`
     /// (`schema/td_api.tl:13802`).
     pub(super) fn toggle_story_reaction_picker(&mut self, cx: &mut Context<Self>) {
-        self.story_reaction_picker_open = !self.story_reaction_picker_open;
-        if self.story_reaction_picker_open {
+        self.stories.reaction_picker_open = !self.stories.reaction_picker_open;
+        if self.stories.reaction_picker_open {
             if let Some(live) = self.live.as_mut() {
                 if live.driver.session.story_available_reactions.is_none() {
                     match live.driver.get_story_available_reactions() {
@@ -319,7 +319,7 @@ impl QuillApp {
 
     /// Phase 9.2: set the current story's reaction to a picker emoji.
     pub(super) fn pick_story_reaction(&mut self, emoji: &str, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -334,7 +334,7 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             self.status_note = "demo — story reactions run with live TDLib".into();
         }
-        self.story_reaction_picker_open = false;
+        self.stories.reaction_picker_open = false;
         cx.notify();
     }
 
@@ -383,7 +383,7 @@ impl QuillApp {
         custom_emoji_id: i64,
         cx: &mut Context<Self>,
     ) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -398,7 +398,7 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             self.status_note = "demo — story reactions run with live TDLib".into();
         }
-        self.story_reaction_picker_open = false;
+        self.stories.reaction_picker_open = false;
         cx.notify();
     }
 
@@ -501,17 +501,17 @@ impl QuillApp {
     /// Phase 9.2: toggle the reply row in the viewer (`story.can_be_replied`
     /// gates the button).
     pub(super) fn toggle_story_reply(&mut self, cx: &mut Context<Self>) {
-        self.story_reply_open = !self.story_reply_open;
+        self.stories.reply_open = !self.stories.reply_open;
         cx.notify();
     }
 
     /// Phase 9.2: send the reply row's text as a message to the story
     /// poster with `inputMessageReplyToStory` (`schema/td_api.tl:3099`).
     pub(super) fn send_story_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        let text = self.story_reply_input.read(cx).value().to_string();
+        let text = self.stories.reply_input.read(cx).value().to_string();
         if text.trim().is_empty() {
             return;
         }
@@ -524,12 +524,13 @@ impl QuillApp {
                     Ok(_) => "Story reply sent".into(),
                     Err(_) => "could not send story reply".into(),
                 };
-            self.story_reply_input
+            self.stories
+                .reply_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         } else if self.demo_session.is_some() {
             self.status_note = "demo — story replies run with live TDLib".into();
         }
-        self.story_reply_open = false;
+        self.stories.reply_open = false;
         cx.notify();
     }
 
@@ -538,7 +539,7 @@ impl QuillApp {
     /// The deletion lands as `updateStoryDeleted`, which closes the viewer
     /// at render time.
     pub(super) fn delete_story_viewer(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -549,8 +550,8 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             self.status_note = "demo — deleteStory runs with live TDLib".into();
         }
-        self.story_reaction_picker_open = false;
-        self.story_reply_open = false;
+        self.stories.reaction_picker_open = false;
+        self.stories.reply_open = false;
         cx.notify();
     }
 
@@ -559,12 +560,12 @@ impl QuillApp {
     /// `getStoryViewers` constructor). Opening fetches the first page;
     /// `Load more` pages with the previous `next_offset`.
     pub(super) fn toggle_story_viewers(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        self.story_viewers_open = !self.story_viewers_open;
-        self.story_report_open = false;
-        if self.story_viewers_open {
+        self.stories.viewers_open = !self.stories.viewers_open;
+        self.stories.report_open = false;
+        if self.stories.viewers_open {
             // Phase 9.5 review: reset rows before the fresh page-1
             // fetch — `begin_story_viewers` keeps rows for the same
             // story, so reopening would otherwise duplicate them.
@@ -603,7 +604,7 @@ impl QuillApp {
 
     /// Phase 9.5: fetch the next viewers page (`next_offset` non-empty).
     pub(super) fn load_more_story_viewers(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let offset = self
@@ -639,12 +640,12 @@ impl QuillApp {
     /// initial `reportStory` (empty option id / text); the server's
     /// `ReportStoryResult` answers drive the picker and details steps.
     pub(super) fn toggle_story_report(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        self.story_report_open = !self.story_report_open;
-        self.story_viewers_open = false;
-        if self.story_report_open {
+        self.stories.report_open = !self.stories.report_open;
+        self.stories.viewers_open = false;
+        if self.stories.report_open {
             self.send_story_report_step(&item, "", "", cx);
         } else {
             self.clear_terminal_story_report();
@@ -727,7 +728,7 @@ impl QuillApp {
     /// Phase 9.5: the user picked a report reason — echo the option id
     /// back into `reportStory` with empty text.
     pub(super) fn pick_story_report_option(&mut self, option_id: &str, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         self.send_story_report_step(&item, option_id, "", cx);
@@ -736,7 +737,7 @@ impl QuillApp {
     /// Phase 9.5: submit the details text (`reportStoryResultTextRequired`
     /// step); an optional step can be skipped with empty text.
     pub(super) fn send_story_report_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let (option_id, is_optional) = self
@@ -753,14 +754,15 @@ impl QuillApp {
         if option_id.is_empty() && !is_optional {
             return;
         }
-        let text = self.story_report_text_input.read(cx).value().to_string();
+        let text = self.stories.report_text_input.read(cx).value().to_string();
         if text.trim().is_empty() && !is_optional {
             self.status_note = "add details or cancel the report".into();
             cx.notify();
             return;
         }
         self.send_story_report_step(&item, &option_id, text.trim(), cx);
-        self.story_report_text_input
+        self.stories
+            .report_text_input
             .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
@@ -815,47 +817,47 @@ impl QuillApp {
     /// Phase 9.1: close the story viewer; `closeStory` marks the current
     /// story as no longer being viewed.
     pub(super) fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
-        if let Some(item) = self.story_viewer.current().cloned()
+        if let Some(item) = self.stories.viewer.current().cloned()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.close_story(item.chat_id, item.story_id);
         }
-        self.story_viewer.close();
+        self.stories.viewer.close();
         self.pending_story_open = None;
-        self.story_reaction_picker_open = false;
-        self.story_reply_open = false;
-        self.story_viewers_open = false;
-        self.story_report_open = false;
-        self.story_stats_open = false;
+        self.stories.reaction_picker_open = false;
+        self.stories.reply_open = false;
+        self.stories.viewers_open = false;
+        self.stories.report_open = false;
+        self.stories.stats_open = false;
         self.clear_terminal_story_report();
         // Phase 9.5: drop the cover / privacy editors with the viewer.
-        self.story_cover_target = None;
-        self.story_cover_sent = false;
-        self.story_privacy_edit = None;
-        self.story_privacy_sent = false;
+        self.stories.cover_target = None;
+        self.stories.cover_sent = false;
+        self.stories.privacy_edit = None;
+        self.stories.privacy_sent = false;
         // Phase 9.6: the tick task self-exits on the next wake when the
         // viewer is no longer open.
-        self.story_playback.stop();
+        self.stories.playback.stop();
         // B14: drop the player and the viewer's extra state with it.
-        *self.story_native.borrow_mut() = None;
-        self.story_native_key = None;
-        self.story_native_failed = None;
-        self.story_pause.reset();
-        self.story_share_open = false;
-        self.close_friends_edit = None;
-        self.close_friends_saving = false;
-        self.story_notice = None;
+        *self.stories.native.borrow_mut() = None;
+        self.stories.native_key = None;
+        self.stories.native_failed = None;
+        self.stories.pause.reset();
+        self.stories.share_open = false;
+        self.stories.close_friends_edit = None;
+        self.stories.close_friends_saving = false;
+        self.stories.notice = None;
         cx.notify();
     }
 
     pub(super) fn step_story_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
-        let prev = self.story_viewer.current().cloned();
+        let prev = self.stories.viewer.current().cloned();
         if delta < 0 {
-            self.story_viewer.prev();
+            self.stories.viewer.prev();
         } else {
-            self.story_viewer.next();
+            self.stories.viewer.next();
         }
-        let next = self.story_viewer.current().cloned();
+        let next = self.stories.viewer.current().cloned();
         if let (Some(prev), Some(next)) = (prev, next)
             && (prev.chat_id, prev.story_id) != (next.chat_id, next.story_id)
             && let Some(live) = self.live.as_mut()
@@ -863,17 +865,17 @@ impl QuillApp {
             let _ = live.driver.close_story(prev.chat_id, prev.story_id);
             let _ = live.driver.open_story(next.chat_id, next.story_id);
         }
-        self.story_reaction_picker_open = false;
-        self.story_reply_open = false;
-        self.story_stats_open = false;
+        self.stories.reaction_picker_open = false;
+        self.stories.reply_open = false;
+        self.stories.stats_open = false;
         // B14: a new story starts playing (a Space pause is per story).
-        self.story_pause.reset();
-        self.story_share_open = false;
-        self.story_notice = None;
-        self.story_native_failed = None;
+        self.stories.pause.reset();
+        self.stories.share_open = false;
+        self.stories.notice = None;
+        self.stories.native_failed = None;
         // Phase 9.6: manual nav restarts the playback clock for the new
         // current story (same as the official clients).
-        self.story_playback.start(Instant::now());
+        self.stories.playback.start(Instant::now());
         self.sync_story_video();
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
@@ -888,11 +890,11 @@ impl QuillApp {
     /// into this same predicate when they land (they live on their own
     /// parity branch; not touched here).
     pub(super) fn story_playback_paused(&self) -> bool {
-        self.story_reaction_picker_open
-            || self.story_reply_open
-            || self.story_pause.is_paused()
-            || self.story_share_open
-            || self.close_friends_edit.is_some()
+        self.stories.reaction_picker_open
+            || self.stories.reply_open
+            || self.stories.pause.is_paused()
+            || self.stories.share_open
+            || self.stories.close_friends_edit.is_some()
     }
 
     /// Phase 9.6: 100ms tick while the story viewer is open (mirrors
@@ -904,10 +906,10 @@ impl QuillApp {
     /// `updatePlayback` → `subjumpFor(1)` else `storiesClose()`,
     /// `media_stories_controller.cpp:1235-1240`).
     pub(super) fn ensure_story_tick(&mut self, cx: &mut Context<Self>) {
-        if !self.story_viewer.is_open() || self.story_tick_active {
+        if !self.stories.viewer.is_open() || self.stories.tick_active {
             return;
         }
-        self.story_tick_active = true;
+        self.stories.tick_active = true;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -915,9 +917,9 @@ impl QuillApp {
                     .await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        if !this.story_viewer.is_open() {
-                            this.story_playback.stop();
-                            this.story_tick_active = false;
+                        if !this.stories.viewer.is_open() {
+                            this.stories.playback.stop();
+                            this.stories.tick_active = false;
                             return false;
                         }
                         let now = Instant::now();
@@ -926,7 +928,8 @@ impl QuillApp {
                         this.sync_story_video();
                         let user_paused = this.story_playback_paused();
                         let video_driven = this.story_video_driven();
-                        this.story_playback
+                        this.stories
+                            .playback
                             .set_paused(user_paused || video_driven, now);
                         this.apply_story_native_pause(user_paused);
                         this.tick_close_friends(cx);
@@ -960,7 +963,8 @@ impl QuillApp {
     /// the viewer at the end of the sequence (official behavior: no loop).
     pub(super) fn advance_story_playback(&mut self, cx: &mut Context<Self>) {
         if self
-            .story_viewer
+            .stories
+            .viewer
             .position()
             .is_some_and(|(position, total)| position < total)
         {
@@ -974,7 +978,7 @@ impl QuillApp {
     /// candidate is local yet (photo: largest size; video: thumbnail, else
     /// the clip itself). Live-only, like `ensure_viewer_download`.
     pub(super) fn ensure_story_download(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let roots = self.media_display_roots();
@@ -1226,7 +1230,8 @@ impl QuillApp {
         // flight so two ops can't overwrite each other's state.
         let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
         let is_video = self
-            .story_viewer
+            .stories
+            .viewer
             .current()
             .is_some_and(|item| matches!(item.kind, StoryViewerKind::Video));
         let quick_label = if chosen.as_deref() == Some("❤") {
@@ -1281,7 +1286,7 @@ impl QuillApp {
                 .ghost()
                 .text_color(rgb(0xffffff))
                 .on_click(cx.listener(|this, _, window, cx| {
-                    if let Some(item) = this.story_viewer.current() {
+                    if let Some(item) = this.stories.viewer.current() {
                         let chat_id = item.chat_id;
                         this.close_story_viewer(cx);
                         this.open_story_page(chat_id, window, cx);
@@ -1393,7 +1398,7 @@ impl QuillApp {
                     .text_color(text_bright())
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
-                        let Some(item) = this.story_viewer.current().cloned() else {
+                        let Some(item) = this.stories.viewer.current().cloned() else {
                             return;
                         };
                         this.open_story_edit(item.chat_id.0, item.story_id, window, cx);
@@ -1407,7 +1412,7 @@ impl QuillApp {
                         .text_color(text_bright())
                         .disabled(manage_busy)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            let Some(item) = this.story_viewer.current().cloned() else {
+                            let Some(item) = this.stories.viewer.current().cloned() else {
                                 return;
                             };
                             this.toggle_story_cover_edit(item.chat_id.0, item.story_id, cx);
@@ -1435,7 +1440,7 @@ impl QuillApp {
                     .text_color(text_bright())
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
-                        let Some(item) = this.story_viewer.current().cloned() else {
+                        let Some(item) = this.stories.viewer.current().cloned() else {
                             return;
                         };
                         this.open_story_repost(item.chat_id.0, item.story_id, window, cx);
@@ -1443,10 +1448,10 @@ impl QuillApp {
             );
         }
         let mut column = div().flex().flex_col().gap_2().items_center().child(row);
-        if self.story_reaction_picker_open {
+        if self.stories.reaction_picker_open {
             column = column.child(self.story_reaction_picker(cx));
         }
-        if self.story_reply_open {
+        if self.stories.reply_open {
             column =
                 column.child(
                     div()
@@ -1456,7 +1461,7 @@ impl QuillApp {
                         .w(px(360.))
                         .child(
                             div().flex_1().child(
-                                Textarea::new(&self.story_reply_input)
+                                Textarea::new(&self.stories.reply_input)
                                     .aria_label("Reply to story")
                                     .h(px(40.)),
                             ),
@@ -1468,13 +1473,13 @@ impl QuillApp {
                         )),
                 );
         }
-        if self.story_viewers_open {
+        if self.stories.viewers_open {
             column = column.child(self.story_viewers_panel(cx));
         }
-        if self.story_stats_open {
+        if self.stories.stats_open {
             column = column.child(self.story_stats_panel(cx));
         }
-        if self.story_report_open {
+        if self.stories.report_open {
             column = column.child(self.story_report_ui(cx));
         }
         if let Some(stealth_err) = self
@@ -1485,10 +1490,10 @@ impl QuillApp {
         }
         // Phase 9.5: cover-frame editor row (video stories) + privacy
         // editor panel + the management status line (pending / error).
-        if self.story_cover_target.is_some() {
+        if self.stories.cover_target.is_some() {
             column = column.child(self.story_cover_editor(cx));
         }
-        if self.story_privacy_edit.is_some() {
+        if self.stories.privacy_edit.is_some() {
             column = column.child(self.story_privacy_panel(cx));
         }
         if let Some(status) = self.story_manage_status() {
@@ -1667,7 +1672,7 @@ impl QuillApp {
                         .items_center()
                         .child(
                             div().flex_1().child(
-                                Textarea::new(&self.story_report_text_input)
+                                Textarea::new(&self.stories.report_text_input)
                                     .aria_label("Story report explanation")
                                     .h(px(40.)),
                             ),
@@ -1681,7 +1686,7 @@ impl QuillApp {
                 if is_optional {
                     panel = panel.child(Button::new("story-report-skip").label("Skip").on_click(
                         cx.listener(move |this, _, _, cx| {
-                            let Some(item) = this.story_viewer.current().cloned() else {
+                            let Some(item) = this.stories.viewer.current().cloned() else {
                                 return;
                             };
                             this.send_story_report_step(&item, &option_id, "", cx);
@@ -1711,7 +1716,8 @@ impl QuillApp {
     /// backdrop click and Escape (see `cancel_search`) close it.
     pub(super) fn story_viewer_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let item = self
-            .story_viewer
+            .stories
+            .viewer
             .current()
             .cloned()
             .unwrap_or_else(|| StoryViewerItem {
@@ -1729,7 +1735,7 @@ impl QuillApp {
                 live_call: None,
                 areas: Vec::new(),
             });
-        let (position, total) = self.story_viewer.position().unwrap_or((0, 0));
+        let (position, total) = self.stories.viewer.position().unwrap_or((0, 0));
         let now = Instant::now();
         let poster = self
             .session()
@@ -1898,7 +1904,7 @@ impl QuillApp {
             })
             .collect();
         // B14: press-and-hold on the media pauses until release.
-        let paused_chip = self.story_pause.is_paused().then(|| {
+        let paused_chip = self.stories.pause.is_paused().then(|| {
             div()
                 .absolute()
                 .left(px(8.))

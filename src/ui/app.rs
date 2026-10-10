@@ -5,7 +5,6 @@ use super::connect_ui::ConnectUiStatus;
 use super::demo::demo_media_allowlist;
 use super::history::HistoryShared;
 use super::notification_settings::SoundPickerTarget;
-use super::story_albums::StoryPrivacyEdit;
 use super::synthetic::SyntheticChat;
 use super::*;
 use gpui_kit::component::input::{InputState, TextareaState};
@@ -28,8 +27,6 @@ use quill::media_viewer::{MediaViewer, ViewerZoom};
 use quill::playback::PlaybackClock;
 use quill::settings::{AppearancePrefs, ChatPrefs};
 use quill::state::{ForwardResult, Session};
-use quill::story_composer::StoryComposer;
-use quill::story_viewer::{StoryPlayback, StoryViewer};
 use quill::telegram::envelope::AuthorizationState;
 use quill::telegram::envelope::NotificationSettingsScope;
 use quill::telegram::requests::SelfDestructSend;
@@ -59,8 +56,8 @@ pub struct QuillApp {
     pub(super) chat_list_items: Vec<ChatListItem>,
     /// Chat-row swipe gesture state (`quill::chat_swipe`).
     pub(super) chat_swipe: super::chat_swipe_ui::ChatSwipeState,
-    /// Stories strip tiles and sideways scroll (`quill::stories_strip`).
-    pub(super) story_strip: super::stories_strip_ui::StoryStripState,
+    /// Stories UI state: the strip, viewer, composer, story page and their boxes.
+    pub(super) stories: super::stories_state::StoryUi,
     /// kit Phase 3: message-history virtualization — scroller state with
     /// tail-following, owned by the app so prepend/append keep the anchor.
     pub(super) history_scroller: Entity<MessageScrollerState>,
@@ -220,13 +217,8 @@ pub struct QuillApp {
     pub(super) demo_screen_frame: Option<quill::calls::engine::VideoFrame>,
     /// Phase C2e: demo-mode camera pick (live picks go to the driver).
     pub(super) demo_selected_camera: Option<String>,
-    /// Phase C2e/C2l: decoded video tiles cached by `(frame seq,
-    /// is_screen)`, rebuilt only when the key changes. The peer's
-    /// screen and camera streams share `seq` numbering (all demo
-    /// fixtures use seq 0), so `is_screen` is part of the key — a
-    /// seq-only key would cross-render.
-    pub(super) call_remote_image: Option<((u64, bool), Arc<RenderImage>)>,
-    pub(super) call_local_image: Option<((u64, bool), Arc<RenderImage>)>,
+    /// One-to-one call UI: the call window, tick, sounds, images and notifications.
+    pub(super) calls: super::calls_state::CallUi,
     /// Slice A1: decoded QR-login bitmap cached by link, rebuilt only when
     /// the link changes. The link itself is never logged.
     pub(super) qr_login_cache: Option<(String, Arc<RenderImage>)>,
@@ -246,11 +238,6 @@ pub struct QuillApp {
     /// Phase 8.1: in-flight OS notification workers; capped so a message
     /// burst cannot stack threads.
     pub(super) notify_inflight: Arc<AtomicUsize>,
-    /// Accept / Decline / body picks on incoming-call notifications.
-    pub(super) call_notify_clicks:
-        Arc<Mutex<Vec<(i32, quill::notify_call::CallNotificationAction)>>>,
-    /// The incoming call last announced with a system notification.
-    pub(super) call_notified: Option<i32>,
     /// Local files the user explicitly attached (canonical paths via `pick`).
     /// One item sends with `sendMessage`. Two or more photos/videos send with
     /// `sendMessageAlbum`.
@@ -545,24 +532,8 @@ pub struct QuillApp {
     pub(super) storage_confirm: Option<StorageClear>,
     /// Batch 6: the file types ticked for "Clear selected".
     pub(super) storage_selected: std::collections::BTreeSet<&'static str>,
-    /// Slice A2: two-step verification overlay. `twofa_view` picks the
-    /// status screen or one of the forms; the four textareas back the
-    /// enable/change/disable/recovery-email forms. Passwords live in the
-    /// inputs only and are cleared on submit/close — never on the session.
-    pub(super) twofa_open: bool,
-    pub(super) twofa_view: TwofaView,
-    pub(super) twofa_current_password: Entity<InputState>,
-    pub(super) twofa_new_password: Entity<InputState>,
-    pub(super) twofa_hint: Entity<TextareaState>,
-    pub(super) twofa_email: Entity<TextareaState>,
-    /// Slice A2 fixup: local validation notice for the 2FA forms ("enter
-    /// your current password") — the driver rejects doomed requests
-    /// silently, so the form must speak before sending.
-    pub(super) twofa_notice: Option<String>,
-    /// Batch 6: code entry (recovery email, password recovery, login
-    /// email) and the inline confirmation on the recovery screen.
-    pub(super) twofa_code: Entity<InputState>,
-    pub(super) twofa_confirm: Option<TwofaConfirm>,
+    /// Two-step verification box: its view, inputs and pending confirmation.
+    pub(super) twofa: super::twofa_state::TwoStepUi,
     /// Slice A9: account lifecycle dialog (delete account + self-destruct
     /// TTL). Working state lives in the named module; this is the one
     /// field the dialog machinery reads.
@@ -640,14 +611,8 @@ pub struct QuillApp {
     pub(super) ttl_custom_open: bool,
     /// The custom auto-delete period being edited, in seconds.
     pub(super) ttl_custom_secs: i32,
-    /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`).
-    pub(super) group_call_title_dialog: Option<GroupCallTitleDialog>,
-    /// Phase C2h: `createVideoChat` start/schedule dialog.
-    pub(super) group_call_start_dialog: Option<GroupCallStartDialog>,
-    /// Phase C2h: in-call chat composer (sendGroupCallMessage).
-    pub(super) group_call_composer: Entity<TextareaState>,
-    /// Phase C2f: voice-chat invite picker overlay (contacts list).
-    pub(super) group_call_invite_open: bool,
+    /// Video chat UI: its window, dialogs, composer, pin and push-to-talk.
+    pub(super) group_call: super::group_call_state::GroupCallUi,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
     pub(super) notif_sound_picker_open: bool,
     /// Parity slice (`parity:stories-notify-settings`): the notifications
@@ -703,41 +668,11 @@ pub struct QuillApp {
     /// The open chat whose live-location countdowns are being refreshed
     /// (`Some` exactly while that task runs; see `live_location_tick`).
     pub(super) live_location_tick_chat: Option<ChatId>,
-    /// Phase C1: whether the call-duration 1s tick task is running
-    /// (keeps the overlay's ringing/connected clock fresh). Mirrors
-    /// `voice_tick`.
-    pub(super) call_tick_active: bool,
-    /// The call window (tdesktop's call panel), and its bookkeeping: a
-    /// call whose window you closed stays closed until the call bar
-    /// reopens it; an incoming call raises it once.
-    pub(super) call_window: Option<AnyWindowHandle>,
-    /// The voice / video chat window, as for 1:1 calls; the in-call
-    /// chat shows under the members when asked.
-    pub(super) group_call_window: Option<AnyWindowHandle>,
-    pub(super) group_call_window_opening: bool,
-    pub(super) group_call_window_closed_by_user: Option<i32>,
-    pub(super) group_call_chat_shown: bool,
-    /// Push-to-talk state for the group call window, its clock origin,
-    /// and whether Settings is waiting for the next key to bind.
-    pub(super) group_call_ptt: quill::calls::ptt::PushToTalk,
-    pub(super) ptt_clock: Instant,
     /// Cmd+Q hold detection (`macWarnBeforeQuit`) and its clock origin.
     pub(super) quit_guard: quill::quit_guard::QuitGuard,
     pub(super) quit_clock: Instant,
-    pub(super) ptt_capture: bool,
-    /// System-wide push-to-talk hook, live only while joined with PTT on.
-    pub(super) global_ptt: quill::calls::ptt_global::PlatformController,
-    pub(super) global_ptt_polling: bool,
-    /// Locally pinned video tile of the group call (tdesktop viewport pin).
-    pub(super) group_call_pin: quill::calls::tile_pin::TilePin,
     /// Demo captures can't go full screen: show the stage anyway.
     pub(super) demo_group_stage: bool,
-    pub(super) call_window_opening: bool,
-    pub(super) call_window_raised: bool,
-    pub(super) call_window_closed_by_user: Option<i32>,
-    pub(super) call_ended_at: Option<(i32, std::time::Instant)>,
-    pub(super) call_sounds: super::call_sounds::CallSounds,
-    pub(super) call_sound_marks: super::call_sounds::SoundMarks,
     /// History row whose voice note is playing.
     pub(super) player: super::player_bar::PlayerBarState,
     pub(super) playing_voice: Option<MessageId>,
@@ -1020,28 +955,10 @@ pub struct QuillApp {
     /// MED1: composer "group media" override for 2+ attachments; `None`
     /// follows `media_prefs.default_grouping()`.
     pub(super) composer_group_media: Option<bool>,
-    /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
-    pub(super) story_viewer: StoryViewer,
-    /// Phase 9.6: playback clock + segmented progress bar for the viewer;
-    /// `story_tick_active` guards the at-most-one 100ms tick task (same
-    /// pattern as `ensure_call_tick`).
-    pub(super) story_playback: StoryPlayback,
-    pub(super) story_tick_active: bool,
     /// Phase 9.1: `(chat_id, story_id)` the user tapped while the story's
     /// full content was still being fetched; resolved on the next render
     /// once the `story` response lands in the cache.
     pub(super) pending_story_open: Option<(i64, i32)>,
-    /// Phase 9.2: story reaction picker open above the viewer overlay.
-    pub(super) story_reaction_picker_open: bool,
-    /// Phase 9.2: story reply input open in the viewer overlay.
-    pub(super) story_reply_open: bool,
-    /// Phase 9.2: reply-to-story draft (the viewer overlay's reply row).
-    pub(super) story_reply_input: Entity<TextareaState>,
-    /// Phase 9.5: viewers panel open in the viewer overlay
-    /// (`getStoryInteractions`).
-    pub(super) story_viewers_open: bool,
-    /// The statistics panel of the story open in the viewer.
-    pub(super) story_stats_open: bool,
     /// The info card under the open forum topic's strip.
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.
@@ -1052,55 +969,6 @@ pub struct QuillApp {
     /// The forum topic column is on screen this frame, so the conversation
     /// shows a hint instead of repeating the topic list.
     pub(super) forum_column_shown: bool,
-    /// Phase 9.5: report flow UI open in the viewer overlay
-    /// (`reportStory`).
-    pub(super) story_report_open: bool,
-    /// Phase 9.5: report details draft (the
-    /// `reportStoryResultTextRequired` step).
-    pub(super) story_report_text_input: Entity<TextareaState>,
-    /// Phase 9.7: the chat story page overlay (albums / chat-page
-    /// stories / archive); `None` when closed.
-    pub(super) story_page: Option<StoryPage>,
-    /// Phase 9.3: story posting composer state (pure) + its path /
-    /// caption / user-search inputs.
-    pub(super) story_composer: StoryComposer,
-    pub(super) story_composer_path: Entity<TextareaState>,
-    pub(super) story_composer_caption: Entity<TextareaState>,
-    pub(super) story_composer_user_search: Entity<TextareaState>,
-    /// Phase 9.4: story areas — link URL + suggested-reaction emoji
-    /// inputs.
-    pub(super) story_composer_link: Entity<TextareaState>,
-    pub(super) story_composer_reaction: Entity<TextareaState>,
-    /// Phase 9.5: cover-frame editor (viewer) — open on a video story
-    /// with `can_be_edited`; the input takes seconds.
-    pub(super) story_cover_target: Option<(i64, i32)>,
-    pub(super) story_cover_input: Entity<TextareaState>,
-    pub(super) story_cover_sent: bool,
-    /// Phase 9.5: privacy editor (viewer) — open on a story with
-    /// `can_set_privacy_settings`; reuses the 4-way privacy selector
-    /// + contact checkboxes.
-    pub(super) story_privacy_edit: Option<StoryPrivacyEdit>,
-    pub(super) story_privacy_user_search: Entity<TextareaState>,
-    pub(super) story_privacy_sent: bool,
-    /// B14: native player of the current video story (a `RefCell` because
-    /// the overlay renders from `&self` and pulling a frame needs `&mut`),
-    /// the story it belongs to, and the story whose clip could not play.
-    pub(super) story_native: std::cell::RefCell<Option<super::native_video::NativeVideo>>,
-    pub(super) story_native_key: Option<(i64, i32)>,
-    pub(super) story_native_failed: Option<(i64, i32)>,
-    pub(super) story_native_play_at: Instant,
-    pub(super) story_native_paused_by_us: bool,
-    pub(super) story_video_wait_since: Option<Instant>,
-    /// B14: story sound muted, the press-and-hold / Space pause, and the
-    /// viewer's extra panels (close friends, share) with their shared
-    /// search field and last result line.
-    pub(super) story_muted: bool,
-    pub(super) story_pause: quill::story_extras::StoryUserPause,
-    pub(super) close_friends_edit: Option<quill::story_extras::CloseFriendsEdit>,
-    pub(super) close_friends_saving: bool,
-    pub(super) story_share_open: bool,
-    pub(super) story_more_search: Entity<TextareaState>,
-    pub(super) story_notice: Option<String>,
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     pub(super) contacts_tab_open: bool,
@@ -1108,18 +976,14 @@ pub struct QuillApp {
     /// call settings instead of the chat list. Mutually exclusive with
     /// `contacts_tab_open`.
     pub(super) calls_tab_open: bool,
-    /// Phase C2i: pending "call again" / profile-call confirmation when
-    /// the confirm-before-calling pref is on: `(user_id, is_video)`.
-    pub(super) call_confirm: Option<(i64, bool)>,
     /// Phase C2i: rating detail draft for the call-end card — the star
     /// tap opens the problems checklist + comment field instead of
     /// sending immediately.
     pub(super) rating_detail: Option<RatingDetail>,
     /// Phase C2i: comment input for the rating detail card.
     pub(super) rating_comment_input: Entity<TextareaState>,
-    /// Phase 7.1: selected folder tab (`None` = Main). Folder membership
-    /// comes from chat positions (`chatListFolder`); the tab only filters.
-    pub(super) folder_tab: Option<i32>,
+    /// Chat folders UI: the tab strip, editor, manager, share and invite boxes.
+    pub(super) folders: super::folders_state::FolderUi,
     /// Phase 6: add-contact dialog (phone + first/last name) opened from
     /// the user info panel.
     pub(super) add_contact_dialog: Option<AddContactDialog>,
@@ -1142,24 +1006,8 @@ pub struct QuillApp {
     /// Slice A6: vCard import dialog opened from the Contacts tab
     /// settings section.
     pub(super) import_contacts_dialog: Option<ImportContactsDialog>,
-    /// Parity slice: folder management (manage dialog / editor / delete
-    /// confirm / per-chat folder menu).
-    pub(super) folder_manage_open: bool,
-    pub(super) folder_editor: Option<FolderEditorDialog>,
-    pub(super) folder_delete_confirm: Option<FolderDeleteConfirm>,
-    /// Share Folder (invite links) dialog.
-    pub(super) folder_share: Option<FolderShareDialog>,
-    /// "Add folder" for an `addlist` link.
-    pub(super) folder_invite: Option<FolderInviteDialog>,
-    pub(super) folder_menu_open: bool,
     /// Theme and wallpaper picker for a chat, or a `bg/` link preview.
     pub(super) chat_look_dialog: Option<super::chat_look_ui::ChatLookDialog>,
-    /// Right-click menu of a folder tab (`None` folder = the All tab).
-    pub(super) folder_tab_menu: Option<super::folder_extras::FolderTabMenu>,
-    /// The shared folder's "N new chats" join dialog.
-    pub(super) folder_new_chats_dialog: Option<super::folder_extras::FolderNewChatsDialog>,
-    /// A folder limit box (or the tag Premium notice).
-    pub(super) folder_limit_box: Option<quill::folder_limits::FolderLimitKind>,
     /// The Archive menu's "How does it work?" box is open.
     pub(super) archive_hint_open: bool,
     /// Screenshot demo: the Appearance box shows only the window and tray switches.

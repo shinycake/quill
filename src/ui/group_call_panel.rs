@@ -242,7 +242,7 @@ impl QuillApp {
                         },
                     ),
             )
-            .when(self.group_call_chat_shown, |this| {
+            .when(self.group_call.chat_shown, |this| {
                 this.child(
                     self.group_call_messages_section(div().id("group-call-chat"), &call, cx)
                         .rounded(px(12.))
@@ -313,7 +313,7 @@ impl QuillApp {
                 .child("Connection lost. Click to rejoin.")
         });
 
-        let invite = self.group_call_invite_open.then(|| {
+        let invite = self.group_call.invite_open.then(|| {
             div()
                 .absolute()
                 .inset_0()
@@ -333,7 +333,7 @@ impl QuillApp {
         });
 
         // Rename (`setVideoChatTitle`).
-        let rename = self.group_call_title_dialog.as_ref().map(|dialog| {
+        let rename = self.group_call.title_dialog.as_ref().map(|dialog| {
             div()
                 .absolute()
                 .inset_0()
@@ -640,7 +640,7 @@ impl QuillApp {
     fn group_call_menu(&self, call: &ActiveGroupCall, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = cx.entity().downgrade();
         let call = call.clone();
-        let chat_shown = self.group_call_chat_shown;
+        let chat_shown = self.group_call.chat_shown;
         let screen_source = self
             .live
             .as_ref()
@@ -667,7 +667,7 @@ impl QuillApp {
                     menu = menu.item(item(
                         if chat_shown { "Hide Chat" } else { "Show Chat" },
                         |this, _, cx| {
-                            this.group_call_chat_shown = !this.group_call_chat_shown;
+                            this.group_call.chat_shown = !this.group_call.chat_shown;
                             cx.notify();
                         },
                     ));
@@ -894,7 +894,7 @@ impl QuillApp {
             .and_then(|s| s.active_group_call.as_ref())
             .map(|c| c.id)
         {
-            self.group_call_window_closed_by_user = Some(id);
+            self.group_call.window_closed_by_user = Some(id);
         }
         cx.notify();
     }
@@ -906,12 +906,12 @@ impl QuillApp {
             .session()
             .and_then(|s| s.active_group_call.as_ref())
             .map(|call| call.id)
-            .filter(|id| self.group_call_window_closed_by_user != Some(*id));
+            .filter(|id| self.group_call.window_closed_by_user != Some(*id));
         self.prune_group_video_images(wanted);
-        match (wanted, self.group_call_window) {
+        match (wanted, self.group_call.window) {
             (Some(_), None) => self.open_group_call_window(cx),
             (None, Some(handle)) => {
-                self.group_call_window = None;
+                self.group_call.window = None;
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
             }
             _ => {}
@@ -919,10 +919,10 @@ impl QuillApp {
     }
 
     fn open_group_call_window(&mut self, cx: &mut Context<Self>) {
-        if self.group_call_window_opening {
+        if self.group_call.window_opening {
             return;
         }
-        self.group_call_window_opening = true;
+        self.group_call.window_opening = true;
         let owner = cx.entity();
         cx.defer(move |cx| {
             let weak = owner.downgrade();
@@ -945,8 +945,8 @@ impl QuillApp {
                     window.activate_window();
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
-                            app.group_call_window = None;
-                            app.group_call_window_closed_by_user = app
+                            app.group_call.window = None;
+                            app.group_call.window_closed_by_user = app
                                 .session()
                                 .and_then(|s| s.active_group_call.as_ref())
                                 .map(|c| c.id);
@@ -978,9 +978,9 @@ impl QuillApp {
                 },
             );
             owner.update(cx, |app, cx| {
-                app.group_call_window_opening = false;
+                app.group_call.window_opening = false;
                 match result {
-                    Ok(handle) => app.group_call_window = Some(handle.into()),
+                    Ok(handle) => app.group_call.window = Some(handle.into()),
                     Err(_) => app.status_note = "Couldn't open the video chat window".into(),
                 }
                 cx.notify();
@@ -990,8 +990,8 @@ impl QuillApp {
 
     /// Bring the group call window back (the call bar).
     pub(super) fn show_group_call_window(&mut self, cx: &mut Context<Self>) {
-        self.group_call_window_closed_by_user = None;
-        if let Some(handle) = self.group_call_window {
+        self.group_call.window_closed_by_user = None;
+        if let Some(handle) = self.group_call.window {
             let _ = handle.update(cx, |_, window, _| window.activate_window());
         }
         cx.notify();

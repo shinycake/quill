@@ -16,8 +16,6 @@ use quill::composer::{ComposerScheduling, PreviewMediaSize, should_send_on_enter
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
 use quill::media_viewer::{MediaViewer, ViewerZoom};
-use quill::story_composer::StoryComposer;
-use quill::story_viewer::{StoryPlayback, StoryViewer};
 use quill::telegram::envelope::AuthorizationState;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -175,38 +173,7 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
-        // Slice A2: two-step verification overlay inputs. Passwords live
-        // here only and are cleared on submit/close — never on the
-        // session.
-        let twofa_current_password = cx.new(|cx| {
-            InputState::new(window, cx)
-                .masked(true)
-                .placeholder("Current password")
-                .submit_on_enter(false)
-        });
-        let twofa_new_password = cx.new(|cx| {
-            InputState::new(window, cx)
-                .masked(true)
-                .placeholder("New password")
-                .submit_on_enter(false)
-        });
-        let twofa_hint = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Hint (optional)")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        let twofa_code = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Code")
-                .submit_on_enter(false)
-        });
-        let twofa_email = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Recovery email")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
+        let twofa = super::twofa_state::TwoStepUi::new(window, cx);
         let global = super::chatlist_global::ChatlistGlobal::new(window, cx);
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -232,75 +199,7 @@ impl QuillApp {
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
-        let story_reply_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Reply to story")
-                .auto_grow(1, 3)
-                .submit_on_enter(true)
-        });
-        // Phase 9.5: report details draft — shown when the server answers
-        // `reportStoryResultTextRequired`.
-        let story_report_text_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Report details (optional)")
-                .auto_grow(1, 3)
-                .submit_on_enter(true)
-        });
-        // Phase 9.3: story composer inputs — media path (path entry; no
-        // native file-picker infrastructure yet), caption, and the
-        // selected-users search.
-        let story_composer_path = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("/path/to/photo.jpg")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        let story_composer_caption = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Caption… (**bold** markup supported)")
-                .auto_grow(1, 3)
-                .submit_on_enter(false)
-        });
-        let story_composer_user_search = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search contacts")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        // Phase 9.4: story area inputs — link sticker URL and
-        // suggested-reaction emoji (space-separated).
-        let story_composer_link = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("https://… (optional, Premium)")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        let story_composer_reaction = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("❤️ (optional, space-separated)")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        // Phase 9.5: cover-frame seconds input (viewer cover editor) and
-        // the privacy editor's contact search.
-        let story_more_search = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        let story_cover_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Cover frame time in seconds, e.g. 1.5")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        let story_privacy_user_search = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search contacts")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
+        let stories = super::stories_state::StoryUi::new(window, cx);
         cx.subscribe_in(
             &composer,
             window,
@@ -567,7 +466,7 @@ impl QuillApp {
             chat_list_scroll: VirtualListScrollHandle::new(),
             chat_list_items: Vec::new(),
             chat_swipe: Default::default(),
-            story_strip: Default::default(),
+            stories,
             history_scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             history_rows: Vec::new(),
             rendered_history_rows: std::cell::RefCell::new(Vec::new()),
@@ -594,7 +493,7 @@ impl QuillApp {
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),
             scroll_view_probe: Default::default(),
-            group_call_composer,
+            group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
             command_menu_open: false,
             command_menu_selected: 0,
             mention_selected: 0,
@@ -633,15 +532,7 @@ impl QuillApp {
             password_input,
             recovery_code_input,
             recovery_mode: false,
-            twofa_open: false,
-            twofa_view: TwofaView::Status,
-            twofa_current_password,
-            twofa_new_password,
-            twofa_hint,
-            twofa_email,
-            twofa_notice: None,
-            twofa_code,
-            twofa_confirm: None,
+            twofa,
             account_lifecycle: AccountLifecycleState::new(window, cx),
             accounts_ui: AccountsUiState::new(window, cx),
             passcode_ui: super::passcode::PasscodeUi::new(window, cx),
@@ -658,41 +549,10 @@ impl QuillApp {
             chat_search_input,
             forward_search_input,
             share_comment_input,
-            story_reply_input,
-            story_viewers_open: false,
-            story_stats_open: false,
             topic_info_open: false,
             thread_info_open: false,
             forum_chats_peek: false,
             forum_column_shown: false,
-            story_report_open: false,
-            story_report_text_input,
-            story_page: None,
-            story_composer: StoryComposer::default(),
-            story_composer_path,
-            story_composer_caption,
-            story_composer_user_search,
-            story_composer_link,
-            story_composer_reaction,
-            story_cover_target: None,
-            story_cover_input,
-            story_cover_sent: false,
-            story_privacy_edit: None,
-            story_privacy_user_search,
-            story_native: std::cell::RefCell::new(None),
-            story_native_key: None,
-            story_native_failed: None,
-            story_native_play_at: std::time::Instant::now(),
-            story_native_paused_by_us: false,
-            story_video_wait_since: None,
-            story_muted: false,
-            story_pause: Default::default(),
-            close_friends_edit: None,
-            close_friends_saving: false,
-            story_share_open: false,
-            story_more_search,
-            story_notice: None,
-            story_privacy_sent: false,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
             context_menu_focus: cx.focus_handle(),
@@ -713,8 +573,7 @@ impl QuillApp {
             demo_local_frame: None,
             demo_screen_frame: None,
             demo_selected_camera: None,
-            call_remote_image: None,
-            call_local_image: None,
+            calls: super::calls_state::CallUi::new(audio_output.clone()),
             qr_login_cache: None,
             group_video_images: HashMap::new(),
             demo_group_frames: HashMap::new(),
@@ -722,8 +581,6 @@ impl QuillApp {
             demo_sink,
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notify_inflight: Arc::new(AtomicUsize::new(0)),
-            call_notify_clicks: Arc::new(Mutex::new(Vec::new())),
-            call_notified: None,
             pending_attachments,
             composer_self_destruct: None,
             composer_caption_above: false,
@@ -863,9 +720,6 @@ impl QuillApp {
             slices: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),
-            group_call_title_dialog: None,
-            group_call_start_dialog: None,
-            group_call_invite_open: false,
             notif_sound_picker_open: false,
             story_sound_picker_open: false,
             notification_defaults_open: false,
@@ -887,27 +741,9 @@ impl QuillApp {
             slow_mode_tick_chat: None,
             self_destruct_tick_chat: None,
             live_location_tick_chat: None,
-            call_tick_active: false,
-            call_window: None,
-            group_call_window: None,
-            group_call_window_opening: false,
-            group_call_window_closed_by_user: None,
-            group_call_chat_shown: false,
-            group_call_ptt: quill::calls::ptt::PushToTalk::new(),
-            ptt_clock: std::time::Instant::now(),
             quit_guard: Default::default(),
             quit_clock: std::time::Instant::now(),
-            ptt_capture: false,
-            global_ptt: Default::default(),
-            global_ptt_polling: false,
-            group_call_pin: quill::calls::tile_pin::TilePin::default(),
             demo_group_stage: false,
-            call_window_opening: false,
-            call_window_raised: false,
-            call_window_closed_by_user: None,
-            call_ended_at: None,
-            call_sounds: super::call_sounds::CallSounds::new(audio_output.clone()),
-            call_sound_marks: Default::default(),
             player: Default::default(),
             playing_voice: None,
             playing_audio: None,
@@ -1026,28 +862,13 @@ impl QuillApp {
             viewer_extract_cancel: None,
             viewer_extract_epoch: 0,
             viewer_demo_sync_frames: false,
-            story_viewer: StoryViewer::closed(),
-            story_playback: StoryPlayback::default(),
-            story_tick_active: false,
             pending_story_open: None,
-            story_reaction_picker_open: false,
-            story_reply_open: false,
             contacts_tab_open: false,
             calls_tab_open: false,
-            call_confirm: None,
             rating_detail: None,
             rating_comment_input,
-            folder_tab: None,
-            folder_manage_open: false,
-            folder_editor: None,
-            folder_delete_confirm: None,
-            folder_share: None,
-            folder_invite: None,
+            folders: super::folders_state::FolderUi::new(),
             chat_look_dialog: None,
-            folder_menu_open: false,
-            folder_tab_menu: None,
-            folder_new_chats_dialog: None,
-            folder_limit_box: None,
             archive_hint_open: false,
             window_settings_screenshot: false,
             chat_export_dialog: None,
@@ -1079,7 +900,7 @@ impl QuillApp {
                         if this.message_menu.is_none()
                             && this.chat_menu.is_none()
                             && this.archive_menu.is_none()
-                            && this.folder_tab_menu.is_none()
+                            && this.folders.tab_menu.is_none()
                         {
                             return false;
                         }
@@ -1087,7 +908,7 @@ impl QuillApp {
                             this.message_menu = None;
                             this.chat_menu = None;
                             this.archive_menu = None;
-                            this.folder_tab_menu = None;
+                            this.folders.tab_menu = None;
                             cx.notify();
                             return true;
                         }
@@ -1192,7 +1013,7 @@ impl QuillApp {
         let ptt_app = cx.weak_entity();
         cx.intercept_keystrokes(move |event, _window, cx| {
             let armed = ptt_app
-                .update(cx, |this, _| this.ptt_capture)
+                .update(cx, |this, _| this.group_call.ptt_capture)
                 .unwrap_or(false);
             if !armed || super::keybindings::is_modifier_key(&event.keystroke.key) {
                 return;
@@ -1270,7 +1091,7 @@ impl QuillApp {
                     let action = quill::notify_call::CallNotificationAction::from_id(
                         response.action_id.as_ref().map(|id| id.as_ref()),
                     );
-                    if let Ok(mut clicks) = this.call_notify_clicks.lock() {
+                    if let Ok(mut clicks) = this.calls.notify_clicks.lock() {
                         clicks.push((call_id, action));
                     }
                     cx.notify();

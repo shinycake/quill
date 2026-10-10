@@ -123,11 +123,11 @@ impl QuillApp {
         let built = self.collect_group_tiles(call, false);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
         // The pin lasts only as long as its stream does.
-        self.group_call_pin.retain_available(&keys);
+        self.group_call.pin.retain_available(&keys);
         if built.is_empty() {
             return None;
         }
-        let layout = self.group_call_pin.layout(&keys);
+        let layout = self.group_call.pin.layout(&keys);
         let mut main: Option<AnyElement> = None;
         let mut rest: Vec<AnyElement> = Vec::new();
         for tile in built {
@@ -159,8 +159,8 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let built = self.collect_group_tiles(call, true);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
-        self.group_call_pin.retain_available(&keys);
-        let stage = stage_tile(&self.group_call_pin, &keys)?;
+        self.group_call.pin.retain_available(&keys);
+        let stage = stage_tile(&self.group_call.pin, &keys)?;
         let tile = built.into_iter().find(|t| t.key == stage)?;
         Some(stage_view(tile, cx))
     }

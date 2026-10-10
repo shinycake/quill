@@ -153,7 +153,7 @@ impl QuillApp {
                         .picker_search
                         .update(cx, |input, cx| input.set_value("e", window, cx));
                 }
-                self.folder_editor = Some(dialog);
+                self.folders.editor = Some(dialog);
             }
             RowsDemo::FoldersToast => {
                 // The real code path: pick "Work" for Maya Chen's chat.

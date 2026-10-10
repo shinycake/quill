@@ -55,10 +55,10 @@ impl QuillApp {
             revision: s.revision,
             demo: self.demo_session.is_some(),
         });
-        if key.is_some() && key == self.story_strip.tiles_key {
+        if key.is_some() && key == self.stories.strip.tiles_key {
             return;
         }
-        self.story_strip.tiles_key = key;
+        self.stories.strip.tiles_key = key;
         let roots = self.media_display_roots();
         let tiles: Vec<StoryTile> = self
             .session()
@@ -86,7 +86,7 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        self.story_strip.tiles = tiles;
+        self.stories.strip.tiles = tiles;
     }
 
     /// Pixel width of the strip (the chat list inside the sidebar's
@@ -105,10 +105,10 @@ impl QuillApp {
     /// the story composer comes first.
     pub(super) fn story_strip_element(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let width = self.story_strip_width();
-        let count = self.story_strip.tiles.len() + 1;
+        let count = self.stories.strip.tiles.len() + 1;
         let max = metrics::max_scroll(width, count);
-        self.story_strip.scroll = self.story_strip.scroll.clamp(0., max);
-        let scroll = self.story_strip.scroll;
+        self.stories.strip.scroll = self.stories.strip.scroll.clamp(0., max);
+        let scroll = self.stories.strip.scroll;
         let (first, pitch) = metrics::expanded_layout(width, count);
         let primary = cx.theme().primary;
         let muted = cx.theme().muted_foreground;
@@ -177,7 +177,7 @@ impl QuillApp {
                     })),
             );
         }
-        for (i, tile) in self.story_strip.tiles.iter().enumerate() {
+        for (i, tile) in self.stories.strip.tiles.iter().enumerate() {
             let index = i + 1;
             if !visible(index) {
                 continue;
@@ -228,19 +228,20 @@ impl QuillApp {
         };
         let restart = event.touch_phase == TouchPhase::Started;
         let axis = self
-            .story_strip
+            .stories
+            .strip
             .axis
             .feed(restart, event.delta.precise(), dx, dy);
         if matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled) {
-            self.story_strip.axis.end();
+            self.stories.strip.axis.end();
         }
         if axis != Axis::Horizontal {
             return;
         }
         cx.stop_propagation();
-        let next = (self.story_strip.scroll - dx).clamp(0., max);
-        if next != self.story_strip.scroll {
-            self.story_strip.scroll = next;
+        let next = (self.stories.strip.scroll - dx).clamp(0., max);
+        if next != self.stories.strip.scroll {
+            self.stories.strip.scroll = next;
             self.notify_sidebar(cx);
         }
     }
@@ -250,7 +251,7 @@ impl QuillApp {
     /// `None` while expanded or with no stories. Width follows the
     /// opacity, so the search field gives way smoothly.
     pub(super) fn story_compact_stack(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let tiles = &self.story_strip.tiles;
+        let tiles = &self.stories.strip.tiles;
         if tiles.is_empty() {
             return None;
         }
