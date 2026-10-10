@@ -94,19 +94,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_export
             .as_ref()
             .is_some_and(|e| e.done_paging && !e.settled());
-        if done_paging {
-            let result = {
-                let export = self.session.chat_export.as_ref().expect("checked");
-                let dir = crate::chat_export::default_export_dir();
-                match crate::chat_export::write_export(export, &dir) {
-                    Ok(path) => Ok(path),
-                    Err(err) => Err(format!("could not write export file: {err}")),
-                }
-            };
-            let export = self.session.chat_export.as_mut().expect("checked");
-            match result {
+        if done_paging && let Some(export) = self.session.chat_export.as_mut() {
+            let dir = crate::chat_export::default_export_dir();
+            match crate::chat_export::write_export(export, &dir) {
                 Ok(path) => export.finished_path = Some(path),
-                Err(note) => export.failed = Some(note),
+                Err(err) => export.failed = Some(format!("could not write export file: {err}")),
             }
             return;
         }
