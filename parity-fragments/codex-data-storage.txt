@@ -1,4 +1,0 @@
-# data-storage: full matches only
-parity:data-storage-limits
-parity:data-clear-per-type
-parity:appearance-dictionaries
