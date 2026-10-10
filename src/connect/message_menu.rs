@@ -177,6 +177,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             )?;
             self.session.audience_reactions_loading(chat_id, message_id);
         }
+        // A right-clicked reaction chip asked for its own tab.
+        if let Some((wanted_chat, wanted_message, reaction)) =
+            self.session.wanted_reactor_tab.take()
+            && wanted_chat == chat_id
+            && wanted_message == message_id
+            && can_react_list
+        {
+            self.fetch_reactors_tab(chat_id, message_id, Some(&reaction), false)?;
+        }
         Ok(())
     }
 
@@ -424,6 +433,29 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.fail_sticker_set_view(set_id);
+                Err(err)
+            }
+        }
+    }
+
+    /// A custom emoji was tapped: look up its pack's title
+    /// (`getStickerSet`); the answer lands in
+    /// `Session::custom_emoji_preview`.
+    pub fn preview_custom_emoji(
+        &mut self,
+        emoji_id: i64,
+        set_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || set_id == 0 || emoji_id == 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::CustomEmojiPack { emoji_id, set_id }, None);
+        match self.sender.send_json(&get_sticker_set(extra, set_id)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
                 Err(err)
             }
         }

@@ -1703,8 +1703,11 @@ impl QuillApp {
             &composer,
             window,
             |this, state, event: &InputEvent, window, cx| {
-                let text = state.read(cx).value().to_string();
+                let mut text = state.read(cx).value().to_string();
                 if matches!(event, InputEvent::Change) {
+                    if let Some(replaced) = this.apply_instant_replace(&text, window, cx) {
+                        text = replaced;
+                    }
                     this.sync_composer_typing(&text);
                     this.note_open_draft(true, cx);
                 }
@@ -2119,6 +2122,7 @@ impl QuillApp {
             composer_preview_link: 0,
             edit_replace_as_file: false,
             composer_preview_token: 0,
+            composer_prev_text: String::new(),
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
             schedule_picker: None,
@@ -2323,6 +2327,7 @@ impl QuillApp {
             deep_link_invite: None,
             pending_deep_link_ui: None,
             share_link_text: None,
+            custom_emoji_card_seen: None,
             pending_media_seek: None,
             pending_deep_link_open: None,
             pending_link: None,
