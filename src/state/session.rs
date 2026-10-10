@@ -359,6 +359,9 @@ pub struct Session {
     pub privacy_data: PrivacyData,
     /// Batch 4: new-login alert, service popups and terms of service.
     pub notices: AccountNotices,
+    /// Account-level sync updates: silent default, downloads, dice,
+    /// freeze, speech quota, live shares, age verification.
+    pub sync: UpdatesSync,
     /// Batch 6: two-step recovery / reset / login-email flow state.
     pub twofa_flow: TwofaFlow,
     /// Slice A2: cached `getPasswordState` / `setPassword` /
@@ -1172,6 +1175,10 @@ pub struct Session {
     /// accumulates them). `None` when the panel is closed or the viewer
     /// moved to a different story.
     pub story_viewers: Option<StoryViewersState>,
+    /// Statistics and public forwards of the story open in the viewer.
+    pub story_insights: Option<StoryInsightsState>,
+    /// The public story search (hashtag, location or venue) and its pages.
+    pub story_search: Option<StorySearchState>,
     /// Phase 9.5: the in-progress `reportStory` flow for the story open in
     /// the viewer — the reason picker and the optional details step.
     /// `None` when no report is in flight.
@@ -1362,6 +1369,7 @@ impl Session {
             storage_limits: Default::default(),
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
+            sync: UpdatesSync::default(),
             twofa_flow: TwofaFlow::default(),
             password_state: None,
             password_state_loading: false,
@@ -1621,6 +1629,8 @@ impl Session {
             story_tray_refresh: HashSet::new(),
             story_post: StoryPostState::default(),
             story_viewers: None,
+            story_insights: None,
+            story_search: None,
             story_report: None,
             story_stealth: StoryStealthMode::default(),
             story_stealth_error: None,

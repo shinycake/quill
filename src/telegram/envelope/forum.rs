@@ -46,6 +46,12 @@ pub struct ForumTopic {
     pub unread_mention_count: i32,
     /// `forumTopic.unread_reaction_count` — gates "Read all reactions".
     pub unread_reaction_count: i32,
+    /// `forumTopicInfo.creation_date` (Unix time, 0 = unknown).
+    pub creation_date: i32,
+    /// `forumTopicInfo.creator_id`.
+    pub creator: Option<MessageSender>,
+    /// `forumTopicInfo.is_outgoing` — the current user created the topic.
+    pub is_outgoing: bool,
 }
 
 /// Subsection tabs: the `forumTopicInfo` fields that
@@ -60,6 +66,9 @@ pub struct ForumTopicInfoUpdate {
     pub is_general: bool,
     pub is_closed: bool,
     pub is_hidden: bool,
+    pub creation_date: i32,
+    pub creator: Option<MessageSender>,
+    pub is_outgoing: bool,
 }
 
 /// Subsection tabs: `updateForumTopic` (schema 1.8.67, line 10665).
@@ -98,6 +107,13 @@ pub(crate) fn parse_forum_topic_info(info: &Value) -> Option<ForumTopicInfoUpdat
         is_general: flag("is_general"),
         is_closed: flag("is_closed"),
         is_hidden: flag("is_hidden"),
+        creation_date: info
+            .get("creation_date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
+        creator: parse_message_sender(info.get("creator_id")).ok(),
+        is_outgoing: flag("is_outgoing"),
     })
 }
 
@@ -170,5 +186,15 @@ pub(crate) fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
         notification_settings: parse_chat_notification_settings(value.get("notification_settings")),
         unread_mention_count: int53_or_zero(value.get("unread_mention_count")).sat_i32(),
         unread_reaction_count: int53_or_zero(value.get("unread_reaction_count")).sat_i32(),
+        creation_date: info
+            .get("creation_date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
+        creator: parse_message_sender(info.get("creator_id")).ok(),
+        is_outgoing: info
+            .get("is_outgoing")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }

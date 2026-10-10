@@ -43,6 +43,8 @@ mod statistics;
 mod storage;
 mod storage_categories;
 mod stories;
+mod story_insights;
+mod updates_sync;
 mod users;
 
 #[cfg(test)]
@@ -142,4 +144,6 @@ pub use statistics::*;
 pub use storage::*;
 pub use storage_categories::*;
 pub use stories::*;
+pub use story_insights::*;
+pub use updates_sync::*;
 pub use users::*;

@@ -2,6 +2,7 @@
 //! `storyArea` / `StoryAreaType` (`schema/td_api.tl:6566`).
 
 use super::envelope::{GeoLocation, geo_location, int53};
+use super::requests_story_insights::StoryLocationAddress;
 use serde_json::Value;
 
 /// Phase 9.8: one `storyArea` (TDLib 1.8.67, `schema/td_api.tl:6566`) — a
@@ -33,6 +34,8 @@ pub enum StoryAreaKind {
     Location {
         location: GeoLocation,
         address: String,
+        /// The structured `locationAddress`, for `searchPublicStoriesByLocation`.
+        address_parts: StoryLocationAddress,
     },
     /// `storyAreaTypeVenue` (`schema/td_api.tl:6539`) — same fields the
     /// message-venue parser keeps.
@@ -40,6 +43,9 @@ pub enum StoryAreaKind {
         title: String,
         address: String,
         location: GeoLocation,
+        /// `venue.provider` / `venue.id`, for `searchPublicStoriesByVenue`.
+        provider: String,
+        venue_id: String,
     },
     /// `storyAreaTypeSuggestedReaction` (`schema/td_api.tl:6546`) — the
     /// emoji plus how often it was added. Same call as Phase 9.2: only
@@ -107,6 +113,7 @@ fn parse_story_area_kind(value: &Value) -> Option<StoryAreaKind> {
             Some(StoryAreaKind::Location {
                 location,
                 address: parse_location_address(value.get("address")),
+                address_parts: parse_location_address_parts(value.get("address")),
             })
         }
         Some("storyAreaTypeVenue") => {
@@ -123,6 +130,16 @@ fn parse_story_area_kind(value: &Value) -> Option<StoryAreaKind> {
                     .unwrap_or("")
                     .to_string(),
                 location: geo_location(venue.get("location"))?,
+                provider: venue
+                    .get("provider")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                venue_id: venue
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
             })
         }
         Some("storyAreaTypeSuggestedReaction") => {
@@ -181,6 +198,24 @@ fn parse_story_area_kind(value: &Value) -> Option<StoryAreaKind> {
             type_name: type_name.to_string(),
         }),
         None => None,
+    }
+}
+
+/// The four `locationAddress` fields as sent back to
+/// `searchPublicStoriesByLocation`.
+fn parse_location_address_parts(value: Option<&Value>) -> StoryLocationAddress {
+    let get = |key: &str| {
+        value
+            .and_then(|v| v.get(key))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    StoryLocationAddress {
+        country_code: get("country_code"),
+        state: get("state"),
+        city: get("city"),
+        street: get("street"),
     }
 }
 
@@ -263,7 +298,13 @@ mod story_areas_tests {
                     (0.1, 0.2, 0.3, 0.05)
                 );
                 match &area.kind {
-                    StoryAreaKind::Location { location, address } => {
+                    StoryAreaKind::Location {
+                        location,
+                        address,
+                        address_parts,
+                    } => {
+                        assert_eq!(address_parts.country_code, "US");
+                        assert_eq!(address_parts.street, "1 Ferry Building");
                         assert!((location.latitude() - 37.7955).abs() < 1e-9);
                         assert!((location.longitude() + 122.3937).abs() < 1e-9);
                         assert_eq!(address, "US, CA, San Francisco, 1 Ferry Building");
@@ -275,7 +316,11 @@ mod story_areas_tests {
                         title,
                         address,
                         location,
+                        provider,
+                        venue_id,
                     } => {
+                        assert_eq!(provider, "foursquare");
+                        assert_eq!(venue_id, "x");
                         assert_eq!(title, "Ferry Building");
                         assert_eq!(address, "1 Ferry Building, San Francisco");
                         assert!((location.latitude() - 37.7955).abs() < 1e-9);

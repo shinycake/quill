@@ -976,6 +976,10 @@ pub(super) fn transcription_row(
     let row = message_id.0 as u64;
     match transcription {
         None => div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_2()
             .child(
                 inline_link(("transcribe", row), "Transcribe", accent)
                     .tooltip(|window, cx| {
@@ -987,6 +991,11 @@ pub(super) fn transcription_row(
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.request_transcription(chat_id, message_id, cx);
                     })),
+            )
+            .children(
+                cx.try_global::<super::updates_sync_ui::SpeechTrialHint>()
+                    .and_then(|hint| hint.0.clone())
+                    .map(|hint| div().text_xs().opacity(0.7).child(hint)),
             )
             .into_any_element(),
         Some(SpeechRecognition::Pending { partial_text }) => div()
@@ -1946,6 +1955,9 @@ pub(super) fn document_kind_label(file_name: &str, mime_type: &str) -> String {
 /// `file_name` when the file belongs to a known message, else the local
 /// path's file name, else a plain "File {id}" fallback.
 pub(super) fn download_display_name(session: &Session, file_id: i32) -> String {
+    if let Some(name) = session.sync.download_names.get(&file_id) {
+        return name.clone();
+    }
     for history in session.histories.values() {
         for message in history.messages.values() {
             if let quill::telegram::envelope::MessageContent::Document(doc) = &message.content

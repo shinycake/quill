@@ -41,6 +41,7 @@ impl Render for QuillApp {
         }
         self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
+        self.sync_speech_trial_hint(cx);
         self.sync_window_title(window);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
@@ -698,6 +699,8 @@ impl Render for QuillApp {
                 self.search_is_open(),
                 cx,
             ))
+            .children(self.frozen_banner(cx))
+            .children(self.live_share_strip(cx))
             .children(self.unconfirmed_login_banner(cx))
             .when(
                 matches!(

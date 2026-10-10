@@ -46,6 +46,7 @@ mod signin_polish;
 mod sponsored;
 mod sticker_tabs;
 mod stories;
+mod story_insights;
 mod subsection_tabs;
 mod support;
 mod threads;

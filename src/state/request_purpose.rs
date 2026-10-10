@@ -1194,6 +1194,15 @@ pub enum RequestPurpose {
     /// `Session::story_viewers` (the previous page's `next_offset`
     /// starts the next request).
     GetStoryInteractions,
+    /// `getStoryStatistics` for the story open in the viewer. Response is
+    /// `storyStatistics`, stored in `Session::story_insights`.
+    GetStoryStatistics,
+    /// `getStoryPublicForwards` pages for the same story. Response is
+    /// `publicForwards`.
+    GetStoryPublicForwards,
+    /// `searchPublicStoriesByTag/Location/Venue`. Response is
+    /// `foundStories`, stored in `Session::story_search`.
+    SearchPublicStories,
     /// Phase 9.5: `reportStory`. Response is `ReportStoryResult`
     /// (`Ok` / `OptionRequired` / `TextRequired`); driven by
     /// `Session::story_report`.

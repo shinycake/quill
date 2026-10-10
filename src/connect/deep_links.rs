@@ -369,9 +369,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(purpose, None);
         let json = match &action {
             DeepLinkAction::OpenUsername { domain, .. }
-            | DeepLinkAction::OpenPublicChatDraft { domain, .. } => {
-                search_public_chat(extra, domain)
-            }
+            | DeepLinkAction::OpenPublicChatDraft { domain, .. }
+            | DeepLinkAction::ShareGame { domain, .. }
+            | DeepLinkAction::AddBot { domain, .. } => search_public_chat(extra, domain),
             DeepLinkAction::MessageLink { url } => get_message_link_info(extra, url),
             DeepLinkAction::BoostLink { url } => get_chat_boost_link_info(extra, url),
             DeepLinkAction::OpenChannelBoost { chat_id } => get_chat(extra, ChatId(*chat_id)),

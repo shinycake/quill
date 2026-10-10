@@ -513,6 +513,10 @@ impl QuillApp {
             PaneMode::Connecting => false,
             PaneMode::Ready => {
                 let session = self.session();
+                // A frozen account is read-only everywhere.
+                if session.is_some_and(|s| s.is_frozen()) {
+                    return false;
+                }
                 let open = session.and_then(|s| s.open_chat);
                 let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
                 // Parity slice 4: posting into a forum topic is supported —
@@ -569,6 +573,14 @@ impl QuillApp {
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
             PaneMode::Connecting => Some("Sign in to send messages.".to_string()),
+            PaneMode::Ready
+                if composer.is_none() && self.session().is_some_and(|s| s.is_frozen()) =>
+            {
+                Some(
+                    "Your account is frozen and read-only. Open the banner at the top for details."
+                        .to_string(),
+                )
+            }
             PaneMode::Ready if composer.is_none() => {
                 let open = self.session().and_then(|s| s.open_chat);
                 let in_topic = self.session().is_some_and(|s| s.open_topic.is_some());
@@ -1082,6 +1094,10 @@ impl QuillApp {
             .when_some(topic_info.clone().filter(|_| !tabs_used), |this, info| {
                 this.child(self.forum_topic_strip(&info, cx))
             })
+            .when_some(
+                topic_info.clone().filter(|_| self.topic_info_open),
+                |this, info| this.child(self.topic_info_card(&info, cx)),
+            )
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
             .children(self.saved_tags_bar(cx))
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
@@ -1168,6 +1184,9 @@ impl QuillApp {
                         .min_h_0()
                         .min_w_0()
                         .children(self.thread_root_bar(cx))
+                        .when(self.thread_info_open, |this| {
+                            this.children(self.thread_info_card(cx))
+                        })
                         .child(list)
                         .into_any_element()
                 } else if is_forum

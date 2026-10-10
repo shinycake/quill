@@ -1463,11 +1463,18 @@ impl QuillApp {
             Some(
                 ScreenshotDemo::ReadyAppearance
                     | ScreenshotDemo::ReadySpellcheckToggle
+                    | ScreenshotDemo::ReadyDictionaries
                     | ScreenshotDemo::ReadyKeybindings
             )
         ) {
-            if matches!(demo, Some(ScreenshotDemo::ReadySpellcheckToggle)) {
+            if matches!(
+                demo,
+                Some(ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries)
+            ) {
                 self.chat_prefs.spellcheck_enabled = true;
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyDictionaries)) {
+                self.dict_manager = super::spell_dictionaries::DictManager::demo();
             }
             // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
             // captures the dialog with the HC theme selected.
@@ -2341,6 +2348,32 @@ impl QuillApp {
                 );
             }
             self.status_note = "screenshot demo — comments and threads".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyForumThreadStories)) {
+            let view = std::env::var("QUILL_DEMO_FTS_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::forum_thread_stories_demo::apply_ready_forum_thread_stories(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            match view.as_str() {
+                "thread" => self.thread_info_open = true,
+                "stats" => {
+                    self.open_story_viewer(ChatId(11), 5, cx);
+                    self.story_stats_open = true;
+                }
+                "search" => {
+                    self.search_input.update(cx, |input, cx| {
+                        input.set_value("#sunset", window, cx);
+                    });
+                }
+                _ => self.topic_info_open = true,
+            }
+            self.status_note = "screenshot demo — topic info, story statistics and search".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyForumsSaved)) {
             let view = std::env::var("QUILL_DEMO_FORUMS_SAVED_VIEW").unwrap_or_default();

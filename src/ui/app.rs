@@ -268,6 +268,15 @@ pub struct QuillApp {
     /// M1: silent-send toggle (`messageSendOptions.disable_notification`,
     /// schema 1.8.67 line 5934). Persists across sends until toggled.
     pub(super) composer_silent: bool,
+    /// The chat whose `default_disable_notification` the user turned off
+    /// for the composer ("Send with sound" in a chat that sends silently).
+    pub(super) composer_loud_chat: Option<i64>,
+    /// The frozen-account details dialog is open.
+    pub(super) freeze_info_open: bool,
+    /// The age verification prompt is open, and the user already started
+    /// the verification (so turning on 18+ content goes to the server).
+    pub(super) age_verify_open: bool,
+    pub(super) age_verify_started: bool,
     /// M1: link-preview toggle (`linkPreviewOptions.is_disabled`, schema
     /// 1.8.67 line 2237). Persists across sends; secret chats force it on.
     pub(super) composer_preview_disabled: bool,
@@ -308,6 +317,9 @@ pub struct QuillApp {
     pub(super) spellchecker: std::sync::Arc<quill::spellcheck::SpellChecker>,
     /// Which engine that is and its dictionaries (Appearance → Spelling).
     pub(super) spell_info: super::spellcheck_ui::SpellInfo,
+    /// Appearance → Spelling → Manage dictionaries (parity:appearance-dictionaries).
+    pub(super) dict_manager: super::spell_dictionaries::DictManager,
+    pub(super) dict_filter_input: Entity<TextareaState>,
     /// Misspellings underlined in the composer; byte ranges into
     /// `spell_checked_text`.
     pub(super) spell_misspellings: Vec<quill::spellcheck::Misspelling>,
@@ -1007,6 +1019,12 @@ pub struct QuillApp {
     /// Phase 9.5: viewers panel open in the viewer overlay
     /// (`getStoryInteractions`).
     pub(super) story_viewers_open: bool,
+    /// The statistics panel of the story open in the viewer.
+    pub(super) story_stats_open: bool,
+    /// The info card under the open forum topic's strip.
+    pub(super) topic_info_open: bool,
+    /// The info card under the open reply thread's root bar.
+    pub(super) thread_info_open: bool,
     /// Phase 9.5: report flow UI open in the viewer overlay
     /// (`reportStory`).
     pub(super) story_report_open: bool,
