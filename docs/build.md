@@ -1,13 +1,13 @@
 # Build
 
-Pinned toolchain: **Rust 1.98.1** (`rust-toolchain.toml`; MSRV 1.92 for `oo7` via GPUI Kit).  
+Pinned toolchain: **Rust 1.99.0** (`rust-toolchain.toml`; MSRV 1.92 for `oo7` via GPUI Kit).  
 UI: **gpui-kit 0.7.1**.  
 TDLib schema/runtime: **1.8.68** at `c15d3f5a5de6e3ba5839822c451152e5e18bb700`.
 
 ## Developer (synthetic UI, no Telegram login)
 
 ```bash
-rustup show   # should pick 1.98.1 from rust-toolchain.toml
+rustup show   # should pick 1.99.0 from rust-toolchain.toml
 cargo test --no-default-features
 cargo run --features ui
 ```
@@ -62,7 +62,7 @@ On macOS, `bash scripts/macos-package-smoke.sh` copies the binary into `dist/Qui
 
 ## Windows package
 
-Needs Visual Studio 2022 Build Tools (C++ workload, run from a developer prompt so `dumpbin`/`cmake` are on `PATH`), Rust 1.98.1 (`x86_64-pc-windows-msvc`), Git for Windows (bash, for the ntgcalls vendor step), and vcpkg. In order:
+Needs Visual Studio 2022 Build Tools (C++ workload, run from a developer prompt so `dumpbin`/`cmake` are on `PATH`), Rust 1.99.0 (`x86_64-pc-windows-msvc`), Git for Windows (bash, for the ntgcalls vendor step), and vcpkg. In order:
 
 ```powershell
 cargo build --release --features ui

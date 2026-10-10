@@ -498,13 +498,15 @@ impl Tray {
         .ok()?;
         let (rgba, w, h, _) = render_platform_icon(0, false, true);
         let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
-        let tray = tray_icon::TrayIconBuilder::new()
+        let builder = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip("Quill")
-            .with_icon(icon)
-            .with_icon_as_template(cfg!(target_os = "macos"))
-            .build()
-            .ok()?;
+            .with_tooltip("Quill");
+        // Templated icons exist on macOS only.
+        #[cfg(target_os = "macos")]
+        let builder = builder.with_icon_templated(icon);
+        #[cfg(not(target_os = "macos"))]
+        let builder = builder.with_icon(icon);
+        let tray = builder.build().ok()?;
         Some(Self {
             icon: tray,
             notifications_item,
@@ -539,7 +541,17 @@ impl Tray {
         self.last_shown = Some(key);
         let (rgba, w, h, template) = render_platform_icon(unread, muted, dark);
         if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) {
-            let _ = self.icon.set_icon_with_as_template(Some(icon), template);
+            #[cfg(target_os = "macos")]
+            let _ = if template {
+                self.icon.set_icon_templated(Some(icon))
+            } else {
+                self.icon.set_icon(Some(icon))
+            };
+            #[cfg(not(target_os = "macos"))]
+            let _ = {
+                let _ = template;
+                self.icon.set_icon(Some(icon))
+            };
         }
         let _ = self.icon.set_tooltip(Some(tray_tooltip(unread)));
     }
