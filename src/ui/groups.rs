@@ -2103,3 +2103,23 @@ impl QuillApp {
         cx.notify();
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    CreateChat => DialogSpec::new(
+        4200,
+        |app| app.create_chat_dialog.is_some(),
+        QuillApp::build_create_chat_dialog,
+    ),
+
+    Username => DialogSpec::new(
+        4500,
+        |app| app.username_dialog.is_some(),
+        QuillApp::build_username_dialog,
+    ),
+
+    GroupConfirm => DialogSpec::new(
+        4800,
+        |app| app.group_confirm_dialog.is_some(),
+        QuillApp::build_group_confirm_dialog,
+    ),
+}

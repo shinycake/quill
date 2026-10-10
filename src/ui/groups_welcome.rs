@@ -344,3 +344,11 @@ impl QuillApp {
         row.into_any_element()
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    Welcome => DialogSpec::new(
+        5800,
+        |app| app.welcome_dialog.is_some(),
+        QuillApp::build_welcome_dialog,
+    ),
+}

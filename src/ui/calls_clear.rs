@@ -107,3 +107,12 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// "Clear all" on the Calls list.
+    ClearCalls => DialogSpec::new(
+        1600,
+        |app| app.global.clear_calls_open,
+        QuillApp::build_clear_calls_dialog,
+    ),
+}

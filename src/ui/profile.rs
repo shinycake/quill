@@ -739,3 +739,11 @@ impl QuillApp {
         Some(panel.into_any_element())
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    EditProfile => DialogSpec::new(
+        6000,
+        |app| app.edit_profile_dialog.is_some(),
+        QuillApp::build_edit_profile_dialog,
+    ),
+}

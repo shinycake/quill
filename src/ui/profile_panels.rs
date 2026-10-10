@@ -1626,3 +1626,12 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// B10: profile and contact panel dialogs.
+    ProfilePanel => DialogSpec::new(
+        6100,
+        |app| app.profile_dialog.is_some(),
+        QuillApp::build_profile_panel_dialog,
+    ),
+}

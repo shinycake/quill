@@ -5646,6 +5646,7 @@ dependencies = [
  "gpui-kit",
  "image",
  "interprocess",
+ "inventory",
  "ksni",
  "libc",
  "libloading 0.9.0",

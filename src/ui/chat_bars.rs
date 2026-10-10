@@ -1068,3 +1068,19 @@ pub(super) fn apply_ready_top_bars(
         );
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Batch 8: chat action bar's "Block {name}" box.
+    BlockBar => DialogSpec::new(
+        6300,
+        |app| app.block_bar_dialog.is_some(),
+        QuillApp::build_block_bar_dialog,
+    ),
+
+    /// Batch 8: the chat's pending join requests.
+    JoinRequests => DialogSpec::new(
+        6400,
+        |app| app.join_requests_dialog.is_some(),
+        QuillApp::build_join_requests_dialog,
+    ),
+}

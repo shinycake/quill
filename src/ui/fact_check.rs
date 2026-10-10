@@ -175,3 +175,11 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    FactCheck => DialogSpec::new(
+        5400,
+        |app| app.fact_check_dialog.is_some(),
+        QuillApp::build_fact_check_dialog,
+    ),
+}

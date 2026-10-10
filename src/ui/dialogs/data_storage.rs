@@ -595,3 +595,11 @@ pub(crate) fn demo_data_storage_prefs() -> DataStoragePrefs {
     );
     prefs
 }
+
+crate::ui::shell::register_dialogs! {
+    StorageUsage => DialogSpec::new(
+        900,
+        |app| app.storage_usage_open,
+        QuillApp::build_storage_usage_dialog,
+    ),
+}

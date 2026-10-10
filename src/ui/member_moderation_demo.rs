@@ -7,7 +7,7 @@
 use super::app::QuillApp;
 use super::dialogs::{GroupConfirmAction, MemberDialog, OwnershipStage};
 use super::groups::apply_ready_group_manage;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -48,16 +48,19 @@ fn apply_owner_and_message(session: &mut Session, sink: &Arc<MemorySink>, seq: &
     );
 }
 
+register_demos![
+    // Member moderation (`QUILL_DEMO_MODERATION=members|restrict|ban|
+    // remove|delete|leave|pick|confirm|blocked`; injected data, no live
+    // Telegram).
+    DemoSpec::chats(
+        "ready-member-moderation",
+        "screenshot demo — member moderation (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_setup_member_moderation),
+];
+
 impl QuillApp {
-    pub(super) fn demo_setup_member_moderation(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if demo != Some(ScreenshotDemo::ReadyMemberModeration) {
-            return;
-        }
+    fn demo_setup_member_moderation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_MODERATION").unwrap_or_else(|_| "members".into());
         let chat = ChatId(CHAT);
         if let Some(session) = self.demo_session.as_mut() {

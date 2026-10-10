@@ -1468,3 +1468,19 @@ impl QuillApp {
             })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    CallConfirm => DialogSpec::new(
+        1100,
+        |app| app.call_confirm.is_some(),
+        QuillApp::build_call_confirm_dialog,
+    ),
+
+    /// Swap prompt: incoming call while another call is active.
+    CallSwap => DialogSpec::new(
+        // Swap prompt is call-urgent: same priority band as CallConfirm.
+        1200,
+        |app| app.session().is_some_and(|s| s.call_swap_pending.is_some()),
+        QuillApp::build_call_swap_dialog,
+    ),
+}

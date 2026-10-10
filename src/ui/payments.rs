@@ -1266,3 +1266,28 @@ fn subscription_price_label(pricing: &StarSubscriptionPricing) -> String {
     };
     format!("⭐ {} / {}", pricing.star_count, period)
 }
+
+crate::ui::shell::register_dialogs! {
+    PaymentForm => DialogSpec::new(
+        3500,
+        |app| {
+            app.payment_dialog.is_some()
+                && app.session().is_some_and(|s| s.payment_form.is_some() || s.payment_form_loading)
+        },
+        QuillApp::build_payment_dialog,
+    ),
+
+    PaymentReceipt => DialogSpec::new(
+        3600,
+        |app| app.session().is_some_and(|s| s.payment_receipt_open),
+        QuillApp::build_payment_receipt_dialog,
+    ),
+
+    // Slice `parity:bots-payment-recurring`: the `starSubscriptions`
+    // management dialog.
+    Subscriptions => DialogSpec::new(
+        3700,
+        |app| app.session().is_some_and(|s| s.subscriptions_open),
+        QuillApp::build_subscriptions_dialog,
+    ),
+}

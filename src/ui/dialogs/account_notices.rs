@@ -490,3 +490,14 @@ impl QuillApp {
         )
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Batch 4: terms of service, server service popups and the
+    /// "New Login Prevented" follow-up.
+    AccountNotice => DialogSpec::new(
+        // Batch 4: what the server says about the account comes first.
+        100,
+        |app| app.account_notice().is_some(),
+        QuillApp::build_account_notice_dialog,
+    ),
+}

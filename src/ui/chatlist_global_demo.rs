@@ -3,9 +3,9 @@
 //! suggestions block and the search tabs (injected through the reducer,
 //! no live Telegram).
 
-use super::ScreenshotDemo as D;
 use super::app::QuillApp;
 use super::calls::apply_ready_calls_settings;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::{Context, Window};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::state::{RequestPurpose, Session};
@@ -86,32 +86,89 @@ fn apply_contacts_fixture(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
     }
 }
 
+register_demos![
+    // Contacts by name with section headers and the index bar.
+    DemoSpec::chats(
+        "ready-chatlist-contacts-index",
+        "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_chatlist_global(
+        GlobalDemo::ContactsIndex,
+        window,
+        cx
+    )),
+    // Calls list with the Clear calls confirm box.
+    DemoSpec::chats(
+        "ready-chatlist-calls-clear",
+        "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_chatlist_global(
+        GlobalDemo::CallsClear,
+        window,
+        cx
+    )),
+    // Stories strip with a tile's right-click menu.
+    DemoSpec::chats(
+        "ready-chatlist-stories-menu",
+        "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_chatlist_global(
+        GlobalDemo::StoriesMenu,
+        window,
+        cx
+    )),
+    // Settings > Contacts with the birthday list.
+    DemoSpec::chats(
+        "ready-chatlist-birthdays",
+        "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_chatlist_global(GlobalDemo::Birthdays, window, cx)),
+    // Suggestions block: a contact's birthday.
+    DemoSpec::chats(
+        "ready-chatlist-suggestions",
+        "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_chatlist_global(
+        GlobalDemo::Suggestions,
+        window,
+        cx
+    )),
+    // Suggestions block: "Is {phone} still your number?".
+    DemoSpec::chats(
+        "ready-chatlist-suggestions-phone",
+        "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_chatlist_global(
+        GlobalDemo::SuggestionsPhone,
+        window,
+        cx
+    )),
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GlobalDemo {
+    ContactsIndex,
+    CallsClear,
+    StoriesMenu,
+    Birthdays,
+    Suggestions,
+    SuggestionsPhone,
+}
+
 impl QuillApp {
     /// Fixtures of the chatlist-global captures.
-    pub(super) fn demo_setup_chatlist_global(
+    fn demo_setup_chatlist_global(
         &mut self,
-        demo: Option<D>,
+        demo: GlobalDemo,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(demo) = demo else { return };
-        if !matches!(
-            demo,
-            D::ReadyChatlistContactsIndex
-                | D::ReadyChatlistCallsClear
-                | D::ReadyChatlistStoriesMenu
-                | D::ReadyChatlistBirthdays
-                | D::ReadyChatlistSuggestions
-                | D::ReadyChatlistSuggestionsPhone
-        ) {
-            return;
-        }
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
         self.demo_seq.store(session.last_seq, Ordering::SeqCst);
         match demo {
-            D::ReadyChatlistContactsIndex => {
+            GlobalDemo::ContactsIndex => {
                 apply_contacts_fixture(session, &self.demo_sink, &self.demo_seq);
                 self.contacts_tab_open = true;
                 self.global.contacts_sort = quill::contacts_index::SortMode::Alphabet;
@@ -119,13 +176,13 @@ impl QuillApp {
                 self.global.index_cursor = Some((46., 250.));
                 self.status_note = "screenshot demo — contacts by name with the index bar".into();
             }
-            D::ReadyChatlistCallsClear => {
+            GlobalDemo::CallsClear => {
                 apply_ready_calls_settings(session, &self.demo_sink, &self.demo_seq);
                 self.calls_tab_open = true;
                 self.global.clear_calls_open = true;
                 self.status_note = "screenshot demo — Clear calls box".into();
             }
-            D::ReadyChatlistStoriesMenu => {
+            GlobalDemo::StoriesMenu => {
                 super::chatlist_demo::apply_ready_archive_row(
                     session,
                     &self.demo_sink,
@@ -135,7 +192,7 @@ impl QuillApp {
                     Some((11, gpui_kit::point(gpui_kit::px(150.), gpui_kit::px(190.))));
                 self.status_note = "screenshot demo — story tile menu".into();
             }
-            D::ReadyChatlistBirthdays => {
+            GlobalDemo::Birthdays => {
                 let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
                 let now = quill::local_time::now_unix();
                 let day = |offset: i64| quill::local_time::civil_local(now + offset * 86_400);
@@ -183,7 +240,7 @@ impl QuillApp {
                 self.settings_page = Some("Contacts");
                 self.status_note = "screenshot demo — birthday contacts in Settings".into();
             }
-            D::ReadyChatlistSuggestions | D::ReadyChatlistSuggestionsPhone => {
+            GlobalDemo::Suggestions | GlobalDemo::SuggestionsPhone => {
                 let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
                 let today = quill::local_time::civil_local(quill::local_time::now_unix());
                 let jsons = [
@@ -201,7 +258,7 @@ impl QuillApp {
                     }
                 }
                 session.my_user_id = Some(1);
-                if demo == D::ReadyChatlistSuggestions {
+                if demo == GlobalDemo::Suggestions {
                     // The phone check outranks a birthday: it was answered.
                     session
                         .suggestions
@@ -210,7 +267,6 @@ impl QuillApp {
                 }
                 self.status_note = "screenshot demo — chat-list suggestion".into();
             }
-            _ => {}
         }
         cx.notify();
     }

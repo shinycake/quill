@@ -2,13 +2,17 @@
 //! the viewer, and a paused voice recording. Injected through the normal
 //! reducer (no live Telegram).
 
+use super::app::QuillApp;
+use super::demo::demo_media_allowlist;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{ChannelMemberStatus, ChatPermissions, MemberRestriction};
+use quill::voice::VoiceCapture;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const GROUP: i64 = -1001700000001;
 
@@ -75,5 +79,61 @@ pub(super) fn apply_ready_restricted_composer(
             }));
             chat.my_member_status = Some(ChannelMemberStatus::Restricted);
         }
+    }
+}
+
+register_demos![
+    // Composer leftovers: a group that restricts the viewer replaces the
+    // composer with the reason (`QUILL_DEMO_RESTRICTION`).
+    DemoSpec::chats(
+        "ready-restricted-composer",
+        "screenshot demo — restricted composer"
+    )
+    .setup(|app, _, _| app.demo_restricted_composer()),
+    // Composer leftovers: a paused voice recording with its preview and
+    // the Play once switch.
+    DemoSpec::chats(
+        "ready-voice-pause",
+        "screenshot demo — voice record bar + history playback"
+    )
+    .setup(|app, _, _| app.demo_voice_pause()),
+];
+
+impl QuillApp {
+    fn demo_restricted_composer(&mut self) {
+        let variant = std::env::var("QUILL_DEMO_RESTRICTION").unwrap_or_default();
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_restricted_composer(
+                session,
+                &self.demo_sink,
+                &self.demo_seq,
+                &variant,
+                quill::local_time::now_unix(),
+            );
+        }
+        self.status_note = if variant == "media" {
+            self.send_denial(quill::send_rights::SendKind::VoiceMessages)
+                .unwrap_or_default()
+        } else {
+            "screenshot demo — restricted composer".into()
+        };
+    }
+
+    fn demo_voice_pause(&mut self) {
+        // A paused recording: the play button leads the bar, the
+        // preview has played to 3 s of 7, and Play once is on.
+        let bars = vec![
+            4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14, 22, 9, 17, 5, 26, 11,
+        ];
+        let mut capture =
+            VoiceCapture::preview(demo_media_allowlist().join("demo-voice.ogg"), 7, bars);
+        capture.pause();
+        self.voice_capture = Some(capture);
+        let mut clock = quill::playback::PlaybackClock::new(7.0);
+        clock.seek(3.0);
+        self.record_preview = Some(clock);
+        self.record_once = true;
+        self.status_note = "screenshot demo — recording paused · previewing · play once".into();
     }
 }

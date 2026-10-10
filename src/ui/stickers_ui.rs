@@ -904,6 +904,14 @@ fn greeting_pick(
     list.get(chat_id.unsigned_abs() as usize % list.len())
 }
 
+crate::ui::shell::register_dialogs! {
+    ArchivedStickers => DialogSpec::new(
+        5000,
+        |app| app.sticker_settings_open,
+        QuillApp::build_archived_stickers_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod greeting_tests {
     use super::greeting_pick;

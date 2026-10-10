@@ -413,7 +413,12 @@ mod dispatch_tests {
         let slot_in = slot.clone();
         let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
             let view = cx.new(|cx| {
-                QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::ReadyChats))
+                QuillApp::new_with_demo(
+                    window,
+                    cx,
+                    None,
+                    Some(ScreenshotDemo::named("ready-chats")),
+                )
             });
             *slot_in.borrow_mut() = Some(view.clone());
             let focus = view.focus_handle(cx);
@@ -528,7 +533,12 @@ mod dispatch_tests {
         let slot_in = slot.clone();
         let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
             let view = cx.new(|cx| {
-                QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::ReadyChats))
+                QuillApp::new_with_demo(
+                    window,
+                    cx,
+                    None,
+                    Some(ScreenshotDemo::named("ready-chats")),
+                )
             });
             *slot_in.borrow_mut() = Some(view.clone());
             let shell = cx.new(|_| QuillShell::new(view));

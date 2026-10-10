@@ -346,6 +346,23 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    /// `parity:platform-deep-links`: TDLib's deep-link info / error text.
+    DeepLinkInfo => DialogSpec::new(
+        // `parity:platform-deep-links`: link info sits with the other
+        // low-priority informational dialogs.
+        2700,
+        |app| app.deep_link_dialog.is_some(),
+        QuillApp::build_deep_link_dialog,
+    ),
+
+    DeepLinkInvite => DialogSpec::new(
+        2800,
+        |app| app.deep_link_invite.is_some(),
+        QuillApp::build_deep_link_invite_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod pump_tests {
     use super::deep_link_step_redraws;

@@ -5,7 +5,7 @@
 
 use super::app::QuillApp;
 use super::audio_playback::apply_ready_voice;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
@@ -15,8 +15,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The mode the demo shows.
-pub(super) fn demo_sync_mode() -> String {
+fn demo_sync_mode() -> String {
     std::env::var("QUILL_DEMO_SYNC").unwrap_or_else(|_| "frozen".into())
+}
+
+/// `downloads` starts from the downloads fixture, every other mode from the
+/// chat list.
+fn seed_updates_sync(sink: Arc<MemorySink>) -> Session {
+    if demo_sync_mode() == "downloads" {
+        super::demo::seed_ready_downloads_session(sink)
+    } else {
+        super::demo::seed_ready_chats_session(sink)
+    }
 }
 
 fn apply(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64, json: &str) {
@@ -98,16 +108,19 @@ fn apply_mode(mode: &str, session: &mut Session, sink: &Arc<MemorySink>, seq: &A
     }
 }
 
+register_demos![
+    // Account-level sync updates (`QUILL_DEMO_SYNC=frozen|live|speech|age|
+    // downloads`; injected data, no live Telegram).
+    DemoSpec::ready(
+        "ready-updates-sync",
+        seed_updates_sync,
+        "screenshot demo — account sync updates (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_setup_updates_sync),
+];
+
 impl QuillApp {
-    pub(super) fn demo_setup_updates_sync(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        if demo != Some(ScreenshotDemo::ReadyUpdatesSync) {
-            return;
-        }
+    fn demo_setup_updates_sync(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         let mode = demo_sync_mode();
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
