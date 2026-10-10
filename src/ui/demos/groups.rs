@@ -224,7 +224,7 @@ impl QuillApp {
         }
         // Select the non-default "News" folder so the screenshot shows
         // the filtered chat list.
-        self.folder_tab = Some(2);
+        self.folders.tab = Some(2);
         self.status_note = "screenshot demo — folder tabs · News folder".into();
     }
 
@@ -238,7 +238,7 @@ impl QuillApp {
         let mut dialog = FolderInviteDialog::new("https://t.me/addlist/Xk3pQ9aBn2".into());
         dialog.selected = [13, 16].into_iter().collect();
         dialog.seeded = true;
-        self.folder_invite = Some(dialog);
+        self.folders.invite = Some(dialog);
         self.status_note = "screenshot demo — Add folder by link".into();
     }
 
@@ -255,7 +255,7 @@ impl QuillApp {
         dialog
             .name_input
             .update(cx, |input, cx| input.set_value("Family", window, cx));
-        self.folder_editor = Some(dialog);
+        self.folders.editor = Some(dialog);
         self.status_note = "screenshot demo — folder icon picker".into();
     }
 
@@ -266,7 +266,7 @@ impl QuillApp {
             apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
         }
         // Open the manage dialog over the folder fixture.
-        self.folder_manage_open = true;
+        self.folders.manage_open = true;
         self.status_note = "screenshot demo — folder management dialog".into();
     }
 
@@ -287,7 +287,7 @@ impl QuillApp {
             apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
         }
         self.appearance.folder_tabs_view = quill::folder_icons::FolderTabsView::Left;
-        self.folder_tab = Some(2);
+        self.folders.tab = Some(2);
         self.status_note = "screenshot demo — folders on the left".into();
     }
 

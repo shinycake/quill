@@ -53,6 +53,7 @@ mod threads;
 mod translate;
 mod types;
 mod typing;
+mod web_apps;
 
 pub use connect_flow::*;
 pub use deep_links::detect_deep_link_arg;

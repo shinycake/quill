@@ -10,11 +10,11 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        if let Some(RequestPurpose::GetInlineQueryResults {
+        if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id,
             bot_user_id,
             first_page,
-        }) = pending.map(|p| p.purpose)
+        })) = pending.map(|p| p.purpose)
         {
             let slot_ok = match (first_page, self.inline_query.as_ref()) {
                 (true, Some(slot)) => {
@@ -60,8 +60,10 @@ impl Session {
                     slot.fetch = fetch;
                 }
             }
-        } else if let Some(RequestPurpose::GetGifSearchResults { first_page, .. }) =
-            pending.map(|p| p.purpose)
+        } else if let Some(RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults {
+            first_page,
+            ..
+        })) = pending.map(|p| p.purpose)
         {
             // Slice S9: GIF-panel search — the
             // `inlineQueryResultAnimation` entries land in `GifPanel`,
@@ -81,12 +83,12 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        if let Some(RequestPurpose::GetPollVoters {
+        if let Some(RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
             chat_id,
             message_id,
             option_id,
             offset,
-        }) = pending.map(|p| p.purpose)
+        })) = pending.map(|p| p.purpose)
         {
             let key = (chat_id.0, message_id.0, option_id);
             let page_len = voters.len();
@@ -134,7 +136,7 @@ impl Session {
         _seq: u64,
     ) {
         if let Some(pending) = pending
-            && let RequestPurpose::CreateCall { is_video } = pending.purpose
+            && let RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }) = pending.purpose
             && let Some(user_id) = pending.user_id
             && self.active_call.is_none()
         {

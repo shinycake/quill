@@ -3,6 +3,7 @@ use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
 use crate::settings::save_contact_prefs;
 use crate::state::RequestPurpose;
+use crate::state::UsersPurpose;
 use crate::telegram::requests::{
     ImportedContact, add_contact, clear_imported_contacts, get_contacts, get_user_full_info,
     import_contacts, remove_contacts, set_message_sender_block_list, share_phone_number,
@@ -80,9 +81,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .enumerate()
         {
-            let purpose = RequestPurpose::GetChatMessageCount {
+            let purpose = RequestPurpose::Users(UsersPurpose::GetChatMessageCount {
                 filter: index as u8,
-            };
+            });
             let extra = self.session.request(purpose, Some(chat_id));
             if let Err(err) =
                 self.sender
@@ -268,7 +269,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.my_user_id.is_some_and(|me| me == user_id) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::SetMessageSenderBlockList { block };
+        let purpose = RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { block });
         if self.session.requests.has_purpose_for_user(purpose, user_id) {
             return Ok(None);
         }

@@ -10,7 +10,7 @@ fn chat_folder_spec_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::ChatFolder { spec } => {
+        EnvelopePayload::ChatList(ChatListPayload::ChatFolder { spec }) => {
             assert_eq!(spec.name, "Work");
             assert_eq!(spec.pinned_chat_ids, vec![11]);
             assert_eq!(spec.included_chat_ids, vec![12, 13]);
@@ -37,7 +37,7 @@ fn chat_folder_info_response_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::ChatFolderInfo(info) => {
+        EnvelopePayload::ChatList(ChatListPayload::ChatFolderInfo(info)) => {
             assert_eq!(info.id, 5);
             assert_eq!(info.name, "New");
         }
@@ -54,7 +54,7 @@ fn chat_lists_response_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::ChatLists { lists } => {
+        EnvelopePayload::ChatList(ChatListPayload::ChatLists { lists }) => {
             assert_eq!(lists, vec![ChatList::Main, ChatList::Folder(2)]);
         }
         other => panic!("{other:?}"),
@@ -82,7 +82,9 @@ fn parse_message_topic_forum_yields_forum_topic_id() {
         )
         .unwrap();
     match forum.payload {
-        EnvelopePayload::Message(message) => assert_eq!(message.topic_id, Some(2)),
+        EnvelopePayload::Messages(MessagesPayload::Message(message)) => {
+            assert_eq!(message.topic_id, Some(2))
+        }
         other => panic!("{other:?}"),
     }
     let thread = parse_envelope(
@@ -90,7 +92,9 @@ fn parse_message_topic_forum_yields_forum_topic_id() {
         )
         .unwrap();
     match thread.payload {
-        EnvelopePayload::Message(message) => assert_eq!(message.topic_id, None),
+        EnvelopePayload::Messages(MessagesPayload::Message(message)) => {
+            assert_eq!(message.topic_id, None)
+        }
         other => panic!("{other:?}"),
     }
     let plain = parse_envelope(
@@ -98,7 +102,9 @@ fn parse_message_topic_forum_yields_forum_topic_id() {
         )
         .unwrap();
     match plain.payload {
-        EnvelopePayload::Message(message) => assert_eq!(message.topic_id, None),
+        EnvelopePayload::Messages(MessagesPayload::Message(message)) => {
+            assert_eq!(message.topic_id, None)
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -114,7 +120,7 @@ fn cl2_bare_chat_answer_parses_as_update_new_chat() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat { chat_id, title, .. } => {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { chat_id, title, .. }) => {
             assert_eq!(chat_id, ChatId(777001));
             assert_eq!(title, "Saved Messages");
         }
@@ -131,10 +137,10 @@ fn update_new_chat_parses_send_permission() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat {
             can_send_basic_messages,
             ..
-        } => assert!(!can_send_basic_messages),
+        }) => assert!(!can_send_basic_messages),
         other => panic!("{other:?}"),
     }
     // Absent block defaults to true (lenient parsing).
@@ -143,10 +149,10 @@ fn update_new_chat_parses_send_permission() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat {
             can_send_basic_messages,
             ..
-        } => assert!(can_send_basic_messages),
+        }) => assert!(can_send_basic_messages),
         other => panic!("{other:?}"),
     }
     // `updateChatPermissions` (schema 1.8.67, line 10500).
@@ -155,11 +161,11 @@ fn update_new_chat_parses_send_permission() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatPermissions {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatPermissions {
             chat_id,
             can_send_basic_messages,
             permissions,
-        } => {
+        }) => {
             assert_eq!(chat_id, ChatId(16));
             assert!(can_send_basic_messages);
             // Slice G1: the full block is kept for the editor.
@@ -174,10 +180,10 @@ fn forum_topics_parse_keeps_needed_fields() {
     let json = r#"{"@type":"forumTopics","@extra":"9","total_count":2,"topics":[{"info":{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":1,"name":"General","icon":{"@type":"forumTopicIcon","color":7322096,"custom_emoji_id":"0"},"creation_date":1700000000,"creator_id":{"@type":"messageSenderUser","user_id":5},"is_general":true,"is_outgoing":false,"is_closed":false,"is_hidden":false,"is_name_implicit":false},"last_message":{"id":50,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_TOPIC_welcome","entities":[]}}},"order":"500","is_pinned":true,"unread_count":3,"last_read_inbox_message_id":50,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":true,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false},"draft_message":null},{"info":{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":2,"name":"Random","icon":{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"},"creation_date":1700000100,"creator_id":{"@type":"messageSenderUser","user_id":6},"is_general":false,"is_outgoing":false,"is_closed":true,"is_hidden":false,"is_name_implicit":false},"last_message":null,"order":"100","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":true,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false},"draft_message":null}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ForumTopics {
+        EnvelopePayload::Threads(ThreadsPayload::ForumTopics {
             total_count,
             topics,
-        } => {
+        }) => {
             assert_eq!(total_count, 2);
             assert_eq!(topics.len(), 2);
             let general = &topics[0];
@@ -210,7 +216,9 @@ fn forum_topic_without_info_is_skipped() {
     let json = r#"{"@type":"forumTopics","total_count":1,"topics":[{"order":"1"}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ForumTopics { topics, .. } => assert!(topics.is_empty()),
+        EnvelopePayload::Threads(ThreadsPayload::ForumTopics { topics, .. }) => {
+            assert!(topics.is_empty())
+        }
         other => panic!("unexpected {other:?}"),
     }
 }
@@ -223,13 +231,13 @@ fn update_supergroup_parses_admin_restrict_right() {
     let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","can_manage_chat":false,"can_change_info":false,"can_post_messages":false,"can_edit_messages":false,"can_delete_messages":false,"can_invite_users":false,"can_restrict_members":true,"can_pin_messages":false,"can_promote_members":false,"can_manage_video_chats":false,"can_post_stories":false,"can_edit_stories":false,"can_delete_stories":false,"can_manage_direct_messages":false,"can_manage_tags":false,"can_send_welcome_messages":false,"is_anonymous":false}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
             status,
             can_restrict_members,
             can_promote_members,
             can_manage_tags,
             ..
-        } => {
+        }) => {
             assert_eq!(status, ChannelMemberStatus::Administrator);
             assert_eq!(can_restrict_members, Some(true));
             // Phase D3b: `can_promote_members` rides the same rights block.
@@ -243,20 +251,20 @@ fn update_supergroup_parses_admin_restrict_right() {
     let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","can_restrict_members":false}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
             can_restrict_members,
             ..
-        } => assert_eq!(can_restrict_members, Some(false)),
+        }) => assert_eq!(can_restrict_members, Some(false)),
         other => panic!("unexpected {other:?}"),
     }
     // Admin with no rights block → `None` (treated as lacking the right).
     let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator"}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
             can_restrict_members,
             ..
-        } => assert_eq!(can_restrict_members, None),
+        }) => assert_eq!(can_restrict_members, None),
         other => panic!("unexpected {other:?}"),
     }
 }
@@ -266,7 +274,7 @@ fn update_supergroup_parses_forum_flag() {
     let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"usernames":null,"date":1700000000,"status":{"@type":"chatMemberStatusMember"},"member_count":42,"boost_level":0,"has_automatic_translation":false,"has_linked_chat":false,"has_location":false,"sign_messages":false,"show_message_sender":false,"join_to_send_messages":false,"join_by_request":false,"is_slow_mode_enabled":false,"is_channel":false,"is_broadcast_group":false,"is_forum":true,"is_direct_messages_group":false,"is_administered_direct_messages_group":false,"verification_status":{"@type":"verificationStatus","is_verified":false,"is_scam":false,"is_fake":false},"has_direct_messages_group":false,"has_forum_tabs":false,"restriction_info":null,"paid_message_star_count":0,"active_story_state":null}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
             supergroup_id,
             verification: _,
             member_count: _,
@@ -288,7 +296,7 @@ fn update_supergroup_parses_forum_flag() {
             is_broadcast_group,
             join_to_send_messages: _,
             usernames: _,
-        } => {
+        }) => {
             assert_eq!(supergroup_id, 16);
             assert!(is_forum);
             // Parity slice: null `usernames` → empty username.
@@ -316,7 +324,7 @@ fn update_supergroup_parses_username() {
     let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":18,"usernames":{"@type":"usernames","active_usernames":["demochannel","backupname"],"disabled_usernames":[],"editable_username":"demochannel","collectible_usernames":[]},"is_forum":false}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
             supergroup_id,
             verification: _,
             member_count: _,
@@ -338,7 +346,7 @@ fn update_supergroup_parses_username() {
             is_broadcast_group,
             join_to_send_messages: _,
             usernames: _,
-        } => {
+        }) => {
             assert_eq!(supergroup_id, 18);
             assert!(!is_forum);
             assert_eq!(username, "demochannel");
@@ -361,7 +369,7 @@ fn supergroup_response_parses_forum_flag() {
     let json = r#"{"@type":"supergroup","@extra":"4","id":17,"is_forum":false}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Supergroup {
+        EnvelopePayload::Groups(GroupsPayload::Supergroup {
             supergroup_id,
             is_forum,
             has_forum_tabs: _,
@@ -380,7 +388,7 @@ fn supergroup_response_parses_forum_flag() {
             show_message_sender: _,
             is_broadcast_group,
             join_to_send_messages: _,
-        } => {
+        }) => {
             assert_eq!(supergroup_id, 17);
             assert!(!is_forum);
             assert_eq!(username, "");
@@ -404,11 +412,11 @@ fn read_inbox_and_outbox_are_typed() {
         )
         .unwrap();
     match inbox.payload {
-        EnvelopePayload::UpdateChatReadInbox {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatReadInbox {
             chat_id,
             last_read_inbox_message_id,
             unread_count,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 4);
             assert_eq!(last_read_inbox_message_id.0, 88);
             assert_eq!(unread_count, 3);
@@ -420,10 +428,10 @@ fn read_inbox_and_outbox_are_typed() {
     )
     .unwrap();
     match outbox.payload {
-        EnvelopePayload::UpdateChatReadOutbox {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatReadOutbox {
             chat_id,
             last_read_outbox_message_id,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 4);
             assert_eq!(last_read_outbox_message_id.0, 91);
         }
@@ -439,14 +447,14 @@ fn user_full_info_bot_info_parsed() {
     let json = r#"{"@type":"userFullInfo","@extra":"7","block_list":null,"bio":{"@type":"formattedText","text":"","entities":[]},"birthdate":null,"bot_info":{"@type":"botInfo","short_description":"A demo bot","description":"This bot demonstrates the info panel.","commands":[{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false},{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}]}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UserFullInfo {
+        EnvelopePayload::Users(UsersPayload::UserFullInfo {
             extras: _,
             bot_info,
             bio,
             photo,
             photo_id: _,
             blocked,
-        } => {
+        }) => {
             let info = bot_info.expect("bot_info");
             assert_eq!(info.short_description, "A demo bot");
             assert_eq!(info.description, "This bot demonstrates the info panel.");
@@ -468,7 +476,9 @@ fn user_full_info_bot_info_parsed() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UserFullInfo { bot_info, .. } => assert!(bot_info.is_none()),
+        EnvelopePayload::Users(UsersPayload::UserFullInfo { bot_info, .. }) => {
+            assert!(bot_info.is_none())
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -482,7 +492,7 @@ fn user_full_info_block_list_main_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UserFullInfo { blocked, .. } => assert!(blocked),
+        EnvelopePayload::Users(UsersPayload::UserFullInfo { blocked, .. }) => assert!(blocked),
         other => panic!("{other:?}"),
     }
 }
@@ -494,9 +504,9 @@ fn update_user_full_info_parsed() {
     let json = r#"{"@type":"updateUserFullInfo","user_id":21,"user_full_info":{"@type":"userFullInfo","bot_info":{"@type":"botInfo","short_description":"","description":"Refreshed description.","commands":[{"@type":"botCommand","command":"ping","description":"","is_ephemeral":false}]}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateUserFullInfo {
+        EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo {
             user_id, bot_info, ..
-        } => {
+        }) => {
             assert_eq!(user_id.0, 21);
             let info = bot_info.expect("bot_info");
             assert_eq!(info.description, "Refreshed description.");
@@ -512,7 +522,7 @@ fn draft_message_text_and_same_chat_reply() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1700000000,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat { draft, .. } => {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { draft, .. }) => {
             let draft = draft.expect("draft");
             assert_eq!(draft.text, "meet at 6");
             assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
@@ -525,9 +535,11 @@ fn draft_message_text_and_same_chat_reply() {
         )
         .unwrap();
     match update.payload {
-        EnvelopePayload::UpdateChatDraftMessage {
-            draft, positions, ..
-        } => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateChatDraftMessage {
+            draft,
+            positions,
+            ..
+        }) => {
             assert!(draft.is_none());
             assert_eq!(positions.len(), 1);
             assert_eq!(positions[0].order, 9);
@@ -539,7 +551,7 @@ fn draft_message_text_and_same_chat_reply() {
         )
         .unwrap();
     match external.payload {
-        EnvelopePayload::UpdateChatDraftMessage { draft, .. } => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateChatDraftMessage { draft, .. }) => {
             let draft = draft.expect("text kept");
             assert_eq!(draft.text, "hi");
             assert_eq!(draft.reply_to_message_id, None);
@@ -552,7 +564,7 @@ fn draft_message_text_and_same_chat_reply() {
         )
         .unwrap();
     match bot.payload {
-        EnvelopePayload::UpdateUser { user_id, user } => {
+        EnvelopePayload::Users(UsersPayload::UpdateUser { user_id, user }) => {
             assert_eq!(user_id, UserId(11));
             assert!(user.is_bot);
             assert_eq!(user.first_name, "Bot");
@@ -566,12 +578,12 @@ fn new_chat_carries_read_cursors() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":9,"title":"n","type":{"@type":"chatTypePrivate","user_id":9},"unread_count":2,"last_read_inbox_message_id":10,"last_read_outbox_message_id":11}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChat {
+        EnvelopePayload::Chats(ChatsPayload::UpdateNewChat {
             unread_count,
             last_read_inbox_message_id,
             last_read_outbox_message_id,
             ..
-        } => {
+        }) => {
             assert_eq!(unread_count, 2);
             assert_eq!(last_read_inbox_message_id.0, 10);
             assert_eq!(last_read_outbox_message_id.0, 11);
@@ -589,7 +601,7 @@ fn draft_message_parses_partial_quote() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatDraftMessage { draft, .. } => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateChatDraftMessage { draft, .. }) => {
             let draft = draft.expect("draft");
             assert_eq!(draft.text, "sounds good");
             assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
@@ -605,10 +617,10 @@ fn chats_and_found_messages_are_typed() {
         parse_envelope(r#"{"@type":"chats","@extra":"4","total_count":2,"chat_ids":[11,"12"]}"#)
             .unwrap();
     match chats.payload {
-        EnvelopePayload::Chats {
+        EnvelopePayload::ChatList(ChatListPayload::Chats {
             total_count,
             chat_ids,
-        } => {
+        }) => {
             assert_eq!(total_count, 2);
             assert_eq!(chat_ids, vec![ChatId(11), ChatId(12)]);
         }
@@ -619,11 +631,11 @@ fn chats_and_found_messages_are_typed() {
         )
         .unwrap();
     match found.payload {
-        EnvelopePayload::FoundMessages {
+        EnvelopePayload::Search(SearchPayload::FoundMessages {
             total_count,
             messages,
             next_offset,
-        } => {
+        }) => {
             assert_eq!(total_count, 1);
             assert_eq!(next_offset, "n1");
             assert_eq!(messages.len(), 1);
@@ -653,11 +665,11 @@ fn chats_and_found_messages_are_typed() {
         )
         .unwrap();
     match in_chat.payload {
-        EnvelopePayload::FoundChatMessages {
+        EnvelopePayload::Search(SearchPayload::FoundChatMessages {
             total_count,
             messages,
             next_from_message_id,
-        } => {
+        }) => {
             assert_eq!(total_count, 2);
             assert_eq!(next_from_message_id.0, 40);
             assert_eq!(messages.len(), 1);
@@ -678,19 +690,19 @@ fn update_option_parses_caption_length_max() {
     let payload = parse_payload("updateOption", json).unwrap();
     assert_eq!(
         payload,
-        EnvelopePayload::UpdateOption {
+        EnvelopePayload::Common(CommonPayload::UpdateOption {
             name: "message_caption_length_max".to_string(),
             value: OptionValue::Integer(1024),
-        }
+        })
     );
     let json = r#"{"@type":"updateOption","name":"some_unknown_option","value":{"@type":"optionValueBoolean","value":true}}"#;
     let payload = parse_payload("updateOption", json).unwrap();
     assert!(matches!(
         payload,
-        EnvelopePayload::UpdateOption {
+        EnvelopePayload::Common(CommonPayload::UpdateOption {
             value: OptionValue::Boolean(true),
             ..
-        }
+        })
     ));
 }
 
@@ -702,11 +714,11 @@ fn parses_unread_count_updates() {
     .unwrap();
     assert!(matches!(
         msg.payload,
-        EnvelopePayload::UpdateUnreadMessageCount {
+        EnvelopePayload::ChatList(ChatListPayload::UpdateUnreadMessageCount {
             list: ChatList::Archive,
             unread_count: 30,
             unread_unmuted_count: 0,
-        }
+        })
     ));
 }
 
@@ -719,7 +731,7 @@ fn message_calendar_parses_days() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::MessageCalendar { total_count, days } => {
+        EnvelopePayload::Search(SearchPayload::MessageCalendar { total_count, days }) => {
             assert_eq!(total_count, 5);
             assert_eq!(days.len(), 1);
             assert_eq!(days[0].message_id.0, 300);
@@ -739,7 +751,7 @@ fn invite_link_counts_and_members_parsed() {
     )
     .unwrap();
     match counts.payload {
-        EnvelopePayload::ChatInviteLinkCounts { counts } => {
+        EnvelopePayload::Groups(GroupsPayload::ChatInviteLinkCounts { counts }) => {
             // The row without a user id is dropped, not defaulted.
             assert_eq!(counts.len(), 1);
             assert_eq!(counts[0].user_id, 5);
@@ -753,10 +765,10 @@ fn invite_link_counts_and_members_parsed() {
     )
     .unwrap();
     match members.payload {
-        EnvelopePayload::ChatInviteLinkMembers {
+        EnvelopePayload::Groups(GroupsPayload::ChatInviteLinkMembers {
             total_count,
             members,
-        } => {
+        }) => {
             assert_eq!(total_count, 9);
             assert_eq!(members[0].user_id, 7);
             assert_eq!(members[0].joined_chat_date, 123);

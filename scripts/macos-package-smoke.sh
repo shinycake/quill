@@ -56,6 +56,13 @@ cp "$ROOT/assets/icons/Quill.icns" "$DIST/Contents/Resources/Quill.icns"
 bash "$ROOT/scripts/stage-licenses.sh" "$DIST/Contents/Resources"
 bash "$ROOT/scripts/build-qr-scanner.sh"
 cp "$ROOT/target/qr-scanner/quill-qr-scanner" "$DIST/Contents/MacOS/quill-qr-scanner"
+# Mini apps run in a helper process (docs/decisions/codex-miniapp-webview.md);
+# Quill looks for it next to its own executable.
+WEBVIEW_BIN="${QUILL_WEBVIEW_BIN:-$ROOT/target/release/quill-webview}"
+if [[ ! -f "$WEBVIEW_BIN" ]]; then
+  cargo build --release --locked -p quill-webview --manifest-path "$ROOT/Cargo.toml"
+fi
+cp "$WEBVIEW_BIN" "$DIST/Contents/MacOS/quill-webview"
 
 if [[ -n "${QUILL_TDJSON_PATH:-}" && -f "${QUILL_TDJSON_PATH}" ]]; then
   cp "${QUILL_TDJSON_PATH}" "$DIST/Contents/Frameworks/libtdjson.dylib"
@@ -114,7 +121,7 @@ vendor_deps
 # and helpers first, then the app. Ad-hoc by default; set QUILL_CODESIGN_IDENTITY
 # (e.g. an "Apple Development: ..." identity) for a stable local signature.
 SIGN_ID="${QUILL_CODESIGN_IDENTITY:--}"
-for item in "$DIST"/Contents/Frameworks/*.dylib "$DIST/Contents/MacOS/quill-qr-scanner" "$DIST"; do
+for item in "$DIST"/Contents/Frameworks/*.dylib "$DIST/Contents/MacOS/quill-qr-scanner" "$DIST/Contents/MacOS/quill-webview" "$DIST"; do
   [[ -e "$item" ]] && codesign --force --sign "$SIGN_ID" "$item"
 done
 

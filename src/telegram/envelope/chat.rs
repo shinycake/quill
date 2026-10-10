@@ -81,7 +81,7 @@ pub enum ChatJoinResult {
 /// updateNewChat, so the reducer inserts it into the model through
 /// the existing path.
 pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError> {
-    Ok(EnvelopePayload::UpdateNewChat {
+    Ok(EnvelopePayload::Chats(ChatsPayload::UpdateNewChat {
         chat_id: ChatId(int53(chat.get("id"))?),
         title: chat
             .get("title")
@@ -221,7 +221,7 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             None | Some(Value::Null) => None,
             Some(message) => super::parse_message(message).ok().map(Box::new),
         },
-    })
+    }))
 }
 
 pub(crate) fn parse_chat_kind(value: Option<&Value>) -> ChatKind {

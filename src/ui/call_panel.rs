@@ -292,27 +292,32 @@ impl QuillApp {
         };
         // The window's call, and when it ended.
         if ended {
-            if self.call_ended_at.is_none_or(|(id, _)| Some(id) != call_id) {
-                self.call_ended_at = call_id.map(|id| (id, Instant::now()));
+            if self
+                .calls
+                .ended_at
+                .is_none_or(|(id, _)| Some(id) != call_id)
+            {
+                self.calls.ended_at = call_id.map(|id| (id, Instant::now()));
             }
         } else {
-            self.call_ended_at = None;
+            self.calls.ended_at = None;
         }
         let lingering = self
-            .call_ended_at
+            .calls
+            .ended_at
             .is_some_and(|(_, at)| busy || at.elapsed() < ENDED_LINGER);
         let wanted = call_id
-            .filter(|id| (!ended || lingering) && self.call_window_closed_by_user != Some(*id));
-        match (wanted, self.call_window) {
+            .filter(|id| (!ended || lingering) && self.calls.window_closed_by_user != Some(*id));
+        match (wanted, self.calls.window) {
             (Some(_), Some(handle)) => {
-                if incoming && !self.call_window_raised {
-                    self.call_window_raised = true;
+                if incoming && !self.calls.window_raised {
+                    self.calls.window_raised = true;
                     let _ = handle.update(cx, |_, window, _| window.activate_window());
                 }
             }
             (Some(id), None) => self.open_call_window(id, cx),
             (None, Some(handle)) => {
-                self.call_window = None;
+                self.calls.window = None;
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
             }
             (None, None) => {}
@@ -328,11 +333,11 @@ impl QuillApp {
     }
 
     fn open_call_window(&mut self, call_id: i32, cx: &mut Context<Self>) {
-        if self.call_window_opening {
+        if self.calls.window_opening {
             return;
         }
-        self.call_window_opening = true;
-        self.call_window_raised = false;
+        self.calls.window_opening = true;
+        self.calls.window_raised = false;
         let owner = cx.entity();
         cx.defer(move |cx| {
             let weak = owner.downgrade();
@@ -355,8 +360,8 @@ impl QuillApp {
                     window.activate_window();
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
-                            app.call_window = None;
-                            app.call_window_closed_by_user = Some(call_id);
+                            app.calls.window = None;
+                            app.calls.window_closed_by_user = Some(call_id);
                             cx.notify();
                         });
                         true
@@ -370,9 +375,9 @@ impl QuillApp {
                 },
             );
             owner.update(cx, |app, cx| {
-                app.call_window_opening = false;
+                app.calls.window_opening = false;
                 match result {
-                    Ok(handle) => app.call_window = Some(handle.into()),
+                    Ok(handle) => app.calls.window = Some(handle.into()),
                     Err(_) => app.status_note = "Couldn't open the call window".into(),
                 }
                 cx.notify();
@@ -482,8 +487,8 @@ impl QuillApp {
 
     /// Bring the call window back (the call bar's click).
     pub(super) fn show_call_window(&mut self, cx: &mut Context<Self>) {
-        self.call_window_closed_by_user = None;
-        if let Some(handle) = self.call_window {
+        self.calls.window_closed_by_user = None;
+        if let Some(handle) = self.calls.window {
             let _ = handle.update(cx, |_, window, _| window.activate_window());
         }
         cx.notify();

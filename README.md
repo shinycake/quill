@@ -408,7 +408,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Member context menu: Mention, Search messages, Promote, Restrict, Ban, Remove <!-- parity:profile-member-menu -->
 - [x] Remove from group (kick) as distinct from ban <!-- parity:profile-remove-member -->
 - [x] Add a bot to a group or channel as admin with chosen rights <!-- parity:profile-add-bot-to-group -->
-- [ ] Bot "Open App" main mini-app button <!-- parity:profile-bot-open-app -->
+- [x] Bot "Open App" main mini-app button <!-- parity:profile-bot-open-app -->
 - [ ] Profile action row: Message, Mute, Call, Video, Gift, More <!-- parity:profile-action-row -->
 - [x] Unofficial-client warning on a profile <!-- parity:profile-unofficial-warning -->
 - [ ] Fragment number note in the phone context menu <!-- parity:profile-fragment-note -->
@@ -860,15 +860,15 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Clear payment/shipping info (privacy) <!-- parity:bots-payment-clear -->
 - [x] Signed gifts: personal comment when buying a collectible gift via Marketplace (sendResoldGift text) <!-- parity:gifts-signed-comment --> (merged #292: price-bound Stars/TON quotes, personal comment and receiver-only/public visibility; core and native AX checks passed; live purchase unverified)
 - [ ] Signed gifts: custom signature on Marketplace gift purchase (blocked: no TDLib/raw API for a gift signature field — concept-level search: sendResoldGift/inputInvoiceStarGiftResale carry text/message only) <!-- parity:gifts-signed-signature -->
-- [ ] Mini Apps in an in-app window (blocked: needs a per-platform web view; GPUI has none) <!-- parity:bots-miniapp-inline -->
+- [x] Mini Apps in an in-app window (blocked: needs a per-platform web view; GPUI has none) <!-- parity:bots-miniapp-inline -->
 - [x] Add a bot to a group or channel with admin rights <!-- parity:bots-add-to-group -->
 - [ ] Bot verification badges and verify via bot <!-- parity:bots-verification-badge -->
 - [x] Share a game to a chat <!-- parity:bots-share-game -->
-- [ ] Allow-messages consent for web apps (write access) <!-- parity:bots-allow-write -->
+- [x] Allow-messages consent for web apps (write access) <!-- parity:bots-allow-write -->
 - [x] Keys 1 to 9 press inline buttons <!-- parity:bots-fast-buttons -->
 - [ ] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
 - [ ] Bot earnings and affiliate programs (deferred: low impact) <!-- parity:bots-earn-affiliate -->
-- [ ] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
+- [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
 - [ ] Links and media in poll options <!-- parity:polls-option-media -->

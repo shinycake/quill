@@ -67,6 +67,7 @@ mod tests_stories;
 mod tests_threads;
 mod translate;
 mod users;
+mod web_apps;
 
 pub use auth::*;
 pub use backgrounds::*;
@@ -103,3 +104,4 @@ pub use stickers::*;
 pub use stories::*;
 pub use translate::*;
 pub use users::*;
+pub use web_apps::*;

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src https: http: about: blob: data:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="robots" content="noindex, nofollow">
+<title>Mini app</title>
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div id="shell">
+  <header id="header">
+    <button id="back" class="icon-button" type="button" aria-label="Back" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.5 8.5 12 15 18.5"/></svg>
+    </button>
+    <div id="title-block">
+      <div id="title"></div>
+      <div id="subtitle">Mini app</div>
+    </div>
+    <button id="menu-button" class="icon-button" type="button" aria-label="Menu" aria-haspopup="menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5.5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="18.5" r="1.6"/></svg>
+    </button>
+    <button id="close" class="icon-button" type="button" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
+    </button>
+  </header>
+  <main id="frame-wrap">
+    <div id="loading"><div class="spinner" aria-label="Loading"></div></div>
+  </main>
+  <footer id="footer" hidden>
+    <div id="buttons"></div>
+  </footer>
+  <div id="menu" role="menu" hidden></div>
+  <div id="popup-backdrop" hidden>
+    <div id="popup" role="dialog" aria-modal="true" aria-labelledby="popup-title">
+      <div id="popup-title"></div>
+      <div id="popup-message"></div>
+      <div id="popup-buttons"></div>
+    </div>
+  </div>
+  <div id="toast" role="status" hidden></div>
+</div>
+<script src="page.js"></script>
+</body>
+</html>

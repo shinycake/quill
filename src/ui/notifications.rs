@@ -224,7 +224,7 @@ impl QuillApp {
         (
             self.status_note.clone(),
             self.login_prevented.is_some(),
-            self.folder_tab,
+            self.folders.tab,
             self.connection_lost,
         )
     }
@@ -325,7 +325,7 @@ impl QuillApp {
             || !live.driver.session.pending_sound_plays.is_empty();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
-        if let Some(folder_id) = self.folder_tab
+        if let Some(folder_id) = self.folders.tab
             && !live
                 .driver
                 .session
@@ -333,7 +333,7 @@ impl QuillApp {
                 .iter()
                 .any(|f| f.id == folder_id)
         {
-            self.folder_tab = None;
+            self.folders.tab = None;
         }
         let err = live.driver.session.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
@@ -765,7 +765,8 @@ impl QuillApp {
     /// notification once the call stops ringing.
     fn flush_call_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let picks: Vec<(i32, quill::notify_call::CallNotificationAction)> = self
-            .call_notify_clicks
+            .calls
+            .notify_clicks
             .lock()
             .map(|mut guard| std::mem::take(&mut *guard))
             .unwrap_or_default();
@@ -787,10 +788,10 @@ impl QuillApp {
                 quill::notify_call::CallNotificationAction::Accept => self.accept_incoming_call(cx),
                 quill::notify_call::CallNotificationAction::Decline => self.hang_up_call(cx),
                 quill::notify_call::CallNotificationAction::Open => {
-                    self.call_window_closed_by_user = None;
+                    self.calls.window_closed_by_user = None;
                     cx.activate(true);
                     window.activate_window();
-                    if let Some(handle) = self.call_window {
+                    if let Some(handle) = self.calls.window {
                         let _ = handle.update(cx, |_, window, _| window.activate_window());
                     }
                 }
@@ -799,7 +800,7 @@ impl QuillApp {
         let Some((call_id, user_id, is_video)) = ringing else {
             // Not ringing any more: take the toast down (macOS and Windows;
             // a Linux `notify-send` toast expires on its own).
-            if let Some(call_id) = self.call_notified.take()
+            if let Some(call_id) = self.calls.notified.take()
                 && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
             {
                 let account = self
@@ -819,13 +820,13 @@ impl QuillApp {
                 caller: &caller,
                 is_video,
                 app_active: cx.active_window().is_some(),
-                last_notified: self.call_notified,
+                last_notified: self.calls.notified,
                 locked: self.passcode_ui.locked,
             })
         else {
             return;
         };
-        self.call_notified = Some(call_id);
+        self.calls.notified = Some(call_id);
         self.spawn_call_notification(notification, cx);
     }
 
@@ -861,7 +862,7 @@ impl QuillApp {
             self.notify_inflight.fetch_sub(1, Ordering::SeqCst);
             return;
         }
-        let clicks = self.call_notify_clicks.clone();
+        let clicks = self.calls.notify_clicks.clone();
         let inflight = self.notify_inflight.clone();
         let call_id = notification.call_id;
         let spawn = std::thread::Builder::new()

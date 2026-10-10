@@ -492,6 +492,21 @@ pub enum DeepLinkAction {
         domain: String,
         invite: crate::bot_invite::Invite,
     },
+    /// `internalLinkTypeWebApp`: resolve the bot, `searchWebApp`, the open
+    /// box, then `getWebAppLinkUrl`.
+    OpenWebAppLink {
+        domain: String,
+        short_name: String,
+        start_parameter: String,
+    },
+    /// `internalLinkTypeMainWebApp`: resolve the bot, then `getMainWebApp`.
+    OpenMainWebApp {
+        domain: String,
+        start_parameter: String,
+    },
+    /// `internalLinkTypeAttachmentMenuBot`: resolve the bot, add it to the
+    /// attachment menu if needed, then `openWebApp` in the current chat.
+    OpenAttachmentBot { domain: String, url: String },
 }
 
 /// `parity:platform-deep-links`: the single active deep-link flow. One

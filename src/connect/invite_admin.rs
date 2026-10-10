@@ -2,6 +2,7 @@
 //! counts, revoked-link deletion and Stars subscription links (batch B8).
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::GroupsPurpose;
 use crate::state::{
     INVITE_ADMIN_PAGE_SIZE, InviteLinkCountsFetch, InviteLinkFetch, InviteLinkMembersState,
     JoinRequestFetch, RequestPurpose,
@@ -122,11 +123,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.invite_admin_ready(chat_id)? {
             return Ok(None);
         }
-        let purpose = RequestPurpose::ProcessAllChatJoinRequests { approve };
+        let purpose = RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { approve });
         // One bulk action at a time, whichever direction.
         if [true, false].into_iter().any(|other| {
             self.session.requests.has_purpose_for_chat(
-                RequestPurpose::ProcessAllChatJoinRequests { approve: other },
+                RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests {
+                    approve: other,
+                }),
                 chat_id,
             )
         }) {
@@ -237,7 +240,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         offset: Option<(i64, i32)>,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let extra = self.session.request(
-            RequestPurpose::GetChatInviteLinkMembers { append },
+            RequestPurpose::Groups(GroupsPurpose::GetChatInviteLinkMembers { append }),
             Some(chat_id),
         );
         let fresh = InviteLinkMembersState {

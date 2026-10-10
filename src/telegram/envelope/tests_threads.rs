@@ -9,9 +9,10 @@ fn reply_info_is_parsed_from_interaction_info() {
         r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":101,"interaction_info":{"@type":"messageInteractionInfo","view_count":5,"forward_count":1,"reply_info":{"@type":"messageReplyInfo","reply_count":12,"recent_replier_ids":[{"@type":"messageSenderUser","user_id":7},{"@type":"messageSenderChat","chat_id":-1002},{"@type":"messageSenderBogus"}],"last_read_inbox_message_id":50,"last_read_outbox_message_id":40,"last_message_id":60},"reactions":null}}"#,
     )
     .unwrap();
-    let EnvelopePayload::UpdateMessageInteractionInfo {
-        interaction_info, ..
-    } = env.payload
+    let EnvelopePayload::Messages(MessagesPayload::UpdateMessageInteractionInfo {
+        interaction_info,
+        ..
+    }) = env.payload
     else {
         panic!("interaction info update");
     };
@@ -33,9 +34,10 @@ fn reply_info_is_parsed_from_interaction_info() {
         r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":102,"interaction_info":{"@type":"messageInteractionInfo","view_count":5,"forward_count":1,"reply_info":null,"reactions":null}}"#,
     )
     .unwrap();
-    let EnvelopePayload::UpdateMessageInteractionInfo {
-        interaction_info, ..
-    } = env.payload
+    let EnvelopePayload::Messages(MessagesPayload::UpdateMessageInteractionInfo {
+        interaction_info,
+        ..
+    }) = env.payload
     else {
         panic!("interaction info update");
     };
@@ -57,7 +59,7 @@ fn message_thread_info_and_thread_topic_are_parsed() {
         r#"{"@type":"messageThreadInfo","@extra":"4","chat_id":14,"message_thread_id":501,"reply_info":{"@type":"messageReplyInfo","reply_count":3,"recent_replier_ids":[],"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"last_message_id":504},"unread_message_count":2,"messages":[{"id":501,"chat_id":14,"is_outgoing":false,"topic_id":{"@type":"messageTopicThread","message_thread_id":501},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"root","entities":[]}}}],"draft_message":null}"#,
     )
     .unwrap();
-    let EnvelopePayload::MessageThreadInfo(info) = env.payload else {
+    let EnvelopePayload::Threads(ThreadsPayload::MessageThreadInfo(info)) = env.payload else {
         panic!("thread info");
     };
     assert_eq!(info.chat_id, ChatId(14));

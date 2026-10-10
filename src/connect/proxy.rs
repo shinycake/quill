@@ -5,6 +5,7 @@ use super::*;
 use crate::ids::RequestId;
 use crate::proxy::{PingStatus, ProxyDraft, RotationAction};
 use crate::settings::save_proxy_prefs;
+use crate::state::SettingsPurpose;
 use crate::state::{LINK_PING_ID, RequestPurpose, ShutdownPhase};
 use crate::telegram::envelope::ConnectionState;
 use crate::telegram::requests::{
@@ -153,9 +154,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.proxy_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::PingProxy { proxy_id: slot }, None);
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id: slot }),
+            None,
+        );
         self.session.proxy.pings.insert(slot, PingStatus::Checking);
         match self.sender.send_json(&ping_proxy(extra, draft)) {
             Ok(()) => Ok(extra),
@@ -172,9 +174,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.proxy_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::SetPreferIpv6 { on }, None);
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { on }),
+            None,
+        );
         self.session.proxy.error = None;
         match self.sender.send_json(&set_prefer_ipv6(extra, on)) {
             Ok(()) => Ok(extra),

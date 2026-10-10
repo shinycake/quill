@@ -9,10 +9,10 @@ fn sessions_carry_the_inactive_ttl_and_detail_fields() {
 {"@type":"session","id":"11","is_current":true,"log_in_date":1700000000,"is_official_application":true,"application_name":"Quill","device_model":"Mac"}
 ]}"#;
     match parse_envelope(json).unwrap().payload {
-        EnvelopePayload::Sessions {
+        EnvelopePayload::Settings(SettingsPayload::Sessions {
             sessions,
             inactive_session_ttl_days,
-        } => {
+        }) => {
             assert_eq!(inactive_session_ttl_days, Some(90));
             assert_eq!(sessions[0].log_in_date, 1_700_000_000);
             assert!(sessions[0].is_official_application);
@@ -24,10 +24,10 @@ fn sessions_carry_the_inactive_ttl_and_detail_fields() {
         r#"{"@type":"sessions","inactive_session_ttl_days":0,"sessions":[]}"#,
     ] {
         match parse_envelope(absent).unwrap().payload {
-            EnvelopePayload::Sessions {
+            EnvelopePayload::Settings(SettingsPayload::Sessions {
                 inactive_session_ttl_days,
                 ..
-            } => assert_eq!(inactive_session_ttl_days, None),
+            }) => assert_eq!(inactive_session_ttl_days, None),
             other => panic!("{other:?}"),
         }
     }
@@ -41,7 +41,7 @@ fn b13_answers_parse() {
     .unwrap()
     .payload
     {
-        EnvelopePayload::NewChatPrivacySettings(settings) => {
+        EnvelopePayload::Settings(SettingsPayload::NewChatPrivacySettings(settings)) => {
             assert!(!settings.allow_from_unknown);
             assert_eq!(settings.incoming_paid_message_star_count, 3);
         }
@@ -53,7 +53,7 @@ fn b13_answers_parse() {
     .unwrap()
     .payload
     {
-        EnvelopePayload::NetworkStatistics(usage) => {
+        EnvelopePayload::Settings(SettingsPayload::NetworkStatistics(usage)) => {
             assert_eq!(usage.since_date, 7);
             assert_eq!(usage.grand_total().total(), 3);
         }
@@ -63,7 +63,7 @@ fn b13_answers_parse() {
         parse_envelope(r#"{"@type":"recoveryEmailAddress","recovery_email_address":""}"#)
             .unwrap()
             .payload,
-        EnvelopePayload::RecoveryEmailAddress
+        EnvelopePayload::Settings(SettingsPayload::RecoveryEmailAddress)
     ));
     match parse_envelope(
         r#"{"@type":"updateSuggestedActions","added_actions":[{"@type":"suggestedActionCheckPassword"},{"@type":"suggestedActionUpgradePremium"}],"removed_actions":[]}"#,
@@ -71,7 +71,7 @@ fn b13_answers_parse() {
     .unwrap()
     .payload
     {
-        EnvelopePayload::UpdateSuggestedActions { added, removed } => {
+        EnvelopePayload::Settings(SettingsPayload::UpdateSuggestedActions { added, removed }) => {
             assert_eq!(
                 added,
                 ["suggestedActionCheckPassword", "suggestedActionUpgradePremium"]
@@ -90,7 +90,7 @@ fn user_full_info_reads_gift_settings() {
     .unwrap()
     .payload
     {
-        EnvelopePayload::UpdateUserFullInfo { extras, .. } => {
+        EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo { extras, .. }) => {
             let gifts = extras.gift_settings.expect("gift settings");
             assert!(gifts.show_gift_button && !gifts.upgraded_gifts);
         }
@@ -102,7 +102,7 @@ fn user_full_info_reads_gift_settings() {
     .unwrap()
     .payload
     {
-        EnvelopePayload::UpdateUserFullInfo { extras, .. } => {
+        EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo { extras, .. }) => {
             assert!(extras.gift_settings.is_none())
         }
         other => panic!("{other:?}"),

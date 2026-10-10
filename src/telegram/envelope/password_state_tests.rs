@@ -7,7 +7,7 @@ fn password_state_parses_pending_email() {
     let json = r#"{"@type":"passwordState","has_password":true,"password_hint":"street","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":{"@type":"emailAddressAuthenticationCodeInfo","email_address_pattern":"i***@example.com","length":6},"login_email_address_pattern":"","pending_reset_date":0}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::PasswordState { state } => {
+        EnvelopePayload::Settings(SettingsPayload::PasswordState { state }) => {
             assert!(state.has_password);
             assert_eq!(state.password_hint, "street");
             assert!(!state.has_recovery_email_address);
@@ -28,7 +28,7 @@ fn password_state_parses_null_code_info() {
     let json = r#"{"@type":"passwordState","has_password":false,"password_hint":"","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::PasswordState { state } => {
+        EnvelopePayload::Settings(SettingsPayload::PasswordState { state }) => {
             assert!(!state.has_password);
             assert_eq!(state.pending_email_pattern, None);
             assert_eq!(state.pending_email_code_length, 0);

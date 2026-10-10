@@ -884,7 +884,7 @@ impl QuillApp {
                 "Your account is protected by 2-Step Verification. Do you still remember your password?",
             ))
             .child(
-                Input::new(&self.twofa_current_password)
+                Input::new(&self.twofa.current_password)
                     .aria_label("Your two-step verification password")
                     .content_type(InputContentType::Password)
                     .h(px(40.)),
@@ -934,8 +934,9 @@ impl QuillApp {
     /// Send the typed password to be verified; the field is cleared and
     /// the string zeroized right away.
     fn submit_password_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut password = self.twofa_current_password.read(cx).value().to_string();
-        self.twofa_current_password
+        let mut password = self.twofa.current_password.read(cx).value().to_string();
+        self.twofa
+            .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
         if password.is_empty() {
             return;

@@ -136,7 +136,11 @@ impl QuillApp {
         // bot's own chat stays closed (tdesktop shows a box, not the chat).
         if matches!(
             action,
-            DeepLinkAction::ShareGame { .. } | DeepLinkAction::AddBot { .. }
+            DeepLinkAction::ShareGame { .. }
+                | DeepLinkAction::AddBot { .. }
+                | DeepLinkAction::OpenWebAppLink { .. }
+                | DeepLinkAction::OpenMainWebApp { .. }
+                | DeepLinkAction::OpenAttachmentBot { .. }
         ) && self.run_bot_link(chat_id, action, cx)
         {
             return;

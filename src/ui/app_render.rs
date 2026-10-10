@@ -80,7 +80,7 @@ impl Render for QuillApp {
             || self.chat_menu.is_some()
             || self.archive_menu.is_some()
             || self.global.story_menu.is_some()
-            || self.folder_tab_menu.is_some();
+            || self.folders.tab_menu.is_some();
         if menu_open && !self.context_menu_was_open {
             self.context_menu_previous_focus = window.focused(cx);
             window.focus(&self.context_menu_focus, cx);
@@ -188,6 +188,7 @@ impl Render for QuillApp {
         }
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
+        self.run_pending_mini_app_action(window, cx);
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
         // chats whose active stories should be refreshed (an own story
         // posted from another client appears in the tray this way).
@@ -200,65 +201,65 @@ impl Render for QuillApp {
         // Phase 9.3: the composer sent `canPostStory` — once the answer
         // lands, either post (eligible) or surface the reason in the
         // composer. Eligibility is re-checked on every Post press.
-        if self.story_composer.check_sent {
+        if self.stories.composer.check_sent {
             let answered = self.session().is_some_and(|session| {
                 session.story_post.eligibility.is_some() || session.story_post.check_error.is_some()
             });
             if answered {
-                self.story_composer.check_sent = false;
+                self.stories.composer.check_sent = false;
                 self.story_composer_after_check(cx);
             }
         }
         // Phase 9.3: `postStory` was sent (`post_sent`) — once its
         // answer moves `story_post.outcome` out of `None` the outcome
         // owns the busy state again and the flag clears.
-        if self.story_composer.post_sent
+        if self.stories.composer.post_sent
             && self.session().is_some_and(|session| {
                 !matches!(session.story_post.outcome, StoryPostOutcome::None)
             })
         {
-            self.story_composer.post_sent = false;
+            self.stories.composer.post_sent = false;
         }
         // Phase 9.5: `editStory` was sent (`save_sent`) — once
         // `story_manage.pending` clears, success closes the composer
         // (the edited story arrives via `updateStory`); failure
         // surfaces `story_manage.error` in the composer.
-        if self.story_composer.save_sent
+        if self.stories.composer.save_sent
             && self
                 .session()
                 .is_some_and(|session| !session.story_manage.pending)
         {
-            self.story_composer.save_sent = false;
+            self.stories.composer.save_sent = false;
             let failed = self.session().and_then(|s| s.story_manage.error.clone());
             match failed {
-                Some(error) => self.story_composer.local_error = Some(error),
+                Some(error) => self.stories.composer.local_error = Some(error),
                 None => self.close_story_composer(cx),
             }
         }
         // Phase 9.5: the viewer cover editor / privacy editor sent a
         // management call — once `story_manage.pending` clears, close
         // the panel on success or leave it open showing the error.
-        if self.story_cover_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
-            self.story_cover_sent = false;
+        if self.stories.cover_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
+            self.stories.cover_sent = false;
             if self
                 .session()
                 .is_some_and(|s| s.story_manage.error.is_none())
             {
-                self.story_cover_target = None;
+                self.stories.cover_target = None;
             }
         }
-        if self.story_privacy_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
-            self.story_privacy_sent = false;
+        if self.stories.privacy_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
+            self.stories.privacy_sent = false;
             if self
                 .session()
                 .is_some_and(|s| s.story_manage.error.is_none())
             {
-                self.story_privacy_edit = None;
+                self.stories.privacy_edit = None;
             }
         }
         // Phase 9.2: a story that vanished from the cache while being
         // viewed was deleted (`updateStoryDeleted`) — close the viewer.
-        let current_deleted = self.story_viewer.current().is_some_and(|item| {
+        let current_deleted = self.stories.viewer.current().is_some_and(|item| {
             self.session().is_some_and(|session| {
                 !session
                     .stories
@@ -266,9 +267,9 @@ impl Render for QuillApp {
             })
         });
         if current_deleted {
-            self.story_viewer.close();
-            self.story_reaction_picker_open = false;
-            self.story_reply_open = false;
+            self.stories.viewer.close();
+            self.stories.reaction_picker_open = false;
+            self.stories.reply_open = false;
             self.status_note = "Story deleted".into();
         }
         // Phase 4.6: push the playback clock into the seek slider entity so
@@ -578,14 +579,14 @@ impl Render for QuillApp {
             // action handler stops propagation unless told to propagate,
             // which used to eat the composer's arrow keys and "0").
             .on_action(cx.listener(|this, _: &StoryTogglePause, _, cx| {
-                if this.story_viewer.is_open() && !this.story_text_input_open() {
+                if this.stories.viewer.is_open() && !this.story_text_input_open() {
                     this.toggle_story_pause(cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerPrev, _, cx| {
-                if this.story_viewer.is_open() && !this.story_text_input_open() {
+                if this.stories.viewer.is_open() && !this.story_text_input_open() {
                     this.step_story_viewer(-1, cx);
                 } else if this.media_viewer.is_open() {
                     this.step_media_viewer(-1, cx);
@@ -594,7 +595,7 @@ impl Render for QuillApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerNext, _, cx| {
-                if this.story_viewer.is_open() && !this.story_text_input_open() {
+                if this.stories.viewer.is_open() && !this.story_text_input_open() {
                     this.step_story_viewer(1, cx);
                 } else if this.media_viewer.is_open() {
                     this.step_media_viewer(1, cx);
@@ -918,16 +919,16 @@ impl Render for QuillApp {
             .children(self.custom_emoji_card(cx))
             .children(self.photo_editor_overlay(cx))
             // Phase 9.1: story viewer overlay above the media viewer.
-            .when(self.story_viewer.is_open(), |this| {
+            .when(self.stories.viewer.is_open(), |this| {
                 this.child(self.story_viewer_overlay(cx))
             })
             // Phase 9.3: story composer overlay above the story viewer.
-            .when(self.story_composer.open, |this| {
+            .when(self.stories.composer.open, |this| {
                 this.child(self.story_composer_overlay(cx))
             })
             // Phase 9.7: chat story page overlay (albums / chat page /
             // archive) above the story composer.
-            .when(self.story_page.is_some(), |this| {
+            .when(self.stories.page.is_some(), |this| {
                 this.child(self.story_page_overlay(cx))
             })
             // kit Phase 2 (redo): add-contact now hosted in a kit Dialog
@@ -1032,7 +1033,7 @@ impl Render for QuillApp {
             .when_some(self.archive_menu, |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })
-            .when_some(self.folder_tab_menu, |this, menu| {
+            .when_some(self.folders.tab_menu, |this, menu| {
                 this.child(self.folder_tab_menu_overlay(menu, cx))
             })
             // Slice CL: floating peek preview — read-only recent

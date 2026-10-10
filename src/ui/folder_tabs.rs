@@ -175,7 +175,7 @@ impl QuillApp {
             }
             FolderSlotKind::Archived => {
                 self.chat_filter = ChatListFilter::Archived;
-                self.folder_tab = None;
+                self.folders.tab = None;
                 cx.notify();
             }
             FolderSlotKind::All => self.open_folder_tab(None, cx),
@@ -237,7 +237,7 @@ impl QuillApp {
             }
             bar = bar.child(tab);
         }
-        let selected = selected_slot(&slots, self.chat_filter, self.folder_tab);
+        let selected = selected_slot(&slots, self.chat_filter, self.folders.tab);
         let kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
         let manage_weak = weak.clone();
         bar.selected_index(selected)
@@ -274,7 +274,7 @@ impl QuillApp {
             .appearance
             .folder_tabs_mode
             .resolved(self.appearance.folder_tabs_view);
-        let selected = selected_slot(&slots, self.chat_filter, self.folder_tab);
+        let selected = selected_slot(&slots, self.chat_filter, self.folders.tab);
         let width = self.folder_rail_width();
         let mut list = div()
             .id("folder-rail-scroll")

@@ -545,7 +545,7 @@ impl QuillApp {
         community_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.folder_tab = None;
+        self.folders.tab = None;
         self.contacts_tab_open = false;
         self.chat_filter = ChatListFilter::Community(community_id);
         if let Some(live) = self.live.as_mut()
@@ -880,7 +880,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
-        self.folder_tab = folder;
+        self.folders.tab = folder;
         self.chat_filter = ChatListFilter::All;
         self.contacts_tab_open = false;
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
@@ -924,7 +924,7 @@ impl QuillApp {
                 .map(|f| (f.id, f.name.clone(), f.color_id))
                 .collect();
             let tags = session.are_folder_tags_enabled;
-            let viewing = self.folder_tab;
+            let viewing = self.folders.tab;
             let lines = self.appearance.preview_lines;
             let heights = ids
                 .iter()
@@ -1328,7 +1328,7 @@ impl QuillApp {
                     if self.search_is_open() {
                         list = list.child(self.search_results(cx));
                     } else {
-                        let folder = self.folder_tab;
+                        let folder = self.folders.tab;
                         let filter = self.chat_filter;
                         // Parity slice: folder names + tags flag for chat-row
                         // chips.
@@ -1541,7 +1541,7 @@ impl QuillApp {
                             .is_some_and(|s| !s.ordered_archived_chats().is_empty());
                         // tdesktop's stories strip is the first row: it
                         // scrolls away with the list (and collapses).
-                        if !self.story_strip.tiles.is_empty() {
+                        if !self.stories.strip.tiles.is_empty() {
                             items.push(ChatListItem::StoryStrip);
                         }
                         match quill::chatlist_archive::row_mode(

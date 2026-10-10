@@ -1,6 +1,7 @@
 //! Connect driver: members, admins, invites, join requests, event log.
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::GroupsPurpose;
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, InviteLinkFetch,
     JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup, RequestPurpose,
@@ -275,7 +276,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !can_invite {
             return Ok(None);
         }
-        let purpose = RequestPurpose::ProcessChatJoinRequest { user_id };
+        let purpose = RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -492,7 +493,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .cloned()
             .unwrap_or_default();
         let extra = self.session.request(
-            RequestPurpose::GetChatEventLog { from_event_id },
+            RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id }),
             Some(chat_id),
         );
         if let Err(err) = self.sender.send_json(&get_chat_event_log(
@@ -531,7 +532,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chat_can_manage_admins(chat_id) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::SetChatMemberStatus { user_id, kind };
+        let purpose = RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus { user_id, kind });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -614,7 +615,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::GetAdminRights { user_id };
+        let purpose = RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -672,7 +673,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => return Ok(None),
         };
         let key = (chat_id.0, filter);
-        let purpose = RequestPurpose::GetSupergroupMembers { filter };
+        let purpose = RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter });
         if matches!(
             self.session.supergroup_members.get(&key),
             Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
@@ -864,10 +865,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let status = chat_member_status_restricted_json(true, until_date, &permissions.to_json());
-        let purpose = RequestPurpose::SetChatMemberStatus {
+        let purpose = RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
             user_id,
             kind: MemberStatusChange::Restrict,
-        };
+        });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -903,10 +904,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let status = chat_member_status_banned_json(until_date);
-        let purpose = RequestPurpose::SetChatMemberStatus {
+        let purpose = RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
             user_id,
             kind: MemberStatusChange::Ban,
-        };
+        });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -939,10 +940,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let status = chat_member_status_member_json();
-        let purpose = RequestPurpose::SetChatMemberStatus {
+        let purpose = RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
             user_id,
             kind: MemberStatusChange::Unban,
-        };
+        });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -982,7 +983,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             MemberStatusChange::Ban
         };
-        let purpose = RequestPurpose::SetChatMemberStatus { user_id, kind };
+        let purpose = RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus { user_id, kind });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -1053,7 +1054,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.begin_ownership_transfer(chat_id.0, user_id);
         let extra = self.session.request(
-            RequestPurpose::TransferChatOwnership { user_id },
+            RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id }),
             Some(chat_id),
         );
         if let Err(err) = self.sender.send_json(&transfer_chat_ownership(

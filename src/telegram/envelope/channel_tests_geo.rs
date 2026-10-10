@@ -7,7 +7,7 @@ fn message_location_parses_coordinates() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":108,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageLocation","location":{"@type":"location","latitude":37.7749,"longitude":-122.4194,"horizontal_accuracy":15.6}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Location(content) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -34,7 +34,7 @@ fn message_live_location_parses_live_fields() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":109,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageLiveLocation","location":{"@type":"liveLocation","location":{"@type":"location","latitude":48.8566,"longitude":2.3522,"horizontal_accuracy":0},"live_period":900,"heading":90,"proximity_alert_radius":500},"expires_in":600}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Location(content) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -63,7 +63,7 @@ fn message_venue_parses_all_fields() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":110,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageVenue","venue":{"@type":"venue","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0},"title":"Ferry Building","address":"1 Ferry Building, San Francisco","provider":"foursquare","id":"4a1a2b3c","type":"Food"}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Venue(venue) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -85,7 +85,7 @@ fn message_contact_parses_with_vcard() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":111,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageContact","contact":{"@type":"contact","phone_number":"+14155550123","first_name":"Ada","last_name":"Lovelace","vcard":"BEGIN:VCARD\nFN:Ada Lovelace\nEND:VCARD","user_id":123456789}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Contact(contact) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -104,12 +104,14 @@ fn message_contact_without_name_or_phone_is_unsupported() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":112,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageContact","contact":{"@type":"contact","phone_number":"","first_name":"","last_name":"","vcard":"","user_id":0}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => match &message.content {
-            MessageContent::Unsupported { type_name } => {
-                assert_eq!(type_name, "messageContact")
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+            match &message.content {
+                MessageContent::Unsupported { type_name } => {
+                    assert_eq!(type_name, "messageContact")
+                }
+                other => panic!("{other:?}"),
             }
-            other => panic!("{other:?}"),
-        },
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -122,7 +124,7 @@ fn message_dice_parses_emoji_and_value() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":115,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","initial_state":{"@type":"diceStickersRegular","sticker":{"@type":"sticker"}},"final_state":{"@type":"diceStickersRegular","sticker":{"@type":"sticker"}},"emoji":"🎲","value":4,"success_animation_frame_number":12}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Dice(dice) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -149,7 +151,7 @@ fn message_dice_keeps_the_regular_final_state_sticker() {
         sticker(71)
     );
     let env = parse_envelope(&json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("not a new message");
     };
     let MessageContent::Dice(dice) = &message.content else {
@@ -165,7 +167,7 @@ fn message_dice_keeps_the_regular_final_state_sticker() {
 fn message_dice_slot_machine_has_no_single_final_sticker() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":117,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","initial_state":{"@type":"diceStickersSlotMachine"},"final_state":{"@type":"diceStickersSlotMachine"},"emoji":"🎰","value":64,"success_animation_frame_number":0}}}"#;
     let env = parse_envelope(json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("not a new message");
     };
     let MessageContent::Dice(dice) = &message.content else {
@@ -204,7 +206,7 @@ const SLOT_KEYS: [&str; 5] = [
 #[test]
 fn message_dice_slot_machine_keeps_its_five_layers_in_draw_order() {
     let env = parse_envelope(&slot_machine_message(&SLOT_KEYS, 64)).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("not a new message");
     };
     let MessageContent::Dice(dice) = &message.content else {
@@ -222,7 +224,7 @@ fn message_dice_slot_machine_keeps_its_five_layers_in_draw_order() {
 #[test]
 fn message_dice_slot_machine_missing_a_layer_falls_back_to_the_emoji() {
     let env = parse_envelope(&slot_machine_message(&SLOT_KEYS[..4], 3)).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("not a new message");
     };
     let MessageContent::Dice(dice) = &message.content else {
@@ -275,12 +277,14 @@ fn message_dice_without_value_is_unsupported() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":116,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","emoji":"🎲"}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => match &message.content {
-            MessageContent::Unsupported { type_name } => {
-                assert_eq!(type_name, "messageDice")
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+            match &message.content {
+                MessageContent::Unsupported { type_name } => {
+                    assert_eq!(type_name, "messageDice")
+                }
+                other => panic!("{other:?}"),
             }
-            other => panic!("{other:?}"),
-        },
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -294,7 +298,7 @@ fn message_dice_empty_emoji_falls_back_to_die() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":116,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","emoji":"","value":3}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Dice(dice) = &message.content else {
                 panic!("{message:?}");
             };
@@ -343,12 +347,14 @@ fn message_location_with_bad_coordinates_is_unsupported() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":113,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageLocation","location":{"@type":"location","latitude":95.0,"longitude":200.0,"horizontal_accuracy":0}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => match &message.content {
-            MessageContent::Unsupported { type_name } => {
-                assert_eq!(type_name, "messageLocation")
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+            match &message.content {
+                MessageContent::Unsupported { type_name } => {
+                    assert_eq!(type_name, "messageLocation")
+                }
+                other => panic!("{other:?}"),
             }
-            other => panic!("{other:?}"),
-        },
+        }
         other => panic!("{other:?}"),
     }
 }

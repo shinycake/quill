@@ -4,6 +4,7 @@
 #
 #   quill-linux-<arch>/
 #     quill                      RUNPATH $ORIGIN/lib
+#     quill-webview              RUNPATH $ORIGIN/lib  (mini apps; needs the system's WebKitGTK 4.1)
 #     lib/libtdjson.so           RUNPATH $ORIGIN
 #     lib/libntgcalls.so         RUNPATH $ORIGIN
 #     lib/librlottie.so          RUNPATH $ORIGIN
@@ -17,6 +18,7 @@
 #
 # Inputs (env, all optional):
 #   QUILL_BIN            release binary            (default target/release/quill)
+#   QUILL_WEBVIEW_BIN    mini-app helper           (default target/release/quill-webview)
 #   QUILL_TDJSON_PATH    libtdjson.so              (default native/prefix/lib/libtdjson.so)
 #   QUILL_NTGCALLS_LIB   libntgcalls.so            (default vendor/ntgcalls/lib/libntgcalls.so)
 #   QUILL_RLOTTIE_PATH   librlottie.so             (default vendor/rlottie/prefix/lib/librlottie.so)
@@ -33,13 +35,14 @@ for tool in patchelf readelf ldd tar; do
 done
 
 BIN="${QUILL_BIN:-target/release/quill}"
+WEBVIEW_BIN="${QUILL_WEBVIEW_BIN:-target/release/quill-webview}"
 TDJSON="${QUILL_TDJSON_PATH:-native/prefix/lib/libtdjson.so}"
 NTGCALLS="${QUILL_NTGCALLS_LIB:-vendor/ntgcalls/lib/libntgcalls.so}"
 RLOTTIE="${QUILL_RLOTTIE_PATH:-vendor/rlottie/prefix/lib/librlottie.so}"
 FFMPEG="${QUILL_FFMPEG_PREFIX:-vendor/ffmpeg/prefix}"
 QUILLVIDEO="$FFMPEG/lib/libquillvideo.so"
 OUT="${OUT:-dist/linux}"
-for f in "$BIN" "$TDJSON" "$NTGCALLS" "$RLOTTIE" "$QUILLVIDEO"; do
+for f in "$BIN" "$WEBVIEW_BIN" "$TDJSON" "$NTGCALLS" "$RLOTTIE" "$QUILLVIDEO"; do
   [[ -f "$f" ]] || { echo "error: missing input $f" >&2; exit 2; }
 done
 
@@ -52,6 +55,7 @@ rm -rf "$PKG" "$TARBALL" "$TARBALL.sha256"
 mkdir -p "$PKG/lib" "$PKG/share/applications" "$PKG/share/icons/hicolor"
 
 install -m 755 "$BIN" "$PKG/quill"
+install -m 755 "$WEBVIEW_BIN" "$PKG/quill-webview"
 # cp -L: rlottie/tdjson installs may be symlink chains; ship the real file under the name the loader opens.
 install -m 755 "$(readlink -f "$TDJSON")" "$PKG/lib/libtdjson.so"
 install -m 755 "$(readlink -f "$NTGCALLS")" "$PKG/lib/libntgcalls.so"
@@ -98,6 +102,7 @@ strip --strip-unneeded "$PKG/lib/libtdjson.so" "$PKG/lib/librlottie.so" \
   "$PKG"/lib/libquillvideo.so "$PKG"/lib/libav*.so.* "$PKG"/lib/libsw*.so.* || true
 
 patchelf --set-rpath '$ORIGIN/lib' "$PKG/quill"
+patchelf --set-rpath '$ORIGIN/lib' "$PKG/quill-webview"
 for lib in "$PKG"/lib/*.so*; do
   patchelf --set-rpath '$ORIGIN' "$lib"
 done

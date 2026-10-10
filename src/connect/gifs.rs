@@ -2,6 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
 use crate::state::RequestPurpose;
+use crate::state::StickersPurpose;
 use crate::telegram::requests::{
     add_saved_animation, get_inline_query_results, remove_saved_animation, search_public_chat,
 };
@@ -20,7 +21,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let search = matches!(
             purpose,
-            RequestPurpose::ResolveGifSearchBot | RequestPurpose::GetGifSearchResults { .. }
+            RequestPurpose::ResolveGifSearchBot
+                | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
         );
         if search {
             self.session.gifs.search_failed = false;
@@ -44,8 +46,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn cancel_gif_search_requests(&mut self) {
         for purpose in [
             RequestPurpose::ResolveGifSearchBot,
-            RequestPurpose::GetGifSearchResults { first_page: true },
-            RequestPurpose::GetGifSearchResults { first_page: false },
+            RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
+            RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         ] {
             drop(self.session.requests.take_purpose(purpose));
         }
@@ -92,15 +94,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.gifs.search_loading = false;
             return Ok(None);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetGifSearchResults { first_page: true })
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetGifSearchResults { first_page: false })
-        {
+        if self.session.requests.has_purpose(RequestPurpose::Stickers(
+            StickersPurpose::GetGifSearchResults { first_page: true },
+        )) || self.session.requests.has_purpose(RequestPurpose::Stickers(
+            StickersPurpose::GetGifSearchResults { first_page: false },
+        )) {
             return Ok(None);
         }
         let Some(bot_id) = self.session.gifs.search_bot_user_id else {
@@ -121,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.gifs.search_loading = true;
         self.session.gifs.search_offset = offset.clone();
         self.gif_request(
-            RequestPurpose::GetGifSearchResults { first_page: !more },
+            RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: !more }),
             |id| get_inline_query_results(id, bot_id, chat_id, &query, &offset),
         )
     }
