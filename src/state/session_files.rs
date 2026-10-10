@@ -208,13 +208,15 @@ impl Session {
                 // A dice's landing animation: its thumbnail is the still
                 // shown until the animation decodes.
                 MessageContent::Dice(dice) => {
-                    if let Some(file_id) = dice
+                    for file_id in dice
                         .final_sticker
-                        .as_ref()
-                        .and_then(|sticker| sticker.display_file_id())
-                        && self.should_download(file_id)
+                        .iter()
+                        .chain(&dice.slot_layers)
+                        .filter_map(|sticker| sticker.display_file_id())
                     {
-                        ids.push(file_id);
+                        if self.should_download(file_id) {
+                            ids.push(file_id);
+                        }
                     }
                 }
                 MessageContent::Animation(animation) => {

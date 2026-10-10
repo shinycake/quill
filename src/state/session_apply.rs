@@ -149,10 +149,14 @@ impl Session {
                 }
             }
             EnvelopePayload::UpdateConnectionState(state) => self.connection = state,
+            EnvelopePayload::UpdateChatAccentColors { chat_id, accent } => {
+                self.chat_accents.insert(chat_id, accent);
+            }
             EnvelopePayload::UpdateNewChat {
                 chat_id,
                 title,
                 kind,
+                accent,
                 unread_count,
                 last_read_inbox_message_id,
                 last_read_outbox_message_id,
@@ -188,6 +192,7 @@ impl Session {
                 if let Some(view_as_topics) = view_as_topics {
                     self.set_chat_view_as_topics(chat_id.0, view_as_topics);
                 }
+                self.chat_accents.insert(chat_id.0, accent);
                 self.set_chat_background(chat_id.0, background);
                 self.set_chat_theme_name(chat_id.0, theme_name);
                 self.set_chat_protected(chat_id.0, has_protected_content);

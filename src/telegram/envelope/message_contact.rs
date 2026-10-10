@@ -38,6 +38,53 @@ pub struct DiceContent {
     /// composed on a reel) and when TDLib has not sent the stickers yet;
     /// the row then shows the face glyph.
     pub final_sticker: Option<StickerContent>,
+    /// `final_state` of a slot machine (`diceStickersSlotMachine`): the
+    /// five stickers drawn one over the other, bottom to top: background,
+    /// left reel, center reel, right reel, lever. Empty for other dice and
+    /// until TDLib has sent them.
+    pub slot_layers: Vec<StickerContent>,
+}
+
+/// What one reel of a slot machine landed on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotSymbol {
+    Bar,
+    Grapes,
+    Lemon,
+    Seven,
+}
+
+impl SlotSymbol {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bar => "Bar",
+            Self::Grapes => "Grapes",
+            Self::Lemon => "Lemon",
+            Self::Seven => "Seven",
+        }
+    }
+}
+
+/// The 🎰 emoji.
+const SLOT_EMOJI: &str = "🎰";
+
+/// Rolls of a slot machine run 1..=64: the value minus one holds one
+/// symbol per reel in two bits, left reel lowest (Telegram Desktop
+/// `ComputePartValue`).
+const SLOT_VALUES: std::ops::RangeInclusive<i32> = 1..=64;
+
+/// The three symbols a slot-machine `value` shows, left to right.
+pub fn slot_symbols(value: i32) -> Option<[SlotSymbol; 3]> {
+    if !SLOT_VALUES.contains(&value) {
+        return None;
+    }
+    let symbol = |reel: i32| match ((value - 1) >> (reel * 2)) & 3 {
+        0 => SlotSymbol::Bar,
+        1 => SlotSymbol::Grapes,
+        2 => SlotSymbol::Lemon,
+        _ => SlotSymbol::Seven,
+    };
+    Some([symbol(0), symbol(1), symbol(2)])
 }
 
 impl DiceContent {
@@ -50,6 +97,27 @@ impl DiceContent {
         } else {
             &self.emoji
         }
+    }
+
+    /// Whether this is a slot machine.
+    pub fn is_slot_machine(&self) -> bool {
+        self.face() == SLOT_EMOJI
+    }
+
+    /// What the roll reads as under the picture: "Rolled 4" for dice and
+    /// darts, the three reels for a slot machine ("Seven · Seven · Seven,
+    /// jackpot!" when all three match on sevens).
+    pub fn result_line(&self) -> String {
+        if self.is_slot_machine()
+            && let Some(symbols) = slot_symbols(self.value)
+        {
+            let reels = symbols.map(SlotSymbol::name).join(" · ");
+            if symbols == [SlotSymbol::Seven; 3] {
+                return format!("{reels}, jackpot!");
+            }
+            return reels;
+        }
+        format!("Rolled {}", self.value)
     }
 
     /// Short line for chat-list previews and the composer reply target,
@@ -133,23 +201,23 @@ pub(crate) fn parse_message_dice(value: &Value) -> (MessageContent, Vec<ParsedFi
     let Ok(value) = i32::try_from(number) else {
         return unsupported;
     };
-    let (final_sticker, files) = parse_dice_final_state(state);
+    let (final_sticker, mut files) = parse_dice_final_state(state);
+    let (slot_layers, slot_files) = parse_slot_final_state(state);
+    files.extend(slot_files);
     (
         MessageContent::Dice(DiceContent {
             emoji,
             value,
             final_sticker,
+            slot_layers,
         }),
         files,
     )
 }
 
-/// The `diceStickersRegular` sticker of a dice `final_state`, plus its
-/// files (they join the message's file list so the downloader sees them).
-fn parse_dice_final_state(state: Option<&Value>) -> (Option<StickerContent>, Vec<ParsedFile>) {
-    let regular = state
-        .filter(|state| state.get("@type").and_then(Value::as_str) == Some("diceStickersRegular"));
-    let (item, mut files) = parse_sticker_value(regular.and_then(|state| state.get("sticker")));
+/// A `sticker` value as the sticker a message carries.
+fn dice_sticker(value: Option<&Value>) -> (Option<StickerContent>, Vec<ParsedFile>) {
+    let (item, mut files) = parse_sticker_value(value);
     files.retain(|file| file.id.0 != 0);
     let sticker = item.map(|item| StickerContent {
         emoji: item.emoji,
@@ -165,4 +233,40 @@ fn parse_dice_final_state(state: Option<&Value>) -> (Option<StickerContent>, Vec
         set_id: item.set_id,
     });
     (sticker, files)
+}
+
+/// The `diceStickersRegular` sticker of a dice `final_state`, plus its
+/// files (they join the message's file list so the downloader sees them).
+fn parse_dice_final_state(state: Option<&Value>) -> (Option<StickerContent>, Vec<ParsedFile>) {
+    let regular = state
+        .filter(|state| state.get("@type").and_then(Value::as_str) == Some("diceStickersRegular"));
+    dice_sticker(regular.and_then(|state| state.get("sticker")))
+}
+
+/// The five stickers of a `diceStickersSlotMachine` `final_state`, bottom
+/// to top, plus their files. All five are needed to draw the machine; if
+/// any is missing the row falls back to the emoji.
+fn parse_slot_final_state(state: Option<&Value>) -> (Vec<StickerContent>, Vec<ParsedFile>) {
+    let Some(state) = state.filter(|state| {
+        state.get("@type").and_then(Value::as_str) == Some("diceStickersSlotMachine")
+    }) else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut layers = Vec::new();
+    let mut files = Vec::new();
+    for key in [
+        "background",
+        "left_reel",
+        "center_reel",
+        "right_reel",
+        "lever",
+    ] {
+        let (sticker, layer_files) = dice_sticker(state.get(key));
+        let Some(sticker) = sticker else {
+            return (Vec::new(), Vec::new());
+        };
+        layers.push(sticker);
+        files.extend(layer_files);
+    }
+    (layers, files)
 }

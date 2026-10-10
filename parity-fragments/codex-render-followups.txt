@@ -1,0 +1,7 @@
+# render follow-ups: checked against demo captures and unit tests
+parity:render-reply-header-media
+parity:render-reply-header-emoji-pattern
+parity:render-media-timestamp-seek
+parity:render-dice-playback
+parity:render-live-location
+parity:render-expired-media

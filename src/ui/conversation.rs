@@ -2169,6 +2169,14 @@ impl QuillApp {
                             .and_then(|s| self.history_dice_sticker(s.file_id, s.format, cx)),
                         _ => None,
                     },
+                    match &message.content {
+                        MessageContent::Dice(dice) => dice
+                            .slot_layers
+                            .iter()
+                            .map(|s| self.history_dice_sticker(s.file_id, s.format, cx))
+                            .collect(),
+                        _ => Vec::new(),
+                    },
                     self.message_custom_emoji_frames(message, cx),
                     inputs.video_playing,
                     inputs.video_frame.clone(),

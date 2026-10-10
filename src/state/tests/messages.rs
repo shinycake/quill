@@ -274,6 +274,36 @@ fn self_destructing_photo_disappears_via_delete_update() {
 }
 
 #[test]
+fn open_chat_live_location_refresh_follows_running_shares_only() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(42));
+    let live = |id: i64, chat: i64, expires_in: i32| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat},"is_outgoing":false,"content":{{"@type":"messageLiveLocation","location":{{"@type":"liveLocation","location":{{"@type":"location","latitude":1.0,"longitude":2.0,"horizontal_accuracy":0}},"live_period":900,"heading":0,"proximity_alert_radius":0}},"expires_in":{expires_in}}}}}}}"#
+        )
+    };
+    let now = crate::local_time::now_unix();
+    assert_eq!(session.open_chat_live_location_refresh(now), None);
+    // A share in another chat does not count.
+    apply_json(&mut session, &seq, &sink, &live(1, 43, 600));
+    assert_eq!(session.open_chat_live_location_refresh(now), None);
+    // An ended one (expires_in 0) does not either.
+    apply_json(&mut session, &seq, &sink, &live(2, 42, 0));
+    assert_eq!(session.open_chat_live_location_refresh(now), None);
+    // A running one asks for a refresh within a minute; the soonest wins.
+    apply_json(&mut session, &seq, &sink, &live(3, 42, 600));
+    let wait = session
+        .open_chat_live_location_refresh(now)
+        .expect("running");
+    assert!((1..=60).contains(&wait));
+    apply_json(&mut session, &seq, &sink, &live(4, 42, 30));
+    assert_eq!(session.open_chat_live_location_refresh(now), Some(1));
+    // Long after both ended nothing is left to refresh.
+    assert_eq!(session.open_chat_live_location_refresh(now + 10_000), None);
+}
+
+#[test]
 fn auth_code_error_is_classified_without_native_message() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

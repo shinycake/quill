@@ -2044,8 +2044,8 @@ fn map_tile(
 /// status when the message is a live location, and a tappable "Open map"
 /// link. The link opens an OpenStreetMap URL through
 /// `platform::open_external_url` (https only, scheme-gated — no `geo:`
-/// or `tel:` schemes). Live re-rendering is out of scope: the
-/// live-period/expires state is a static snapshot from parse time.
+/// or `tel:` schemes). A running share's countdown is recomputed on every
+/// draw and the window redraws as it changes (`live_location_tick`).
 pub(super) fn location_row(
     row_id: u64,
     location: &quill::telegram::envelope::GeoLocation,
@@ -2488,9 +2488,11 @@ pub(super) fn paid_media_card(
 /// Phase 4.4: `messageDice` row. A regular dice plays its landing
 /// animation once (`diceStickersRegular` final state, drawn like an
 /// animated sticker) and rests on the last frame, which shows the rolled
-/// value; until the animation decodes — and for slot machines, whose five
-/// stacked stickers are not composed — the emoji face stands in. The
-/// "Rolled N" line always states the value.
+/// value. A slot machine stacks its five stickers the way Telegram
+/// Desktop does (`history_view_slot_machine.cpp`): background, three
+/// reels, lever, each resting on its last frame, which shows the symbol.
+/// Until the animation decodes the emoji face stands in. The line under
+/// the picture states the result in words.
 pub(super) fn dice_row(
     row_id: u64,
     dice: &quill::telegram::envelope::DiceContent,
@@ -2498,22 +2500,27 @@ pub(super) fn dice_row(
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     animated: Option<super::sticker_playback::AnimatedVisual>,
+    layers: Vec<Option<super::sticker_playback::AnimatedVisual>>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let picture = match &dice.final_sticker {
-        Some(sticker) => sticker_attachment(
-            row_id,
-            sticker,
-            files,
-            downloading,
-            media_roots,
-            animated,
-            cx,
-        ),
-        None => div()
-            .text_size(px(64.0))
-            .child(dice.face().to_string())
-            .into_any_element(),
+    let picture = if dice.slot_layers.is_empty() {
+        match &dice.final_sticker {
+            Some(sticker) => sticker_attachment(
+                row_id,
+                sticker,
+                files,
+                downloading,
+                media_roots,
+                animated,
+                cx,
+            ),
+            None => div()
+                .text_size(px(64.0))
+                .child(dice.face().to_string())
+                .into_any_element(),
+        }
+    } else {
+        slot_machine(row_id, dice, files, downloading, media_roots, layers, cx)
     };
     div()
         .id(("dice-row", row_id))
@@ -2526,10 +2533,62 @@ pub(super) fn dice_row(
         .child(picture)
         .child(
             div()
+                .id(("dice-result", row_id))
+                .role(Role::Label)
                 .text_sm()
                 .font_medium()
-                .child(format!("Rolled {}", dice.value)),
+                .child(dice.result_line()),
         )
+        .into_any_element()
+}
+
+/// The slot machine's layers stacked in one 128 px square, bottom first.
+/// A layer without its animation yet shows its still, so the machine is
+/// whole from the first frame.
+fn slot_machine(
+    row_id: u64,
+    dice: &quill::telegram::envelope::DiceContent,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    layers: Vec<Option<super::sticker_playback::AnimatedVisual>>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let mut layers = layers.into_iter();
+    let stack = div()
+        .id(("slot-machine", row_id))
+        .role(Role::Image)
+        .aria_label(format!("Slot machine, {}", dice.result_line()))
+        .relative()
+        .mt_2()
+        .flex_none()
+        .size(px(128.));
+    dice.slot_layers
+        .iter()
+        .enumerate()
+        .fold(stack, |stack, (index, sticker)| {
+            let animated = layers.next().flatten();
+            let layer_id = row_id.wrapping_mul(8).wrapping_add(index as u64);
+            // The still path carries the sticker's own top margin; the
+            // stack has none to spare, so pull it back.
+            let layer = sticker_attachment(
+                layer_id,
+                sticker,
+                files,
+                downloading,
+                media_roots,
+                animated,
+                cx,
+            );
+            stack.child(
+                div()
+                    .absolute()
+                    .top(px(-8.))
+                    .left_0()
+                    .size(px(128.))
+                    .child(layer),
+            )
+        })
         .into_any_element()
 }
 

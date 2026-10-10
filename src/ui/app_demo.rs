@@ -750,6 +750,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — service and media cards".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyRenderFollowups => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — render follow-ups".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyServiceMessages => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2269,6 +2275,7 @@ impl QuillApp {
             round_preview: Default::default(),
             slow_mode_tick_chat: None,
             self_destruct_tick_chat: None,
+            live_location_tick_chat: None,
             call_tick_active: false,
             call_window: None,
             group_call_window: None,

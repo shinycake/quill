@@ -746,6 +746,26 @@ impl Session {
         })
     }
 
+    /// Seconds until the soonest status line of a running live location in
+    /// the open chat's loaded history reads differently, or `None` when
+    /// the chat shows none. Drives the redraw that keeps the countdown
+    /// current (`ensure_live_location_tick`), at the pace the labels
+    /// change rather than every frame.
+    pub fn open_chat_live_location_refresh(&self, now: i64) -> Option<u32> {
+        let open = self.open_chat?;
+        self.histories
+            .get(&open.0)?
+            .messages
+            .values()
+            .filter_map(|message| match &message.content {
+                crate::telegram::envelope::MessageContent::Location(location) => {
+                    location.live.as_ref()?.refresh_in_at(now)
+                }
+                _ => None,
+            })
+            .min()
+    }
+
     /// Phase 6: contacts-list rows in server order with a name/status view
     /// model, sorted case-insensitively by display name. Users not yet
     /// seen via `updateUser` are skipped (their rows fill in when the

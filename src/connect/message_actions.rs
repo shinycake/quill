@@ -39,6 +39,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 crate::state::ReplyTarget::Loading,
             );
         }
+        // The stories replied to: their picture fills the strip. `get_story`
+        // skips cached and in-flight ones.
+        for (chat_id, story_id) in self.session.reply_story_candidates() {
+            self.session
+                .story_reply_attempted
+                .insert((chat_id.0, story_id));
+            self.get_story(chat_id, story_id)?;
+        }
         Ok(())
     }
 
