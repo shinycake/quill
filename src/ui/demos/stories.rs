@@ -198,25 +198,25 @@ impl QuillApp {
             session.story_post.eligibility =
                 Some(quill::telegram::envelope::CanPostStoryResult::Ok { story_count: 0 });
         }
-        self.story_composer_path.update(cx, |input, cx| {
+        self.stories.composer_path.update(cx, |input, cx| {
             input.set_value(demo_thumb_png_path(), window, cx);
         });
-        self.story_composer_caption.update(cx, |input, cx| {
+        self.stories.composer_caption.update(cx, |input, cx| {
             input.set_value("Posting my first story **from Quill**!", window, cx);
         });
-        self.story_composer.privacy = StoryPrivacy::CloseFriends;
+        self.stories.composer.privacy = StoryPrivacy::CloseFriends;
         // Phase 9.4: seed the new options so the screenshot shows
         // them — 48h expiry, both toggles on, a link sticker URL and
         // reaction stickers.
-        self.story_composer.expiry = StoryExpiry::TwoDays;
-        self.story_composer.post_to_chat_page = true;
-        self.story_composer.protect_content = true;
-        self.story_composer.link_url = "https://t.me/quill".into();
-        self.story_composer.reaction_emojis = "❤️ 🔥".into();
-        self.story_composer_link.update(cx, |input, cx| {
+        self.stories.composer.expiry = StoryExpiry::TwoDays;
+        self.stories.composer.post_to_chat_page = true;
+        self.stories.composer.protect_content = true;
+        self.stories.composer.link_url = "https://t.me/quill".into();
+        self.stories.composer.reaction_emojis = "❤️ 🔥".into();
+        self.stories.composer_link.update(cx, |input, cx| {
             input.set_value("https://t.me/quill", window, cx);
         });
-        self.story_composer_reaction.update(cx, |input, cx| {
+        self.stories.composer_reaction.update(cx, |input, cx| {
             input.set_value("❤️ 🔥", window, cx);
         });
         self.status_note = "screenshot demo — story posting composer".into();
@@ -272,9 +272,9 @@ impl QuillApp {
         // a chosen ❤ reaction. The composer isn't opened here — it
         // has its own `ReadyStoryComposer` demo (Phase 9.3).
         self.open_story_viewer(ChatId(11), 5, cx);
-        self.story_reaction_picker_open = true;
-        self.story_reply_open = true;
-        self.story_reply_input.update(cx, |input, cx| {
+        self.stories.reaction_picker_open = true;
+        self.stories.reply_open = true;
+        self.stories.reply_input.update(cx, |input, cx| {
             input.set_value("Great photo!", window, cx);
         });
         self.status_note = "screenshot demo — story reactions / reply / delete".into();
@@ -300,7 +300,7 @@ impl QuillApp {
         // the viewers panel open — the fixture injected a real
         // `storyInteractions` page through the reducer.
         self.open_story_viewer(ChatId(11), 5, cx);
-        self.story_viewers_open = true;
+        self.stories.viewers_open = true;
         self.status_note = "screenshot demo — story viewers list".into();
     }
 }

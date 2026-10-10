@@ -54,13 +54,13 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             || app.chat_menu.is_some()
             || app.archive_menu.is_some()
             || app.global.story_menu.is_some()
-            || app.folder_tab_menu.is_some(),
+            || app.folders.tab_menu.is_some(),
         |app, _, cx| {
             app.message_menu = None;
             app.chat_menu = None;
             app.archive_menu = None;
             app.global.story_menu = None;
-            app.folder_tab_menu = None;
+            app.folders.tab_menu = None;
             cx.notify();
         }
     ),
@@ -98,25 +98,25 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // itself is a live call and never closes on Escape.
     layer!(
         "group-call-title",
-        |app| app.group_call_title_dialog.is_some(),
+        |app| app.group_call.title_dialog.is_some(),
         |app, _, cx| app.close_group_call_title_dialog(cx)
     ),
     // Phase 9.7: the chat story page paints above the story composer.
     layer!(
         "story-page",
-        |app| app.story_page.is_some(),
+        |app| app.stories.page.is_some(),
         |app, _, cx| app.close_story_page(cx)
     ),
     // Phase 9.3: the story composer is above the story viewer.
     layer!(
         "story-composer",
-        |app| app.story_composer.open,
+        |app| app.stories.composer.open,
         |app, _, cx| app.close_story_composer(cx)
     ),
     // Phase 9.1: the story viewer is above the media viewer.
     layer!(
         "story-viewer",
-        |app| app.story_viewer.is_open(),
+        |app| app.stories.viewer.is_open(),
         |app, _, cx| app.close_story_viewer(cx)
     ),
     layer!(
@@ -446,10 +446,11 @@ mod dispatch_tests {
                 app.exception_picker_open = true;
             }),
             ("story-page", |app, window, cx| {
-                app.story_page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
+                app.stories.page =
+                    Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             }),
             ("group-call-title", |app, window, cx| {
-                app.group_call_title_dialog = Some(
+                app.group_call.title_dialog = Some(
                     crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
                 );
             }),
@@ -492,7 +493,7 @@ mod dispatch_tests {
         let vcx = &mut vcx;
         app.update_in(vcx, |app, window, cx| {
             app.privacy_open = true;
-            app.story_page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
+            app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             app.link_popup = Some(crate::ui::entity_links::LinkPopup {
                 position: point(px(10.), px(10.)),
                 link: quill::text::LinkTarget::Mention("@x".into()),

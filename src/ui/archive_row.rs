@@ -99,7 +99,7 @@ impl QuillApp {
     /// view (tdesktop `openFolder`).
     pub(super) fn open_archive_folder(&mut self, cx: &mut Context<Self>) {
         self.chat_filter = ChatListFilter::Archived;
-        self.folder_tab = None;
+        self.folders.tab = None;
         self.contacts_tab_open = false;
         self.calls_tab_open = false;
         cx.notify();

@@ -20,6 +20,13 @@ ALSA (libasound), zlib.
   Debian/Ubuntu: sudo apt install libgtk-3-0 libxkbcommon-x11-0 libvulkan1 \
                      libfontconfig1 libasound2 mesa-vulkan-drivers
 
+Optional: mini apps (bot web apps) open in the quill-webview helper, which
+needs WebKitGTK 4.1 and libsoup 3. Quill runs without them and tells you what
+to install the first time you open a mini app.
+
+  Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0 libsoup-3.0-0
+  Fedora:        sudo dnf install webkit2gtk4.1 libsoup3
+
 Telegram API credentials: see docs/credentials.md in the source repository.
 Licenses: Quill is MIT (LICENSE). THIRD_PARTY.md lists every bundled
 component and its license. The license texts are in licenses/, and the Rust

@@ -140,9 +140,9 @@ impl QuillApp {
     ) -> Option<Arc<RenderImage>> {
         let key = (frame.seq, frame.is_screen);
         let slot = if local {
-            &mut self.call_local_image
+            &mut self.calls.local_image
         } else {
-            &mut self.call_remote_image
+            &mut self.calls.remote_image
         };
         if slot.as_ref().is_some_and(|(k, _)| *k == key) {
             return slot.as_ref().map(|(_, image)| image.clone());

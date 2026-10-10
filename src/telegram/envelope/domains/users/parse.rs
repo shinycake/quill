@@ -33,7 +33,8 @@ pub(crate) fn parse_users_payload(
             user_id: UserId(int53(value.get("user_id"))?),
             status: parse_user_status(value.get("status")),
         })),
-        "users" => Ok(EnvelopePayload::Users(UsersPayload::Users {
+        // `foundUsers` (`getGrossingWebAppBots`) carries the same ids.
+        "users" | "foundUsers" => Ok(EnvelopePayload::Users(UsersPayload::Users {
             user_ids: value
                 .get("user_ids")
                 .and_then(Value::as_array)

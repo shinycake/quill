@@ -113,6 +113,24 @@ impl QuillApp {
         }
         let muted = cx.theme().muted_foreground;
         let mut column = div().flex().flex_col().w_full().gap_0p5();
+        // Mini apps: tdesktop's "Open App" for a bot with a main app.
+        if session
+            .user(user_id)
+            .is_some_and(|user| user.has_main_web_app)
+        {
+            column = column.child(
+                action_row(
+                    "info-panel-open-app",
+                    Some(IconName::PanelTop),
+                    "Open App",
+                    false,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_main_web_app(user_id, "", cx);
+                })),
+            );
+        }
         if let Some(facts) = self.bot_invite_facts(user_id)
             && let Some(label) = invite_label(&facts)
         {
@@ -757,6 +775,11 @@ impl QuillApp {
             } => self.open_share_game_dialog(bot_id, game_short_name.clone(), cx),
             DeepLinkAction::AddBot { invite, .. } => {
                 self.open_add_bot_dialog(bot_id, invite.clone(), cx);
+            }
+            DeepLinkAction::OpenWebAppLink { .. }
+            | DeepLinkAction::OpenMainWebApp { .. }
+            | DeepLinkAction::OpenAttachmentBot { .. } => {
+                return self.run_web_app_link(chat_id, bot_id, action, cx);
             }
             _ => return false,
         }

@@ -158,16 +158,25 @@ pub enum SearchScope {
     #[default]
     MyMessages,
     PublicPosts,
+    /// Mini apps (tdesktop's Apps tab): the apps in use and the grossing
+    /// ones; no message search runs.
+    Apps,
 }
 
 impl SearchScope {
-    pub const ALL: [Self; 2] = [Self::MyMessages, Self::PublicPosts];
+    pub const ALL: [Self; 3] = [Self::MyMessages, Self::PublicPosts, Self::Apps];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::MyMessages => "My messages",
             Self::PublicPosts => "Public posts",
+            Self::Apps => "Apps",
         }
+    }
+
+    /// Whether the scope searches messages at all.
+    pub fn searches_messages(self) -> bool {
+        !matches!(self, Self::Apps)
     }
 }
 

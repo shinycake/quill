@@ -34,7 +34,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.story_page = Some(StoryPage::new(chat_id, window, cx));
+        self.stories.page = Some(StoryPage::new(chat_id, window, cx));
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
                 self.status_note = format!("could not load story albums: {err:?}");
@@ -58,7 +58,7 @@ impl QuillApp {
 
     /// Phase 9.7: close the chat story page.
     pub(super) fn close_story_page(&mut self, cx: &mut Context<Self>) {
-        self.story_page = None;
+        self.stories.page = None;
         cx.notify();
     }
 
@@ -71,7 +71,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let chat_id = match self.story_page.as_mut() {
+        let chat_id = match self.stories.page.as_mut() {
             Some(page) => {
                 page.open_album = Some(album_id);
                 page.delete_confirm = None;
@@ -85,7 +85,7 @@ impl QuillApp {
             .and_then(|albums| albums.iter().find(|a| a.id == album_id))
             .map(|a| a.name.clone())
             .unwrap_or_default();
-        if let Some(page) = self.story_page.as_mut() {
+        if let Some(page) = self.stories.page.as_mut() {
             page.rename_input.update(cx, |input, cx| {
                 input.set_value(&name, window, cx);
             });
@@ -110,7 +110,7 @@ impl QuillApp {
 
     /// Phase 9.7: back from the opened album to the album list.
     pub(super) fn back_to_story_albums(&mut self, cx: &mut Context<Self>) {
-        if let Some(page) = self.story_page.as_mut() {
+        if let Some(page) = self.stories.page.as_mut() {
             page.open_album = None;
             page.delete_confirm = None;
         }
@@ -143,7 +143,7 @@ impl QuillApp {
     /// (`story.can_be_added_to_album`, `schema/td_api.tl:6724`) are skipped
     /// up front instead of being sent to fail.
     pub(super) fn create_story_album(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, name, story_ids) = match self.story_page.as_ref() {
+        let (chat_id, name, story_ids) = match self.stories.page.as_ref() {
             Some(page) => {
                 let name = page.new_album_name.read(cx).value().trim().to_string();
                 let story_ids =
@@ -170,7 +170,7 @@ impl QuillApp {
 
     /// Phase 9.7: rename the opened album (`setStoryAlbumName`).
     pub(super) fn rename_story_album(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, album_id, name) = match self.story_page.as_ref() {
+        let (chat_id, album_id, name) = match self.stories.page.as_ref() {
             Some(page) => match page.open_album {
                 Some(album_id) => (
                     page.chat_id,
@@ -195,7 +195,7 @@ impl QuillApp {
     /// Phase 9.7: two-click album delete — first click arms the confirm,
     /// second click sends `deleteStoryAlbum`.
     pub(super) fn delete_story_album(&mut self, album_id: i32, cx: &mut Context<Self>) {
-        let chat_id = match self.story_page.as_mut() {
+        let chat_id = match self.stories.page.as_mut() {
             Some(page) if page.delete_confirm == Some(album_id) => page.chat_id,
             Some(page) => {
                 page.delete_confirm = Some(album_id);
@@ -213,7 +213,7 @@ impl QuillApp {
             },
             cx,
         );
-        if let Some(page) = self.story_page.as_mut() {
+        if let Some(page) = self.stories.page.as_mut() {
             page.delete_confirm = None;
             if page.open_album == Some(album_id) {
                 page.open_album = None;
@@ -224,7 +224,7 @@ impl QuillApp {
     /// Phase 9.7: move an album up/down in the list
     /// (`reorderStoryAlbums` with the full new order).
     pub(super) fn move_story_album(&mut self, album_id: i32, up: bool, cx: &mut Context<Self>) {
-        let (chat_id, order) = match self.session().zip(self.story_page.as_ref()) {
+        let (chat_id, order) = match self.session().zip(self.stories.page.as_ref()) {
             Some((session, page)) => {
                 let mut ids: Vec<i32> = session
                     .story_albums
@@ -280,7 +280,7 @@ impl QuillApp {
     /// (`addStoryAlbumStories`). Ids the server marks as not addable to
     /// albums are skipped up front (see `partition_addable_stories`).
     pub(super) fn add_stories_to_album(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, album_id, story_ids) = match self.story_page.as_ref() {
+        let (chat_id, album_id, story_ids) = match self.stories.page.as_ref() {
             Some(page) => match page.open_album {
                 Some(album_id) => (
                     page.chat_id,
@@ -326,7 +326,7 @@ impl QuillApp {
         story_id: i32,
         cx: &mut Context<Self>,
     ) {
-        let chat_id = match self.story_page.as_ref() {
+        let chat_id = match self.stories.page.as_ref() {
             Some(page) => page.chat_id,
             None => return,
         };
@@ -349,7 +349,7 @@ impl QuillApp {
         story_id: i32,
         cx: &mut Context<Self>,
     ) {
-        let chat_id = match self.story_page.as_ref() {
+        let chat_id = match self.stories.page.as_ref() {
             Some(page) => page.chat_id,
             None => return,
         };
@@ -367,7 +367,7 @@ impl QuillApp {
     /// Phase 9.7: next archive page (`getChatArchivedStories` from the
     /// smallest loaded id).
     pub(super) fn load_more_archived_stories(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, from_story_id) = match self.story_page.as_ref().zip(self.session()) {
+        let (chat_id, from_story_id) = match self.stories.page.as_ref().zip(self.session()) {
             Some((page, session)) => match session.archived_stories.get(&page.chat_id.0) {
                 Some(archived) => (page.chat_id, archived.next_from_story_id.unwrap_or(0)),
                 None => (page.chat_id, 0),
@@ -388,7 +388,7 @@ impl QuillApp {
     /// Phase 9.7: next chat-page-stories page (from the smallest loaded
     /// id).
     pub(super) fn load_more_chat_page_stories(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, from_story_id) = match self.story_page.as_ref().zip(self.session()) {
+        let (chat_id, from_story_id) = match self.stories.page.as_ref().zip(self.session()) {
             Some((page, session)) => match session.chat_page_stories.get(&page.chat_id.0) {
                 Some(chat_page) => (
                     page.chat_id,
@@ -413,7 +413,7 @@ impl QuillApp {
     /// full new list, so the current pinned ids are adjusted locally and
     /// the `ok` answer applies them (correlated via the pending request).
     pub(super) fn toggle_story_pin(&mut self, story_id: i32, cx: &mut Context<Self>) {
-        let (chat_id, pinned) = match self.story_page.as_ref().zip(self.session()) {
+        let (chat_id, pinned) = match self.stories.page.as_ref().zip(self.session()) {
             Some((page, session)) => {
                 let mut pinned: Vec<i32> = session
                     .chat_page_stories
@@ -458,11 +458,11 @@ impl QuillApp {
         story_id: i32,
         cx: &mut Context<Self>,
     ) {
-        if self.story_cover_target == Some((chat_id, story_id)) {
-            self.story_cover_target = None;
+        if self.stories.cover_target == Some((chat_id, story_id)) {
+            self.stories.cover_target = None;
         } else {
-            self.story_cover_target = Some((chat_id, story_id));
-            self.story_cover_sent = false;
+            self.stories.cover_target = Some((chat_id, story_id));
+            self.stories.cover_sent = false;
         }
         cx.notify();
     }
@@ -479,14 +479,14 @@ impl QuillApp {
             .w(px(360.))
             .child(
                 div().flex_1().child(
-                    Textarea::new(&self.story_cover_input)
+                    Textarea::new(&self.stories.cover_input)
                         .aria_label("Story cover file path")
                         .h(px(32.)),
                 ),
             )
             .child(
                 Button::new("story-cover-set")
-                    .label(if self.story_cover_sent {
+                    .label(if self.stories.cover_sent {
                         "Saving…"
                     } else {
                         "Set"
@@ -503,10 +503,10 @@ impl QuillApp {
     /// (`td_api.tl:13738`). The driver gates on `can_be_edited`; the
     /// tick closes the editor on success.
     pub(super) fn story_cover_save(&mut self, cx: &mut Context<Self>) {
-        if self.story_cover_sent {
+        if self.stories.cover_sent {
             return;
         }
-        let Some((chat_id, story_id)) = self.story_cover_target else {
+        let Some((chat_id, story_id)) = self.stories.cover_target else {
             return;
         };
         // Demo mode: surface the same notice as `story_composer_save_edit`
@@ -518,7 +518,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let raw = self.story_cover_input.read(cx).value().trim().to_string();
+        let raw = self.stories.cover_input.read(cx).value().trim().to_string();
         let timestamp: f64 = match raw.parse() {
             Ok(seconds) if seconds >= 0.0 => seconds,
             _ => {
@@ -535,7 +535,7 @@ impl QuillApp {
                 .driver
                 .edit_story_cover(ChatId(chat_id), story_id, timestamp)
             {
-                Ok(_) => self.story_cover_sent = true,
+                Ok(_) => self.stories.cover_sent = true,
                 Err(_) => {
                     live.driver.session.story_manage.error =
                         Some("Could not send the cover request".into());
@@ -552,11 +552,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.story_privacy_edit.is_some() {
-            self.story_privacy_edit = None;
+        if self.stories.privacy_edit.is_some() {
+            self.stories.privacy_edit = None;
             return;
         }
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let (privacy, selected_user_ids) = self
@@ -565,14 +565,15 @@ impl QuillApp {
             .and_then(|story| story.privacy_settings.as_ref())
             .and_then(StoryPrivacy::from_settings_json)
             .unwrap_or((StoryPrivacy::Everyone, Vec::new()));
-        self.story_privacy_edit = Some(StoryPrivacyEdit {
+        self.stories.privacy_edit = Some(StoryPrivacyEdit {
             chat_id: item.chat_id.0,
             story_id: item.story_id,
             privacy,
             selected_user_ids,
         });
-        self.story_privacy_sent = false;
-        self.story_privacy_user_search
+        self.stories.privacy_sent = false;
+        self.stories
+            .privacy_user_search
             .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
@@ -580,7 +581,7 @@ impl QuillApp {
     /// Phase 9.5: toggle a contact in the privacy editor's
     /// "Selected users" picker.
     pub(super) fn toggle_story_privacy_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        if let Some(edit) = self.story_privacy_edit.as_mut() {
+        if let Some(edit) = self.stories.privacy_edit.as_mut() {
             if edit.selected_user_ids.contains(&user_id) {
                 edit.selected_user_ids.retain(|id| *id != user_id);
             } else {
@@ -593,7 +594,7 @@ impl QuillApp {
     /// Phase 9.5: the privacy editor panel — the 4-way selector plus
     /// the contact picker for "Selected users".
     pub(super) fn story_privacy_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let edit = match self.story_privacy_edit.as_ref() {
+        let edit = match self.stories.privacy_edit.as_ref() {
             Some(edit) => edit,
             None => return div().into_any_element(),
         };
@@ -616,7 +617,7 @@ impl QuillApp {
                     Radio::new(format!("story-privacy-{}", option.label())).label(option.label())
                 }))
                 .on_click(cx.listener(move |this, &ix, _, cx| {
-                    if let Some(edit) = this.story_privacy_edit.as_mut() {
+                    if let Some(edit) = this.stories.privacy_edit.as_mut() {
                         edit.privacy = StoryPrivacy::ALL[ix];
                     }
                     cx.notify();
@@ -635,7 +636,7 @@ impl QuillApp {
             );
         }
         if edit.privacy == StoryPrivacy::SelectedUsers {
-            let query = self.story_privacy_user_search.read(cx).value();
+            let query = self.stories.privacy_user_search.read(cx).value();
             let rows = self.g1_contact_rows(&query, cx);
             let selected = edit.selected_user_ids.clone();
             let mut list = div()
@@ -668,14 +669,14 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(
-                        Textarea::new(&self.story_privacy_user_search)
+                        Textarea::new(&self.stories.privacy_user_search)
                             .aria_label("Search story privacy exceptions")
                             .h(px(32.)),
                     )
                     .child(list),
             );
         }
-        let busy = self.story_privacy_sent;
+        let busy = self.stories.privacy_sent;
         // Review fix-up: shared `story_manage.pending` slot — no second
         // op while one is in flight.
         let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
@@ -697,7 +698,7 @@ impl QuillApp {
                         .ghost()
                         .text_color(text_bright())
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.story_privacy_edit = None;
+                            this.stories.privacy_edit = None;
                             cx.notify();
                         })),
                 ),
@@ -710,10 +711,10 @@ impl QuillApp {
     /// `can_set_privacy_settings`; the tick closes the panel on
     /// success.
     pub(super) fn story_privacy_save(&mut self, cx: &mut Context<Self>) {
-        if self.story_privacy_sent {
+        if self.stories.privacy_sent {
             return;
         }
-        let Some(edit) = self.story_privacy_edit.clone() else {
+        let Some(edit) = self.stories.privacy_edit.clone() else {
             return;
         };
         // Demo mode: surface the same notice as `story_composer_save_edit`
@@ -740,7 +741,7 @@ impl QuillApp {
                 edit.story_id,
                 settings,
             ) {
-                Ok(_) => self.story_privacy_sent = true,
+                Ok(_) => self.stories.privacy_sent = true,
                 Err(_) => {
                     live.driver.session.story_manage.error =
                         Some("Could not send the privacy request".into());
@@ -797,7 +798,7 @@ impl QuillApp {
     /// archive list. The status line renders the honest
     /// `Session::story_page_op` state (Sending / Succeeded / Failed).
     pub(super) fn story_page_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(page) = self.story_page.as_ref() else {
+        let Some(page) = self.stories.page.as_ref() else {
             return div().into_any_element();
         };
         let chat_id = page.chat_id;

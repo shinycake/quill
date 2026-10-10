@@ -104,6 +104,35 @@ pub(crate) fn parse_bots_payload(
                 })
                 .unwrap_or_default(),
         })),
+        // Mini apps (docs/decisions/codex-miniapp-webview.md).
+        "webAppInfo" => Ok(EnvelopePayload::Bots(BotsPayload::WebAppInfo {
+            launch_id: int53_or_zero(value.get("launch_id")),
+            url: web_app_url(value),
+        })),
+        "webAppUrl" => Ok(EnvelopePayload::Bots(BotsPayload::WebAppUrl {
+            url: json_field_str(value, "url"),
+        })),
+        "mainWebApp" => Ok(EnvelopePayload::Bots(BotsPayload::MainWebApp {
+            url: web_app_url(value),
+        })),
+        "foundWebApp" => Ok(EnvelopePayload::Bots(BotsPayload::FoundWebApp(
+            parse_found_web_app(value),
+        ))),
+        "attachmentMenuBot" => match parse_attachment_menu_bot(value) {
+            Some(bot) => Ok(EnvelopePayload::Bots(BotsPayload::AttachmentMenuBot(bot))),
+            None => Err(ParseError::MissingField),
+        },
+        "updateAttachmentMenuBots" => Ok(EnvelopePayload::Bots(
+            BotsPayload::UpdateAttachmentMenuBots(parse_attachment_menu_bots(value)),
+        )),
+        "updateWebAppMessageSent" => Ok(EnvelopePayload::Bots(
+            BotsPayload::UpdateWebAppMessageSent {
+                launch_id: int53_or_zero(value.get("web_app_launch_id")),
+            },
+        )),
+        "customRequestResult" => Ok(EnvelopePayload::Bots(BotsPayload::CustomRequestResult {
+            result: json_field_str(value, "result"),
+        })),
         _ => return Ok(None),
     };
     payload.map(Some)

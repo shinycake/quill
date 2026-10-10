@@ -182,7 +182,7 @@ impl QuillApp {
             || self.playing_video.is_some()
             || self.recording_active()
             || self.media_viewer.is_open()
-            || self.story_viewer.is_open()
+            || self.stories.viewer.is_open()
         {
             return;
         }

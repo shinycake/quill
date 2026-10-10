@@ -105,7 +105,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.folder_share = Some(FolderShareDialog::new(window, cx, folder_id));
+        self.folders.share = Some(FolderShareDialog::new(window, cx, folder_id));
         if let Some(live) = self.live.as_mut() {
             if !live.driver.session.folder_specs.contains_key(&folder_id)
                 && let Err(err) = live.driver.fetch_chat_folder(folder_id)
@@ -120,7 +120,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_folder_share(&mut self, cx: &mut Context<Self>) {
-        self.folder_share = None;
+        self.folders.share = None;
         cx.notify();
     }
 
@@ -137,7 +137,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(folder_id) = self.folder_share.as_ref().map(|d| d.folder_id) else {
+        let Some(folder_id) = self.folders.share.as_ref().map(|d| d.folder_id) else {
             return;
         };
         // tdesktop `FilterLinksLimitBox`: a folder has a few links at most.
@@ -158,7 +158,7 @@ impl QuillApp {
             // tdesktop starts a new link with every shareable chat ticked.
             None => choices.iter().copied().collect(),
         };
-        if let Some(dialog) = self.folder_share.as_mut() {
+        if let Some(dialog) = self.folders.share.as_mut() {
             dialog.view = FolderShareView::Edit {
                 link: link.map(|l| l.invite_link),
             };
@@ -173,7 +173,7 @@ impl QuillApp {
     }
 
     fn save_folder_link(&mut self, cx: &mut Context<Self>) {
-        let Some((folder_id, view, mut chat_ids, name)) = self.folder_share.as_ref().map(|d| {
+        let Some((folder_id, view, mut chat_ids, name)) = self.folders.share.as_ref().map(|d| {
             let mut ids: Vec<i64> = d.selected.iter().copied().collect();
             ids.sort_unstable();
             (
@@ -186,7 +186,7 @@ impl QuillApp {
             return;
         };
         let fail = |this: &mut Self, text: &str| {
-            if let Some(dialog) = this.folder_share.as_mut() {
+            if let Some(dialog) = this.folders.share.as_mut() {
                 dialog.error = Some(text.to_string());
             }
         };
@@ -218,7 +218,7 @@ impl QuillApp {
             None => {
                 // Screenshot demo: apply locally.
                 self.apply_demo_folder_link(folder_id, link.clone(), name.clone(), chat_ids);
-                if let Some(dialog) = self.folder_share.as_mut() {
+                if let Some(dialog) = self.folders.share.as_mut() {
                     dialog.view = FolderShareView::List;
                 }
                 Ok(())
@@ -227,7 +227,7 @@ impl QuillApp {
         match result {
             Ok(()) => {
                 if self.live.is_some()
-                    && let Some(dialog) = self.folder_share.as_mut()
+                    && let Some(dialog) = self.folders.share.as_mut()
                 {
                     dialog.busy = true;
                     dialog.error = None;
@@ -269,7 +269,7 @@ impl QuillApp {
     }
 
     fn delete_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
-        let Some(folder_id) = self.folder_share.as_ref().map(|d| d.folder_id) else {
+        let Some(folder_id) = self.folders.share.as_ref().map(|d| d.folder_id) else {
             return;
         };
         let result = match self.live.as_mut() {
@@ -286,7 +286,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        if let Some(dialog) = self.folder_share.as_mut() {
+        if let Some(dialog) = self.folders.share.as_mut() {
             dialog.confirm_delete = None;
             if let Err(err) = result {
                 dialog.error = Some(format!("Couldn't delete the link: {err:?}"));
@@ -297,7 +297,7 @@ impl QuillApp {
 
     fn copy_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(link.to_string()));
-        if let Some(dialog) = self.folder_share.as_mut() {
+        if let Some(dialog) = self.folders.share.as_mut() {
             dialog.copied = Some(link.to_string());
         }
         self.status_note = "Link copied to clipboard".into();
@@ -315,7 +315,7 @@ impl QuillApp {
             None => return false,
         };
         let mut changed = false;
-        if let Some(dialog) = self.folder_share.as_mut() {
+        if let Some(dialog) = self.folders.share.as_mut() {
             if saved {
                 dialog.view = FolderShareView::List;
                 dialog.busy = false;
@@ -349,7 +349,7 @@ impl QuillApp {
                 this.close_folder_share(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(state) = this.folder_share.as_ref() else {
+            let Some(state) = this.folders.share.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Share folder"))
@@ -389,7 +389,7 @@ impl QuillApp {
     }
 
     fn folder_link_list(&self, folder_name: &str, cx: &mut Context<Self>) -> AnyElement {
-        let Some(state) = self.folder_share.as_ref() else {
+        let Some(state) = self.folders.share.as_ref() else {
             return div().into_any_element();
         };
         let folder_id = state.folder_id;
@@ -517,7 +517,7 @@ impl QuillApp {
                                 .tooltip("Delete link")
                                 .accessibility_label("Delete invite link")
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(dialog) = this.folder_share.as_mut() {
+                                    if let Some(dialog) = this.folders.share.as_mut() {
                                         dialog.confirm_delete = Some(ask_url.clone());
                                     }
                                     cx.notify();
@@ -546,7 +546,7 @@ impl QuillApp {
                                         .ghost()
                                         .small()
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            if let Some(dialog) = this.folder_share.as_mut() {
+                                            if let Some(dialog) = this.folders.share.as_mut() {
                                                 dialog.confirm_delete = None;
                                             }
                                             cx.notify();
@@ -592,7 +592,7 @@ impl QuillApp {
     }
 
     fn folder_link_form(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(state) = self.folder_share.as_ref() else {
+        let Some(state) = self.folders.share.as_ref() else {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
@@ -635,11 +635,12 @@ impl QuillApp {
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let choices = this
-                                    .folder_share
+                                    .folders
+                                    .share
                                     .as_ref()
                                     .map(|d| this.folder_link_choices(d.folder_id))
                                     .unwrap_or_default();
-                                if let Some(dialog) = this.folder_share.as_mut() {
+                                if let Some(dialog) = this.folders.share.as_mut() {
                                     if choices.iter().all(|id| dialog.selected.contains(id)) {
                                         dialog.selected.clear();
                                     } else {
@@ -668,7 +669,7 @@ impl QuillApp {
                     .checked(checked)
                     .label(chat_title(session, chat_id))
                     .on_click(cx.listener(move |this, &on, _, cx| {
-                        if let Some(dialog) = this.folder_share.as_mut() {
+                        if let Some(dialog) = this.folders.share.as_mut() {
                             if on {
                                 dialog.selected.insert(chat_id);
                             } else {
@@ -683,9 +684,9 @@ impl QuillApp {
     }
 
     fn folder_link_form_footer(&self, cx: &mut Context<Self>) -> AnyElement {
-        let busy = self.folder_share.as_ref().is_some_and(|d| d.busy);
+        let busy = self.folders.share.as_ref().is_some_and(|d| d.busy);
         let creating = matches!(
-            self.folder_share.as_ref().map(|d| &d.view),
+            self.folders.share.as_ref().map(|d| &d.view),
             Some(FolderShareView::Edit { link: None })
         );
         div()
@@ -697,7 +698,7 @@ impl QuillApp {
                     .label("Cancel")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(dialog) = this.folder_share.as_mut() {
+                        if let Some(dialog) = this.folders.share.as_mut() {
                             dialog.view = FolderShareView::List;
                             dialog.error = None;
                             dialog.busy = false;
@@ -721,7 +722,7 @@ impl QuillApp {
 
     /// `addlist` link opened: show the dialog and check the link.
     pub(super) fn open_folder_invite(&mut self, link: String, cx: &mut Context<Self>) {
-        self.folder_invite = Some(FolderInviteDialog::new(link.clone()));
+        self.folders.invite = Some(FolderInviteDialog::new(link.clone()));
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.check_folder_invite_link(&link)
         {
@@ -731,7 +732,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_folder_invite(&mut self, cx: &mut Context<Self>) {
-        self.folder_invite = None;
+        self.folders.invite = None;
         if let Some(session) = self.session_mut_any() {
             session.folder_invite_link = None;
             session.folder_invite_info = None;
@@ -745,7 +746,7 @@ impl QuillApp {
     /// the link is checked, fetch the titles of chats we do not know yet,
     /// and finish when the add is confirmed.
     pub(super) fn drive_folder_invite(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.folder_invite.is_none() {
+        if self.folders.invite.is_none() {
             return false;
         }
         let (info, done) = match self.session() {
@@ -756,7 +757,8 @@ impl QuillApp {
         if done {
             let name = info.as_ref().map(|i| i.folder.name.clone());
             let joined = self
-                .folder_invite
+                .folders
+                .invite
                 .as_ref()
                 .map(|d| d.selected.len())
                 .unwrap_or(0);
@@ -779,7 +781,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.fetch_chats_for_folder_invite(&unknown);
             }
-            if let Some(dialog) = self.folder_invite.as_mut()
+            if let Some(dialog) = self.folders.invite.as_mut()
                 && !dialog.seeded
             {
                 dialog.seeded = true;
@@ -787,7 +789,7 @@ impl QuillApp {
                 changed = true;
             }
         }
-        if let Some(dialog) = self.folder_invite.as_mut()
+        if let Some(dialog) = self.folders.invite.as_mut()
             && dialog.adding
             && self
                 .live
@@ -804,7 +806,7 @@ impl QuillApp {
     }
 
     fn confirm_folder_invite(&mut self, cx: &mut Context<Self>) {
-        let Some((link, selected)) = self.folder_invite.as_ref().map(|d| {
+        let Some((link, selected)) = self.folders.invite.as_ref().map(|d| {
             let mut ids: Vec<i64> = d.selected.iter().copied().collect();
             ids.sort_unstable();
             (d.link.clone(), ids)
@@ -824,7 +826,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => match live.driver.add_folder_by_invite_link(&link, &chat_ids) {
                 Ok(_) => {
-                    if let Some(dialog) = self.folder_invite.as_mut() {
+                    if let Some(dialog) = self.folders.invite.as_mut() {
                         dialog.adding = true;
                     }
                 }
@@ -856,7 +858,7 @@ impl QuillApp {
                 this.close_folder_invite(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(state) = this.folder_invite.as_ref() else {
+            let Some(state) = this.folders.invite.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Add folder"))
@@ -957,7 +959,7 @@ impl QuillApp {
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(dialog) = this.folder_invite.as_mut() {
+                                    if let Some(dialog) = this.folders.invite.as_mut() {
                                         if select_ids.iter().all(|id| dialog.selected.contains(id)) {
                                             dialog.selected.clear();
                                         } else {
@@ -982,7 +984,7 @@ impl QuillApp {
                             .checked(checked)
                             .label(chat_title(this.session(), chat_id))
                             .on_click(cx.listener(move |this, &on, _, cx| {
-                                if let Some(dialog) = this.folder_invite.as_mut() {
+                                if let Some(dialog) = this.folders.invite.as_mut() {
                                     if on {
                                         dialog.selected.insert(chat_id);
                                     } else {
@@ -1047,13 +1049,13 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     FolderShare => DialogSpec::new(
         1900,
-        |app| app.folder_share.is_some(),
+        |app| app.folders.share.is_some(),
         QuillApp::build_folder_share_dialog,
     ),
 
     FolderInvite => DialogSpec::new(
         2000,
-        |app| app.folder_invite.is_some(),
+        |app| app.folders.invite.is_some(),
         QuillApp::build_folder_invite_dialog,
     ),
 }

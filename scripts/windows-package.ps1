@@ -3,6 +3,7 @@
 #
 #   quill-windows-<arch>/
 #     quill.exe
+#     quill-webview.exe          mini apps (WebView2; the Evergreen runtime ships with Windows 10/11)
 #     tdjson.dll                         TDLib, OpenSSL and zlib linked in statically
 #     ntgcalls.dll rlottie.dll
 #     quillvideo.dll av{codec,format,util}-N.dll sw{scale,resample}-N.dll   in-process video (FFmpeg, LGPL-2.1+)
@@ -20,6 +21,7 @@ $root = (Resolve-Path "$PSScriptRoot/..").Path
 Set-Location $root
 function Pick($value, $default) { if ($value) { $value } else { $default } }
 $bin = Pick $env:QUILL_BIN 'target/release/quill.exe'
+$webview = Pick $env:QUILL_WEBVIEW_BIN 'target/release/quill-webview.exe'
 $tdDir = Pick $env:QUILL_TDJSON_DIR 'native/prefix/bin'
 $ntg = Pick $env:QUILL_NTGCALLS_DLL 'vendor/ntgcalls/lib/Release/ntgcalls.dll'
 $rlottie = Pick $env:QUILL_RLOTTIE_DLL 'vendor/rlottie/prefix/bin/rlottie.dll'
@@ -29,7 +31,7 @@ $out = Pick $env:OUT 'dist/windows'
 $videoDlls = @(Get-ChildItem -File (Join-Path $ffmpeg 'bin') -Filter *.dll -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match '^(quillvideo|avcodec-\d+|avformat-\d+|avutil-\d+|swscale-\d+|swresample-\d+)\.dll$' })
 if ($videoDlls.Count -ne 6) { throw "expected quillvideo.dll and 5 FFmpeg DLLs in $ffmpeg/bin, found $($videoDlls.Name -join ', ')" }
-foreach ($f in @($bin, $ntg, $rlottie, (Join-Path $tdDir 'tdjson.dll'))) {
+foreach ($f in @($bin, $webview, $ntg, $rlottie, (Join-Path $tdDir 'tdjson.dll'))) {
     if (-not (Test-Path $f)) { throw "missing input $f" }
 }
 
@@ -41,6 +43,7 @@ Remove-Item -Recurse -Force $pkg, $zip, "$zip.sha256" -ErrorAction SilentlyConti
 New-Item -ItemType Directory -Force $pkg | Out-Null
 
 Copy-Item $bin (Join-Path $pkg 'quill.exe')
+Copy-Item $webview (Join-Path $pkg 'quill-webview.exe')
 Copy-Item (Join-Path $tdDir 'tdjson.dll') $pkg
 Copy-Item $ntg (Join-Path $pkg 'ntgcalls.dll')
 Copy-Item $rlottie (Join-Path $pkg 'rlottie.dll')

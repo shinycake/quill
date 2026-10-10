@@ -24,13 +24,13 @@ use quill::topic_info::InfoRow;
 impl QuillApp {
     /// The "Statistics" button toggles the panel and loads both answers.
     pub(super) fn toggle_story_stats(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        self.story_stats_open = !self.story_stats_open;
-        if self.story_stats_open {
-            self.story_viewers_open = false;
-            self.story_report_open = false;
+        self.stories.stats_open = !self.stories.stats_open;
+        if self.stories.stats_open {
+            self.stories.viewers_open = false;
+            self.stories.report_open = false;
             self.fetch_story_stats(&item.chat_id, item.story_id, cx);
         }
         cx.notify();
@@ -53,7 +53,7 @@ impl QuillApp {
     }
 
     fn load_more_story_forwards(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.story_viewer.current().cloned() else {
+        let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
         let offset = self
@@ -121,7 +121,11 @@ impl QuillApp {
                     .text_color(text_menu())
                     .child("Story statistics"),
             );
-        let current = self.story_viewer.current().map(|i| (i.chat_id, i.story_id));
+        let current = self
+            .stories
+            .viewer
+            .current()
+            .map(|i| (i.chat_id, i.story_id));
         let state = self
             .session()
             .and_then(|s| s.story_insights.clone())
@@ -186,7 +190,7 @@ impl QuillApp {
                             .label("Retry")
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(item) = this.story_viewer.current().cloned() {
+                                if let Some(item) = this.stories.viewer.current().cloned() {
                                     this.fetch_story_stats(&item.chat_id, item.story_id, cx);
                                 }
                             })),
@@ -292,7 +296,7 @@ impl QuillApp {
 
     /// The location or venue the current story is tagged with, as a search.
     pub(super) fn viewer_story_search_query(&self) -> Option<StorySearchQuery> {
-        let item = self.story_viewer.current()?;
+        let item = self.stories.viewer.current()?;
         item.areas.iter().find_map(|area| match &area.kind {
             StoryAreaKind::Venue {
                 title,

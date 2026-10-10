@@ -321,6 +321,8 @@ mod tests {
             has_topics: false,
             allows_users_to_create_topics: false,
             can_join_groups: false,
+            has_main_web_app: false,
+            can_be_added_to_attachment_menu: false,
             status: UserStatusKind::Empty,
             photo_small_file_id: 0,
             accent_color_id: 0,
