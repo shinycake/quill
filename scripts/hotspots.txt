@@ -9,11 +9,11 @@
 src/lib.rs | mod-lines | add or remove a `pub mod` line for a new core module
 src/ui/mod.rs | mod-lines | add or remove a `mod` line for a new UI module
 src/ui/demos/mod.rs | mod-lines | add or remove a `mod` line (new demos register in their own module)
-src/connect/mod.rs | mod-lines | add or remove a `mod` line
-src/state/mod.rs | mod-lines | add or remove a `mod` line
-src/telegram/mod.rs | mod-lines | add or remove a `mod` line
-src/telegram/envelope/mod.rs | mod-lines | add or remove a `mod` line
-src/telegram/requests/mod.rs | mod-lines | add or remove a `mod` line
+src/connect/mod.rs | mod-lines | add or remove a `mod` or `use` line
+src/state/mod.rs | mod-lines | add or remove a `mod` or `use` line
+src/telegram/mod.rs | mod-lines | add or remove a `mod` or `use` line
+src/telegram/envelope/mod.rs | mod-lines | add or remove a `mod` or `use` line
+src/telegram/requests/mod.rs | mod-lines | add or remove a `mod` or `use` line
 
 # Startup and app shell.
 src/main.rs | none | nothing: demos, dialogs and state register in their own modules
