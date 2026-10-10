@@ -137,11 +137,11 @@ impl QuillApp {
                     };
                     dialog.prefill_from_spec(&spec, window, cx);
                 }
-                self.folder_editor = Some(dialog);
+                self.folders.editor = Some(dialog);
             }
             FolderDemo::Menu => {
                 self.appearance.folder_tabs_mode = FolderTabsMode::TextAndIcons;
-                self.folder_tab_menu = Some(FolderTabMenu {
+                self.folders.tab_menu = Some(FolderTabMenu {
                     folder_id: Some(1),
                     position: point(px(190.), px(96.)),
                 });
@@ -152,19 +152,19 @@ impl QuillApp {
                 }
             }
             FolderDemo::NewChats | FolderDemo::NewChatsJoin => {
-                self.folder_tab = Some(1);
+                self.folders.tab = Some(1);
                 if matches!(demo, FolderDemo::NewChatsJoin) {
-                    self.folder_new_chats_dialog = Some(FolderNewChatsDialog {
+                    self.folders.new_chats_dialog = Some(FolderNewChatsDialog {
                         folder_id: 1,
                         selected: [14, 16].into_iter().collect(),
                     });
                 }
             }
             FolderDemo::Limit => {
-                self.folder_limit_box = Some(FolderLimitKind::Folders);
+                self.folders.limit_box = Some(FolderLimitKind::Folders);
             }
             FolderDemo::Delete => {
-                self.folder_delete_confirm = Some(FolderDeleteConfirm {
+                self.folders.delete_confirm = Some(FolderDeleteConfirm {
                     folder_id: 1,
                     name: "Work".into(),
                     has_links: true,

@@ -39,14 +39,14 @@ impl QuillApp {
             // A finished recovery / reset / login-email step reports on the
             // status screen.
             if this.twofa_step_finished()
-                && matches!(this.twofa_view, TwofaView::Recover | TwofaView::LoginEmail)
+                && matches!(this.twofa.view, TwofaView::Recover | TwofaView::LoginEmail)
             {
-                this.twofa_view = TwofaView::Status;
-                this.twofa_confirm = None;
+                this.twofa.view = TwofaView::Status;
+                this.twofa.confirm = None;
             }
             let notice = this.twofa_notice_line();
             let mut body = div().flex().flex_col().gap_2();
-            if let Some(line) = notice.filter(|_| this.twofa_view == TwofaView::Status) {
+            if let Some(line) = notice.filter(|_| this.twofa.view == TwofaView::Status) {
                 body = body.child(
                     div()
                         .id("twofa-notice")
@@ -64,7 +64,7 @@ impl QuillApp {
                         .child(format!("Error: {line}")),
                 );
             }
-            body = match (this.twofa_view, state) {
+            body = match (this.twofa.view, state) {
                 (TwofaView::Status, None) => body.child(
                     div()
                         .text_xs()
@@ -570,7 +570,7 @@ impl QuillApp {
     /// fetch of the authoritative `passwordState` (cached state reused,
     /// in-flight fetch deduped). Demo: the fixture is already injected.
     pub(super) fn open_twofa(&mut self, cx: &mut Context<Self>) {
-        self.twofa_open = true;
+        self.twofa.open = true;
         self.goto_twofa_view(TwofaView::Status);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_password_state();
@@ -598,17 +598,22 @@ impl QuillApp {
     /// Slice A2: close the overlay and clear every 2FA input — passwords
     /// must not linger in the form after the dialog is gone.
     pub(super) fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.twofa_open = false;
+        self.twofa.open = false;
         self.goto_twofa_view(TwofaView::Status);
-        self.twofa_current_password
+        self.twofa
+            .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa_new_password
+        self.twofa
+            .new_password
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa_hint
+        self.twofa
+            .hint
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa_email
+        self.twofa
+            .email
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa_code
+        self.twofa
+            .code
             .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
@@ -639,9 +644,9 @@ impl QuillApp {
     /// Slice A2: switch the 2FA view; a fresh form starts with no local
     /// notice line.
     pub(super) fn goto_twofa_view(&mut self, view: TwofaView) {
-        self.twofa_view = view;
-        self.twofa_notice = None;
-        self.twofa_confirm = None;
+        self.twofa.view = view;
+        self.twofa.notice = None;
+        self.twofa.confirm = None;
         if view == TwofaView::Status {
             self.clear_twofa_flow();
         } else if let Some(session) = self.live.as_mut().map(|l| &mut l.driver.session) {
@@ -665,10 +670,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
         include_email: bool,
     ) {
-        let mut current = self.twofa_current_password.read(cx).value().to_string();
-        let mut new = self.twofa_new_password.read(cx).value().to_string();
-        let hint = self.twofa_hint.read(cx).value().to_string();
-        let email = self.twofa_email.read(cx).value().trim().to_string();
+        let mut current = self.twofa.current_password.read(cx).value().to_string();
+        let mut new = self.twofa.new_password.read(cx).value().to_string();
+        let hint = self.twofa.hint.read(cx).value().to_string();
+        let email = self.twofa.email.read(cx).value().trim().to_string();
         // Slice A2 fixup: never fire a doomed request — the driver
         // rejects it silently and the old code cleared the form first, so
         // the submit vanished with no feedback.
@@ -680,20 +685,24 @@ impl QuillApp {
             None
         };
         if let Some(note) = missing {
-            self.twofa_notice = Some(note.to_string());
+            self.twofa.notice = Some(note.to_string());
             current.zeroize();
             new.zeroize();
             cx.notify();
             return;
         }
-        self.twofa_notice = None;
-        self.twofa_current_password
+        self.twofa.notice = None;
+        self.twofa
+            .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa_new_password
+        self.twofa
+            .new_password
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa_hint
+        self.twofa
+            .hint
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa_email
+        self.twofa
+            .email
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
             let email_opt = if include_email && !email.is_empty() {
@@ -715,8 +724,8 @@ impl QuillApp {
     /// current two-step password; the change stays pending until the new
     /// address is confirmed.
     pub(super) fn submit_twofa_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut current = self.twofa_current_password.read(cx).value().to_string();
-        let email = self.twofa_email.read(cx).value().trim().to_string();
+        let mut current = self.twofa.current_password.read(cx).value().to_string();
+        let email = self.twofa.email.read(cx).value().trim().to_string();
         // Slice A2 fixup: the driver rejects an empty password or email
         // silently — say so locally instead of clearing the form.
         let missing: Option<&str> = if current.is_empty() {
@@ -727,15 +736,17 @@ impl QuillApp {
             None
         };
         if let Some(note) = missing {
-            self.twofa_notice = Some(note.to_string());
+            self.twofa.notice = Some(note.to_string());
             current.zeroize();
             cx.notify();
             return;
         }
-        self.twofa_notice = None;
-        self.twofa_current_password
+        self.twofa.notice = None;
+        self.twofa
+            .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa_email
+        self.twofa
+            .email
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.set_recovery_email(&current, &email);
@@ -933,7 +944,7 @@ impl QuillApp {
         )
         .child(div().mt_1().font_semibold().text_sm().child("New password"))
         .child(
-            Input::new(&self.twofa_new_password)
+            Input::new(&self.twofa.new_password)
                 .aria_label("New two-step verification password")
                 .content_type(InputContentType::Password)
                 .h(px(40.)),
@@ -946,7 +957,7 @@ impl QuillApp {
                 .child("Hint (optional)"),
         )
         .child(
-            Textarea::new(&self.twofa_hint)
+            Textarea::new(&self.twofa.hint)
                 .aria_label("Password hint")
                 .h(px(40.)),
         )
@@ -958,7 +969,7 @@ impl QuillApp {
                 .child("Recovery email (optional)"),
         )
         .child(
-            Textarea::new(&self.twofa_email)
+            Textarea::new(&self.twofa.email)
                 .aria_label("Recovery email address")
                 .h(px(40.)),
         )
@@ -982,14 +993,14 @@ impl QuillApp {
                     .child("Current password"),
             )
             .child(
-                Input::new(&self.twofa_current_password)
+                Input::new(&self.twofa.current_password)
                     .aria_label("Current two-step verification password")
                     .content_type(InputContentType::Password)
                     .h(px(40.)),
             )
             .child(div().mt_1().font_semibold().text_sm().child("New password"))
             .child(
-                Input::new(&self.twofa_new_password)
+                Input::new(&self.twofa.new_password)
                     .aria_label("New two-step verification password")
                     .content_type(InputContentType::Password)
                     .h(px(40.)),
@@ -1002,7 +1013,7 @@ impl QuillApp {
                     .child("Hint (optional)"),
             )
             .child(
-                Textarea::new(&self.twofa_hint)
+                Textarea::new(&self.twofa.hint)
                     .aria_label("Password hint")
                     .h(px(40.)),
             )
@@ -1039,7 +1050,7 @@ impl QuillApp {
                 .child("Current password"),
         )
         .child(
-            Input::new(&self.twofa_current_password)
+            Input::new(&self.twofa.current_password)
                 .aria_label("Current two-step verification password")
                 .content_type(InputContentType::Password)
                 .h(px(40.)),
@@ -1066,7 +1077,7 @@ impl QuillApp {
                     .child("Current password"),
             )
             .child(
-                Input::new(&self.twofa_current_password)
+                Input::new(&self.twofa.current_password)
                     .aria_label("Current two-step verification password")
                     .content_type(InputContentType::Password)
                     .h(px(40.)),
@@ -1079,7 +1090,7 @@ impl QuillApp {
                     .child("New recovery email"),
             )
             .child(
-                Textarea::new(&self.twofa_email)
+                Textarea::new(&self.twofa.email)
                     .aria_label("Recovery email address")
                     .h(px(40.)),
             )
@@ -1116,7 +1127,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .when_some(self.twofa_notice.clone(), |this, note| {
+            .when_some(self.twofa.notice.clone(), |this, note| {
                 this.child(div().text_xs().text_color(danger()).child(note))
             })
             .child(

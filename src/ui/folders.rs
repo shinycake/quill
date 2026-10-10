@@ -55,11 +55,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::FolderEditor, |this, _, cx| {
-                this.folder_editor = None;
+                this.folders.editor = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let title = match this.folder_editor.as_ref().and_then(|d| d.folder_id) {
+            let title = match this.folders.editor.as_ref().and_then(|d| d.folder_id) {
                 Some(_) => "Edit folder",
                 None => "New folder",
             };
@@ -73,7 +73,7 @@ impl QuillApp {
                         .label("Cancel")
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.folder_editor = None;
+                            this.folders.editor = None;
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::FolderEditor, window, cx);
                         })),
@@ -115,11 +115,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::FolderDelete, |this, _, cx| {
-                this.folder_delete_confirm = None;
+                this.folders.delete_confirm = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let Some(confirm) = this.folder_delete_confirm.as_ref() else {
+            let Some(confirm) = this.folders.delete_confirm.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Delete folder"))
@@ -178,7 +178,7 @@ impl QuillApp {
                                     .ghost()
                                     .small()
                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                        if let Some(confirm) = this.folder_delete_confirm.as_mut() {
+                                        if let Some(confirm) = this.folders.delete_confirm.as_mut() {
                                             if all_ticked {
                                                 confirm.keep = select_ids.iter().copied().collect();
                                             } else {
@@ -203,7 +203,7 @@ impl QuillApp {
                             .checked(ticked)
                             .label(super::folder_share::chat_title(this.session(), chat_id))
                             .on_click(cx.listener(move |this, &on, _, cx| {
-                                if let Some(confirm) = this.folder_delete_confirm.as_mut() {
+                                if let Some(confirm) = this.folders.delete_confirm.as_mut() {
                                     if on {
                                         confirm.keep.remove(&chat_id);
                                     } else {
@@ -243,7 +243,7 @@ impl QuillApp {
                         .label("Cancel")
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.folder_delete_confirm = None;
+                            this.folders.delete_confirm = None;
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);
                         })),
@@ -567,7 +567,7 @@ impl QuillApp {
     /// Parity slice: create/edit folder form — name, include-type filters,
     /// per-chat include/exclude multi-select, exclude flags.
     pub(super) fn folder_editor_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(dialog) = self.folder_editor.as_ref() else {
+        let Some(dialog) = self.folders.editor.as_ref() else {
             return div().into_any_element();
         };
         // kit Phase 2 (redo): plain form content — the kit `Dialog`
@@ -632,7 +632,7 @@ impl QuillApp {
                         .tooltip(name)
                         .accessibility_label(format!("{name} icon"))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(dialog) = this.folder_editor.as_mut() {
+                            if let Some(dialog) = this.folders.editor.as_mut() {
                                 // A second click returns to the default icon.
                                 dialog.editor.icon_name = if selected {
                                     None
@@ -685,7 +685,7 @@ impl QuillApp {
                     .checked(checked)
                     .label(label)
                     .on_click(cx.listener(move |this, &on, _, cx| {
-                        if let Some(dialog) = this.folder_editor.as_mut() {
+                        if let Some(dialog) = this.folders.editor.as_mut() {
                             match key {
                                 "include-contacts" => {
                                     dialog.editor.include_contacts = on;
@@ -738,7 +738,7 @@ impl QuillApp {
                     .checked(checked)
                     .label(label)
                     .on_click(cx.listener(move |this, &on, _, cx| {
-                        if let Some(dialog) = this.folder_editor.as_mut() {
+                        if let Some(dialog) = this.folders.editor.as_mut() {
                             match key {
                                 "exclude-muted" => {
                                     dialog.editor.exclude_muted = on;
@@ -802,16 +802,16 @@ impl QuillApp {
         {
             self.status_note = format!("could not load recommended folders: {err:?}");
         }
-        self.folder_manage_open = true;
-        self.folder_editor = None;
-        self.folder_delete_confirm = None;
+        self.folders.manage_open = true;
+        self.folders.editor = None;
+        self.folders.delete_confirm = None;
         cx.notify();
     }
 
     pub(super) fn close_folder_manage(&mut self, cx: &mut Context<Self>) {
-        self.folder_manage_open = false;
-        self.folder_editor = None;
-        self.folder_delete_confirm = None;
+        self.folders.manage_open = false;
+        self.folders.editor = None;
+        self.folders.delete_confirm = None;
         cx.notify();
     }
 
@@ -820,7 +820,7 @@ impl QuillApp {
             self.show_folder_limit(quill::folder_limits::FolderLimitKind::Folders, cx);
             return;
         }
-        self.folder_editor = Some(FolderEditorDialog::new(window, cx, None));
+        self.folders.editor = Some(FolderEditorDialog::new(window, cx, None));
         cx.notify();
     }
 
@@ -843,7 +843,7 @@ impl QuillApp {
         {
             self.status_note = format!("could not load folder: {err:?}");
         }
-        self.folder_editor = Some(dialog);
+        self.folders.editor = Some(dialog);
         cx.notify();
     }
 
@@ -854,7 +854,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let folder_id = match self.folder_editor.as_ref() {
+        let folder_id = match self.folders.editor.as_ref() {
             Some(dialog) if dialog.fetch_pending => dialog.folder_id,
             _ => return,
         };
@@ -867,18 +867,18 @@ impl QuillApp {
         else {
             return;
         };
-        if let Some(dialog) = self.folder_editor.as_mut() {
+        if let Some(dialog) = self.folders.editor.as_mut() {
             dialog.prefill_from_spec(&spec, window, cx);
         }
         cx.notify();
     }
 
     pub(super) fn save_folder_editor(&mut self, cx: &mut Context<Self>) {
-        let (name, folder_id) = match self.folder_editor.as_ref() {
+        let (name, folder_id) = match self.folders.editor.as_ref() {
             Some(dialog) => (dialog.name(cx), dialog.folder_id),
             None => return,
         };
-        if let Some(dialog) = self.folder_editor.as_mut() {
+        if let Some(dialog) = self.folders.editor.as_mut() {
             dialog.editor.name = name;
             if let Some(err) = dialog.editor.validate() {
                 dialog.error = Some(err.to_string());
@@ -887,7 +887,8 @@ impl QuillApp {
             }
         }
         let spec = self
-            .folder_editor
+            .folders
+            .editor
             .as_ref()
             .map(|dialog| dialog.editor.to_spec());
         let Some(spec) = spec else { return };
@@ -917,7 +918,7 @@ impl QuillApp {
         };
         match result {
             Ok(()) => {
-                self.folder_editor = None;
+                self.folders.editor = None;
                 self.status_note = if folder_id.is_some() {
                     "folder updated".into()
                 } else {
@@ -925,7 +926,7 @@ impl QuillApp {
                 };
             }
             Err(err) => {
-                if let Some(dialog) = self.folder_editor.as_mut() {
+                if let Some(dialog) = self.folders.editor.as_mut() {
                     dialog.error = Some(format!("could not save folder: {err:?}"));
                 }
             }
@@ -940,7 +941,7 @@ impl QuillApp {
             .map(|f| (f.name.clone(), f.is_shareable, f.has_my_invite_links));
         let (name, shared, has_links) =
             info.unwrap_or_else(|| (format!("Folder {folder_id}"), false, false));
-        self.folder_delete_confirm = Some(FolderDeleteConfirm {
+        self.folders.delete_confirm = Some(FolderDeleteConfirm {
             folder_id,
             name,
             has_links,
@@ -958,7 +959,7 @@ impl QuillApp {
     }
 
     pub(super) fn confirm_folder_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.folder_delete_confirm.take() else {
+        let Some(confirm) = self.folders.delete_confirm.take() else {
             return;
         };
         let leave: Vec<i64> = if confirm.shared {
@@ -985,8 +986,8 @@ impl QuillApp {
             Ok(()) => "folder deleted".into(),
             Err(err) => format!("could not delete folder: {err:?}"),
         };
-        if self.folder_tab == Some(confirm.folder_id) {
-            self.folder_tab = None;
+        if self.folders.tab == Some(confirm.folder_id) {
+            self.folders.tab = None;
         }
         cx.notify();
     }
@@ -1041,7 +1042,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_folder_menu(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.folder_menu_open = true;
+        self.folders.menu_open = true;
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
         {
@@ -1051,7 +1052,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_folder_menu(&mut self, cx: &mut Context<Self>) {
-        self.folder_menu_open = false;
+        self.folders.menu_open = false;
         cx.notify();
     }
 
@@ -1085,7 +1086,7 @@ impl QuillApp {
             Ok(()) => toast,
             Err(err) => format!("could not add chat to folder: {err:?}"),
         };
-        self.folder_menu_open = false;
+        self.folders.menu_open = false;
         cx.notify();
     }
 
@@ -1104,7 +1105,7 @@ impl QuillApp {
             Ok(()) => toast,
             Err(err) => format!("could not remove chat from folder: {err:?}"),
         };
-        self.folder_menu_open = false;
+        self.folders.menu_open = false;
         cx.notify();
     }
 
@@ -1204,7 +1205,7 @@ impl QuillApp {
                             {
                                 this.status_note = format!("could not move chat: {err:?}");
                             }
-                            this.folder_menu_open = false;
+                            this.folders.menu_open = false;
                             cx.notify();
                         }
                         ChatList::Archive => {
@@ -1213,7 +1214,7 @@ impl QuillApp {
                             {
                                 this.status_note = format!("could not archive chat: {err:?}");
                             }
-                            this.folder_menu_open = false;
+                            this.folders.menu_open = false;
                             cx.notify();
                         }
                         ChatList::Folder(folder_id) => {

@@ -351,7 +351,7 @@ impl QuillApp {
                 } else {
                     chat.is_pinned
                         && self.chat_filter == ChatListFilter::All
-                        && self.folder_tab.is_none()
+                        && self.folders.tab.is_none()
                         && self
                             .session()
                             .is_some_and(|s| s.pinned_chat_ids(false).len() >= 2)
@@ -414,7 +414,7 @@ impl QuillApp {
                     chat,
                     selected,
                     &folder_names,
-                    self.folder_tab,
+                    self.folders.tab,
                     show_folder_tags,
                     photo.as_deref(),
                     draggable,

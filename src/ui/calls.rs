@@ -497,7 +497,7 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.call_prefs.confirm_before_calling)
         {
-            self.call_confirm = Some((user_id, is_video));
+            self.calls.confirm = Some((user_id, is_video));
             cx.notify();
             return;
         }
@@ -546,7 +546,7 @@ impl QuillApp {
     /// Phase C2i: the user confirmed the pending call in the
     /// confirm-before-calling dialog.
     pub(super) fn confirm_pending_call(&mut self, cx: &mut Context<Self>) {
-        if let Some((user_id, is_video)) = self.call_confirm.take() {
+        if let Some((user_id, is_video)) = self.calls.confirm.take() {
             self.dial_user(user_id, is_video, cx);
         } else {
             cx.notify();
@@ -556,7 +556,7 @@ impl QuillApp {
     /// Phase C2i: the user cancelled the pending call in the
     /// confirm-before-calling dialog.
     pub(super) fn cancel_pending_call(&mut self, cx: &mut Context<Self>) {
-        self.call_confirm = None;
+        self.calls.confirm = None;
         cx.notify();
     }
 
@@ -894,10 +894,10 @@ impl QuillApp {
     /// tick (at most one task; exits when no call is active).
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
         let call_active = self.session().is_some_and(|s| s.active_call.is_some());
-        if !call_active || self.call_tick_active {
+        if !call_active || self.calls.tick_active {
             return;
         }
-        self.call_tick_active = true;
+        self.calls.tick_active = true;
         cx.spawn(async move |this, cx| {
             loop {
                 // Phase C2e: video calls tick at 100ms so incoming
@@ -913,7 +913,7 @@ impl QuillApp {
                             cx.notify();
                             true
                         } else {
-                            this.call_tick_active = false;
+                            this.calls.tick_active = false;
                             false
                         }
                     })
@@ -923,7 +923,7 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.call_tick_active = false;
+                this.calls.tick_active = false;
             });
         })
         .detach();
@@ -974,7 +974,7 @@ impl QuillApp {
                 this.cancel_pending_call(cx);
             });
         app.update(cx, |this, cx| {
-            let Some((user_id, is_video)) = this.call_confirm else {
+            let Some((user_id, is_video)) = this.calls.confirm else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Confirm call"))
@@ -1291,7 +1291,7 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.call_prefs.confirm_before_calling);
         if confirm {
-            self.call_confirm = Some((user_id, is_video));
+            self.calls.confirm = Some((user_id, is_video));
             cx.notify();
             return;
         }

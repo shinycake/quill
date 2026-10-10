@@ -522,7 +522,7 @@ impl QuillApp {
     ) -> Option<InlineFrame> {
         if !super::native_video::supported()
             || self.media_viewer.is_open()
-            || self.story_viewer.is_open()
+            || self.stories.viewer.is_open()
         {
             return None;
         }

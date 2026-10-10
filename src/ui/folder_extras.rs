@@ -73,7 +73,7 @@ impl QuillApp {
         self.message_menu = None;
         self.chat_menu = None;
         self.archive_menu = None;
-        self.folder_tab_menu = Some(FolderTabMenu {
+        self.folders.tab_menu = Some(FolderTabMenu {
             folder_id,
             position,
         });
@@ -153,7 +153,7 @@ impl QuillApp {
                 .child(Icon::new(icon).size(px(16.)).text_color(color))
                 .child(label)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.folder_tab_menu = None;
+                    this.folders.tab_menu = None;
                     on_click(this, window, cx);
                     cx.notify();
                 }))
@@ -251,13 +251,13 @@ impl QuillApp {
                     .right_0()
                     .bottom_0()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.folder_tab_menu = None;
+                        this.folders.tab_menu = None;
                         cx.notify();
                     }))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(|this, _, _, cx| {
-                            this.folder_tab_menu = None;
+                            this.folders.tab_menu = None;
                             cx.notify();
                         }),
                     ),
@@ -279,7 +279,7 @@ impl QuillApp {
     /// Ask for the open shared folder's new chats (the driver keeps to the
     /// update period). Called when a folder opens and from the poll loop.
     pub(super) fn poll_folder_new_chats(&mut self) {
-        let (Some(folder_id), Some(live)) = (self.folder_tab, self.live.as_mut()) else {
+        let (Some(folder_id), Some(live)) = (self.folders.tab, self.live.as_mut()) else {
             return;
         };
         let _ = live.driver.fetch_folder_new_chats(folder_id);
@@ -287,7 +287,7 @@ impl QuillApp {
 
     /// The bar above the list of a shared folder with new chats.
     pub(super) fn folder_new_chats_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let folder_id = self.folder_tab?;
+        let folder_id = self.folders.tab?;
         let count = self
             .session()?
             .folder_new_chats
@@ -378,7 +378,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.folder_new_chats.get(&folder_id).cloned())
             .unwrap_or_default();
-        self.folder_new_chats_dialog = Some(FolderNewChatsDialog {
+        self.folders.new_chats_dialog = Some(FolderNewChatsDialog {
             folder_id,
             selected: ids.into_iter().collect(),
         });
@@ -386,12 +386,12 @@ impl QuillApp {
     }
 
     pub(super) fn close_folder_new_chats(&mut self, cx: &mut Context<Self>) {
-        self.folder_new_chats_dialog = None;
+        self.folders.new_chats_dialog = None;
         cx.notify();
     }
 
     fn confirm_folder_new_chats(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.folder_new_chats_dialog.take() else {
+        let Some(dialog) = self.folders.new_chats_dialog.take() else {
             return;
         };
         let mut ids: Vec<i64> = dialog.selected.iter().copied().collect();
@@ -427,7 +427,7 @@ impl QuillApp {
                 this.close_folder_new_chats(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(state) = this.folder_new_chats_dialog.as_ref() else {
+            let Some(state) = this.folders.new_chats_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Add chats to folder"))
@@ -475,7 +475,7 @@ impl QuillApp {
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(dialog) = this.folder_new_chats_dialog.as_mut() {
+                                if let Some(dialog) = this.folders.new_chats_dialog.as_mut() {
                                     if select_ids.iter().all(|id| dialog.selected.contains(id)) {
                                         dialog.selected.clear();
                                     } else {
@@ -500,7 +500,7 @@ impl QuillApp {
                         .checked(checked)
                         .label(chat_title(this.session(), chat_id))
                         .on_click(cx.listener(move |this, &on, _, cx| {
-                            if let Some(dialog) = this.folder_new_chats_dialog.as_mut() {
+                            if let Some(dialog) = this.folders.new_chats_dialog.as_mut() {
                                 if on {
                                     dialog.selected.insert(chat_id);
                                 } else {
@@ -562,7 +562,7 @@ impl QuillApp {
     /// Open the limit box for `kind` and ask Telegram for its Premium
     /// value when we do not know it yet.
     pub(super) fn show_folder_limit(&mut self, kind: FolderLimitKind, cx: &mut Context<Self>) {
-        self.folder_limit_box = Some(kind);
+        self.folders.limit_box = Some(kind);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_premium_limit(kind);
         }
@@ -582,10 +582,10 @@ impl QuillApp {
         let Some(kind) = hit else {
             return false;
         };
-        if let Some(dialog) = self.folder_share.as_mut() {
+        if let Some(dialog) = self.folders.share.as_mut() {
             dialog.busy = false;
         }
-        if let Some(dialog) = self.folder_invite.as_mut() {
+        if let Some(dialog) = self.folders.invite.as_mut() {
             dialog.adding = false;
         }
         self.show_folder_limit(kind, cx);
@@ -600,11 +600,11 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::FolderLimit, |this, _, cx| {
-                this.folder_limit_box = None;
+                this.folders.limit_box = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let Some(kind) = this.folder_limit_box else {
+            let Some(kind) = this.folders.limit_box else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Limit Reached"))
@@ -664,7 +664,7 @@ impl QuillApp {
                     .label(if premium { "OK" } else { "Not now" })
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.folder_limit_box = None;
+                        this.folders.limit_box = None;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::FolderLimit, window, cx);
                     })),
@@ -675,7 +675,7 @@ impl QuillApp {
                         .label("Get Telegram Premium")
                         .on_click(cx.listener(|this, _, window, cx| {
                             cx.open_url(PREMIUM_URL);
-                            this.folder_limit_box = None;
+                            this.folders.limit_box = None;
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::FolderLimit, window, cx);
                         })),
@@ -706,7 +706,7 @@ impl QuillApp {
             self.show_folder_limit(FolderLimitKind::Tags, cx);
             return;
         }
-        if let Some(dialog) = self.folder_editor.as_mut() {
+        if let Some(dialog) = self.folders.editor.as_mut() {
             dialog.editor.color_id = color_id;
         }
         cx.notify();
@@ -716,7 +716,7 @@ impl QuillApp {
     /// preview of the tag. Hidden for a Premium account whose folder tags
     /// are off (nothing to show), like tdesktop.
     pub(super) fn folder_tag_picker(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.folder_editor.as_ref()?;
+        let dialog = self.folders.editor.as_ref()?;
         let premium = self.is_premium();
         let tags_enabled = self.session().is_some_and(|s| s.are_folder_tags_enabled);
         if !tag_picker_visible(premium, tags_enabled) {

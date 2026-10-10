@@ -124,7 +124,7 @@ impl QuillApp {
         self.pane_mode() != PaneMode::Ready
             || self.passcode_ui.locked
             || self.media_viewer.is_open()
-            || self.story_viewer.is_open()
+            || self.stories.viewer.is_open()
             || window.has_active_dialog(cx)
     }
 
@@ -498,7 +498,7 @@ impl QuillApp {
         let tabs: Vec<Option<i32>> = std::iter::once(None)
             .chain(session.chat_folders.iter().map(|f| Some(f.id)))
             .collect();
-        let Some(target) = near_folder(&tabs, self.folder_tab, forward) else {
+        let Some(target) = near_folder(&tabs, self.folders.tab, forward) else {
             return false;
         };
         self.open_folder_tab(target, cx);
