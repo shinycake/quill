@@ -793,6 +793,8 @@ pub enum EnvelopePayload {
         /// 2746): the channel shows its messages translated for everyone.
         has_automatic_translation: bool,
         username: String,
+        /// `supergroup.usernames`: active/disabled/collectible lists.
+        usernames: SupergroupUsernames,
         /// `supergroup.member_count` — may be 0 until full info is known.
         member_count: i32,
         /// Phase A1: own `chatMemberStatus*` (`supergroup.status`, schema
@@ -1515,6 +1517,17 @@ pub enum EnvelopePayload {
     ChatJoinRequests {
         total_count: i32,
         requests: Vec<ParsedChatJoinRequest>,
+    },
+    /// `foundChatBoosts` — the `getChatBoosts` answer.
+    FoundChatBoosts {
+        total_count: i32,
+        boosts: Vec<ParsedChatBoost>,
+        next_offset: String,
+    },
+    /// `chatBoostLink` — the `getChatBoostLink` answer.
+    ChatBoostLink {
+        link: String,
+        is_public: bool,
     },
     /// B8: `chatInviteLinkCounts` — the `getChatInviteLinkCounts` answer.
     ChatInviteLinkCounts {

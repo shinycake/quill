@@ -624,6 +624,19 @@ impl Session {
                         RequestPurpose::RevokeChatInviteLink => {
                             self.apply_revoke_answer(chat_id.0, links);
                         }
+                        RequestPurpose::GetAdminChatInviteLinks { revoked } => {
+                            if let Some(state) = self.admin_invite_links.get_mut(&chat_id.0) {
+                                let loaded =
+                                    InviteLinkFetch::Loaded(InviteLinkList { total_count, links });
+                                if revoked && state.revoked_request == Some(pending.id) {
+                                    state.revoked = loaded;
+                                    state.revoked_request = None;
+                                } else if !revoked && state.active_request == Some(pending.id) {
+                                    state.active = loaded;
+                                    state.active_request = None;
+                                }
+                            }
+                        }
                         RequestPurpose::GetRevokedChatInviteLinks => {
                             self.revoked_invite_links.insert(
                                 chat_id.0,
@@ -632,6 +645,37 @@ impl Session {
                         }
                         _ => {}
                     }
+                }
+            }
+            // `getChatBoosts` answer; stale pages (the tab changed) drop.
+            EnvelopePayload::FoundChatBoosts {
+                total_count,
+                boosts,
+                next_offset,
+            } => {
+                if let Some(pending) = pending
+                    && let RequestPurpose::GetChatBoosts { append } = pending.purpose
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(state) = self.chat_boost_lists.get_mut(&chat_id.0)
+                    && state.request == Some(pending.id)
+                {
+                    if !append {
+                        state.boosts.clear();
+                    }
+                    state.boosts.extend(boosts);
+                    state.total_count = total_count;
+                    state.next_offset = next_offset;
+                    state.loading = false;
+                    state.error = None;
+                    state.request = None;
+                }
+            }
+            // `getChatBoostLink` answer.
+            EnvelopePayload::ChatBoostLink { link, is_public } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatBoostLink)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.chat_boost_links.insert(chat_id.0, (link, is_public));
                 }
             }
             // B8: `getChatInviteLinkCounts` answer.
@@ -671,6 +715,20 @@ impl Session {
                 requests,
             } => {
                 if let Some(pending) = pending
+                    && let RequestPurpose::GetLinkJoinRequests { append } = pending.purpose
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(state) = self.link_join_requests.get_mut(&chat_id.0)
+                    && state.request == Some(pending.id)
+                {
+                    if !append {
+                        state.requests.clear();
+                    }
+                    state.requests.extend(requests);
+                    state.total_count = total_count;
+                    state.loading = false;
+                    state.error = None;
+                    state.request = None;
+                } else if let Some(pending) = pending
                     && matches!(
                         pending.purpose,
                         RequestPurpose::GetChatJoinRequests
@@ -2180,6 +2238,7 @@ impl Session {
                 has_forum_tabs,
                 has_automatic_translation,
                 username,
+                usernames,
                 status,
                 can_restrict_members,
                 can_invite_users,
@@ -2194,6 +2253,7 @@ impl Session {
                 show_message_sender,
                 join_to_send_messages,
             } => {
+                self.set_supergroup_usernames(supergroup_id, usernames);
                 self.supergroup_join_to_send
                     .insert(supergroup_id, join_to_send_messages);
                 if member_count > 0 {

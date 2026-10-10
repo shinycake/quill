@@ -335,7 +335,10 @@ fn channel_admin_links_a_discussion_group_and_sets_reactions() {
         &admin_status(r#""can_post_messages":true"#),
     );
     let _ = sg2;
-    assert!(session.group_admin_controls(ChatId(21)).is_empty());
+    let plain = session.group_admin_controls(ChatId(21));
+    assert!(plain.discussion.is_none() && !plain.reactions && !plain.usernames);
+    // Every administrator may open the boosts list.
+    assert!(plain.boosts);
 }
 
 fn basic_group(

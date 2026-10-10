@@ -211,3 +211,24 @@ fn me_response_keeps_id_only() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn own_restricted_status_keeps_rights_and_end_date() {
+    let json = r#"{"@type":"updateChatMember","chat_id":-100,"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":7},"status":{"@type":"chatMemberStatusRestricted","is_member":true,"restricted_until_date":1800000000,"permissions":{"@type":"chatPermissions","can_send_basic_messages":true,"can_send_photos":false}}}}"#;
+    match parse_envelope(json).unwrap().payload {
+        EnvelopePayload::UpdateChatMember { member, .. } => {
+            assert_eq!(member.status, ChannelMemberStatus::Restricted);
+            let restriction = member.restriction.expect("restriction");
+            assert_eq!(restriction.until_date, 1_800_000_000);
+            assert!(restriction.permissions.can_send_basic_messages);
+            assert!(!restriction.permissions.can_send_photos);
+        }
+        other => panic!("{other:?}"),
+    }
+    // Any other status carries no restriction.
+    let json = r#"{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":7},"status":{"@type":"chatMemberStatusMember"}}"#;
+    match parse_envelope(json).unwrap().payload {
+        EnvelopePayload::ChatMember { member } => assert_eq!(member.restriction, None),
+        other => panic!("{other:?}"),
+    }
+}

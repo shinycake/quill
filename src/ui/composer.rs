@@ -24,6 +24,7 @@ use quill::composer::{
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::schedule::ScheduleKind;
+use quill::send_rights::SendKind;
 use quill::state::{Session, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatKind;
@@ -105,6 +106,15 @@ impl QuillApp {
                         return;
                     }
                     let attachments = self.pending_attachments.clone();
+                    // The viewer's own rights in a group: text needs the
+                    // basic right, each attachment its media right.
+                    if attachments.is_empty() {
+                        if !text.trim().is_empty() && self.deny_send(SendKind::Message, cx) {
+                            return;
+                        }
+                    } else if self.deny_attachments(attachments.iter().map(|a| a.kind), cx) {
+                        return;
+                    }
                     // Phase B3: self-destruct only leaves the composer on
                     // photo/video attachments; the driver additionally
                     // strips it for non-private chats (TDLib's 400 gate).

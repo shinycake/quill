@@ -803,6 +803,7 @@ impl QuillApp {
                     .unwrap_or_default()
             })
             .unwrap_or_default();
+        let selected_topic = session.and_then(|s| s.open_topic);
         let mut list = div()
             .id("forum-topics")
             .flex()
@@ -858,7 +859,11 @@ impl QuillApp {
                     .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
-                    .bg(cx.theme().sidebar)
+                    .bg(if selected_topic == Some(topic_id) {
+                        cx.theme().accent
+                    } else {
+                        cx.theme().sidebar
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_topic_ui(topic_id, cx);
                     }))
@@ -957,6 +962,106 @@ impl QuillApp {
             );
         }
         list.into_any_element()
+    }
+
+    /// Where the forum topic column sits for this window; also records
+    /// whether it is on screen for the conversation pane. A peek at the chat
+    /// list ends once the open chat is no longer a forum.
+    pub(super) fn forum_column_layout(&mut self, window: &Window) -> quill::state::ForumColumn {
+        let width = f32::from(window.viewport_size().width);
+        let layout = self
+            .session()
+            .map_or(quill::state::ForumColumn::Hidden, |s| {
+                s.forum_column(width, self.forum_chats_peek)
+            });
+        if self.forum_chats_peek
+            && self
+                .session()
+                .is_some_and(|s| s.forum_column(width, false) == quill::state::ForumColumn::Hidden)
+        {
+            self.forum_chats_peek = false;
+        }
+        self.forum_column_shown = layout != quill::state::ForumColumn::Hidden;
+        layout
+    }
+
+    /// The forum's topic list as its own column (tdesktop shows the topics
+    /// where the chat list was): the forum's name and topic count on top,
+    /// then the topics. On a narrow window a "Chats" button brings the
+    /// chat list back.
+    pub(super) fn forum_column_view(
+        &self,
+        open: Option<ChatId>,
+        replacing: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = open
+            .and_then(|id| self.session().and_then(|s| s.chats.get(&id.0)))
+            .map(|chat| chat.title.clone())
+            .unwrap_or_default();
+        let count = open
+            .and_then(|id| self.session().map(|s| s.ordered_forum_topics(id).len()))
+            .unwrap_or(0);
+        div()
+            .id("forum-column")
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(px(quill::state::FORUM_COLUMN_WIDTH))
+            .h_full()
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .when(replacing, |this| {
+                        this.child(
+                            Button::new("forum-column-chats")
+                                .icon(gpui_kit::assets::IconName::ChevronLeft)
+                                .ghost()
+                                .tooltip("Show chats")
+                                .accessibility_label("Show chats")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.forum_chats_peek = true;
+                                    cx.notify();
+                                })),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_w_0()
+                            .child(div().font_semibold().truncate().child(title))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(match count {
+                                        1 => "1 topic".to_owned(),
+                                        n => format!("{n} topics"),
+                                    }),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .id("forum-column-scroll")
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(self.forum_topics_pane(open, cx)),
+            )
+            .into_any_element()
     }
 
     /// Phase 5.1: select a forum topic (live: `searchChatMessages` with

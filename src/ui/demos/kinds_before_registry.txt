@@ -105,6 +105,7 @@ ready-folders-sidebar
 ready-folders-tag-color
 ready-folders-tags
 ready-folders-toast
+ready-forum-column
 ready-forum-thread-stories
 ready-forum-topics
 ready-forums-saved
@@ -134,6 +135,7 @@ ready-jump-date
 ready-key-verification
 ready-keybindings
 ready-link-preview
+ready-links-boosts
 ready-local-storage
 ready-location
 ready-lock-screen
@@ -176,6 +178,7 @@ ready-rendering-leftovers
 ready-reply
 ready-reply-keyboard
 ready-reply-media
+ready-restricted-composer
 ready-reveal
 ready-rich-ai-tools
 ready-rich-editor
@@ -264,6 +267,7 @@ ready-viewer-extras
 ready-viewer-gif
 ready-viewer-shared
 ready-voice
+ready-voice-pause
 ready-web-sessions
 wait-code
 wait-code-firebase
