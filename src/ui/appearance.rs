@@ -1401,7 +1401,7 @@ impl QuillApp {
     /// Windows; macOS lets the system pick).
     fn appearance_spellcheck_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let checked = self.chat_prefs.spellcheck_enabled;
-        let hint = self.spell_info.hint();
+        let hint = self.spell.info.hint();
         let row = div()
             .flex()
             .items_center()
@@ -1432,29 +1432,29 @@ impl QuillApp {
                     })),
             );
         let mut control = div().flex().flex_col().gap_2().child(row);
-        if checked && !self.spell_info.available.is_empty() {
-            let active = self.spell_info.active.clone();
+        if checked && !self.spell.info.available.is_empty() {
+            let active = self.spell.info.active.clone();
             let mut chips = div().flex().flex_wrap().gap_2().child(self.appearance_chip(
                 "spell-lang-auto",
                 "Automatic",
-                self.spell_info.chosen.is_empty(),
+                self.spell.info.chosen.is_empty(),
                 cx,
                 |this, cx| this.set_spell_languages(Vec::new(), cx),
             ));
-            for code in self.spell_info.available.clone() {
+            for code in self.spell.info.available.clone() {
                 let on = active.contains(&code);
                 let base = active.clone();
                 let toggled = code.clone();
                 chips = chips.child(self.appearance_chip(
                     SharedString::from(format!("spell-lang-{code}")),
                     code.clone(),
-                    on && !self.spell_info.chosen.is_empty(),
+                    on && !self.spell.info.chosen.is_empty(),
                     cx,
                     move |this, cx| {
-                        let mut next = if this.spell_info.chosen.is_empty() {
+                        let mut next = if this.spell.info.chosen.is_empty() {
                             base.clone()
                         } else {
-                            this.spell_info.chosen.clone()
+                            this.spell.info.chosen.clone()
                         };
                         if let Some(i) = next.iter().position(|c| *c == toggled) {
                             next.remove(i);

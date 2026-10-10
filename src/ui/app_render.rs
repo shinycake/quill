@@ -52,7 +52,8 @@ impl Render for QuillApp {
         // one) and swept no player orphans them.
         let history_drawn = self.slices.conversation_rendered.replace(false)
             || !self.slices.conversation_shown.replace(false);
-        self.inline_videos
+        self.playback
+            .inline_videos
             .borrow_mut()
             .frame_start(history_drawn, window.scale_factor());
         let active = window.is_window_active() || super::frame_clock::assume_active();
@@ -60,10 +61,13 @@ impl Render for QuillApp {
         // where the chat list was).
         let forum_column = self.forum_column_layout(window);
         if self.window_active.replace(active) != active {
-            self.inline_videos.borrow_mut().set_window_active(active);
+            self.playback
+                .inline_videos
+                .borrow_mut()
+                .set_window_active(active);
         }
         // The viewer left video full screen: give the window back.
-        if std::mem::take(&mut self.viewer_extra.restore_fullscreen) && window.is_fullscreen() {
+        if std::mem::take(&mut self.viewer.extra.restore_fullscreen) && window.is_fullscreen() {
             window.toggle_fullscreen();
         }
         self.media_roots_frame.borrow_mut().take();
@@ -71,12 +75,12 @@ impl Render for QuillApp {
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
         }
-        if std::mem::take(&mut self.recording_auto_send) {
+        if std::mem::take(&mut self.recording.auto_send) {
             cx.defer_in(window, |this, window, cx| this.send_recording(window, cx));
         }
         let status_toast = self.status_toast_visible(cx);
-        let viewer_open = self.media_viewer.is_open();
-        let menu_open = self.message_menu.is_some()
+        let viewer_open = self.viewer.state.is_open();
+        let menu_open = self.message_ui.menu.is_some()
             || self.chat_menu.is_some()
             || self.archive_menu.is_some()
             || self.global.story_menu.is_some()
@@ -582,7 +586,7 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &ViewerPrev, _, cx| {
                 if this.stories.viewer.is_open() && !this.story_text_input_open() {
                     this.step_story_viewer(-1, cx);
-                } else if this.media_viewer.is_open() {
+                } else if this.viewer.state.is_open() {
                     this.step_media_viewer(-1, cx);
                 } else {
                     cx.propagate();
@@ -591,56 +595,56 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &ViewerNext, _, cx| {
                 if this.stories.viewer.is_open() && !this.story_text_input_open() {
                     this.step_story_viewer(1, cx);
-                } else if this.media_viewer.is_open() {
+                } else if this.viewer.state.is_open() {
                     this.step_media_viewer(1, cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerZoomReset, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.viewer.state.is_open() {
                     this.viewer_reset_zoom(cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerZoomIn, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.viewer.state.is_open() {
                     this.viewer_zoom_step(true, cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerZoomOut, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.viewer.state.is_open() {
                     this.viewer_zoom_step(false, cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerFlipHorizontal, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.viewer.state.is_open() {
                     this.flip_viewer_horizontal(cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerFlipVertical, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.viewer.state.is_open() {
                     this.flip_viewer_vertical(cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerCopy, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.viewer.state.is_open() {
                     this.copy_viewer_photo(cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerSave, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.viewer.state.is_open() {
                     this.save_viewer_media(cx);
                 } else {
                     cx.propagate();
@@ -874,7 +878,7 @@ impl Render for QuillApp {
                 },
             )
             .when(
-                self.media_viewer.is_open() && self.pip_window.is_none(),
+                self.viewer.state.is_open() && self.viewer.pip_window.is_none(),
                 |this| this.child(self.media_viewer_overlay(window, cx)),
             )
             // Live: the latest status note is a transient toast floating
@@ -980,7 +984,7 @@ impl Render for QuillApp {
             // kit Phase 2 (redo): scheduled messages now hosted in a kit
             // Dialog via the shell sync — render wiring deleted.
             // M1: right-click message context menu.
-            .when_some(self.message_menu, |this, menu| {
+            .when_some(self.message_ui.menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
             // The copy menu of a phone number, card number or date, and
@@ -992,7 +996,7 @@ impl Render for QuillApp {
                 this.child(overlay)
             })
             // The expanded reaction selector, where the menu was.
-            .when_some(self.media_panel.reaction, |this, target| {
+            .when_some(self.pickers.media_panel.reaction, |this, target| {
                 let panel = self.media_panel(cx);
                 this.child(
                     div()

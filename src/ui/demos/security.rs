@@ -521,7 +521,7 @@ impl QuillApp {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_secret_chat(session, &self.demo_sink, &self.demo_seq);
         }
-        self.pending_inline_bot_alert = Some("@gif cats".to_string());
+        self.composer_ui.pending_inline_bot_alert = Some("@gif cats".to_string());
         self.status_note = "screenshot demo — inline-bot warning in secret chat".into();
     }
 
@@ -553,7 +553,7 @@ impl QuillApp {
             // its own demo; the picker screenshot wants it closed.
             session.open_info_panel = None;
         }
-        self.new_secret_picker_open = true;
+        self.share.new_secret_picker_open = true;
         self.status_note = "screenshot demo — new secret chat picker".into();
     }
 
@@ -566,7 +566,7 @@ impl QuillApp {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_self_destruct(session, &self.demo_sink, &self.demo_seq);
         }
-        self.composer_self_destruct = Some(SelfDestructSend::Timer(30));
+        self.composer_ui.self_destruct = Some(SelfDestructSend::Timer(30));
         self.status_note =
             "screenshot demo — self-destructing media · picker on 30s (injected, no live Telegram)"
                 .into();
@@ -689,7 +689,7 @@ impl QuillApp {
             self.chat_prefs.spellcheck_enabled = true;
         }
         if matches!(demo, AppearanceDemo::Dictionaries) {
-            self.dict_manager = crate::ui::spell_dictionaries::DictManager::demo();
+            self.spell.dict_manager = crate::ui::spell_dictionaries::DictManager::demo();
         }
         // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
         // captures the dialog with the HC theme selected.

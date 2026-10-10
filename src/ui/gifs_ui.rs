@@ -14,7 +14,7 @@ use quill::state::RequestPurpose;
 
 impl QuillApp {
     fn search_gif_picker(&mut self, cx: &mut Context<Self>) {
-        let query = self.gif_search_input.read(cx).value().to_string();
+        let query = self.pickers.gif_search_input.read(cx).value().to_string();
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.search_gifs(&query) {
                 Ok(_) => "searching GIFs…".into(),
@@ -191,7 +191,8 @@ impl QuillApp {
                     .label(emoji.clone())
                     .ghost()
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.gif_search_input
+                        this.pickers
+                            .gif_search_input
                             .update(cx, |input, cx| input.set_value(query.clone(), window, cx));
                         this.search_gif_picker(cx);
                     })),
@@ -213,7 +214,7 @@ impl QuillApp {
         let searching = panel.search_mode;
         div()
             .id("gif-picker")
-            .when(!self.media_panel.open, |this| {
+            .when(!self.pickers.media_panel.open, |this| {
                 this.max_h(px(420.)).overflow_y_scroll()
             })
             .flex()
@@ -221,13 +222,13 @@ impl QuillApp {
             .gap_2()
             .px_3()
             .py_2()
-            .when(!self.media_panel.open, |this| {
+            .when(!self.pickers.media_panel.open, |this| {
                 this.border_b_1()
                     .border_color(cx.theme().border)
                     .bg(cx.theme().sidebar)
             })
             // Embedded in the media panel: its tab and close button lead.
-            .when(!self.media_panel.open, |this| {
+            .when(!self.pickers.media_panel.open, |this| {
                 this.child(
                     div()
                         .flex()
@@ -252,7 +253,7 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .child(
-                        Textarea::new(&self.gif_search_input)
+                        Textarea::new(&self.pickers.gif_search_input)
                             .aria_label("Search GIFs")
                             .flex_1()
                             .min_w_0(),
@@ -285,7 +286,8 @@ impl QuillApp {
                             .small()
                             .selected(searching)
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.gif_search_input
+                                this.pickers
+                                    .gif_search_input
                                     .update(cx, |input, cx| input.set_value("", window, cx));
                                 this.search_gif_picker(cx);
                             })),

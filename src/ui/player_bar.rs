@@ -113,14 +113,16 @@ impl QuillApp {
         id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        self.player.chat = Some(chat);
-        self.player.meta = Some(self.track_meta_for(chat, id, kind));
+        self.playback.player.chat = Some(chat);
+        self.playback.player.meta = Some(self.track_meta_for(chat, id, kind));
         let duration = self
-            .playback_clock
+            .playback
+            .clock
             .as_ref()
             .map_or(0.1, |c| c.duration_secs().max(0.1));
         let offset = self
-            .playback_clock
+            .playback
+            .clock
             .as_ref()
             .map_or(0.0, |c| c.elapsed_secs());
         let slider = cx.new(|_| {
@@ -134,7 +136,7 @@ impl QuillApp {
             this.on_seek_event(event, cx);
         })
         .detach();
-        self.player.slider = Some(slider);
+        self.playback.player.slider = Some(slider);
     }
 
     /// The chat's playable messages, oldest first.
@@ -175,7 +177,7 @@ impl QuillApp {
         if self.active_playback_kind() != PlaybackKind::Audio {
             return (false, false);
         }
-        let Some(chat) = self.player.chat else {
+        let Some(chat) = self.playback.player.chat else {
             return (false, false);
         };
         let len = self.playlist_audio_ids(chat).len();
@@ -184,7 +186,7 @@ impl QuillApp {
 
     /// The message to play after the active one, per the playlist rules.
     fn playlist_neighbor(&mut self, step: Step, auto: bool) -> Option<(ChatId, MessageId)> {
-        let chat = self.player.chat?;
+        let chat = self.playback.player.chat?;
         let current = self.active_playback_id()?;
         let next = match self.active_playback_kind() {
             PlaybackKind::Voice => {
@@ -199,10 +201,10 @@ impl QuillApp {
                     current: current.0,
                     step,
                     auto,
-                    repeat: self.player.repeat,
-                    order: self.player.order,
+                    repeat: self.playback.player.repeat,
+                    order: self.playback.player.order,
                 };
-                playlist::next_track(&ids, mv, &mut self.player.shuffle, random_below)
+                playlist::next_track(&ids, mv, &mut self.playback.player.shuffle, random_below)
             }
         };
         next.map(|id| (chat, MessageId(id)))
@@ -249,7 +251,7 @@ impl QuillApp {
 
     /// Pause when playing, resume when paused.
     pub(super) fn toggle_active_playback(&mut self, cx: &mut Context<Self>) {
-        let Some(clock) = self.playback_clock.as_ref() else {
+        let Some(clock) = self.playback.clock.as_ref() else {
             return;
         };
         if clock.is_playing() {
@@ -264,7 +266,7 @@ impl QuillApp {
     pub(super) fn close_player(&mut self, cx: &mut Context<Self>) {
         self.stop_voice_playback();
         self.stop_audio_playback();
-        self.player.shuffle.clear();
+        self.playback.player.shuffle.clear();
         media_session::publish(None);
         cx.notify();
     }
@@ -273,7 +275,8 @@ impl QuillApp {
     pub(super) fn drain_media_commands(&mut self, cx: &mut Context<Self>) {
         for command in media_session::take_commands() {
             let playing = self
-                .playback_clock
+                .playback
+                .clock
                 .as_ref()
                 .is_some_and(PlaybackClock::is_playing);
             match command {
@@ -291,12 +294,12 @@ impl QuillApp {
 
     /// Tell the OS what is playing (cheap: deduplicated downstream).
     pub(super) fn publish_now_playing(&mut self) {
-        let (Some(id), Some(clock)) = (self.active_playback_id(), self.playback_clock.as_ref())
+        let (Some(id), Some(clock)) = (self.active_playback_id(), self.playback.clock.as_ref())
         else {
             media_session::publish(None);
             return;
         };
-        let meta = match (&self.player.meta, self.player.chat) {
+        let meta = match (&self.playback.player.meta, self.playback.player.chat) {
             (Some(meta), _) => meta.clone(),
             (None, Some(chat)) => self.track_meta_for(chat, id, self.active_playback_kind()),
             (None, None) => TrackMeta {
@@ -311,7 +314,7 @@ impl QuillApp {
             duration_secs: clock.duration_secs(),
             position_secs: clock.elapsed_secs(),
             playing: clock.is_playing(),
-            rate: self.playback_speed,
+            rate: self.playback.speed,
             can_next,
             can_previous,
         };
@@ -320,7 +323,7 @@ impl QuillApp {
 
     /// Open the track's chat if needed and scroll to the message.
     fn jump_to_playing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(chat), Some(id)) = (self.player.chat, self.active_playback_id()) else {
+        let (Some(chat), Some(id)) = (self.playback.player.chat, self.active_playback_id()) else {
             return;
         };
         if self.open_chat_id() != Some(chat) {
@@ -332,9 +335,9 @@ impl QuillApp {
     /// The bar, when a voice note or music file is active.
     pub(super) fn player_bar(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = self.active_playback_id()?;
-        let clock = self.playback_clock.as_ref()?;
+        let clock = self.playback.clock.as_ref()?;
         let kind = self.active_playback_kind();
-        let meta = match (&self.player.meta, self.player.chat) {
+        let meta = match (&self.playback.player.meta, self.playback.player.chat) {
             (Some(meta), _) => meta.clone(),
             (None, Some(chat)) => self.track_meta_for(chat, id, kind),
             (None, None) => TrackMeta {
@@ -348,6 +351,7 @@ impl QuillApp {
         };
         let playing = clock.is_playing();
         let elapsed = self
+            .playback
             .seek_preview_secs
             .unwrap_or_else(|| clock.elapsed_secs());
         let time = format!(
@@ -357,8 +361,8 @@ impl QuillApp {
         );
         let music = kind == PlaybackKind::Audio;
         let (can_previous, can_next) = self.playlist_can_move();
-        let (repeat, order) = (self.player.repeat, self.player.order);
-        let muted = self.playback_volume < 0.01;
+        let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);
+        let muted = self.playback.volume < 0.01;
         let speed_dial = self.speed_dial("player-bar-speed", cx);
 
         let icon_button = |id: &'static str, icon: IconName, label: &'static str| {
@@ -444,7 +448,7 @@ impl QuillApp {
                     )
                 })
                 .child(title_block)
-                .when_some(self.player.slider.clone(), |this, slider| {
+                .when_some(self.playback.player.slider.clone(), |this, slider| {
                     this.child(
                         div()
                             .id("player-bar-seek")
@@ -492,7 +496,7 @@ impl QuillApp {
                         )
                         .selected(repeat != RepeatMode::Off)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.player.repeat = this.player.repeat.cycled();
+                            this.playback.player.repeat = this.playback.player.repeat.cycled();
                             cx.notify();
                         })),
                     )
@@ -512,8 +516,8 @@ impl QuillApp {
                         )
                         .selected(order != OrderMode::InOrder)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.player.order = this.player.order.cycled();
-                            this.player.shuffle.clear();
+                            this.playback.player.order = this.playback.player.order.cycled();
+                            this.playback.player.shuffle.clear();
                             cx.notify();
                         })),
                     )

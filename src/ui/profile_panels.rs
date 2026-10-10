@@ -716,10 +716,10 @@ impl QuillApp {
         if items.is_empty() {
             return;
         }
-        self.media_viewer = MediaViewer::open_profile(items, 0);
-        self.viewer_extra.profile_user = Some(user_id);
-        self.viewer_extra.profile_personal = personal;
-        self.viewer_open_gen += 1;
+        self.viewer.state = MediaViewer::open_profile(items, 0);
+        self.viewer.extra.profile_user = Some(user_id);
+        self.viewer.extra.profile_personal = personal;
+        self.viewer.open_gen += 1;
         self.viewer_note_activity(false, cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
@@ -742,7 +742,7 @@ impl QuillApp {
 
     /// "Set as main photo" on one of your own earlier photos.
     pub(super) fn set_viewer_photo_as_main(&mut self, cx: &mut Context<Self>) {
-        let Some(photo_id) = self.media_viewer.current().map(|item| item.message_id.0) else {
+        let Some(photo_id) = self.viewer.state.current().map(|item| item.message_id.0) else {
             return;
         };
         let Some(live) = self.live.as_mut() else {
@@ -763,11 +763,12 @@ impl QuillApp {
     /// Open the viewer's "Report" for the photo on screen: the viewer
     /// closes first so the reason list is not hidden behind it.
     pub(super) fn report_viewer_profile_photo(&mut self, cx: &mut Context<Self>) {
-        let Some(user_id) = self.viewer_extra.profile_user else {
+        let Some(user_id) = self.viewer.extra.profile_user else {
             return;
         };
         let Some(file_id) = self
-            .media_viewer
+            .viewer
+            .state
             .current()
             .map(|item| item.download_file_id.0)
         else {

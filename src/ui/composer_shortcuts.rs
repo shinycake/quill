@@ -134,7 +134,7 @@ impl QuillApp {
         })
         .detach();
         input.update(cx, |input, cx| input.focus(window, cx));
-        self.composer_link_dialog = Some(ComposerLinkDialog {
+        self.composer_ui.link_dialog = Some(ComposerLinkDialog {
             range,
             selected,
             input,
@@ -148,7 +148,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_link_dialog.take().is_some() {
+        if self.composer_ui.link_dialog.take().is_some() {
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
             cx.notify();
@@ -157,7 +157,7 @@ impl QuillApp {
 
     /// Wrap the remembered selection in `[text](url)`.
     fn apply_composer_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.composer_link_dialog.as_ref() else {
+        let Some(dialog) = self.composer_ui.link_dialog.as_ref() else {
             return;
         };
         let typed = dialog.input.read(cx).value().to_string();
@@ -177,7 +177,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if !self.rich_editor_open {
+        if !self.composer_ui.rich_editor_open {
             // The selected text becomes a link, shown in the link colour.
             self.composer.update(cx, |input, cx| {
                 input.set_selected_range(range.clone(), cx);
@@ -201,7 +201,7 @@ impl QuillApp {
 
     /// The dialog panel, above the composer input row.
     pub(super) fn composer_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_link_dialog.as_ref()?;
+        let dialog = self.composer_ui.link_dialog.as_ref()?;
         Some(
             div()
                 .id("composer-link-dialog")
@@ -253,7 +253,7 @@ impl QuillApp {
         let caret = self.composer.read(cx).selected_range().start;
         // A code block is formatting in the field (codex:composer-input);
         // the rich editor still writes fences.
-        let (block, current) = if self.rich_editor_open {
+        let (block, current) = if self.composer_ui.rich_editor_open {
             let Some(fence) = quill::code_language::fence_at(&text, caret) else {
                 self.status_note = "Put the cursor inside a code block first.".into();
                 cx.notify();
@@ -286,7 +286,7 @@ impl QuillApp {
             input.focus(window, cx);
             input.select_all(window, cx);
         });
-        self.composer_code_language = Some(CodeLanguageDialog {
+        self.composer_ui.code_language = Some(CodeLanguageDialog {
             block,
             input,
             error: None,
@@ -299,7 +299,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_code_language.take().is_some() {
+        if self.composer_ui.code_language.take().is_some() {
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
             cx.notify();
@@ -308,12 +308,12 @@ impl QuillApp {
 
     /// Save: rewrite the language after the block's opening fence.
     fn apply_code_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.composer_code_language.as_ref() else {
+        let Some(dialog) = self.composer_ui.code_language.as_ref() else {
             return;
         };
         let typed = dialog.input.read(cx).value().to_string();
         let block = dialog.block.clone();
-        if !self.rich_editor_open {
+        if !self.composer_ui.rich_editor_open {
             let still_there = self
                 .composer_code_block_at_caret(cx)
                 .is_some_and(|(range, _)| range == block);
@@ -329,7 +329,7 @@ impl QuillApp {
                     self.set_composer_code_language(block, language, window, cx);
                 }
                 Err(error) => {
-                    if let Some(dialog) = self.composer_code_language.as_mut() {
+                    if let Some(dialog) = self.composer_ui.code_language.as_mut() {
                         dialog.error = Some(error.note());
                     }
                 }
@@ -357,7 +357,7 @@ impl QuillApp {
                 });
             }
             Err(error) => {
-                if let Some(dialog) = self.composer_code_language.as_mut() {
+                if let Some(dialog) = self.composer_ui.code_language.as_mut() {
                     dialog.error = Some(error.note());
                 }
             }
@@ -367,7 +367,7 @@ impl QuillApp {
 
     /// The box, above the composer input row.
     pub(super) fn code_language_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_code_language.as_ref()?;
+        let dialog = self.composer_ui.code_language.as_ref()?;
         let typed = dialog.input.read(cx).value().chars().count();
         let over = typed > quill::code_language::CODE_LANGUAGE_LIMIT;
         Some(

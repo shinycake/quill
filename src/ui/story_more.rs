@@ -115,7 +115,7 @@ impl QuillApp {
                     let volume = if self.stories.muted {
                         0.0
                     } else {
-                        self.playback_volume
+                        self.playback.volume
                     };
                     video.set_volume(volume);
                     if !self.story_playback_paused() {
@@ -234,7 +234,7 @@ impl QuillApp {
         let volume = if self.stories.muted {
             0.0
         } else {
-            self.playback_volume
+            self.playback.volume
         };
         if let Some(video) = self.stories.native.borrow_mut().as_mut() {
             video.set_volume(volume);

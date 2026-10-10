@@ -70,9 +70,9 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        if let Some(existing) = self.pending_forward.as_mut()
+        if let Some(existing) = self.share.pending_forward.as_mut()
             && existing.from_chat_id == chat_id
-            && self.forward_picker_open
+            && self.share.forward_picker_open
         {
             existing.toggle(chat_id, message_id, pending);
             if existing.is_empty() {
@@ -81,7 +81,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.pending_forward = Some(single);
+        self.share.pending_forward = Some(single);
         self.open_forward_picker(window, cx);
     }
 
@@ -92,20 +92,21 @@ impl QuillApp {
         pending: bool,
         cx: &mut Context<Self>,
     ) {
-        match self.pending_forward.as_mut() {
+        match self.share.pending_forward.as_mut() {
             Some(draft) => {
                 draft.toggle(chat_id, message_id, pending);
                 if draft.is_empty() {
-                    self.pending_forward = None;
-                    self.selection_focus = None;
-                    self.forward_picker_open = false;
+                    self.share.pending_forward = None;
+                    self.message_ui.selection_focus = None;
+                    self.share.forward_picker_open = false;
                 }
             }
             None => {
-                self.pending_forward = ForwardDraft::from_message(chat_id, message_id, pending);
+                self.share.pending_forward =
+                    ForwardDraft::from_message(chat_id, message_id, pending);
             }
         }
-        self.status_note = match self.pending_forward.as_ref().map(|d| d.count()) {
+        self.status_note = match self.share.pending_forward.as_ref().map(|d| d.count()) {
             Some(1) => "1 message selected".into(),
             Some(n) => format!("{n} messages selected"),
             None => "selection cleared".into(),
@@ -114,14 +115,20 @@ impl QuillApp {
     }
 
     pub(super) fn open_forward_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pending_forward.as_ref().is_none_or(|d| d.is_empty()) {
+        if self
+            .share
+            .pending_forward
+            .as_ref()
+            .is_none_or(|d| d.is_empty())
+        {
             return;
         }
-        self.forward_picker_open = true;
-        self.share_selection.clear();
-        self.share_comment_input
+        self.share.forward_picker_open = true;
+        self.share.selection.clear();
+        self.share
+            .comment_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.forward_search_input.update(cx, |input, cx| {
+        self.share.search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
@@ -130,21 +137,23 @@ impl QuillApp {
     }
 
     pub(super) fn close_forward_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.forward_picker_open = false;
-        self.share_selection.clear();
-        self.forward_search_input
+        self.share.forward_picker_open = false;
+        self.share.selection.clear();
+        self.share
+            .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.status_note = "forward picker closed".into();
         cx.notify();
     }
 
     pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let _ = cancel_forward_draft(self.pending_forward.take());
-        self.selection_focus = None;
-        self.forward_picker_open = false;
-        self.forward_bar_dest = None;
-        self.share_selection.clear();
-        self.forward_search_input
+        let _ = cancel_forward_draft(self.share.pending_forward.take());
+        self.message_ui.selection_focus = None;
+        self.share.forward_picker_open = false;
+        self.share.forward_bar_dest = None;
+        self.share.selection.clear();
+        self.share
+            .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.status_note = "forward cancelled".into();
         cx.notify();
@@ -154,27 +163,32 @@ impl QuillApp {
     /// selection) and for the chat the forward bar waits in.
     pub(super) fn dismiss_forward_for_chat(&mut self, chat_id: ChatId) {
         // The send-as list belongs to the chat it was opened in.
-        self.send_as_open = false;
-        if self.forward_bar_dest.is_some_and(|dest| dest != chat_id) {
-            self.forward_bar_dest = None;
+        self.composer_ui.send_as_open = false;
+        if self
+            .share
+            .forward_bar_dest
+            .is_some_and(|dest| dest != chat_id)
+        {
+            self.share.forward_bar_dest = None;
         }
-        if self.forward_bar_dest != Some(chat_id)
+        if self.share.forward_bar_dest != Some(chat_id)
             && self
+                .share
                 .pending_forward
                 .as_ref()
                 .is_some_and(|draft| draft.from_chat_id != chat_id)
         {
-            self.pending_forward = None;
-            self.forward_picker_open = false;
+            self.share.pending_forward = None;
+            self.share.forward_picker_open = false;
         }
     }
 
     pub(super) fn present_forward_result(&mut self, result: ForwardResult, cx: &mut Context<Self>) {
         self.status_note = result.success_label();
-        self.forward_result = Some(result);
-        self.pending_forward = None;
-        self.forward_bar_dest = None;
-        self.forward_picker_open = false;
+        self.share.forward_result = Some(result);
+        self.share.pending_forward = None;
+        self.share.forward_bar_dest = None;
+        self.share.forward_picker_open = false;
         cx.notify();
     }
 
@@ -231,7 +245,7 @@ impl QuillApp {
                 Button::new("dismiss-forward-success")
                     .label("Dismiss")
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.forward_result = None;
+                        this.share.forward_result = None;
                         cx.notify();
                     })),
             )

@@ -76,7 +76,8 @@ impl QuillApp {
     /// Called every render; touches AppKit only when the desired state changes.
     pub(super) fn sync_capture_block(&mut self, window: &Window) {
         let viewer_chat_secret = self
-            .media_viewer
+            .viewer
+            .state
             .current()
             .is_some_and(|item| self.chat_is_secret(item.chat_id.0));
         let blocked = should_block(self.open_chat_is_secret(), viewer_chat_secret);

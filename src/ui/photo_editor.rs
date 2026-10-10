@@ -368,12 +368,12 @@ impl PhotoEditor {
 impl QuillApp {
     /// Open the editor on a pending photo attachment.
     pub(super) fn open_photo_editor(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(attachment) = self.pending_attachments.get(index) else {
+        let Some(attachment) = self.composer_ui.pending_attachments.get(index) else {
             return;
         };
         match image::open(&attachment.path) {
             Ok(image) => {
-                self.photo_editor = Some(PhotoEditor::new(index, image.to_rgba8()));
+                self.viewer.photo_editor = Some(PhotoEditor::new(index, image.to_rgba8()));
             }
             Err(_) => self.status_note = "Couldn't open this image for editing.".into(),
         }
@@ -381,14 +381,14 @@ impl QuillApp {
     }
 
     pub(super) fn close_photo_editor(&mut self, cx: &mut Context<Self>) {
-        self.photo_editor = None;
+        self.viewer.photo_editor = None;
         cx.notify();
     }
 
     /// Render the edit at full resolution into a new PNG and send that
     /// instead of the original.
     fn save_photo_editor(&mut self, cx: &mut Context<Self>) {
-        let Some(editor) = self.photo_editor.take() else {
+        let Some(editor) = self.viewer.photo_editor.take() else {
             return;
         };
         let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
@@ -402,7 +402,10 @@ impl QuillApp {
             .ok()
             .and_then(|()| edited.save(&path).ok())
             .and_then(|()| std::fs::canonicalize(&path).ok());
-        match (saved, self.pending_attachments.get_mut(editor.index)) {
+        match (
+            saved,
+            self.composer_ui.pending_attachments.get_mut(editor.index),
+        ) {
             (Some(path), Some(attachment)) => {
                 let stem = attachment
                     .path
@@ -420,7 +423,7 @@ impl QuillApp {
     }
 
     fn photo_editor_mut(&mut self, edit: impl FnOnce(&mut PhotoEditor), cx: &mut Context<Self>) {
-        if let Some(editor) = self.photo_editor.as_mut() {
+        if let Some(editor) = self.viewer.photo_editor.as_mut() {
             edit(editor);
             cx.notify();
         }
@@ -428,7 +431,7 @@ impl QuillApp {
 
     /// The editor overlay: canvas in the middle, tools below.
     pub(super) fn photo_editor_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let editor = self.photo_editor.as_ref()?;
+        let editor = self.viewer.photo_editor.as_ref()?;
         let app = cx.entity().downgrade();
         let preview = editor.preview.clone();
         let preview_size = preview.size(0);
@@ -809,6 +812,7 @@ impl QuillApp {
     /// Delete for the selected one.
     fn photo_editor_sticker_tools(&self, cx: &mut Context<Self>) -> AnyElement {
         let has_selection = self
+            .viewer
             .photo_editor
             .as_ref()
             .is_some_and(|editor| editor.selected.is_some());

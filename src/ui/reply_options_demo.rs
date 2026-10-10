@@ -115,16 +115,16 @@ impl QuillApp {
         apply_ready_reply_elsewhere(session, &self.demo_sink, &self.demo_seq);
         match demo {
             ReplyDemo::Elsewhere => {
-                self.pending_reply = Some(reply_to_choose());
-                self.reply_elsewhere_open = true;
+                self.composer_ui.pending_reply = Some(reply_to_choose());
+                self.share.reply_elsewhere_open = true;
             }
             ReplyDemo::Quote => {
-                self.pending_reply = Some(reply_with_quote());
-                self.reply_quote_open = true;
+                self.composer_ui.pending_reply = Some(reply_with_quote());
+                self.share.reply_quote_open = true;
             }
             ReplyDemo::External => {
                 session.open_chat(TARGET_CHAT);
-                self.pending_reply = Some(reply_in_target());
+                self.composer_ui.pending_reply = Some(reply_in_target());
                 self.composer.update(cx, |input, cx| {
                     input.set_value("I will send them tonight.", window, cx);
                     input.focus(window, cx);

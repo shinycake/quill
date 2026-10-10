@@ -54,7 +54,7 @@ impl QuillApp {
         match ui {
             DeepLinkUi::StickerSet { set_id } => self.view_message_sticker_set(set_id, cx),
             DeepLinkUi::Share { text } => {
-                self.share_link_text = Some(text);
+                self.share.link_text = Some(text);
                 self.status_note = "choose a chat to share to".into();
             }
             DeepLinkUi::Proxy { link } => {
@@ -102,14 +102,14 @@ impl QuillApp {
     /// Chat picked in the share chooser: open it with the text in the
     /// composer. Never sent; the user confirms (tdesktop `shareUrl`).
     fn choose_share_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(text) = self.share_link_text.take() {
+        if let Some(text) = self.share.link_text.take() {
             self.pending_deep_link_open = Some((chat_id, DeepLinkAction::ShareDraft { text }));
         }
         cx.notify();
     }
 
     fn cancel_share_link(&mut self, cx: &mut Context<Self>) {
-        self.share_link_text = None;
+        self.share.link_text = None;
         cx.notify();
     }
 
@@ -135,7 +135,7 @@ impl QuillApp {
 
     /// Seek a linked media timestamp once the message has loaded.
     pub(super) fn tick_media_seek(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, message_id, seconds, polls)) = self.pending_media_seek else {
+        let Some((chat_id, message_id, seconds, polls)) = self.playback.pending_media_seek else {
             return;
         };
         let loaded = self.session().is_some_and(|session| {
@@ -145,12 +145,12 @@ impl QuillApp {
                 .is_some_and(|history| history.messages.contains_key(&message_id.0))
         });
         if loaded {
-            self.pending_media_seek = None;
+            self.playback.pending_media_seek = None;
             self.seek_media_timestamp(chat_id, message_id, seconds, cx);
         } else if polls >= SEEK_POLLS {
-            self.pending_media_seek = None;
+            self.playback.pending_media_seek = None;
         } else {
-            self.pending_media_seek = Some((chat_id, message_id, seconds, polls + 1));
+            self.playback.pending_media_seek = Some((chat_id, message_id, seconds, polls + 1));
         }
     }
 
@@ -179,7 +179,8 @@ impl QuillApp {
                 if let Some(seconds) = media_timestamp
                     && *message_id > 0
                 {
-                    self.pending_media_seek = Some((chat_id, MessageId(*message_id), *seconds, 0));
+                    self.playback.pending_media_seek =
+                        Some((chat_id, MessageId(*message_id), *seconds, 0));
                 }
                 if let Some(thread) = thread_id {
                     self.open_thread_view(chat_id, MessageId(*thread), window, cx);
@@ -200,7 +201,7 @@ impl QuillApp {
                 this.cancel_share_link(cx);
             });
         app.update(cx, |this, cx| {
-            let text = this.share_link_text.clone().unwrap_or_default();
+            let text = this.share.link_text.clone().unwrap_or_default();
             let choices: Vec<(ChatId, String)> = this
                 .session()
                 .map(|session| {
@@ -284,7 +285,7 @@ crate::ui::shell::register_dialogs! {
     /// `msg` / `msg_url` share link: the chat chooser.
     DeepLinkShare => DialogSpec::new(
         2900,
-        |app| app.share_link_text.is_some(),
+        |app| app.share.link_text.is_some(),
         QuillApp::build_deep_link_share_dialog,
     ),
 }

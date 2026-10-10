@@ -175,13 +175,13 @@ pub(super) fn apply_ready_video_send(
 
 impl QuillApp {
     pub(super) fn maybe_autoplay_gif(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if self.playing_animation.is_some()
-            || self.pending_gif_play.is_some()
-            || self.playing_voice.is_some()
-            || self.playing_audio.is_some()
-            || self.playing_video.is_some()
+        if self.playback.playing_animation.is_some()
+            || self.playback.pending_gif_play.is_some()
+            || self.playback.playing_voice.is_some()
+            || self.playback.playing_audio.is_some()
+            || self.playback.playing_video.is_some()
             || self.recording_active()
-            || self.media_viewer.is_open()
+            || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
         {
             return;
@@ -195,7 +195,7 @@ impl QuillApp {
         if !session.media_prefs.autoplay_gifs
             || session.media_prefs.data_saver
             || session.open_chat != Some(row.message.chat_id)
-            || self.autoplayed_gifs.contains(&row.message.id)
+            || self.playback.autoplayed_gifs.contains(&row.message.id)
         {
             return;
         }
@@ -221,68 +221,71 @@ impl QuillApp {
         };
         let (id, mime) = (row.message.id, animation.mime_type.clone());
         // ponytail: the existing player supports one visible GIF at a time; concurrent clips need independent playback slots.
-        self.autoplayed_gifs.insert(id);
+        self.playback.autoplayed_gifs.insert(id);
         self.toggle_animation_playback(id, file_id, mime, cx);
     }
 
     pub(super) fn stop_animation_playback(&mut self) {
-        if let Some(cancel) = self.animation_extract_cancel.take() {
+        if let Some(cancel) = self.playback.animation_extract_cancel.take() {
             cancel.store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        if let Some(slot) = self.animation_extract_child.take() {
+        if let Some(slot) = self.playback.animation_extract_child.take() {
             let child = slot.lock().ok().and_then(|mut guard| guard.take());
             if let Some(mut child) = child {
                 let _ = child.kill();
                 let _ = child.wait();
             }
         }
-        self.animation_extract_epoch = self.animation_extract_epoch.wrapping_add(1);
-        if let Some(file_id) = self.animation_cache_file.take() {
+        self.playback.animation_extract_epoch =
+            self.playback.animation_extract_epoch.wrapping_add(1);
+        if let Some(file_id) = self.playback.animation_cache_file.take() {
             quill::animation::discard_frame_cache(file_id);
         }
-        self.playing_animation = None;
-        super::image_budget::retire_all(self.animation_frames.drain(..));
-        self.animation_frame = 0;
-        self.animation_started_at = None;
-        self.animation_tick = false;
-        self.pending_gif_play = None;
+        self.playback.playing_animation = None;
+        super::image_budget::retire_all(self.playback.animation_frames.drain(..));
+        self.playback.animation_frame = 0;
+        self.playback.animation_started_at = None;
+        self.playback.animation_tick = false;
+        self.playback.pending_gif_play = None;
     }
 
     pub(super) fn spawn_animation_tick(&mut self, cx: &mut Context<Self>) {
-        if self.animation_tick {
+        if self.playback.animation_tick {
             return;
         }
-        self.animation_tick = true;
-        let epoch = self.animation_extract_epoch;
-        self.animation_started_at = Some(std::time::Instant::now());
+        self.playback.animation_tick = true;
+        let epoch = self.playback.animation_extract_epoch;
+        self.playback.animation_started_at = Some(std::time::Instant::now());
         cx.spawn(async move |this, cx| {
             loop {
                 let delay = this
                     .update(cx, |this, _| {
-                        Duration::from_secs_f64(1.0 / this.animation_fps.max(0.01))
+                        Duration::from_secs_f64(1.0 / this.playback.animation_fps.max(0.01))
                     })
                     .unwrap_or(Duration::from_millis(125));
                 cx.background_executor().timer(delay).await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        if this.animation_extract_epoch != epoch {
+                        if this.playback.animation_extract_epoch != epoch {
                             return false;
                         }
-                        let playing =
-                            this.playing_animation.is_some() && this.animation_frames.len() > 1;
+                        let playing = this.playback.playing_animation.is_some()
+                            && this.playback.animation_frames.len() > 1;
                         // Muted GIFs hold still behind another app, like
                         // tdesktop; activation redraws.
                         if playing && this.window_active.get() {
                             let elapsed = this
+                                .playback
                                 .animation_started_at
                                 .map(|t| t.elapsed().as_secs_f64())
                                 .unwrap_or(0.0);
-                            this.animation_frame = (elapsed * this.animation_fps) as usize
-                                % this.animation_frames.len();
+                            this.playback.animation_frame = (elapsed * this.playback.animation_fps)
+                                as usize
+                                % this.playback.animation_frames.len();
                             // Only the history shows the GIF.
                             this.notify_conversation(cx);
                         }
-                        this.playing_animation.is_some()
+                        this.playback.playing_animation.is_some()
                     })
                     .unwrap_or(false);
                 if !cont {
@@ -290,8 +293,8 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                if this.animation_extract_epoch == epoch {
-                    this.animation_tick = false;
+                if this.playback.animation_extract_epoch == epoch {
+                    this.playback.animation_tick = false;
                 }
             });
         })
@@ -305,8 +308,8 @@ impl QuillApp {
         mime: String,
         cx: &mut Context<Self>,
     ) {
-        self.autoplayed_gifs.insert(message_id);
-        if self.playing_animation == Some(message_id) {
+        self.playback.autoplayed_gifs.insert(message_id);
+        if self.playback.playing_animation == Some(message_id) {
             self.stop_animation_playback();
             self.status_note = "GIF paused".into();
             cx.notify();
@@ -320,11 +323,11 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
-            self.pending_gif_play = Some((message_id, file_id, mime));
+            self.playback.pending_gif_play = Some((message_id, file_id, mime));
             self.request_media_download(file_id, None, cx);
             return;
         };
-        self.pending_gif_play = None;
+        self.playback.pending_gif_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.status_note = "GIF file is outside the account files".into();
@@ -336,15 +339,15 @@ impl QuillApp {
         self.stop_audio_playback();
         self.stop_video_playback();
         self.stop_viewer_video();
-        let epoch = self.animation_extract_epoch;
+        let epoch = self.playback.animation_extract_epoch;
         let cache = quill::animation::gif_frame_cache_dir(file_id.0).join(epoch.to_string());
-        self.animation_cache_file = Some(file_id.0);
-        self.playing_animation = Some(message_id);
+        self.playback.animation_cache_file = Some(file_id.0);
+        self.playback.playing_animation = Some(message_id);
         self.status_note = "Loading GIF playback…".into();
         let slot = Arc::new(std::sync::Mutex::new(None));
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.animation_extract_child = Some(slot.clone());
-        self.animation_extract_cancel = Some(cancel.clone());
+        self.playback.animation_extract_child = Some(slot.clone());
+        self.playback.animation_extract_cancel = Some(cancel.clone());
         let cache_for_task = cache.clone();
         cx.spawn(async move |this, cx| {
             let extracted = cx.background_executor().spawn(async move {
@@ -356,14 +359,14 @@ impl QuillApp {
                 result
             }).await;
             let applied = this.update(cx, |this, cx| {
-                if this.animation_extract_epoch != epoch || this.playing_animation != Some(message_id) { return false; }
-                this.animation_extract_child = None;
-                this.animation_extract_cancel = None;
+                if this.playback.animation_extract_epoch != epoch || this.playback.playing_animation != Some(message_id) { return false; }
+                this.playback.animation_extract_child = None;
+                this.playback.animation_extract_cancel = None;
                 match extracted {
                     Ok((frames, fps)) => {
-                        this.animation_frames = frames;
-                        this.animation_fps = fps;
-                        this.animation_frame = 0;
+                        this.playback.animation_frames = frames;
+                        this.playback.animation_fps = fps;
+                        this.playback.animation_frame = 0;
                         this.spawn_animation_tick(cx);
                         this.status_note = "Playing GIF".into();
                     }
@@ -381,20 +384,20 @@ impl QuillApp {
     }
 
     pub(super) fn stop_video_playback(&mut self) {
-        if let Some(file_id) = self.video_cache_file.take() {
+        if let Some(file_id) = self.playback.video_cache_file.take() {
             quill::video::discard_frame_cache(file_id);
         }
-        self.playing_video = None;
-        self.video_frames.clear();
-        self.video_frame = 0;
-        self.pending_video_play = None;
+        self.playback.playing_video = None;
+        self.playback.video_frames.clear();
+        self.playback.video_frame = 0;
+        self.playback.pending_video_play = None;
     }
 
     pub(super) fn spawn_video_tick(&mut self, cx: &mut Context<Self>) {
-        if self.video_tick {
+        if self.playback.video_tick {
             return;
         }
-        self.video_tick = true;
+        self.playback.video_tick = true;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -402,13 +405,15 @@ impl QuillApp {
                     .await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        let playing = this.playing_video.is_some() && this.video_frames.len() > 1;
+                        let playing = this.playback.playing_video.is_some()
+                            && this.playback.video_frames.len() > 1;
                         if playing && this.window_active.get() {
-                            this.video_frame = (this.video_frame + 1) % this.video_frames.len();
+                            this.playback.video_frame =
+                                (this.playback.video_frame + 1) % this.playback.video_frames.len();
                             // Only the history shows the clip.
                             this.notify_conversation(cx);
                         }
-                        this.playing_video.is_some()
+                        this.playback.playing_video.is_some()
                     })
                     .unwrap_or(false);
                 if !cont {
@@ -416,7 +421,7 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.video_tick = false;
+                this.playback.video_tick = false;
             });
         })
         .detach();
@@ -431,7 +436,7 @@ impl QuillApp {
         mark_opened: Option<ChatId>,
         cx: &mut Context<Self>,
     ) {
-        if self.playing_video == Some(message_id) {
+        if self.playback.playing_video == Some(message_id) {
             self.stop_video_playback();
             self.status_note = "video paused".into();
             cx.notify();
@@ -445,12 +450,12 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
-            self.pending_video_play =
+            self.playback.pending_video_play =
                 Some((message_id, file_id, mime, start_timestamp, mark_opened));
             self.request_media_download(file_id, None, cx);
             return;
         };
-        self.pending_video_play = None;
+        self.playback.pending_video_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.status_note = "video file is outside the account files".into();
@@ -464,16 +469,19 @@ impl QuillApp {
                 self.stop_audio_playback();
                 self.stop_animation_playback();
                 self.stop_viewer_video();
-                self.pending_video_play = None;
-                if self.video_cache_file.is_some_and(|id| id != file_id.0)
-                    && let Some(old) = self.video_cache_file.take()
+                self.playback.pending_video_play = None;
+                if self
+                    .playback
+                    .video_cache_file
+                    .is_some_and(|id| id != file_id.0)
+                    && let Some(old) = self.playback.video_cache_file.take()
                 {
                     quill::video::discard_frame_cache(old);
                 }
-                self.video_cache_file = Some(file_id.0);
-                self.playing_video = Some(message_id);
-                self.video_frames = frames;
-                self.video_frame = 0;
+                self.playback.video_cache_file = Some(file_id.0);
+                self.playback.playing_video = Some(message_id);
+                self.playback.video_frames = frames;
+                self.playback.video_frame = 0;
                 self.spawn_video_tick(cx);
                 if let Some(chat_id) = mark_opened {
                     self.mark_voice_opened(chat_id, message_id);
@@ -489,7 +497,7 @@ impl QuillApp {
 
     pub(super) fn resume_pending_video(&mut self, cx: &mut Context<Self>) {
         let Some((message_id, file_id, mime, start_timestamp, mark_opened)) =
-            self.pending_video_play.clone()
+            self.playback.pending_video_play.clone()
         else {
             return;
         };
@@ -506,7 +514,7 @@ impl QuillApp {
     }
 
     pub(super) fn resume_pending_gif(&mut self, cx: &mut Context<Self>) {
-        let Some((message_id, file_id, mime)) = self.pending_gif_play.clone() else {
+        let Some((message_id, file_id, mime)) = self.playback.pending_gif_play.clone() else {
             return;
         };
         let ready = self.session().is_some_and(|session| {
@@ -522,10 +530,10 @@ impl QuillApp {
     }
 
     pub(super) fn spawn_voice_tick(&mut self, cx: &mut Context<Self>) {
-        if self.voice_tick {
+        if self.recording.voice_tick {
             return;
         }
-        self.voice_tick = true;
+        self.recording.voice_tick = true;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -536,7 +544,7 @@ impl QuillApp {
                         this.check_recording(cx);
                         this.check_record_preview();
                         let recording = this.recording_active();
-                        if let Some(capture) = this.voice_capture.as_mut() {
+                        if let Some(capture) = this.recording.voice_capture.as_mut() {
                             capture.sample_bar();
                         }
                         if recording {
@@ -551,7 +559,7 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.voice_tick = false;
+                this.recording.voice_tick = false;
             });
         })
         .detach();

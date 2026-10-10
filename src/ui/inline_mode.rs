@@ -130,21 +130,21 @@ impl QuillApp {
             // Trigger gone: close, and clear a typed-mode alert marker
             // (an empty stash is ours; a non-empty one belongs to a
             // `SwitchInline` button press).
-            if self.pending_inline_bot_alert.as_deref() == Some("") {
-                self.pending_inline_bot_alert = None;
+            if self.composer_ui.pending_inline_bot_alert.as_deref() == Some("") {
+                self.composer_ui.pending_inline_bot_alert = None;
             }
-            self.inline_results_open = false;
-            self.inline_query_armed = None;
+            self.composer_ui.inline_results_open = false;
+            self.composer_ui.inline_query_armed = None;
             return;
         };
         // TGX: the first inline use in a secret chat shows the privacy
         // alert before any query is sent. The banner renders while the
         // stash is set; confirming re-syncs (the text is already there).
-        if self.open_chat_is_secret() && !self.inline_bot_alert_shown {
-            if self.pending_inline_bot_alert.is_none() {
-                self.pending_inline_bot_alert = Some(String::new());
+        if self.open_chat_is_secret() && !self.composer_ui.inline_bot_alert_shown {
+            if self.composer_ui.pending_inline_bot_alert.is_none() {
+                self.composer_ui.pending_inline_bot_alert = Some(String::new());
             }
-            self.inline_results_open = false;
+            self.composer_ui.inline_results_open = false;
             cx.notify();
             return;
         }
@@ -156,9 +156,9 @@ impl QuillApp {
         };
         if username_changed {
             self.resolve_inline_bot(username);
-            self.inline_query_armed = None;
-            self.inline_results_open = true;
-            self.inline_results_selected = 0;
+            self.composer_ui.inline_query_armed = None;
+            self.composer_ui.inline_results_open = true;
+            self.composer_ui.inline_results_selected = 0;
             cx.notify();
             return;
         }
@@ -172,12 +172,12 @@ impl QuillApp {
             })
         );
         if !proceed {
-            self.inline_results_open = true;
+            self.composer_ui.inline_results_open = true;
             cx.notify();
             return;
         }
         self.maybe_dispatch_inline_query(username, query, cx);
-        self.inline_results_open = true;
+        self.composer_ui.inline_results_open = true;
         cx.notify();
     }
 
@@ -288,15 +288,16 @@ impl QuillApp {
         // trigger. A newer keystroke bumps the token and re-arms for its
         // own (username, query).
         if self
+            .composer_ui
             .inline_query_armed
             .as_ref()
             .is_some_and(|(u, q)| u == username && q == query)
         {
             return;
         }
-        self.inline_query_token = self.inline_query_token.wrapping_add(1);
-        let token = self.inline_query_token;
-        self.inline_query_armed = Some((username.to_string(), query.to_string()));
+        self.composer_ui.inline_query_token = self.composer_ui.inline_query_token.wrapping_add(1);
+        let token = self.composer_ui.inline_query_token;
+        self.composer_ui.inline_query_armed = Some((username.to_string(), query.to_string()));
         let username = username.to_string();
         let query = query.to_string();
         cx.spawn(async move |this, cx| {
@@ -304,15 +305,16 @@ impl QuillApp {
                 .timer(Duration::from_millis(100))
                 .await;
             this.update(cx, |this, cx| {
-                if this.inline_query_token != token {
+                if this.composer_ui.inline_query_token != token {
                     return;
                 }
                 if this
+                    .composer_ui
                     .inline_query_armed
                     .as_ref()
                     .is_some_and(|(u, q)| u == &username && q == &query)
                 {
-                    this.inline_query_armed = None;
+                    this.composer_ui.inline_query_armed = None;
                 }
                 // The trigger must have survived the quiet window; a
                 // newer keystroke scheduled its own timer.
@@ -331,7 +333,7 @@ impl QuillApp {
                     .inline_query(user_id, chat_id, &query, "")
                     .is_err()
                 {
-                    this.inline_results_open = false;
+                    this.composer_ui.inline_results_open = false;
                 }
                 cx.notify();
             })
@@ -343,12 +345,12 @@ impl QuillApp {
     /// Bots slice: close the inline-results dropdown. Returns true when it
     /// consumed the key (open); mirrors `close_command_menu`.
     pub(super) fn close_inline_results(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.inline_results_open {
+        if !self.composer_ui.inline_results_open {
             return false;
         }
-        self.inline_results_open = false;
-        self.inline_results_selected = 0;
-        self.inline_query_armed = None;
+        self.composer_ui.inline_results_open = false;
+        self.composer_ui.inline_results_selected = 0;
+        self.composer_ui.inline_query_armed = None;
         cx.notify();
         true
     }
@@ -357,11 +359,12 @@ impl QuillApp {
     /// Returns true when the dropdown consumed the key.
     pub(super) fn step_inline_results(&mut self, delta: i32, cx: &mut Context<Self>) -> bool {
         let rows = inline_rows(self, cx).unwrap_or_default();
-        if !self.inline_results_open || rows.is_empty() {
+        if !self.composer_ui.inline_results_open || rows.is_empty() {
             return false;
         }
-        self.inline_results_selected =
-            (self.inline_results_selected as i32 + delta).rem_euclid(rows.len() as i32) as usize;
+        self.composer_ui.inline_results_selected =
+            (self.composer_ui.inline_results_selected as i32 + delta).rem_euclid(rows.len() as i32)
+                as usize;
         cx.notify();
         true
     }
@@ -374,10 +377,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let rows = inline_rows(self, cx).unwrap_or_default();
-        if !self.inline_results_open || rows.is_empty() {
+        if !self.composer_ui.inline_results_open || rows.is_empty() {
             return false;
         }
-        let index = self.inline_results_selected.min(rows.len() - 1);
+        let index = self.composer_ui.inline_results_selected.min(rows.len() - 1);
         self.pick_inline_row(&rows[index], window, cx);
         true
     }
@@ -427,9 +430,9 @@ impl QuillApp {
                 self.composer.update(cx, |input, cx| {
                     input.set_value(String::new(), window, cx);
                 });
-                self.inline_results_open = false;
-                self.inline_results_selected = 0;
-                self.inline_query_armed = None;
+                self.composer_ui.inline_results_open = false;
+                self.composer_ui.inline_results_selected = 0;
+                self.composer_ui.inline_query_armed = None;
                 if let Some(live) = self.live.as_mut()
                     && live
                         .driver
@@ -446,14 +449,14 @@ impl QuillApp {
     /// Bots slice: the inline-results dropdown above the composer.
     /// Mirrors the `/` command menu's styling and click behavior.
     pub(super) fn inline_results_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.inline_results_open {
+        if !self.composer_ui.inline_results_open {
             return None;
         }
         let rows = inline_rows(self, cx)?;
         if rows.is_empty() {
             return None;
         }
-        let selected = self.inline_results_selected.min(rows.len() - 1);
+        let selected = self.composer_ui.inline_results_selected.min(rows.len() - 1);
         let mut list = div()
             .id("inline-results")
             .flex()

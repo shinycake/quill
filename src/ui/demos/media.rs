@@ -152,37 +152,39 @@ impl QuillApp {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_audio(session, &self.demo_sink, &self.demo_seq);
         }
-        self.playing_audio = Some(MessageId(801));
+        self.playback.playing_audio = Some(MessageId(801));
         self.status_note = "screenshot demo — audio · playing".into();
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // Exercise failed playback recovery without a network request.
-        self.pending_gif_play = Some((MessageId(205), FileId(26), String::new()));
-        self.pending_video_play = Some((MessageId(205), FileId(26), String::new(), 0, None));
-        self.pending_audio_play = Some((ChatId(11), MessageId(205), FileId(26), 1.));
-        self.viewer_pending_play = Some((MessageId(205), FileId(26)));
-        self.pending_voice_play = Some((ChatId(11), MessageId(205), FileId(26), false, 1.));
+        self.playback.pending_gif_play = Some((MessageId(205), FileId(26), String::new()));
+        self.playback.pending_video_play =
+            Some((MessageId(205), FileId(26), String::new(), 0, None));
+        self.playback.pending_audio_play = Some((ChatId(11), MessageId(205), FileId(26), 1.));
+        self.viewer.pending_play = Some((MessageId(205), FileId(26)));
+        self.playback.pending_voice_play =
+            Some((ChatId(11), MessageId(205), FileId(26), false, 1.));
         self.discard_stopped_media_playback(cx);
         assert!(
-            self.pending_gif_play.is_none()
-                && self.pending_video_play.is_none()
-                && self.pending_audio_play.is_none()
-                && self.viewer_pending_play.is_none()
-                && self.pending_voice_play.is_none()
+            self.playback.pending_gif_play.is_none()
+                && self.playback.pending_video_play.is_none()
+                && self.playback.pending_audio_play.is_none()
+                && self.viewer.pending_play.is_none()
+                && self.playback.pending_voice_play.is_none()
         );
-        self.pending_audio_play = Some((ChatId(11), MessageId(204), FileId(24), 1.));
+        self.playback.pending_audio_play = Some((ChatId(11), MessageId(204), FileId(24), 1.));
         self.discard_stopped_media_playback(cx);
-        assert!(self.pending_audio_play.is_some());
-        self.pending_audio_play = None;
+        assert!(self.playback.pending_audio_play.is_some());
+        self.playback.pending_audio_play = None;
     }
 
     fn demo_ready_drop_folder(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.drop_preview = Some(quill::drop_modes::DragState::Folder);
+        self.composer_ui.drop_preview = Some(quill::drop_modes::DragState::Folder);
     }
 
     fn demo_ready_drop_zones(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.drop_preview = Some(quill::drop_modes::DragState::PhotoFiles);
+        self.composer_ui.drop_preview = Some(quill::drop_modes::DragState::PhotoFiles);
     }
 
     fn demo_ready_emoji_packs(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -233,8 +235,8 @@ impl QuillApp {
             },
             cx,
         );
-        self.media_panel.open = true;
-        self.media_panel.tab = crate::ui::media_panel::PanelTab::Emoji;
+        self.pickers.media_panel.open = true;
+        self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Emoji;
         self.status_note = "screenshot demo — emoji panel".into();
     }
 
@@ -262,8 +264,8 @@ impl QuillApp {
             cx,
         );
         self.pause_active_playback();
-        self.player.repeat = quill::playlist::RepeatMode::All;
-        self.player.order = quill::playlist::OrderMode::Shuffle;
+        self.playback.player.repeat = quill::playlist::RepeatMode::All;
+        self.playback.player.order = quill::playlist::OrderMode::Shuffle;
         self.status_note = "screenshot demo — player bar".into();
     }
 
@@ -285,7 +287,7 @@ impl QuillApp {
             5.0,
             cx,
         );
-        self.playback_positions.insert(MessageId(801), 87.0);
+        self.playback.positions.insert(MessageId(801), 87.0);
         self.status_note = "screenshot demo — seek bars · voice playing · audio paused".into();
     }
 
@@ -299,8 +301,8 @@ impl QuillApp {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video(session, &self.demo_sink, &self.demo_seq);
         }
-        self.playing_video = Some(MessageId(601));
-        self.video_frames = vec![
+        self.playback.playing_video = Some(MessageId(601));
+        self.playback.video_frames = vec![
             demo_media_allowlist().join("demo-gif-1.png"),
             demo_media_allowlist().join("demo-gif-2.png"),
         ];
@@ -313,8 +315,8 @@ impl QuillApp {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_note(session, &self.demo_sink, &self.demo_seq);
         }
-        self.playing_video = Some(MessageId(611));
-        self.video_frames = vec![
+        self.playback.playing_video = Some(MessageId(611));
+        self.playback.video_frames = vec![
             demo_media_allowlist().join("demo-gif-1.png"),
             demo_media_allowlist().join("demo-gif-2.png"),
         ];
@@ -338,20 +340,23 @@ impl QuillApp {
             .files
             .insert(82, waiting);
         self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
-        assert!(self.pending_voice_play.is_some());
+        assert!(self.playback.pending_voice_play.is_some());
         self.demo_session.as_mut().unwrap().files.insert(82, local);
         self.resume_pending_voice(cx);
-        assert!(self.pending_voice_play.is_none() && self.playing_voice == Some(MessageId(91)));
+        assert!(
+            self.playback.pending_voice_play.is_none()
+                && self.playback.playing_voice == Some(MessageId(91))
+        );
         self.stop_voice_playback();
         let bars = vec![4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14];
-        self.voice_capture = Some(VoiceCapture::preview(
+        self.recording.voice_capture = Some(VoiceCapture::preview(
             demo_media_allowlist().join("demo-voice.ogg"),
             2,
             bars,
         ));
-        self.playing_voice = Some(MessageId(91));
+        self.playback.playing_voice = Some(MessageId(91));
         // MED2: demo shows the locked record bar + a transcribed note.
-        self.record_locked = true;
+        self.recording.locked = true;
         self.status_note = "screenshot demo — recording voice · locked · playing voice note".into();
     }
 
@@ -411,8 +416,8 @@ impl QuillApp {
             }
             session.media_library.set_stickers.insert(77, stickers);
         }
-        self.media_panel.open = true;
-        self.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
+        self.pickers.media_panel.open = true;
+        self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
         self.status_note = "screenshot demo — stickers · tap to send".into();
     }
 
@@ -428,8 +433,8 @@ impl QuillApp {
             }
         }
         if demo == GifsDemo::Gifs {
-            self.media_panel.open = true;
-            self.media_panel.tab = crate::ui::media_panel::PanelTab::Gifs;
+            self.pickers.media_panel.open = true;
+            self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Gifs;
             self.toggle_animation_playback(
                 MessageId(501),
                 quill::ids::FileId(63),

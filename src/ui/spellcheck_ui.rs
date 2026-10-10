@@ -168,11 +168,11 @@ impl QuillApp {
             self.status_note = format!("Couldn't save spelling languages: {err}");
         }
         let (checker, info) = Self::build_spell_engine(&chosen);
-        checker.set_app_words(self.spellchecker.app_words());
-        self.spellchecker = checker;
-        self.spell_info = info;
-        self.spell_misspellings.clear();
-        self.spell_checked_text = self.composer.read(cx).value().to_string();
+        checker.set_app_words(self.spell.checker.app_words());
+        self.spell.checker = checker;
+        self.spell.info = info;
+        self.spell.misspellings.clear();
+        self.spell.checked_text = self.composer.read(cx).value().to_string();
         self.schedule_spellcheck(WARM_DELAY, cx);
         cx.notify();
     }
@@ -181,31 +181,31 @@ impl QuillApp {
     /// the debounced background re-check. Cheap — no dictionary calls.
     pub(super) fn sync_spellcheck(&mut self, text: &str, cx: &mut Context<Self>) {
         if !self.chat_prefs.spellcheck_enabled {
-            self.spell_task = None;
-            self.spell_checked_text.clear();
-            if !self.spell_misspellings.is_empty() {
-                self.spell_misspellings.clear();
+            self.spell.task = None;
+            self.spell.checked_text.clear();
+            if !self.spell.misspellings.is_empty() {
+                self.spell.misspellings.clear();
                 cx.notify();
             }
             return;
         }
-        if text == self.spell_checked_text && !text.is_empty() {
+        if text == self.spell.checked_text && !text.is_empty() {
             return;
         }
-        let shifted = shift_misspellings(&self.spell_checked_text, text, &self.spell_misspellings);
-        let delay = if !self.spell_checked_text.is_empty()
-            && is_typing_word(&self.spell_checked_text, text)
+        let shifted = shift_misspellings(&self.spell.checked_text, text, &self.spell.misspellings);
+        let delay = if !self.spell.checked_text.is_empty()
+            && is_typing_word(&self.spell.checked_text, text)
         {
             COLD_DELAY
         } else {
             WARM_DELAY
         };
-        if shifted != self.spell_misspellings {
-            self.spell_misspellings = shifted;
+        if shifted != self.spell.misspellings {
+            self.spell.misspellings = shifted;
             // The underlines are drawn in the composer.
             self.notify_composer(cx);
         }
-        self.spell_checked_text = text.to_string();
+        self.spell.checked_text = text.to_string();
         self.schedule_spellcheck(delay, cx);
     }
 
@@ -213,13 +213,13 @@ impl QuillApp {
     /// `delay`; replaces (cancels) any pending check. The result is
     /// dropped if the draft changed meanwhile — that edit scheduled its own.
     fn schedule_spellcheck(&mut self, delay: Duration, cx: &mut Context<Self>) {
-        let text = self.spell_checked_text.clone();
+        let text = self.spell.checked_text.clone();
         if text.trim().is_empty() {
-            self.spell_task = None;
+            self.spell.task = None;
             return;
         }
-        let checker = self.spellchecker.clone();
-        self.spell_task = Some(cx.spawn(async move |this, cx| {
+        let checker = self.spell.checker.clone();
+        self.spell.task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(delay).await;
             let checked = text.clone();
             let found = cx
@@ -227,10 +227,10 @@ impl QuillApp {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.chat_prefs.spellcheck_enabled
-                    && this.spell_checked_text == text
-                    && this.spell_misspellings != found
+                    && this.spell.checked_text == text
+                    && this.spell.misspellings != found
                 {
-                    this.spell_misspellings = found;
+                    this.spell.misspellings = found;
                     cx.notify();
                 }
             });
@@ -241,23 +241,24 @@ impl QuillApp {
     /// first captured frame already has its underlines).
     pub(super) fn spellcheck_now(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
-        self.spell_task = None;
-        self.spell_misspellings = if self.chat_prefs.spellcheck_enabled {
-            self.spellchecker.check_text(&text)
+        self.spell.task = None;
+        self.spell.misspellings = if self.chat_prefs.spellcheck_enabled {
+            self.spell.checker.check_text(&text)
         } else {
             Vec::new()
         };
-        self.spell_checked_text = text;
+        self.spell.checked_text = text;
         cx.notify();
     }
 
     /// After the dictionary changed: re-check everything soon.
     fn recheck_spelling(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
-        self.spell_checked_text = text;
+        self.spell.checked_text = text;
         // Words the user just accepted lose their underline right away.
-        let checker = self.spellchecker.clone();
-        self.spell_misspellings
+        let checker = self.spell.checker.clone();
+        self.spell
+            .misspellings
             .retain(|m| !checker.is_correct(&m.word));
         cx.notify();
         self.schedule_spellcheck(WARM_DELAY, cx);
@@ -290,12 +291,12 @@ impl QuillApp {
         let mut menu = menu;
         if app.chat_prefs.spellcheck_enabled {
             let text = input.value().to_string();
-            menu = spelling_menu_items(menu, &app.spellchecker, &text, selection);
+            menu = spelling_menu_items(menu, &app.spell.checker, &text, selection);
         }
         // Cut / Copy / Paste / Paste as Plain Text / Select All, then the
         // Formatting submenu with its shortcuts (tdesktop's field menu).
         let menu = edit_menu_items(menu, has_selection, true);
-        let in_code_block = if app.rich_editor_open {
+        let in_code_block = if app.composer_ui.rich_editor_open {
             quill::code_language::fence_at(&input.value(), caret).is_some()
         } else {
             app.composer_code_block_at_caret(cx).is_some()
@@ -330,28 +331,28 @@ impl QuillApp {
     }
 
     pub(super) fn on_spelling_learn(&mut self, action: &SpellingLearn, cx: &mut Context<Self>) {
-        if self.spellchecker.learn(&action.word) == LearnedIn::App {
+        if self.spell.checker.learn(&action.word) == LearnedIn::App {
             self.save_app_words();
         }
         self.recheck_spelling(cx);
     }
 
     pub(super) fn on_spelling_unlearn(&mut self, action: &SpellingUnlearn, cx: &mut Context<Self>) {
-        if self.spellchecker.unlearn(&action.word) == Some(LearnedIn::App) {
+        if self.spell.checker.unlearn(&action.word) == Some(LearnedIn::App) {
             self.save_app_words();
         }
         self.recheck_spelling(cx);
     }
 
     pub(super) fn on_spelling_ignore(&mut self, action: &SpellingIgnore, cx: &mut Context<Self>) {
-        self.spellchecker.ignore(&action.word);
+        self.spell.checker.ignore(&action.word);
         self.recheck_spelling(cx);
     }
 
     /// Persist app-level words (`spellcheck_words.json`).
     fn save_app_words(&mut self) {
         let prefs = quill::settings::SpellcheckWords {
-            words: self.spellchecker.app_words(),
+            words: self.spell.checker.app_words(),
         };
         if let Err(err) = quill::settings::save_spellcheck_words(&Self::appearance_paths(), &prefs)
         {
@@ -362,11 +363,11 @@ impl QuillApp {
     /// The red wavy underlines, as an overlay over the composer Textarea
     /// (place it after the Textarea inside a `relative()` wrapper).
     pub(super) fn spellcheck_underlines(&self, cx: &App) -> Option<AnyElement> {
-        if !self.chat_prefs.spellcheck_enabled || self.spell_misspellings.is_empty() {
+        if !self.chat_prefs.spellcheck_enabled || self.spell.misspellings.is_empty() {
             return None;
         }
         // Only paint ranges that match the text on screen.
-        if self.composer.read(cx).value().as_ref() != self.spell_checked_text {
+        if self.composer.read(cx).value().as_ref() != self.spell.checked_text {
             return None;
         }
         let composer = self.composer.clone();
@@ -390,7 +391,8 @@ impl QuillApp {
             .map(|span| span.range())
             .collect();
         let misspellings: Vec<_> = self
-            .spell_misspellings
+            .spell
+            .misspellings
             .iter()
             .filter(|m| !skip.iter().any(|r| r.start < m.end && m.start < r.end))
             .cloned()

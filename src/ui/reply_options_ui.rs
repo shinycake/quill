@@ -146,13 +146,13 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(reply) = self.pending_reply.clone() else {
+        let Some(reply) = self.composer_ui.pending_reply.clone() else {
             return;
         };
         match option {
             ReplyOption::UpdateQuote => {
-                self.reply_elsewhere_open = false;
-                self.reply_quote_open = true;
+                self.share.reply_elsewhere_open = false;
+                self.share.reply_quote_open = true;
                 self.status_note = "pick the part to quote".into();
             }
             ReplyOption::ReplyInAnotherChat => {
@@ -183,13 +183,13 @@ impl QuillApp {
 
     /// Show the chat chooser for the composer's reply.
     pub(super) fn open_reply_elsewhere(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pending_reply.is_none() {
+        if self.composer_ui.pending_reply.is_none() {
             return;
         }
-        self.reply_quote_open = false;
-        self.reply_elsewhere_open = true;
-        self.forward_picker_open = false;
-        self.forward_search_input.update(cx, |input, cx| {
+        self.share.reply_quote_open = false;
+        self.share.reply_elsewhere_open = true;
+        self.share.forward_picker_open = false;
+        self.share.search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
@@ -198,11 +198,12 @@ impl QuillApp {
     }
 
     pub(super) fn close_reply_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let was_open = self.reply_elsewhere_open;
-        self.reply_elsewhere_open = false;
-        self.reply_quote_open = false;
+        let was_open = self.share.reply_elsewhere_open;
+        self.share.reply_elsewhere_open = false;
+        self.share.reply_quote_open = false;
         if was_open {
-            self.forward_search_input
+            self.share
+                .search_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
         cx.notify();
@@ -215,7 +216,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(reply) = self.pending_reply.clone() else {
+        let Some(reply) = self.composer_ui.pending_reply.clone() else {
             return;
         };
         let secret = self
@@ -231,10 +232,11 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.reply_elsewhere_open = false;
-        self.forward_search_input
+        self.share.reply_elsewhere_open = false;
+        self.share
+            .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.pending_reply = Some(reply.into_chat(dest));
+        self.composer_ui.pending_reply = Some(reply.into_chat(dest));
         self.select_listed_chat(dest, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -244,7 +246,7 @@ impl QuillApp {
 
     /// Enter in the chooser's search box picks the first match.
     pub(super) fn choose_first_reply_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let query = self.forward_search_input.read(cx).value().to_string();
+        let query = self.share.search_input.read(cx).value().to_string();
         let first = self
             .session()
             .and_then(|session| session.share_destinations(&query).into_iter().next())
@@ -257,11 +259,11 @@ impl QuillApp {
     /// The part of the message was picked (or unpicked, back to the whole
     /// message).
     fn pick_reply_quote(&mut self, quote: QuoteSelection, cx: &mut Context<Self>) {
-        let Some(reply) = self.pending_reply.take() else {
+        let Some(reply) = self.composer_ui.pending_reply.take() else {
             return;
         };
         let same = reply.quote.as_ref() == Some(&quote);
-        self.pending_reply = Some(reply.with_new_quote((!same).then_some(quote)));
+        self.composer_ui.pending_reply = Some(reply.with_new_quote((!same).then_some(quote)));
         self.note_open_draft(true, cx);
         cx.notify();
     }
@@ -269,12 +271,12 @@ impl QuillApp {
     /// The chat chooser above the composer: the message's author first,
     /// then the chat list (tdesktop `ShowReplyToChatBox`).
     pub(super) fn reply_elsewhere_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.reply_elsewhere_open {
+        if !self.share.reply_elsewhere_open {
             return None;
         }
-        let reply = self.pending_reply.as_ref()?;
+        let reply = self.composer_ui.pending_reply.as_ref()?;
         let session = self.session()?;
-        let query = self.forward_search_input.read(cx).value().to_string();
+        let query = self.share.search_input.read(cx).value().to_string();
         let searching = session.share_search.is_searching();
         let secret = |id: ChatId| {
             session
@@ -382,7 +384,7 @@ impl QuillApp {
                         ),
                 )
                 .child(
-                    Textarea::new(&self.forward_search_input)
+                    Textarea::new(&self.share.search_input)
                         .aria_label("Search chats")
                         .h(px(36.)),
                 )
@@ -398,10 +400,10 @@ impl QuillApp {
 
     /// The quote picker: the parts of the message, one click each.
     pub(super) fn reply_quote_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.reply_quote_open {
+        if !self.share.reply_quote_open {
             return None;
         }
-        let reply = self.pending_reply.as_ref()?;
+        let reply = self.composer_ui.pending_reply.as_ref()?;
         let text = self.reply_message_text(reply)?;
         let picked = reply.quote.clone();
         let mut list = div()

@@ -32,7 +32,8 @@ impl QuillApp {
         // loop only needs the shared frame clock.
         let loops = self.viewer_loops();
         if self
-            .viewer_native
+            .viewer
+            .native
             .as_mut()
             .is_some_and(|video| video.is_playing())
         {
@@ -48,17 +49,19 @@ impl QuillApp {
                 self.request_media_tick(fps, cx);
             }
         } else if loops
-            && !self.viewer_video_frames.is_empty()
+            && !self.viewer.video_frames.is_empty()
             && self
-                .viewer_clock
+                .viewer
+                .clock
                 .as_ref()
                 .is_some_and(|clock| clock.is_playing())
         {
-            let fps = self.viewer_video_fps.round().clamp(1.0, 30.0) as u32;
+            let fps = self.viewer.video_fps.round().clamp(1.0, 30.0) as u32;
             self.request_animation_tick(fps, cx);
         }
         let item = self
-            .media_viewer
+            .viewer
+            .state
             .current()
             .cloned()
             .unwrap_or_else(|| MediaViewerItem {
@@ -76,7 +79,7 @@ impl QuillApp {
                 duration_label: None,
                 natural_size: None,
             });
-        let (position, total) = self.media_viewer.position().unwrap_or((0, 0));
+        let (position, total) = self.viewer.state.position().unwrap_or((0, 0));
         let files: HashMap<i32, ParsedFile> =
             self.session().map(|s| s.files.clone()).unwrap_or_default();
         let downloading: HashSet<i32> = self
@@ -92,29 +95,30 @@ impl QuillApp {
         // async load). Otherwise it falls back to the thumbnail (or the
         // loading status).
         let frame: Option<Arc<RenderImage>> =
-            if item.kind.is_playable() && !self.viewer_video_frames.is_empty() {
+            if item.kind.is_playable() && !self.viewer.video_frames.is_empty() {
                 self.viewer_render_frame()
             } else {
                 None
             };
         let protected = self
-            .media_viewer
+            .viewer
+            .state
             .current()
             .zip(self.session())
             .is_some_and(|(item, session)| session.chat_has_protected_content(item.chat_id));
         let can_delete = self.viewer_delete_confirm().is_some();
         let has_local_clip = self.viewer_clip_path(&item).is_some();
-        let hidden = self.viewer_controls_hidden;
-        let fade_gen = self.viewer_controls_gen;
+        let hidden = self.viewer.controls_hidden;
+        let fade_gen = self.viewer.controls_gen;
         let row_id = item.message_id.0 as u64;
         let downloading_now = item
             .display_file_ids
             .iter()
             .chain(std::iter::once(&item.download_file_id))
             .any(|id| file_is_downloading(*id, &files, &downloading));
-        let profile_view = self.media_viewer.source() == ViewerSource::Profile;
+        let profile_view = self.viewer.state.source() == ViewerSource::Profile;
         let kind_label = if profile_view {
-            if self.viewer_extra.profile_personal == Some(item.message_id.0) {
+            if self.viewer.extra.profile_personal == Some(item.message_id.0) {
                 "Photo set by you"
             } else {
                 "Profile photo"
@@ -135,14 +139,16 @@ impl QuillApp {
         let can_set_main = profile_view
             && position > 1
             && self
-                .viewer_extra
+                .viewer
+                .extra
                 .profile_user
                 .zip(self.session().and_then(|s| s.my_user_id))
                 .is_some_and(|(shown, me)| shown == me);
         // Reporting someone else's profile photo (`reportChatPhoto`).
         let can_report = profile_view
             && self
-                .viewer_extra
+                .viewer
+                .extra
                 .profile_user
                 .zip(self.session().and_then(|s| s.my_user_id))
                 .is_some_and(|(shown, me)| shown != me);
@@ -191,7 +197,7 @@ impl QuillApp {
         // dimensions (axes swapped for a quarter turn) rather than trusting
         // object-fit, so it can never spill out of the frame.
         let natural = item.natural_size.map(|(w, h)| {
-            if self.viewer_orientation.swaps_axes() {
+            if self.viewer.orientation.swaps_axes() {
                 (h as f32, w as f32)
             } else {
                 (w as f32, h as f32)
@@ -201,12 +207,12 @@ impl QuillApp {
             .map(|natural| quill::media_viewer::fit_within(natural, fit))
             .unwrap_or(fit);
         // Zoom and pan work in the media's own box.
-        if (media_w, media_h) != self.viewer_frame {
+        if (media_w, media_h) != self.viewer.frame {
             // A resized window (or another item) refits the media.
-            self.viewer_frame = (media_w, media_h);
-            self.viewer_zoom.reset();
+            self.viewer.frame = (media_w, media_h);
+            self.viewer.zoom.reset();
         }
-        let zoom = self.viewer_zoom;
+        let zoom = self.viewer.zoom;
         let (zoom_w, zoom_h) = (media_w * zoom.zoom, media_h * zoom.zoom);
         let (pan_x, pan_y) = zoom.pan;
         // The player's current frame (an AVPlayer GPU buffer on macOS, a
@@ -214,7 +220,7 @@ impl QuillApp {
         let native_frame = item
             .kind
             .is_playable()
-            .then(|| self.viewer_native.as_mut().and_then(|video| video.frame()))
+            .then(|| self.viewer.native.as_mut().and_then(|video| video.frame()))
             .flatten();
         let content: AnyElement = if let Some(frame) = native_frame {
             frame.element(
@@ -230,10 +236,10 @@ impl QuillApp {
             // a rotated photo renders from the eagerly-decoded
             // `viewer_rotated` cache (90°/180°/270° clockwise).
             let rotated: Option<ImageSource> = (item.kind == MediaViewerKind::Photo)
-                .then_some(self.viewer_rotated.as_ref())
+                .then_some(self.viewer.rotated.as_ref())
                 .flatten()
                 .filter(|(path, turns, _)| {
-                    *turns == self.viewer_orientation.code()
+                    *turns == self.viewer.orientation.code()
                         && Some(path.as_path()) == thumb_path.as_deref()
                 })
                 .map(|(_, _, image)| ImageSource::from(image.clone()));
@@ -318,7 +324,7 @@ impl QuillApp {
             let menu_set_main = can_set_main;
             let menu_can_report = can_report;
             let menu_playable = item.kind.is_playable();
-            let menu_chat_source = self.media_viewer.source() == ViewerSource::Chat;
+            let menu_chat_source = self.viewer.state.source() == ViewerSource::Chat;
             // `photo.has_stickers` / `video.has_stickers`: stickers were
             // added to the media (tdesktop "Attached Stickers").
             let menu_attached = self
@@ -365,7 +371,7 @@ impl QuillApp {
                     let pos = (f32::from(event.position.x), f32::from(event.position.y));
                     if let Some(view) = down_view.upgrade() {
                         view.update(cx, |this, cx| {
-                            this.viewer_drag = Some(pos);
+                            this.viewer.drag = Some(pos);
                             cx.notify();
                         });
                     }
@@ -375,9 +381,9 @@ impl QuillApp {
                     if let Some(view) = move_view.upgrade() {
                         view.update(cx, |this, cx| {
                             this.viewer_note_activity(false, cx);
-                            if let Some((lx, ly)) = this.viewer_drag {
+                            if let Some((lx, ly)) = this.viewer.drag {
                                 this.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
-                                this.viewer_drag = Some(pos);
+                                this.viewer.drag = Some(pos);
                             }
                         });
                     }
@@ -385,7 +391,7 @@ impl QuillApp {
                 .on_mouse_up(MouseButton::Left, move |_event, _window, cx| {
                     if let Some(view) = up_view.upgrade() {
                         view.update(cx, |this, cx| {
-                            this.viewer_drag = None;
+                            this.viewer.drag = None;
                             cx.notify();
                         });
                     }
@@ -498,7 +504,7 @@ impl QuillApp {
                 &item.caption_entities,
                 (item.chat_id.0, row_id),
                 true,
-                &self.spoiler_revealed,
+                &self.message_ui.spoiler_revealed,
                 // Settings → Appearance: captions follow the message font size.
                 self.msg_font(),
                 &caption_emoji,
@@ -713,7 +719,7 @@ impl QuillApp {
                     this.step_media_viewer(step, cx);
                 }))
         };
-        let prev = self.media_viewer.has_prev().then(|| {
+        let prev = self.viewer.state.has_prev().then(|| {
             nav_arrow(
                 "media-viewer-prev",
                 gpui_kit::assets::IconName::ChevronLeft,
@@ -722,7 +728,7 @@ impl QuillApp {
                 cx,
             )
         });
-        let next = self.media_viewer.has_next().then(|| {
+        let next = self.viewer.state.has_next().then(|| {
             nav_arrow(
                 "media-viewer-next",
                 gpui_kit::assets::IconName::ChevronRight,
@@ -731,7 +737,7 @@ impl QuillApp {
                 cx,
             )
         });
-        let open_gen = self.viewer_open_gen as usize;
+        let open_gen = self.viewer.open_gen as usize;
         let arrow_top = px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0);
         div()
             .id("media-viewer-overlay")
@@ -824,7 +830,7 @@ impl QuillApp {
                     })
                     // MED1: honest playback error (unsupported format /
                     // player failure) instead of a silent stall.
-                    .when_some(self.playback_error.clone(), |this, err| {
+                    .when_some(self.playback.error.clone(), |this, err| {
                         let can_open = item.kind.is_playable() && has_local_clip;
                         this.child(
                             div()

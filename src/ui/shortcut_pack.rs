@@ -123,7 +123,7 @@ impl QuillApp {
     fn shortcut_blocked(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.pane_mode() != PaneMode::Ready
             || self.passcode_ui.locked
-            || self.media_viewer.is_open()
+            || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
             || window.has_active_dialog(cx)
     }
@@ -157,7 +157,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.shortcut_blocked(window, cx) || self.pending_edit.is_some() {
+        if self.shortcut_blocked(window, cx) || self.composer_ui.pending_edit.is_some() {
             return false;
         }
         if cfg!(target_os = "macos")
@@ -184,6 +184,7 @@ impl QuillApp {
             return false;
         }
         if self
+            .composer_ui
             .pending_reply
             .as_ref()
             .is_some_and(|reply| reply.chat_id != chat_id)
@@ -204,7 +205,11 @@ impl QuillApp {
             })
             .map(|m| m.id.0)
             .collect();
-        let current = self.pending_reply.as_ref().map(|reply| reply.message_id.0);
+        let current = self
+            .composer_ui
+            .pending_reply
+            .as_ref()
+            .map(|reply| reply.message_id.0);
         match reply_nav(&ids, current, forward, !history.has_newer) {
             ReplyNav::Reply(id) => {
                 self.jump_to_replied_message(MessageId(id), cx);
@@ -221,7 +226,7 @@ impl QuillApp {
 
     /// Cmd/Ctrl+O: the attach picker (`chooseAttach`).
     pub(super) fn attach_by_key(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.shortcut_blocked(window, cx) || self.pending_edit.is_some() {
+        if self.shortcut_blocked(window, cx) || self.composer_ui.pending_edit.is_some() {
             return false;
         }
         let can_attach = self.session().is_some_and(|session| {
@@ -328,14 +333,15 @@ impl QuillApp {
         };
         let ids = self.loaded_selectable_ids(chat_id);
         let focus = self
+            .message_ui
             .selection_focus
             .filter(|id| ids.contains(id))
             .or(ids.last().copied());
         let Some(focus) = focus else {
             return false;
         };
-        self.selection_anchor = Some(focus);
-        self.selection_focus = Some(focus);
+        self.message_ui.selection_anchor = Some(focus);
+        self.message_ui.selection_focus = Some(focus);
         self.toggle_forward_select(chat_id, focus, false, cx);
         true
     }
@@ -363,12 +369,16 @@ impl QuillApp {
             return false;
         }
         let ids = self.loaded_selectable_ids(chat_id);
-        let old = self.selection_focus.filter(|id| ids.contains(id));
+        let old = self
+            .message_ui
+            .selection_focus
+            .filter(|id| ids.contains(id));
         let Some(new) = quill::selection_pin::step_focus(&ids, old, older) else {
             return false;
         };
         if extend {
             let anchor = self
+                .message_ui
                 .selection_anchor
                 .filter(|id| ids.contains(id))
                 .or(old)
@@ -378,7 +388,7 @@ impl QuillApp {
             let mut keep = vec![anchor];
             keep.extend(select);
             self.add_to_selection(chat_id, keep);
-            if let Some(draft) = self.pending_forward.as_mut() {
+            if let Some(draft) = self.share.pending_forward.as_mut() {
                 let leaving: Vec<_> = deselect
                     .into_iter()
                     .filter(|id| draft.contains(*id))
@@ -387,11 +397,11 @@ impl QuillApp {
                     draft.toggle(chat_id, id, false);
                 }
             }
-            self.selection_anchor = Some(anchor);
+            self.message_ui.selection_anchor = Some(anchor);
         } else {
-            self.selection_anchor = Some(new);
+            self.message_ui.selection_anchor = Some(new);
         }
-        self.selection_focus = Some(new);
+        self.message_ui.selection_focus = Some(new);
         self.jump_to_replied_message(new, cx);
         true
     }

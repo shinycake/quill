@@ -241,11 +241,11 @@ fn push_custom_packs(
 
 impl QuillApp {
     pub(super) fn media_panel_open(&self) -> bool {
-        self.media_panel.open
+        self.pickers.media_panel.open
     }
 
     pub(super) fn toggle_media_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
-        if self.media_panel.open && self.media_panel.tab == tab {
+        if self.pickers.media_panel.open && self.pickers.media_panel.tab == tab {
             self.close_media_panel(cx);
         } else {
             self.open_media_panel(tab, cx);
@@ -256,7 +256,7 @@ impl QuillApp {
         if self.recording_active() {
             self.cancel_recording(cx);
         }
-        self.media_panel.open = true;
+        self.pickers.media_panel.open = true;
         self.set_media_panel_tab(tab, cx);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.open_media_panel();
@@ -281,20 +281,20 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.message_menu = None;
-        self.reaction_search_input.update(cx, |input, cx| {
+        self.message_ui.menu = None;
+        self.pickers.reaction_search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.media_panel.reaction = Some(ReactionTarget {
+        self.pickers.media_panel.reaction = Some(ReactionTarget {
             chat_id,
             message_id,
             position,
         });
-        self.media_panel.key = None;
-        self.media_panel.active_section = 0;
-        self.media_panel.open = true;
-        self.media_panel.tab = PanelTab::Emoji;
+        self.pickers.media_panel.key = None;
+        self.pickers.media_panel.active_section = 0;
+        self.pickers.media_panel.open = true;
+        self.pickers.media_panel.tab = PanelTab::Emoji;
         if let Some(live) = self.live.as_mut() {
             // Loads the installed custom emoji packs.
             let _ = live.driver.open_media_panel();
@@ -308,7 +308,7 @@ impl QuillApp {
         choice: quill::state::ReactionChoice,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(target) = self.media_panel.reaction else {
+        let Some(target) = self.pickers.media_panel.reaction else {
             return false;
         };
         self.close_media_panel(cx);
@@ -317,13 +317,13 @@ impl QuillApp {
     }
 
     pub(super) fn close_media_panel(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.media_panel.open {
+        if !self.pickers.media_panel.open {
             return false;
         }
-        self.media_panel.open = false;
-        self.media_panel.hovered = None;
-        if self.media_panel.reaction.take().is_some() {
-            self.media_panel.key = None;
+        self.pickers.media_panel.open = false;
+        self.pickers.media_panel.hovered = None;
+        if self.pickers.media_panel.reaction.take().is_some() {
+            self.pickers.media_panel.key = None;
         }
         if let Some(live) = self.live.as_mut() {
             live.driver.close_gif_panel();
@@ -335,10 +335,10 @@ impl QuillApp {
     }
 
     fn set_media_panel_tab(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
-        if self.media_panel.tab != tab {
-            self.media_panel.tab = tab;
-            self.media_panel.key = None;
-            self.media_panel.active_section = 0;
+        if self.pickers.media_panel.tab != tab {
+            self.pickers.media_panel.tab = tab;
+            self.pickers.media_panel.key = None;
+            self.pickers.media_panel.active_section = 0;
             if tab == PanelTab::Gifs {
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.open_gif_panel();
@@ -363,15 +363,23 @@ impl QuillApp {
     }
 
     fn panel_query(&self, cx: &App) -> String {
-        match self.media_panel.tab {
-            PanelTab::Emoji if self.media_panel.reaction.is_some() => self
+        match self.pickers.media_panel.tab {
+            PanelTab::Emoji if self.pickers.media_panel.reaction.is_some() => self
+                .pickers
                 .reaction_search_input
                 .read(cx)
                 .value()
                 .trim()
                 .to_string(),
-            PanelTab::Emoji => self.emoji_search_input.read(cx).value().trim().to_string(),
+            PanelTab::Emoji => self
+                .pickers
+                .emoji_search_input
+                .read(cx)
+                .value()
+                .trim()
+                .to_string(),
             PanelTab::Stickers => self
+                .pickers
                 .sticker_search_input
                 .read(cx)
                 .value()
@@ -386,8 +394,8 @@ impl QuillApp {
     fn sync_media_panel_rows(&mut self, cx: &mut Context<Self>) {
         let query = self.panel_query(cx);
         let key = PanelKey {
-            tab: self.media_panel.tab,
-            reaction: self.media_panel.reaction.is_some(),
+            tab: self.pickers.media_panel.tab,
+            reaction: self.pickers.media_panel.reaction.is_some(),
             query: query.clone(),
             session_revision: self.session().map_or(0, |s| s.revision),
             recent_emoji: self
@@ -395,10 +403,10 @@ impl QuillApp {
                 .map_or(0, |s| s.media_prefs.recent_emoji.len()),
             premium: self.session().is_some_and(|s| s.my_is_premium()),
         };
-        if self.media_panel.key.as_ref() == Some(&key) {
+        if self.pickers.media_panel.key.as_ref() == Some(&key) {
             return;
         }
-        let same_view = self.media_panel.key.as_ref().is_some_and(|old| {
+        let same_view = self.pickers.media_panel.key.as_ref().is_some_and(|old| {
             old.tab == key.tab && old.query == key.query && old.reaction == key.reaction
         });
         let (rows, sections) = match key.tab {
@@ -407,24 +415,28 @@ impl QuillApp {
             PanelTab::Stickers => self.build_sticker_rows(&query),
             PanelTab::Gifs => (Vec::new(), Vec::new()),
         };
-        let top = self.media_panel.list.logical_scroll_top();
-        self.media_panel.list.reset(rows.len());
+        let top = self.pickers.media_panel.list.logical_scroll_top();
+        self.pickers.media_panel.list.reset(rows.len());
         if same_view && top.item_ix < rows.len() {
-            self.media_panel.list.scroll_to(top);
+            self.pickers.media_panel.list.scroll_to(top);
         }
-        self.media_panel.rows = rows;
-        self.media_panel.sections = sections;
-        self.media_panel.key = Some(key);
+        self.pickers.media_panel.rows = rows;
+        self.pickers.media_panel.sections = sections;
+        self.pickers.media_panel.key = Some(key);
         // Emoji search adds TDLib's keyword matches (all typed languages).
-        if self.media_panel.tab == PanelTab::Emoji && query != self.media_panel.keyword_searched {
-            self.media_panel.keyword_searched = query.clone();
+        if self.pickers.media_panel.tab == PanelTab::Emoji
+            && query != self.pickers.media_panel.keyword_searched
+        {
+            self.pickers.media_panel.keyword_searched = query.clone();
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.search_keyword_emojis(&query);
             }
         }
         // Sticker search goes to TDLib (by emoji or keyword).
-        if self.media_panel.tab == PanelTab::Stickers && query != self.media_panel.searched {
-            self.media_panel.searched = query.clone();
+        if self.pickers.media_panel.tab == PanelTab::Stickers
+            && query != self.pickers.media_panel.searched
+        {
+            self.pickers.media_panel.searched = query.clone();
             if !query.is_empty()
                 && let Some(live) = self.live.as_mut()
             {
@@ -533,7 +545,8 @@ impl QuillApp {
         use quill::state::ReactionChoice;
         let mut rows = Vec::new();
         let mut sections = Vec::new();
-        let (Some(session), Some(target)) = (self.session(), self.media_panel.reaction) else {
+        let (Some(session), Some(target)) = (self.session(), self.pickers.media_panel.reaction)
+        else {
             return (rows, sections);
         };
         let Some(options) = session
@@ -697,7 +710,7 @@ impl QuillApp {
     /// One virtualized row; also asks for what it needs to show (set
     /// contents, cell files).
     pub(super) fn render_panel_row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
-        let Some(row) = self.media_panel.rows.get(ix).cloned() else {
+        let Some(row) = self.pickers.media_panel.rows.get(ix).cloned() else {
             return div().into_any_element();
         };
         let mut need_sets: Vec<i64> = Vec::new();
@@ -731,8 +744,8 @@ impl QuillApp {
                                     need_files.push(file);
                                 }
                                 let on_screen = row_on_screen(
-                                    self.media_panel.list.item_is_above_viewport(ix),
-                                    self.media_panel.list.item_is_below_viewport(ix),
+                                    self.pickers.media_panel.list.item_is_above_viewport(ix),
+                                    self.pickers.media_panel.list.item_is_below_viewport(ix),
                                 );
                                 self.custom_emoji_cell(id, item, on_screen, cx)
                             }
@@ -781,7 +794,7 @@ impl QuillApp {
     fn emoji_cell(&self, id: u64, emoji: SharedString, cx: &mut Context<Self>) -> AnyElement {
         // A recently used emoji offers "Reset recent emoji" (the list is
         // local; tdesktop clears it from the same section).
-        let in_recent = self.media_panel.reaction.is_none()
+        let in_recent = self.pickers.media_panel.reaction.is_none()
             && self
                 .session()
                 .is_some_and(|s| s.media_prefs.recent_emoji.iter().any(|e| *e == *emoji));
@@ -819,7 +832,7 @@ impl QuillApp {
                             move |prefs| prefs.recent_emoji.retain(|e| *e != emoji),
                             cx,
                         );
-                        this.media_panel.key = None;
+                        this.pickers.media_panel.key = None;
                         cx.notify();
                     });
                 }),
@@ -870,10 +883,10 @@ impl QuillApp {
             .when(!premium, |this| this.opacity(0.55))
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 let next = hovering.then_some(file_id);
-                if this.media_panel.hovered != next
-                    && (*hovering || this.media_panel.hovered == Some(file_id))
+                if this.pickers.media_panel.hovered != next
+                    && (*hovering || this.pickers.media_panel.hovered == Some(file_id))
                 {
-                    this.media_panel.hovered = next;
+                    this.pickers.media_panel.hovered = next;
                     cx.notify();
                 }
             }))
@@ -904,7 +917,7 @@ impl QuillApp {
         recent_section: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let hovered = self.media_panel.hovered == Some(item.file_id);
+        let hovered = self.pickers.media_panel.hovered == Some(item.file_id);
         // Only the hovered sticker animates; the rest stay still.
         let animated = hovered
             .then(|| self.sticker_image(item.file_id, item.format, cx))
@@ -941,10 +954,10 @@ impl QuillApp {
             .aria_label(format!("Send {} sticker", item.emoji))
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 let next = hovering.then_some(file_id);
-                if this.media_panel.hovered != next
-                    && (*hovering || this.media_panel.hovered == Some(file_id))
+                if this.pickers.media_panel.hovered != next
+                    && (*hovering || this.pickers.media_panel.hovered == Some(file_id))
                 {
-                    this.media_panel.hovered = next;
+                    this.pickers.media_panel.hovered = next;
                     cx.notify();
                 }
             }))
@@ -1013,7 +1026,7 @@ impl QuillApp {
             },
             cx,
         );
-        self.media_panel.key = None;
+        self.pickers.media_panel.key = None;
         cx.notify();
     }
 
@@ -1078,12 +1091,18 @@ impl QuillApp {
     }
 
     fn jump_to_panel_section(&mut self, section: usize, cx: &mut Context<Self>) {
-        if let Some(first) = self.media_panel.sections.get(section).map(|s| s.first_row) {
-            self.media_panel.list.scroll_to(ListOffset {
+        if let Some(first) = self
+            .pickers
+            .media_panel
+            .sections
+            .get(section)
+            .map(|s| s.first_row)
+        {
+            self.pickers.media_panel.list.scroll_to(ListOffset {
                 item_ix: first,
                 offset_in_item: px(0.),
             });
-            self.media_panel.active_section = section;
+            self.pickers.media_panel.active_section = section;
             cx.notify();
         }
     }
@@ -1092,7 +1111,7 @@ impl QuillApp {
     /// composer).
     pub(super) fn media_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
         self.sync_media_panel_rows(cx);
-        let tab = self.media_panel.tab;
+        let tab = self.pickers.media_panel.tab;
         let tabs = div().flex().items_center().gap_1().children(
             [
                 (PanelTab::Emoji, "Emoji"),
@@ -1117,7 +1136,7 @@ impl QuillApp {
             .justify_between()
             .px_2()
             .pt_2()
-            .child(if self.media_panel.reaction.is_some() {
+            .child(if self.pickers.media_panel.reaction.is_some() {
                 div()
                     .px_1()
                     .text_sm()
@@ -1148,15 +1167,15 @@ impl QuillApp {
                 .into_any_element()
         } else {
             let weak = cx.weak_entity();
-            let sections = self.media_panel.sections.clone();
-            let active = self.media_panel.active_section;
+            let sections = self.pickers.media_panel.sections.clone();
+            let active = self.pickers.media_panel.active_section;
             let search = div().px_2().pt_2().child(
-                Textarea::new(if self.media_panel.reaction.is_some() {
-                    &self.reaction_search_input
+                Textarea::new(if self.pickers.media_panel.reaction.is_some() {
+                    &self.pickers.reaction_search_input
                 } else if tab == PanelTab::Emoji {
-                    &self.emoji_search_input
+                    &self.pickers.emoji_search_input
                 } else {
-                    &self.sticker_search_input
+                    &self.pickers.sticker_search_input
                 })
                 .aria_label(if tab == PanelTab::Emoji {
                     "Search emoji"
@@ -1191,11 +1210,14 @@ impl QuillApp {
                     });
                 });
             }
-            let empty = self.media_panel.rows.is_empty();
-            let list = list(self.media_panel.list.clone(), move |ix, _window, cx| {
-                weak.update(cx, |this, cx| this.render_panel_row(ix, cx))
-                    .unwrap_or_else(|_| div().into_any_element())
-            })
+            let empty = self.pickers.media_panel.rows.is_empty();
+            let list = list(
+                self.pickers.media_panel.list.clone(),
+                move |ix, _window, cx| {
+                    weak.update(cx, |this, cx| this.render_panel_row(ix, cx))
+                        .unwrap_or_else(|_| div().into_any_element())
+                },
+            )
             .flex_1()
             .min_h_0();
             let footer = div()

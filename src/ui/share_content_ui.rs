@@ -38,7 +38,7 @@ impl QuillApp {
         if let ShareContentKind::Contact { query } = &dialog.kind {
             query.update(cx, |input, cx| input.focus(window, cx));
         }
-        self.share_content_dialog = Some(dialog);
+        self.share.content_dialog = Some(dialog);
         cx.notify();
     }
 
@@ -56,19 +56,20 @@ impl QuillApp {
         if let ShareContentKind::Location { latitude, .. } = &dialog.kind {
             latitude.update(cx, |input, cx| input.focus(window, cx));
         }
-        self.share_content_dialog = Some(dialog);
+        self.share.content_dialog = Some(dialog);
         cx.notify();
     }
 
     pub(super) fn close_share_content_dialog(&mut self, cx: &mut Context<Self>) {
-        self.share_content_dialog = None;
+        self.share.content_dialog = None;
         cx.notify();
     }
 
     /// The composer's reply (with its quote), carried by the share like by
     /// any other send.
     fn share_reply(&self, chat_id: ChatId) -> Option<SendReply> {
-        self.pending_reply
+        self.composer_ui
+            .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_target(chat_id))
     }
@@ -96,7 +97,7 @@ impl QuillApp {
         let reply_to = self.share_reply(chat_id);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
-            self.share_content_dialog = None;
+            self.share.content_dialog = None;
             self.status_note = "sharing needs a live connection (demo)".into();
             cx.notify();
             return;
@@ -106,8 +107,8 @@ impl QuillApp {
             .share_contact_to_chat(chat_id, &contact, reply_to, &options)
         {
             Ok(_) => {
-                self.share_content_dialog = None;
-                self.pending_reply = None;
+                self.share.content_dialog = None;
+                self.composer_ui.pending_reply = None;
                 self.status_note = "sending contact…".into();
             }
             Err(_) => self.status_note = "could not send the contact".into(),
@@ -135,7 +136,7 @@ impl QuillApp {
             .share_dice_to_chat(chat_id, emoji, reply_to, &options)
         {
             Ok(_) => {
-                self.pending_reply = None;
+                self.composer_ui.pending_reply = None;
                 self.status_note = "rolling…".into();
             }
             Err(_) => self.status_note = "could not send the dice".into(),
@@ -148,7 +149,7 @@ impl QuillApp {
         let Some(chat_id) = self.share_target() else {
             return;
         };
-        let typed = match self.share_content_dialog.as_ref().map(|d| &d.kind) {
+        let typed = match self.share.content_dialog.as_ref().map(|d| &d.kind) {
             Some(ShareContentKind::Location {
                 latitude,
                 longitude,
@@ -161,7 +162,7 @@ impl QuillApp {
         let (latitude, longitude) = match parse_coordinates(&typed.0, &typed.1) {
             Ok(pair) => pair,
             Err(reason) => {
-                if let Some(dialog) = self.share_content_dialog.as_mut() {
+                if let Some(dialog) = self.share.content_dialog.as_mut() {
                     dialog.error = Some(reason);
                 }
                 cx.notify();
@@ -174,7 +175,7 @@ impl QuillApp {
         let reply_to = self.share_reply(chat_id);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
-            self.share_content_dialog = None;
+            self.share.content_dialog = None;
             self.status_note = "sharing needs a live connection (demo)".into();
             cx.notify();
             return;
@@ -184,8 +185,8 @@ impl QuillApp {
             .share_location_to_chat(chat_id, latitude, longitude, reply_to, &options)
         {
             Ok(_) => {
-                self.share_content_dialog = None;
-                self.pending_reply = None;
+                self.share.content_dialog = None;
+                self.composer_ui.pending_reply = None;
                 self.status_note = "sending location…".into();
             }
             Err(_) => self.status_note = "could not send the location".into(),
@@ -216,7 +217,7 @@ impl QuillApp {
     }
 
     pub(super) fn share_content_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.share_content_dialog.as_ref()?;
+        let dialog = self.share.content_dialog.as_ref()?;
         let mut body = div()
             .id("share-content-panel")
             .flex()

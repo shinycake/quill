@@ -68,7 +68,7 @@ impl QuillApp {
                     cx.notify();
                     return;
                 }
-                if self.pending_edit.is_some() {
+                if self.composer_ui.pending_edit.is_some() {
                     self.submit_edit(text, window, cx);
                     return;
                 }
@@ -79,7 +79,7 @@ impl QuillApp {
                 }
                 self.remember_sent_hashtags(&text);
                 // M2: the rich editor sends blocks, not text.
-                if self.rich_editor_open {
+                if self.composer_ui.rich_editor_open {
                     self.submit_rich_composer(text, window, cx);
                     return;
                 }
@@ -105,7 +105,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    let attachments = self.pending_attachments.clone();
+                    let attachments = self.composer_ui.pending_attachments.clone();
                     // The viewer's own rights in a group: text needs the
                     // basic right, each attachment its media right.
                     if attachments.is_empty() {
@@ -123,7 +123,7 @@ impl QuillApp {
                         .all(|att| {
                             matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
                         })
-                        .then_some(self.composer_self_destruct)
+                        .then_some(self.composer_ui.self_destruct)
                         .flatten();
                     // MED1: the grouping toggle decides album vs separate
                     // sends (TGX `RememberAlbumSetting`).
@@ -141,7 +141,7 @@ impl QuillApp {
                                 text,
                                 attachments,
                             )
-                            .with_reply(self.pending_reply.clone())
+                            .with_reply(self.composer_ui.pending_reply.clone())
                             .with_self_destruct(self_destruct)
                             // M1: silent / scheduled / when-online /
                             // link-preview options ride the snapshot to
@@ -149,7 +149,7 @@ impl QuillApp {
                             .with_send_options(self.composer_send_options())
                             // MED4: caption-above-media toggle.
                             .with_caption_above_media(
-                                self.composer_caption_above && !self.open_chat_is_secret(),
+                                self.composer_ui.caption_above && !self.open_chat_is_secret(),
                             ),
                         );
                     } else if attachments.len() >= 2 {
@@ -164,7 +164,7 @@ impl QuillApp {
                                     Some(att),
                                 )
                                 .with_reply(if i == 0 {
-                                    self.pending_reply.clone()
+                                    self.composer_ui.pending_reply.clone()
                                 } else {
                                     None
                                 })
@@ -172,7 +172,7 @@ impl QuillApp {
                                 .with_send_options(self.composer_send_options())
                                 // MED4: caption-above-media toggle.
                                 .with_caption_above_media(
-                                    self.composer_caption_above && !self.open_chat_is_secret(),
+                                    self.composer_ui.caption_above && !self.open_chat_is_secret(),
                                 ),
                             );
                         }
@@ -184,7 +184,7 @@ impl QuillApp {
                                 text,
                                 attachments.first().cloned(),
                             )
-                            .with_reply(self.pending_reply.clone())
+                            .with_reply(self.composer_ui.pending_reply.clone())
                             .with_self_destruct(self_destruct)
                             // M1: silent / scheduled / when-online /
                             // link-preview options ride the snapshot to
@@ -192,7 +192,7 @@ impl QuillApp {
                             .with_send_options(self.composer_send_options())
                             // MED4: caption-above-media toggle.
                             .with_caption_above_media(
-                                self.composer_caption_above && !self.open_chat_is_secret(),
+                                self.composer_ui.caption_above && !self.open_chat_is_secret(),
                             ),
                         );
                     }
@@ -252,22 +252,22 @@ impl QuillApp {
                     let scheduling = snaps[0].send_options.scheduling;
                     match result {
                         Ok(_) => {
-                            self.pending_attachments.clear();
+                            self.composer_ui.pending_attachments.clear();
                             // MED1: the grouping override was consumed —
                             // the next composer follows the pref again.
-                            self.composer_group_media = None;
+                            self.composer_ui.group_media = None;
                             // Phase B3: the timer choice was consumed by the
                             // snapshot — reset the picker for the next send.
-                            self.composer_self_destruct = None;
+                            self.composer_ui.self_destruct = None;
                             // MED4: the caption-above choice was consumed
                             // too — reset for the next send.
-                            self.composer_caption_above = false;
+                            self.composer_ui.caption_above = false;
                             // M1: a scheduling choice is one-shot (the next
                             // send goes immediately unless re-scheduled).
-                            self.composer_scheduling = ComposerScheduling::None;
-                            self.schedule_popup_open = false;
-                            self.pending_reply = None;
-                            self.clear_draft_on_success = Some(chat_id);
+                            self.composer_ui.scheduling = ComposerScheduling::None;
+                            self.composer_ui.schedule_popup_open = false;
+                            self.composer_ui.pending_reply = None;
+                            self.composer_ui.clear_draft_on_success = Some(chat_id);
                             self.composer
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             self.forget_local_draft(chat_id);
@@ -314,7 +314,7 @@ impl QuillApp {
                     if demo_chat.is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx)) {
                         return;
                     }
-                    let attachments = self.pending_attachments.clone();
+                    let attachments = self.composer_ui.pending_attachments.clone();
                     if attachments.iter().any(|att| {
                         att.kind == AttachmentKind::VideoNote
                             && quill::video::probe_local_video_note(&att.path).is_err()
@@ -324,7 +324,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    let reply = self.pending_reply.clone();
+                    let reply = self.composer_ui.pending_reply.clone();
                     // MED1: the grouping toggle applies to the demo too.
                     let albumable = attachments.len() >= 2
                         && attachments.iter().all(|att| {
@@ -343,9 +343,9 @@ impl QuillApp {
                     } else {
                         self.apply_demo_outgoing(&text, attachments.first(), reply.as_ref());
                     }
-                    self.pending_attachments.clear();
-                    self.composer_group_media = None;
-                    self.pending_reply = None;
+                    self.composer_ui.pending_attachments.clear();
+                    self.composer_ui.group_media = None;
+                    self.composer_ui.pending_reply = None;
                     if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                         self.forget_local_draft(chat_id);
                     }
@@ -417,6 +417,7 @@ impl QuillApp {
         // block (`pageBlockDocument`) — the file picker's local path, never
         // a TDLib-provided `local.path`.
         if let Some(attachment) = self
+            .composer_ui
             .pending_attachments
             .iter()
             .find(|attachment| attachment.kind == AttachmentKind::Document)
@@ -430,7 +431,7 @@ impl QuillApp {
         // Attached photos/videos become inline media blocks — every one is
         // converted (photos and videos accumulate, unlike documents), same
         // local-path rule as above.
-        for attachment in &self.pending_attachments {
+        for attachment in &self.composer_ui.pending_attachments {
             match attachment.kind {
                 AttachmentKind::Photo => blocks.push(quill::rich::RichBlock::Photo {
                     caption: String::new(),
@@ -460,6 +461,7 @@ impl QuillApp {
             return;
         }
         let reply_to = self
+            .composer_ui
             .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_reply(chat_id));
@@ -472,13 +474,13 @@ impl QuillApp {
             .send_rich_snapshot(chat_id, &blocks, reply_to, &options)
         {
             Ok(_) => {
-                self.pending_attachments.clear();
+                self.composer_ui.pending_attachments.clear();
                 // M1: a scheduling choice is one-shot.
-                self.composer_scheduling = ComposerScheduling::None;
-                self.schedule_popup_open = false;
-                self.pending_reply = None;
-                self.rich_editor_open = false;
-                self.clear_draft_on_success = Some(chat_id);
+                self.composer_ui.scheduling = ComposerScheduling::None;
+                self.composer_ui.schedule_popup_open = false;
+                self.composer_ui.pending_reply = None;
+                self.composer_ui.rich_editor_open = false;
+                self.composer_ui.clear_draft_on_success = Some(chat_id);
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
@@ -494,10 +496,11 @@ impl QuillApp {
     pub(super) fn attach_dropped_files(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         // B5: while editing, a drop or paste replaces the message's media
         // (tdesktop `EditCaptionBox` accepts exactly one file).
-        if self.pending_edit.is_some() {
+        if self.composer_ui.pending_edit.is_some() {
             match paths {
                 [only]
                     if self
+                        .composer_ui
                         .pending_edit
                         .as_ref()
                         .is_some_and(|e| e.allows_replace()) =>
@@ -511,11 +514,13 @@ impl QuillApp {
             }
             return;
         }
-        self.status_note =
-            match ComposerAttachment::append_dropped_files(&mut self.pending_attachments, paths) {
-                Ok(count) => format!("Attached {count} files. Send to upload."),
-                Err(note) => note.into(),
-            };
+        self.status_note = match ComposerAttachment::append_dropped_files(
+            &mut self.composer_ui.pending_attachments,
+            paths,
+        ) {
+            Ok(count) => format!("Attached {count} files. Send to upload."),
+            Err(note) => note.into(),
+        };
         cx.notify();
     }
 
@@ -560,7 +565,7 @@ impl QuillApp {
     fn attach_picked(&mut self, paths: Vec<PathBuf>, as_files: bool, cx: &mut Context<Self>) {
         self.attach_dropped_files(&paths, cx);
         if as_files {
-            ComposerAttachment::set_send_as_files(&mut self.pending_attachments, true);
+            ComposerAttachment::set_send_as_files(&mut self.composer_ui.pending_attachments, true);
         }
     }
 
@@ -630,15 +635,15 @@ impl QuillApp {
         };
         match quill::composer::clipboard_image_attachment(&image.bytes, extension) {
             // B5: a pasted image replaces the edited message's media.
-            Some(att) if self.pending_edit.is_some() => {
+            Some(att) if self.composer_ui.pending_edit.is_some() => {
                 self.attach_dropped_files(std::slice::from_ref(&att.path), cx);
                 return true;
             }
             Some(att) => {
                 let name = att.file_name.clone();
-                let before = self.pending_attachments.len();
-                ComposerAttachment::push_attachment(&mut self.pending_attachments, att);
-                self.status_note = if self.pending_attachments.len() == before {
+                let before = self.composer_ui.pending_attachments.len();
+                ComposerAttachment::push_attachment(&mut self.composer_ui.pending_attachments, att);
+                self.status_note = if self.composer_ui.pending_attachments.len() == before {
                     format!("album is full ({before})")
                 } else {
                     format!("attached {name}")
@@ -654,18 +659,18 @@ impl QuillApp {
 
     /// Drop one picked file; the batch options reset with the last one.
     pub(super) fn toggle_attachment_spoiler(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(attachment) = self.pending_attachments.get_mut(index) {
+        if let Some(attachment) = self.composer_ui.pending_attachments.get_mut(index) {
             attachment.spoiler = !attachment.spoiler;
             cx.notify();
         }
     }
 
     pub(super) fn remove_attachment(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index >= self.pending_attachments.len() {
+        if index >= self.composer_ui.pending_attachments.len() {
             return;
         }
-        self.pending_attachments.remove(index);
-        if self.pending_attachments.is_empty() {
+        self.composer_ui.pending_attachments.remove(index);
+        if self.composer_ui.pending_attachments.is_empty() {
             self.clear_attachment(cx);
         } else {
             cx.notify();
@@ -673,10 +678,10 @@ impl QuillApp {
     }
 
     pub(super) fn clear_attachment(&mut self, cx: &mut Context<Self>) {
-        self.pending_attachments.clear();
-        self.composer_self_destruct = None;
+        self.composer_ui.pending_attachments.clear();
+        self.composer_ui.self_destruct = None;
         // MED1: the grouping override belongs to this composer batch.
-        self.composer_group_media = None;
+        self.composer_ui.group_media = None;
         self.status_note = "attachment cleared".into();
         cx.notify();
     }
@@ -712,8 +717,9 @@ impl QuillApp {
             .get(&open.0)
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Private { .. }));
         is_private
-            && !self.pending_attachments.is_empty()
+            && !self.composer_ui.pending_attachments.is_empty()
             && self
+                .composer_ui
                 .pending_attachments
                 .iter()
                 .all(|att| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
@@ -726,7 +732,7 @@ impl QuillApp {
         next: Option<SelfDestructSend>,
         cx: &mut Context<Self>,
     ) {
-        self.composer_self_destruct = next;
+        self.composer_ui.self_destruct = next;
         self.status_note = match next {
             None => "self-destruct off".into(),
             Some(SelfDestructSend::Timer(secs)) => format!("self-destruct: {secs}s"),
@@ -743,9 +749,9 @@ impl QuillApp {
         let chat_default =
             chat.is_some_and(|id| self.session().is_some_and(|s| s.sync.is_default_silent(id)));
         quill::state::effective_silent(
-            self.composer_silent,
+            self.composer_ui.silent,
             chat_default,
-            chat.is_some() && self.composer_loud_chat == chat,
+            chat.is_some() && self.composer_ui.loud_chat == chat,
         )
     }
 
@@ -756,13 +762,13 @@ impl QuillApp {
         let chat_default =
             chat.is_some_and(|id| self.session().is_some_and(|s| s.sync.is_default_silent(id)));
         if self.composer_effective_silent() {
-            self.composer_silent = false;
+            self.composer_ui.silent = false;
             if chat_default {
-                self.composer_loud_chat = chat;
+                self.composer_ui.loud_chat = chat;
             }
         } else {
-            self.composer_silent = true;
-            self.composer_loud_chat = None;
+            self.composer_ui.silent = true;
+            self.composer_ui.loud_chat = None;
         }
     }
 
@@ -770,11 +776,11 @@ impl QuillApp {
     pub(super) fn composer_send_options(&self) -> SendOptions {
         SendOptions {
             disable_notification: self.composer_effective_silent(),
-            scheduling: self.composer_scheduling,
-            link_preview_disabled: self.composer_preview_disabled,
-            link_preview_above_text: self.composer_preview_above,
-            link_preview_media: self.composer_preview_media,
-            link_preview_link: self.composer_preview_link,
+            scheduling: self.composer_ui.scheduling,
+            link_preview_disabled: self.composer_ui.preview_disabled,
+            link_preview_above_text: self.composer_ui.preview_above,
+            link_preview_media: self.composer_ui.preview_media,
+            link_preview_link: self.composer_ui.preview_link,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
             ..SendOptions::default()
@@ -792,7 +798,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.rich_editor_open {
+        if !self.composer_ui.rich_editor_open {
             let tag = super::composer_field::tag_for_action(&action);
             self.toggle_composer_tag(tag, window, cx);
             self.composer
@@ -814,7 +820,7 @@ impl QuillApp {
     /// M1: strip formatting markers in the composer selection (whole text
     /// when the selection is empty), keeping the inner text.
     pub(super) fn clear_composer_format(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.rich_editor_open {
+        if !self.composer_ui.rich_editor_open {
             self.clear_composer_tags(window, cx);
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -833,7 +839,7 @@ impl QuillApp {
 
     /// M1: load the chat's scheduled sends and open the dialog.
     pub(super) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.schedule_popup_open = false;
+        self.composer_ui.schedule_popup_open = false;
         if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
@@ -842,7 +848,7 @@ impl QuillApp {
                 Err(_) => self.status_note = "could not load scheduled messages".into(),
             }
         }
-        self.scheduled_dialog_open = true;
+        self.composer_ui.scheduled_dialog_open = true;
         cx.notify();
     }
 
@@ -976,8 +982,8 @@ impl QuillApp {
             let app = app.read(cx);
             (
                 app.composer_effective_silent(),
-                app.composer_preview_disabled,
-                !matches!(app.composer_scheduling, ComposerScheduling::None),
+                app.composer_ui.preview_disabled,
+                !matches!(app.composer_ui.scheduling, ComposerScheduling::None),
                 app.schedule_kind(),
             )
         };
@@ -1006,7 +1012,7 @@ impl QuillApp {
                 .checked(!preview_off)
                 .on_click(move |_, _, cx| {
                     let _ = toggle_preview.update(cx, |this, cx| {
-                        this.composer_preview_disabled = !this.composer_preview_disabled;
+                        this.composer_ui.preview_disabled = !this.composer_ui.preview_disabled;
                         cx.notify();
                     });
                 }),
@@ -1060,7 +1066,7 @@ impl QuillApp {
                 ),
             );
         }
-        let schedule_label = match self.composer_scheduling {
+        let schedule_label = match self.composer_ui.scheduling {
             ComposerScheduling::None => None,
             ComposerScheduling::SendAtDate(date) => Some(format!(
                 "{} · {}",
@@ -1078,8 +1084,8 @@ impl QuillApp {
                 chip("chip-schedule", label, cx)
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        if this.schedule_popup_open {
-                            this.schedule_popup_open = false;
+                        if this.composer_ui.schedule_popup_open {
+                            this.composer_ui.schedule_popup_open = false;
                             cx.notify();
                         } else {
                             this.open_schedule_picker(ScheduleTarget::Composer, window, cx);
@@ -1093,13 +1099,13 @@ impl QuillApp {
                             .accessibility_label("Send now")
                             .swallow_press()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.composer_scheduling = ComposerScheduling::None;
+                                this.composer_ui.scheduling = ComposerScheduling::None;
                                 cx.notify();
                             })),
                     ),
             );
         }
-        if self.composer_preview_disabled {
+        if self.composer_ui.preview_disabled {
             any = true;
             row = row.child(
                 chip("chip-preview", "No link preview".into(), cx).child(
@@ -1109,7 +1115,7 @@ impl QuillApp {
                         .ghost()
                         .accessibility_label("Show link preview")
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.composer_preview_disabled = false;
+                            this.composer_ui.preview_disabled = false;
                             cx.notify();
                         })),
                 ),
@@ -1122,7 +1128,8 @@ impl QuillApp {
         // 8160 — "The ability to send rich messages"): non-Premium users
         // get the button but tapping it explains the requirement instead
         // of opening the editor.
-        if !self.rich_editor_open && self.composer.read(cx).value().lines().count() > 3 {
+        if !self.composer_ui.rich_editor_open && self.composer.read(cx).value().lines().count() > 3
+        {
             row = row.child(
                 Button::new("rich-editor-open")
                     .label("⛶ Rich editor")
@@ -1135,7 +1142,7 @@ impl QuillApp {
                         if premium {
                             // The editor works on block markup: show it raw.
                             let markup = this.composer_markup(cx);
-                            this.rich_editor_open = true;
+                            this.composer_ui.rich_editor_open = true;
                             this.set_composer_markup(&markup, window, cx);
                             this.status_note = "rich editor — markup becomes blocks".into();
                         } else {
@@ -1289,7 +1296,7 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, window, cx| {
                     // Back to the formatted field.
                     let markup = this.composer_markup(cx);
-                    this.rich_editor_open = false;
+                    this.composer_ui.rich_editor_open = false;
                     this.set_composer_markup(&markup, window, cx);
                     cx.notify();
                 })),
@@ -1378,7 +1385,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(position) = self.playback_clock.as_ref().map(|c| c.elapsed_secs()) else {
+        let Some(position) = self.playback.clock.as_ref().map(|c| c.elapsed_secs()) else {
             return;
         };
         let timecode = quill::message_menu::timecode_text(position);
@@ -1452,7 +1459,7 @@ impl QuillApp {
 
     /// Phase B3: label for the picker button (`⏱` cycle affordance).
     pub(super) fn self_destruct_button_label(&self) -> String {
-        match self.composer_self_destruct {
+        match self.composer_ui.self_destruct {
             None => "Off".to_string(),
             Some(SelfDestructSend::Timer(secs)) => format!("{secs}s"),
             Some(SelfDestructSend::Immediately) => "View once".to_string(),
@@ -1478,11 +1485,11 @@ impl QuillApp {
                 .unwrap_or(false)
         });
         let open = triggered && has_items;
-        if open == self.command_menu_open {
+        if open == self.composer_ui.command_menu_open {
             return;
         }
-        self.command_menu_open = open;
-        self.command_menu_selected = 0;
+        self.composer_ui.command_menu_open = open;
+        self.composer_ui.command_menu_selected = 0;
         cx.notify();
     }
 
@@ -1490,11 +1497,11 @@ impl QuillApp {
     /// true when the menu was open (the key interceptor swallows the
     /// keystroke only then).
     pub(super) fn close_command_menu(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.command_menu_open {
+        if !self.composer_ui.command_menu_open {
             return false;
         }
-        self.command_menu_open = false;
-        self.command_menu_selected = 0;
+        self.composer_ui.command_menu_open = false;
+        self.composer_ui.command_menu_selected = 0;
         cx.notify();
         true
     }
@@ -1506,11 +1513,12 @@ impl QuillApp {
             .command_menu_state(cx)
             .map(|(_, items)| items.len())
             .unwrap_or(0);
-        if !self.command_menu_open || rows == 0 {
+        if !self.composer_ui.command_menu_open || rows == 0 {
             return false;
         }
-        self.command_menu_selected =
-            (self.command_menu_selected as i32 + delta).rem_euclid(rows as i32) as usize;
+        self.composer_ui.command_menu_selected = (self.composer_ui.command_menu_selected as i32
+            + delta)
+            .rem_euclid(rows as i32) as usize;
         cx.notify();
         true
     }
@@ -1522,7 +1530,7 @@ impl QuillApp {
         &self,
         cx: &Context<Self>,
     ) -> Option<(String, Vec<CommandMenuItem>)> {
-        if !self.command_menu_open {
+        if !self.composer_ui.command_menu_open {
             return None;
         }
         let text = self.composer.read(cx).value().to_string();
@@ -1553,10 +1561,10 @@ impl QuillApp {
             .command_menu_state(cx)
             .map(|(_, items)| items)
             .unwrap_or_default();
-        if !self.command_menu_open || items.is_empty() {
+        if !self.composer_ui.command_menu_open || items.is_empty() {
             return false;
         }
-        let index = self.command_menu_selected.min(items.len() - 1);
+        let index = self.composer_ui.command_menu_selected.min(items.len() - 1);
         self.pick_command_menu_index(index, window, cx);
         true
     }
@@ -1661,8 +1669,8 @@ impl QuillApp {
 
     /// B5: validate a file against tdesktop's replacement rules and stage it.
     pub(super) fn set_edit_replacement(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
-        let as_file = self.edit_replace_as_file;
-        let Some(edit) = self.pending_edit.as_mut() else {
+        let as_file = self.composer_ui.edit_replace_as_file;
+        let Some(edit) = self.composer_ui.pending_edit.as_mut() else {
             return;
         };
         match edit.replacement_for(path, as_file) {
@@ -1677,18 +1685,19 @@ impl QuillApp {
 
     /// B5: drop the staged replacement and keep the original media.
     pub(super) fn clear_edit_replacement(&mut self, cx: &mut Context<Self>) {
-        if let Some(edit) = self.pending_edit.as_mut() {
+        if let Some(edit) = self.composer_ui.pending_edit.as_mut() {
             edit.media_edit.replacement = None;
         }
-        self.edit_replace_as_file = false;
+        self.composer_ui.edit_replace_as_file = false;
         self.status_note = "replacement cleared".into();
         cx.notify();
     }
 
     /// B5: tdesktop's "Send as a document" checkbox on the replacement.
     pub(super) fn toggle_edit_replace_as_file(&mut self, cx: &mut Context<Self>) {
-        self.edit_replace_as_file = !self.edit_replace_as_file;
+        self.composer_ui.edit_replace_as_file = !self.composer_ui.edit_replace_as_file;
         let path = self
+            .composer_ui
             .pending_edit
             .as_ref()
             .and_then(|e| e.media_edit.replacement.as_ref())
@@ -1700,6 +1709,7 @@ impl QuillApp {
 
     pub(super) fn toggle_edit_replace_spoiler(&mut self, cx: &mut Context<Self>) {
         if let Some(replacement) = self
+            .composer_ui
             .pending_edit
             .as_mut()
             .and_then(|e| e.media_edit.replacement.as_mut())
@@ -1715,10 +1725,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.pending_edit.is_some() {
+        if self.composer_ui.pending_edit.is_some() {
             self.clear_edit(window, cx);
         }
-        self.pending_reply = Some(reply);
+        self.composer_ui.pending_reply = Some(reply);
         self.note_open_draft(true, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -1735,9 +1745,9 @@ impl QuillApp {
     ) -> bool {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window)
             || !self.composer.read(cx).value().is_empty()
-            || self.pending_edit.is_some()
-            || !self.pending_attachments.is_empty()
-            || self.command_menu_open
+            || self.composer_ui.pending_edit.is_some()
+            || !self.composer_ui.pending_attachments.is_empty()
+            || self.composer_ui.command_menu_open
             || !self.mention_menu_items(cx).is_empty()
         {
             return false;
@@ -1758,16 +1768,16 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pending_attachments.clear();
-        self.edit_replace_as_file = false;
+        self.composer_ui.pending_attachments.clear();
+        self.composer_ui.edit_replace_as_file = false;
         let current = self.composer_markup(cx);
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
-        let reply = self.pending_reply.take();
+        let reply = self.composer_ui.pending_reply.take();
         let (edit, field, saved, stashed) = begin_edit_keeping_reply(current, edit, reply);
-        self.pending_edit = Some(edit);
-        self.saved_edit_draft = saved;
-        self.saved_edit_reply = stashed;
+        self.composer_ui.pending_edit = Some(edit);
+        self.composer_ui.saved_edit_draft = saved;
+        self.composer_ui.saved_edit_reply = stashed;
         self.set_composer_markup(&field, window, cx);
         self.composer.update(cx, |input, cx| {
             let end = input.value().len();
@@ -1782,11 +1792,11 @@ impl QuillApp {
 
     pub(super) fn clear_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // tdesktop cancelEditMessage → applyDraft(): restore normal draft.
-        let saved = std::mem::take(&mut self.saved_edit_draft);
-        let stashed = self.saved_edit_reply.take();
-        let (_, restored) = cancel_edit_draft(self.pending_edit.take(), saved);
+        let saved = std::mem::take(&mut self.composer_ui.saved_edit_draft);
+        let stashed = self.composer_ui.saved_edit_reply.take();
+        let (_, restored) = cancel_edit_draft(self.composer_ui.pending_edit.take(), saved);
         let (restored, reply) = cancel_edit_keeping_reply(restored, stashed);
-        self.pending_reply = reply;
+        self.composer_ui.pending_reply = reply;
         self.set_composer_markup(&restored, window, cx);
         let restored = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&restored);
@@ -1799,10 +1809,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let saved = std::mem::take(&mut self.saved_edit_draft);
-        let reply = self.saved_edit_reply.take();
-        self.pending_edit = None;
-        self.pending_reply = reply;
+        let saved = std::mem::take(&mut self.composer_ui.saved_edit_draft);
+        let reply = self.composer_ui.saved_edit_reply.take();
+        self.composer_ui.pending_edit = None;
+        self.composer_ui.pending_reply = reply;
         self.set_composer_markup(&saved, window, cx);
     }
 
@@ -1812,7 +1822,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(edit) = self.pending_edit.clone() else {
+        let Some(edit) = self.composer_ui.pending_edit.clone() else {
             return;
         };
         if self.live.is_some() {
@@ -1860,13 +1870,13 @@ impl QuillApp {
     }
 
     pub(super) fn cancel_delete(&mut self, cx: &mut Context<Self>) {
-        self.pending_delete = None;
+        self.message_ui.pending_delete = None;
         self.status_note = "delete cancelled".into();
         cx.notify();
     }
 
     pub(super) fn confirm_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.pending_delete.take() else {
+        let Some(confirm) = self.message_ui.pending_delete.take() else {
             return;
         };
         self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
@@ -1890,9 +1900,10 @@ impl QuillApp {
 
     pub(super) fn clear_reply(&mut self, cx: &mut Context<Self>) {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
-        self.pending_reply = cancel_reply_draft(self.pending_reply.take(), String::new()).0;
-        self.reply_elsewhere_open = false;
-        self.reply_quote_open = false;
+        self.composer_ui.pending_reply =
+            cancel_reply_draft(self.composer_ui.pending_reply.take(), String::new()).0;
+        self.share.reply_elsewhere_open = false;
+        self.share.reply_quote_open = false;
         self.note_open_draft(true, cx);
         self.status_note = "reply cancelled".into();
         cx.notify();
@@ -1901,9 +1912,9 @@ impl QuillApp {
     /// Sticker/GIF/voice sends consume the composer reply. Drop it from the UI
     /// and from the stored draft, and keep any unsent text.
     pub(super) fn consume_sent_reply(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.pending_reply = None;
-        if self.pending_edit.is_some() {
-            self.saved_edit_reply = None;
+        self.composer_ui.pending_reply = None;
+        if self.composer_ui.pending_edit.is_some() {
+            self.composer_ui.saved_edit_reply = None;
             return;
         }
         let text = self.composer_markup(cx);
@@ -1969,7 +1980,7 @@ impl QuillApp {
             let _ = live.driver.maybe_fetch_recent_inline_bots();
         }
         if before != query {
-            self.mention_selected = 0;
+            self.composer_ui.mention_selected = 0;
             cx.notify();
         }
     }
@@ -1992,8 +2003,8 @@ impl QuillApp {
         if rows == 0 {
             return false;
         }
-        self.mention_selected =
-            (self.mention_selected as i32 + delta).rem_euclid(rows as i32) as usize;
+        self.composer_ui.mention_selected =
+            (self.composer_ui.mention_selected as i32 + delta).rem_euclid(rows as i32) as usize;
         cx.notify();
         true
     }
@@ -2008,7 +2019,7 @@ impl QuillApp {
         if items.is_empty() {
             return false;
         }
-        let index = self.mention_selected.min(items.len() - 1);
+        let index = self.composer_ui.mention_selected.min(items.len() - 1);
         self.pick_mention_index(index, window, cx);
         true
     }
@@ -2039,7 +2050,7 @@ impl QuillApp {
         }
         let completed = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&completed);
-        self.mention_selected = 0;
+        self.composer_ui.mention_selected = 0;
         cx.notify();
     }
 }

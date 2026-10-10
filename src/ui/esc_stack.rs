@@ -50,13 +50,13 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "context-menus",
-        |app| app.message_menu.is_some()
+        |app| app.message_ui.menu.is_some()
             || app.chat_menu.is_some()
             || app.archive_menu.is_some()
             || app.global.story_menu.is_some()
             || app.folders.tab_menu.is_some(),
         |app, _, cx| {
-            app.message_menu = None;
+            app.message_ui.menu = None;
             app.chat_menu = None;
             app.archive_menu = None;
             app.global.story_menu = None;
@@ -66,9 +66,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "link-popup",
-        |app| app.link_popup.is_some(),
+        |app| app.message_ui.link_popup.is_some(),
         |app, _, cx| {
-            app.link_popup = None;
+            app.message_ui.link_popup = None;
             cx.notify();
         }
     ),
@@ -80,12 +80,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "composer-code-language",
-        |app| app.composer_code_language.is_some(),
+        |app| app.composer_ui.code_language.is_some(),
         |app, window, cx| app.close_code_language_dialog(window, cx)
     ),
     layer!(
         "composer-link-dialog",
-        |app| app.composer_link_dialog.is_some(),
+        |app| app.composer_ui.link_dialog.is_some(),
         |app, window, cx| app.close_composer_link_dialog(window, cx)
     ),
     // Slice CL: the peek preview is the most transient layer.
@@ -121,32 +121,32 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "photo-editor",
-        |app| app.photo_editor.is_some(),
+        |app| app.viewer.photo_editor.is_some(),
         |app, _, cx| app.close_photo_editor(cx)
     ),
     layer!(
         "media-viewer",
-        |app| app.media_viewer.is_open(),
+        |app| app.viewer.state.is_open(),
         |app, _, cx| app.close_media_viewer(cx)
     ),
     layer!(
         "checklist-dialog",
-        |app| app.checklist_dialog.is_some(),
+        |app| app.composer_ui.checklist_dialog.is_some(),
         |app, _, cx| app.close_checklist_dialog(cx)
     ),
     layer!(
         "share-content-dialog",
-        |app| app.share_content_dialog.is_some(),
+        |app| app.share.content_dialog.is_some(),
         |app, _, cx| app.close_share_content_dialog(cx)
     ),
     layer!(
         "poll-add-option",
-        |app| app.poll_add_option.is_some(),
+        |app| app.message_ui.poll_add_option.is_some(),
         |app, _, cx| app.close_poll_add_option(cx)
     ),
     layer!(
         "poll-dialog",
-        |app| app.poll_dialog.is_some(),
+        |app| app.composer_ui.poll_dialog.is_some(),
         |app, _, cx| app.request_close_poll_dialog(cx)
     ),
     // Slice P1: the checkout and receipt dialogs.
@@ -167,14 +167,14 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // confirm row (locked recordings ignore Esc beyond a hint).
     layer!(
         "record-discard-confirm",
-        |app| app.record_discard_confirm,
+        |app| app.recording.discard_confirm,
         |app, _, cx| {
-            app.record_discard_confirm = false;
+            app.recording.discard_confirm = false;
             cx.notify();
         }
     ),
     layer!("recording", |app| app.recording_active(), |app, _, cx| {
-        if app.record_locked {
+        if app.recording.locked {
             app.status_note = "recording is locked — unlock it or use Cancel".into();
             cx.notify();
         } else {
@@ -228,29 +228,34 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             .is_some_and(|session| session.sponsored_report.is_some()),
         |app, _, cx| app.dismiss_sponsored_report_ui(cx)
     ),
-    layer!("send-as", |app| app.send_as_open, |app, _, cx| {
-        app.send_as_open = false;
-        cx.notify();
-    }),
+    layer!(
+        "send-as",
+        |app| app.composer_ui.send_as_open,
+        |app, _, cx| {
+            app.composer_ui.send_as_open = false;
+            cx.notify();
+        }
+    ),
     layer!(
         "reply-panels",
-        |app| (app.reply_elsewhere_open || app.reply_quote_open) && app.pending_reply.is_some(),
+        |app| (app.share.reply_elsewhere_open || app.share.reply_quote_open)
+            && app.composer_ui.pending_reply.is_some(),
         |app, window, cx| app.close_reply_panels(window, cx)
     ),
     layer!(
         "forward-picker",
-        |app| app.forward_picker_open,
+        |app| app.share.forward_picker_open,
         |app, window, cx| app.close_forward_picker(window, cx)
     ),
     layer!(
         "pending-delete",
-        |app| app.pending_delete.is_some(),
+        |app| app.message_ui.pending_delete.is_some(),
         |app, _, cx| app.cancel_delete(cx)
     ),
     // B4: Escape cancels the stop-poll confirm too.
     layer!(
         "pending-stop-poll",
-        |app| app.pending_stop_poll.is_some(),
+        |app| app.message_ui.pending_stop_poll.is_some(),
         |app, _, cx| app.cancel_stop_poll(cx)
     ),
     // Slice media-shared-gallery: above the chat-search layer (the row-click
@@ -268,11 +273,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, window, cx| app.close_chat_search_ui(window, cx)
     ),
     layer!("search", |app| app.search_is_open(), |app, window, cx| {
-        let query = app.search_input.read(cx).value().to_string();
+        let query = app.search_ui.input.read(cx).value().to_string();
         if query.trim().is_empty() {
             app.close_search_ui(window, cx);
         } else {
-            app.search_input
+            app.search_ui
+                .input
                 .update(cx, |input, cx| input.set_value("", window, cx));
             app.sync_search_query("", cx);
         }
@@ -289,24 +295,24 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "pending-reply",
-        |app| app.pending_reply.is_some(),
+        |app| app.composer_ui.pending_reply.is_some(),
         |app, _, cx| app.clear_reply(cx)
     ),
     layer!(
         "pending-edit",
-        |app| app.pending_edit.is_some(),
+        |app| app.composer_ui.pending_edit.is_some(),
         |app, window, cx| app.clear_edit(window, cx)
     ),
     layer!(
         "pending-forward",
-        |app| app.pending_forward.is_some(),
+        |app| app.share.pending_forward.is_some(),
         |app, window, cx| app.clear_forward(window, cx)
     ),
     layer!(
         "forward-result",
-        |app| app.forward_result.is_some(),
+        |app| app.share.forward_result.is_some(),
         |app, _, cx| {
-            app.forward_result = None;
+            app.share.forward_result = None;
             app.status_note = "forward result dismissed".into();
             cx.notify();
         }
@@ -455,7 +461,7 @@ mod dispatch_tests {
                 );
             }),
             ("link-popup", |app, _, _| {
-                app.link_popup = Some(crate::ui::entity_links::LinkPopup {
+                app.message_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                     position: point(px(10.), px(10.)),
                     link: quill::text::LinkTarget::Mention("@x".into()),
                 });
@@ -494,7 +500,7 @@ mod dispatch_tests {
         app.update_in(vcx, |app, window, cx| {
             app.privacy_open = true;
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
-            app.link_popup = Some(crate::ui::entity_links::LinkPopup {
+            app.message_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                 position: point(px(10.), px(10.)),
                 link: quill::text::LinkTarget::Mention("@x".into()),
             });

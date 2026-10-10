@@ -15,7 +15,7 @@ impl Render for VideoPip {
             let app = owner.read(cx);
             (
                 app.viewer_render_frame(),
-                app.viewer_clock.as_ref().is_some_and(|c| c.is_playing()),
+                app.viewer.clock.as_ref().is_some_and(|c| c.is_playing()),
             )
         });
         let Some((Some(frame), playing)) = snapshot else {
@@ -59,7 +59,7 @@ impl Render for VideoPip {
                             .accessibility_label("Return to viewer")
                             .on_click(move |_, window, cx| {
                                 let _ = return_owner.update(cx, |app, cx| {
-                                    app.pip_window = None;
+                                    app.viewer.pip_window = None;
                                     cx.notify();
                                 });
                                 window.remove_window();
@@ -72,18 +72,19 @@ impl Render for VideoPip {
 impl QuillApp {
     pub(super) fn viewer_render_frame(&self) -> Option<Arc<RenderImage>> {
         let elapsed = self
-            .viewer_clock
+            .viewer
+            .clock
             .as_ref()
             .map(|c| c.elapsed_secs())
             .unwrap_or(0.0);
-        let at = (elapsed * self.viewer_video_fps) as usize;
+        let at = (elapsed * self.viewer.video_fps) as usize;
         // A looping animation wraps; a video holds its last frame.
         let index = if self.viewer_loops() {
-            at % self.viewer_video_frames.len().max(1)
+            at % self.viewer.video_frames.len().max(1)
         } else {
-            at.min(self.viewer_video_frames.len().saturating_sub(1))
+            at.min(self.viewer.video_frames.len().saturating_sub(1))
         };
-        self.viewer_video_frames.get(index).cloned()
+        self.viewer.video_frames.get(index).cloned()
     }
     pub(super) fn open_video_pip(&mut self, cx: &mut Context<Self>) {
         if !cfg!(target_os = "macos") {
@@ -94,14 +95,14 @@ impl QuillApp {
         if self.viewer_render_frame().is_none() {
             return;
         }
-        if let Some(handle) = self.pip_window {
+        if let Some(handle) = self.viewer.pip_window {
             if handle
                 .update(cx, |_, window, _| window.activate_window())
                 .is_ok()
             {
                 return;
             }
-            self.pip_window = None;
+            self.viewer.pip_window = None;
         }
         let weak_owner = cx.entity().downgrade();
         // Window creation renders synchronously; release the owner lease first.
@@ -112,7 +113,7 @@ impl QuillApp {
             if owner.read(cx).viewer_render_frame().is_none() {
                 return;
             }
-            if let Some(handle) = owner.read(cx).pip_window {
+            if let Some(handle) = owner.read(cx).viewer.pip_window {
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
                 return;
             }
@@ -137,7 +138,7 @@ impl QuillApp {
                     configure_pip_window(window);
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
-                            app.pip_window = None;
+                            app.viewer.pip_window = None;
                             cx.notify();
                         });
                         true
@@ -151,7 +152,7 @@ impl QuillApp {
             );
             owner.update(cx, |app, cx| {
                 match result {
-                    Ok(handle) => app.pip_window = Some(handle),
+                    Ok(handle) => app.viewer.pip_window = Some(handle),
                     Err(_) => app.status_note = "Could not open Picture-in-Picture".into(),
                 }
                 cx.notify();
