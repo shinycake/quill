@@ -6,7 +6,7 @@
 #
 #   <path> | <rule> | <what a normal PR may change>
 #
-# Rules: `none` (no change), `mod-lines` (only add or remove `mod x;` /
+# Rules: `none` (no change), `mod-lines` (only add or remove `mod x;`, `use`/`pub use` lines /
 # `pub mod x;` lines), `max:N` (at most N added plus removed lines),
 # `re:<regex>` (every added or removed line matches the extended regex).
 #
@@ -58,7 +58,7 @@ while IFS= read -r entry; do
   case $rule in
     none) bad=$changed ;;
     mod-lines)
-      bad=$(printf '%s\n' "$changed" | grep -vE '^[+-][[:space:]]*((pub(\([a-z]+\))? )?mod [A-Za-z0-9_]+;)?[[:space:]]*$') ;;
+      bad=$(printf '%s\n' "$changed" | grep -vE '^[+-][[:space:]]*(((pub(\([a-z]+\))? )?mod [A-Za-z0-9_]+;)|((pub(\([a-z]+\))? )?use [^;]*;))?[[:space:]]*$') ;;
     max:*)
       [ "$n" -gt "${rule#max:}" ] && bad="$n changed lines (allowed ${rule#max:})" ;;
     re:*)
