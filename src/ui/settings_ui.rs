@@ -1,6 +1,7 @@
 //! settings sections: archive, contacts, calls, media/auto-download.
 
 use super::app::QuillApp;
+use super::privacy::PrivacyEditorTarget;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
@@ -13,11 +14,13 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::data_settings::NetworkKind;
 use quill::ids::ChatId;
+use quill::privacy::PrivacyKeyState;
 use quill::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
     AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, CallPrefs,
 };
-use quill::telegram::requests::{ArchiveChatListSettings, CallPrivacySetting, PrivacyWho};
+use quill::telegram::requests::{ArchiveChatListSettings, PrivacyWho};
+use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::cell::RefCell;
 use std::rc::Rc;
 /// Slice CL2: the three `archiveChatListSettings` fields (schema
@@ -333,21 +336,29 @@ impl QuillApp {
             .session()
             .map(|session| session.call_prefs.clone())
             .unwrap_or_default();
-        let allow_calls = self
-            .session()
-            .and_then(|session| session.call_privacy_allow_calls);
-        let p2p = self.session().and_then(|session| session.call_privacy_p2p);
-        let privacy_loading = self
-            .session()
-            .is_some_and(|session| session.call_privacy_loading);
-        let privacy_failed = self
-            .session()
-            .is_some_and(|session| session.call_privacy_error);
+        // The same rules as Privacy and security > Who can call me, with
+        // their exceptions: a choice made here keeps the exception lists.
+        let rule_state = |key: PrivacySettingKey| {
+            self.session()
+                .and_then(|session| session.privacy.get(&key).cloned())
+        };
+        let who_of = |key: PrivacySettingKey| match rule_state(key) {
+            Some(PrivacyKeyState::Ready(detail)) => detail.who,
+            _ => None,
+        };
+        let allow_calls = who_of(PrivacySettingKey::AllowCalls);
+        let p2p = who_of(PrivacySettingKey::PeerToPeer);
+        let privacy_loading = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
+            .into_iter()
+            .any(|key| matches!(rule_state(key), None | Some(PrivacyKeyState::Loading)));
+        let privacy_failed = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
+            .into_iter()
+            .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed)));
         let ptt_section = self.push_to_talk_settings(&prefs.push_to_talk, cx);
         // Phase 6: one kit RadioGroup per privacy setting. Controlled:
         // the chosen index writes the value and the owner re-renders.
         let privacy_group =
-            |id: &'static str, current: Option<PrivacyWho>, set: CallPrivacySetting| {
+            |id: &'static str, current: Option<PrivacyWho>, key: PrivacySettingKey| {
                 const WHOS: [PrivacyWho; 3] = [
                     PrivacyWho::Everybody,
                     PrivacyWho::Contacts,
@@ -363,22 +374,7 @@ impl QuillApp {
                             .map(|(who, label)| Radio::new(format!("{id}-{who:?}")).label(*label)),
                     )
                     .on_click(cx.listener(move |this, &ix, _, cx| {
-                        let who = WHOS[ix];
-                        if let Some(live) = this.live.as_mut()
-                            && let Err(err) = live.driver.set_call_privacy(set, who)
-                        {
-                            this.status_note = format!("privacy update failed: {err:?}");
-                        } else if let Some(demo) = this.demo_session.as_mut() {
-                            // Demo: show the chosen value immediately (no
-                            // live TDLib to confirm it).
-                            match set {
-                                CallPrivacySetting::AllowCalls => {
-                                    demo.call_privacy_allow_calls = Some(who)
-                                }
-                                CallPrivacySetting::PeerToPeer => demo.call_privacy_p2p = Some(who),
-                            }
-                        }
-                        cx.notify();
+                        this.set_privacy_target_who(PrivacyEditorTarget::Rule(key), WHOS[ix], cx);
                     }))
             };
         // Phase 6: a kit Switch row with the title/caption beside it
@@ -529,7 +525,7 @@ impl QuillApp {
                 privacy_group(
                     "call-privacy-allow",
                     allow_calls,
-                    CallPrivacySetting::AllowCalls,
+                    PrivacySettingKey::AllowCalls,
                 )
                 .into_any_element()
             })
@@ -556,7 +552,7 @@ impl QuillApp {
                     .child("Loading privacy settings…")
                     .into_any_element()
             } else {
-                privacy_group("call-privacy-p2p", p2p, CallPrivacySetting::PeerToPeer)
+                privacy_group("call-privacy-p2p", p2p, PrivacySettingKey::PeerToPeer)
                     .into_any_element()
             })
     }
@@ -565,7 +561,6 @@ impl QuillApp {
     /// "Record HQ Round Videos" / `UseHqRoundVideos`). Persisted in
     /// `MediaPrefs`; 480px captures when on, 280px otherwise.
     pub(super) fn media_settings_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let big_emoji = self.session().is_none_or(|s| s.media_prefs.big_emoji);
         let hq = self
             .session()
             .is_some_and(|session| session.media_prefs.hq_round_videos);
@@ -647,29 +642,13 @@ impl QuillApp {
                     ),
             )
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .child(
-                        Switch::new("media-pref-big-emoji")
-                            .checked(big_emoji)
-                            .accessibility_label("Big emoji")
-                            .on_click(cx.listener(|this, &on, _, cx| {
-                                this.set_media_pref(|prefs| prefs.big_emoji = on, cx)
-                            })),
-                    )
-                    .child(div().text_sm().child("Big emoji")),
-            )
-            .child(
                 Button::new("open-emoji-sets")
                     .label("Emoji Sets")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.open_emoji_sets(cx))),
             )
             .child(self.quick_reaction_picker(cx))
+            .child(self.corner_button_switches(cx))
             .child(
                 div()
                     .flex()
@@ -864,5 +843,72 @@ impl QuillApp {
             grid = grid.child(row);
         }
         section.child(grid)
+    }
+}
+
+impl QuillApp {
+    /// Privacy and security > Archive and Mute (tdesktop
+    /// `settings_privacy_security.cpp`): the three archive switches,
+    /// including the one for chats from folders, inline.
+    pub(super) fn archive_privacy_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session();
+        let settings = session.and_then(|s| s.archive_chat_list_settings);
+        let loading = session.is_some_and(|s| s.archive_settings_loading);
+        let mut section = div().flex().flex_col().gap_1().child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .px_1()
+                .child("Archive and Mute"),
+        );
+        let Some(settings) = settings else {
+            let note = if loading {
+                "Loading…"
+            } else {
+                "Couldn't load these settings."
+            };
+            return section
+                .child(
+                    div()
+                        .id("archive-privacy-note")
+                        .px_2()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(note),
+                )
+                .into_any_element();
+        };
+        for (index, (title, label, desc)) in ARCHIVE_SETTING_ROWS.iter().enumerate() {
+            section = section.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .px_2()
+                    .py_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(*title),
+                    )
+                    .child(
+                        Switch::new(format!("archive-privacy-{index}"))
+                            .checked(archive_setting_get(&settings, index))
+                            .label(*label)
+                            .accessibility_label(format!("{title}: {label}"))
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.set_archive_setting(index, on, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(*desc),
+                    ),
+            );
+        }
+        section.into_any_element()
     }
 }

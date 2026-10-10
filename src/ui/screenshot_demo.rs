@@ -183,6 +183,13 @@ pub enum ScreenshotDemo {
     /// MED4: composer with a typed URL → detected-URL chip + preview
     /// toggle (injected, no live Telegram).
     ReadyComposerPreview,
+    /// Composer core: files dragged over the chat show two drop zones
+    /// (photos: quick versus without compression).
+    ReadyDropZones,
+    /// Composer core: the "Code Language" box over a fenced block.
+    ReadyCodeLanguage,
+    /// Composer core: a dragged folder offers its files or one archive.
+    ReadyDropFolder,
     /// MED4: embedded-player + album `linkPreview` cards in bubbles
     /// (injected, no live Telegram).
     ReadyPreviewCards,
@@ -257,6 +264,9 @@ pub enum ScreenshotDemo {
     /// loaded `chatEvents` fixture covering the handled action types, so
     /// the info panel's "Recent actions" section renders directly.
     ReadyAdminLog,
+    /// Admin extras (`QUILL_DEMO_ADMIN_EXTRAS=log|title|broadcast|warning|
+    /// delete`; injected data, no live Telegram).
+    ReadyAdminExtras,
     /// Slice G2: channel-management surface (no live TDLib): like
     /// `ReadyAdminLog` (demo channel id 13, viewer 777 is an admin), plus
     /// signature flags (`sign_messages` on, `show_message_sender` off),
@@ -747,6 +757,14 @@ pub enum ScreenshotDemo {
     /// B13: the Gifts privacy editor — who can show gifts, the gift icon
     /// switch and the accepted gift types (injected, no live Telegram).
     ReadyPrivacyGifts,
+    /// Who can call me: the editor with its Always/Never allow lists
+    /// (injected, no live Telegram).
+    ReadyPrivacyCalls,
+    /// Settings with the help rows and the version footer (injected, no
+    /// live Telegram).
+    ReadySettingsHelp,
+    /// Settings > Ask a Question (injected, no live Telegram).
+    ReadyAskQuestion,
     /// B13: the session details view (application, system, IP address,
     /// location) with Terminate (injected, no live Telegram).
     ReadySessionDetails,

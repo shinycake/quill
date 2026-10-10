@@ -403,6 +403,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — link + web page preview".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyDropZones
+        | ScreenshotDemo::ReadyDropFolder
+        | ScreenshotDemo::ReadyCodeLanguage => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — file drop zones".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyComposerPreview => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -551,6 +559,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — admin management".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyAdminExtras => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — admin extras (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyAdminLog => (
@@ -1300,7 +1314,11 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyPrivacy | ScreenshotDemo::ReadyPrivacyGifts => (
+        ScreenshotDemo::ReadyPrivacy
+        | ScreenshotDemo::ReadyPrivacyGifts
+        | ScreenshotDemo::ReadyPrivacyCalls
+        | ScreenshotDemo::ReadySettingsHelp
+        | ScreenshotDemo::ReadyAskQuestion => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — privacy settings (injected, no live Telegram)".into(),
@@ -1697,8 +1715,11 @@ impl QuillApp {
             &composer,
             window,
             |this, state, event: &InputEvent, window, cx| {
-                let text = state.read(cx).value().to_string();
+                let mut text = state.read(cx).value().to_string();
                 if matches!(event, InputEvent::Change) {
+                    if let Some(replaced) = this.apply_instant_replace(&text, window, cx) {
+                        text = replaced;
+                    }
                     this.sync_composer_typing(&text);
                     this.note_open_draft(true, cx);
                 }
@@ -2113,6 +2134,7 @@ impl QuillApp {
             composer_preview_link: 0,
             edit_replace_as_file: false,
             composer_preview_token: 0,
+            composer_prev_text: String::new(),
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
             schedule_picker: None,
@@ -2149,7 +2171,6 @@ impl QuillApp {
             share_content_dialog: None,
             welcome_dialog: None,
             event_log_search: None,
-            event_log_admin_filter: None,
             storage_usage_open: false,
             appearance: appearance_prefs,
             chat_prefs,
@@ -2221,6 +2242,7 @@ impl QuillApp {
             frame_clock_running: Default::default(),
             motion: Default::default(),
             composer_link_dialog: None,
+            composer_code_language: None,
             send_morph: Default::default(),
             slices: Default::default(),
             stream_reveal: Default::default(),
@@ -2238,6 +2260,9 @@ impl QuillApp {
             video_note_capture: None,
             record_locked: false,
             record_discard_confirm: false,
+            drop_paths: Vec::new(),
+            drop_state: None,
+            drop_preview: None,
             voice_tick: false,
             recording_auto_send: false,
             round_preview: Default::default(),
@@ -2315,6 +2340,7 @@ impl QuillApp {
             deep_link_invite: None,
             pending_deep_link_ui: None,
             share_link_text: None,
+            custom_emoji_card_seen: None,
             pending_media_seek: None,
             pending_deep_link_open: None,
             pending_link: None,
@@ -2471,6 +2497,7 @@ impl QuillApp {
         app.demo_setup_profile_panels(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
+        app.demo_setup_admin_extras(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);
         }

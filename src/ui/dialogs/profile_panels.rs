@@ -50,6 +50,17 @@ pub enum ProfileDialog {
         user_id: i64,
         target: Option<i64>,
     },
+    /// Confirm setting, suggesting or resetting a contact's photo.
+    PersonalPhoto {
+        user_id: i64,
+        mode: quill::profile_forms::PersonalPhotoMode,
+        path: Option<String>,
+    },
+    /// Pick why a profile photo (`file_id`) is reported.
+    ReportPhoto {
+        user_id: i64,
+        file_id: i32,
+    },
 }
 
 impl EditContactDialog {

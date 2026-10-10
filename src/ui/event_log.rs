@@ -6,7 +6,7 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::state::{ChatEventLogFetch, event_log_relative_time};
+use quill::state::{AdminListFetch, ChatEventLogFetch, event_log_relative_time};
 use quill::telegram::envelope::{
     ChannelMemberStatus, ChatEventAction, MessageSender, ParsedChatEvent,
 };
@@ -122,6 +122,16 @@ impl QuillApp {
                             })),
                     ),
             );
+        section = section.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(quill::admin_extras::event_log_about(
+                    self.session()
+                        .and_then(|session| session.chats.get(&chat_id.0))
+                        .is_some_and(|chat| chat.is_channel()),
+                )),
+        );
         // Slice G2: compact search + filter controls. The search box
         // feeds `getChatEventLog.query` (schema 1.8.67, line 15252);
         // the chips flip `chatEventLogFilters` categories (line 7956).
@@ -151,6 +161,18 @@ impl QuillApp {
             .and_then(|session| session.event_log_filters.get(&chat_id.0).copied())
             .unwrap_or_default();
         section = section.child(self.event_log_filter_chips(chat_id, active_filters, cx));
+        // The admin filter is server side (`getChatEventLog.user_ids`), so
+        // the chips come from the administrator list, not the loaded page.
+        let selected_admins = self
+            .session()
+            .and_then(|session| session.event_log_users.get(&chat_id.0).cloned())
+            .unwrap_or_default();
+        let filtered_by_admin = !selected_admins.is_empty();
+        let admins = self.event_log_admin_ids(chat_id, fetch.as_ref());
+        if admins.len() > 1 {
+            section =
+                section.child(self.event_log_admin_chips(chat_id, &admins, &selected_admins, cx));
+        }
         match fetch {
             None | Some(ChatEventLogFetch::Loading) => {
                 section = section.child(
@@ -190,22 +212,14 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("No recent actions."),
+                            .child(if filtered_by_admin {
+                                "No recent actions by the selected admins."
+                            } else {
+                                "No recent actions."
+                            }),
                     );
                 } else {
-                    // Slice G2: per-admin filter chips (client-side).
-                    let admins = page.admin_user_ids();
-                    if admins.len() > 1 {
-                        section = section.child(self.event_log_admin_chips(&admins, cx));
-                    }
-                    let admin_filter = self.event_log_admin_filter;
-                    let visible = page.events.iter().filter(|event| match admin_filter {
-                        None => true,
-                        Some(user_id) => {
-                            matches!(event.member_id, MessageSender::User { user_id: id } if id == user_id)
-                        }
-                    });
-                    for event in visible {
+                    for event in page.events.iter() {
                         section = section.child(self.event_log_row(event, cx));
                     }
                     if page.has_more {
@@ -224,22 +238,48 @@ impl QuillApp {
         section.into_any_element()
     }
 
-    /// Slice G2: per-admin filter chips for the event log. `None`
-    /// (the "All admins" chip) shows every row; picking one admin filters
-    /// the loaded page client-side.
+    /// Administrators to offer as filter chips: the loaded administrator
+    /// list, or the actors seen in the loaded page while that is missing.
+    pub(super) fn event_log_admin_ids(
+        &self,
+        chat_id: ChatId,
+        fetch: Option<&ChatEventLogFetch>,
+    ) -> Vec<i64> {
+        let from_list =
+            self.session()
+                .and_then(|session| match session.admin_lists.get(&chat_id.0) {
+                    Some(AdminListFetch::Loaded(entries)) => Some(
+                        entries
+                            .iter()
+                            .map(|entry| entry.user_id)
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                });
+        match (from_list, fetch) {
+            (Some(list), _) => list,
+            (None, Some(ChatEventLogFetch::Loaded(page))) => page.admin_user_ids(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Per-admin filter chips. The selection goes to the server as
+    /// `getChatEventLog.user_ids` (tdesktop's admin filter); with nothing
+    /// selected every admin shows.
     pub(super) fn event_log_admin_chips(
         &self,
+        chat_id: ChatId,
         admins: &[i64],
+        selected: &[i64],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let current = self.event_log_admin_filter;
         let mut chips = div()
             .id("event-log-admin-filters")
             .flex()
             .flex_wrap()
             .w_full()
             .gap_1();
-        let all_label = if current.is_none() {
+        let all_label = if selected.is_empty() {
             "✓ All admins".to_string()
         } else {
             "All admins".to_string()
@@ -248,15 +288,16 @@ impl QuillApp {
             Button::new("event-log-admin-all")
                 .label(all_label)
                 .ghost()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.event_log_admin_filter = None;
-                    cx.notify();
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(live) = this.live.as_mut() {
+                        live.driver.clear_chat_event_log_users(chat_id);
+                    }
+                    this.refresh_event_log(chat_id, cx);
                 })),
         );
         for user_id in admins.iter().copied() {
-            let selected = current == Some(user_id);
             let name = self.group_call_participant_name(&MessageSender::User { user_id });
-            let label = if selected {
+            let label = if selected.contains(&user_id) {
                 format!("✓ {name}")
             } else {
                 name
@@ -266,8 +307,10 @@ impl QuillApp {
                     .label(label)
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.event_log_admin_filter = Some(user_id);
-                        cx.notify();
+                        if let Some(live) = this.live.as_mut() {
+                            live.driver.toggle_chat_event_log_user(chat_id, user_id);
+                        }
+                        this.refresh_event_log(chat_id, cx);
                     })),
             );
         }

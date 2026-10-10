@@ -450,6 +450,36 @@ impl QuillApp {
         self.with_selection_bar(chat_id, header, cx)
     }
 
+    /// Whether the open chat shows a composer at all.
+    pub(super) fn composer_available(&self, mode: PaneMode) -> bool {
+        match mode {
+            PaneMode::Synthetic => true,
+            PaneMode::Connecting => false,
+            PaneMode::Ready => {
+                let session = self.session();
+                let open = session.and_then(|s| s.open_chat);
+                let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
+                // Parity slice 4: posting into a forum topic is supported —
+                // `sendMessage` carries `topic_id = messageTopicForum`
+                // (schema 1.8.67, lines 12200 / 3004). Closed topics and
+                // chats without the basic send permission keep the composer
+                // hidden.
+                let topic = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
+                let in_topic = session.is_some_and(|s| s.open_topic.is_some());
+                match (chat, topic) {
+                    (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
+                    // Saved sublists and tag filters are read-only views.
+                    (Some(_), None) if self.saved_readonly() => false,
+                    (Some(c), None) if !in_topic => c.can_post(),
+                    // In a topic whose info hasn't loaded yet: hide the
+                    // composer until it arrives (the note says "Loading
+                    // topic…").
+                    _ => false,
+                }
+            }
+        }
+    }
+
     /// One part of the open chat's column: the composer
     /// (`ConversationPart::Bottom`) renders as its own cached slice, so
     /// typing and the caret's blink don't rebuild the history
@@ -480,33 +510,7 @@ impl QuillApp {
             .into_any_element(),
             PaneMode::Ready => self.session_history(cx).into_any_element(),
         };
-        let composer = match mode {
-            PaneMode::Synthetic => Some(true),
-            PaneMode::Connecting => None,
-            PaneMode::Ready => {
-                let session = self.session();
-                let open = session.and_then(|s| s.open_chat);
-                let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
-                // Parity slice 4: posting into a forum topic is supported —
-                // `sendMessage` carries `topic_id = messageTopicForum`
-                // (schema 1.8.67, lines 12200 / 3004). Closed topics and
-                // chats without the basic send permission keep the composer
-                // hidden.
-                let topic = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
-                let in_topic = session.is_some_and(|s| s.open_topic.is_some());
-                let can_post = match (chat, topic) {
-                    (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
-                    // Saved sublists and tag filters are read-only views.
-                    (Some(_), None) if self.saved_readonly() => false,
-                    (Some(c), None) if !in_topic => c.can_post(),
-                    // In a topic whose info hasn't loaded yet: hide the
-                    // composer until it arrives (the note says "Loading
-                    // topic…").
-                    _ => false,
-                };
-                if can_post { Some(true) } else { None }
-            }
-        };
+        let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
             PaneMode::Connecting => Some("Sign in to send messages.".to_string()),
             PaneMode::Ready if composer.is_none() => {
@@ -646,14 +650,6 @@ impl QuillApp {
                                     .child(super::anim_layer::occluder(circle)),
                             )
                         })
-                        .when(
-                            show_attach && !self.rich_editor_open && !self.recording_active(),
-                            |this| {
-                                this.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                                    this.attach_dropped_files(paths.paths(), cx);
-                                }))
-                            },
-                        )
                         .p_3()
                         .border_t_1()
                         .border_color(cx.theme().border)
@@ -769,6 +765,9 @@ impl QuillApp {
                         // remaining time (`composer_send_button`) and
                         // `ensure_slow_mode_tick` re-renders every second.
                         .when_some(self.composer_link_dialog_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
+                        .when_some(self.code_language_panel(cx), |this, panel| {
                             this.child(panel)
                         })
                         // Non-default send options as clearable chips; the

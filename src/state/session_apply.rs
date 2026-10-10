@@ -1994,10 +1994,9 @@ impl Session {
                             self.privacy_roundtrip_done();
                         }
                         RequestPurpose::GetPrivacyRules { key } => {
-                            self.privacy.insert(
-                                key,
-                                PrivacyKeyState::Ready(PrivacyRuleDetail::from_rules(&rules)),
-                            );
+                            let detail = PrivacyRuleDetail::from_rules(&rules);
+                            self.mirror_call_privacy(key, &detail);
+                            self.privacy.insert(key, PrivacyKeyState::Ready(detail));
                         }
                         _ => {}
                     }
@@ -2012,13 +2011,8 @@ impl Session {
                     .into_iter()
                     .find(|k| k.td_type() == setting)
                 {
+                    self.mirror_call_privacy(key, &detail);
                     self.privacy.insert(key, PrivacyKeyState::Ready(detail));
-                } else if setting == CallPrivacySetting::AllowCalls.td_type() {
-                    let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
-                    self.call_privacy_allow_calls = PrivacyWho::from_rule_names(&names);
-                } else if setting == CallPrivacySetting::PeerToPeer.td_type() {
-                    let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
-                    self.call_privacy_p2p = PrivacyWho::from_rule_names(&names);
                 }
             }
             // Slice S3: `readDatePrivacySettings` answer.
@@ -2473,7 +2467,9 @@ impl Session {
                 stickers,
                 files,
                 title,
+                name,
                 is_installed,
+                is_custom_emoji,
                 ..
             } => {
                 if let Some(RequestPurpose::DeepLinkResolve { generation }) =
@@ -2495,7 +2491,18 @@ impl Session {
                     pending.map(|p| p.purpose)
                 {
                     self.remember_files(&files);
-                    self.accept_sticker_set_view(set_id, title, is_installed, stickers);
+                    self.accept_sticker_set_view(
+                        set_id,
+                        title,
+                        name,
+                        is_installed,
+                        is_custom_emoji,
+                        stickers,
+                    );
+                } else if let Some(RequestPurpose::CustomEmojiPack { emoji_id, set_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.accept_custom_emoji_preview(emoji_id, set_id, title);
                 } else if let Some(RequestPurpose::LoadLibrarySet { set_id }) =
                     pending.map(|p| p.purpose)
                 {
@@ -2560,6 +2567,8 @@ impl Session {
             EnvelopePayload::Me { user_id } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {
+                    self.support_user_ready = Some(user_id);
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
