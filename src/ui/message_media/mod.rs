@@ -42,8 +42,8 @@ pub(super) use document::{
 };
 pub(super) use fixtures::{apply_ready_dice, apply_ready_location};
 pub(super) use layout::{
-    MediaCorners, MediaDisc, bubble_outer_width, media_content_width, media_disc, media_frame,
-    single_media_width,
+    MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, media_content_width, media_disc,
+    media_frame, single_media_width,
 };
 pub(super) use location::{location_row, venue_row};
 pub(super) use sticker::sticker_attachment;

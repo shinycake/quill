@@ -98,8 +98,12 @@ pub(super) struct InlineTile {
 
 impl InlineTile {
     /// A video or GIF tile: the media fitted by `media_frame`.
-    pub(super) fn media(width: i32, height: i32) -> Self {
-        let (w, h) = super::message_media::media_frame(width, height);
+    pub(super) fn media(
+        kind: crate::ui::message_media::MediaFrameKind,
+        width: i32,
+        height: i32,
+    ) -> Self {
+        let (w, h) = super::message_media::media_frame(kind, width, height);
         Self {
             media: (width, height),
             tile: (f32::from(w), f32::from(h)),
@@ -537,7 +541,11 @@ impl QuillApp {
             {
                 (
                     video.play_file_id()?,
-                    InlineTile::media(video.width, video.height),
+                    InlineTile::media(
+                        crate::ui::message_media::MediaFrameKind::Video,
+                        video.width,
+                        video.height,
+                    ),
                 )
             }
             // The player takes Telegram's MP4 GIFs; true `image/gif`
@@ -553,7 +561,11 @@ impl QuillApp {
             {
                 (
                     animation.play_file_id()?,
-                    InlineTile::media(animation.width, animation.height),
+                    InlineTile::media(
+                        crate::ui::message_media::MediaFrameKind::Gif,
+                        animation.width,
+                        animation.height,
+                    ),
                 )
             }
             _ => return None,
@@ -750,49 +762,75 @@ mod tests {
 
     #[test]
     fn clips_decode_at_their_tile_size_in_device_pixels() {
-        // A 720p GIF fills a 360 x 202.5 pt tile: 360 px wide at 1x, 720 at 2x.
-        let gif = InlineTile::media(1280, 720);
-        assert_eq!(gif.decode_edge(1.), 360);
-        assert_eq!(gif.decode_edge(2.), 720);
-        assert_eq!(gif.decoded_size(360), (360, 203));
-        // A round video message: the 220 pt circle.
+        // A 720p GIF fills a 320 x 180 pt tile (`maxGifSize`): 320 px wide
+        // at 1x, 640 at 2x.
+        let gif = InlineTile::media(crate::ui::message_media::MediaFrameKind::Gif, 1280, 720);
+        assert_eq!(gif.decode_edge(1.), 320);
+        assert_eq!(gif.decode_edge(2.), 640);
+        assert_eq!(gif.decoded_size(320), (320, 180));
+        // A round video message: the 240 pt circle (`maxVideoMessageSize`).
         let round = InlineTile::round(640);
-        assert_eq!(round.decode_edge(1.), 220);
-        assert_eq!(round.decode_edge(1.5), 330);
-        assert_eq!(round.decode_edge(2.), 440);
+        assert_eq!(round.decode_edge(1.), 240);
+        assert_eq!(round.decode_edge(1.5), 360);
+        assert_eq!(round.decode_edge(2.), 480);
         // A tall portrait clip covers its 400 pt height at 2x, at the cap.
         assert_eq!(
-            InlineTile::media(1080, 1920).decode_edge(2.),
+            InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 1080, 1920)
+                .decode_edge(2.),
             INLINE_MAX_EDGE
         );
         // A very wide clip cropped into the minimum height, or a clip of
         // unknown proportions, decodes at the cap.
         assert_eq!(
-            InlineTile::media(1000, 100).decode_edge(1.),
+            InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 1000, 100)
+                .decode_edge(1.),
             INLINE_MAX_EDGE
         );
-        assert_eq!(InlineTile::media(0, 0).decode_edge(1.), INLINE_MAX_EDGE);
+        assert_eq!(
+            InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 0, 0)
+                .decode_edge(1.),
+            INLINE_MAX_EDGE
+        );
         // Before the first frame reports a scale, assume 2x.
-        assert_eq!(gif.decode_edge(0.), 720);
-        assert_eq!(gif.decode_edge(f32::NAN), 720);
+        assert_eq!(gif.decode_edge(0.), 640);
+        assert_eq!(gif.decode_edge(f32::NAN), 640);
     }
 
     #[test]
     fn small_clips_are_never_upscaled() {
-        let tiny = InlineTile::media(100, 80);
+        let tiny = InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 100, 80);
         assert_eq!(tiny.decoded_size(tiny.decode_edge(2.)), (100, 80));
         assert_eq!(tiny.decode_bytes(720, 3), 100 * 80 * 4 * 4);
-        assert_eq!(InlineTile::media(0, 0).decoded_size(300), (300, 300));
+        assert_eq!(
+            InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 0, 0)
+                .decoded_size(300),
+            (300, 300)
+        );
     }
 
     #[test]
     fn clips_above_1080p_stay_still_in_software() {
-        assert!(InlineTile::media(1920, 1080).within_inline_area());
-        assert!(InlineTile::media(1080, 1920).within_inline_area());
-        assert!(!InlineTile::media(2560, 1440).within_inline_area());
-        assert!(!InlineTile::media(3840, 2160).within_inline_area());
+        assert!(
+            InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 1920, 1080)
+                .within_inline_area()
+        );
+        assert!(
+            InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 1080, 1920)
+                .within_inline_area()
+        );
+        assert!(
+            !InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 2560, 1440)
+                .within_inline_area()
+        );
+        assert!(
+            !InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 3840, 2160)
+                .within_inline_area()
+        );
         // Unknown sizes may try.
-        assert!(InlineTile::media(0, 0).within_inline_area());
+        assert!(
+            InlineTile::media(crate::ui::message_media::MediaFrameKind::Video, 0, 0)
+                .within_inline_area()
+        );
         assert!(InlineTile::round(640).within_inline_area());
     }
 
@@ -801,11 +839,13 @@ mod tests {
         // The first clip always plays, however large.
         assert!(admits(0, INLINE_DECODE_BUDGET * 2));
         // Players at 1x 720p-GIF size: dozens fit.
-        let each = InlineTile::media(1280, 720).decode_bytes(360, 3);
+        let each = InlineTile::media(crate::ui::message_media::MediaFrameKind::Gif, 1280, 720)
+            .decode_bytes(360, 3);
         let fit = (1..).take_while(|n| admits(each * n, each)).count();
         assert!(fit >= 40, "{fit}");
         // At 2x they cost four times as much, still a dozen.
-        let each = InlineTile::media(1280, 720).decode_bytes(720, 3);
+        let each = InlineTile::media(crate::ui::message_media::MediaFrameKind::Gif, 1280, 720)
+            .decode_bytes(720, 3);
         let fit = (1..).take_while(|n| admits(each * n, each)).count();
         assert!((12..40).contains(&fit), "{fit}");
         // AVPlayer players hold nothing of ours.
