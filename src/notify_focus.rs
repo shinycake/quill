@@ -6,8 +6,7 @@
 //! macOS reads the `doNotDisturb` preference of `com.apple.notificationcenterui`,
 //! Windows asks `SHQueryUserNotificationState` plus Focus Assist, Linux reads
 //! the `org.freedesktop.Notifications` `Inhibited` property. Quill does the
-//! same, and also looks at the macOS Focus assertion file and GNOME's
-//! `show-banners` switch.
+//! same, and on Linux also checks GNOME's `show-banners` switch.
 //!
 //! Every query shells out or calls the OS, so none of them runs on the UI
 //! thread: [`dnd_active`] returns the last answer and, when it is stale,
@@ -110,22 +109,6 @@ pub fn gnome_banners_off(output: &str) -> bool {
     output.trim() == "false"
 }
 
-/// `~/Library/DoNotDisturb/DB/Assertions.json`: a Focus is on when the
-/// first store has assertion records. (The file needs Full Disk Access;
-/// without it the read fails and the preference check decides.)
-pub fn focus_assertions_active(json: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
-        return false;
-    };
-    value
-        .get("data")
-        .and_then(|data| data.as_array())
-        .and_then(|stores| stores.first())
-        .and_then(|store| store.get("storeAssertionRecords"))
-        .and_then(|records| records.as_array())
-        .is_some_and(|records| !records.is_empty())
-}
-
 /// `QUERY_USER_NOTIFICATION_STATE` values that silence alerts: no user at the
 /// machine (1), presentation mode (4) and quiet time / Focus Assist (6).
 /// Full-screen apps (2, 3) only hide banners, which Windows handles itself.
@@ -135,19 +118,11 @@ pub fn windows_state_is_dnd(state: i32) -> bool {
 
 #[cfg(target_os = "macos")]
 fn query_os_dnd() -> bool {
-    let pref = std::process::Command::new("defaults")
+    std::process::Command::new("defaults")
         .args(["read", "com.apple.notificationcenterui", "doNotDisturb"])
         .output()
         .ok()
-        .is_some_and(|out| parse_defaults_bool(&String::from_utf8_lossy(&out.stdout)));
-    if pref {
-        return true;
-    }
-    std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .map(|home| home.join("Library/DoNotDisturb/DB/Assertions.json"))
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .is_some_and(|json| focus_assertions_active(&json))
+        .is_some_and(|out| parse_defaults_bool(&String::from_utf8_lossy(&out.stdout)))
 }
 
 #[cfg(windows)]
@@ -253,18 +228,6 @@ mod tests {
         assert!(gnome_banners_off("false\n"));
         assert!(!gnome_banners_off("true\n"));
         assert!(!gnome_banners_off("No such schema"));
-    }
-
-    #[test]
-    fn focus_assertions_need_records() {
-        assert!(focus_assertions_active(
-            r#"{"data":[{"storeAssertionRecords":[{"assertionDetails":{}}]}]}"#
-        ));
-        assert!(!focus_assertions_active(
-            r#"{"data":[{"storeAssertionRecords":[]}]}"#
-        ));
-        assert!(!focus_assertions_active(r#"{"data":[{}]}"#));
-        assert!(!focus_assertions_active("not json"));
     }
 
     #[test]

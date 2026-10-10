@@ -19,13 +19,16 @@
 
 - `src/notify_focus.rs`: the Do Not Disturb query per OS (cached, refreshed
   on a worker thread so the UI never waits on a process) and `plan_alert`,
-  which drops both sound and flash during DND. Pure parsers are unit tested.
+  which drops both sound and flash during DND. macOS reads only the
+  notification-center `doNotDisturb` preference, like tdesktop; the Focus
+  assertions file sits in a privacy-protected folder and is left alone.
+  Pure parsers are unit tested.
 - Flash or bounce: `Session::pending_attention` is set whenever a message
   passes the notify rules, even with "Desktop notifications" off (tdesktop's
   alert does not depend on that switch). The UI calls
   `Window::request_attention`, which GPUI implements on macOS (Dock bounce),
-  Windows (`FlashWindowEx`) and X11 (urgency hint). Wayland has no
-  implementation in GPUI, and Qt's alert does not do much there either.
+  Windows (`FlashWindowEx`) and X11 (urgency hint). GPUI does nothing on
+  Wayland.
   The switch is `BadgePrefs::flash_bounce`, labeled per OS as tdesktop does.
 - Events: `decide_notify` takes `pinned_allowed` (the chat's or scope's
   `disable_pinned_message_notifications`, which was stored but never applied
