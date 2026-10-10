@@ -1,0 +1,4 @@
+# appearance 2: full matches only
+parity:appearance-system-accent
+parity:appearance-font
+parity:appearance-quick-action

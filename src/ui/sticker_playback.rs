@@ -4,6 +4,7 @@ use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::FileId;
 use quill::local_path::sandboxed_display_path;
+use quill::power_saving;
 use quill::telegram::envelope::StickerFormat;
 use smallvec::SmallVec;
 use std::cell::Cell;
@@ -63,6 +64,14 @@ impl PlaybackSize {
         match self {
             Self::Sticker => 48 * 1024 * 1024,
             Self::Emoji => 32 * 1024 * 1024,
+        }
+    }
+
+    /// The power-saving switch for this kind of clip shown in a chat.
+    fn chat_flag(self) -> power_saving::Flag {
+        match self {
+            Self::Sticker => power_saving::Flag::StickersChat,
+            Self::Emoji => power_saving::Flag::EmojiChat,
         }
     }
 
@@ -393,6 +402,10 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
+        // Battery and animations: the sticker panel shows stills.
+        if power_saving::on(power_saving::Flag::StickersPanel) {
+            return None;
+        }
         self.animated_image(id, format, PlaybackSize::Sticker, false, true, cx)
     }
 
@@ -427,6 +440,11 @@ impl QuillApp {
         once: bool,
         cx: &mut Context<QuillApp>,
     ) -> Option<AnimatedVisual> {
+        // Battery and animations: stickers and emoji in messages stay
+        // still (the row shows the preview image).
+        if power_saving::on(size.chat_flag()) {
+            return None;
+        }
         if self.slices.in_conversation() && super::anim_layer::current().is_some() {
             let looping = !once
                 && self
@@ -496,7 +514,10 @@ impl QuillApp {
         cx: &mut Context<QuillApp>,
     ) -> PreviewEmoji {
         let entities = &chat.last_preview_style.entities;
-        if !self.slices.in_sidebar() || super::anim_layer::current().is_none() {
+        if !self.slices.in_sidebar()
+            || super::anim_layer::current().is_none()
+            || power_saving::on(power_saving::Flag::EmojiChat)
+        {
             return PreviewEmoji {
                 still: self.custom_emoji_images(entities, cx),
                 layered: HashMap::new(),
@@ -600,8 +621,9 @@ impl QuillApp {
             else {
                 continue;
             };
-            let source = self
-                .custom_emoji_image(item.file_id, item.format, cx)
+            let source = (!power_saving::on(power_saving::Flag::EmojiChat))
+                .then(|| self.custom_emoji_image(item.file_id, item.format, cx))
+                .flatten()
                 .map(ImageSource::from)
                 .or_else(|| {
                     item.display_file_id()

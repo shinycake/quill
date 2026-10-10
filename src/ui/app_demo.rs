@@ -138,7 +138,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearancePower | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -1493,6 +1493,7 @@ impl QuillApp {
         });
         let appearance_prefs = Self::load_appearance();
         let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
+        let font_picker = Self::new_font_picker(&appearance_prefs.font_family, window, cx);
         let emoji_status_hours_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Custom duration in hours")
@@ -2286,7 +2287,11 @@ impl QuillApp {
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
             keybindings_screenshot: false,
+            appearance_power_screenshot: false,
             appearance_applied: None,
+            system_accent: None,
+            system_accent_probed: false,
+            font_picker,
             accent_picker,
             // codex:spellcheck-native: platform engine + persisted app words.
             spellchecker,
@@ -2855,6 +2860,9 @@ impl QuillApp {
         {
             app.appearance.interface_scale_pct = pct;
         }
+        if app.appearance.system_accent && demo.is_none() {
+            app.refresh_system_accent(cx);
+        }
         app.apply_appearance(cx);
         app.init_slices(cx);
         // Animations stop behind another app and resume on activation:
@@ -2863,6 +2871,12 @@ impl QuillApp {
             let active = window.is_window_active() || super::frame_clock::assume_active();
             this.window_active.set(active);
             this.inline_videos.borrow_mut().set_window_active(active);
+            // The system accent may have changed while another app was in
+            // front.
+            if active && this.appearance.system_accent {
+                this.refresh_system_accent(cx);
+                this.apply_appearance(cx);
+            }
             cx.notify();
         })
         .detach();
@@ -2909,7 +2923,12 @@ impl QuillApp {
                     .timer(Duration::from_secs(60))
                     .await;
                 let alive = this
-                    .update(cx, |this, cx| this.apply_appearance(cx))
+                    .update(cx, |this, cx| {
+                        if this.appearance.system_accent {
+                            this.refresh_system_accent(cx);
+                        }
+                        this.apply_appearance(cx)
+                    })
                     .is_ok();
                 if !alive {
                     break;
