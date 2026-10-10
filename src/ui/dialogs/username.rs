@@ -1,5 +1,5 @@
 use super::super::app::QuillApp;
-use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ids::ChatId;
 /// Slice G1: what a `UsernameDialog` text prompt edits.
@@ -48,6 +48,15 @@ impl UsernameDialog {
         input.update(cx, |input, cx| {
             input.set_value(current, window, cx);
         });
+        if matches!(kind, TextPromptKind::CustomTitle { .. }) {
+            // The length counter follows every keystroke.
+            cx.subscribe(&input, |_this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            })
+            .detach();
+        }
         Self {
             chat_id,
             kind,

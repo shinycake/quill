@@ -50,8 +50,17 @@ pub enum ProfileDialog {
         user_id: i64,
         target: Option<i64>,
     },
-    /// Add the bot `bot_id` to a group or channel: the chat picker, then
-    /// (`target` set) the rights to grant or the confirmation.
+    /// Confirm setting, suggesting or resetting a contact's photo.
+    PersonalPhoto {
+        user_id: i64,
+        mode: quill::profile_forms::PersonalPhotoMode,
+        path: Option<String>,
+    },
+    /// Pick why a profile photo (`file_id`) is reported.
+    ReportPhoto {
+        user_id: i64,
+        file_id: i32,
+    },
     /// Send the game `game_short_name` of `bot_id` to a chat (`target` is
     /// the chosen chat awaiting the confirm step).
     ShareGame {
@@ -59,6 +68,8 @@ pub enum ProfileDialog {
         game_short_name: String,
         target: Option<i64>,
     },
+    /// Add the bot `bot_id` to a group or channel: the chat picker, then
+    /// (`target` set) the rights to grant or the confirmation.
     AddBot {
         bot_id: i64,
         invite: quill::bot_invite::Invite,

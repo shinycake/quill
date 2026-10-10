@@ -133,7 +133,8 @@ gpui_kit::assets::icon_assets!(
         Briefcase,
         BellPlus,
         Tag,
-        TagX
+        TagX,
+        FaceSlightlySmilingPlus
     ]
 );
 
@@ -644,6 +645,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-2fa-reset", Ready2faReset),
         ("ready-account", ReadyAccountLifecycle),
         ("ready-accounts", ReadyAccounts),
+        ("ready-admin-extras", ReadyAdminExtras),
         ("ready-admin-log", ReadyAdminLog),
         ("ready-admin-management", ReadyAdminManagement),
         ("ready-albums", ReadyAlbums),
@@ -1132,6 +1134,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyChannelStats => ".quill-ready-ready-channel-stats",
         ScreenshotDemo::ReadyInviteLinks => ".quill-ready-ready-invite-links",
         ScreenshotDemo::ReadyAdminManagement => ".quill-ready-ready-admin-management",
+        ScreenshotDemo::ReadyAdminExtras => ".quill-ready-ready-admin-extras",
         ScreenshotDemo::ReadyAdminLog => ".quill-ready-ready-admin-log",
         ScreenshotDemo::ReadyGroups2 => ".quill-ready-ready-groups2",
         ScreenshotDemo::ReadyGroupManage => ".quill-ready-ready-group-manage",

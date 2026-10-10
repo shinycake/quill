@@ -145,8 +145,8 @@ pub(crate) use session_chat_search::history_message;
 pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;
 pub use session_message_menu::{
-    Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
-    StickerSetViewStage, reaction_filter_key,
+    Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
+    StickerSetView, StickerSetViewStage, reaction_filter_key,
 };
 pub use session_privacy_data::{PasswordCheck, PrivacyData};
 pub use session_proxy::LINK_PING_ID;

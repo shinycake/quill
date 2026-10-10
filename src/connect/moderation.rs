@@ -380,6 +380,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Flip one admin in the chat's server-side event-log filter
+    /// (`getChatEventLog.user_ids`). The UI follows with a refresh.
+    pub fn toggle_chat_event_log_user(&mut self, chat_id: ChatId, user_id: i64) {
+        let mut users = self
+            .session
+            .event_log_users
+            .get(&chat_id.0)
+            .cloned()
+            .unwrap_or_default();
+        crate::admin_extras::toggle_event_log_user(&mut users, user_id);
+        if users.is_empty() {
+            self.session.event_log_users.remove(&chat_id.0);
+        } else {
+            self.session.event_log_users.insert(chat_id.0, users);
+        }
+    }
+
+    /// Show every admin again.
+    pub fn clear_chat_event_log_users(&mut self, chat_id: ChatId) {
+        self.session.event_log_users.remove(&chat_id.0);
+    }
+
     /// Slice G2: flip one event-log filter category for the chat
     /// (`toggle` flips one field of the set; clearing the last active
     /// category removes the set so the log shows all types again).
@@ -463,6 +485,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .cloned()
             .unwrap_or_default();
+        let user_ids = self
+            .session
+            .event_log_users
+            .get(&chat_id.0)
+            .cloned()
+            .unwrap_or_default();
         let extra = self.session.request(
             RequestPurpose::GetChatEventLog { from_event_id },
             Some(chat_id),
@@ -474,7 +502,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             from_event_id,
             CHAT_EVENT_LOG_PAGE_SIZE,
             filters,
-            &[],
+            &user_ids,
         )) {
             self.session.requests.take(extra);
             if from_event_id == 0 {

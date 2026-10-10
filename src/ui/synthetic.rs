@@ -282,6 +282,8 @@ pub(crate) struct MessageChrome {
     /// Hover-revealed control in the bubble's top-right corner (message
     /// actions). Right-click opens the same menu.
     pub actions: Option<AnyElement>,
+    /// Room the actions take beside the bubble.
+    pub actions_span: Pixels,
     /// Full-width bar under the footer (the comments / replies bar).
     pub bottom_bar: Option<AnyElement>,
     /// Content width of the picture / video / GIF / album that leads the
@@ -382,6 +384,7 @@ fn message_bubble_with_quote(
         footer_rebuild,
         media_led,
         actions,
+        actions_span,
         bottom_bar,
         media_width,
     } = chrome;
@@ -535,9 +538,9 @@ fn message_bubble_with_quote(
             .bg(gpui_kit::transparent_black())
             .map(|this| {
                 if outside {
-                    this.left(px(-34.))
+                    this.left(-actions_span)
                 } else {
-                    this.right(px(-34.))
+                    this.right(-actions_span)
                 }
             })
             .child(
