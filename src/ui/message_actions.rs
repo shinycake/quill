@@ -428,6 +428,23 @@ impl QuillApp {
                 );
             }
         }
+        // Telegram Desktop's share box copies a game's `t.me/<bot>?game=` link.
+        if matches!(message.content, MessageContent::Game(_)) && !message.pending {
+            item!(
+                51,
+                gpui_kit::assets::IconName::Link,
+                "menu-copy-game-link",
+                "Copy game link",
+                this,
+                _window,
+                cx,
+                {
+                    this.copy_game_link(chat_id, message_id, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
+        }
         if let Some(edit) = quill::composer::ComposerEdit::from_own_content(
             chat_id,
             message_id,

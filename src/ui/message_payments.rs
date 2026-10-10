@@ -18,6 +18,7 @@ use quill::telegram::envelope::{
 /// desktop; empty rows are skipped.
 pub(super) fn inline_keyboard(
     message: &HistoryMessage,
+    fast_buttons: bool,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
     // M2: an ephemeral payload carries its own `reply_markup`, shown
@@ -47,6 +48,7 @@ pub(super) fn inline_keyboard(
         .gap_1()
         .mt_2();
     let mut any = false;
+    let row_lens: Vec<usize> = keyboard.rows.iter().map(Vec::len).collect();
     for (row_index, row) in keyboard.rows.iter().enumerate() {
         if row.is_empty() {
             continue;
@@ -57,22 +59,52 @@ pub(super) fn inline_keyboard(
             .flex()
             .gap_1();
         for (button_index, button) in row.iter().enumerate() {
-            line = line.child(
-                inline_keyboard_button(
-                    message.chat_id,
-                    message.id,
-                    row_index,
-                    button_index,
-                    button,
-                    game_short_name,
-                    cx,
-                )
-                .flex_1(),
+            let element = inline_keyboard_button(
+                message.chat_id,
+                message.id,
+                row_index,
+                button_index,
+                button,
+                game_short_name,
+                cx,
             );
+            let number = fast_buttons
+                .then(|| quill::fast_buttons::badge_number(&row_lens, row_index, button_index))
+                .flatten();
+            line = line.child(match number {
+                Some(number) => fast_button_cell(message.id.0 as u64, number, element, cx),
+                None => element.flex_1().into_any_element(),
+            });
         }
         grid = grid.child(line);
     }
     any.then(|| grid.into_any_element())
+}
+
+/// A button with its fast-button digit in the top-left corner, like
+/// tdesktop's numbered reply keyboard.
+fn fast_button_cell(
+    message_id: u64,
+    number: u8,
+    button: Button,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    div()
+        .id(("fast-button-cell", message_id * 10 + u64::from(number)))
+        .relative()
+        .flex_1()
+        .flex()
+        .child(button.w_full())
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_2()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(number.to_string()),
+        )
+        .into_any_element()
 }
 
 /// Phase 3.2 (extended in B1): one inline keyboard button. `Url` opens in
@@ -119,71 +151,79 @@ pub(super) fn inline_keyboard_button(
         InlineKeyboardButtonStyle::Link => element.link(),
         InlineKeyboardButtonStyle::Default => element.ghost(),
     };
-    match &button.kind {
-        InlineKeyboardButtonType::Url { url } => {
-            let url = url.clone();
-            element.on_click(cx.listener(move |this, _, _, cx| {
-                this.open_message_url(&url, cx);
-            }))
+    if !button_is_pressable(&button.kind) {
+        return element.disabled(true);
+    }
+    let button = button.clone();
+    let game_short_name = game_short_name.map(str::to_string);
+    element.on_click(cx.listener(move |this, _, window, cx| {
+        this.activate_inline_button(
+            chat_id,
+            message_id,
+            &button,
+            game_short_name.as_deref(),
+            window,
+            cx,
+        );
+    }))
+}
+
+/// Whether pressing a button of this kind does anything (`Disabled` and
+/// unknown kinds stay inert).
+pub(super) fn button_is_pressable(kind: &InlineKeyboardButtonType) -> bool {
+    !matches!(
+        kind,
+        InlineKeyboardButtonType::Disabled | InlineKeyboardButtonType::Unknown { .. }
+    )
+}
+
+impl QuillApp {
+    /// Press one inline button, from a click or a fast-button key.
+    pub(super) fn activate_inline_button(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        button: &InlineKeyboardButton,
+        game_short_name: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match &button.kind {
+            InlineKeyboardButtonType::Url { url } | InlineKeyboardButtonType::WebApp { url } => {
+                self.open_message_url(url, cx);
+            }
+            InlineKeyboardButtonType::LoginUrl { url, id } => {
+                self.press_login_url(chat_id, message_id, *id, url, cx);
+            }
+            InlineKeyboardButtonType::Callback { data } => {
+                self.press_inline_callback(chat_id, message_id, data.clone(), cx);
+            }
+            InlineKeyboardButtonType::CallbackWithPassword { data } => {
+                self.open_callback_password_dialog(chat_id, message_id, data.clone(), window, cx);
+            }
+            InlineKeyboardButtonType::CallbackGame => {
+                self.press_game_button(
+                    chat_id,
+                    message_id,
+                    game_short_name.map(str::to_string),
+                    cx,
+                );
+            }
+            InlineKeyboardButtonType::User { user_id } => {
+                self.open_user_chat(*user_id, window, cx);
+            }
+            InlineKeyboardButtonType::SwitchInline { query, .. } => {
+                self.insert_switch_inline_query(query, window, cx);
+            }
+            InlineKeyboardButtonType::CopyText { text } => self.copy_inline_text(text, cx),
+            // Slice P1: the Buy button fetches the `paymentForm` and opens
+            // the checkout dialog (schema:15262). It is only ever attached
+            // to a `messageInvoice` (schema:3798).
+            InlineKeyboardButtonType::Buy => {
+                self.press_buy_button(chat_id, message_id, window, cx);
+            }
+            InlineKeyboardButtonType::Disabled | InlineKeyboardButtonType::Unknown { .. } => {}
         }
-        InlineKeyboardButtonType::LoginUrl { url, id } => {
-            let url = url.clone();
-            let button_id = *id;
-            element.on_click(cx.listener(move |this, _, _, cx| {
-                this.press_login_url(chat_id, message_id, button_id, &url, cx);
-            }))
-        }
-        InlineKeyboardButtonType::WebApp { url } => {
-            let url = url.clone();
-            element.on_click(cx.listener(move |this, _, _, cx| {
-                this.open_message_url(&url, cx);
-            }))
-        }
-        InlineKeyboardButtonType::Callback { data } => {
-            let data = data.clone();
-            element.on_click(cx.listener(move |this, _, _, cx| {
-                this.press_inline_callback(chat_id, message_id, data.clone(), cx);
-            }))
-        }
-        InlineKeyboardButtonType::CallbackWithPassword { data } => {
-            let data = data.clone();
-            element.on_click(cx.listener(move |this, _, window, cx| {
-                this.open_callback_password_dialog(chat_id, message_id, data.clone(), window, cx);
-            }))
-        }
-        InlineKeyboardButtonType::CallbackGame => {
-            let game_short_name = game_short_name.map(str::to_string);
-            element.on_click(cx.listener(move |this, _, _, cx| {
-                this.press_game_button(chat_id, message_id, game_short_name.clone(), cx);
-            }))
-        }
-        InlineKeyboardButtonType::User { user_id } => {
-            let user_id = *user_id;
-            element.on_click(cx.listener(move |this, _, window, cx| {
-                this.open_user_chat(user_id, window, cx);
-            }))
-        }
-        InlineKeyboardButtonType::SwitchInline { query, .. } => {
-            let query = query.clone();
-            element.on_click(cx.listener(move |this, _, window, cx| {
-                this.insert_switch_inline_query(&query, window, cx);
-            }))
-        }
-        InlineKeyboardButtonType::CopyText { text } => {
-            let text = text.clone();
-            element.on_click(cx.listener(move |this, _, _, cx| {
-                this.copy_inline_text(&text, cx);
-            }))
-        }
-        // Slice P1: the Buy button fetches the `paymentForm` and opens
-        // the checkout dialog (schema:15262). It is only ever attached to
-        // a `messageInvoice` (schema:3798).
-        InlineKeyboardButtonType::Buy => {
-            element.on_click(cx.listener(move |this, _, window, cx| {
-                this.press_buy_button(chat_id, message_id, window, cx);
-            }))
-        }
-        _ => element.disabled(true),
     }
 }
 

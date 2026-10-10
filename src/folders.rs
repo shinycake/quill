@@ -320,6 +320,7 @@ mod tests {
             is_inline: false,
             has_topics: false,
             allows_users_to_create_topics: false,
+            can_join_groups: false,
             status: UserStatusKind::Empty,
             photo_small_file_id: 0,
             accent_color_id: 0,

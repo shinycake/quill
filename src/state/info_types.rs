@@ -480,6 +480,18 @@ pub enum DeepLinkAction {
     OpenChannelBoost { chat_id: i64 },
     /// Chosen share target: prefill the composer with `text`.
     ShareDraft { text: String },
+    /// `internalLinkTypeGame`: resolve the bot, then pick a chat to send the
+    /// game to (tdesktop `ShowShareGameBox`).
+    ShareGame {
+        domain: String,
+        game_short_name: String,
+    },
+    /// `internalLinkTypeBotStartInGroup` / `internalLinkTypeBotAddToChannel`:
+    /// resolve the bot, then pick the group or channel to add it to.
+    AddBot {
+        domain: String,
+        invite: crate::bot_invite::Invite,
+    },
 }
 
 /// `parity:platform-deep-links`: the single active deep-link flow. One

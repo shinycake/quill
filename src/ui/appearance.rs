@@ -1332,6 +1332,9 @@ impl QuillApp {
             }
             control = control.child(chips);
         }
+        if checked && self.dictionary_manager_available() {
+            control = control.child(self.dictionary_manager_section(cx));
+        }
         self.appearance_section(cx, "Spelling", "", control.into_any_element())
     }
 

@@ -1260,6 +1260,11 @@ impl QuillApp {
         // B15: "Checklist" is offered only to Premium accounts in chats
         // where checklists can be sent (`PeerData::canCreateTodoLists`).
         let checklists_allowed = self.checklist_creation_allowed();
+        // The dice the server offers (`updateDiceEmojis`).
+        let dice = self
+            .session()
+            .map(|s| s.sync.dice_menu())
+            .unwrap_or_default();
         Button::new("composer-attach")
             .icon(IconName::Paperclip)
             .ghost()
@@ -1273,7 +1278,7 @@ impl QuillApp {
                     );
                 }
             })
-            .dropdown_menu(move |mut menu, _, _| {
+            .dropdown_menu(move |mut menu, window, cx| {
                 for (label, icon, as_files) in [
                     ("Photo or video", IconName::Image, false),
                     ("File", IconName::File, true),
@@ -1337,6 +1342,23 @@ impl QuillApp {
                             .update(cx, |this, cx| this.open_share_location_panel(window, cx));
                     },
                 ))
+                .submenu("Dice", window, cx, {
+                    let owner = owner.clone();
+                    let dice = dice.clone();
+                    move |mut sub, _, _| {
+                        for emoji in &dice {
+                            let owner = owner.clone();
+                            let rolled = emoji.clone();
+                            sub = sub.item(PopupMenuItem::new(format!("Roll {emoji}")).on_click(
+                                move |_, _, cx| {
+                                    let _ =
+                                        owner.update(cx, |this, cx| this.roll_dice(&rolled, cx));
+                                },
+                            ));
+                        }
+                        sub
+                    }
+                })
                 .item(
                     PopupMenuItem::new("GIFs")
                         .icon(IconName::SquarePlay)

@@ -650,8 +650,9 @@ pub fn sync_tray(session: Option<&Session>) {
 }
 
 /// First sync at window creation. macOS/Windows create the tray
-/// synchronously; Linux waits briefly for the StatusNotifierItem
-/// registration so start-in-tray knows whether a tray host exists.
+/// synchronously; Linux only starts the StatusNotifierItem registration on a
+/// worker thread (never blocking the UI thread) and the caller watches
+/// [`tray_registering`] / [`tray_available`] to learn the outcome.
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn sync_tray_startup(session: Option<&Session>) {
     sync_tray(session);
@@ -659,15 +660,35 @@ pub fn sync_tray_startup(session: Option<&Session>) {
 
 #[cfg(all(feature = "ui", target_os = "linux"))]
 pub fn sync_tray_startup(session: Option<&Session>) {
-    let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
-    let toggles = (
-        session.is_none_or(|s| s.desktop_notifications),
-        session.is_none_or(|s| s.inapp_sounds_enabled),
-    );
-    TRAY.with(|cell| {
-        cell.borrow_mut()
-            .poll_startup(unread, toggles, std::time::Duration::from_millis(1500))
-    });
+    sync_tray(session);
+}
+
+/// Whether the tray registration is still in flight (Linux only; the other
+/// platforms create the tray synchronously).
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
+pub fn tray_registering() -> bool {
+    false
+}
+
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn tray_registering() -> bool {
+    TRAY.with(|cell| cell.borrow().registering())
+}
+
+/// How long start-in-tray waits for the tray host before revealing the window.
+pub const TRAY_STARTUP_WAIT_MS: u64 = 1500;
+
+/// Start-in-tray outcome check, run repeatedly after launch. `Some(true)`:
+/// no tray host, reveal the window so it is never unreachable. `Some(false)`:
+/// the tray is up, stay hidden. `None`: still registering, keep waiting.
+pub fn tray_startup_reveal(available: bool, registering: bool, waited_ms: u64) -> Option<bool> {
+    if available {
+        Some(false)
+    } else if !registering || waited_ms >= TRAY_STARTUP_WAIT_MS {
+        Some(true)
+    } else {
+        None
+    }
 }
 
 /// Whether a tray icon is currently shown. The close/minimize/start-in-tray
@@ -698,6 +719,15 @@ pub fn take_tray_actions() -> Vec<TrayAction> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_reveal_waits_then_decides() {
+        assert_eq!(tray_startup_reveal(true, false, 0), Some(false));
+        assert_eq!(tray_startup_reveal(false, true, 0), None);
+        assert_eq!(tray_startup_reveal(false, true, 1499), None);
+        assert_eq!(tray_startup_reveal(false, true, 1500), Some(true));
+        assert_eq!(tray_startup_reveal(false, false, 10), Some(true));
+    }
     #[test]
     fn tray_menu_routes_only_its_own_actions() {
         assert_eq!(menu_action("quill-tray-open"), Some(TrayAction::Open));

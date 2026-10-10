@@ -374,10 +374,41 @@ fn ui_main(args: &[String]) {
                     if window.focused(cx).is_none() {
                         window.focus(&view.focus_handle(cx), cx);
                     }
-                    if start_in_tray && !quill::tray::tray_available() {
-                        // No tray host must never leave the only window inaccessible.
-                        cx.activate(true);
-                        window.activate_window();
+                    if start_in_tray {
+                        // No tray host must never leave the only window
+                        // inaccessible. Registration runs off-thread; poll its
+                        // outcome without blocking launch.
+                        let watch = view.downgrade();
+                        let handle = window.window_handle();
+                        cx.spawn(async move |cx| {
+                            let mut waited = 0u64;
+                            loop {
+                                let state = watch.update(cx, |this, _| {
+                                    quill::tray::sync_tray(this.session());
+                                    quill::tray::tray_startup_reveal(
+                                        quill::tray::tray_available(),
+                                        quill::tray::tray_registering(),
+                                        waited,
+                                    )
+                                });
+                                match state {
+                                    Ok(None) => {}
+                                    Ok(Some(true)) => {
+                                        let _ = handle.update(cx, |_, window, cx| {
+                                            cx.activate(true);
+                                            window.activate_window();
+                                        });
+                                        break;
+                                    }
+                                    _ => break,
+                                }
+                                cx.background_executor()
+                                    .timer(std::time::Duration::from_millis(100))
+                                    .await;
+                                waited += 100;
+                            }
+                        })
+                        .detach();
                     }
                     // The shell adds Quill's dialog hit-test barrier; Root
                     // hosts the kit dialog and notification layers.
@@ -665,6 +696,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-blockquote-expandable", ReadyBlockquoteExpandable),
         ("ready-bot-chat", ReadyBotChat),
         ("ready-bot-command-menu", ReadyBotCommandMenu),
+        ("ready-bot-extras", ReadyBotExtras),
         ("ready-bot-keyboard", ReadyBotKeyboard),
         ("ready-bot-profile", ReadyBotProfile),
         ("ready-bot-topics", ReadyBotTopics),
@@ -722,6 +754,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-deep-link-invite", ReadyDeepLinkInvite),
         ("ready-deep-link-share", ReadyDeepLinkShare),
         ("ready-dice", ReadyDice),
+        ("ready-dictionaries", ReadyDictionaries),
         ("ready-downloads", ReadyDownloads),
         ("ready-drafts", ReadyDrafts),
         ("ready-drop-folder", ReadyDropFolder),
@@ -896,6 +929,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-update-changelog", ReadyUpdateChangelog),
         ("ready-update-failure", ReadyUpdateFailure),
         ("ready-update-install", ReadyUpdateInstall),
+        ("ready-updates-sync", ReadyUpdatesSync),
         ("ready-username", ReadyUsername),
         ("ready-video", ReadyVideo),
         ("ready-video-note", ReadyVideoNote),
@@ -1174,6 +1208,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyBotCommandMenu => ".quill-ready-ready-bot-command-menu",
         ScreenshotDemo::ReadyInlineResults => ".quill-ready-ready-inline-results",
         ScreenshotDemo::ReadyBotProfile => ".quill-ready-ready-bot-profile",
+        ScreenshotDemo::ReadyBotExtras => ".quill-ready-ready-bot-extras",
         ScreenshotDemo::ReadyTextEntities => ".quill-ready-ready-text-entities",
         ScreenshotDemo::ReadyUnsupportedMessage => ".quill-ready-ready-unsupported-message",
         ScreenshotDemo::ReadyBlockquoteExpandable => ".quill-ready-ready-blockquote-expandable",
@@ -1254,6 +1289,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySpellcheck => ".quill-ready-ready-spellcheck",
         ScreenshotDemo::ReadySpellcheckPanel => ".quill-ready-ready-spellcheck-panel",
         ScreenshotDemo::ReadySpellcheckToggle => ".quill-ready-ready-spellcheck-toggle",
+        ScreenshotDemo::ReadyDictionaries => ".quill-ready-ready-dictionaries",
         ScreenshotDemo::ReadyKeybindings => ".quill-ready-ready-keybindings",
         ScreenshotDemo::ReadyAccounts => ".quill-ready-ready-accounts",
         ScreenshotDemo::Ready2faManage => ".quill-ready-ready-2fa-manage",
@@ -1309,6 +1345,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyProfilePanels => ".quill-ready-ready-profile-panels",
         ScreenshotDemo::ReadyMemberModeration => ".quill-ready-ready-member-moderation",
         ScreenshotDemo::ReadyGroupAdminSettings => ".quill-ready-ready-group-admin-settings",
+        ScreenshotDemo::ReadyUpdatesSync => ".quill-ready-ready-updates-sync",
         ScreenshotDemo::ReadyUsername => ".quill-ready-ready-username",
         ScreenshotDemo::ReadyShortcuts => ".quill-ready-ready-shortcuts",
         ScreenshotDemo::ReadyProxy => ".quill-ready-ready-proxy",

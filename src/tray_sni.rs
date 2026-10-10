@@ -21,7 +21,7 @@ use crate::tray::{
 };
 use ksni::blocking::{Handle, TrayMethods};
 use std::sync::Mutex;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
 /// Delay between registration attempts while the desktop has no tray host.
@@ -162,25 +162,11 @@ impl TrayState {
         matches!(&self.phase, Phase::Ready { handle, .. } if !handle.is_closed())
     }
 
-    /// First registration at startup: wait up to `wait` for the result so
-    /// `--start-minimized` can tell "no tray host" (reveal the window) from
-    /// "tray still registering". A healthy or tray-less desktop answers in
-    /// milliseconds; a hung bus falls back to the polled `Connecting` phase.
-    pub fn poll_startup(&mut self, unread: u32, toggles: (bool, bool), wait: Duration) {
-        if !matches!(self.phase, Phase::Idle(_)) {
-            return self.poll(unread, toggles);
-        }
-        let result = start_registration(unread, toggles);
-        self.phase = match result.recv_timeout(wait) {
-            Ok(Some(handle)) => Phase::Ready {
-                handle,
-                shown: (unread, toggles),
-            },
-            Ok(None) | Err(RecvTimeoutError::Disconnected) => {
-                Phase::Idle(Instant::now() + RETRY_EVERY)
-            }
-            Err(RecvTimeoutError::Timeout) => Phase::Connecting(result),
-        };
+    /// Whether a registration attempt is still in flight. The window-start
+    /// logic polls this to tell "no tray host" (reveal the window) from
+    /// "tray still registering" without blocking the UI thread.
+    pub fn registering(&self) -> bool {
+        matches!(self.phase, Phase::Connecting(_))
     }
 
     /// Advance the lifecycle and publish `unread`.

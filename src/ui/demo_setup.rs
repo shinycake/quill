@@ -1498,11 +1498,18 @@ impl QuillApp {
             Some(
                 ScreenshotDemo::ReadyAppearance
                     | ScreenshotDemo::ReadySpellcheckToggle
+                    | ScreenshotDemo::ReadyDictionaries
                     | ScreenshotDemo::ReadyKeybindings
             )
         ) {
-            if matches!(demo, Some(ScreenshotDemo::ReadySpellcheckToggle)) {
+            if matches!(
+                demo,
+                Some(ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyDictionaries)
+            ) {
                 self.chat_prefs.spellcheck_enabled = true;
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyDictionaries)) {
+                self.dict_manager = super::spell_dictionaries::DictManager::demo();
             }
             // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
             // captures the dialog with the HC theme selected.

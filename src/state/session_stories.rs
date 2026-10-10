@@ -1,6 +1,9 @@
 //! Story tray and story interaction state.
 use super::*;
 
+/// Most story-reaction custom emoji stickers kept per session.
+pub const STORY_CUSTOM_EMOJI_CAP: usize = 512;
+
 impl Session {
     /// Phase 9.1: insert or drop a story-tray entry. Every chat with
     /// active stories is kept (the chat list paints a ring on its
@@ -116,6 +119,13 @@ impl Session {
     /// reaction picker — keyed by sticker id (= custom emoji id).
     pub fn accept_story_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
         for sticker in stickers {
+            // Bounded: past the cap the cache restarts empty; the story
+            // viewer refetches the ids it still shows.
+            if self.story_custom_emoji_stickers.len() >= STORY_CUSTOM_EMOJI_CAP
+                && !self.story_custom_emoji_stickers.contains_key(&sticker.id)
+            {
+                self.story_custom_emoji_stickers.clear();
+            }
             self.story_custom_emoji_stickers.insert(sticker.id, sticker);
         }
     }
