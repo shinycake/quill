@@ -1,8 +1,8 @@
 Components inside the ntgcalls library (libntgcalls.so / libntgcalls.dylib / ntgcalls.dll)
 
-Quill ships the official prebuilt ntgcalls v3.0.0 shared library unmodified
+Quill ships the official prebuilt ntgcalls v3.0.2 shared library unmodified
 (scripts/vendor-ntgcalls.sh, SHA256-pinned). ntgcalls itself is LGPL-3.0
-(ntgcalls-LGPL-3.0.txt). According to its build files at tag v3.0.0
+(ntgcalls-LGPL-3.0.txt). According to its build files at tag v3.0.2
 (CMakeLists.txt, wrtc/CMakeLists.txt, cmake/*.cmake, version.properties), the
 library statically links the components below. Versions are the ones pinned in
 version.properties at that tag.
@@ -29,7 +29,7 @@ libva, libvdpau      (FFmpeg deps)  MIT                               Linux
 nv-codec-headers     13.1.15.0      MIT                               Linux, Windows
 
 Sources:
-  ntgcalls        https://github.com/pytgcalls/ntgcalls/tree/v3.0.0
+  ntgcalls        https://github.com/pytgcalls/ntgcalls/tree/v3.0.2
   WebRTC build    https://github.com/pytgcalls/webrtc-build/releases/tag/m152.7977.0.3
   FFmpeg build    https://github.com/pytgcalls/ffmpeg (build.sh, libraries.properties)
   OpenH264 build  https://github.com/pytgcalls/openh264

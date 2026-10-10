@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
-description = "Hand-written raw FFI bindings for ntgcalls v3.0.0 (LGPLv3), loaded at runtime via dlopen"
+description = "Hand-written raw FFI bindings for ntgcalls v3.0.2 (LGPLv3), loaded at runtime via dlopen"
 repository = "https://github.com/shinycake/quill"
 publish = false
 

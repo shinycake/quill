@@ -16,24 +16,24 @@ VENDOR_DIR="$REPO_ROOT/vendor/ntgcalls"
 # 40MB zip can fill. ~/.cache persists and has room.
 STAGE_DIR="${QUILL_VENDOR_STAGE:-$HOME/.cache/quill-vendor}/ntgcalls"
 
-# Digests match the official GitHub release asset metadata for v3.0.0.
-NTGCALLS_VERSION="v3.0.0"
+# Digests match the official GitHub release asset metadata for v3.0.2.
+NTGCALLS_VERSION="v3.0.2"
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64)
         ASSET="ntgcalls.linux-x86_64-shared_libs.zip"
         LIB_NAME="libntgcalls.so"
-        NTGCALLS_SHA256="b28f99eec39ae62a9c612da1e16b2884c5662f32c52effc0d985a6918f2831f0"
+        NTGCALLS_SHA256="cf01935d60d7bbaa0e94d21d8d18c5122bb42beca502c1c0dc31beeac5853d50"
         ;;
     Darwin:arm64)
         ASSET="ntgcalls.macos-arm64-shared_libs.zip"
         LIB_NAME="libntgcalls.dylib"
-        NTGCALLS_SHA256="20cac9a1516c75e08d81049d2d8126e7d156ad800aaa1314f14f66b13f83508a"
+        NTGCALLS_SHA256="a7b8c33e3b7b1f8bf9e398e43bd6c3467a0b57356ba284bcd57cc1afc7f1939d"
         ;;
     MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
         # Git Bash on Windows; the zip keeps the DLL under lib/Release.
         ASSET="ntgcalls.windows-x86_64-shared_libs.zip"
         LIB_NAME="Release/ntgcalls.dll"
-        NTGCALLS_SHA256="454ee2282cac29de79f7836a2af915f6e7ff8e1378b6500976c2a2b7e9ed6d0d"
+        NTGCALLS_SHA256="7ef18426d27af3f865fbe79e51ea808f9f5ef2c349c0f372796d0561f26f7a75"
         ;;
     *) echo "vendor-ntgcalls: unsupported host $(uname -s) $(uname -m)" >&2; exit 1 ;;
 esac
