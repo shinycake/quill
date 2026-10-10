@@ -259,6 +259,9 @@ pub struct ComposerReplyTo {
     /// line 3056) — `text` is a verbatim substring of the original
     /// message and `position` its UTF-16 code-unit offset.
     pub quote: Option<QuoteSelection>,
+    /// "Reply in Another Chat": the chat this reply will be sent into when
+    /// it is not `chat_id`. `None` for the usual same-chat reply.
+    pub target_chat: Option<ChatId>,
 }
 
 /// Slice G1: a quoted part of the replied-to message.
@@ -275,6 +278,7 @@ impl ComposerReplyTo {
             message_id,
             preview: preview.into(),
             quote: None,
+            target_chat: None,
         }
     }
 
@@ -290,19 +294,67 @@ impl ComposerReplyTo {
             message_id,
             preview: preview.into(),
             quote: Some(quote),
+            target_chat: None,
         }
+    }
+
+    /// Aim this reply at another chat: the reply stays attached while that
+    /// chat is open and goes out as `inputMessageReplyToExternalMessage`.
+    pub fn into_chat(mut self, target: ChatId) -> Self {
+        self.target_chat = (target != self.chat_id).then_some(target);
+        self
+    }
+
+    /// The reply belongs in `chat`: it replies there, or was aimed there.
+    pub fn belongs_to(&self, chat: ChatId) -> bool {
+        self.chat_id == chat || self.target_chat == Some(chat)
+    }
+
+    /// Send-pipeline view for a send into `chat`: a same-chat reply, or an
+    /// external one when this reply was aimed at `chat`. `None` when the
+    /// reply is not for that chat. Drafts keep using [`Self::send_reply`],
+    /// which only knows same-chat replies.
+    pub fn send_target(&self, chat: ChatId) -> Option<crate::telegram::SendReply> {
+        let quote = self
+            .quote
+            .as_ref()
+            .map(|quote| (quote.text.clone(), quote.position));
+        if self.chat_id == chat {
+            Some(crate::telegram::SendReply {
+                message_id: self.message_id,
+                quote,
+                source_chat: None,
+            })
+        } else if self.target_chat == Some(chat) {
+            Some(crate::telegram::SendReply::external(
+                self.chat_id,
+                self.message_id,
+                quote,
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Replace the quote (`None` replies to the whole message).
+    pub fn with_new_quote(mut self, quote: Option<QuoteSelection>) -> Self {
+        self.quote = quote;
+        self
     }
 
     /// Slice G1: draft/send-pipeline view of this reply — the replied-to
     /// message id plus the optional validated partial quote, mirroring
     /// `telegram::SendReply`. `None` when this reply targets another chat.
     pub fn send_reply(&self, chat_id: ChatId) -> Option<crate::telegram::SendReply> {
-        (self.chat_id == chat_id).then(|| crate::telegram::SendReply {
-            message_id: self.message_id,
-            quote: self
-                .quote
-                .as_ref()
-                .map(|quote| (quote.text.clone(), quote.position)),
+        (self.chat_id == chat_id && self.target_chat.is_none()).then(|| {
+            crate::telegram::SendReply {
+                message_id: self.message_id,
+                quote: self
+                    .quote
+                    .as_ref()
+                    .map(|quote| (quote.text.clone(), quote.position)),
+                source_chat: None,
+            }
         })
     }
 }
@@ -1926,34 +1978,18 @@ impl ComposerSnapshot {
         self
     }
 
-    /// Same-chat `inputMessageReplyToMessage.message_id` only. Cross-chat
-    /// `inputMessageReplyToExternalMessage` is out of this slice.
+    /// The replied-to message id for a send into this snapshot's chat:
+    /// same-chat replies and replies aimed here from another chat.
     pub fn send_reply_to(&self) -> Option<MessageId> {
-        self.reply_to.as_ref().and_then(|reply| {
-            if reply.chat_id.0 == self.chat_id {
-                Some(reply.message_id)
-            } else {
-                None
-            }
-        })
+        self.send_reply().map(|reply| reply.message_id)
     }
 
     /// Slice G1: the full reply (message id plus validated partial
     /// quote) for the send builders.
     pub fn send_reply(&self) -> Option<crate::telegram::SendReply> {
-        self.reply_to.as_ref().and_then(|reply| {
-            if reply.chat_id.0 == self.chat_id {
-                Some(crate::telegram::SendReply {
-                    message_id: reply.message_id,
-                    quote: reply
-                        .quote
-                        .as_ref()
-                        .map(|quote| (quote.text.clone(), quote.position)),
-                })
-            } else {
-                None
-            }
-        })
+        self.reply_to
+            .as_ref()
+            .and_then(|reply| reply.send_target(ChatId(self.chat_id)))
     }
 
     pub fn chat_id(&self) -> ChatId {
@@ -2352,17 +2388,66 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_reply_is_same_chat_only() {
+    fn snapshot_reply_is_same_chat_unless_aimed_there() {
         let same = ComposerSnapshot::capture(ChatId(11), ViewGeneration(1), "hi").with_reply(Some(
             ComposerReplyTo::new(ChatId(11), MessageId(101), "orig"),
         ));
         assert_eq!(same.send_reply_to(), Some(MessageId(101)));
-        let other = same.with_reply(Some(ComposerReplyTo::new(
+        assert_eq!(same.send_reply().unwrap().source_chat, None);
+        // A reply from chat 12 that was never aimed at chat 11 is dropped.
+        let other = same.clone().with_reply(Some(ComposerReplyTo::new(
             ChatId(12),
             MessageId(40),
             "other chat",
         )));
         assert_eq!(other.send_reply_to(), None);
+        // Aimed at chat 11, it goes out as a reply to chat 12's message.
+        let aimed = same.with_reply(Some(
+            ComposerReplyTo::with_quote(
+                ChatId(12),
+                MessageId(40),
+                "other chat",
+                QuoteSelection {
+                    text: "part".into(),
+                    position: 3,
+                },
+            )
+            .into_chat(ChatId(11)),
+        ));
+        let reply = aimed.send_reply().unwrap();
+        assert_eq!(reply.message_id, MessageId(40));
+        assert_eq!(reply.source_chat, Some(ChatId(12)));
+        assert_eq!(reply.quote, Some(("part".to_string(), 3)));
+    }
+
+    #[test]
+    fn aimed_reply_belongs_to_both_chats_but_drafts_stay_same_chat() {
+        let reply = ComposerReplyTo::new(ChatId(12), MessageId(40), "x").into_chat(ChatId(11));
+        assert!(reply.belongs_to(ChatId(12)));
+        assert!(reply.belongs_to(ChatId(11)));
+        assert!(!reply.belongs_to(ChatId(13)));
+        assert!(reply.send_target(ChatId(13)).is_none());
+        // Drafts only know replies that stay in their own chat.
+        assert!(reply.send_reply(ChatId(11)).is_none());
+        assert!(reply.send_reply(ChatId(12)).is_none());
+        let plain = ComposerReplyTo::new(ChatId(12), MessageId(40), "x");
+        assert!(plain.send_reply(ChatId(12)).is_some());
+        // Aiming a reply at its own chat is no detour.
+        let home = ComposerReplyTo::new(ChatId(12), MessageId(40), "x").into_chat(ChatId(12));
+        assert_eq!(home.target_chat, None);
+    }
+
+    #[test]
+    fn updating_the_quote_keeps_the_target() {
+        let reply = ComposerReplyTo::new(ChatId(12), MessageId(40), "x")
+            .into_chat(ChatId(11))
+            .with_new_quote(Some(QuoteSelection {
+                text: "q".into(),
+                position: 0,
+            }));
+        assert_eq!(reply.target_chat, Some(ChatId(11)));
+        assert!(reply.quote.is_some());
+        assert!(reply.with_new_quote(None).quote.is_none());
     }
 
     fn edit_with(media: Option<EditableMedia>, in_album: bool) -> ComposerEdit {

@@ -321,6 +321,7 @@ fn quoted_draft_round_trips_input_text_quote() {
     let reply = SendReply {
         message_id: MessageId(3),
         quote: Some(("meet at".to_string(), 0)),
+        source_chat: None,
     };
     let outcome = driver
         .note_composer_draft(ChatId(7), "sounds good", Some(reply), 1_000, false)

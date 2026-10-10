@@ -1855,6 +1855,8 @@ impl QuillApp {
     pub(super) fn clear_reply(&mut self, cx: &mut Context<Self>) {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
         self.pending_reply = cancel_reply_draft(self.pending_reply.take(), String::new()).0;
+        self.reply_elsewhere_open = false;
+        self.reply_quote_open = false;
         self.note_open_draft(true, cx);
         self.status_note = "reply cancelled".into();
         cx.notify();

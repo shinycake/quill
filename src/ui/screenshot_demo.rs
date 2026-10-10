@@ -87,6 +87,12 @@ pub enum ScreenshotDemo {
     ReadySelectKeyboard,
     /// Reply bar above the composer for a photo message, with its thumbnail.
     ReadyReplyMedia,
+    /// The chat chooser behind "Reply in Another Chat".
+    ReadyReplyElsewhere,
+    /// A reply carried into another chat, quote and source chat in its bar.
+    ReadyReplyExternal,
+    /// The quote picker opened from the reply bar.
+    ReadyReplyQuote,
     /// Edit bar above the composer for an outgoing photo (caption edit).
     ReadyEditMedia,
     /// A new message revealing at the bottom of the history; freeze the

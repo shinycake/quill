@@ -204,6 +204,8 @@ mod proxy;
 mod reactions;
 mod recording;
 mod rendering_demo;
+mod reply_options_demo;
+mod reply_options_ui;
 mod request_share;
 mod round_record;
 mod round_seek;

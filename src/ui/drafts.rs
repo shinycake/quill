@@ -78,7 +78,7 @@ impl QuillApp {
         if self
             .pending_reply
             .as_ref()
-            .is_some_and(|reply| reply.chat_id != chat_id)
+            .is_some_and(|reply| !reply.belongs_to(chat_id))
         {
             self.pending_reply = None;
         }

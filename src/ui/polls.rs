@@ -768,13 +768,7 @@ impl QuillApp {
         let reply_to = self
             .pending_reply
             .as_ref()
-            .map(|reply| quill::telegram::SendReply {
-                message_id: reply.message_id,
-                quote: reply
-                    .quote
-                    .as_ref()
-                    .map(|quote| (quote.text.clone(), quote.position)),
-            });
+            .and_then(|reply| reply.send_target(chat_id));
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_poll_draft(chat_id, &draft, reply_to);
             match result {

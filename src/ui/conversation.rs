@@ -777,6 +777,10 @@ impl QuillApp {
                         .when_some(self.pending_reply.clone(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
+                        .when_some(self.reply_elsewhere_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
+                        .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
                         // Phase 4.2: poll creation dialog above the composer.
                         .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))
                         // B15: checklist composer / "Add Tasks" and the poll

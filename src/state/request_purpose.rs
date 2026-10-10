@@ -314,6 +314,11 @@ pub enum RequestPurpose {
         emoji_id: i64,
         set_id: i64,
     },
+    /// The message menu's emoji pack footer: `getStickerSet` for the
+    /// pack's title, answered into `Session::emoji_pack_titles`.
+    EmojiPackTitle {
+        set_id: i64,
+    },
     /// "Save to... Profile" on a song: `addProfileAudio`.
     AddProfileAudio,
     /// "Cancel Upload": `deleteMessages` on a message still being sent.
