@@ -210,12 +210,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "N comments" bar with commenter avatars under channel posts and reply counters in groups <!-- parity:render-comments-bar -->
 - [x] Service messages name the people involved and their names are clickable <!-- parity:render-service-actors -->
 - [x] Pinned-message service row shows an excerpt and jumps to the message <!-- parity:render-service-pinned-excerpt -->
-- [ ] Group photo change service row shows the new photo and opens it <!-- parity:render-service-photo-thumb -->
+- [x] Group photo change service row shows the new photo and opens it <!-- parity:render-service-photo-thumb -->
 - [x] Video chat service rows: ended with duration, scheduled, and invited members <!-- parity:render-service-video-chat -->
 - [x] Forum topic created, edited, closed and hidden service rows <!-- parity:render-service-topics -->
 - [x] Chat theme and wallpaper change service rows <!-- parity:render-service-theme-wallpaper -->
 - [x] Owner change, boost, game score and proximity alert service rows <!-- parity:render-service-owner-boost-game -->
-- [ ] Suggested profile photo and birthday rows with an Accept action <!-- parity:render-service-suggestions -->
+- [x] Suggested profile photo and birthday rows with an Accept action <!-- parity:render-service-suggestions -->
 - [x] Service rows for users or chats shared with a bot, web-app data sent and bot write access allowed <!-- parity:render-service-bot-shared -->
 - [x] Protected-content toggled and disable-requested service rows <!-- parity:render-service-protected-content -->
 - [x] Payment refunded, paid-message refunded and price-changed service rows <!-- parity:render-service-payment-refund -->
@@ -232,7 +232,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
 - [ ] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
 - [ ] Similar channels carousel after joining a channel <!-- parity:render-similar-channels -->
-- [ ] Link-preview "View channel / bot / message" buttons <!-- parity:render-preview-view-button -->
+- [x] Link-preview "View channel / bot / message" buttons <!-- parity:render-preview-view-button -->
 - [x] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
 - [x] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
 - [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
@@ -477,16 +477,16 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Remove captions when forwarding copies (TGX RemoveCaptions; checkbox gated on send-copy) <!-- parity:media-caption-remove-on-forward -->
 - [x] Caption-too-long validation on sends and caption edits (runtime `message_caption_length_max`, live counter, refusal names the limit) <!-- parity:media-caption-length-limit -->
 - [ ] Video viewer: Copy Frame, Share at current time, quality picker, rotate video <!-- parity:viewer-video-extras -->
-- [ ] Caption overlay in the viewer with formatted text and links <!-- parity:viewer-caption-entities -->
-- [ ] Viewer header shows the sender (opens profile) and send time <!-- parity:viewer-sender-header -->
+- [x] Caption overlay in the viewer with formatted text and links <!-- parity:viewer-caption-entities -->
+- [x] Viewer header shows the sender (opens profile) and send time <!-- parity:viewer-sender-header -->
 - [ ] "Disappears in" countdown on timed photos and videos <!-- parity:viewer-ttl-countdown -->
-- [ ] "View all photos / files" link to shared media <!-- parity:viewer-view-all -->
-- [ ] "Saved to Downloads" toast with a folder link <!-- parity:viewer-saved-toast -->
+- [x] "View all photos / files" link to shared media <!-- parity:viewer-view-all -->
+- [x] "Saved to Downloads" toast with a folder link <!-- parity:viewer-saved-toast -->
 - [x] Video playback in the viewer and inline on Linux and Windows <!-- parity:viewer-video-cross-platform -->
 - [x] Round video notes autoplay muted inline in history <!-- parity:viewer-round-autoplay -->
 - [x] Audio playlist with repeat, shuffle and autoplay of the next voice message <!-- parity:viewer-audio-playlist -->
-- [ ] OS media keys and Now Playing integration <!-- parity:viewer-os-media-keys -->
-- [ ] Voice and round playback speed dial with custom speeds <!-- parity:viewer-speed-dial -->
+- [x] OS media keys and Now Playing integration <!-- parity:viewer-os-media-keys -->
+- [x] Voice and round playback speed dial with custom speeds <!-- parity:viewer-speed-dial -->
 - [ ] Save music to Profile, Saved Messages or Downloads <!-- parity:viewer-save-music -->
 
 ### Groups, supergroups & channels
@@ -940,7 +940,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] proxy and socks links offer to add the proxy <!-- parity:deeplink-proxy -->
 - [x] share and msg_url links open a chat picker with the draft text <!-- parity:deeplink-share-draft -->
 - [x] Settings links open the matching settings page <!-- parity:deeplink-settings -->
-- [ ] Login code links fill in the code <!-- parity:deeplink-login-code -->
+- [x] Login code links fill in the code <!-- parity:deeplink-login-code -->
 - [ ] Invoice links open the payment checkout <!-- parity:deeplink-invoice -->
 - [ ] Boost links open the boost dialog <!-- parity:deeplink-boost -->
 - [ ] Premium gift code links offer to apply the code <!-- parity:deeplink-giftcode -->
@@ -953,7 +953,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Story and story album links open the story viewer <!-- parity:deeplink-story -->
 - [x] ?t= timestamp links seek the media to that time <!-- parity:deeplink-timestamp -->
 - [ ] Premium offer, privacy policy and language pack links <!-- parity:deeplink-premium-language -->
-- [ ] Register the tg:// scheme on Linux and Windows <!-- parity:deeplink-scheme-registration -->
+- [x] Register the tg:// scheme on Linux and Windows <!-- parity:deeplink-scheme-registration -->
 
 ### Data freshness (TDLib updates)
 

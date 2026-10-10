@@ -148,19 +148,38 @@ impl ComposerAttachment {
             list.iter()
                 .all(|att| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
         });
-        let picked = paths
+        let planned: Vec<(PathBuf, AttachmentKind)> = paths
             .iter()
             .enumerate()
             .map(|(ix, path)| {
                 let kind = media
                     .as_ref()
                     .map_or(AttachmentKind::Document, |kinds| kinds[ix]);
-                Self::pick(path, kind)
+                (path.clone(), kind)
             })
+            .collect();
+        Self::append_planned(list, &planned)
+    }
+
+    /// Append files whose kind was already chosen, for example by the drop
+    /// zone they landed on. All or nothing: on failure the list is unchanged.
+    pub fn append_planned(
+        list: &mut Vec<Self>,
+        planned: &[(PathBuf, AttachmentKind)],
+    ) -> Result<usize, &'static str> {
+        if planned.is_empty() {
+            return Ok(0);
+        }
+        if planned.len() > crate::album::ALBUM_MAX_ITEMS.saturating_sub(list.len()) {
+            return Err("Attach at most 10 files at a time.");
+        }
+        let picked = planned
+            .iter()
+            .map(|(path, kind)| Self::pick(path, *kind))
             .collect::<Option<Vec<_>>>()
             .ok_or("Could not attach files. Drop existing files, not folders.")?;
         list.extend(picked);
-        Ok(paths.len())
+        Ok(planned.len())
     }
 
     /// Validate `candidate` as a user-picked send path. Never call with paths

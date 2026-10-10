@@ -275,6 +275,7 @@ impl QuillApp {
         let app = app.read(cx);
         let input = app.composer.read(cx);
         let selection = input.selected_range();
+        let caret = selection.start;
         let has_selection = !selection.is_empty();
         let mut menu = menu;
         if app.chat_prefs.spellcheck_enabled {
@@ -284,7 +285,8 @@ impl QuillApp {
         // Cut / Copy / Paste / Paste as Plain Text / Select All, then the
         // Formatting submenu with its shortcuts (tdesktop's field menu).
         let menu = edit_menu_items(menu, has_selection, true);
-        Self::formatting_menu_items(menu.separator(), has_selection)
+        let in_code_block = quill::code_language::fence_at(&input.value(), caret).is_some();
+        Self::formatting_menu_items(menu.separator(), has_selection, in_code_block)
     }
 
     pub(super) fn on_spelling_replace(

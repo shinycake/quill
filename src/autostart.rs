@@ -86,7 +86,7 @@ fn autostart_path_in(home: &Path, platform: Platform) -> PathBuf {
 /// or shell-reserved characters is double-quoted with `"`, `` ` ``, `$`
 /// and `\` backslash-escaped, then backslashes are doubled for the
 /// desktop-file string syntax; a literal `%` is `%%` (field codes).
-fn desktop_exec(exe: &Path) -> String {
+pub(crate) fn desktop_exec(exe: &Path) -> String {
     const RESERVED: &str = " \t\n\"'\\><~|&;$*?#()`";
     let raw = exe.display().to_string().replace('%', "%%");
     if !raw.chars().any(|c| RESERVED.contains(c)) {
@@ -152,7 +152,7 @@ fn render_file(platform: Platform, exe: &Path) -> String {
 /// and synced, then renamed over the target, so a crash or full disk can
 /// never leave a truncated autostart file that the session manager would
 /// half-parse. The temp file is removed when any step fails.
-fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
     use std::io::Write;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
