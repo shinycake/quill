@@ -472,7 +472,8 @@ impl QuillApp {
     pub(super) fn night_mode_on(&self) -> bool {
         quill::main_menu::night_mode_on(
             self.appearance_applied
-                .map(|(mode, ..)| mode == gpui_kit::component::theme::ThemeMode::Dark),
+                .as_ref()
+                .map(|(mode, ..)| *mode == gpui_kit::component::theme::ThemeMode::Dark),
             self.appearance.theme,
         )
     }

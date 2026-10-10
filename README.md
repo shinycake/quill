@@ -97,7 +97,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] "Link desktop device": show QR so another device can log in as this account <!-- parity:auth-qr-authorize-other -->
 - [x] New-user registration: first/last name + terms <!-- parity:auth-registration -->
 - [x] Email-based login flow <!-- parity:auth-email-login -->
-- [ ] Premium-purchase-gated login state (partial: explicit UnsupportedHalt, auth.rs:66) <!-- parity:auth-premium-login -->
+- [x] Premium-purchase-gated login state (partial: explicit UnsupportedHalt, auth.rs:66) <!-- parity:auth-premium-login -->
 - [x] Enable / change / disable the two-step password: "Two-Step Verification" overlay (TGX wording) shows the authoritative getPasswordState; setPassword enable (empty old, optional recovery email in the same call), change, and disable (empty new); no optimistic mutations, one op in flight, passwords zeroized and never logged <!-- parity:auth-2fa-manage -->
 - [x] Set / change recovery email, pending-confirmation state, abort setup: setRecoveryEmailAddress (current password required), pending pattern card (TGX PendingEmailText), resend (resendRecoveryEmailAddressCode, no invented cooldown) and "Abort recovery email setup" (TGX AbortRecoveryEmail verbatim) <!-- parity:auth-recovery-email -->
 - [x] Password recovery via emailed code: "Forgot password?" on the 2FA screen sends requestAuthenticationPasswordRecovery (resend re-issues it — no invented cooldown, 429 surfaces), recovery-code entry sends recoverAuthenticationPassword (code zeroized, never stored — the A2 rule; new password empty, re-enable 2FA in Settings); recovery removes 2FA and TDLib continues auth <!-- parity:auth-password-recovery --> (A10: requests.rs; state.rs:RequestPurpose; connect.rs:request_password_recovery/submit_recovery_code; ui/mod.rs)
@@ -1064,13 +1064,13 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 - [ ] Wallpapers: gallery, patterns, from file, blur, motion, tile, remove <!-- parity:appearance-wallpapers -->
 - [ ] Built-in themes (Day, Classic, Tinted, Night), custom and cloud themes, theme editor <!-- parity:appearance-themes -->
-- [ ] System accent color option <!-- parity:appearance-system-accent -->
+- [x] System accent color option <!-- parity:appearance-system-accent -->
 - [x] Interface scale <!-- parity:appearance-scale -->
-- [ ] Font family choice <!-- parity:appearance-font -->
+- [x] Font family choice <!-- parity:appearance-font -->
 - [ ] Interface language packs (English only today) <!-- parity:appearance-localization -->
 - [ ] Adaptive layout for wide screens (centered column) <!-- parity:appearance-wide-layout -->
 - [ ] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
-- [ ] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
+- [x] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
 - [x] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
 
 ### Settings: data, proxy & advanced

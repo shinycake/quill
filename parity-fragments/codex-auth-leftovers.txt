@@ -1,2 +1,0 @@
-# Premium-gated login is explained with a QR and support route; no purchase flow by design
-parity:auth-premium-login
