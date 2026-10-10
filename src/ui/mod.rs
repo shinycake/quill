@@ -146,6 +146,7 @@ mod folder_picker_ui;
 mod folder_share;
 mod folder_tabs;
 mod folders;
+mod forum_column_demo;
 mod forum_extras;
 mod forum_thread_stories_demo;
 mod forums_saved_demo;

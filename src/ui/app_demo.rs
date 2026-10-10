@@ -812,6 +812,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — comments and threads".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyForumColumn => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — forum topic column and topic threads".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyForumThreadStories => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2146,6 +2152,8 @@ impl QuillApp {
             story_stats_open: false,
             topic_info_open: false,
             thread_info_open: false,
+            forum_chats_peek: false,
+            forum_column_shown: false,
             story_report_open: false,
             story_report_text_input,
             story_page: None,

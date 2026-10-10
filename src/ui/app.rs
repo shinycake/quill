@@ -1025,6 +1025,12 @@ pub struct QuillApp {
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.
     pub(super) thread_info_open: bool,
+    /// On a narrow window the forum's topic column replaces the chat list;
+    /// this brings the list back until another forum opens.
+    pub(super) forum_chats_peek: bool,
+    /// The forum topic column is on screen this frame, so the conversation
+    /// shows a hint instead of repeating the topic list.
+    pub(super) forum_column_shown: bool,
     /// Phase 9.5: report flow UI open in the viewer overlay
     /// (`reportStory`).
     pub(super) story_report_open: bool,
