@@ -97,6 +97,7 @@ impl QuillApp {
                 draft.toggle(chat_id, message_id, pending);
                 if draft.is_empty() {
                     self.pending_forward = None;
+                    self.selection_focus = None;
                     self.forward_picker_open = false;
                 }
             }
@@ -139,6 +140,7 @@ impl QuillApp {
 
     pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = cancel_forward_draft(self.pending_forward.take());
+        self.selection_focus = None;
         self.forward_picker_open = false;
         self.forward_bar_dest = None;
         self.share_selection.clear();
