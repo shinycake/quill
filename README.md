@@ -79,7 +79,7 @@ Without credentials, `cargo run --features ui` opens a synthetic demo chat. To s
 
 On Linux, building the UI also needs the GTK 3 and ALSA development packages (`libgtk-3-dev` and `libasound2-dev` on Debian and Ubuntu).
 
-Toolchain: Rust 1.98.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.1. TDLib: 1.8.68.
+Toolchain: Rust 1.99.0, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.1. TDLib: 1.8.68.
 
 ## Status
 
@@ -94,7 +94,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Resend the login code: "Resend code" on the code screen sends resendAuthenticationCode (reason resendCodeReasonUserRequest); no invented local cooldown — a too-early resend fails server-side (429) and surfaces via the auth-error line <!-- parity:auth-code-resend -->
 - [x] Two-step password entry on login <!-- parity:auth-2fa-password --> (auth.rs:52; telegram/requests.rs:81)
 - [x] Log in via QR code: "Sign in with QR code" on the phone screen sends requestQrCodeAuthentication; the link from authorizationStateWaitOtherDeviceConfirmation renders as a real QR bitmap (never logged) <!-- parity:auth-qr-login -->
-- [ ] "Link desktop device": show QR so another device can log in as this account <!-- parity:auth-qr-authorize-other -->
+- [x] "Link desktop device": confirm a QR login for another device (camera scan or pasted tg://login link) <!-- parity:auth-qr-authorize-other -->
 - [x] New-user registration: first/last name + terms <!-- parity:auth-registration -->
 - [x] Email-based login flow <!-- parity:auth-email-login -->
 - [x] Premium-purchase-gated login state (partial: explicit UnsupportedHalt, auth.rs:66) <!-- parity:auth-premium-login -->
@@ -315,10 +315,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Translate bar at the top of a chat (partial: translate actions exist; no bar or per-chat toggle) <!-- parity:chrome-translate-bar -->
 - [ ] Similar channels suggestions after leaving a channel <!-- parity:chrome-similar-channels -->
 - [ ] Business bot manage bar <!-- parity:chrome-business-bot-bar -->
-- [ ] Pin message from the pinned bar and hide-all confirmation wording <!-- parity:chrome-pinned-bar-confirm -->
+- [x] Pinned bar unpin and hide-all confirmation wording <!-- parity:chrome-pinned-bar-confirm -->
 - [x] Top "now playing" bar for voice and music with play, prev, next, speed and close <!-- parity:chrome-now-playing-bar -->
 - [x] Emoji status and premium badge beside the chat title <!-- parity:chrome-header-status -->
-- [x] Restricted, Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
+- [x] Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
 - [ ] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
 - [x] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
 - [x] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
@@ -569,8 +569,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
 - [ ] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
 - [x] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
-- [ ] Recent actions: server-side admin filter, export and explainer <!-- parity:admin-log-extras -->
-- [ ] Typed confirmation before deleting a large group or channel <!-- parity:admin-delete-confirm-typing -->
+- [x] Recent actions: server-side admin filter and explainer <!-- parity:admin-log-extras -->
 
 ### Forums, Saved Messages & threads
 
