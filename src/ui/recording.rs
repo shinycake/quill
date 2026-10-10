@@ -258,7 +258,7 @@ impl QuillApp {
         // not leak into the next recording.
         self.record_locked = false;
         self.record_discard_confirm = false;
-        let caption = self.composer.read(cx).value().to_string();
+        let caption = self.composer_markup(cx);
         let draft = match capture.finish() {
             Ok(draft) => draft,
             Err(err) => {

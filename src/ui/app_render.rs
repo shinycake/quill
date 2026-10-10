@@ -129,9 +129,7 @@ impl Render for QuillApp {
         if let Some((chat_id, text)) = ai_text
             && open_chat == Some(chat_id)
         {
-            self.composer.update(cx, |input, cx| {
-                input.set_value(&text, window, cx);
-            });
+            self.set_composer_markup(&text, window, cx);
             self.status_note = "AI updated the draft".into();
         }
         if let Some((chat_id, rich, note)) = ai_blocks

@@ -904,6 +904,9 @@ impl QuillApp {
                                                 .appearance(false)
                                                 .bordered(false)
                                                 .aria_label("Message")
+                                                // Custom emoji drawn inline
+                                                // (codex:composer-input).
+                                                .token(self.composer_token_renderer(cx))
                                                 // codex:spellcheck-native:
                                                 // suggestions / Add to
                                                 // Dictionary / Ignore on a

@@ -202,6 +202,11 @@ pub enum ScreenshotDemo {
     /// MED4: composer with a typed URL → detected-URL chip + preview
     /// toggle (injected, no live Telegram).
     ReadyComposerPreview,
+    /// codex:composer-input: a draft whose formatting, mention tag and custom
+    /// emoji show in the field as they will be sent.
+    /// `QUILL_DEMO_WYSIWYG=rtl|wrap|select` picks a Persian draft, a long
+    /// bold line that wraps, or a selection across formats.
+    ReadyComposerWysiwyg,
     /// Composer core: files dragged over the chat show two drop zones
     /// (photos: quick versus without compression).
     ReadyDropZones,

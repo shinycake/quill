@@ -295,7 +295,11 @@ impl QuillApp {
         // Cut / Copy / Paste / Paste as Plain Text / Select All, then the
         // Formatting submenu with its shortcuts (tdesktop's field menu).
         let menu = edit_menu_items(menu, has_selection, true);
-        let in_code_block = quill::code_language::fence_at(&input.value(), caret).is_some();
+        let in_code_block = if app.rich_editor_open {
+            quill::code_language::fence_at(&input.value(), caret).is_some()
+        } else {
+            app.composer_code_block_at_caret(cx).is_some()
+        };
         Self::formatting_menu_items(menu.separator(), has_selection, in_code_block)
     }
 
@@ -366,7 +370,34 @@ impl QuillApp {
             return None;
         }
         let composer = self.composer.clone();
-        let misspellings = self.spell_misspellings.clone();
+        // Like Telegram Desktop, code, links and mentions are not checked.
+        let skip: Vec<std::ops::Range<usize>> = self
+            .composer
+            .read(cx)
+            .spans()
+            .iter()
+            .filter(|span| {
+                matches!(
+                    quill::composer_doc::ComposerTag::from_tag(span.tag()),
+                    Some(
+                        quill::composer_doc::ComposerTag::Code
+                            | quill::composer_doc::ComposerTag::Pre(_)
+                            | quill::composer_doc::ComposerTag::Link(_)
+                            | quill::composer_doc::ComposerTag::Mention(_)
+                    )
+                )
+            })
+            .map(|span| span.range())
+            .collect();
+        let misspellings: Vec<_> = self
+            .spell_misspellings
+            .iter()
+            .filter(|m| !skip.iter().any(|r| r.start < m.end && m.start < r.end))
+            .cloned()
+            .collect();
+        if misspellings.is_empty() {
+            return None;
+        }
         let color: Hsla = danger().into();
         Some(
             canvas(

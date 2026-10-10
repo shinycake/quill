@@ -1059,11 +1059,11 @@ impl QuillApp {
         let Some(id) = item.custom_emoji_id else {
             return;
         };
-        let markup = quill::composer::custom_emoji_markup(&item.emoji, id);
-        self.composer.update(cx, |input, cx| {
-            input.replace(&markup, window, cx);
-            input.focus(window, cx);
-        });
+        // Drawn inline in the field, one caret stop (codex:composer-input).
+        let fallback = item.emoji.clone();
+        self.insert_composer_custom_emoji(&fallback, id, window, cx);
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
         self.set_media_pref(
             move |prefs| {
                 prefs.recent_custom_emoji_ids.retain(|e| *e != id);

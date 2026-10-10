@@ -987,7 +987,7 @@ impl QuillApp {
             return None;
         }
         let limit = self.text_length_limit();
-        let value = self.composer.read(cx).value().to_string();
+        let value = self.composer_markup(cx);
         let over = quill::text_split::units_over_limit(value.trim(), limit);
         if over == 0 {
             return None;
