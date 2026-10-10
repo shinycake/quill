@@ -1,2 +1,0 @@
-# Topic list as its own column beside the chat list; collapses the chat list on narrow windows
-parity:forum-second-column
