@@ -88,7 +88,8 @@ impl QuillApp {
     }
     pub(super) fn open_video_pip(&mut self, cx: &mut Context<Self>) {
         if !cfg!(target_os = "macos") {
-            self.status_note = "Picture-in-Picture requires native floating-window support.".into();
+            self.connection.status_note =
+                "Picture-in-Picture requires native floating-window support.".into();
             cx.notify();
             return;
         }
@@ -153,7 +154,9 @@ impl QuillApp {
             owner.update(cx, |app, cx| {
                 match result {
                     Ok(handle) => app.viewer.pip_window = Some(handle),
-                    Err(_) => app.status_note = "Could not open Picture-in-Picture".into(),
+                    Err(_) => {
+                        app.connection.status_note = "Could not open Picture-in-Picture".into()
+                    }
                 }
                 cx.notify();
             });

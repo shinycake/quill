@@ -108,7 +108,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note =
+            self.connection.status_note =
                 match live
                     .driver
                     .pin_chat_message_with(chat_id, message_id, silent, only_for_self)
@@ -118,7 +118,7 @@ impl QuillApp {
                 };
         } else if self.demo_session.is_some() {
             self.apply_demo_pin_toggle(chat_id, message_id);
-            self.status_note = "pinned".into();
+            self.connection.status_note = "pinned".into();
         }
         cx.notify();
     }

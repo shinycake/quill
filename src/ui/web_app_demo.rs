@@ -52,8 +52,8 @@ impl QuillApp {
         quill::web_app::trust::set_persistence(false);
         let mode = std::env::var("QUILL_DEMO_MINIAPP").unwrap_or_else(|_| "terms".into());
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_bot(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_bot(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         let then = PendingOpen::Open {
             chat_id: ChatId(21),

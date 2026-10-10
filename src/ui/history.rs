@@ -1764,7 +1764,7 @@ impl QuillApp {
                     } else {
                         self.live.as_mut().expect("live").driver.fetch_history()
                     };
-                    self.status_note = match result {
+                    self.connection.status_note = match result {
                         Ok(Some(_)) => "loading older messages".into(),
                         Ok(None) => "no older messages to load".into(),
                         Err(_) => "could not load history".into(),

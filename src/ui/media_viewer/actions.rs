@@ -51,12 +51,12 @@ impl QuillApp {
                     self.viewer.rotated = Some((path, orientation.code(), image));
                 }
                 None => {
-                    self.status_note = "couldn't rotate this photo".into();
+                    self.connection.status_note = "couldn't rotate this photo".into();
                     (self.viewer.orientation, self.viewer.rotated) = previous;
                 }
             },
             None => {
-                self.status_note = "download the photo first to rotate it".into();
+                self.connection.status_note = "download the photo first to rotate it".into();
                 (self.viewer.orientation, self.viewer.rotated) = previous;
             }
         }
@@ -137,11 +137,11 @@ impl QuillApp {
                     self.show_saved_toast(dest, item.kind != MediaViewerKind::Photo, cx);
                 }
                 Err(err) => {
-                    self.status_note = format!("couldn't save: {err}");
+                    self.connection.status_note = format!("couldn't save: {err}");
                 }
             },
             None => {
-                self.status_note = "download the media first to save it".into();
+                self.connection.status_note = "download the media first to save it".into();
             }
         }
         cx.notify();
@@ -185,7 +185,7 @@ impl QuillApp {
             return;
         };
         if !quill::platform::reveal_in_file_manager(&toast.dest) {
-            self.status_note = "couldn't open the folder".into();
+            self.connection.status_note = "couldn't open the folder".into();
         }
         cx.notify();
     }
@@ -283,7 +283,7 @@ impl QuillApp {
             return;
         };
         if item.kind != MediaViewerKind::Photo {
-            self.status_note = "only photos can be copied".into();
+            self.connection.status_note = "only photos can be copied".into();
             cx.notify();
             return;
         }
@@ -316,9 +316,9 @@ impl QuillApp {
                     gpui_kit::ImageFormat::Png,
                     bytes,
                 )));
-                self.status_note = "photo copied".into();
+                self.connection.status_note = "photo copied".into();
             }
-            Err(note) => self.status_note = note.into(),
+            Err(note) => self.connection.status_note = note.into(),
         }
         cx.notify();
     }
@@ -362,9 +362,9 @@ impl QuillApp {
                     gpui_kit::ImageFormat::Png,
                     bytes,
                 )));
-                self.status_note = "Frame copied".into();
+                self.connection.status_note = "Frame copied".into();
             }
-            Err(note) => self.status_note = note.into(),
+            Err(note) => self.connection.status_note = note.into(),
         }
         cx.notify();
     }
@@ -533,7 +533,7 @@ impl QuillApp {
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
             self.message_ui.menu_ui.sticker_set_open = false;
-            self.status_note = "could not load the attached stickers".into();
+            self.connection.status_note = "could not load the attached stickers".into();
         }
         cx.notify();
     }
@@ -565,7 +565,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .is_some_and(|chat| chat.can_pin_messages());
         if !can_pin {
-            self.status_note = "you can't pin messages in this chat".into();
+            self.connection.status_note = "you can't pin messages in this chat".into();
             cx.notify();
             return;
         }
@@ -592,12 +592,12 @@ impl QuillApp {
                     self.apply_demo_pin_toggle(chat_id, *id);
                 }
             }
-            self.status_note = "demo: album pin updated".into();
+            self.connection.status_note = "demo: album pin updated".into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "no live connection".into();
+            self.connection.status_note = "no live connection".into();
             cx.notify();
             return;
         };
@@ -608,7 +608,7 @@ impl QuillApp {
                     failed += 1;
                 }
             }
-            self.status_note = if failed == 0 {
+            self.connection.status_note = if failed == 0 {
                 "pinning album…".into()
             } else {
                 format!("couldn't pin {failed} album item(s)")
@@ -619,7 +619,7 @@ impl QuillApp {
                     failed += 1;
                 }
             }
-            self.status_note = if failed == 0 {
+            self.connection.status_note = if failed == 0 {
                 "unpinning album…".into()
             } else {
                 format!("couldn't unpin {failed} album item(s)")

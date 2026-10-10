@@ -87,7 +87,7 @@ impl QuillApp {
         let Some(wait) = self.slow_mode_wait_secs_for(chat_id) else {
             return false;
         };
-        self.status_note = format!("Slow mode: wait {wait}s before sending");
+        self.connection.status_note = format!("Slow mode: wait {wait}s before sending");
         if self.live.is_some() {
             let supergroup_id = self.live.as_ref().and_then(|live| {
                 let session = &live.driver.session;
@@ -185,7 +185,7 @@ impl QuillApp {
                 _ => None,
             });
         if supergroup_id.is_none_or(|id| !self.can_change_slow_mode(id)) {
-            self.status_note = "slow mode needs the restrict-members admin right".into();
+            self.connection.status_note = "slow mode needs the restrict-members admin right".into();
             cx.notify();
             return;
         }
@@ -194,11 +194,11 @@ impl QuillApp {
                 .driver
                 .set_chat_slow_mode_delay(chat_id, slow_mode_delay)
             {
-                Ok(_) => self.status_note = "slow mode updated".into(),
-                Err(_) => self.status_note = "could not change slow mode".into(),
+                Ok(_) => self.connection.status_note = "slow mode updated".into(),
+                Err(_) => self.connection.status_note = "could not change slow mode".into(),
             }
         } else {
-            self.status_note = "slow mode needs a live connection (demo)".into();
+            self.connection.status_note = "slow mode needs a live connection (demo)".into();
         }
         cx.notify();
     }

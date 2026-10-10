@@ -120,13 +120,13 @@ impl QuillApp {
     ) {
         let premium = matches!(demo, FolderDemo::Tags | FolderDemo::TagColor);
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_folder_tags(session, &self.demo_sink, &self.demo_seq, premium);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_folder_tags(session, &self.demo_ui.sink, &self.demo_ui.seq, premium);
         }
         self.appearance.folder_tabs_view = FolderTabsView::Top;
         match demo {
             FolderDemo::Tags => {
-                self.status_note = "screenshot demo — folder tags on chat rows".into();
+                self.connection.status_note = "screenshot demo — folder tags on chat rows".into();
             }
             FolderDemo::TagColor => {
                 let mut dialog = FolderEditorDialog::new(window, cx, Some(1));

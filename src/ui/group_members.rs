@@ -33,7 +33,7 @@ impl QuillApp {
                 .get(&chat_id.0)
                 .is_some_and(|chat| matches!(chat.kind, ChatKind::BasicGroup { .. }))
         });
-        self.member_dialog = Some(MemberDialog::new(window, cx, chat_id, is_basic_group));
+        self.admin.member_dialog = Some(MemberDialog::new(window, cx, chat_id, is_basic_group));
         // Slice G1: a fresh dialog open clears the last action error —
         // stale failures from a previous open must not linger.
         if let Some(live) = self.live.as_mut() {
@@ -46,7 +46,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_member_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.member_dialog.take() {
+        if let Some(dialog) = self.admin.member_dialog.take() {
             let chat_id = dialog.chat_id;
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.add_members_failed.remove(&chat_id.0);
@@ -61,7 +61,7 @@ impl QuillApp {
     /// shows. Basic groups read `getBasicGroupFullInfo`; supergroups
     /// read the matching `getSupergroupMembers` filter.
     pub(super) fn refresh_member_dialog(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, is_basic_group, tab, query) = match self.member_dialog.as_ref() {
+        let (chat_id, is_basic_group, tab, query) = match self.admin.member_dialog.as_ref() {
             Some(dialog) => (
                 dialog.chat_id,
                 dialog.is_basic_group,
@@ -86,20 +86,20 @@ impl QuillApp {
                 .map(|_| ())
         };
         if result.is_err() {
-            self.status_note = "could not load members".into();
+            self.connection.status_note = "could not load members".into();
         }
         cx.notify();
     }
 
     pub(super) fn member_dialog_tab(&mut self, tab: MemberTab, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.member_dialog.as_mut() {
+        if let Some(dialog) = self.admin.member_dialog.as_mut() {
             dialog.tab = tab;
         }
         self.refresh_member_dialog(cx);
     }
 
     pub(super) fn toggle_member_add_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.member_dialog.as_mut() {
+        if let Some(dialog) = self.admin.member_dialog.as_mut() {
             if let Some(position) = dialog.add_selected.iter().position(|id| *id == user_id) {
                 dialog.add_selected.remove(position);
             } else {
@@ -114,12 +114,12 @@ impl QuillApp {
     /// driver picks). Failures surface via `FailedToAddMembers` in
     /// `status_note` through the session's `add_members_failed` map.
     pub(super) fn submit_member_add(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, user_ids) = match self.member_dialog.as_mut() {
+        let (chat_id, user_ids) = match self.admin.member_dialog.as_mut() {
             Some(dialog) => (dialog.chat_id, std::mem::take(&mut dialog.add_selected)),
             None => return,
         };
         if user_ids.is_empty() {
-            self.status_note = "pick at least one contact to add".into();
+            self.connection.status_note = "pick at least one contact to add".into();
             cx.notify();
             return;
         }
@@ -130,7 +130,7 @@ impl QuillApp {
             },
             None => "adding members needs a live connection (demo)".into(),
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         // `updateChatMember` drops the cached member list and marks the
         // chat stale; `poll_live` refetches the open dialog's page.
         self.refresh_member_dialog(cx);
@@ -149,7 +149,7 @@ impl QuillApp {
         });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
-            let Some(dialog_state) = this.member_dialog.as_ref() else {
+            let Some(dialog_state) = this.admin.member_dialog.as_ref() else {
                 return dialog
                     .title(crate::ui::shell::dialog_title("Manage members"))
                     .on_close(on_close);
@@ -330,7 +330,7 @@ impl QuillApp {
                         .label(toggle_label)
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(dialog) = this.member_dialog.as_mut() {
+                            if let Some(dialog) = this.admin.member_dialog.as_mut() {
                                 dialog.add_open = !dialog.add_open;
                                 cx.notify();
                             }
@@ -511,7 +511,7 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<SupergroupMembersFetch> {
-        let dialog = self.member_dialog.as_ref()?;
+        let dialog = self.admin.member_dialog.as_ref()?;
         let session = self.session()?;
         if dialog.is_basic_group {
             session.basic_group_members.get(&dialog.chat_id.0).cloned()
@@ -635,7 +635,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Member => DialogSpec::new(
         4300,
-        |app| app.member_dialog.is_some(),
+        |app| app.admin.member_dialog.is_some(),
         QuillApp::build_member_dialog,
     ),
 }

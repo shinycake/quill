@@ -123,12 +123,12 @@ impl QuillApp {
     fn demo_setup_updates_sync(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         let mode = demo_sync_mode();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_mode(&mode, session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_mode(&mode, session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         match mode.as_str() {
-            "frozen" => self.freeze_info_open = true,
-            "age" => self.age_verify_open = true,
+            "frozen" => self.account.freeze_info_open = true,
+            "age" => self.account.age_verify_open = true,
             _ => {}
         }
     }

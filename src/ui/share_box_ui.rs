@@ -132,7 +132,7 @@ impl QuillApp {
         // Phase A1: slow-mode gate applies to forwards — forwarding sends
         // messages to the destination chat.
         if self.slow_mode_blocked(dest, cx) {
-            return Some(self.status_note.clone());
+            return Some(self.connection.status_note.clone());
         }
         None
     }
@@ -145,13 +145,13 @@ impl QuillApp {
         };
         let dests: Vec<ChatId> = self.share.selection.chats().to_vec();
         if dests.is_empty() {
-            self.status_note = "choose a chat to forward to".into();
+            self.connection.status_note = "choose a chat to forward to".into();
             cx.notify();
             return;
         }
         for dest in &dests {
             if let Some(note) = self.share_dest_refusal(*dest, cx) {
-                self.status_note = note;
+                self.connection.status_note = note;
                 cx.notify();
                 return;
             }
@@ -186,7 +186,7 @@ impl QuillApp {
                     failed += 1;
                 }
             }
-            self.status_note = if failed == 0 {
+            self.connection.status_note = if failed == 0 {
                 share_done_label(draft.count(), &titles)
             } else {
                 format!("could not forward to {failed} chat(s)")
@@ -234,7 +234,7 @@ impl QuillApp {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
-            self.status_note = note;
+            self.connection.status_note = note;
             cx.notify();
             return;
         }
@@ -249,7 +249,7 @@ impl QuillApp {
         if !comment.is_empty() {
             self.set_composer_markup(&comment, window, cx);
         }
-        self.status_note = "forward bar ready — press Send".into();
+        self.connection.status_note = "forward bar ready — press Send".into();
         cx.notify();
     }
 
@@ -284,7 +284,7 @@ impl QuillApp {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
-            self.status_note = note;
+            self.connection.status_note = note;
             cx.notify();
             return;
         }
@@ -309,12 +309,12 @@ impl QuillApp {
                 .forward_messages_with_options(dest, &draft, &options);
             match result {
                 Ok(_) => {
-                    self.status_note = "forwarding…".into();
+                    self.connection.status_note = "forwarding…".into();
                     self.share.pending_forward = None;
                     self.share.forward_bar_dest = None;
                     self.composer_ui.scheduling = quill::composer::ComposerScheduling::None;
                 }
-                Err(_) => self.status_note = "could not forward messages".into(),
+                Err(_) => self.connection.status_note = "could not forward messages".into(),
             }
         } else if self.demo_session.is_some() {
             self.apply_demo_forward(dest, &draft);
@@ -719,14 +719,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if locked {
-            self.status_note =
+            self.connection.status_note =
                 "Subscribe to Telegram Premium to be able to comment on behalf of your channels in group chats."
                     .into();
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.set_chat_message_sender(chat_id, sender) {
+            self.connection.status_note = match live.driver.set_chat_message_sender(chat_id, sender)
+            {
                 Ok(()) => "changing sender…".into(),
                 Err(_) => "could not change the sender".into(),
             };

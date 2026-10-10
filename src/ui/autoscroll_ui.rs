@@ -43,7 +43,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.autoscroll.active.is_some() {
+        if self.history.autoscroll.active.is_some() {
             self.autoscroll_stop(cx);
             return;
         }
@@ -51,7 +51,7 @@ impl QuillApp {
             return;
         };
         let now = Instant::now();
-        self.autoscroll.active = Some(Active {
+        self.history.autoscroll.active = Some(Active {
             anchor: position,
             chat: chat.0,
             pressed_at: Some(now),
@@ -89,7 +89,7 @@ impl QuillApp {
 
     /// Middle button released: a long press was a hold and ends here.
     pub(super) fn autoscroll_release(&mut self, cx: &mut Context<Self>) {
-        let Some(active) = self.autoscroll.active.as_mut() else {
+        let Some(active) = self.history.autoscroll.active.as_mut() else {
             return;
         };
         let Some(pressed_at) = active.pressed_at.take() else {
@@ -101,13 +101,13 @@ impl QuillApp {
     }
 
     pub(super) fn autoscroll_stop(&mut self, cx: &mut Context<Self>) {
-        if self.autoscroll.active.take().is_some() {
+        if self.history.autoscroll.active.take().is_some() {
             cx.notify();
         }
     }
 
     pub(super) fn autoscroll_active(&self) -> bool {
-        self.autoscroll.active.is_some()
+        self.history.autoscroll.active.is_some()
     }
 
     /// One tick of the loop: how far to scroll, or `None` to end it (the
@@ -119,9 +119,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<(Point<Pixels>, f32)> {
         let open = self.session().and_then(|s| s.open_chat).map(|id| id.0);
-        let active = self.autoscroll.active.as_mut()?;
+        let active = self.history.autoscroll.active.as_mut()?;
         if !window_active || open != Some(active.chat) {
-            self.autoscroll.active = None;
+            self.history.autoscroll.active = None;
             cx.notify();
             return None;
         }
@@ -140,7 +140,7 @@ impl QuillApp {
     /// The anchor mark: a ring with an arrow for each direction, the one
     /// being pulled towards drawn strong.
     pub(super) fn autoscroll_mark(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let active = self.autoscroll.active.as_ref()?;
+        let active = self.history.autoscroll.active.as_ref()?;
         let theme = cx.theme();
         let strong = theme.foreground;
         let faint = theme.muted_foreground;

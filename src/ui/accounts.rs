@@ -60,19 +60,20 @@ impl QuillApp {
     /// Slice parity:auth-multi-account: open the Accounts dialog. The
     /// registry reads are local and synchronous — no TDLib round-trip.
     pub(crate) fn open_accounts(&mut self, cx: &mut Context<Self>) {
-        self.accounts_ui.open = true;
-        self.accounts_ui.remove_confirm = None;
-        self.accounts_ui.error = None;
+        self.account.accounts.open = true;
+        self.account.accounts.remove_confirm = None;
+        self.account.accounts.error = None;
         cx.notify();
     }
 
     /// Slice parity:auth-multi-account: close the dialog and drop its
     /// working state (pending remove confirm, error, add-name input).
     pub(crate) fn close_accounts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.accounts_ui.open = false;
-        self.accounts_ui.remove_confirm = None;
-        self.accounts_ui.error = None;
-        self.accounts_ui
+        self.account.accounts.open = false;
+        self.account.accounts.remove_confirm = None;
+        self.account.accounts.error = None;
+        self.account
+            .accounts
             .add_name
             .update(cx, |input, cx| input.set_value("", window, cx));
     }
@@ -85,7 +86,7 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.status_note = message.into();
+        self.connection.status_note = message.into();
         cx.notify();
     }
 
@@ -119,26 +120,32 @@ impl QuillApp {
         };
         self.clear_device_qr();
         self.close_accounts(window, cx);
-        self.accepted_registration_terms = None;
-        self.registration_notify_contacts = false;
-        self.registration_first_input
+        self.auth_ui.accepted_registration_terms = None;
+        self.auth_ui.registration_notify_contacts = false;
+        self.auth_ui
+            .registration_first_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.registration_last_input
+        self.auth_ui
+            .registration_last_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.email_input
+        self.auth_ui
+            .email_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.code_input
+        self.auth_ui
+            .code_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.pickers.media_panel.open = false;
-        self.marketplace_open = false;
-        self.marketplace_private = true;
-        self.marketplace_error = None;
-        self.marketplace_name_input
+        self.payments.marketplace_open = false;
+        self.payments.marketplace_private = true;
+        self.payments.marketplace_error = None;
+        self.payments
+            .marketplace_name_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.marketplace_comment_input
+        self.payments
+            .marketplace_comment_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.pickers
             .emoji_search_input
@@ -146,7 +153,7 @@ impl QuillApp {
         self.pickers
             .gif_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.sticker_settings_open = false;
+        self.settings.sticker_settings_open = false;
         self.pickers
             .sticker_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -167,19 +174,20 @@ impl QuillApp {
     /// flow for the new account.
     pub(crate) fn add_account_named(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name = self
-            .accounts_ui
+            .account
+            .accounts
             .add_name
             .read(cx)
             .value()
             .trim()
             .to_string();
         if name.is_empty() {
-            self.accounts_ui.error = Some("Give the new account a name first.".into());
+            self.account.accounts.error = Some("Give the new account a name first.".into());
             cx.notify();
             return;
         }
         let Some(root) = safe_app_root() else {
-            self.accounts_ui.error =
+            self.account.accounts.error =
                 Some("Accounts are unavailable: no app data directory.".into());
             cx.notify();
             return;
@@ -189,19 +197,20 @@ impl QuillApp {
         let premium = usize::from(self.session().and_then(|s| s.premium_option) == Some(true));
         if let Some(note) = quill::signin::add_account_blocker(list_accounts(&root).len(), premium)
         {
-            self.accounts_ui.error = Some(note);
+            self.account.accounts.error = Some(note);
             cx.notify();
             return;
         }
         match add_account(&root, &name) {
             Ok(key) => {
-                self.accounts_ui
+                self.account
+                    .accounts
                     .add_name
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.switch_account(&key, &name, window, cx);
             }
             Err(e) => {
-                self.accounts_ui.error = Some(format!("Could not add the account: {e}"));
+                self.account.accounts.error = Some(format!("Could not add the account: {e}"));
                 cx.notify();
             }
         }
@@ -211,12 +220,12 @@ impl QuillApp {
     /// UI never offers the active one — switch away from it first).
     pub(crate) fn remove_account_key(&mut self, key: &AccountKey, cx: &mut Context<Self>) {
         let Some(root) = safe_app_root() else {
-            self.accounts_ui.error =
+            self.account.accounts.error =
                 Some("Accounts are unavailable: no app data directory.".into());
             cx.notify();
             return;
         };
-        self.accounts_ui.remove_confirm = None;
+        self.account.accounts.remove_confirm = None;
         match remove_account(&root, key) {
             Ok(()) => {
                 // Drop the account's keychain item too: otherwise the
@@ -225,10 +234,10 @@ impl QuillApp {
                 // the account data is already gone; a locked keychain is
                 // just an orphaned item, not a failure.
                 let _ = live_secret_store().delete(key);
-                self.accounts_ui.error = None;
+                self.account.accounts.error = None;
             }
             Err(e) => {
-                self.accounts_ui.error = Some(format!("Could not remove the account: {e}"));
+                self.account.accounts.error = Some(format!("Could not remove the account: {e}"));
             }
         }
         cx.notify();
@@ -274,8 +283,8 @@ impl QuillApp {
                         .label("Remove")
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.accounts_ui.remove_confirm = Some(key_remove_arm.clone());
-                            this.accounts_ui.error = None;
+                            this.account.accounts.remove_confirm = Some(key_remove_arm.clone());
+                            this.account.accounts.error = None;
                             cx.notify();
                         })),
                 )
@@ -328,7 +337,7 @@ impl QuillApp {
                                     .label("Cancel")
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.accounts_ui.remove_confirm = None;
+                                        this.account.accounts.remove_confirm = None;
                                         cx.notify();
                                     })),
                             ),
@@ -358,8 +367,8 @@ impl QuillApp {
                 .map(|root| list_accounts(root))
                 .unwrap_or_default();
             let active: Option<AccountKey> = root.as_ref().map(|root| active_account(root));
-            let error = this.accounts_ui.error.clone();
-            let remove_confirm = this.accounts_ui.remove_confirm.clone();
+            let error = this.account.accounts.error.clone();
+            let remove_confirm = this.account.accounts.remove_confirm.clone();
             let mut body = div().flex().flex_col().gap_3();
             if let Some(line) = error {
                 body = body.child(
@@ -397,7 +406,7 @@ impl QuillApp {
                         )),
                 )
                 .child(
-                    Textarea::new(&this.accounts_ui.add_name)
+                    Textarea::new(&this.account.accounts.add_name)
                         .aria_label("Account display name")
                         .h(px(40.)),
                 )
@@ -445,7 +454,7 @@ crate::ui::shell::register_dialogs! {
         // Slice parity:auth-multi-account (UI): accounts sit with the
         // other settings-level dialogs (lowest priority band).
         7000,
-        |app| app.accounts_ui.open,
+        |app| app.account.accounts.open,
         QuillApp::build_accounts_dialog,
     ),
 }

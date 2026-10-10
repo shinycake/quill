@@ -981,7 +981,9 @@ impl QuillApp {
                 app.group_call.window_opening = false;
                 match result {
                     Ok(handle) => app.group_call.window = Some(handle.into()),
-                    Err(_) => app.status_note = "Couldn't open the video chat window".into(),
+                    Err(_) => {
+                        app.connection.status_note = "Couldn't open the video chat window".into()
+                    }
                 }
                 cx.notify();
             });
@@ -1108,7 +1110,7 @@ impl Render for GroupCallPanel {
         }
         let fullscreen = window.is_fullscreen();
         let body = owner.update(cx, |app, cx| {
-            let wants_stage = fullscreen || app.demo_group_stage;
+            let wants_stage = fullscreen || app.demo_ui.group_stage;
             let call = app.session().and_then(|s| s.active_group_call.clone());
             let stage = call
                 .filter(|_| wants_stage)

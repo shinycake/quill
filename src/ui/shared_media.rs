@@ -349,15 +349,15 @@ impl QuillApp {
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_shared_media() {
                 Ok(true) => {
-                    self.status_note = "shared media".into();
+                    self.connection.status_note = "shared media".into();
                     true
                 }
                 Ok(false) => {
-                    self.status_note = "select a chat to browse its shared media".into();
+                    self.connection.status_note = "select a chat to browse its shared media".into();
                     false
                 }
                 Err(_) => {
-                    self.status_note = "could not open shared media".into();
+                    self.connection.status_note = "could not open shared media".into();
                     false
                 }
             }
@@ -365,11 +365,11 @@ impl QuillApp {
             match session.open_chat {
                 Some(chat_id) => {
                     session.shared_media.open_for(chat_id);
-                    self.status_note = "shared media".into();
+                    self.connection.status_note = "shared media".into();
                     true
                 }
                 None => {
-                    self.status_note = "select a chat to browse its shared media".into();
+                    self.connection.status_note = "select a chat to browse its shared media".into();
                     false
                 }
             }
@@ -387,7 +387,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.shared_media.close();
         }
-        self.status_note = "shared media closed".into();
+        self.connection.status_note = "shared media closed".into();
         cx.notify();
     }
 
@@ -400,7 +400,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_shared_media_tab(tab).is_err() {
-                self.status_note = "could not load that tab".into();
+                self.connection.status_note = "could not load that tab".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.shared_media.select_tab(tab);
@@ -412,7 +412,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let tab = live.driver.session.shared_media.active_tab;
             if live.driver.fetch_shared_media(tab).is_err() {
-                self.status_note = "could not retry loading shared media".into();
+                self.connection.status_note = "could not retry loading shared media".into();
             }
         }
         cx.notify();
@@ -427,8 +427,8 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.jump_to_shared_media_item(message_id) {
-                Ok(_) => self.status_note = "jumped to message".into(),
-                Err(_) => self.status_note = "could not open that message".into(),
+                Ok(_) => self.connection.status_note = "jumped to message".into(),
+                Err(_) => self.connection.status_note = "could not open that message".into(),
             }
         }
         cx.notify();

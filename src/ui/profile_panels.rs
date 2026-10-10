@@ -98,7 +98,7 @@ impl QuillApp {
     /// "Phone number copied to clipboard" and friends).
     pub(super) fn copy_profile_text(&mut self, text: &str, toast: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-        self.status_note = toast.into();
+        self.connection.status_note = toast.into();
         cx.notify();
     }
 
@@ -654,7 +654,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "profile photos need a live connection (demo)".into();
+            self.connection.status_note = "profile photos need a live connection (demo)".into();
             cx.notify();
             return;
         };
@@ -666,8 +666,8 @@ impl QuillApp {
             live.driver.session.user_profile_photos.remove(&user_id);
         }
         match live.driver.fetch_user_profile_photos(user_id) {
-            Ok(_) => self.pending_profile_gallery = Some(user_id),
-            Err(_) => self.status_note = "Couldn't reach Telegram; try again.".into(),
+            Ok(_) => self.dialogs.pending_profile_gallery = Some(user_id),
+            Err(_) => self.connection.status_note = "Couldn't reach Telegram; try again.".into(),
         }
         cx.notify();
     }
@@ -675,7 +675,7 @@ impl QuillApp {
     /// Poll-loop hook: open the gallery that was waiting for its list.
     /// Returns `true` when something changed.
     pub(super) fn pump_profile_gallery(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(user_id) = self.pending_profile_gallery else {
+        let Some(user_id) = self.dialogs.pending_profile_gallery else {
             return false;
         };
         let Some(state) = self
@@ -692,16 +692,16 @@ impl QuillApp {
         match state {
             ProfilePhotosFetch::Loading => return false,
             ProfilePhotosFetch::Loaded { .. } if has_photos => {
-                self.pending_profile_gallery = None;
+                self.dialogs.pending_profile_gallery = None;
                 self.show_profile_gallery(user_id, cx);
             }
             ProfilePhotosFetch::Loaded { .. } => {
-                self.pending_profile_gallery = None;
-                self.status_note = "No profile photos".into();
+                self.dialogs.pending_profile_gallery = None;
+                self.connection.status_note = "No profile photos".into();
             }
             ProfilePhotosFetch::Failed(reason) => {
-                self.pending_profile_gallery = None;
-                self.status_note = format!("Couldn't load profile photos: {reason}");
+                self.dialogs.pending_profile_gallery = None;
+                self.connection.status_note = format!("Couldn't load profile photos: {reason}");
             }
         }
         true
@@ -729,13 +729,14 @@ impl QuillApp {
     /// (`setProfilePhoto` with the suggestion's `chatPhoto.id`).
     pub(super) fn accept_suggested_photo(&mut self, photo_id: i64, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "profile photo changes need a live connection (demo)".into();
+            self.connection.status_note =
+                "profile photo changes need a live connection (demo)".into();
             cx.notify();
             return;
         };
         match live.driver.set_profile_photo_previous(photo_id) {
-            Ok(_) => self.status_note = "Profile photo updated".into(),
-            Err(_) => self.status_note = "Couldn't reach Telegram; try again.".into(),
+            Ok(_) => self.connection.status_note = "Profile photo updated".into(),
+            Err(_) => self.connection.status_note = "Couldn't reach Telegram; try again.".into(),
         }
         cx.notify();
     }
@@ -746,16 +747,17 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "profile photo changes need a live connection (demo)".into();
+            self.connection.status_note =
+                "profile photo changes need a live connection (demo)".into();
             cx.notify();
             return;
         };
         match live.driver.set_profile_photo_previous(photo_id) {
             Ok(_) => {
-                self.status_note = "Main profile photo updated".into();
+                self.connection.status_note = "Main profile photo updated".into();
                 self.close_media_viewer(cx);
             }
-            Err(_) => self.status_note = "Couldn't reach Telegram; try again.".into(),
+            Err(_) => self.connection.status_note = "Couldn't reach Telegram; try again.".into(),
         }
         cx.notify();
     }
@@ -775,7 +777,7 @@ impl QuillApp {
             return;
         };
         self.close_media_viewer(cx);
-        self.profile_dialog = Some(ProfileDialog::ReportPhoto { user_id, file_id });
+        self.dialogs.profile_dialog = Some(ProfileDialog::ReportPhoto { user_id, file_id });
         cx.notify();
     }
 
@@ -787,7 +789,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: reports need a live session.".into();
+            self.connection.status_note = "Demo mode: reports need a live session.".into();
             cx.notify();
             return;
         };
@@ -795,8 +797,8 @@ impl QuillApp {
             .driver
             .report_profile_photo(user_id, file_id, reason.td_type())
         {
-            Ok(_) => self.status_note = "Report sent".into(),
-            Err(_) => self.status_note = "Couldn't reach Telegram; try again.".into(),
+            Ok(_) => self.connection.status_note = "Report sent".into(),
+            Err(_) => self.connection.status_note = "Couldn't reach Telegram; try again.".into(),
         }
         cx.notify();
     }
@@ -810,7 +812,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !mode.needs_file() {
-            self.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+            self.dialogs.profile_dialog = Some(ProfileDialog::PersonalPhoto {
                 user_id,
                 mode,
                 path: None,
@@ -830,11 +832,11 @@ impl QuillApp {
             {
                 let _ = this.update(cx, |this, cx| {
                     if !is_profile_photo_file(&path) {
-                        this.status_note = "Choose a JPEG, PNG or WebP image.".into();
+                        this.connection.status_note = "Choose a JPEG, PNG or WebP image.".into();
                         cx.notify();
                         return;
                     }
-                    this.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+                    this.dialogs.profile_dialog = Some(ProfileDialog::PersonalPhoto {
                         user_id,
                         mode,
                         path: Some(path.to_string_lossy().into_owned()),
@@ -854,7 +856,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: photo changes need a live session.".into();
+            self.connection.status_note = "Demo mode: photo changes need a live session.".into();
             cx.notify();
             return;
         };
@@ -868,7 +870,7 @@ impl QuillApp {
             }
             _ => return,
         };
-        self.status_note = match sent {
+        self.connection.status_note = match sent {
             Ok(_) => mode.done_note().into(),
             Err(_) => "Couldn't reach Telegram; try again.".into(),
         };
@@ -878,7 +880,7 @@ impl QuillApp {
     // ===================== dialogs =====================
 
     pub(super) fn close_profile_dialog(&mut self, cx: &mut Context<Self>) {
-        self.profile_dialog = None;
+        self.dialogs.profile_dialog = None;
         cx.notify();
     }
 
@@ -904,7 +906,7 @@ impl QuillApp {
         dialog
             .first_name_input
             .update(cx, |input, cx| input.focus(window, cx));
-        self.profile_dialog = Some(ProfileDialog::EditContact(dialog));
+        self.dialogs.profile_dialog = Some(ProfileDialog::EditContact(dialog));
         cx.notify();
     }
 
@@ -912,7 +914,7 @@ impl QuillApp {
     /// otherwise `addContact` (add-or-edit) with the current note so the
     /// note is not cleared.
     fn submit_edit_contact(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(ProfileDialog::EditContact(dialog)) = &self.profile_dialog else {
+        let Some(ProfileDialog::EditContact(dialog)) = &self.dialogs.profile_dialog else {
             return false;
         };
         let read = |input: &Entity<TextareaState>| {
@@ -931,7 +933,7 @@ impl QuillApp {
             dialog.share_phone,
         );
         if first.is_empty() && last.is_empty() {
-            self.status_note = "Enter a name for the contact.".into();
+            self.connection.status_note = "Enter a name for the contact.".into();
             cx.notify();
             return false;
         }
@@ -947,7 +949,7 @@ impl QuillApp {
             return false;
         };
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: contact edits need a live session.".into();
+            self.connection.status_note = "Demo mode: contact edits need a live session.".into();
             cx.notify();
             return true;
         };
@@ -961,11 +963,11 @@ impl QuillApp {
         };
         match sent {
             Ok(()) => {
-                self.status_note = "Contact saved".into();
+                self.connection.status_note = "Contact saved".into();
                 true
             }
             Err(_) => {
-                self.status_note = "Couldn't reach Telegram; try again.".into();
+                self.connection.status_note = "Couldn't reach Telegram; try again.".into();
                 cx.notify();
                 false
             }
@@ -1002,7 +1004,7 @@ impl QuillApp {
         dialog
             .day_input
             .update(cx, |input, cx| input.focus(window, cx));
-        self.profile_dialog = Some(ProfileDialog::Birthday(dialog));
+        self.dialogs.profile_dialog = Some(ProfileDialog::Birthday(dialog));
         cx.notify();
     }
 
@@ -1010,9 +1012,9 @@ impl QuillApp {
     /// Privacy editor for the date-of-birth rule (tdesktop links the same
     /// `Privacy::Key::Birthday` box from the birthday row).
     pub(super) fn open_birthday_privacy(&mut self, cx: &mut Context<Self>) {
-        self.profile_dialog = None;
+        self.dialogs.profile_dialog = None;
         self.open_privacy(cx);
-        self.privacy_editor = Some(super::privacy::PrivacyEditorTarget::Rule(
+        self.privacy.editor = Some(super::privacy::PrivacyEditorTarget::Rule(
             quill::telegram::requests_privacy::PrivacySettingKey::ShowBirthdate,
         ));
         cx.notify();
@@ -1024,7 +1026,7 @@ impl QuillApp {
         let parsed = if remove {
             Ok(None)
         } else {
-            let Some(ProfileDialog::Birthday(dialog)) = &self.profile_dialog else {
+            let Some(ProfileDialog::Birthday(dialog)) = &self.dialogs.profile_dialog else {
                 return false;
             };
             let field = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
@@ -1041,7 +1043,7 @@ impl QuillApp {
         let parts = match parsed {
             Ok(parts) => parts,
             Err(message) => {
-                if let Some(ProfileDialog::Birthday(dialog)) = &mut self.profile_dialog {
+                if let Some(ProfileDialog::Birthday(dialog)) = &mut self.dialogs.profile_dialog {
                     dialog.error = Some(message);
                 }
                 cx.notify();
@@ -1049,13 +1051,13 @@ impl QuillApp {
             }
         };
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: birthday changes need a live session.".into();
+            self.connection.status_note = "Demo mode: birthday changes need a live session.".into();
             cx.notify();
             return true;
         };
         match live.driver.set_birthdate(parts) {
             Ok(_) => {
-                self.status_note = if remove {
+                self.connection.status_note = if remove {
                     "Birthday removed".into()
                 } else {
                     "Birthday saved".into()
@@ -1063,7 +1065,7 @@ impl QuillApp {
                 true
             }
             Err(_) => {
-                self.status_note = "Couldn't reach Telegram; try again.".into();
+                self.connection.status_note = "Couldn't reach Telegram; try again.".into();
                 cx.notify();
                 false
             }
@@ -1074,19 +1076,19 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_suitable_personal_chats();
         }
-        self.profile_dialog = Some(ProfileDialog::PersonalChannel);
+        self.dialogs.profile_dialog = Some(ProfileDialog::PersonalChannel);
         cx.notify();
     }
 
     fn choose_personal_channel(&mut self, chat_id: i64, cx: &mut Context<Self>) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: this needs a live session.".into();
+            self.connection.status_note = "Demo mode: this needs a live session.".into();
             cx.notify();
             return true;
         };
         match live.driver.set_personal_chat(chat_id) {
             Ok(_) => {
-                self.status_note = if chat_id == 0 {
+                self.connection.status_note = if chat_id == 0 {
                     "Personal channel removed".into()
                 } else {
                     "Personal channel saved".into()
@@ -1094,7 +1096,7 @@ impl QuillApp {
                 true
             }
             Err(_) => {
-                self.status_note = "Couldn't reach Telegram; try again.".into();
+                self.connection.status_note = "Couldn't reach Telegram; try again.".into();
                 cx.notify();
                 false
             }
@@ -1102,7 +1104,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_share_contact_dialog(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        self.profile_dialog = Some(ProfileDialog::ShareContact {
+        self.dialogs.profile_dialog = Some(ProfileDialog::ShareContact {
             user_id,
             target: None,
         });
@@ -1111,7 +1113,7 @@ impl QuillApp {
 
     fn send_shared_contact(&mut self, user_id: i64, chat_id: i64, cx: &mut Context<Self>) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "Demo mode: sharing needs a live session.".into();
+            self.connection.status_note = "Demo mode: sharing needs a live session.".into();
             cx.notify();
             return true;
         };
@@ -1124,11 +1126,11 @@ impl QuillApp {
             .unwrap_or_default();
         match live.driver.send_contact_message(ChatId(chat_id), user_id) {
             Ok(_) => {
-                self.status_note = format!("Contact shared with {title}");
+                self.connection.status_note = format!("Contact shared with {title}");
                 true
             }
             Err(_) => {
-                self.status_note = "Couldn't share the contact here.".into();
+                self.connection.status_note = "Couldn't share the contact here.".into();
                 cx.notify();
                 false
             }
@@ -1158,13 +1160,19 @@ impl QuillApp {
                     this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
                 }))
         };
-        if matches!(self.profile_dialog, Some(ProfileDialog::AddBot { .. })) {
+        if matches!(
+            self.dialogs.profile_dialog,
+            Some(ProfileDialog::AddBot { .. })
+        ) {
             return self.add_bot_dialog_parts(cx);
         }
-        if matches!(self.profile_dialog, Some(ProfileDialog::ShareGame { .. })) {
+        if matches!(
+            self.dialogs.profile_dialog,
+            Some(ProfileDialog::ShareGame { .. })
+        ) {
             return self.share_game_dialog_parts(cx);
         }
-        match self.profile_dialog.as_ref()? {
+        match self.dialogs.profile_dialog.as_ref()? {
             ProfileDialog::AddBot { .. } | ProfileDialog::ShareGame { .. } => None,
             ProfileDialog::EditContact(dialog) => {
                 let user_id = dialog.user_id;
@@ -1204,7 +1212,7 @@ impl QuillApp {
                                 .label("Share my phone number")
                                 .on_click(cx.listener(|this, &on, window, cx| {
                                     if let Some(ProfileDialog::EditContact(dialog)) =
-                                        &mut this.profile_dialog
+                                        &mut this.dialogs.profile_dialog
                                     {
                                         dialog.share_phone = on;
                                     }
@@ -1449,10 +1457,11 @@ impl QuillApp {
                                 .label("Back")
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.profile_dialog = Some(ProfileDialog::ShareContact {
-                                        user_id,
-                                        target: None,
-                                    });
+                                    this.dialogs.profile_dialog =
+                                        Some(ProfileDialog::ShareContact {
+                                            user_id,
+                                            target: None,
+                                        });
                                     window.refresh();
                                     cx.notify();
                                 })),
@@ -1496,7 +1505,7 @@ impl QuillApp {
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
-                                this.profile_dialog = Some(ProfileDialog::ShareContact {
+                                this.dialogs.profile_dialog = Some(ProfileDialog::ShareContact {
                                     user_id,
                                     target: Some(id),
                                 });
@@ -1632,7 +1641,7 @@ crate::ui::shell::register_dialogs! {
     /// B10: profile and contact panel dialogs.
     ProfilePanel => DialogSpec::new(
         6100,
-        |app| app.profile_dialog.is_some(),
+        |app| app.dialogs.profile_dialog.is_some(),
         QuillApp::build_profile_panel_dialog,
     ),
 }

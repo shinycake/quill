@@ -166,34 +166,35 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+        self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
         match demo {
             GlobalDemo::ContactsIndex => {
-                apply_contacts_fixture(session, &self.demo_sink, &self.demo_seq);
-                self.contacts_tab_open = true;
-                self.global.contacts_sort = quill::contacts_index::SortMode::Alphabet;
+                apply_contacts_fixture(session, &self.demo_ui.sink, &self.demo_ui.seq);
+                self.chat_list.contacts_tab_open = true;
+                self.chat_list.global.contacts_sort = quill::contacts_index::SortMode::Alphabet;
                 // The pointer rests over the "L" area of the bar.
-                self.global.index_cursor = Some((46., 250.));
-                self.status_note = "screenshot demo — contacts by name with the index bar".into();
+                self.chat_list.global.index_cursor = Some((46., 250.));
+                self.connection.status_note =
+                    "screenshot demo — contacts by name with the index bar".into();
             }
             GlobalDemo::CallsClear => {
-                apply_ready_calls_settings(session, &self.demo_sink, &self.demo_seq);
-                self.calls_tab_open = true;
-                self.global.clear_calls_open = true;
-                self.status_note = "screenshot demo — Clear calls box".into();
+                apply_ready_calls_settings(session, &self.demo_ui.sink, &self.demo_ui.seq);
+                self.chat_list.calls_tab_open = true;
+                self.chat_list.global.clear_calls_open = true;
+                self.connection.status_note = "screenshot demo — Clear calls box".into();
             }
             GlobalDemo::StoriesMenu => {
                 super::chatlist_demo::apply_ready_archive_row(
                     session,
-                    &self.demo_sink,
-                    &self.demo_seq,
+                    &self.demo_ui.sink,
+                    &self.demo_ui.seq,
                 );
-                self.global.story_menu =
+                self.chat_list.global.story_menu =
                     Some((11, gpui_kit::point(gpui_kit::px(150.), gpui_kit::px(190.))));
-                self.status_note = "screenshot demo — story tile menu".into();
+                self.connection.status_note = "screenshot demo — story tile menu".into();
             }
             GlobalDemo::Birthdays => {
-                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
                 let now = quill::local_time::now_unix();
                 let day = |offset: i64| quill::local_time::civil_local(now + offset * 86_400);
                 let entry = |id: i64,
@@ -214,7 +215,7 @@ impl QuillApp {
                 ];
                 let mut closes = Vec::new();
                 for [user, date] in &people {
-                    if let Some(owned) = copy_and_parse(user, &self.demo_seq, &dyn_sink) {
+                    if let Some(owned) = copy_and_parse(user, &self.demo_ui.seq, &dyn_sink) {
                         session.apply(owned);
                     }
                     closes.push(date.clone());
@@ -233,15 +234,16 @@ impl QuillApp {
                     r#"{{"@type":"updateContactCloseBirthdays","close_birthday_users":[{}]}}"#,
                     list.join(",")
                 );
-                if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                     session.apply(owned);
                 }
-                self.settings_open = true;
-                self.settings_page = Some("Contacts");
-                self.status_note = "screenshot demo — birthday contacts in Settings".into();
+                self.settings.open = true;
+                self.settings.page = Some("Contacts");
+                self.connection.status_note =
+                    "screenshot demo — birthday contacts in Settings".into();
             }
             GlobalDemo::Suggestions | GlobalDemo::SuggestionsPhone => {
-                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+                let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
                 let today = quill::local_time::civil_local(quill::local_time::now_unix());
                 let jsons = [
                     r#"{"@type":"updateUser","user":{"id":401,"first_name":"Ada","last_name":"Lovelace","phone_number":"","type":{"@type":"userTypeRegular"}}}"#.to_string(),
@@ -253,7 +255,7 @@ impl QuillApp {
                     ),
                 ];
                 for json in jsons {
-                    if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                    if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                         session.apply(owned);
                     }
                 }
@@ -265,7 +267,7 @@ impl QuillApp {
                         .actions
                         .remove("suggestedActionCheckPhoneNumber");
                 }
-                self.status_note = "screenshot demo — chat-list suggestion".into();
+                self.connection.status_note = "screenshot demo — chat-list suggestion".into();
             }
         }
         cx.notify();

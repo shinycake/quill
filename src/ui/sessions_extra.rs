@@ -78,7 +78,8 @@ impl QuillApp {
     fn set_session_ttl(&mut self, days: i32, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_inactive_session_ttl(days) {
-                self.status_note = format!("couldn't change the session timeout: {err:?}");
+                self.connection.status_note =
+                    format!("couldn't change the session timeout: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.privacy_data.inactive_session_ttl_days = Some(days);
@@ -192,7 +193,7 @@ impl QuillApp {
                 .label("Back")
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.privacy_ui.session_details = None;
+                    this.privacy.extra.session_details = None;
                     cx.notify();
                 })),
         );
@@ -203,7 +204,7 @@ impl QuillApp {
                     .custom(quiet_danger(cx))
                     .disabled(mutating)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.privacy_ui.session_details = None;
+                        this.privacy.extra.session_details = None;
                         this.begin_terminate_session(session_id, incomplete, cx);
                     })),
             );

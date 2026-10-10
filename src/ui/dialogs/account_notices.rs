@@ -51,11 +51,11 @@ impl QuillApp {
             Some(AccountNotice::Terms)
         } else if !session.notices.service.is_empty() {
             Some(AccountNotice::Service)
-        } else if self.login_prevented.is_some() {
+        } else if self.auth_ui.login_prevented.is_some() {
             Some(AccountNotice::LoginPrevented)
-        } else if self.freeze_info_open && session.sync.freeze.is_some() {
+        } else if self.account.freeze_info_open && session.sync.freeze.is_some() {
             Some(AccountNotice::Frozen)
-        } else if self.age_verify_open && session.sync.age_verification.is_some() {
+        } else if self.account.age_verify_open && session.sync.age_verification.is_some() {
             Some(AccountNotice::AgeVerify)
         } else {
             None
@@ -71,11 +71,11 @@ impl QuillApp {
             .and_then(|live| live.driver.session.notices.review_outcome.take());
         match outcome {
             Some(LoginReview::Allowed) => {
-                self.status_note =
+                self.connection.status_note =
                     "New Login Allowed. You can check the list of your active logins in Active Devices."
                         .into();
             }
-            Some(LoginReview::Prevented { places }) => self.login_prevented = Some(places),
+            Some(LoginReview::Prevented { places }) => self.auth_ui.login_prevented = Some(places),
             None => {}
         }
     }
@@ -151,7 +151,7 @@ impl QuillApp {
             demo.notices.unconfirmed_count = 0;
             demo.notices.unconfirmed_entries.clear();
             if !confirmed {
-                self.login_prevented = Some(vec!["Berlin, Germany (Pixel 9)".into()]);
+                self.auth_ui.login_prevented = Some(vec!["Berlin, Germany (Pixel 9)".into()]);
             }
         }
         cx.notify();
@@ -175,9 +175,9 @@ impl QuillApp {
                             demo.dismiss_service_notice();
                         }
                     }
-                    Some(AccountNotice::LoginPrevented) => this.login_prevented = None,
-                    Some(AccountNotice::Frozen) => this.freeze_info_open = false,
-                    Some(AccountNotice::AgeVerify) => this.age_verify_open = false,
+                    Some(AccountNotice::LoginPrevented) => this.auth_ui.login_prevented = None,
+                    Some(AccountNotice::Frozen) => this.account.freeze_info_open = false,
+                    Some(AccountNotice::AgeVerify) => this.account.age_verify_open = false,
                     _ => {}
                 }
                 cx.notify();
@@ -238,7 +238,7 @@ impl QuillApp {
         let error = session.as_ref().and_then(|s| s.notices.terms_error.clone());
         let busy_delete = session.as_ref().is_some_and(|s| s.account_mutating);
         let account_error = session.as_ref().and_then(|s| s.account_error.clone());
-        match self.terms_step {
+        match self.auth_ui.terms_step {
             TermsStep::Terms => {
                 let min_age = terms.min_user_age;
                 let mut body = div().flex().flex_col().gap_3().child(
@@ -253,14 +253,14 @@ impl QuillApp {
                     body = body.child(
                         Checkbox::new("terms-age")
                             .label(format!("I confirm that I am {min_age} or over"))
-                            .checked(self.terms_age_ok)
+                            .checked(self.auth_ui.terms_age_ok)
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                this.terms_age_ok = on;
-                                this.terms_age_error = false;
+                                this.auth_ui.terms_age_ok = on;
+                                this.auth_ui.terms_age_error = false;
                                 cx.notify();
                             })),
                     );
-                    if self.terms_age_error {
+                    if self.auth_ui.terms_age_error {
                         body = body.child(
                             div()
                                 .text_xs()
@@ -282,7 +282,7 @@ impl QuillApp {
                             .ghost()
                             .disabled(in_flight)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.terms_step = TermsStep::DeclineSorry;
+                                this.auth_ui.terms_step = TermsStep::DeclineSorry;
                                 cx.notify();
                             })),
                     )
@@ -296,8 +296,8 @@ impl QuillApp {
                             .primary()
                             .disabled(in_flight)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                if min_age > 0 && !this.terms_age_ok {
-                                    this.terms_age_error = true;
+                                if min_age > 0 && !this.auth_ui.terms_age_ok {
+                                    this.auth_ui.terms_age_error = true;
                                 } else if let Some(live) = this.live.as_mut() {
                                     let _ = live.driver.accept_terms();
                                 } else if let Some(demo) = this.demo_session.as_mut() {
@@ -324,7 +324,7 @@ impl QuillApp {
                             .label("Back")
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.terms_step = TermsStep::Terms;
+                                this.auth_ui.terms_step = TermsStep::Terms;
                                 cx.notify();
                             })),
                     )
@@ -333,7 +333,7 @@ impl QuillApp {
                             .label("Decline & Delete")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.terms_step = TermsStep::DeleteWarning;
+                                this.auth_ui.terms_step = TermsStep::DeleteWarning;
                                 cx.notify();
                             })),
                     );
@@ -363,7 +363,7 @@ impl QuillApp {
                             .primary()
                             .disabled(busy_delete)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.terms_step = TermsStep::DeclineSorry;
+                                this.auth_ui.terms_step = TermsStep::DeclineSorry;
                                 cx.notify();
                             })),
                     )
@@ -455,7 +455,7 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> (SharedString, AnyElement, AnyElement, bool) {
-        let places = self.login_prevented.clone().unwrap_or_default();
+        let places = self.auth_ui.login_prevented.clone().unwrap_or_default();
         let title = if places.len() == 1 {
             "New Login Prevented"
         } else {
@@ -478,7 +478,7 @@ impl QuillApp {
                 .label("OK")
                 .primary()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.login_prevented = None;
+                    this.auth_ui.login_prevented = None;
                     cx.notify();
                 })),
         );

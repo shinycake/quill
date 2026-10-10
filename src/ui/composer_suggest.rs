@@ -253,7 +253,7 @@ impl QuillApp {
             &Self::appearance_paths(),
             &self.composer_ui.suggest.hashtags,
         ) {
-            self.status_note = format!("Couldn't save recent hashtags: {err}");
+            self.connection.status_note = format!("Couldn't save recent hashtags: {err}");
         }
     }
 

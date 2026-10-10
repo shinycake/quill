@@ -54,8 +54,8 @@ impl QuillApp {
         if self.demo_session.is_some() {
             return;
         }
-        self.system_accent = quill::system_accent::read();
-        self.system_accent_probed = true;
+        self.settings.system_accent = quill::system_accent::read();
+        self.settings.system_accent_probed = true;
         if quill::system_accent::pending() {
             cx.spawn(async move |this, cx| {
                 while quill::system_accent::pending() {
@@ -64,7 +64,7 @@ impl QuillApp {
                         .await;
                 }
                 let _ = this.update(cx, |this, cx| {
-                    this.system_accent = quill::system_accent::read();
+                    this.settings.system_accent = quill::system_accent::read();
                     this.apply_appearance(cx);
                     cx.notify();
                 });
@@ -128,7 +128,7 @@ impl QuillApp {
             cx,
             "Font family",
             &hint,
-            Select::new(&self.font_picker)
+            Select::new(&self.settings.font_picker)
                 .search_placeholder("Search fonts")
                 .accessibility_label("Interface font family")
                 .menu_max_h(px(280.))

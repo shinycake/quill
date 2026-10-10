@@ -267,7 +267,7 @@ impl QuillApp {
         }
         if was_playing {
             self.restart_player_at(offset);
-            self.status_note = format!(
+            self.connection.status_note = format!(
                 "{} — seek {}",
                 match self.active_playback_kind() {
                     PlaybackKind::Voice => "playing voice note",
@@ -332,7 +332,7 @@ impl QuillApp {
                             if let Some(id) = finished_id {
                                 this.playback.positions.insert(id, 0.0);
                             }
-                            this.status_note = "playback finished".into();
+                            this.connection.status_note = "playback finished".into();
                             if let Some((chat, id)) = next {
                                 this.play_message(chat, id, cx);
                             }
@@ -457,10 +457,10 @@ impl QuillApp {
                 .is_some_and(PlaybackClock::is_playing);
             if playing {
                 self.pause_active_playback();
-                self.status_note = "voice note paused".into();
+                self.connection.status_note = "voice note paused".into();
             } else {
                 self.resume_active_playback();
-                self.status_note = "playing voice note".into();
+                self.connection.status_note = "playing voice note".into();
             }
             cx.notify();
             return;
@@ -482,7 +482,7 @@ impl QuillApp {
         self.playback.pending_voice_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.status_note = "voice file is outside the account files".into();
+            self.connection.status_note = "voice file is outside the account files".into();
             cx.notify();
             return;
         };
@@ -506,7 +506,7 @@ impl QuillApp {
             self.mark_voice_opened(chat_id, message_id);
         }
         let playing = self.start_player(&safe, offset);
-        self.status_note = if playing {
+        self.connection.status_note = if playing {
             "playing voice note".into()
         } else {
             "voice note can't be played".into()
@@ -533,10 +533,10 @@ impl QuillApp {
                 .is_some_and(PlaybackClock::is_playing);
             if playing {
                 self.pause_active_playback();
-                self.status_note = "audio paused".into();
+                self.connection.status_note = "audio paused".into();
             } else {
                 self.resume_active_playback();
-                self.status_note = "playing audio".into();
+                self.connection.status_note = "playing audio".into();
             }
             cx.notify();
             return;
@@ -557,7 +557,7 @@ impl QuillApp {
         self.playback.pending_audio_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.status_note = "audio file is outside the account files".into();
+            self.connection.status_note = "audio file is outside the account files".into();
             cx.notify();
             return;
         };
@@ -579,7 +579,7 @@ impl QuillApp {
         );
         self.playback.path = Some(safe.clone());
         let playing = self.start_player(&safe, offset);
-        self.status_note = if playing {
+        self.connection.status_note = if playing {
             "playing audio".into()
         } else {
             "audio can't be played".into()
@@ -628,12 +628,12 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let json = format!(
             r#"{{"@type":"updateMessageContentOpened","chat_id":{},"message_id":{}}}"#,
             chat_id.0, message_id.0
         );
-        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
     }

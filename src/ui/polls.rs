@@ -204,13 +204,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_ui.pending_stop_poll = Some((chat_id, message_id, is_quiz));
-        self.status_note = "confirm stop poll".into();
+        self.connection.status_note = "confirm stop poll".into();
         cx.notify();
     }
 
     pub(super) fn cancel_stop_poll(&mut self, cx: &mut Context<Self>) {
         self.message_ui.pending_stop_poll = None;
-        self.status_note = "stop cancelled".into();
+        self.connection.status_note = "stop cancelled".into();
         cx.notify();
     }
 
@@ -227,7 +227,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .stop_poll(chat_id, message_id);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "stopping poll…".into(),
                 Err(_) => "could not stop poll".into(),
             };
@@ -241,7 +241,7 @@ impl QuillApp {
             {
                 poll_content.poll.is_closed = true;
             }
-            self.status_note = "poll stopped (demo)".into();
+            self.connection.status_note = "poll stopped (demo)".into();
         }
         cx.notify();
     }
@@ -256,7 +256,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.demo_session.is_some() {
-            self.status_note = "voter lists are unavailable in demo mode".into();
+            self.connection.status_note = "voter lists are unavailable in demo mode".into();
             cx.notify();
             return;
         }
@@ -279,7 +279,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.demo_session.is_some() {
-            self.status_note = "poll stats are unavailable in demo mode".into();
+            self.connection.status_note = "poll stats are unavailable in demo mode".into();
             cx.notify();
             return;
         }
@@ -290,7 +290,7 @@ impl QuillApp {
                 .fetch_poll_vote_statistics(chat_id, message_id, is_dark)
                 .is_err()
         {
-            self.status_note = "could not load poll stats".into();
+            self.connection.status_note = "could not load poll stats".into();
             cx.notify();
             return;
         }
@@ -336,7 +336,7 @@ impl QuillApp {
                 .fetch_poll_voters(chat_id, message_id, option_index)
                 .is_err()
         {
-            self.status_note = "could not load voters".into();
+            self.connection.status_note = "could not load voters".into();
         }
         cx.notify();
     }
@@ -354,7 +354,7 @@ impl QuillApp {
                 .load_more_poll_voters(chat_id, message_id, option_index)
                 .is_err()
         {
-            self.status_note = "could not load more voters".into();
+            self.connection.status_note = "could not load more voters".into();
         }
         cx.notify();
     }
@@ -564,7 +564,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_poll_answer(chat_id, message_id, option_index);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "voting…".into(),
                 Err(_) => "could not vote".into(),
             };
@@ -573,7 +573,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_poll_vote(chat_id, message_id, option_index);
-            self.status_note = "vote updated (demo)".into();
+            self.connection.status_note = "vote updated (demo)".into();
             cx.notify();
         }
     }
@@ -586,7 +586,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.retract_poll_vote(chat_id, message_id) {
+            self.connection.status_note = match live.driver.retract_poll_vote(chat_id, message_id) {
                 Ok(_) => "vote retracted".into(),
                 Err(_) => "could not retract the vote".into(),
             };
@@ -601,7 +601,7 @@ impl QuillApp {
             for option in &mut poll_content.poll.options {
                 option.is_chosen = false;
             }
-            self.status_note = "vote retracted (demo)".into();
+            self.connection.status_note = "vote retracted (demo)".into();
         }
         cx.notify();
     }
@@ -618,7 +618,7 @@ impl QuillApp {
                 .is_none_or(|chat| chat_allows_polls(chat.permissions.as_ref()))
         });
         if !polls_allowed {
-            self.status_note = "polls are restricted in this chat".into();
+            self.connection.status_note = "polls are restricted in this chat".into();
             cx.notify();
             return;
         }
@@ -752,7 +752,7 @@ impl QuillApp {
             None => return,
         };
         if let Some(reason) = draft.validate() {
-            self.status_note = reason.to_string();
+            self.connection.status_note = reason.to_string();
             cx.notify();
             return;
         }
@@ -762,7 +762,7 @@ impl QuillApp {
             chat.can_post().then_some(chat_id)
         });
         let Some(chat_id) = plan else {
-            self.status_note = "select a chat to send".into();
+            self.connection.status_note = "select a chat to send".into();
             cx.notify();
             return;
         };
@@ -782,10 +782,10 @@ impl QuillApp {
                 Ok(_) => {
                     self.composer_ui.poll_dialog = None;
                     self.composer_ui.pending_reply = None;
-                    self.status_note = "sending poll…".into();
+                    self.connection.status_note = "sending poll…".into();
                 }
                 Err(_) => {
-                    self.status_note = "could not send poll".into();
+                    self.connection.status_note = "could not send poll".into();
                 }
             }
             cx.notify();
@@ -794,7 +794,7 @@ impl QuillApp {
         // Screenshot demos have no live driver; close the dialog honestly.
         let _ = window;
         self.composer_ui.poll_dialog = None;
-        self.status_note = "polls need a live connection (demo)".into();
+        self.connection.status_note = "polls need a live connection (demo)".into();
         cx.notify();
     }
 

@@ -232,39 +232,41 @@ impl QuillApp {
     fn demo_ready_chat_header(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         let variant = std::env::var("QUILL_DEMO_HEADER").unwrap_or_default();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::chat_header_demo::apply_ready_chat_header(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 &variant,
             );
         }
-        self.status_note = "screenshot demo — chat header".into();
+        self.connection.status_note = "screenshot demo — chat header".into();
     }
 
     fn demo_ready_chat_list_menu(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Slice CL1: pinned + archived + marked-as-unread rows, with the
         // row context menu open over the pinned chat.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_list_menu(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_list_menu(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.chat_menu = Some(ChatMenuState {
+        self.chat_list.menu = Some(ChatMenuState {
             chat_id: ChatId(11),
             position: Point::new(px(120.), px(490.)),
         });
-        self.status_note = "screenshot demo — pin · archive · marked unread · row menu".into();
+        self.connection.status_note =
+            "screenshot demo — pin · archive · marked unread · row menu".into();
     }
 
     fn demo_ready_chat_list(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         // Slice CL2: folder tabs + category chips + pinned chat +
         // expanded archive section; Main stays selected.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_list(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_list(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — folders · categories · pinned · archive".into();
+        self.connection.status_note =
+            "screenshot demo — folders · categories · pinned · archive".into();
     }
 
     fn demo_ready_chat_list3(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -275,16 +277,16 @@ impl QuillApp {
         // and the select bar stay visible (capture at
         // QUILL_DEMO_WINDOW_SIZE=1200x1250 on a 1400x1400 display).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_list_3(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_list_3(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.selected_chats.insert(11);
-        self.selected_chats.insert(12);
-        self.chat_menu = Some(ChatMenuState {
+        self.chat_list.selected.insert(11);
+        self.chat_list.selected.insert(12);
+        self.chat_list.menu = Some(ChatMenuState {
             chat_id: ChatId(11),
             position: Point::new(px(120.), px(770.)),
         });
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — mentions · reactions · multi-select · report · block".into();
     }
 
@@ -292,11 +294,11 @@ impl QuillApp {
         // Slice CL2: same chat-list fixture with the archive
         // auto-settings dialog open.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_list(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_list(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.archive_settings_open = true;
         }
-        self.status_note = "screenshot demo — archive settings dialog".into();
+        self.connection.status_note = "screenshot demo — archive settings dialog".into();
     }
 
     fn demo_ready_chat_list_search(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -306,7 +308,7 @@ impl QuillApp {
             session.search.begin_query("xyzzy-no-such-chat");
             session.search.status = SearchStatus::Empty;
         }
-        self.status_note = "screenshot demo — search empty state".into();
+        self.connection.status_note = "screenshot demo — search empty state".into();
     }
 
     fn demo_ready_chat_preview(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -315,57 +317,57 @@ impl QuillApp {
         // panel floats over the chat list. The anchor sits just right of
         // the second chat row.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_preview(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_preview(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.chat_preview = Some(ChatPreviewState {
+        self.chat_list.preview = Some(ChatPreviewState {
             chat_id: ChatId(12),
             anchor: Point::new(px(170.), px(470.)),
         });
-        self.status_note = "screenshot demo — chat peek preview".into();
+        self.connection.status_note = "screenshot demo — chat peek preview".into();
     }
 
     fn demo_ready_chat_rows(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_rows(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_rows(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — chat rows".into();
+        self.connection.status_note = "screenshot demo — chat rows".into();
     }
 
     fn demo_ready_join_bar(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_join_bar(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_join_bar(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — non-member channel".into();
+        self.connection.status_note = "screenshot demo — non-member channel".into();
     }
 
     fn demo_ready_multiline_rows(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_multiline_rows(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_multiline_rows(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — multi-line row previews".into();
+        self.connection.status_note = "screenshot demo — multi-line row previews".into();
     }
 
     fn demo_ready_notification_sound(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_notification_sound(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_notification_sound(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.mute_menu_open = true;
-        self.notif_sound_picker_open = true;
-        self.status_note =
+        self.notify.mute_menu_open = true;
+        self.notify.notif_sound_picker_open = true;
+        self.connection.status_note =
             "screenshot demo — notification sounds · per-chat panel · scope defaults".into();
     }
 
     fn demo_ready_search_previews(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_search_previews(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_search_previews(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — search previews".into();
+        self.connection.status_note = "screenshot demo — search previews".into();
     }
 
     fn demo_ready_shared_media(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -373,20 +375,20 @@ impl QuillApp {
         // Media tab shows its empty state, the Files tab two injected
         // documents (through the real `foundChatMessages` reducer).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_shared_media(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_shared_media(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — shared media gallery empty state".into();
+        self.connection.status_note = "screenshot demo — shared media gallery empty state".into();
     }
 
     fn demo_ready_top_bars(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let variant = std::env::var("QUILL_DEMO_BAR").unwrap_or_default();
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::chat_bars::apply_ready_top_bars(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
                 &variant,
             );
         }
@@ -399,7 +401,7 @@ impl QuillApp {
                 );
             }
             "block-box" => {
-                self.block_bar_dialog = Some(crate::ui::chat_bars::BlockBarDialog {
+                self.dialogs.block_bar_dialog = Some(crate::ui::chat_bars::BlockBarDialog {
                     chat_id: quill::ids::ChatId(crate::ui::chat_bars::DEMO_STRANGER),
                     user_id: crate::ui::chat_bars::DEMO_STRANGER,
                     report: true,
@@ -408,15 +410,15 @@ impl QuillApp {
             }
             _ => {}
         }
-        self.status_note = "screenshot demo — chat top bars".into();
+        self.connection.status_note = "screenshot demo — chat top bars".into();
     }
 
     fn demo_ready_typing(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_typing(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_typing(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — typing…".into();
+        self.connection.status_note = "screenshot demo — typing…".into();
     }
 
     fn demo_archive_row(
@@ -428,14 +430,14 @@ impl QuillApp {
         // Archive row / bar / menu and the pinned drag, over the same
         // fixture (archived chats, story rings, three pinned chats).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_archive_row(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_archive_row(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         if matches!(demo, ArchiveRowDemo::ArchiveBar) {
             self.appearance.archive_collapsed = true;
         }
         if matches!(demo, ArchiveRowDemo::ArchiveMenu) {
-            self.archive_menu = Some(Point::new(px(120.), px(150.)));
+            self.chat_list.archive_menu = Some(Point::new(px(120.), px(150.)));
         }
         if matches!(demo, ArchiveRowDemo::PinDrag) {
             // Pinned 11 / 12 / 13: drag 12 past 13. 13 has just
@@ -445,10 +447,10 @@ impl QuillApp {
                 quill::pin_reorder::PinReorder::begin(vec![11, 12, 13], heights, 12, 300.)
             {
                 drag.drag_to(352., std::time::Instant::now());
-                self.pin_reorder = Some(drag);
+                self.chat_list.pin_reorder = Some(drag);
             }
         }
-        self.status_note = "screenshot demo — archive row · story rings".into();
+        self.connection.status_note = "screenshot demo — archive row · story rings".into();
     }
 
     fn demo_swipe_stories(
@@ -461,9 +463,9 @@ impl QuillApp {
         // the archive-row fixture (story rings, pins, archive) plus the
         // chat-row fixture's extra chats, so the list scrolls.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_archive_row(session, &self.demo_sink, &self.demo_seq);
-            apply_ready_chat_rows(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_archive_row(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            apply_ready_chat_rows(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         match demo {
             SwipeStoriesDemo::SwipeMute => {
@@ -487,12 +489,12 @@ impl QuillApp {
                 self.appearance.swipe_action = quill::chat_swipe::SwipeAction::Mute;
             }
             SwipeStoriesDemo::StoriesCollapsing => {
-                self.chat_list_scroll.set_offset(point(px(0.), px(-38.)));
+                self.chat_list.scroll.set_offset(point(px(0.), px(-38.)));
             }
             SwipeStoriesDemo::StoriesCollapsed => {
-                self.chat_list_scroll.set_offset(point(px(0.), px(-96.)));
+                self.chat_list.scroll.set_offset(point(px(0.), px(-96.)));
             }
         }
-        self.status_note = "screenshot demo — swipe actions · stories strip".into();
+        self.connection.status_note = "screenshot demo — swipe actions · stories strip".into();
     }
 }

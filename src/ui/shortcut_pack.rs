@@ -122,7 +122,7 @@ impl QuillApp {
     /// window, and before the account is signed in.
     fn shortcut_blocked(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.pane_mode() != PaneMode::Ready
-            || self.passcode_ui.locked
+            || self.account.passcode.locked
             || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
             || window.has_active_dialog(cx)
@@ -138,7 +138,8 @@ impl QuillApp {
 
     /// The listed chats, top to bottom.
     fn listed_chat_ids(&self) -> Vec<ChatId> {
-        self.chat_list_items
+        self.chat_list
+            .items
             .iter()
             .filter_map(|item| match item {
                 ChatListItem::Chat { id, .. } => Some(*id),
@@ -263,22 +264,23 @@ impl QuillApp {
         }
         match key {
             HistoryKey::Top => {
-                self.history_scroller
+                self.history
+                    .scroller
                     .update(cx, |state, cx| state.scroll_to_item(0, cx));
                 self.maybe_auto_load_older(cx);
             }
             HistoryKey::Bottom => self.jump_to_latest_messages(cx),
             HistoryKey::PageUp | HistoryKey::PageDown => {
-                let Some((first, last)) = self.scroll_view_probe.get() else {
+                let Some((first, last)) = self.history.scroll_view_probe.get() else {
                     return false;
                 };
-                let count = self.history_scroller.read(cx).item_count();
+                let count = self.history.scroller.read(cx).item_count();
                 let target = if key == HistoryKey::PageUp {
                     page_up_target(first, last)
                 } else {
                     page_down_target(first, last, count)
                 };
-                self.history_scroller.update(cx, |state, cx| match target {
+                self.history.scroller.update(cx, |state, cx| match target {
                     PageTarget::Row(row) => {
                         state.scroll_to_item(row, cx);
                     }
@@ -419,7 +421,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let pinned = session.pinned_chat_ids(self.chat_filter == ChatListFilter::Archived);
+        let pinned = session.pinned_chat_ids(self.chat_list.filter == ChatListFilter::Archived);
         let chats = visible_pinned(&self.listed_chat_ids(), &pinned);
         let Some(&chat_id) = chats.get(index) else {
             return false;
@@ -544,8 +546,8 @@ impl QuillApp {
             return false;
         };
         let size = window.viewport_size();
-        self.chat_preview = None;
-        self.chat_menu = Some(ChatMenuState {
+        self.chat_list.preview = None;
+        self.chat_list.menu = Some(ChatMenuState {
             chat_id,
             position: point(size.width - px(220.), px(64.)),
         });

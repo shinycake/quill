@@ -156,7 +156,8 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "sharing with a bot needs a live connection (demo)".into();
+            self.connection.status_note =
+                "sharing with a bot needs a live connection (demo)".into();
             cx.notify();
             return;
         };
@@ -186,7 +187,7 @@ impl QuillApp {
                 None => Ok(()),
             },
         };
-        self.status_note = match result {
+        self.connection.status_note = match result {
             Ok(()) => format!("shared with {}", share.bot_name),
             Err(_) => "could not share with the bot".into(),
         };

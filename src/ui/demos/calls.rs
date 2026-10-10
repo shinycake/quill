@@ -195,10 +195,10 @@ impl QuillApp {
         {
             chat.message_auto_delete_time = 604_800;
         }
-        self.ttl_picker_open = true;
-        self.ttl_custom_open = true;
-        self.ttl_custom_secs = 1_209_600;
-        self.status_note = "screenshot demo — auto-delete timer · custom".into();
+        self.notify.ttl_picker_open = true;
+        self.notify.ttl_custom_open = true;
+        self.notify.ttl_custom_secs = 1_209_600;
+        self.connection.status_note = "screenshot demo — auto-delete timer · custom".into();
     }
 
     fn demo_ready_call(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -206,17 +206,17 @@ impl QuillApp {
         // voice call, so the overlay renders the incoming-call card
         // (Accept / Decline + ticking clock).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_call(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_call(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — incoming call from Zed (injected, no live Telegram)".into();
     }
 
     fn demo_ready_call_devices(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_call_video(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_call_video(session, &self.demo_ui.sink, &self.demo_ui.seq);
             if let Some(call) = session.active_call.as_mut() {
                 call.is_video = false;
                 call.transport = Some(quill::calls::engine::TransportState::Connected);
@@ -224,7 +224,7 @@ impl QuillApp {
         }
         // Injected demo devices only (no live Telegram, no real
         // hardware); pre-selects the USB headset pair.
-        self.demo_call_devices = Some(vec![
+        self.demo_ui.call_devices = Some(vec![
             quill::calls::engine::MediaDevice {
                 id: "default-mic".into(),
                 name: "Default - Built-in Microphone".into(),
@@ -246,11 +246,11 @@ impl QuillApp {
                 kind: quill::calls::engine::MediaDeviceKind::Speaker,
             },
         ]);
-        self.demo_selected_devices = (
+        self.demo_ui.selected_devices = (
             Some("usb-headset-mic".into()),
             Some("usb-headset-sp".into()),
         );
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — real-audio device selection (injected, no live Telegram)".into();
     }
 
@@ -258,14 +258,14 @@ impl QuillApp {
         // Phase C2d: reconnecting-audio fixture — a ready voice call
         // whose driver is retrying the retained connect parameters.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_call_video(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_call_video(session, &self.demo_ui.sink, &self.demo_ui.seq);
             if let Some(call) = session.active_call.as_mut() {
                 call.is_video = false;
                 call.transport = Some(quill::calls::engine::TransportState::Reconnecting);
             }
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — reconnecting call audio (injected, no live Telegram)".into();
     }
 
@@ -275,10 +275,10 @@ impl QuillApp {
         // Telegram, no real capture). The demo devices carry a screen
         // source so the "Stop sharing" button renders.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_call_video(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_call_video(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.demo_call_devices = Some(vec![
+        self.demo_ui.call_devices = Some(vec![
             quill::calls::engine::MediaDevice {
                 id: "demo-cam".into(),
                 name: "Demo Camera (synthetic)".into(),
@@ -290,8 +290,8 @@ impl QuillApp {
                 kind: quill::calls::engine::MediaDeviceKind::Screen,
             },
         ]);
-        self.demo_remote_frame = Some(demo_video_frame(false));
-        self.demo_local_frame = Some(demo_video_frame(true));
+        self.demo_ui.remote_frame = Some(demo_video_frame(false));
+        self.demo_ui.local_frame = Some(demo_video_frame(true));
         if let Some(call) = self
             .demo_session
             .as_mut()
@@ -302,7 +302,7 @@ impl QuillApp {
             call.screen_sharing = true;
             call.camera_on = false;
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — 1:1 call screen-share send (injected, no live Telegram)".into();
     }
 
@@ -315,10 +315,10 @@ impl QuillApp {
         // their screen, so the main video-stage tile renders the
         // screen frame with the badge; the local camera stays the PiP.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_call_video(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_call_video(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.demo_call_devices = Some(vec![
+        self.demo_ui.call_devices = Some(vec![
             quill::calls::engine::MediaDevice {
                 id: "demo-cam".into(),
                 name: "Demo Camera (synthetic)".into(),
@@ -330,8 +330,8 @@ impl QuillApp {
                 kind: quill::calls::engine::MediaDeviceKind::Screen,
             },
         ]);
-        self.demo_local_frame = Some(demo_video_frame(true));
-        self.demo_screen_frame = Some(QuillApp::demo_screen_frame());
+        self.demo_ui.local_frame = Some(demo_video_frame(true));
+        self.demo_ui.screen_frame = Some(QuillApp::demo_screen_frame());
         if let Some(call) = self
             .demo_session
             .as_mut()
@@ -341,7 +341,7 @@ impl QuillApp {
             call.remote_screen = quill::calls::engine::RemoteVideoState::Active;
             call.transport = Some(quill::calls::engine::TransportState::Connected);
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — 1:1 peer screen-share receive (injected, no live Telegram)".into();
     }
 
@@ -350,10 +350,10 @@ impl QuillApp {
         // video call from Ada, so the state machine raises the swap
         // prompt and the kit dialog renders (End & answer / Decline).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_call_swap(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_call_swap(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — swap prompt: Ada calling while in a call with Zed (injected, no live Telegram)".into();
     }
 
@@ -368,16 +368,16 @@ impl QuillApp {
         // generated test patterns (remote: teal + circle; local: warm +
         // crosshair). NOT a real camera: generated in code, demo only.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_call_video(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_call_video(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.demo_call_devices = Some(vec![quill::calls::engine::MediaDevice {
+        self.demo_ui.call_devices = Some(vec![quill::calls::engine::MediaDevice {
             id: "demo-cam".into(),
             name: "Demo Camera (synthetic)".into(),
             kind: quill::calls::engine::MediaDeviceKind::Camera,
         }]);
-        self.demo_remote_frame = Some(demo_video_frame(false));
-        self.demo_local_frame = Some(demo_video_frame(true));
+        self.demo_ui.remote_frame = Some(demo_video_frame(false));
+        self.demo_ui.local_frame = Some(demo_video_frame(true));
         if let Some(call) = self
             .demo_session
             .as_mut()
@@ -386,7 +386,7 @@ impl QuillApp {
             call.remote_video = quill::calls::engine::RemoteVideoState::Active;
             call.transport = Some(quill::calls::engine::TransportState::Connected);
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — connected video call with Zed (injected, no live Telegram)".into();
     }
 
@@ -395,13 +395,13 @@ impl QuillApp {
         // (through the real reducer), privacy values, and the
         // confirm-before-calling pref on.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_calls_settings(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_calls_settings(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.call_prefs.push_to_talk.enabled = true;
             session.call_prefs.push_to_talk.key = "f13".into();
         }
-        self.calls_tab_open = true;
-        self.status_note =
+        self.chat_list.calls_tab_open = true;
+        self.connection.status_note =
             "screenshot demo — recent calls + call settings (injected, no live Telegram)".into();
     }
 
@@ -410,111 +410,112 @@ impl QuillApp {
         // self-destruct timer, a live `auto_delete_in` countdown on one
         // message, the timer-change service row, and the picker expanded.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_chat_ttl(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_chat_ttl(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.ttl_picker_open = true;
-        self.status_note =
+        self.notify.ttl_picker_open = true;
+        self.connection.status_note =
                 "screenshot demo — chat self-destruct timer 1h · picker open (injected, no live Telegram)"
                     .into();
     }
 
     fn demo_ready_group_call(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_call(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_call(session, &self.demo_ui.sink, &self.demo_ui.seq);
             // Phase C2g: synthetic per-participant video frames for
             // the demo tiles (camera for Zed, screen share for Mia).
             // Injected demo data, not real media.
-            self.demo_group_frames = demo_group_video_frames();
+            self.demo_ui.group_frames = demo_group_video_frames();
             // Slice calls-group-self-tile: the self tile renders the
             // local camera preview (fixture camera is on).
-            self.demo_local_frame = Some(demo_video_frame(true));
+            self.demo_ui.local_frame = Some(demo_video_frame(true));
         }
-        self.status_note = "screenshot demo — group voice chat (injected, no live Telegram)".into();
+        self.connection.status_note =
+            "screenshot demo — group voice chat (injected, no live Telegram)".into();
     }
 
     fn demo_ready_group_call_invitation(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_call_invitation(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_call_invitation(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — incoming voice-chat invitation (injected, no live Telegram)".into();
     }
 
     fn demo_ready_group_call_invite(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_call_invite(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_call_invite(session, &self.demo_ui.sink, &self.demo_ui.seq);
             // Slice calls-group-self-tile: fixture camera is on —
             // the self tile behind the panel renders the preview.
-            self.demo_local_frame = Some(demo_video_frame(true));
+            self.demo_ui.local_frame = Some(demo_video_frame(true));
         }
         self.group_call.invite_open = true;
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — group voice chat invite picker (injected, no live Telegram)".into();
     }
 
     fn demo_ready_group_call_join_as(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_call_join_as(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_call_join_as(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — join a voice chat as a channel (injected, no live Telegram)".into();
     }
 
     fn demo_ready_group_call_manage(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_call_manage(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_call_manage(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note =
+        self.connection.status_note =
                 "screenshot demo — voice chat management: title, invite link, recording, RTMP, chat (injected, no live Telegram)"
                     .into();
     }
 
     fn demo_ready_group_call_polish(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_call_polish(session, &self.demo_sink, &self.demo_seq);
-            self.demo_group_frames = demo_group_video_frames();
-            self.demo_local_frame = Some(demo_video_frame(true));
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_call_polish(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            self.demo_ui.group_frames = demo_group_video_frames();
+            self.demo_ui.local_frame = Some(demo_video_frame(true));
         }
         // Pin Zed's camera: the large tile, the rest in the strip.
         self.group_call.pin.toggle(quill::calls::tile_pin::TileKey {
             participant: quill::telegram::envelope::MessageSender::User { user_id: 41 },
             screen: false,
         });
-        self.status_note =
+        self.connection.status_note =
             "screenshot demo — pinned tile and paused streams (injected, no live Telegram)".into();
     }
 
     fn demo_ready_group_call_scheduled(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_call_scheduled(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_call_scheduled(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note =
+        self.connection.status_note =
                 "screenshot demo — scheduled voice chat: start time, Start now, notify-me toggle (injected, no live Telegram)"
                     .into();
     }
 
     fn demo_ready_group_call_stage(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_call_polish(session, &self.demo_sink, &self.demo_seq);
-            self.demo_group_frames = demo_group_video_frames();
-            self.demo_local_frame = Some(demo_video_frame(true));
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_call_polish(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            self.demo_ui.group_frames = demo_group_video_frames();
+            self.demo_ui.local_frame = Some(demo_video_frame(true));
         }
         // Zed's camera, pinned and shown across the window.
         self.group_call.pin.toggle(quill::calls::tile_pin::TileKey {
             participant: quill::telegram::envelope::MessageSender::User { user_id: 41 },
             screen: false,
         });
-        self.demo_group_stage = true;
-        self.status_note =
+        self.demo_ui.group_stage = true;
+        self.connection.status_note =
             "screenshot demo — full-screen pinned stream (injected, no live Telegram)".into();
     }
 
@@ -522,12 +523,12 @@ impl QuillApp {
         // Notifications and mute: chat 11 muted, the Mute submenu open on
         // the Custom duration row (2 days 3 hours).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_mute_archive(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_mute_archive(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.mute_menu_open = true;
-        self.mute_custom_open = true;
-        self.mute_custom = quill::mute_menu::CustomMute { days: 2, hours: 3 };
-        self.status_note = "screenshot demo — mute menu · custom duration".into();
+        self.notify.mute_menu_open = true;
+        self.notify.mute_custom_open = true;
+        self.notify.mute_custom = quill::mute_menu::CustomMute { days: 2, hours: 3 };
+        self.connection.status_note = "screenshot demo — mute menu · custom duration".into();
     }
 }

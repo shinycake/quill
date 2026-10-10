@@ -177,7 +177,7 @@ impl QuillApp {
 
     /// B1: set the status-bar note and refresh.
     pub(super) fn set_status_note(&mut self, note: &str, cx: &mut Context<Self>) {
-        self.status_note = note.into();
+        self.connection.status_note = note.into();
         cx.notify();
     }
 

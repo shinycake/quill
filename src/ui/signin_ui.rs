@@ -102,14 +102,14 @@ impl QuillApp {
     fn signin_countries(&self) -> Vec<Country> {
         match self.live.as_ref() {
             Some(live) => live.driver.session.countries.clone().unwrap_or_default(),
-            None => self.signin.demo_countries.clone(),
+            None => self.auth_ui.signin.demo_countries.clone(),
         }
     }
 
     fn signin_guess_iso(&self) -> Option<String> {
         match self.live.as_ref() {
             Some(live) => live.driver.session.guessed_country_iso.clone(),
-            None => self.signin.demo_guess.clone(),
+            None => self.auth_ui.signin.demo_guess.clone(),
         }
     }
 
@@ -126,29 +126,30 @@ impl QuillApp {
         }
         match &auth {
             AuthorizationState::WaitCode { delivery, .. } => {
-                if self.signin.code_clock.as_ref().map(|(d, _)| d) != Some(delivery) {
-                    self.signin.code_clock = Some((delivery.clone(), Instant::now()));
+                if self.auth_ui.signin.code_clock.as_ref().map(|(d, _)| d) != Some(delivery) {
+                    self.auth_ui.signin.code_clock = Some((delivery.clone(), Instant::now()));
                 }
             }
-            _ => self.signin.code_clock = None,
+            _ => self.auth_ui.signin.code_clock = None,
         }
         match &auth {
             AuthorizationState::WaitEmailCode { reset, .. } => {
-                if self.signin.email_clock.as_ref().map(|(r, _)| r) != Some(reset) {
-                    self.signin.email_clock = Some((*reset, Instant::now()));
+                if self.auth_ui.signin.email_clock.as_ref().map(|(r, _)| r) != Some(reset) {
+                    self.auth_ui.signin.email_clock = Some((*reset, Instant::now()));
                 }
             }
-            _ => self.signin.email_clock = None,
+            _ => self.auth_ui.signin.email_clock = None,
         }
         if !matches!(auth, AuthorizationState::WaitCode { .. }) {
-            self.signin.editing_phone = false;
+            self.auth_ui.signin.editing_phone = false;
         }
         self.apply_login_code_link(&auth, window, cx);
         let phone_screen = matches!(auth, AuthorizationState::WaitPhoneNumber)
-            || (self.signin.editing_phone && matches!(auth, AuthorizationState::WaitCode { .. }));
+            || (self.auth_ui.signin.editing_phone
+                && matches!(auth, AuthorizationState::WaitCode { .. }));
         if phone_screen
-            && !self.signin.touched
-            && self.signin.phone_text.is_empty()
+            && !self.auth_ui.signin.touched
+            && self.auth_ui.signin.phone_text.is_empty()
             && let Some(iso) = self.signin_guess_iso()
         {
             let countries = self.signin_countries();
@@ -158,9 +159,10 @@ impl QuillApp {
                 .and_then(|country| country.calling_codes.first())
             {
                 let text = format!("+{code}");
-                self.signin.phone_text = text.clone();
+                self.auth_ui.signin.phone_text = text.clone();
                 cx.defer_in(window, move |this, window, cx| {
-                    this.phone_input
+                    this.auth_ui
+                        .phone_input
                         .update(cx, |input, cx| input.set_value(text, window, cx));
                 });
             }
@@ -192,7 +194,8 @@ impl QuillApp {
             .and_then(|len| usize::try_from(len).ok())
             .is_some_and(|len| len == code.len());
         cx.defer_in(window, move |this, window, cx| {
-            this.code_input
+            this.auth_ui
+                .code_input
                 .update(cx, |input, cx| input.set_value(code, window, cx));
             if complete {
                 this.submit_code(window, cx);
@@ -202,17 +205,19 @@ impl QuillApp {
 
     /// The phone field changed: re-group the digits, refresh the country.
     pub(super) fn signin_phone_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let value = self.phone_input.read(cx).value().to_string();
-        if value == self.signin.phone_text {
+        let value = self.auth_ui.phone_input.read(cx).value().to_string();
+        if value == self.auth_ui.signin.phone_text {
             return;
         }
         let countries = self.signin_countries();
-        let formatted = phone::reformat_after_edit(&self.signin.phone_text, &value, &countries);
-        self.signin.touched = true;
-        self.signin.hint = None;
-        self.signin.phone_text = formatted.text.clone();
+        let formatted =
+            phone::reformat_after_edit(&self.auth_ui.signin.phone_text, &value, &countries);
+        self.auth_ui.signin.touched = true;
+        self.auth_ui.signin.hint = None;
+        self.auth_ui.signin.phone_text = formatted.text.clone();
         if formatted.text != value {
-            self.phone_input
+            self.auth_ui
+                .phone_input
                 .update(cx, |input, cx| input.set_value(formatted.text, window, cx));
         }
         cx.notify();
@@ -228,14 +233,15 @@ impl QuillApp {
             return;
         };
         let text = format!("+{code}");
-        self.signin.phone_text = text.clone();
-        self.signin.touched = true;
-        self.signin.hint = None;
-        self.signin.picker_open = false;
-        self.signin
+        self.auth_ui.signin.phone_text = text.clone();
+        self.auth_ui.signin.touched = true;
+        self.auth_ui.signin.hint = None;
+        self.auth_ui.signin.picker_open = false;
+        self.auth_ui
+            .signin
             .search
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.phone_input.update(cx, |input, cx| {
+        self.auth_ui.phone_input.update(cx, |input, cx| {
             input.set_value(text, window, cx);
             input.focus(window, cx);
         });
@@ -243,9 +249,10 @@ impl QuillApp {
     }
 
     fn signin_toggle_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.signin.picker_open = !self.signin.picker_open;
-        if self.signin.picker_open {
-            self.signin
+        self.auth_ui.signin.picker_open = !self.auth_ui.signin.picker_open;
+        if self.auth_ui.signin.picker_open {
+            self.auth_ui
+                .signin
                 .search
                 .update(cx, |input, cx| input.focus(window, cx));
         }
@@ -259,15 +266,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<(String, String)> {
         let countries = self.signin_countries();
-        let value = self.phone_input.read(cx).value().to_string();
+        let value = self.auth_ui.phone_input.read(cx).value().to_string();
         let formatted = phone::format_international(&value, &countries);
         match phone::e164(&formatted) {
             Some(number) => {
-                self.signin.hint = None;
+                self.auth_ui.signin.hint = None;
                 Some((number, formatted.text))
             }
             None => {
-                self.signin.hint = phone::validate(&formatted)
+                self.auth_ui.signin.hint = phone::validate(&formatted)
                     .message()
                     .or(Some("Invalid phone number. Please try again."));
                 cx.notify();
@@ -278,8 +285,8 @@ impl QuillApp {
 
     /// "Wrong number?" on the code screen.
     fn signin_wrong_number(&mut self, cx: &mut Context<Self>) {
-        self.signin.editing_phone = true;
-        self.signin.hint = None;
+        self.auth_ui.signin.editing_phone = true;
+        self.auth_ui.signin.hint = None;
         cx.notify();
     }
 
@@ -287,19 +294,19 @@ impl QuillApp {
         let err = self
             .session()
             .and_then(|session| session.last_auth_error)
-            .or(self.signin.demo_error);
+            .or(self.auth_ui.signin.demo_error);
         let Some(err) = err else {
-            self.signin.error_clock = None;
-            self.signin.banned_dismissed = false;
+            self.auth_ui.signin.error_clock = None;
+            self.auth_ui.signin.banned_dismissed = false;
             return None;
         };
-        match &self.signin.error_clock {
+        match &self.auth_ui.signin.error_clock {
             Some((seen, since)) if *seen == err => {
                 Some((err, i64::try_from(since.elapsed().as_secs()).unwrap_or(0)))
             }
             _ => {
-                self.signin.error_clock = Some((err, Instant::now()));
-                self.signin.banned_dismissed = false;
+                self.auth_ui.signin.error_clock = Some((err, Instant::now()));
+                self.auth_ui.signin.banned_dismissed = false;
                 Some((err, 0))
             }
         }
@@ -307,14 +314,14 @@ impl QuillApp {
 
     /// Re-render once a second while any countdown on screen is running.
     fn arm_signin_tick(&mut self, cx: &mut Context<Self>) {
-        if self.signin.tick_armed {
+        if self.auth_ui.signin.tick_armed {
             return;
         }
-        self.signin.tick_armed = true;
+        self.auth_ui.signin.tick_armed = true;
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(1)).await;
             let _ = this.update(cx, |this, cx| {
-                this.signin.tick_armed = false;
+                this.auth_ui.signin.tick_armed = false;
                 cx.notify();
             });
         })
@@ -326,7 +333,7 @@ impl QuillApp {
     pub(super) fn signin_view(&self, auth: &AuthView, state: &AuthorizationState) -> AuthView {
         let mut view = auth.clone();
         match state {
-            AuthorizationState::WaitCode { delivery, .. } if self.signin.editing_phone => {
+            AuthorizationState::WaitCode { delivery, .. } if self.auth_ui.signin.editing_phone => {
                 let _ = delivery;
                 view.title = "Your phone number";
                 view.body =
@@ -337,8 +344,11 @@ impl QuillApp {
                 delivery,
             } => {
                 view.title = signin::code_step_title(delivery.kind);
-                view.body =
-                    signin::code_step_body(delivery, *code_length, &self.signin.submitted_phone);
+                view.body = signin::code_step_body(
+                    delivery,
+                    *code_length,
+                    &self.auth_ui.signin.submitted_phone,
+                );
             }
             AuthorizationState::WaitPhoneNumber => {
                 view.body =
@@ -351,7 +361,8 @@ impl QuillApp {
 
     pub(super) fn signin_phone_visible(&self, state: &AuthorizationState) -> bool {
         matches!(state, AuthorizationState::WaitPhoneNumber)
-            || (self.signin.editing_phone && matches!(state, AuthorizationState::WaitCode { .. }))
+            || (self.auth_ui.signin.editing_phone
+                && matches!(state, AuthorizationState::WaitCode { .. }))
     }
 
     /// Error line, banned box and flood lock for the current screen.
@@ -369,7 +380,7 @@ impl QuillApp {
             self.arm_signin_tick(cx);
         }
         if err.class == quill::telegram::envelope::ErrorClass::PhoneBanned {
-            if !self.signin.banned_dismissed {
+            if !self.auth_ui.signin.banned_dismissed {
                 out.push(self.banned_box(cx));
             }
             return (out, locked);
@@ -391,7 +402,7 @@ impl QuillApp {
     /// tdesktop's `ShowPhoneBannedError` box: the text, OK, and Help which
     /// opens a prefilled mail to Telegram's login support.
     fn banned_box(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let phone = self.signin.submitted_phone.clone();
+        let phone = self.auth_ui.signin.submitted_phone.clone();
         div()
             .id("phone-banned-box")
             .role(Role::AlertDialog)
@@ -434,7 +445,7 @@ impl QuillApp {
                             .label("OK")
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.signin.banned_dismissed = true;
+                                this.auth_ui.signin.banned_dismissed = true;
                                 cx.notify();
                             })),
                     ),
@@ -450,7 +461,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let countries = self.signin_countries();
-        let value = self.phone_input.read(cx).value().to_string();
+        let value = self.auth_ui.phone_input.read(cx).value().to_string();
         let formatted = phone::format_international(&value, &countries);
         let selected = phone::country_for_digits(&formatted.digits, &countries)
             .cloned()
@@ -480,16 +491,16 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, window, cx| this.signin_toggle_picker(window, cx)))
                 .into_any_element(),
         );
-        if self.signin.picker_open {
+        if self.auth_ui.signin.picker_open {
             out.push(self.country_picker(&countries, cx));
         }
         out.push(
-            Textarea::new(&self.phone_input)
+            Textarea::new(&self.auth_ui.phone_input)
                 .aria_label("Phone number")
                 .h(px(40.))
                 .into_any_element(),
         );
-        if let Some(hint) = self.signin.hint {
+        if let Some(hint) = self.auth_ui.signin.hint {
             out.push(
                 div()
                     .id("phone-hint")
@@ -510,14 +521,14 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, window, cx| this.submit_phone(window, cx)))
                 .into_any_element(),
         );
-        if self.signin.editing_phone {
+        if self.auth_ui.signin.editing_phone {
             out.push(
                 Button::new("phone-edit-back")
                     .label("Back")
                     .ghost()
                     .w_full()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.signin.editing_phone = false;
+                        this.auth_ui.signin.editing_phone = false;
                         cx.notify();
                     }))
                     .into_any_element(),
@@ -527,7 +538,7 @@ impl QuillApp {
     }
 
     fn country_picker(&mut self, countries: &[Country], cx: &mut Context<Self>) -> AnyElement {
-        let query = self.signin.search.read(cx).value().to_string();
+        let query = self.auth_ui.signin.search.read(cx).value().to_string();
         let hits = phone::search_countries(countries, &query);
         let muted = cx.theme().muted_foreground;
         let hover = cx.theme().secondary;
@@ -584,7 +595,7 @@ impl QuillApp {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
-            .child(Input::new(&self.signin.search).aria_label("Search countries"))
+            .child(Input::new(&self.auth_ui.signin.search).aria_label("Search countries"))
             .child(list)
             .into_any_element()
     }
@@ -597,7 +608,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut out: Vec<AnyElement> = vec![
-            Textarea::new(&self.code_input)
+            Textarea::new(&self.auth_ui.code_input)
                 .aria_label("Sign-in code")
                 .h(px(40.))
                 .into_any_element(),
@@ -614,9 +625,14 @@ impl QuillApp {
         let mut ticking = false;
         match &auth {
             AuthorizationState::WaitCode { delivery, .. } => {
-                let elapsed = self.signin.code_clock.as_ref().map_or(0, |(_, since)| {
-                    i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
-                });
+                let elapsed = self
+                    .auth_ui
+                    .signin
+                    .code_clock
+                    .as_ref()
+                    .map_or(0, |(_, since)| {
+                        i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
+                    });
                 if let Some(url) = signin::fragment_url(delivery) {
                     let url = url.to_string();
                     out.insert(
@@ -659,9 +675,14 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.resend_code(cx)))
                         .into_any_element(),
                 );
-                let elapsed = self.signin.email_clock.as_ref().map_or(0, |(_, since)| {
-                    i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
-                });
+                let elapsed = self
+                    .auth_ui
+                    .signin
+                    .email_clock
+                    .as_ref()
+                    .map_or(0, |(_, since)| {
+                        i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
+                    });
                 if let Some(label) = signin::email_reset_label(*reset, elapsed) {
                     match reset {
                         EmailResetState::Available { .. } => out.push(
@@ -701,7 +722,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        self.status_note = match live.driver.reset_login_email() {
+        self.connection.status_note = match live.driver.reset_login_email() {
             Ok(_) => "email reset requested — waiting for Telegram".into(),
             Err(_) => "could not reset the email".into(),
         };

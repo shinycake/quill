@@ -37,7 +37,7 @@ impl QuillApp {
         let Some(note) = self.send_denial(kind) else {
             return false;
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
         true
     }
@@ -54,7 +54,7 @@ impl QuillApp {
         else {
             return false;
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
         true
     }

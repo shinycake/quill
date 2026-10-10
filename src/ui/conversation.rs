@@ -747,7 +747,7 @@ impl QuillApp {
                             this.child(self.stop_poll_confirm_banner(cx))
                         })
                         // Phase B1: close-secret-chat confirm banner.
-                        .when_some(self.pending_close_secret_chat, |this, _| {
+                        .when_some(self.chat_list.pending_close_secret_chat, |this, _| {
                             this.child(self.close_secret_chat_confirm_banner(cx))
                         })
                         // Phase S2: inline-bot warning banner for secret chats.
@@ -1061,7 +1061,7 @@ impl QuillApp {
                 translate: self.translate_revision(),
                 today,
             });
-            let reuse = key.is_some() && key == self.history_rows_key;
+            let reuse = key.is_some() && key == self.history.rows_key;
             let messages = (!reuse).then(|| {
                 let mut messages: Vec<quill::state::HistoryMessage> = history
                     .map(|h| h.ordered().into_iter().cloned().collect())
@@ -1094,18 +1094,18 @@ impl QuillApp {
                 this.child(self.forum_topic_strip(&info, cx))
             })
             .when_some(
-                topic_info.clone().filter(|_| self.topic_info_open),
+                topic_info.clone().filter(|_| self.history.topic_info_open),
                 |this, info| this.child(self.topic_info_card(&info, cx)),
             )
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
             .children(self.saved_tags_bar(cx))
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
-            .when(self.mute_menu_open, |this| {
+            .when(self.notify.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
             })
             // Phase B4: self-destruct / auto-delete timer picker below
             // the header.
-            .when(self.ttl_picker_open, |this| {
+            .when(self.notify.ttl_picker_open, |this| {
                 this.child(self.ttl_picker_panel(cx))
             })
             // Parity slice: per-chat folder picker below the header.
@@ -1118,7 +1118,7 @@ impl QuillApp {
             )
             .children(open.and_then(|chat_id| self.pinned_message_banner(chat_id, cx)))
             .children(
-                open.filter(|_| self.pinned_list_open)
+                open.filter(|_| self.history.pinned_list_open)
                     .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
             )
             .when(self.share.forward_picker_open, |this| {
@@ -1160,7 +1160,7 @@ impl QuillApp {
                     );
                     // Saved sublist and tag views rebuild their rows every
                     // frame, like topics and threads.
-                    self.history_rows_key = None;
+                    self.history.rows_key = None;
                     list
                 } else if thread_pending {
                     self.thread_status_pane(cx)
@@ -1175,7 +1175,7 @@ impl QuillApp {
                         cx,
                     );
                     // Thread views rebuild their rows every frame, like topics.
-                    self.history_rows_key = None;
+                    self.history.rows_key = None;
                     div()
                         .flex()
                         .flex_col()
@@ -1183,7 +1183,7 @@ impl QuillApp {
                         .min_h_0()
                         .min_w_0()
                         .children(self.thread_root_bar(cx))
-                        .when(self.thread_info_open, |this| {
+                        .when(self.history.thread_info_open, |this| {
                             this.children(self.thread_info_card(cx))
                         })
                         .child(list)
@@ -1196,7 +1196,7 @@ impl QuillApp {
                     // Phase 5.1: opening a forum supergroup shows its topics;
                     // with the topic column on screen the pane only asks for
                     // a choice.
-                    if self.forum_column_shown {
+                    if self.chat_list.forum_column_shown {
                         pane_placeholder(
                             "Choose a topic",
                             "Pick a topic from the list to read and write in it.",
@@ -1227,7 +1227,7 @@ impl QuillApp {
                             media_roots,
                             cx,
                         );
-                        self.history_rows_key = topic_key;
+                        self.history.rows_key = topic_key;
                         list
                     }
                 } else if main_empty {
@@ -1295,11 +1295,11 @@ impl QuillApp {
                         media_roots,
                         cx,
                     );
-                    self.history_rows_key = main_key;
+                    self.history.rows_key = main_key;
                     // Channels end with their sponsored message (Telegram API
                     // terms: clients must show it), but only while the
                     // history is scrolled to the bottom.
-                    let scrolled_up = self.history_scroller.read(cx).is_scrolled_up();
+                    let scrolled_up = self.history.scroller.read(cx).is_scrolled_up();
                     match self.sponsored_footer(scrolled_up, cx) {
                         Some(footer) => div()
                             .id("history-with-sponsored")
@@ -1688,23 +1688,24 @@ impl QuillApp {
                     )
                 })
                 .unwrap_or_default();
-            if self.history_key == Some(history_key)
-                && count == self.history_rows.len()
-                && count == self.history_scroller.read(cx).item_count()
+            if self.history.key == Some(history_key)
+                && count == self.history.rows.len()
+                && count == self.history.scroller.read(cx).item_count()
             {
-                if media_signature != self.history_media_signature {
-                    self.history_scroller
+                if media_signature != self.history.media_signature {
+                    self.history
+                        .scroller
                         .update(cx, |state, cx| state.remeasure(cx));
                 } else {
                     let changed: Vec<usize> = rows
                         .iter()
-                        .zip(&self.history_rows)
+                        .zip(&self.history.rows)
                         .enumerate()
                         .filter(|(_, (new, old))| !new.renders_like(old))
                         .map(|(ix, _)| ix)
                         .collect();
                     if !changed.is_empty() {
-                        self.history_scroller.update(cx, |state, cx| {
+                        self.history.scroller.update(cx, |state, cx| {
                             for ix in changed {
                                 let _ = state.remeasure_items(ix..ix + 1, cx);
                             }
@@ -1712,31 +1713,31 @@ impl QuillApp {
                     }
                 }
             }
-            self.history_media_signature = media_signature;
-            if self.history_key != Some(history_key) || self.history_window_epoch != window_epoch {
+            self.history.media_signature = media_signature;
+            if self.history.key != Some(history_key) || self.history.window_epoch != window_epoch {
                 // A new or replaced window anchors once its rows are in.
-                self.history_window_epoch = window_epoch;
-                self.history_anchor_pending = true;
+                self.history.window_epoch = window_epoch;
+                self.history.anchor_pending = true;
             }
-            if self.history_key != Some(history_key) {
+            if self.history.key != Some(history_key) {
                 // New chat/topic (or first render): reset; the anchor below
                 // picks the position.
-                self.history_key = Some(history_key);
+                self.history.key = Some(history_key);
                 // Message ids are chat-local: a stale highlight id in the new
                 // chat must not suppress its search-jump scroll.
-                self.last_highlight = None;
-                self.scroll_date = Default::default();
-                self.scroll_top_probe.set(None);
-                self.history_scroller.update(cx, |state, cx| {
+                self.history.last_highlight = None;
+                self.history.scroll_date = Default::default();
+                self.history.scroll_top_probe.set(None);
+                self.history.scroller.update(cx, |state, cx| {
                     state.reset(count, cx);
                 });
-            } else if count != self.history_scroller.read(cx).item_count() {
-                let prev_count = self.history_scroller.read(cx).item_count();
+            } else if count != self.history.scroller.read(cx).item_count() {
+                let prev_count = self.history.scroller.read(cx).item_count();
                 // R6: a page landed and the window trimmed its far end —
                 // the rows slid. Remove exactly the dropped rows (so the
                 // reader's scroll anchor shifts with them) instead of
                 // splicing the whole list.
-                let slide = (prev_count == self.history_rows.len())
+                let slide = (prev_count == self.history.rows.len())
                     .then(|| {
                         let ids = |rows: &[HistoryRow]| -> Vec<(i64, i64)> {
                             rows.iter()
@@ -1748,15 +1749,15 @@ impl QuillApp {
                                 })
                                 .collect()
                         };
-                        quill::state::row_window_shift(&ids(&self.history_rows), &ids(&rows))
+                        quill::state::row_window_shift(&ids(&self.history.rows), &ids(&rows))
                     })
                     .flatten()
                     .filter(|shift| shift.front_removed + shift.tail_removed > 0);
-                match (first, last, self.history_ends) {
+                match (first, last, self.history.ends) {
                     _ if slide.is_some() => {
                         if let Some(shift) = slide {
-                            let newer_page = self.history_had_newer;
-                            self.history_scroller.update(cx, |state, cx| {
+                            let newer_page = self.history.had_newer;
+                            self.history.scroller.update(cx, |state, cx| {
                                 let following = state.is_following_tail();
                                 if shift.tail_removed > 0 {
                                     state.splice(
@@ -1790,9 +1791,9 @@ impl QuillApp {
                         // newer page must not be skipped that way: keep the old
                         // last row in view and read on from there.
                         let added = count.saturating_sub(prev_count);
-                        let newer_page = self.history_had_newer;
+                        let newer_page = self.history.had_newer;
                         let mut following = false;
-                        self.history_scroller.update(cx, |state, cx| {
+                        self.history.scroller.update(cx, |state, cx| {
                             following = state.is_following_tail();
                             state.append(added, cx);
                             if newer_page && following {
@@ -1806,10 +1807,11 @@ impl QuillApp {
                             && !newer_page
                             && prev_count > 0
                             && added <= NEW_ROW_REVEAL_MAX
-                            && self.window_active.get()
-                            && self.motion.list_fills.get()
+                            && self.frame.window_active.get()
+                            && self.frame.motion.list_fills.get()
                         {
-                            self.motion
+                            self.frame
+                                .motion
                                 .start_reveal(prev_count, std::time::Instant::now());
                         }
                     }
@@ -1818,7 +1820,7 @@ impl QuillApp {
                     {
                         // Older history prepended — the visible anchor stays.
                         let added = count.saturating_sub(prev_count);
-                        self.history_scroller.update(cx, |state, cx| {
+                        self.history.scroller.update(cx, |state, cx| {
                             state.prepend(added, cx);
                         });
                     }
@@ -1827,8 +1829,8 @@ impl QuillApp {
                         // scroll anchor (reset() would yank to the top and arm
                         // tail-follow); stay at the tail only if the user was
                         // following it.
-                        let follow = self.history_scroller.read(cx).is_following_tail();
-                        self.history_scroller.update(cx, |state, cx| {
+                        let follow = self.history.scroller.read(cx).is_following_tail();
+                        self.history.scroller.update(cx, |state, cx| {
                             state.splice(0..prev_count, count, cx);
                             if follow {
                                 state.scroll_to_end(cx);
@@ -1837,43 +1839,45 @@ impl QuillApp {
                     }
                 }
             } else if let (Some(first), Some(last)) = (first, last)
-                && self.history_ends != Some((first, last))
+                && self.history.ends != Some((first, last))
             {
                 // Same row count but row identity changed (e.g. a second album
                 // photo turned a Single row into a taller Album row): cached
                 // measured heights are stale, so remeasure. This converges —
                 // history_ends is updated below — and must not run
                 // unconditionally or remeasure's notify() would loop.
-                self.history_scroller.update(cx, |state, cx| {
+                self.history.scroller.update(cx, |state, cx| {
                     state.remeasure(cx);
                 });
             }
-            self.history_ends = match (first, last) {
+            self.history.ends = match (first, last) {
                 (Some(first), Some(last)) => Some((first, last)),
                 _ => None,
             };
-            self.history_rows = rows;
-            self.history_had_newer = has_newer;
+            self.history.rows = rows;
+            self.history.had_newer = has_newer;
             // A new or replaced window: start at the jump target, else at the
             // "Unread messages" divider, else at the bottom.
-            if self.history_anchor_pending && !self.history_rows.is_empty() {
-                self.history_anchor_pending = false;
+            if self.history.anchor_pending && !self.history.rows.is_empty() {
+                self.history.anchor_pending = false;
                 let highlighted = highlight_id.and_then(|target| {
-                    self.history_rows
+                    self.history
+                        .rows
                         .iter()
                         .position(|row| row.contains(target))
                 });
                 if highlighted.is_some() {
-                    self.last_highlight = highlight_id;
+                    self.history.last_highlight = highlight_id;
                 }
                 let target = highlighted.or_else(|| {
-                    self.history_rows
+                    self.history
+                        .rows
                         .iter()
                         .position(HistoryRow::unread_divider)
                         // A little context above the divider.
                         .map(|ix| ix.saturating_sub(1))
                 });
-                self.history_scroller.update(cx, |state, cx| match target {
+                self.history.scroller.update(cx, |state, cx| match target {
                     Some(ix) => {
                         state.scroll_to_item(ix, cx);
                     }
@@ -1882,31 +1886,32 @@ impl QuillApp {
             }
             // Chat-search jump: scroll the highlight into view once per new
             // `highlight_id` (current code only outlined the message).
-            if highlight_id != self.last_highlight {
-                self.last_highlight = highlight_id;
+            if highlight_id != self.history.last_highlight {
+                self.history.last_highlight = highlight_id;
                 if let Some(target) = highlight_id
                     && let Some(ix) = self
-                        .history_rows
+                        .history
+                        .rows
                         .iter()
                         .position(|row| row.contains(target))
                 {
-                    self.history_scroller.update(cx, |state, cx| {
+                    self.history.scroller.update(cx, |state, cx| {
                         state.scroll_to_item(ix, cx);
                     });
                 }
             }
         }
-        self.history_shared = HistoryShared { media_roots };
+        self.history.shared = HistoryShared { media_roots };
         // A new jump (search hit, reply, pinned message) restarts the
         // highlight fade, even onto the message highlighted before.
         match (highlight_id, jump_serial) {
-            (Some(_), serial) if self.highlight_fade.map(|f| f.0) != Some(serial) => {
-                self.highlight_fade = Some((serial, std::time::Instant::now()));
+            (Some(_), serial) if self.history.highlight_fade.map(|f| f.0) != Some(serial) => {
+                self.history.highlight_fade = Some((serial, std::time::Instant::now()));
             }
-            (None, _) => self.highlight_fade = None,
+            (None, _) => self.history.highlight_fade = None,
             _ => {}
         }
-        let count = self.history_rows.len();
+        let count = self.history.rows.len();
         let corner_buttons = self.jump_corner_buttons(
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
             chat.as_ref().map_or(0, |c| c.unread_reaction_count),
@@ -1921,12 +1926,12 @@ impl QuillApp {
         self.playback.inline_videos.borrow_mut().begin_render();
         let weak = cx.weak_entity();
         let date_pill = self.scroll_date_pill(cx);
-        let probe = self.scroll_probe.clone();
-        let top_probe = self.scroll_top_probe.clone();
-        let view_probe = self.scroll_view_probe.clone();
+        let probe = self.history.scroll_probe.clone();
+        let top_probe = self.history.scroll_top_probe.clone();
+        let view_probe = self.history.scroll_view_probe.clone();
         let reveal = self.history_reveal(cx);
-        let reveal_probe = self.motion.reveal_probe();
-        let jump_zone = self.history_scroller.read(cx).is_scrolled_up().then(|| {
+        let reveal_probe = self.frame.motion.reveal_probe();
+        let jump_zone = self.history.scroller.read(cx).is_scrolled_up().then(|| {
             div()
                 .absolute()
                 .left_0()
@@ -1972,7 +1977,7 @@ impl QuillApp {
             )
             .child(super::history_fx::reveal_viewport(
                 reveal,
-                MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
+                MessageScroller::new(id, self.history.scroller.clone(), move |ix, _window, cx| {
                     let gif_view = weak.clone();
                     cx.defer(move |cx| {
                         let _ = gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
@@ -2067,11 +2072,11 @@ impl QuillApp {
     /// row's highlight, selected-forward, failed-send and mouse behavior
     /// unchanged from the pre-virtualization list.
     pub(super) fn render_history_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
-        let Some(row) = self.history_rows.get(ix) else {
+        let Some(row) = self.history.rows.get(ix) else {
             return div().into_any_element();
         };
         {
-            let mut rendered = self.rendered_history_rows.borrow_mut();
+            let mut rendered = self.history.rendered_rows.borrow_mut();
             if !rendered.contains(&ix) {
                 rendered.push(ix);
             }
@@ -2080,9 +2085,10 @@ impl QuillApp {
         // the app once more so `report_visible_history` sees it promptly
         // (list scrolling alone doesn't re-render the app view).
         let unreported = self.live.is_some()
-            && self.history_window_active
+            && self.history.window_active
             && row.message_ids().iter().any(|id| {
                 !self
+                    .history
                     .reported_visible
                     .as_ref()
                     .is_some_and(|(_, ids)| ids.contains(id))
@@ -2092,7 +2098,7 @@ impl QuillApp {
         }
         let element = self.render_history_row_body(row, cx);
         let has_day = row.day_label().is_some();
-        let probe = self.scroll_probe.clone();
+        let probe = self.history.scroll_probe.clone();
         // Notes where the row is painted, for the floating date pill.
         let tracker = canvas(
             |_, _, _| {},
@@ -2121,7 +2127,7 @@ impl QuillApp {
     }
 
     fn render_history_row_body(&self, row: &HistoryRow, cx: &mut Context<Self>) -> AnyElement {
-        let shared = &self.history_shared;
+        let shared = &self.history.shared;
         // File state is read from the session at row-render time rather
         // than copied into a per-render snapshot.
         let no_files = HashMap::new();
@@ -2416,7 +2422,8 @@ impl QuillApp {
             {
                 history.unread_anchor = None;
             }
-            self.history_scroller
+            self.history
+                .scroller
                 .update(cx, |state, cx| state.scroll_to_end(cx));
         }
         cx.notify();
@@ -2428,7 +2435,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.retry_history().is_err()
         {
-            self.status_note = "could not load history".into();
+            self.connection.status_note = "could not load history".into();
         }
         cx.notify();
     }
@@ -2519,8 +2526,8 @@ impl QuillApp {
     /// nothing is "seen" behind another app — and when the set is
     /// unchanged; the driver also drops ids already viewed or in flight.
     pub(super) fn report_visible_history(&mut self, window_active: bool, cx: &mut Context<Self>) {
-        self.history_window_active = window_active;
-        let rendered = std::mem::take(&mut *self.rendered_history_rows.borrow_mut());
+        self.history.window_active = window_active;
+        let rendered = std::mem::take(&mut *self.history.rendered_rows.borrow_mut());
         if !window_active || rendered.is_empty() {
             return;
         }
@@ -2529,12 +2536,13 @@ impl QuillApp {
         };
         let mut ids: Vec<MessageId> = rendered
             .into_iter()
-            .filter_map(|ix| self.history_rows.get(ix))
+            .filter_map(|ix| self.history.rows.get(ix))
             .flat_map(HistoryRow::message_ids)
             .collect();
         ids.sort_unstable_by_key(|id| id.0);
         ids.dedup();
         if self
+            .history
             .reported_visible
             .as_ref()
             .is_some_and(|(chat, last)| *chat == chat_id && *last == ids)
@@ -2546,7 +2554,7 @@ impl QuillApp {
             // queued for the next attempt, and re-reporting every frame
             // would only spin the render loop.
             let _ = live.driver.view_messages(chat_id, &ids);
-            self.reported_visible = Some((chat_id, ids));
+            self.history.reported_visible = Some((chat_id, ids));
             cx.notify();
         }
     }

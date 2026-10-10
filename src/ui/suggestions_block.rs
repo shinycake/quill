@@ -22,7 +22,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.hide_suggestion(suggestion).is_err() {
-                    self.status_note = "Could not hide the suggestion".into();
+                    self.connection.status_note = "Could not hide the suggestion".into();
                 }
             }
             None => {
@@ -57,7 +57,7 @@ impl QuillApp {
                 self.navigate(Nav::Profile, window, cx)
             }
             Suggestion::CheckPassword => {
-                self.settings_open = true;
+                self.settings.open = true;
                 self.navigate(Nav::Privacy, window, cx);
             }
             Suggestion::UpgradePremium => self.navigate(Nav::Premium, window, cx),
@@ -187,7 +187,7 @@ impl QuillApp {
                                 .small()
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.status_note = "Please change your phone number in the official Telegram app on your phone as soon as possible.".into();
+                                    this.connection.status_note = "Please change your phone number in the official Telegram app on your phone as soon as possible.".into();
                                     cx.notify();
                                 })),
                         ),

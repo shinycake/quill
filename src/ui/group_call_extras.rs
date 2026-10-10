@@ -281,7 +281,7 @@ impl QuillApp {
         if window.is_fullscreen() {
             window.toggle_fullscreen();
         }
-        self.demo_group_stage = false;
+        self.demo_ui.group_stage = false;
         cx.notify();
     }
 
@@ -293,7 +293,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.choose_group_call_join_as(sender).is_err() {
-                self.status_note = "Couldn't change who you join as.".into();
+                self.connection.status_note = "Couldn't change who you join as.".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_group_call_join_as(Some(sender));

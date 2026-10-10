@@ -121,10 +121,10 @@ register_demos![
 impl QuillApp {
     fn demo_ready_channels(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_channels(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_channels(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — broadcast channel".into();
+        self.connection.status_note = "screenshot demo — broadcast channel".into();
     }
 
     fn demo_ready_channels_admin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -132,30 +132,30 @@ impl QuillApp {
             input.set_value("admin post — hello from the channel", window, cx);
         });
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_channels_admin(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_channels_admin(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — broadcast channel admin".into();
+        self.connection.status_note = "screenshot demo — broadcast channel admin".into();
     }
 
     fn demo_ready_sponsored(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_sponsored(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_sponsored(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.status_note = "screenshot demo — sponsored messages".into();
+        self.connection.status_note = "screenshot demo — sponsored messages".into();
     }
 
     fn demo_ready_stories(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_stories(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_stories(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // Phase 9.1: the tray above the chat list shows the seeded
         // active stories for chats 11/12; the viewer opens on chat 11's
         // downloaded photo story.
         self.open_story_viewer(ChatId(11), 5, cx);
-        self.status_note = "screenshot demo — story viewer".into();
+        self.connection.status_note = "screenshot demo — story viewer".into();
     }
 
     fn demo_ready_story_albums(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -163,23 +163,23 @@ impl QuillApp {
         // then open the story page on chat 11 (demo mode — the live
         // notice renders as the status note).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_story_albums(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_story_albums(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_story_page(ChatId(11), window, cx);
-        self.status_note = "screenshot demo — story albums / chat page / archive".into();
+        self.connection.status_note = "screenshot demo — story albums / chat page / archive".into();
     }
 
     fn demo_ready_story_areas(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            story_areas::apply_ready_story_areas(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            story_areas::apply_ready_story_areas(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // Phase 9.8: viewer opens on the seeded photo story carrying
         // one of every `storyAreaType` — the fixture injected the real
         // `story` (with `areas`) through the reducer.
         self.open_story_viewer(ChatId(11), 5, cx);
-        self.status_note = "screenshot demo — clickable story areas".into();
+        self.connection.status_note = "screenshot demo — clickable story areas".into();
     }
 
     fn demo_ready_story_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -189,8 +189,8 @@ impl QuillApp {
         // server-side round-trip state, so eligibility is seeded after.)
         self.open_story_composer(window, cx);
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_stories(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_stories(session, &self.demo_ui.sink, &self.demo_ui.seq);
             // Phase 9.3: the Saved Messages chat id `postStory` posts
             // to, and a seeded `canPostStoryResultOk` so the status
             // line shows "✓ Eligible to post".
@@ -219,7 +219,7 @@ impl QuillApp {
         self.stories.composer_reaction.update(cx, |input, cx| {
             input.set_value("❤️ 🔥", window, cx);
         });
-        self.status_note = "screenshot demo — story posting composer".into();
+        self.connection.status_note = "screenshot demo — story posting composer".into();
     }
 
     fn demo_ready_story_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -227,19 +227,19 @@ impl QuillApp {
         // the composer in edit mode — caption + area inputs prefill
         // from the cached story, the path stays empty.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_story_edit(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_story_edit(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_story_edit(11, 5, window, cx);
-        self.status_note = "screenshot demo — story edit composer".into();
+        self.connection.status_note = "screenshot demo — story edit composer".into();
     }
 
     fn demo_ready_story_more(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_contacts(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_contacts(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.open_info_panel = None;
-            apply_ready_story_post(session, &self.demo_sink, &self.demo_seq);
+            apply_ready_story_post(session, &self.demo_ui.sink, &self.demo_ui.seq);
             // `getCloseFriends` answered through the real reducer.
             let extra = session.request(quill::state::RequestPurpose::GetCloseFriends, None);
             let json = format!(
@@ -247,9 +247,9 @@ impl QuillApp {
                 extra.0,
             );
             let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
-                self.demo_sink.clone();
+                self.demo_ui.sink.clone();
             if let Some(owned) =
-                quill::telegram::client::copy_and_parse(&json, &self.demo_seq, &dyn_sink)
+                quill::telegram::client::copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink)
             {
                 session.apply(owned);
             }
@@ -257,13 +257,13 @@ impl QuillApp {
         // B14: own story 5 with the close-friends editor open.
         self.open_story_viewer(ChatId(11), 5, cx);
         self.open_close_friends_editor(window, cx);
-        self.status_note = "screenshot demo — story close friends".into();
+        self.connection.status_note = "screenshot demo — story close friends".into();
     }
 
     fn demo_ready_story_post(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_story_post(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_story_post(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // Phase 9.2 / stories-custom-reactions: viewer opens on the
         // seeded own photo story with the reaction picker and the
@@ -277,30 +277,30 @@ impl QuillApp {
         self.stories.reply_input.update(cx, |input, cx| {
             input.set_value("Great photo!", window, cx);
         });
-        self.status_note = "screenshot demo — story reactions / reply / delete".into();
+        self.connection.status_note = "screenshot demo — story reactions / reply / delete".into();
     }
 
     fn demo_ready_story_video(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_stories(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_stories(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // B14: the viewer opens on chat 11's video story (story 4) and
         // plays the generated 12 s clip with the native player.
         self.open_story_viewer(ChatId(11), 4, cx);
-        self.status_note = "screenshot demo — story video playback".into();
+        self.connection.status_note = "screenshot demo — story video playback".into();
     }
 
     fn demo_ready_story_viewers(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_story_viewers(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_story_viewers(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // Phase 9.5: viewer opens on the seeded own photo story with
         // the viewers panel open — the fixture injected a real
         // `storyInteractions` page through the reducer.
         self.open_story_viewer(ChatId(11), 5, cx);
         self.stories.viewers_open = true;
-        self.status_note = "screenshot demo — story viewers list".into();
+        self.connection.status_note = "screenshot demo — story viewers list".into();
     }
 }

@@ -20,11 +20,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.badge_prefs = prefs;
             if let Err(err) = live.driver.save_badge_prefs() {
-                self.status_note = format!("couldn’t save badge settings: {err}");
+                self.connection.status_note = format!("couldn’t save badge settings: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.badge_prefs = prefs;
-            self.status_note = "demo: badge settings are not saved".into();
+            self.connection.status_note = "demo: badge settings are not saved".into();
         }
         cx.notify();
     }
@@ -38,11 +38,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.desktop_notifications = on;
             if let Err(err) = live.driver.save_desktop_notifications() {
-                self.status_note = format!("couldn’t save desktop notifications: {err}");
+                self.connection.status_note = format!("couldn’t save desktop notifications: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.desktop_notifications = on;
-            self.status_note = "demo: desktop notifications are not saved".into();
+            self.connection.status_note = "demo: desktop notifications are not saved".into();
         }
         cx.notify();
     }
@@ -59,11 +59,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.inapp_sounds_enabled = on;
             if let Err(err) = live.driver.save_inapp_sounds_enabled() {
-                self.status_note = format!("couldn’t save notification sounds: {err}");
+                self.connection.status_note = format!("couldn’t save notification sounds: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.inapp_sounds_enabled = on;
-            self.status_note = "demo: in-app sounds are not saved".into();
+            self.connection.status_note = "demo: in-app sounds are not saved".into();
         }
         cx.notify();
     }
@@ -81,10 +81,10 @@ impl QuillApp {
             shell,
             DialogKind::NotificationDefaults,
             |this, _, cx| {
-                this.notification_defaults_open = false;
-                this.defaults_sound_picker = None;
-                this.defaults_exceptions_scope = None;
-                this.notifications_confirm = None;
+                this.notify.notification_defaults_open = false;
+                this.notify.defaults_sound_picker = None;
+                this.notify.defaults_exceptions_scope = None;
+                this.notify.notifications_confirm = None;
                 cx.notify();
             },
         );
@@ -104,7 +104,7 @@ impl QuillApp {
                          Changes apply via setScopeNotificationSettings.",
                     ),
             );
-            if let Some(confirm) = this.notifications_confirm {
+            if let Some(confirm) = this.notify.notifications_confirm {
                 body = body.child(this.notifications_confirm_banner(confirm, cx));
             }
             for scope in NotificationSettingsScope::ALL {
@@ -129,7 +129,7 @@ impl QuillApp {
                     .label("Reset all")
                     .danger()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.notifications_confirm = Some(NotificationsConfirm::ResetAll);
+                        this.notify.notifications_confirm = Some(NotificationsConfirm::ResetAll);
                         cx.notify();
                     }))
                     .into_any_element(),
@@ -138,10 +138,10 @@ impl QuillApp {
                     .label("Close")
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.notification_defaults_open = false;
-                        this.defaults_sound_picker = None;
-                        this.defaults_exceptions_scope = None;
-                        this.notifications_confirm = None;
+                        this.notify.notification_defaults_open = false;
+                        this.notify.defaults_sound_picker = None;
+                        this.notify.defaults_exceptions_scope = None;
+                        this.notify.notifications_confirm = None;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::NotificationDefaults, window, cx);
                     }))
@@ -345,7 +345,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_contact_joined_notifications(on) {
-                self.status_note = format!("couldn’t change the setting: {err:?}");
+                self.connection.status_note = format!("couldn’t change the setting: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.disable_contact_registered_notifications = !on;
@@ -438,7 +438,7 @@ impl QuillApp {
     /// refill them. Demo: seed the schema defaults directly.
     pub(in crate::ui) fn reset_all_notification_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.reset_all_notification_settings() {
+            self.connection.status_note = match live.driver.reset_all_notification_settings() {
                 Ok(_) => "resetting all notification settings…".into(),
                 Err(_) => "could not reset notification settings".into(),
             };
@@ -448,7 +448,7 @@ impl QuillApp {
                     .scope_notification_settings
                     .insert(scope, ScopeNotificationSettings::default());
             }
-            self.status_note = "notification settings reset".into();
+            self.connection.status_note = "notification settings reset".into();
         }
         cx.notify();
     }
@@ -513,7 +513,7 @@ impl QuillApp {
 
     /// Parity slice: drop the pending "Reset all" confirmation.
     pub(in crate::ui) fn cancel_notifications_reset(&mut self, cx: &mut Context<Self>) {
-        self.notifications_confirm = None;
+        self.notify.notifications_confirm = None;
         cx.notify();
     }
 
@@ -521,7 +521,7 @@ impl QuillApp {
     /// `resetAllNotificationSettings`; demo: seed the schema defaults
     /// directly — both via the shared `reset_all_notification_settings`.
     pub(in crate::ui) fn confirm_notifications_reset(&mut self, cx: &mut Context<Self>) {
-        self.notifications_confirm.take();
+        self.notify.notifications_confirm.take();
         self.reset_all_notification_settings(cx);
     }
 }

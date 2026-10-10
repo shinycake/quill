@@ -123,7 +123,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.open_thread(chat_id, message_id).is_err()
         {
-            self.status_note = "could not open comments".into();
+            self.connection.status_note = "could not open comments".into();
         }
         cx.notify();
     }
@@ -164,7 +164,7 @@ impl QuillApp {
             }
             return;
         }
-        if self.thread_root_jump {
+        if self.history.thread_root_jump {
             let complete = live
                 .driver
                 .session
@@ -172,8 +172,8 @@ impl QuillApp {
                 .as_ref()
                 .is_none_or(|thread| thread.history.loaded_complete);
             if complete {
-                self.thread_root_jump = false;
-                self.history_scroller.update(cx, |state, cx| {
+                self.history.thread_root_jump = false;
+                self.history.scroller.update(cx, |state, cx| {
                     state.scroll_to_item(0, cx);
                 });
             } else if live.driver.fetch_thread_history().is_ok() {
@@ -198,7 +198,7 @@ impl QuillApp {
             .as_ref()
             .map(|thread| thread.origin_message_id);
         let back = live.driver.close_thread();
-        self.thread_root_jump = false;
+        self.history.thread_root_jump = false;
         if let Some(chat) = back {
             self.select_listed_chat(chat, window, cx);
         }
@@ -222,7 +222,7 @@ impl QuillApp {
             .as_ref()
             .map(|thread| MessageId(thread.thread_id));
         live.driver.session.close_thread();
-        self.thread_root_jump = false;
+        self.history.thread_root_jump = false;
         if let Some(root) = root {
             self.jump_to_replied_message(root, cx);
         }
@@ -237,11 +237,11 @@ impl QuillApp {
             .and_then(|s| s.thread.as_ref())
             .is_none_or(|thread| thread.history.loaded_complete);
         if complete {
-            self.history_scroller.update(cx, |state, cx| {
+            self.history.scroller.update(cx, |state, cx| {
                 state.scroll_to_item(0, cx);
             });
         } else {
-            self.thread_root_jump = true;
+            self.history.thread_root_jump = true;
         }
         cx.notify();
     }
@@ -315,7 +315,7 @@ impl QuillApp {
                         // Keep the root bar's own click (jump to the original) out of it.
                         .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.thread_info_open = !this.thread_info_open;
+                            this.history.thread_info_open = !this.history.thread_info_open;
                             cx.notify();
                         })),
                 )

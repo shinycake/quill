@@ -526,7 +526,7 @@ impl QuillApp {
             if self.session().and_then(|s| s.open_topic) != Some(topic_id) {
                 self.select_topic_ui(topic_id, cx);
             }
-            self.topic_info_open = true;
+            self.history.topic_info_open = true;
             cx.notify();
             return;
         }
@@ -541,7 +541,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.status_note = "topics need a live connection (demo)".into();
+            self.connection.status_note = "topics need a live connection (demo)".into();
             cx.notify();
             return;
         };
@@ -552,7 +552,7 @@ impl QuillApp {
             _ => Ok(None),
         };
         if result.is_err() {
-            self.status_note = "could not update topic".into();
+            self.connection.status_note = "could not update topic".into();
         }
         cx.notify();
     }

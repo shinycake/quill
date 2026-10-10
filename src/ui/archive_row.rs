@@ -98,10 +98,10 @@ impl QuillApp {
     /// Show the archive: the Archived category is Quill's opened-folder
     /// view (tdesktop `openFolder`).
     pub(super) fn open_archive_folder(&mut self, cx: &mut Context<Self>) {
-        self.chat_filter = ChatListFilter::Archived;
+        self.chat_list.filter = ChatListFilter::Archived;
         self.folders.tab = None;
-        self.contacts_tab_open = false;
-        self.calls_tab_open = false;
+        self.chat_list.contacts_tab_open = false;
+        self.chat_list.calls_tab_open = false;
         cx.notify();
     }
 
@@ -120,7 +120,7 @@ impl QuillApp {
         if moved {
             // Quill's menu is a dropdown (no right click on its entries),
             // so the toast names the way back instead.
-            self.status_note =
+            self.connection.status_note =
                 "Archive moved to the main menu. Open Menu > Move archive to chat list to return it."
                     .into();
         }
@@ -156,7 +156,7 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.archive_menu = Some(event.position);
+                    this.chat_list.archive_menu = Some(event.position);
                     cx.notify();
                 }),
             )
@@ -213,7 +213,7 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.archive_menu = Some(event.position);
+                    this.chat_list.archive_menu = Some(event.position);
                     cx.notify();
                 }),
             )
@@ -260,7 +260,7 @@ impl QuillApp {
                 .child(Icon::new(icon).size(px(16.)))
                 .child(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.archive_menu = None;
+                    this.chat_list.archive_menu = None;
                     on_click(this, cx);
                     cx.notify();
                 }))
@@ -325,7 +325,7 @@ impl QuillApp {
             .children(rows);
         div()
             .id("archive-menu-overlay")
-            .track_focus(&self.context_menu_focus)
+            .track_focus(&self.frame.context_menu_focus)
             .occlude()
             .absolute()
             .top_0()
@@ -342,7 +342,7 @@ impl QuillApp {
                     .right_0()
                     .bottom_0()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.archive_menu = None;
+                        this.chat_list.archive_menu = None;
                         cx.notify();
                     })),
             )
@@ -352,7 +352,7 @@ impl QuillApp {
                     .snap_to_window_with_margin(px(8.))
                     .child(panel),
             )
-            .focus_trap("archive-menu-focus", &self.context_menu_focus)
+            .focus_trap("archive-menu-focus", &self.frame.context_menu_focus)
             .into_any_element()
     }
 }

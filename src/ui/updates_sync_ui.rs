@@ -84,7 +84,7 @@ impl QuillApp {
                         .child("Click to view details \u{203a}"),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.freeze_info_open = true;
+                    this.account.freeze_info_open = true;
                     cx.notify();
                 }))
                 .into_any_element(),
@@ -218,7 +218,7 @@ impl QuillApp {
                     .label("Close")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.freeze_info_open = false;
+                        this.account.freeze_info_open = false;
                         cx.notify();
                     })),
             )
@@ -277,7 +277,7 @@ impl QuillApp {
                     .label("Close")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.age_verify_open = false;
+                        this.account.age_verify_open = false;
                         cx.notify();
                     })),
             )
@@ -287,7 +287,7 @@ impl QuillApp {
                         .label("Verify My Age")
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.age_verify_started = true;
+                            this.account.age_verify_started = true;
                             this.open_message_url(&url, cx);
                         })),
                 )
@@ -308,8 +308,8 @@ impl QuillApp {
         let needs_verification = self
             .session()
             .is_some_and(|s| s.sync.age_verification.is_some());
-        if quill::state::age_gate_blocks(on, needs_verification, self.age_verify_started) {
-            self.age_verify_open = true;
+        if quill::state::age_gate_blocks(on, needs_verification, self.account.age_verify_started) {
+            self.account.age_verify_open = true;
             cx.notify();
         } else {
             self.set_sensitive_content(on, cx);

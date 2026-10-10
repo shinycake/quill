@@ -759,6 +759,7 @@ impl QuillApp {
                 }
             }
         }
-        self.status_note = format!("screenshot demo — message menu: {}", scenario_name());
+        self.connection.status_note =
+            format!("screenshot demo — message menu: {}", scenario_name());
     }
 }

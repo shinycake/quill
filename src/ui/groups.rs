@@ -424,11 +424,11 @@ impl QuillApp {
             match live.driver.refresh_chat_invite_links(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.status_note = "could not refresh invite links".into();
+                    self.connection.status_note = "could not refresh invite links".into();
                 }
             }
         } else {
-            self.status_note = "invite links need a live connection (demo)".into();
+            self.connection.status_note = "invite links need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -436,7 +436,7 @@ impl QuillApp {
     /// Phase D3a: copy an invite-link URL to the clipboard.
     pub(super) fn copy_invite_link(&mut self, invite_link: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(invite_link.to_string()));
-        self.status_note = "Invite link copied".into();
+        self.connection.status_note = "Invite link copied".into();
         cx.notify();
     }
 
@@ -453,11 +453,11 @@ impl QuillApp {
             match live.driver.revoke_chat_invite_link(chat_id, invite_link) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.status_note = "could not revoke invite link".into();
+                    self.connection.status_note = "could not revoke invite link".into();
                 }
             }
         } else {
-            self.status_note = "invite links need a live connection (demo)".into();
+            self.connection.status_note = "invite links need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -468,11 +468,11 @@ impl QuillApp {
             match live.driver.refresh_chat_join_requests(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.status_note = "could not refresh join requests".into();
+                    self.connection.status_note = "could not refresh join requests".into();
                 }
             }
         } else {
-            self.status_note = "join requests need a live connection (demo)".into();
+            self.connection.status_note = "join requests need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -492,11 +492,11 @@ impl QuillApp {
             {
                 Ok(_) => {}
                 Err(_) => {
-                    self.status_note = "could not process join request".into();
+                    self.connection.status_note = "could not process join request".into();
                 }
             }
         } else {
-            self.status_note = "join requests need a live connection (demo)".into();
+            self.connection.status_note = "join requests need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -509,11 +509,11 @@ impl QuillApp {
             match live.driver.refresh_chat_administrators(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.status_note = "could not refresh administrators".into();
+                    self.connection.status_note = "could not refresh administrators".into();
                 }
             }
         } else {
-            self.status_note = "administrators need a live connection (demo)".into();
+            self.connection.status_note = "administrators need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -535,11 +535,11 @@ impl QuillApp {
                 .driver
                 .toggle_sign_messages(chat_id, sign_messages, show_message_sender)
             {
-                Ok(_) => self.status_note = "signatures updated".into(),
-                Err(_) => self.status_note = "could not change signatures".into(),
+                Ok(_) => self.connection.status_note = "signatures updated".into(),
+                Err(_) => self.connection.status_note = "could not change signatures".into(),
             }
         } else {
-            self.status_note = "signatures need a live connection (demo)".into();
+            self.connection.status_note = "signatures need a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -550,12 +550,13 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.chat_auto_translate(chat_id));
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.toggle_auto_translate(chat_id, enabled) {
+            self.connection.status_note = match live.driver.toggle_auto_translate(chat_id, enabled)
+            {
                 Ok(()) => "auto-translate updated".into(),
                 Err(_) => "could not change auto-translate".into(),
             };
         } else {
-            self.status_note = "auto-translate needs a live connection (demo)".into();
+            self.connection.status_note = "auto-translate needs a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -565,11 +566,11 @@ impl QuillApp {
     pub(super) fn set_anti_spam(&mut self, chat_id: ChatId, enabled: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.toggle_aggressive_anti_spam(chat_id, enabled) {
-                Ok(_) => self.status_note = "anti-spam updated".into(),
-                Err(_) => self.status_note = "could not change anti-spam".into(),
+                Ok(_) => self.connection.status_note = "anti-spam updated".into(),
+                Err(_) => self.connection.status_note = "could not change anti-spam".into(),
             }
         } else {
-            self.status_note = "anti-spam needs a live connection (demo)".into();
+            self.connection.status_note = "anti-spam needs a live connection (demo)".into();
         }
         cx.notify();
     }
@@ -617,17 +618,17 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.create_chat_dialog = Some(CreateChatDialog::new(window, cx, kind));
+        self.admin.create_chat_dialog = Some(CreateChatDialog::new(window, cx, kind));
         cx.notify();
     }
 
     pub(super) fn close_create_chat_dialog(&mut self, cx: &mut Context<Self>) {
-        self.create_chat_dialog = None;
+        self.admin.create_chat_dialog = None;
         cx.notify();
     }
 
     pub(super) fn toggle_create_chat_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.create_chat_dialog.as_mut() {
+        if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
             if let Some(position) = dialog.selected_users.iter().position(|id| *id == user_id) {
                 dialog.selected_users.remove(position);
             } else {
@@ -643,7 +644,7 @@ impl QuillApp {
     /// afterwards (`createNewSupergroupChat` takes no members, schema
     /// 1.8.67 line 13337).
     pub(super) fn submit_create_chat_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.create_chat_dialog.take() else {
+        let Some(dialog) = self.admin.create_chat_dialog.take() else {
             return;
         };
         let title = dialog.title_input.read(cx).value().trim().to_string();
@@ -651,8 +652,8 @@ impl QuillApp {
         let kind = dialog.kind;
         let user_ids = dialog.selected_users.clone();
         if title.is_empty() {
-            self.create_chat_dialog = Some(dialog);
-            self.status_note = "Name cannot be empty".into();
+            self.admin.create_chat_dialog = Some(dialog);
+            self.connection.status_note = "Name cannot be empty".into();
             cx.notify();
             return;
         }
@@ -675,17 +676,17 @@ impl QuillApp {
                 match result {
                     Ok(()) => format!("{} created", kind.title()),
                     Err(_) => {
-                        self.create_chat_dialog = Some(dialog);
+                        self.admin.create_chat_dialog = Some(dialog);
                         format!("could not create {}", kind.title().to_lowercase())
                     }
                 }
             }
             None => {
-                self.create_chat_dialog = Some(dialog);
+                self.admin.create_chat_dialog = Some(dialog);
                 "creating chats needs a live connection (demo)".to_string()
             }
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -695,18 +696,18 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.community_ui.create_dialog = Some(CreateCommunityDialog::new(window, cx));
+        self.admin.community.create_dialog = Some(CreateCommunityDialog::new(window, cx));
         cx.notify();
     }
 
     pub(super) fn close_create_community_dialog(&mut self, cx: &mut Context<Self>) {
-        self.community_ui.create_dialog = None;
+        self.admin.community.create_dialog = None;
         cx.notify();
     }
 
     /// Slice G10: single-select base-chat picker for the create dialog.
     pub(super) fn toggle_create_community_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.community_ui.create_dialog.as_mut() {
+        if let Some(dialog) = self.admin.community.create_dialog.as_mut() {
             dialog.chat_id = if dialog.chat_id == Some(chat_id) {
                 None
             } else {
@@ -720,20 +721,20 @@ impl QuillApp {
     /// driver (`create_community` refuses empty names and unknown chats
     /// client-side); the new community arrives via `updateCommunity`.
     pub(super) fn submit_create_community_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.community_ui.create_dialog.take() else {
+        let Some(dialog) = self.admin.community.create_dialog.take() else {
             return;
         };
         let name = dialog.name_input.read(cx).value().trim().to_string();
         let hide_chat = dialog.hide_chat;
         if name.is_empty() {
-            self.community_ui.create_dialog = Some(dialog);
-            self.status_note = "Name cannot be empty".into();
+            self.admin.community.create_dialog = Some(dialog);
+            self.connection.status_note = "Name cannot be empty".into();
             cx.notify();
             return;
         }
         let Some(chat_id) = dialog.chat_id else {
-            self.community_ui.create_dialog = Some(dialog);
-            self.status_note = "Pick a chat for the community".into();
+            self.admin.community.create_dialog = Some(dialog);
+            self.connection.status_note = "Pick a chat for the community".into();
             cx.notify();
             return;
         };
@@ -745,17 +746,17 @@ impl QuillApp {
                 {
                     Ok(Some(_)) => "Community created".to_string(),
                     _ => {
-                        self.community_ui.create_dialog = Some(dialog);
+                        self.admin.community.create_dialog = Some(dialog);
                         "could not create community".to_string()
                     }
                 }
             }
             None => {
-                self.community_ui.create_dialog = Some(dialog);
+                self.admin.community.create_dialog = Some(dialog);
                 "creating communities needs a live connection (demo)".to_string()
             }
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -774,7 +775,7 @@ impl QuillApp {
             .unwrap_or_default();
         // `chat_id` is unused for `CommunityName`; the community id
         // rides the prompt kind.
-        self.username_dialog = Some(UsernameDialog::new(
+        self.admin.username_dialog = Some(UsernameDialog::new(
             window,
             cx,
             ChatId(community_id),
@@ -795,7 +796,7 @@ impl QuillApp {
         allowed: bool,
         cx: &mut Context<Self>,
     ) {
-        self.status_note = match self.live.as_mut() {
+        self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.set_community_permissions(community_id, allowed) {
                 Ok(Some(_)) => "updating community permissions…".into(),
                 Ok(None) => "you can't change this community's permissions".into(),
@@ -813,7 +814,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let current = self.chat_username(chat_id);
-        self.username_dialog = Some(UsernameDialog::new(
+        self.admin.username_dialog = Some(UsernameDialog::new(
             window,
             cx,
             chat_id,
@@ -838,7 +839,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.username_dialog = Some(UsernameDialog::new(
+        self.admin.username_dialog = Some(UsernameDialog::new(
             window,
             cx,
             chat_id,
@@ -872,7 +873,7 @@ impl QuillApp {
                 })
             })
             .unwrap_or_default();
-        self.username_dialog = Some(UsernameDialog::new(
+        self.admin.username_dialog = Some(UsernameDialog::new(
             window,
             cx,
             chat_id,
@@ -893,7 +894,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.username_dialog = Some(UsernameDialog::new(
+        self.admin.username_dialog = Some(UsernameDialog::new(
             window,
             cx,
             chat_id,
@@ -915,7 +916,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.username_dialog = Some(UsernameDialog::new(
+        self.admin.username_dialog = Some(UsernameDialog::new(
             window,
             cx,
             chat_id,
@@ -927,12 +928,12 @@ impl QuillApp {
     }
 
     pub(super) fn close_username_dialog(&mut self, cx: &mut Context<Self>) {
-        self.username_dialog = None;
+        self.admin.username_dialog = None;
         cx.notify();
     }
 
     pub(super) fn submit_username_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.username_dialog.take() else {
+        let Some(dialog) = self.admin.username_dialog.take() else {
             return;
         };
         let value = dialog.input.read(cx).value().trim().to_string();
@@ -948,12 +949,12 @@ impl QuillApp {
                         }
                     }
                     Err(_) => {
-                        self.username_dialog = Some(dialog);
+                        self.admin.username_dialog = Some(dialog);
                         "could not set username".into()
                     }
                 },
                 None => {
-                    self.username_dialog = Some(dialog);
+                    self.admin.username_dialog = Some(dialog);
                     "usernames need a live connection (demo)".into()
                 }
             },
@@ -963,8 +964,8 @@ impl QuillApp {
                 let too_long = !quill::admin_extras::custom_title_fits(&value);
                 let has_emoji = value.chars().any(looks_like_emoji);
                 if too_long || has_emoji {
-                    self.username_dialog = Some(dialog);
-                    self.status_note = if too_long {
+                    self.admin.username_dialog = Some(dialog);
+                    self.connection.status_note = if too_long {
                         "custom title must be at most 16 characters".into()
                     } else {
                         "custom title cannot contain emoji".into()
@@ -982,12 +983,12 @@ impl QuillApp {
                             }
                         }
                         Err(_) => {
-                            self.username_dialog = Some(dialog);
+                            self.admin.username_dialog = Some(dialog);
                             "could not set custom title".into()
                         }
                     },
                     None => {
-                        self.username_dialog = Some(dialog);
+                        self.admin.username_dialog = Some(dialog);
                         "custom titles need a live connection (demo)".into()
                     }
                 }
@@ -996,8 +997,8 @@ impl QuillApp {
                 // 1–128 chars per the schema (line 13430); the driver
                 // re-validates before sending.
                 if value.is_empty() || value.chars().count() > 128 {
-                    self.username_dialog = Some(dialog);
-                    self.status_note = "title must be 1–128 characters".into();
+                    self.admin.username_dialog = Some(dialog);
+                    self.connection.status_note = "title must be 1–128 characters".into();
                     cx.notify();
                     return;
                 }
@@ -1005,16 +1006,16 @@ impl QuillApp {
                     Some(live) => match live.driver.set_group_title(chat_id, &value) {
                         Ok(Some(_)) => "title updated".into(),
                         Ok(None) => {
-                            self.username_dialog = Some(dialog);
+                            self.admin.username_dialog = Some(dialog);
                             "you can't change this group's info".into()
                         }
                         Err(_) => {
-                            self.username_dialog = Some(dialog);
+                            self.admin.username_dialog = Some(dialog);
                             "could not update title".into()
                         }
                     },
                     None => {
-                        self.username_dialog = Some(dialog);
+                        self.admin.username_dialog = Some(dialog);
                         "titles need a live connection (demo)".into()
                     }
                 }
@@ -1024,8 +1025,8 @@ impl QuillApp {
             // optimistic — the new name arrives via `updateCommunity`.
             TextPromptKind::CommunityName { community_id } => {
                 if value.is_empty() {
-                    self.username_dialog = Some(dialog);
-                    self.status_note = "community name cannot be empty".into();
+                    self.admin.username_dialog = Some(dialog);
+                    self.connection.status_note = "community name cannot be empty".into();
                     cx.notify();
                     return;
                 }
@@ -1033,12 +1034,12 @@ impl QuillApp {
                     Some(live) => match live.driver.set_community_name(community_id, &value) {
                         Ok(_) => "community name updated".into(),
                         Err(_) => {
-                            self.username_dialog = Some(dialog);
+                            self.admin.username_dialog = Some(dialog);
                             "could not update community name".into()
                         }
                     },
                     None => {
-                        self.username_dialog = Some(dialog);
+                        self.admin.username_dialog = Some(dialog);
                         "renaming communities needs a live connection (demo)".into()
                     }
                 }
@@ -1046,8 +1047,9 @@ impl QuillApp {
             TextPromptKind::GroupDescription => {
                 // 0–255 chars per the schema (line 13533); empty clears.
                 if value.chars().count() > 255 {
-                    self.username_dialog = Some(dialog);
-                    self.status_note = "description must be at most 255 characters".into();
+                    self.admin.username_dialog = Some(dialog);
+                    self.connection.status_note =
+                        "description must be at most 255 characters".into();
                     cx.notify();
                     return;
                 }
@@ -1061,16 +1063,16 @@ impl QuillApp {
                             }
                         }
                         Ok(None) => {
-                            self.username_dialog = Some(dialog);
+                            self.admin.username_dialog = Some(dialog);
                             "you can't change this group's info".into()
                         }
                         Err(_) => {
-                            self.username_dialog = Some(dialog);
+                            self.admin.username_dialog = Some(dialog);
                             "could not update description".into()
                         }
                     },
                     None => {
-                        self.username_dialog = Some(dialog);
+                        self.admin.username_dialog = Some(dialog);
                         "descriptions need a live connection (demo)".into()
                     }
                 }
@@ -1089,8 +1091,8 @@ impl QuillApp {
                 } else if std::path::Path::new(&value).is_file() {
                     Some(value.as_str())
                 } else {
-                    self.username_dialog = Some(dialog);
-                    self.status_note = format!("file not found: {value}");
+                    self.admin.username_dialog = Some(dialog);
+                    self.connection.status_note = format!("file not found: {value}");
                     cx.notify();
                     return;
                 };
@@ -1104,22 +1106,22 @@ impl QuillApp {
                             }
                         }
                         Ok(None) => {
-                            self.username_dialog = Some(dialog);
+                            self.admin.username_dialog = Some(dialog);
                             "you can't change this group's info".into()
                         }
                         Err(_) => {
-                            self.username_dialog = Some(dialog);
+                            self.admin.username_dialog = Some(dialog);
                             "could not update photo".into()
                         }
                     },
                     None => {
-                        self.username_dialog = Some(dialog);
+                        self.admin.username_dialog = Some(dialog);
                         "photos need a live connection (demo)".into()
                     }
                 }
             }
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -1129,7 +1131,7 @@ impl QuillApp {
         action: GroupConfirmAction,
         cx: &mut Context<Self>,
     ) {
-        self.group_confirm_dialog = Some(GroupConfirmDialog { chat_id, action });
+        self.admin.group_confirm_dialog = Some(GroupConfirmDialog { chat_id, action });
         cx.notify();
     }
 
@@ -1144,7 +1146,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_group_confirm(&mut self, cx: &mut Context<Self>) {
-        self.group_confirm_dialog = None;
+        self.admin.group_confirm_dialog = None;
         cx.notify();
     }
 
@@ -1154,7 +1156,7 @@ impl QuillApp {
     /// one-way `toggleSupergroupIsBroadcastGroup` upgrade (schema
     /// 1.8.67, line 15221).
     pub(super) fn submit_group_confirm(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.group_confirm_dialog.take() else {
+        let Some(dialog) = self.admin.group_confirm_dialog.take() else {
             return;
         };
         // A driver's `Ok(None)` means the request was refused or is
@@ -1176,7 +1178,7 @@ impl QuillApp {
         };
         // The conversion asks twice (tdesktop): the intro leads to the warning.
         if matches!(dialog.action, GroupConfirmAction::BroadcastIntro) {
-            self.group_confirm_dialog = Some(GroupConfirmDialog {
+            self.admin.group_confirm_dialog = Some(GroupConfirmDialog {
                 chat_id: dialog.chat_id,
                 action: GroupConfirmAction::BroadcastUpgrade,
             });
@@ -1293,8 +1295,12 @@ impl QuillApp {
                     // (the dialog blocks selection changes while
                     // open), so the enum stays `Copy`.
                     GroupConfirmAction::RemoveSelectedChats => {
-                        let chat_ids: Vec<ChatId> =
-                            self.selected_chats.iter().map(|id| ChatId(*id)).collect();
+                        let chat_ids: Vec<ChatId> = self
+                            .chat_list
+                            .selected
+                            .iter()
+                            .map(|id| ChatId(*id))
+                            .collect();
                         let mut sent = 0;
                         for id in &chat_ids {
                             if live
@@ -1306,7 +1312,7 @@ impl QuillApp {
                             }
                         }
                         let total = chat_ids.len();
-                        self.selected_chats.clear();
+                        self.chat_list.selected.clear();
                         Ok(format!("deleting {sent} of {total} chats…"))
                     }
                     // Slice A2: abort the pending recovery-email setup
@@ -1370,17 +1376,17 @@ impl QuillApp {
                 match result {
                     Ok(note) => note,
                     Err(_) => {
-                        self.group_confirm_dialog = Some(dialog);
+                        self.admin.group_confirm_dialog = Some(dialog);
                         "action failed".to_string()
                     }
                 }
             }
             None => {
-                self.group_confirm_dialog = Some(dialog);
+                self.admin.group_confirm_dialog = Some(dialog);
                 "chat actions need a live connection (demo)".to_string()
             }
         };
-        self.status_note = note;
+        self.connection.status_note = note;
         cx.notify();
     }
 
@@ -1398,7 +1404,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
-            let Some(dialog_state) = this.create_chat_dialog.as_ref() else {
+            let Some(dialog_state) = this.admin.create_chat_dialog.as_ref() else {
                 return dialog
                     .title(crate::ui::shell::dialog_title("New chat"))
                     .on_close(on_close);
@@ -1530,7 +1536,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
-            let Some(dialog_state) = this.username_dialog.as_ref() else {
+            let Some(dialog_state) = this.admin.username_dialog.as_ref() else {
                 return dialog
                     .title(crate::ui::shell::dialog_title("Public username"))
                     .on_close(on_close);
@@ -1666,7 +1672,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
-            let Some(dialog_state) = this.group_confirm_dialog.as_ref() else {
+            let Some(dialog_state) = this.admin.group_confirm_dialog.as_ref() else {
                 return dialog.title(crate::ui::shell::dialog_title("Confirm")).on_close(on_close);
             };
             let (title, message, confirm_label): (String, String, String) =
@@ -2074,7 +2080,7 @@ impl QuillApp {
     /// locally (no live driver).
     pub(super) fn join_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.join_channel(chat_id) {
+            self.connection.status_note = match live.driver.join_channel(chat_id) {
                 Ok(()) => "joining channel…".into(),
                 Err(_) => "could not join channel".into(),
             };
@@ -2082,7 +2088,7 @@ impl QuillApp {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.set_member_status(ChannelMemberStatus::Member, None);
             }
-            self.status_note = "joined channel (demo)".into();
+            self.connection.status_note = "joined channel (demo)".into();
         }
         cx.notify();
     }
@@ -2090,7 +2096,7 @@ impl QuillApp {
     /// `leaveChat` for the open channel. Demo sessions flip the status locally.
     pub(super) fn leave_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.leave_channel(chat_id) {
+            self.connection.status_note = match live.driver.leave_channel(chat_id) {
                 Ok(()) => "leaving channel…".into(),
                 Err(_) => "could not leave channel".into(),
             };
@@ -2098,7 +2104,7 @@ impl QuillApp {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.set_member_status(ChannelMemberStatus::Left, None);
             }
-            self.status_note = "left channel (demo)".into();
+            self.connection.status_note = "left channel (demo)".into();
         }
         cx.notify();
     }
@@ -2107,19 +2113,19 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     CreateChat => DialogSpec::new(
         4200,
-        |app| app.create_chat_dialog.is_some(),
+        |app| app.admin.create_chat_dialog.is_some(),
         QuillApp::build_create_chat_dialog,
     ),
 
     Username => DialogSpec::new(
         4500,
-        |app| app.username_dialog.is_some(),
+        |app| app.admin.username_dialog.is_some(),
         QuillApp::build_username_dialog,
     ),
 
     GroupConfirm => DialogSpec::new(
         4800,
-        |app| app.group_confirm_dialog.is_some(),
+        |app| app.admin.group_confirm_dialog.is_some(),
         QuillApp::build_group_confirm_dialog,
     ),
 }

@@ -111,11 +111,11 @@ impl QuillApp {
         // (viewer 777 is an administrator, seeded by
         // apply_ready_channels_admin).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_admin_log(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_admin_log(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
-        self.status_note = "screenshot demo — recent actions".into();
+        self.connection.status_note = "screenshot demo — recent actions".into();
     }
 
     fn demo_ready_admin_management(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -123,27 +123,27 @@ impl QuillApp {
         // panel plus the promote picker (viewer 777 has
         // can_promote_members, seeded by apply_ready_channels_admin).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_admin_management(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_admin_management(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
-        self.admin_dialog = Some(AdminDialog::promote(window, cx, ChatId(13)));
-        if let Some(dialog) = self.admin_dialog.as_mut()
+        self.admin.admin_dialog = Some(AdminDialog::promote(window, cx, ChatId(13)));
+        if let Some(dialog) = self.admin.admin_dialog.as_mut()
             && let AdminDialogKind::Promote { selected_user, .. } = &mut dialog.kind
         {
             *selected_user = Some(5);
         }
-        self.status_note = "screenshot demo — admin management".into();
+        self.connection.status_note = "screenshot demo — admin management".into();
     }
 
     fn demo_ready_avatar_profile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Avatar click: group history with a member's profile layer open.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             crate::ui::profile_modal::apply_ready_avatar_profile(
                 session,
-                &self.demo_sink,
-                &self.demo_seq,
+                &self.demo_ui.sink,
+                &self.demo_ui.seq,
             );
         }
         self.open_avatar_profile(
@@ -152,21 +152,21 @@ impl QuillApp {
             cx,
         );
         // Captures show the settled layer, not the fade.
-        self.profile_modal = Some(crate::ui::profile_modal::ProfileModal::shown(
+        self.dialogs.profile_modal = Some(crate::ui::profile_modal::ProfileModal::shown(
             InfoPanelTarget::User(602),
         ));
-        self.status_note = "screenshot demo — profile layer from an avatar click".into();
+        self.connection.status_note = "screenshot demo — profile layer from an avatar click".into();
     }
 
     fn demo_ready_channel_stats(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Phase D2: channel statistics fixture, then open the stats panel
         // directly in the info panel (demo path just sets the target).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_channel_stats(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_channel_stats(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Statistics(13), window, cx);
-        self.status_note = "screenshot demo — channel statistics".into();
+        self.connection.status_note = "screenshot demo — channel statistics".into();
     }
 
     fn demo_ready_group_info_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -175,11 +175,11 @@ impl QuillApp {
         // instead of the member dialog so the Edit title / Edit
         // description / Change photo rows render directly.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_manage(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_manage(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(61), window, cx);
-        self.status_note = "screenshot demo — group info edit".into();
+        self.connection.status_note = "screenshot demo — group info edit".into();
         cx.notify();
     }
 
@@ -189,11 +189,11 @@ impl QuillApp {
         // restrict/invite/tag rights, seeded by
         // apply_ready_group_manage).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_group_manage(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_group_manage(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.member_dialog = Some(MemberDialog::new(window, cx, ChatId(61), false));
-        self.status_note = "screenshot demo — group management".into();
+        self.admin.member_dialog = Some(MemberDialog::new(window, cx, ChatId(61), false));
+        self.connection.status_note = "screenshot demo — group management".into();
         cx.notify();
     }
 
@@ -202,11 +202,11 @@ impl QuillApp {
         // on the demo channel so the signatures, boost, welcome-message,
         // and recent-actions sections render directly.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_groups2(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_groups2(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
-        self.status_note = "screenshot demo — groups/channels G2".into();
+        self.connection.status_note = "screenshot demo — groups/channels G2".into();
         cx.notify();
     }
 
@@ -214,23 +214,23 @@ impl QuillApp {
         // Phase D3a: invite-links fixture, then open the channel info panel
         // (admin with can_invite_users, seeded by apply_ready_channels_admin).
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            apply_ready_invite_links(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_invite_links(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.invite_link_details = Some((
+        self.admin.invite_link_details = Some((
             quill::ids::ChatId(13),
             "https://t.me/+moderatorslink".to_owned(),
         ));
-        self.revoked_links_open = true;
+        self.admin.revoked_links_open = true;
         self.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
-        self.status_note = "screenshot demo — invite links".into();
+        self.connection.status_note = "screenshot demo — invite links".into();
     }
 
     fn demo_community(&mut self, demo: CommunityDemo, window: &mut Window, cx: &mut Context<Self>) {
         // Slice G10: community fixtures, then open the new surface.
         if let Some(session) = self.demo_session.as_mut() {
-            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-            community::apply_ready_communities(session, &self.demo_sink, &self.demo_seq);
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            community::apply_ready_communities(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         match demo {
             CommunityDemo::Create => {
@@ -243,7 +243,7 @@ impl QuillApp {
                 self.open_info_panel_target(InfoPanelTarget::Community(9001), window, cx);
             }
         }
-        self.status_note = "screenshot demo — communities G10".into();
+        self.connection.status_note = "screenshot demo — communities G10".into();
         cx.notify();
     }
 }

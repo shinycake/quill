@@ -109,7 +109,7 @@ impl QuillApp {
         action: UsernameChange,
         cx: &mut Context<Self>,
     ) {
-        self.status_note = match self.live.as_mut() {
+        self.connection.status_note = match self.live.as_mut() {
             Some(live) => {
                 let sent = match action {
                     UsernameChange::Toggle(on) => {
@@ -416,7 +416,7 @@ impl QuillApp {
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
-                                    this.status_note = "Boost link copied".into();
+                                    this.connection.status_note = "Boost link copied".into();
                                     cx.notify();
                                 })),
                         ),

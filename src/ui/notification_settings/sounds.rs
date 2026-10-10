@@ -54,14 +54,14 @@ impl QuillApp {
         sound_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.notif_sound_picker_open = false;
+        self.notify.notif_sound_picker_open = false;
         if self.live.is_some() {
             let result = self.live.as_mut().expect("live").driver.set_chat_sound(
                 chat_id,
                 use_default_sound,
                 sound_id,
             );
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "sound updated…".into(),
                 Err(_) => "could not change sound".into(),
             };
@@ -77,7 +77,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.status_note = "sound updated".into();
+            self.connection.status_note = "sound updated".into();
             cx.notify();
         }
     }
@@ -97,7 +97,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .set_chat_show_preview(chat_id, show_preview);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "preview setting updated…".into(),
                 Err(_) => "could not change preview".into(),
             };
@@ -113,7 +113,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.status_note = "preview setting updated".into();
+            self.connection.status_note = "preview setting updated".into();
             cx.notify();
         }
     }
@@ -133,7 +133,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .set_chat_story_mute(chat_id, mute_stories);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "story mute updated…".into(),
                 Err(_) => "could not change story mute".into(),
             };
@@ -149,7 +149,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.status_note = "story mute updated".into();
+            self.connection.status_note = "story mute updated".into();
             cx.notify();
         }
     }
@@ -169,7 +169,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .set_chat_story_poster(chat_id, show_story_poster);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "story poster setting updated…".into(),
                 Err(_) => "could not change story poster".into(),
             };
@@ -185,7 +185,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.status_note = "story poster setting updated".into();
+            self.connection.status_note = "story poster setting updated".into();
             cx.notify();
         }
     }
@@ -199,7 +199,7 @@ impl QuillApp {
         story_sound_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.story_sound_picker_open = false;
+        self.notify.story_sound_picker_open = false;
         if self.live.is_some() {
             let result = self
                 .live
@@ -207,7 +207,7 @@ impl QuillApp {
                 .expect("live")
                 .driver
                 .set_chat_story_sound(chat_id, use_default_story_sound, story_sound_id);
-            self.status_note = match result {
+            self.connection.status_note = match result {
                 Ok(_) => "story sound updated…".into(),
                 Err(_) => "could not change story sound".into(),
             };
@@ -223,7 +223,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.status_note = "story sound updated".into();
+            self.connection.status_note = "story sound updated".into();
             cx.notify();
         }
     }
@@ -241,7 +241,7 @@ impl QuillApp {
             None => Some(crate::ui::audio::NotificationSound::DefaultTone),
         };
         if let Some(sound) = sound {
-            self.notification_sounds.play(sound);
+            self.notify.notification_sounds.play(sound);
         }
     }
 

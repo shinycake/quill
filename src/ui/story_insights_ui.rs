@@ -44,10 +44,10 @@ impl QuillApp {
                 .retry_story_statistics(*chat_id, story_id, is_dark)
                 .is_err()
             {
-                self.status_note = "could not load story statistics".into();
+                self.connection.status_note = "could not load story statistics".into();
             }
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — story statistics run with live TDLib".into();
+            self.connection.status_note = "demo — story statistics run with live TDLib".into();
         }
         cx.notify();
     }
@@ -70,7 +70,7 @@ impl QuillApp {
                 .fetch_story_public_forwards(item.chat_id, item.story_id, &offset)
                 .is_err()
         {
-            self.status_note = "could not load public shares".into();
+            self.connection.status_note = "could not load public shares".into();
         }
         cx.notify();
     }
@@ -328,10 +328,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.search_public_stories(query).is_err() {
-                self.status_note = "could not search stories".into();
+                self.connection.status_note = "could not search stories".into();
             }
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — public story search runs with live TDLib".into();
+            self.connection.status_note = "demo — public story search runs with live TDLib".into();
         }
         cx.notify();
     }
