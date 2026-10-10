@@ -359,6 +359,9 @@ pub struct Session {
     pub privacy_data: PrivacyData,
     /// Batch 4: new-login alert, service popups and terms of service.
     pub notices: AccountNotices,
+    /// Account-level sync updates: silent default, downloads, dice,
+    /// freeze, speech quota, live shares, age verification.
+    pub sync: UpdatesSync,
     /// Batch 6: two-step recovery / reset / login-email flow state.
     pub twofa_flow: TwofaFlow,
     /// Slice A2: cached `getPasswordState` / `setPassword` /
@@ -1366,6 +1369,7 @@ impl Session {
             storage_limits: Default::default(),
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
+            sync: UpdatesSync::default(),
             twofa_flow: TwofaFlow::default(),
             password_state: None,
             password_state_loading: false,

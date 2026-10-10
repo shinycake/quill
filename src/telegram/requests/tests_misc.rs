@@ -407,3 +407,24 @@ fn toggle_has_sponsored_messages_enabled_matches_1_8_67() {
     assert_eq!(v["@type"], "toggleHasSponsoredMessagesEnabled");
     assert_eq!(v["has_sponsored_messages_enabled"], false);
 }
+
+#[test]
+fn optimize_storage_carries_file_types_and_chats() {
+    let v: serde_json::Value = serde_json::from_str(&optimize_storage(
+        RequestId(5),
+        &OptimizeStorage {
+            file_types: &["fileTypePhoto", "fileTypeVideo"],
+            chat_ids: &[-1001, 42],
+            ..OptimizeStorage::everything(50)
+        },
+    ))
+    .unwrap();
+    assert_eq!(v["@type"], "optimizeStorage");
+    assert_eq!(
+        v["file_types"],
+        serde_json::json!([{"@type": "fileTypePhoto"}, {"@type": "fileTypeVideo"}])
+    );
+    assert_eq!(v["chat_ids"], serde_json::json!([-1001, 42]));
+    assert_eq!(v["exclude_chat_ids"], serde_json::json!([]));
+    assert_eq!(v["size"], 0);
+}

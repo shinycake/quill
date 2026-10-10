@@ -1,4 +1,5 @@
 use super::SatI32;
+use super::chat_members::{ChatAdminRights, parse_chat_admin_rights};
 use serde_json::Value;
 
 /// `botCommand` (TDLib 1.8.67, `schema/td_api.tl:826`):
@@ -33,6 +34,12 @@ pub struct BotInfo {
     /// Slice B2: `botInfo.privacy_policy_url` — the HTTP link to the bot's
     /// privacy policy (schema line 2414); empty when the bot published none.
     pub privacy_policy_url: String,
+    /// `botInfo.default_group_administrator_rights` (schema 1.8.67, line
+    /// 2739): the rights the bot asks for when added to a group as an
+    /// administrator. `None` when the bot has no such request.
+    pub group_admin_rights: Option<ChatAdminRights>,
+    /// `botInfo.default_channel_administrator_rights`, same for channels.
+    pub channel_admin_rights: Option<ChatAdminRights>,
 }
 
 /// Slice B2: `botMenuButton text:string url:string = BotMenuButton;`
@@ -108,7 +115,17 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        group_admin_rights: parse_requested_rights(value.get("default_group_administrator_rights")),
+        channel_admin_rights: parse_requested_rights(
+            value.get("default_channel_administrator_rights"),
+        ),
     })
+}
+
+/// A requested-rights block counts only when it asks for something, like
+/// tdesktop treating an all-zero mask as "no admin request".
+fn parse_requested_rights(value: Option<&Value>) -> Option<ChatAdminRights> {
+    parse_chat_admin_rights(value).filter(|rights| *rights != ChatAdminRights::default())
 }
 
 /// Slice bots-games: `gameHighScore` (TDLib 1.8.67, `schema/td_api.tl:7755`)
@@ -155,4 +172,58 @@ pub(crate) fn parse_game_high_scores(value: &Value) -> Vec<GameHighScore> {
 pub struct GameInfo {
     pub short_name: String,
     pub title: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_bot_info;
+    use crate::telegram::envelope::users::parse_user;
+    use serde_json::json;
+
+    #[test]
+    fn requested_admin_rights_are_kept_only_when_they_ask_for_something() {
+        let info = parse_bot_info(Some(&json!({
+            "@type": "botInfo",
+            "default_group_administrator_rights": {
+                "@type": "chatAdministratorRights",
+                "can_manage_chat": true,
+                "can_delete_messages": true,
+            },
+            "default_channel_administrator_rights": {
+                "@type": "chatAdministratorRights",
+            },
+        })))
+        .expect("bot info");
+        let group = info.group_admin_rights.expect("group rights");
+        assert!(group.can_manage_chat && group.can_delete_messages && !group.can_post_messages);
+        assert_eq!(info.channel_admin_rights, None);
+    }
+
+    #[test]
+    fn missing_rights_blocks_parse_as_none() {
+        let info = parse_bot_info(Some(&json!({"@type": "botInfo"}))).expect("bot info");
+        assert_eq!(info.group_admin_rights, None);
+        assert_eq!(info.channel_admin_rights, None);
+    }
+
+    #[test]
+    fn a_bot_user_reports_whether_it_can_join_groups() {
+        let user = |can_join: bool| {
+            parse_user(&json!({
+                "id": 5,
+                "first_name": "Helper",
+                "type": {"@type": "userTypeBot", "can_join_groups": can_join},
+            }))
+            .expect("user")
+        };
+        assert!(user(true).can_join_groups);
+        assert!(!user(false).can_join_groups);
+        let person = parse_user(&json!({
+            "id": 6,
+            "first_name": "Ada",
+            "type": {"@type": "userTypeRegular"},
+        }))
+        .expect("user");
+        assert!(!person.can_join_groups);
+    }
 }

@@ -1,0 +1,5 @@
+# bots-extras: landed in full, verified by tests and demo captures
+parity:bots-fast-buttons
+parity:bots-add-to-group
+parity:profile-add-bot-to-group
+parity:bots-share-game

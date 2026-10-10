@@ -420,10 +420,6 @@ fn typed_links_route_through_get_internal_link_type() {
             "tg://settings/themes",
             json!({"@type":"internalLinkTypeTheme","theme_name":"x"}),
         ),
-        (
-            "https://t.me/bot?startgroup=x",
-            json!({"@type":"internalLinkTypeBotStartInGroup","bot_username":"bot","start_parameter":"x"}),
-        ),
     ] {
         assert!(
             matches!(
@@ -483,6 +479,46 @@ fn typed_link_failures_use_clear_wording() {
         Some(DeepLinkState::ShowText(
             "The phone number +1555000 is not on Telegram yet.".into()
         ))
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn bot_links_resolve_the_bot_with_search_public_chat() {
+    use crate::bot_invite::{Invite, Scope};
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+
+    let game = DeepLinkAction::ShareGame {
+        domain: "chessbot".into(),
+        game_short_name: "chess".into(),
+    };
+    driver.resolve_deep_link(game.clone()).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "searchPublicChat")["username"],
+        "chessbot"
+    );
+    assert!(matches!(
+        driver.session.deep_link,
+        Some(DeepLinkState::ResolvingChat { ref action, .. }) if *action == game
+    ));
+
+    driver
+        .resolve_deep_link(DeepLinkAction::AddBot {
+            domain: "helper".into(),
+            invite: Invite {
+                scope: Scope::GroupAdmin,
+                ..Default::default()
+            },
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        sent_request(&recorder, "searchPublicChat")["username"],
+        "helper"
     );
     std::fs::remove_dir_all(dir).unwrap();
 }

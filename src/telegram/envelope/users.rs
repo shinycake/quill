@@ -99,6 +99,9 @@ pub struct ParsedUser {
     /// itself, and Telegram Desktop only shows the tabs once at least one
     /// topic exists (`Data::IsBotCreatesTopics`, `displayAsForum`).
     pub allows_users_to_create_topics: bool,
+    /// `userTypeBot.can_join_groups` (schema 1.8.67, line 816): the bot
+    /// accepts being added to groups. False for non-bots.
+    pub can_join_groups: bool,
     pub status: UserStatusKind,
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
@@ -287,6 +290,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     };
     let has_topics = bot_flag("has_topics");
     let allows_users_to_create_topics = bot_flag("allows_users_to_create_topics");
+    let can_join_groups = bot_flag("can_join_groups");
     let status = parse_user_status(value.get("status"));
     let photo_small_file_id = i32::try_from(int53_or_zero(
         value
@@ -347,6 +351,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_inline,
         has_topics,
         allows_users_to_create_topics,
+        can_join_groups,
         status,
         photo_small_file_id,
         accent_color_id,
