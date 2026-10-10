@@ -394,3 +394,119 @@ fn moderation_needs_a_supergroup() {
             .is_err()
     );
 }
+
+const VOTED_POLL: &str = r#"{"@type":"updateNewMessage","message":{"id":106,"chat_id":7,"is_outgoing":false,"content":{"@type":"messagePoll","poll":{"@type":"poll","id":9001,"question":{"@type":"formattedText","text":"Lunch?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Sushi","entities":[]},"voter_count":12,"vote_percentage":55,"is_chosen":true},{"@type":"pollOption","id":"b","text":{"@type":"formattedText","text":"Pizza","entities":[]},"voter_count":7,"vote_percentage":32,"is_chosen":false}],"total_voter_count":19,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{"@type":"pollTypeRegular"}},"description":{"@type":"formattedText","text":"","entities":[]},"can_add_option":false}}}"#;
+
+fn private_chat(
+    driver: &mut ConnectDriver<Recorder>,
+    seq: &AtomicU64,
+    sink: &Arc<dyn DiagnosticSink>,
+) {
+    feed(
+        driver,
+        seq,
+        sink,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    );
+}
+
+#[test]
+fn retracting_a_vote_sends_an_empty_answer_and_clears_the_mark() {
+    let (mut driver, recorder, sink, seq) = group_driver();
+    private_chat(&mut driver, &seq, &sink);
+    feed(&mut driver, &seq, &sink, VOTED_POLL);
+    driver.retract_poll_vote(ChatId(7), MessageId(106)).unwrap();
+    let request = sent_request(&recorder, "setPollAnswer");
+    assert_eq!(request["message_id"], 106);
+    assert_eq!(request["option_ids"], serde_json::json!([]));
+    let chosen = match &driver.session.histories[&7].messages[&106].content {
+        crate::telegram::envelope::MessageContent::Poll(poll) => poll.poll.chosen_indexes(),
+        other => panic!("{other:?}"),
+    };
+    assert!(chosen.is_empty());
+    // Nothing is left to retract now.
+    assert!(driver.retract_poll_vote(ChatId(7), MessageId(106)).is_err());
+}
+
+#[test]
+fn a_fact_check_is_set_with_the_text_and_removed_with_null() {
+    let (mut driver, recorder, sink, seq) = group_driver();
+    private_chat(&mut driver, &seq, &sink);
+    driver
+        .set_fact_check(ChatId(7), MessageId(5), "Checked against the report.")
+        .unwrap();
+    let request = sent_request(&recorder, "setMessageFactCheck");
+    assert_eq!(request["text"]["text"], "Checked against the report.");
+    driver
+        .set_fact_check(ChatId(7), MessageId(5), "  ")
+        .unwrap();
+    assert!(sent_request(&recorder, "setMessageFactCheck")["text"].is_null());
+}
+
+#[test]
+fn a_fact_check_update_lands_on_the_loaded_message() {
+    let (mut driver, _recorder, sink, seq) = group_driver();
+    private_chat(&mut driver, &seq, &sink);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Claim","entities":[]}}}}"#,
+    );
+    assert_eq!(
+        driver.session.histories[&7].messages[&5].extras.fact_check,
+        ""
+    );
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageFactCheck","chat_id":7,"message_id":5,"fact_check":{"@type":"factCheck","text":{"@type":"formattedText","text":"Context","entities":[]},"country_code":"US"}}"#,
+    );
+    assert_eq!(
+        driver.session.histories[&7].messages[&5].extras.fact_check,
+        "Context"
+    );
+}
+
+#[test]
+fn saving_a_notification_tone_sends_the_file_by_id() {
+    let (mut driver, recorder, _sink, _seq) = group_driver();
+    driver
+        .save_notification_tone(crate::ids::FileId(42))
+        .unwrap();
+    let request = sent_request(&recorder, "addSavedNotificationSound");
+    assert_eq!(request["sound"]["@type"], "inputFileId");
+    assert_eq!(request["sound"]["id"], 42);
+    assert!(
+        driver
+            .save_notification_tone(crate::ids::FileId(0))
+            .is_err()
+    );
+}
+
+#[test]
+fn message_properties_carry_the_new_rights() {
+    let (mut driver, _recorder, sink, seq) = group_driver();
+    private_chat(&mut driver, &seq, &sink);
+    let extra = driver.session.request(
+        crate::state::RequestPurpose::GetMessageMenuActions {
+            chat_id: ChatId(7),
+            message_id: MessageId(5),
+        },
+        Some(ChatId(7)),
+    );
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messageProperties","@extra":"{}","can_set_fact_check":true,"can_be_replied_in_another_chat":true}}"#,
+            extra.0
+        ),
+    );
+    let (_, _, actions) = driver.session.message_menu_actions.expect("properties");
+    assert!(actions.can_set_fact_check);
+    assert!(actions.can_be_replied_in_another_chat);
+    assert!(!actions.can_be_edited);
+}

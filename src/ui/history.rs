@@ -840,61 +840,87 @@ pub(super) fn session_history_row(
                 quill::state::ReactionChoice::Emoji(emoji) => format!("{emoji} {count}"),
                 quill::state::ReactionChoice::CustomEmoji(_) => format!("Custom emoji {count}"),
             };
-            row = row.child(
-                div()
-                    .id(("reaction-chip", message_id.0 as u64 * 64 + index as u64))
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .px_2()
-                    .py_1()
-                    .rounded_full()
-                    .text_xs()
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(label)
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .when(chosen, |this| {
-                        this.bg(accent_strong())
-                            .text_color(text_on_fill())
-                            .border_1()
-                            .border_color(accent())
-                    })
-                    .when(!chosen, |this| {
-                        this.bg(bg_subtle())
-                            .text_color(text_primary())
-                            .border_1()
-                            .border_color(text_muted())
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
-                    }))
-                    .child(glyph)
-                    .map(|this| {
-                        if are_tags {
-                            this
-                        } else if reactors.is_empty() {
-                            this.child(count.to_string())
-                        } else {
-                            // Overlapping 18 px avatars of who reacted.
-                            this.child(div().flex().items_center().children(
-                                reactors.iter().enumerate().map(|(ix, (name, photo))| {
-                                    div()
-                                        .when(ix > 0, |this| this.ml(px(-5.)))
-                                        .rounded_full()
-                                        .border_1()
-                                        .border_color(bg_subtle())
-                                        .child(super::message_text::kit_avatar_element(
-                                            name,
-                                            photo.as_deref(),
-                                            px(18.),
-                                        ))
-                                }),
-                            ))
-                        }
-                    }),
-            );
+            let tag_type = chip.reaction_type.clone();
+            let chip_el = div()
+                .id(("reaction-chip", message_id.0 as u64 * 64 + index as u64))
+                .flex()
+                .items_center()
+                .gap_1()
+                .px_2()
+                .py_1()
+                .rounded_full()
+                .text_xs()
+                .role(gpui_kit::Role::Button)
+                .aria_label(label)
+                .tab_index(0)
+                .cursor_pointer()
+                .pressable(cx.theme())
+                .when(chosen, |this| {
+                    this.bg(accent_strong())
+                        .text_color(text_on_fill())
+                        .border_1()
+                        .border_color(accent())
+                })
+                .when(!chosen, |this| {
+                    this.bg(bg_subtle())
+                        .text_color(text_primary())
+                        .border_1()
+                        .border_color(text_muted())
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
+                }))
+                .child(glyph)
+                .map(|this| {
+                    if are_tags {
+                        this
+                    } else if reactors.is_empty() {
+                        this.child(count.to_string())
+                    } else {
+                        // Overlapping 18 px avatars of who reacted.
+                        this.child(div().flex().items_center().children(
+                            reactors.iter().enumerate().map(|(ix, (name, photo))| {
+                                div()
+                                    .when(ix > 0, |this| this.ml(px(-5.)))
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(bg_subtle())
+                                    .child(super::message_text::kit_avatar_element(
+                                        name,
+                                        photo.as_deref(),
+                                        px(18.),
+                                    ))
+                            }),
+                        ))
+                    }
+                });
+            // A Saved Messages tag has its own menu (Filter by Tag, Add or
+            // Edit Name, Remove Tag).
+            row = row.child(if are_tags {
+                let named = session.is_some_and(|s| {
+                    s.saved
+                        .tags
+                        .iter()
+                        .any(|entry| entry.tag == tag_type && !entry.label.is_empty())
+                });
+                let premium = session
+                    .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))
+                    .is_some_and(|user| user.is_premium);
+                super::saved_sublists::tag_chip_menu(
+                    chip_el,
+                    super::saved_sublists::TagChipMenu {
+                        owner: cx.entity().downgrade(),
+                        tag: tag_type,
+                        choice: quill::state::ReactionChoice::from_type(&chip.reaction_type),
+                        chat_id,
+                        message_id,
+                        named,
+                        premium,
+                    },
+                )
+            } else {
+                chip_el.into_any_element()
+            });
         }
         // Telegram Desktop keeps the time on the reactions' line.
         if let Some(footer) = message_footer_meta(&footer_meta) {

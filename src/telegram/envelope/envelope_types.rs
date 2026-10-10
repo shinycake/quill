@@ -1175,6 +1175,12 @@ pub enum EnvelopePayload {
         settings: ReactionNotificationSettings,
     },
     /// `updateMessageInteractionInfo` — views / forwards / `messageReactions`.
+    /// `updateMessageFactCheck`: the fact check of a message changed.
+    UpdateMessageFactCheck {
+        chat_id: ChatId,
+        message_id: MessageId,
+        text: String,
+    },
     UpdateMessageInteractionInfo {
         chat_id: ChatId,
         message_id: MessageId,
@@ -1856,6 +1862,10 @@ pub struct MessageActions {
     pub can_edit_scheduling_state: bool,
     /// B15: `getPollVoteStatistics` works (poll creator / admin view).
     pub can_get_poll_vote_statistics: bool,
+    /// "Reply in Another Chat" is offered.
+    pub can_be_replied_in_another_chat: bool,
+    /// An admin may add or edit a fact check (`setMessageFactCheck`).
+    pub can_set_fact_check: bool,
 }
 
 impl MessageActions {

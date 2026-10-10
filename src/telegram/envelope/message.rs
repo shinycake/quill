@@ -55,6 +55,8 @@ pub struct MessageExtras {
     pub via_bot_user_id: i64,
     /// `message.import_info`.
     pub import_info: Option<MessageImportInfo>,
+    /// `message.fact_check.text` as plain text ("" when none).
+    pub fact_check: String,
 }
 
 /// Typed `messageForwardInfo`. `source` (Saved Messages / Replies) stays out.
@@ -513,6 +515,14 @@ pub(crate) fn parse_message_topic(value: Option<&Value>) -> Option<i32> {
     }
 }
 
+/// The text of a `factCheck` (null or absent: none).
+pub(crate) fn parse_fact_check_text(value: Option<&Value>) -> String {
+    value
+        .filter(|check| !check.is_null())
+        .map(|check| super::message_content::parse_formatted_text(check.get("text")))
+        .unwrap_or_default()
+}
+
 pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
     MessageExtras {
         edit_date: value
@@ -521,6 +531,7 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
             .unwrap_or(0)
             .sat_i32(),
         via_bot_user_id: int53_or_zero(value.get("via_bot_user_id")),
+        fact_check: parse_fact_check_text(value.get("fact_check")),
         import_info: value
             .get("import_info")
             .filter(|info| info.get("@type").and_then(Value::as_str) == Some("messageImportInfo"))
