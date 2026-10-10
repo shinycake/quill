@@ -715,3 +715,24 @@ pub fn set_group_call_participant_volume_level(
     })
     .to_string()
 }
+
+/// `setGroupCallParticipantIsSpeaking group_call_id:int32
+/// audio_source:int32 is_speaking:Bool = MessageSender`
+/// (`schema/td_api.tl:14819`): your own microphone's speaking state,
+/// from the level tap. TDLib marks the participant and sends the
+/// speaking action to the server.
+pub fn set_group_call_participant_is_speaking(
+    extra: RequestId,
+    group_call_id: i32,
+    audio_source: i32,
+    is_speaking: bool,
+) -> String {
+    json!({
+        "@type": "setGroupCallParticipantIsSpeaking",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "audio_source": audio_source,
+        "is_speaking": is_speaking,
+    })
+    .to_string()
+}

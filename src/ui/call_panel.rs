@@ -59,9 +59,16 @@ pub(super) struct CallSnap {
     screen_sharing: bool,
     can_share_screen: bool,
     emojis: Vec<String>,
+    /// The peer's microphone is off (tdesktop `lng_call_microphone_off`).
+    remote_muted: bool,
     remote: Option<Arc<RenderImage>>,
     local: Option<Arc<RenderImage>>,
     backdrop: Option<Arc<RenderImage>>,
+}
+
+/// tdesktop `lng_call_microphone_off`.
+pub(super) fn microphone_off_line(name: &str) -> String {
+    format!("{name}'s microphone is off")
 }
 
 /// tdesktop `Ui::FormatDurationText`: `m:ss`, or `h:mm:ss`.
@@ -202,6 +209,7 @@ impl QuillApp {
                 screen_sharing: false,
                 can_share_screen: false,
                 emojis: Vec::new(),
+                remote_muted: false,
                 remote: None,
                 local: None,
                 backdrop,
@@ -267,6 +275,7 @@ impl QuillApp {
                 .as_ref()
                 .map(|r| r.emojis.clone())
                 .unwrap_or_default(),
+            remote_muted: ready && call.remote_audio_muted,
             remote,
             local,
             backdrop,
@@ -809,6 +818,14 @@ impl Render for CallPanel {
             .text_size(px(14.))
             .text_color(rgb(STATUS_FG))
             .child(snap.status.clone());
+        // tdesktop `callRemoteAudioMute`: a 12 px line under the status
+        // while the peer's microphone is off.
+        let mic_off = snap.remote_muted.then(|| {
+            div()
+                .text_size(px(12.))
+                .text_color(rgb(STATUS_FG))
+                .child(microphone_off_line(&snap.name))
+        });
 
         // The 4 emoji everyone in the call should see the same.
         let fingerprint = (!snap.emojis.is_empty()).then(|| {
@@ -890,6 +907,7 @@ impl Render for CallPanel {
                 .gap(px(4.))
                 .child(name.text_size(px(17.)))
                 .child(status)
+                .children(mic_off)
                 .into_any_element()
         } else {
             div()
@@ -904,6 +922,7 @@ impl Render for CallPanel {
                 .child(photo)
                 .child(div().mt(px(16.)).max_w(px(420.)).child(name))
                 .child(status)
+                .children(mic_off)
                 .into_any_element()
         };
 
@@ -973,9 +992,14 @@ impl Render for CallPanel {
 
 #[cfg(test)]
 mod tests {
-    use super::{call_status, duration_text};
+    use super::{call_status, duration_text, microphone_off_line};
     use quill::calls::engine::TransportState;
     use quill::telegram::envelope::CallState;
+
+    #[test]
+    fn peer_microphone_off_line_names_the_peer() {
+        assert_eq!(microphone_off_line("Zed"), "Zed's microphone is off");
+    }
 
     #[test]
     fn statuses_follow_tdesktop() {

@@ -154,6 +154,7 @@ impl Session {
                 screen_sharing: false,
                 remote_video: RemoteVideoState::Inactive,
                 remote_screen: RemoteVideoState::Inactive,
+                remote_audio_muted: false,
                 state: CallState::Pending {
                     is_created: true,
                     is_received: false,

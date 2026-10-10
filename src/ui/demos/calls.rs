@@ -5,7 +5,7 @@ use crate::ui::calls::apply_ready_call;
 use crate::ui::calls::{
     apply_ready_call_swap, apply_ready_call_video, apply_ready_calls_settings,
     apply_ready_group_call, apply_ready_group_call_invitation, apply_ready_group_call_invite,
-    apply_ready_group_call_join_as, apply_ready_group_call_manage, apply_ready_group_call_polish,
+    apply_ready_group_call_join_as, apply_ready_group_call_manage,
     apply_ready_group_call_scheduled,
 };
 use crate::ui::chat_list::apply_ready_mute_archive;
@@ -14,7 +14,11 @@ use crate::ui::group_calls::demo_group_video_frames;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use crate::ui::secret_chats::apply_ready_chat_ttl;
 use gpui_kit::*;
-use std::sync::atomic::Ordering;
+use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::state::Session;
+use quill::telegram::client::copy_and_parse;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 register_demos![
     // Auto-delete in a regular chat: the header menu's picker with the
@@ -385,6 +389,8 @@ impl QuillApp {
         {
             call.remote_video = quill::calls::engine::RemoteVideoState::Active;
             call.transport = Some(quill::calls::engine::TransportState::Connected);
+            // `QUILL_DEMO_CALL_REMOTE_MUTED=1`: the peer's microphone is off.
+            call.remote_audio_muted = std::env::var_os("QUILL_DEMO_CALL_REMOTE_MUTED").is_some();
         }
         self.connection.status_note =
             "screenshot demo — connected video call with Zed (injected, no live Telegram)".into();
@@ -399,6 +405,16 @@ impl QuillApp {
             apply_ready_calls_settings(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.call_prefs.push_to_talk.enabled = true;
             session.call_prefs.push_to_talk.key = "f13".into();
+        }
+        // `QUILL_DEMO_MIC_TEST=<peak 0..1>`: the microphone test running
+        // with a fixed level (no device is opened).
+        if let Some(level) = std::env::var("QUILL_DEMO_MIC_TEST")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            self.start_mic_test_demo(level);
+            self.settings.open = true;
+            self.settings.page = Some("Calls");
         }
         self.chat_list.calls_tab_open = true;
         self.connection.status_note =
@@ -430,6 +446,15 @@ impl QuillApp {
             // Slice calls-group-self-tile: the self tile renders the
             // local camera preview (fixture camera is on).
             self.demo_ui.local_frame = Some(demo_video_frame(true));
+            // `QUILL_DEMO_SELF_LEVEL=<level>`: your own microphone level on
+            // the mute button and your row (tgcalls scale, voice from 1.0).
+            if let Some(level) = std::env::var("QUILL_DEMO_SELF_LEVEL")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+            {
+                self.group_call.demo_level = Some(level);
+                session.set_group_call_self_muted(false);
+            }
         }
         self.connection.status_note =
             "screenshot demo — group voice chat (injected, no live Telegram)".into();
@@ -530,5 +555,21 @@ impl QuillApp {
         self.notify.mute_custom_open = true;
         self.notify.mute_custom = quill::mute_menu::CustomMute { days: 2, hours: 3 };
         self.connection.status_note = "screenshot demo — mute menu · custom duration".into();
+    }
+}
+
+/// Calls-polish fixture: the Ready group voice chat with Mia's screen
+/// share paused (`screen_sharing_video_info.is_paused`), Raj's camera
+/// still paused, and Zed's camera pinned by the caller.
+pub(super) fn apply_ready_group_call_polish(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    apply_ready_group_call(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let json = r#"{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{"@type":"groupCallParticipant","participant_id":{"@type":"messageSenderUser","user_id":42},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":null,"screen_sharing_video_info":{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[222]}],"endpoint_id":"ep-42-screen","is_paused":true},"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":true,"can_be_muted_for_all_users":true,"can_be_unmuted_for_all_users":true,"can_be_muted_for_current_user":true,"can_be_unmuted_for_current_user":true,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"a2"}}"#;
+    if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+        session.apply(owned);
     }
 }

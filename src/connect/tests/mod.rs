@@ -5,6 +5,7 @@ mod ai_tools;
 mod auth_leftovers;
 mod bot_pending;
 mod bots;
+mod call_audio;
 mod calls;
 mod chat_list;
 mod chat_state;

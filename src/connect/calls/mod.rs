@@ -39,24 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .expect("call transport outbox")
                 .push_back((call_id, state));
         }));
-        // Phase C2e: peer camera states and decoded frames ride the same
-        // worker-thread -> driver-pump path as transport and signaling.
-        let video_state_outbox = self.video_state_outbox.clone();
-        engine.set_remote_video_state_callback(Arc::new(move |call_id, state| {
-            video_state_outbox
-                .lock()
-                .expect("call video state outbox")
-                .push_back((call_id, state));
-        }));
-        // Phase C2j: the peer's 1:1 screen-share state rides the same
-        // worker-thread -> driver-pump path as the camera state.
-        let screen_state_outbox = self.screen_state_outbox.clone();
-        engine.set_remote_screen_state_callback(Arc::new(move |call_id, state| {
-            screen_state_outbox
-                .lock()
-                .expect("call screen state outbox")
-                .push_back((call_id, state));
-        }));
+        self.install_remote_state_hooks(engine.as_mut());
         let video_frame_slots = self.video_frame_slots.clone();
         let group_video_frame_slots = self.group_video_frame_slots.clone();
         engine.set_video_frame_callback(Arc::new(move |call_id, frame| {

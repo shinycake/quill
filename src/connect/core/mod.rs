@@ -1,4 +1,5 @@
 //! Connect driver core: construction, the update pump, and lifecycle.
+use super::composer::ai_rich_draft_note;
 use super::*;
 use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
@@ -22,17 +23,6 @@ use std::path::{Path, PathBuf};
 mod lifecycle;
 
 use std::sync::{Arc, Mutex};
-
-/// Status note for a rich AI answer. Create / fix / rewrite must not share
-/// one label — only create actually created the draft.
-fn ai_rich_draft_note(purpose: RequestPurpose) -> &'static str {
-    match purpose {
-        RequestPurpose::FixRichMessageWithAi => "AI fixed the draft",
-        RequestPurpose::ComposeRichMessageWithAi => "AI rewrote the draft",
-        RequestPurpose::CreateRichMessageWithAi => "AI created the draft",
-        _ => "AI updated the draft",
-    }
-}
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
@@ -534,6 +524,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;
+        self.pump_call_audio()?;
         self.maybe_send_parameters()?;
         self.maybe_probe_channel_membership()?;
         // Slice G2: chain `boostChat` once the slots answer arrives.

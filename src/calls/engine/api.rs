@@ -50,6 +50,13 @@ pub trait CallEngine {
     /// peer's share goes inactive so no stale picture renders.
     fn set_remote_screen_state_callback(&mut self, callback: RemoteVideoStateCallback);
 
+    /// engine -> app; register the hook receiving the peer's 1:1
+    /// microphone on/off state (`(call id, muted)`). Engines without
+    /// the signal never call it.
+    fn set_remote_audio_state_callback(&mut self, callback: RemoteAudioStateCallback) {
+        let _ = callback;
+    }
+
     /// Phase C2e: app -> engine; toggle the local camera. `camera` doubles
     /// as camera selection, `None` means the default device.
     fn set_camera_enabled(

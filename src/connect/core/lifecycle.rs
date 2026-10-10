@@ -22,6 +22,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
             screen_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            audio_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            call_audio: Default::default(),
             video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
             group_video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
             group_camera_state: HashMap::new(),

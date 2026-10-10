@@ -96,6 +96,7 @@ impl Session {
             screen_sharing: false,
             remote_video: RemoteVideoState::Inactive,
             remote_screen: RemoteVideoState::Inactive,
+            remote_audio_muted: false,
         });
         self.call_summary = None;
         self.call_error = None;

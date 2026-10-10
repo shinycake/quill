@@ -73,6 +73,7 @@ impl NtgcallsEngine {
                 frame_hook: Mutex::new(None),
                 remote_video_hook: Mutex::new(None),
                 remote_screen_hook: Mutex::new(None),
+                remote_audio_hook: Mutex::new(None),
                 frame_seq: AtomicU64::new(0),
                 group_chat_to_call: Mutex::new(HashMap::new()),
                 group_video_ssrc_to_user: Mutex::new(HashMap::new()),

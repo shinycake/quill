@@ -7,7 +7,7 @@
 1185 src/telegram/requests/messages.rs
 1197 src/ui/app_render.rs
 1893 src/ui/appearance.rs
-1497 src/ui/calls.rs
+1482 src/ui/calls.rs
 1088 src/ui/chat_bars.rs
 1906 src/ui/chat_list.rs
 1385 src/ui/chat_row.rs
@@ -18,7 +18,6 @@
 1061 src/ui/folder_share.rs
 1265 src/ui/folders.rs
 1308 src/ui/group_admin_panels.rs
-1171 src/ui/group_call_panel.rs
 1110 src/ui/group_moderation.rs
 1264 src/ui/group_panels.rs
 2131 src/ui/groups.rs

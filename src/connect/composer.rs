@@ -351,3 +351,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 }
+
+/// Status note for a rich AI answer. Create / fix / rewrite must not share
+/// one label — only create actually created the draft.
+pub(super) fn ai_rich_draft_note(purpose: RequestPurpose) -> &'static str {
+    match purpose {
+        RequestPurpose::FixRichMessageWithAi => "AI fixed the draft",
+        RequestPurpose::ComposeRichMessageWithAi => "AI rewrote the draft",
+        RequestPurpose::CreateRichMessageWithAi => "AI created the draft",
+        _ => "AI updated the draft",
+    }
+}

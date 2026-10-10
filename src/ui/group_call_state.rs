@@ -32,6 +32,13 @@ pub(crate) struct GroupCallUi {
     pub(super) global_ptt_polling: bool,
     /// Locally pinned video tile of the group call (tdesktop viewport pin).
     pub(super) pin: quill::calls::tile_pin::TilePin,
+    /// Your own microphone level on the mute button: the halo follows
+    /// the driver's level over `LEVEL_ANIMATION_MS` (tdesktop's blobs).
+    /// `level_seen` is the last driver level the animation was aimed
+    /// at; `demo_level` stands in for the driver in screenshot demos.
+    pub(super) level_anim: quill::calls::audio_level::LevelAnimation,
+    pub(super) level_seen: f32,
+    pub(super) demo_level: Option<f32>,
     /// Phase C2g: group-call video tiles cached by
     /// `(group_call_id, user_id, is_screen)` → `(frame seq, image)`,
     /// rebuilt only when that slot's frame sequence changes.
@@ -55,6 +62,12 @@ impl GroupCallUi {
             global_ptt: Default::default(),
             global_ptt_polling: false,
             pin: quill::calls::tile_pin::TilePin::default(),
+            level_anim: quill::calls::audio_level::LevelAnimation::new(
+                0.0,
+                quill::calls::audio_level::LEVEL_ANIMATION_MS,
+            ),
+            level_seen: 0.0,
+            demo_level: None,
             video_images: HashMap::new(),
         }
     }

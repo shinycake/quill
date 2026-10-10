@@ -129,6 +129,11 @@ pub enum CallsPurpose {
     /// Phase C2f: `setGroupCallParticipantVolumeLevel`. Response is
     /// `ok`; the new level arrives via `updateGroupCallParticipant`.
     SetGroupCallParticipantVolumeLevel { group_call_id: i32 },
+    /// `setGroupCallParticipantIsSpeaking` from the level tap. Response
+    /// is a `MessageSender`; your `is_speaking` arrives via
+    /// `updateGroupCallParticipant`. Failures are ignored: a missed
+    /// speaking mark is not worth a banner.
+    SetGroupCallParticipantIsSpeaking { group_call_id: i32 },
     /// Phase C2f: `joinGroupCall` to accept a `messageGroupCall`
     /// invitation (schema 1.8.67, line 5288: "Use joinGroupCall to
     /// accept the call"). The joined call is tracked via

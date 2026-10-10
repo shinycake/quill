@@ -3,9 +3,9 @@ use super::*;
 use ntgcalls_sys::{
     NTG_CONNECTION_STATE_CLOSED, NTG_CONNECTION_STATE_CONNECTED, NTG_CONNECTION_STATE_CONNECTING,
     NTG_CONNECTION_STATE_FAILED, NTG_CONNECTION_STATE_TIMEOUT, NTG_ERR_INVALID_PARAMS,
-    NTG_MEDIA_SOURCE_DEVICE, NTG_STREAM_DEVICE_CAMERA, NTG_STREAM_DEVICE_SCREEN,
-    NTG_STREAM_MODE_CAPTURE, NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_STATUS_ACTIVE,
-    NTG_STREAM_STATUS_PAUSED, NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
+    NTG_MEDIA_SOURCE_DEVICE, NTG_STREAM_DEVICE_CAMERA, NTG_STREAM_DEVICE_MICROPHONE,
+    NTG_STREAM_DEVICE_SCREEN, NTG_STREAM_MODE_CAPTURE, NTG_STREAM_MODE_PLAYBACK,
+    NTG_STREAM_STATUS_ACTIVE, NTG_STREAM_STATUS_PAUSED, NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
     NTG_VIDEO_ROTATION_VIDEO_ROTATION_180, NTG_VIDEO_ROTATION_VIDEO_ROTATION_270,
     ntg_audio_description, ntg_connection_info, ntg_device_info, ntg_frame, ntg_instance,
     ntg_remote_source, ntg_stream_device, ntg_stream_mode, ntg_stream_status, ntg_video_rotation,
@@ -256,9 +256,7 @@ pub(crate) unsafe extern "C" fn remote_source_trampoline(
     state: ntg_remote_source,
     user_data: *mut c_void,
 ) {
-    if user_data.is_null()
-        || (state.device != NTG_STREAM_DEVICE_CAMERA && state.device != NTG_STREAM_DEVICE_SCREEN)
-    {
+    if user_data.is_null() {
         return;
     }
     let shared = unsafe { &*user_data.cast::<CallbackShared>() };
@@ -268,6 +266,22 @@ pub(crate) unsafe extern "C" fn remote_source_trampoline(
         .expect("ntgcalls callback map")
         .get(&user_id)
         .copied();
+    // The peer's microphone (ntgcalls `p2p_call.cpp`: the MediaState
+    // message's `is_muted` arrives as the Microphone source idling).
+    if state.device == NTG_STREAM_DEVICE_MICROPHONE {
+        let hook = shared
+            .remote_audio_hook
+            .lock()
+            .expect("ntgcalls remote audio state hook")
+            .clone();
+        if let (Some(call_id), Some(hook)) = (call_id, hook) {
+            hook(call_id, remote_audio_muted_from(state.state));
+        }
+        return;
+    }
+    if state.device != NTG_STREAM_DEVICE_CAMERA && state.device != NTG_STREAM_DEVICE_SCREEN {
+        return;
+    }
     // Phase C2j: camera and screen-share states ride separate hooks so the
     // driver can clear retained screen frames without touching the camera
     // state. Audio and other devices never reach this path.
@@ -287,6 +301,11 @@ pub(crate) unsafe extern "C" fn remote_source_trampoline(
     if let (Some(call_id), Some(hook)) = (call_id, hook) {
         hook(call_id, remote_video_state_from(state.state));
     }
+}
+
+/// The peer's microphone is off unless its source is active.
+pub(crate) fn remote_audio_muted_from(status: ntg_stream_status) -> bool {
+    status != NTG_STREAM_STATUS_ACTIVE
 }
 
 /// Phase C2e: map an ntgcalls stream status to the app-level camera state,
