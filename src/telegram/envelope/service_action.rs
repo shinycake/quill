@@ -209,6 +209,12 @@ pub enum ServiceAction {
         price: Option<Money>,
     },
     RefundedUpgradedGift,
+    /// A gift/giveaway service message drawn as a bubble card; `action`
+    /// keeps the one-line wording (chat list preview, accessibility).
+    WithCard {
+        action: Box<ServiceAction>,
+        card: Box<GiftCard>,
+    },
     GiftOffer {
         name: String,
         price: Money,
@@ -461,6 +467,21 @@ impl ServiceAction {
     /// constructors that are not service actions (or are unknown), so the
     /// caller falls back to `Unsupported`.
     pub(crate) fn from_td(
+        kind: &str,
+        value: &Value,
+        files: &mut Vec<ParsedFile>,
+    ) -> Option<ServiceAction> {
+        let action = Self::from_td_plain(kind, value, files)?;
+        Some(match build_gift_card(kind, value, files) {
+            Some(card) => ServiceAction::WithCard {
+                action: Box::new(action),
+                card: Box::new(card),
+            },
+            None => action,
+        })
+    }
+
+    fn from_td_plain(
         kind: &str,
         value: &Value,
         files: &mut Vec<ParsedFile>,

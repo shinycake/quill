@@ -643,6 +643,25 @@ pub enum RequestPurpose {
     /// (rejoin an expired channel subscription). Response is `ok`
     /// (schema 1.8.67, line 16095).
     ReuseStarSubscription,
+    /// `parity:premium-stars-balance`: `getStarTransactions`; `append` =
+    /// follow-up page of the same filter.
+    GetStarTransactions {
+        append: bool,
+    },
+    /// `parity:premium-received-gifts`: `getReceivedGifts`.
+    GetReceivedGifts {
+        append: bool,
+    },
+    /// `toggleGiftIsSaved` for the gift in `PremiumHub::gift_selected`.
+    ToggleGiftSaved {
+        saved: bool,
+    },
+    /// `sellGift` (convert to Stars) for the confirmed gift.
+    SellGift,
+    /// `parity:premium-promo-page`: `getPremiumFeatures`.
+    GetPremiumFeatures,
+    /// `getPremiumState`.
+    GetPremiumState,
     /// B1: `getLoginUrl` after the user consented to a
     /// `loginUrlInfoRequestConfirmation`. Response is `httpUrl`; on error
     /// the button degrades to a plain URL button (schema 1.8.67 doc on

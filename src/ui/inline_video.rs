@@ -279,6 +279,11 @@ impl InlineVideos {
         if history_drawn && !self.swept {
             self.clear();
         }
+        // The display or interface scale changed: running players decode
+        // at the old size, so restart them at the new one.
+        if self.scale > 0. && (self.scale - scale).abs() > f32::EPSILON {
+            self.clear();
+        }
         self.swept = false;
         self.scale = scale;
     }

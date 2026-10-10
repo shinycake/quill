@@ -7,3 +7,5 @@ isolation: worktree
 ---
 
 Same workflow and rules as quill-builder, for complex changes. Measure before and after for performance/memory work and put numbers in the decision doc. Commit trailer: "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>".
+
+Dependencies must stay current; see docs/dependency-updates.md

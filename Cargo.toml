@@ -14,7 +14,7 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:zbus", "dep:objc2-media-player", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus", "dep:resvg"]
+ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:zbus", "dep:objc2-media-player", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus", "dep:resvg", "dep:futures-channel"]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
@@ -55,6 +55,9 @@ sha2 = "0.10"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 chacha20poly1305 = "0.10"
 smallvec = { version = "1", optional = true }
+# Interface scale (docs/decisions/codex-interface-scale-full.md): the platform
+# decorator names GPUI's oneshot receiver type. Already in the lockfile via GPUI.
+futures-channel = { version = "0.3", optional = true }
 thiserror = "2"
 unicode-segmentation = "1.13"
 unicode-bidi = "0.3"
@@ -79,6 +82,9 @@ tray-icon = { version = "0.21", optional = true, default-features = false }
 ksni = { version = "0.3", optional = true, default-features = false, features = ["async-io", "blocking"] }
 # MPRIS (org.mpris.MediaPlayer2) on the session bus; same zbus GPUI and ksni already link.
 zbus = { version = "5", optional = true }
+# System-wide push-to-talk (docs/decisions/codex-ptt-global.md): the X11 RECORD
+# extension. Same x11rb 0.13 GPUI already links; only the `record` feature is new.
+x11rb = { version = "0.13", default-features = false, features = ["record"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
@@ -131,7 +137,7 @@ embed-resource = "3"
 
 [target.'cfg(windows)'.dependencies]
 # Local time zone offsets; secret chats kept out of screen capture.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Registry", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Media", "Media_Playback", "Foundation"] }
 

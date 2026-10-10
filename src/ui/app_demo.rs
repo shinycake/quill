@@ -779,6 +779,30 @@ pub(super) fn demo_seed_for(
             "screenshot demo — ⭐ subscriptions (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyStars => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — Stars (fixture)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyGifts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — received gifts (fixture)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyPremium => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — Premium features (fixture)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyGiftCards => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — gift cards (fixture)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyMarketplaceGift => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2191,6 +2215,8 @@ impl QuillApp {
             group_call_ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
             ptt_capture: false,
+            global_ptt: Default::default(),
+            global_ptt_polling: false,
             group_call_pin: quill::calls::tile_pin::TilePin::default(),
             call_window_opening: false,
             call_window_raised: false,
@@ -2605,6 +2631,11 @@ impl QuillApp {
         // (scheduled/system) once a minute. `apply_appearance` only
         // notifies when the effective theme actually changed, so the
         // tick is free when idle.
+        if demo.is_some()
+            && let Some(pct) = super::interface_zoom::demo_interface_scale()
+        {
+            app.appearance.interface_scale_pct = pct;
+        }
         app.apply_appearance(cx);
         app.init_slices(cx);
         // Animations stop behind another app and resume on activation:

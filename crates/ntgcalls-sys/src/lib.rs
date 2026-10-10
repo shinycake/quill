@@ -1,10 +1,10 @@
-//! Raw FFI bindings for ntgcalls v3.0.0 — Quill's vendored call media engine.
+//! Raw FFI bindings for ntgcalls v3.0.2 — Quill's vendored call media engine.
 //!
 //! Quill's call UI keeps its honest "no audio yet" stance until Phase C2b
 //! wires this engine up; this crate is the un-wired seam.
 //!
 //! **License (LGPLv3 sidecar).** The native library `libntgcalls.so`
-//! (pytgcalls/ntgcalls v3.0.0, LGPL-3.0) is **never linked into the Quill
+//! (pytgcalls/ntgcalls v3.0.2, LGPL-3.0) is **never linked into the Quill
 //! binary** — it is procured unmodified by `scripts/vendor-ntgcalls.sh`
 //! (checksum-pinned, git-ignored) and loaded at runtime via `dlopen` by
 //! [`Loader`]. See `THIRD_PARTY.md` for attribution and the LGPL source
@@ -183,6 +183,13 @@ pub struct ntg_subchain_request {
     pub subchain: i32,
     pub height: i32,
     pub limit: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ntg_participants_request {
+    pub ssrcs: *mut u32,
+    pub ssrcs_len: usize,
 }
 
 #[repr(C)]
@@ -397,7 +404,7 @@ pub type ntg_request_broadcast_part_callback_cb =
 pub type ntg_request_broadcast_timestamp_callback_cb =
     Option<unsafe extern "C" fn(*mut ntg_instance, i64, *mut c_void)>;
 pub type ntg_request_participants_callback_cb =
-    Option<unsafe extern "C" fn(*mut ntg_instance, i64, *mut c_void)>;
+    Option<unsafe extern "C" fn(*mut ntg_instance, i64, ntg_participants_request, *mut c_void)>;
 pub type ntg_outbound_block_callback_cb =
     Option<unsafe extern "C" fn(*mut ntg_instance, i64, *const u8, usize, *mut c_void)>;
 pub type ntg_subchain_request_callback_cb =
@@ -431,6 +438,7 @@ unsafe extern "C" {
     pub fn ntg_ssrc_group_free(value: *mut ntg_ssrc_group);
     pub fn ntg_frame_free(value: *mut ntg_frame);
     pub fn ntg_segment_part_request_free(value: *mut ntg_segment_part_request);
+    pub fn ntg_participants_request_free(value: *mut ntg_participants_request);
     pub fn ntg_ssrc_mapping_free(value: *mut ntg_ssrc_mapping);
     pub fn ntg_auth_params_free(value: *mut ntg_auth_params);
     pub fn ntg_conference_join_params_free(value: *mut ntg_conference_join_params);
@@ -750,6 +758,7 @@ pub struct Loader {
     pub ntg_ssrc_group_free: unsafe extern "C" fn(*mut ntg_ssrc_group),
     pub ntg_frame_free: unsafe extern "C" fn(*mut ntg_frame),
     pub ntg_segment_part_request_free: unsafe extern "C" fn(*mut ntg_segment_part_request),
+    pub ntg_participants_request_free: unsafe extern "C" fn(*mut ntg_participants_request),
     pub ntg_ssrc_mapping_free: unsafe extern "C" fn(*mut ntg_ssrc_mapping),
     pub ntg_auth_params_free: unsafe extern "C" fn(*mut ntg_auth_params),
     pub ntg_conference_join_params_free: unsafe extern "C" fn(*mut ntg_conference_join_params),
@@ -1049,6 +1058,11 @@ impl Loader {
                 lib,
                 "ntg_segment_part_request_free",
                 unsafe extern "C" fn(*mut ntg_segment_part_request)
+            ),
+            ntg_participants_request_free: resolve!(
+                lib,
+                "ntg_participants_request_free",
+                unsafe extern "C" fn(*mut ntg_participants_request)
             ),
             ntg_ssrc_mapping_free: resolve!(
                 lib,

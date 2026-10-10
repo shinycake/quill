@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check tdlib/td master against the TDLib pin in src/pins.rs.
 
-Used by .github/workflows/tdlib-watch.yml. Reads TDLIB_GIT_COMMIT and
+Used by scripts/deps-watch.py (workflow .github/workflows/deps-watch.yml); also runnable alone. Reads TDLIB_GIT_COMMIT and
 TDLIB_CMAKE_VERSION from src/pins.rs, fetches the HEAD of tdlib/td master and
 the version in its CMakeLists.txt, and, when upstream is newer, writes an issue
 title and a Markdown body (compare link, commit count, td_api.tl constructor
@@ -96,29 +96,13 @@ def section(title: str, names: list) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--ours-commit")
-    parser.add_argument("--ours-version")
-    args = parser.parse_args()
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "src", "pins.rs"), encoding="utf-8") as pins:
-        pins_text = pins.read()
-    ours_commit = args.ours_commit or read_pin(pins_text, "TDLIB_GIT_COMMIT")
-    ours_version = args.ours_version or read_pin(pins_text, "TDLIB_CMAKE_VERSION")
-
+def check(ours_commit: str, ours_version: str):
+    """Return (title, body) when upstream master is newer than the pin, else None."""
     head = json.loads(fetch(f"{API}/repos/{UPSTREAM}/commits/master"))["sha"]
     upstream_version = cmake_version(fetch(f"{RAW}/{UPSTREAM}/{head}/CMakeLists.txt", "*/*").decode())
-    newer = version_tuple(upstream_version) > version_tuple(ours_version)
     print(f"pinned TDLib {ours_version} @ {ours_commit}; upstream master {upstream_version} @ {head}")
-    os.makedirs(args.out, exist_ok=True)
-    with open(os.path.join(args.out, "newer"), "w") as f:
-        f.write("true" if newer else "false")
-    if not newer:
-        print("up to date")
-        return 0
-
+    if version_tuple(upstream_version) <= version_tuple(ours_version):
+        return None
     compare = json.loads(fetch(f"{API}/repos/{UPSTREAM}/compare/{ours_commit}...{head}"))
     diff = schema_diff(
         fetch(f"{RAW}/{UPSTREAM}/{ours_commit}/{SCHEMA}", "*/*").decode(),
@@ -135,13 +119,40 @@ def main() -> int:
             section("Added", diff["added"]),
             section("Removed", diff["removed"]),
             section("Changed signature", diff["changed"]),
-            "Bump checklist: update `src/pins.rs` (commit, CMake version, schema SHA-256 and size), "
-            "re-vendor with `scripts/vendor-td-schema.sh`, regenerate "
-            "`native/patches/tdlib-quill-takeout-contacts.patch` against the new commit, fix every "
-            "removed/changed constructor Quill uses, and rebuild TDLib with `scripts/build-tdlib.sh`.",
-            "_Opened by `.github/workflows/tdlib-watch.yml`; it updates this issue instead of opening another._",
+            "Bump checklist: see the TDLib section of `docs/dependency-updates.md` "
+            "(`src/pins.rs`, `scripts/vendor-td-schema.sh`, "
+            "`native/patches/tdlib-quill-takeout-contacts.patch`, `scripts/build-tdlib.sh`, "
+            "`docs/build.md`, README badge).",
+            "_Opened by `.github/workflows/deps-watch.yml`; it updates this issue instead of opening another._",
         ]
     )
+    return title, body
+
+
+def pins(root: str, ours_commit=None, ours_version=None):
+    with open(os.path.join(root, "src", "pins.rs"), encoding="utf-8") as f:
+        pins_text = f.read()
+    return (
+        ours_commit or read_pin(pins_text, "TDLIB_GIT_COMMIT"),
+        ours_version or read_pin(pins_text, "TDLIB_CMAKE_VERSION"),
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--ours-commit")
+    parser.add_argument("--ours-version")
+    args = parser.parse_args()
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    result = check(*pins(root, args.ours_commit, args.ours_version))
+    os.makedirs(args.out, exist_ok=True)
+    with open(os.path.join(args.out, "newer"), "w") as f:
+        f.write("true" if result else "false")
+    if not result:
+        print("up to date")
+        return 0
+    title, body = result
     with open(os.path.join(args.out, "title.txt"), "w") as f:
         f.write(title)
     with open(os.path.join(args.out, "body.md"), "w") as f:

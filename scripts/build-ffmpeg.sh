@@ -18,8 +18,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${QUILL_FFMPEG_DEST:-$ROOT/vendor/ffmpeg}"
 PREFIX="$DEST/prefix"
-TAG=n8.1.3
-COMMIT=1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7
+TAG=n9.0.2
+COMMIT=946fcce07b6dcd0331c8cc609192aeff5e1924f8
 JOBS="${JOBS:-$( (nproc || sysctl -n hw.ncpu) 2>/dev/null || echo 4)}"
 
 case "$(uname -s)" in

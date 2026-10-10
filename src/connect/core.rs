@@ -688,6 +688,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `editStarSubscription` / `reuseStarSubscription` `ok` marks the
         // subscriptions list stale in the reducer; same pattern.
         let _ = self.refresh_star_subscriptions_if_stale();
+        let _ = self.refresh_received_gifts_if_stale();
         if view_after {
             self.maybe_view_open_messages()?;
         }

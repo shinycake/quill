@@ -695,6 +695,8 @@ pub struct Session {
     /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog is
     /// on screen.
     pub subscriptions_open: bool,
+    /// Premium / Stars / received-gifts hub state (`crate::premium_hub`).
+    pub hub: crate::premium_hub::PremiumHub,
     /// Slice `parity:bots-payment-recurring`: subscription id awaiting
     /// cancel confirmation in the dialog.
     pub subscription_cancel_confirm: Option<String>,
@@ -1441,6 +1443,7 @@ impl Session {
             star_subscriptions_stale: false,
             star_subscriptions_mutating: false,
             subscriptions_open: false,
+            hub: crate::premium_hub::PremiumHub::default(),
             subscription_cancel_confirm: None,
             pending_force_reply: None,
             files: HashMap::new(),

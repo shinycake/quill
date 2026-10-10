@@ -1,4 +1,4 @@
-ntgcalls v3.0.0, https://github.com/pytgcalls/ntgcalls
+ntgcalls v3.0.2, https://github.com/pytgcalls/ntgcalls
 Licensed under the GNU Lesser General Public License v3.0 (below). The LGPL
 supplements the GNU General Public License v3.0, in GPL-3.0.txt next to this file.
 

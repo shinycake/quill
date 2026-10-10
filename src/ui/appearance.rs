@@ -184,10 +184,17 @@ impl QuillApp {
                 ..primary
             };
             colors.button_primary_foreground = gpui_kit::white();
-            // Interface scale: the kit root feeds `font_size` to the window's
-            // rem size every frame, so this scales text and rem spacing.
-            theme.font_size = px(BASE_REM_PX * f32::from(scale) / 100.);
+            // The rem size stays at the kit's default: the interface scale
+            // zooms whole windows instead (below), so scaling rems too
+            // would apply it twice.
+            theme.font_size = px(BASE_REM_PX);
         });
+        // Interface scale: every window is drawn `zoom` times larger
+        // (`interface_zoom`). GPUI re-lays the windows out through their
+        // resize callbacks, which need the windows free: defer past this
+        // update.
+        let zoom = super::interface_zoom::zoom_for_percent(scale);
+        cx.defer(move |_| super::interface_zoom::set_zoom(zoom));
         self.appearance_applied = Some((mode, accent, hc, scale));
         cx.notify();
     }
@@ -909,7 +916,7 @@ impl QuillApp {
         self.appearance_section(
             cx,
             "Interface scale",
-            "Scales text and spacing live. Avatars, chat rows and other fixed-size parts keep their size.",
+            "Scales the whole interface, applied right away.",
             row.into_any_element(),
         )
     }
