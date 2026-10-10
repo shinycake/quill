@@ -595,12 +595,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                     send_options.is_secret = true;
                 }
                 // A lone dice emoji rolls a die (tdesktop does the same).
-                match crate::telegram::requests::dice_emoji(caption) {
+                match crate::telegram::requests::dice_emoji_in(
+                    caption,
+                    &self.session.sync.dice_emojis,
+                ) {
                     Some(emoji) => crate::telegram::requests::send_dice(
                         extra,
                         chat_id,
                         topic_id,
-                        emoji,
+                        &emoji,
                         reply_to.as_ref(),
                         &send_options,
                     ),
