@@ -134,6 +134,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
+    /// Settings > Notifications > Events > "Contact joined Telegram":
+    /// `setOption(disable_contact_registered_notifications)`. TDLib answers
+    /// with `updateOption`, which moves the switch.
+    pub fn set_contact_joined_notifications(
+        &mut self,
+        on: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetContactJoinedNotifications, None);
+        if let Err(err) = self.sender.send_json(&set_option_boolean(
+            extra,
+            "disable_contact_registered_notifications",
+            !on,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.privacy_data.error = None;
+        Ok(extra)
+    }
+
     /// `getNetworkStatistics` (everything since the last reset).
     pub fn fetch_network_statistics(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {

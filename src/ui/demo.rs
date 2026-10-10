@@ -916,7 +916,6 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             location: "Austin, United States".into(),
             log_in_date: now - 40 * 86_400,
             is_official_application: true,
-            ..Default::default()
         },
         ParsedSession {
             id: 123456789,
@@ -935,7 +934,6 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             location: "Austin, United States".into(),
             log_in_date: now - 40 * 86_400,
             is_official_application: true,
-            ..Default::default()
         },
         ParsedSession {
             id: 555111222,
@@ -954,7 +952,6 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             location: "Dallas, United States".into(),
             log_in_date: now - 40 * 86_400,
             is_official_application: true,
-            ..Default::default()
         },
         ParsedSession {
             id: 999888777,
@@ -973,7 +970,6 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             location: "Unknown".into(),
             log_in_date: now - 40 * 86_400,
             is_official_application: true,
-            ..Default::default()
         },
     ]
 }

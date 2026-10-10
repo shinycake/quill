@@ -1053,11 +1053,11 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
 - [x] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
 - [ ] Desktop notification options: position, count, display, volume <!-- parity:notify-desktop-options -->
-- [ ] Flash the taskbar or bounce the Dock for new messages <!-- parity:notify-alert-attention -->
+- [x] Flash the taskbar or bounce the Dock for new messages <!-- parity:notify-alert-attention -->
 - [ ] Show notifications from all accounts <!-- parity:notify-all-accounts -->
-- [ ] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
-- [ ] Events: contact joined Telegram, pinned messages <!-- parity:notify-events -->
-- [ ] Include muted chats in folder counters <!-- parity:notify-muted-counters -->
+- [x] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
+- [x] Events: contact joined Telegram, pinned messages <!-- parity:notify-events -->
+- [x] Include muted chats in folder counters <!-- parity:notify-muted-counters -->
 - [ ] Sender avatar in OS notifications <!-- parity:notify-avatar -->
 
 ### Settings: appearance & chat

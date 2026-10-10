@@ -50,6 +50,7 @@ pub mod moderation;
 pub mod mute_menu;
 pub mod network_usage;
 pub mod notify;
+pub mod notify_focus;
 pub mod passcode;
 pub mod peer_badge;
 pub mod phone;
