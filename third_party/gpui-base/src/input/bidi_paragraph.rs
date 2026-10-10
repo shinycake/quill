@@ -42,7 +42,6 @@ struct Row {
 pub struct BidiParagraph {
     rows: Vec<Row>,
     line_height: Pixels,
-    wrap_width: Option<Pixels>,
     width: Pixels,
     len: usize,
 }
@@ -151,7 +150,6 @@ impl BidiParagraph {
         Self {
             rows,
             line_height,
-            wrap_width,
             width,
             len: text.len(),
         }
