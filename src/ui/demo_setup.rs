@@ -2324,6 +2324,32 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — comments and threads".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyForumThreadStories)) {
+            let view = std::env::var("QUILL_DEMO_FTS_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::forum_thread_stories_demo::apply_ready_forum_thread_stories(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            match view.as_str() {
+                "thread" => self.thread_info_open = true,
+                "stats" => {
+                    self.open_story_viewer(ChatId(11), 5, cx);
+                    self.story_stats_open = true;
+                }
+                "search" => {
+                    self.search_input.update(cx, |input, cx| {
+                        input.set_value("#sunset", window, cx);
+                    });
+                }
+                _ => self.topic_info_open = true,
+            }
+            self.status_note = "screenshot demo — topic info, story statistics and search".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyForumsSaved)) {
             let view = std::env::var("QUILL_DEMO_FORUMS_SAVED_VIEW").unwrap_or_default();
             if let Some(session) = self.demo_session.as_mut() {

@@ -993,6 +993,12 @@ pub struct QuillApp {
     /// Phase 9.5: viewers panel open in the viewer overlay
     /// (`getStoryInteractions`).
     pub(super) story_viewers_open: bool,
+    /// The statistics panel of the story open in the viewer.
+    pub(super) story_stats_open: bool,
+    /// The info card under the open forum topic's strip.
+    pub(super) topic_info_open: bool,
+    /// The info card under the open reply thread's root bar.
+    pub(super) thread_info_open: bool,
     /// Phase 9.5: report flow UI open in the viewer overlay
     /// (`reportStory`).
     pub(super) story_report_open: bool,

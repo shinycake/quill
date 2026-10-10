@@ -189,6 +189,12 @@ fn forum_topics_parse_keeps_needed_fields() {
             assert_eq!(general.unread_count, 3);
             assert_eq!(general.order, 500);
             assert_eq!(general.last_message_preview, "CANARY_TOPIC_welcome");
+            assert_eq!(general.creation_date, 1_700_000_000);
+            assert_eq!(
+                general.creator,
+                Some(crate::telegram::envelope::MessageSender::User { user_id: 5 })
+            );
+            assert!(!general.is_outgoing);
             let random = &topics[1];
             assert_eq!(random.forum_topic_id, 2);
             assert!(!random.is_general);

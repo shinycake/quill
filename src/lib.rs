@@ -116,6 +116,7 @@ pub mod suggest;
 pub mod telegram;
 pub mod text;
 pub mod text_split;
+pub mod topic_info;
 pub mod translate;
 pub mod tray;
 #[cfg(all(target_os = "macos", feature = "ui"))]
