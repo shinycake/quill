@@ -469,6 +469,9 @@ pub struct QuillApp {
     /// Screenshot proof for the keyboard-shortcuts section. The Appearance
     /// dialog then shows that section alone so the frame is the rebind UI.
     pub(super) keybindings_screenshot: bool,
+    /// Screenshot demo: the Appearance dialog shows only the accent, font
+    /// family and power-saving sections.
+    pub(super) appearance_power_screenshot: bool,
     /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
     /// reference dialog is on screen.
     pub(super) shortcuts_open: bool,
@@ -478,7 +481,18 @@ pub struct QuillApp {
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
-    pub(super) appearance_applied: Option<(ThemeMode, u32, bool, u16)>,
+    pub(super) appearance_applied: Option<(ThemeMode, u32, bool, u16, String)>,
+    /// The operating system's accent color (0xRRGGBB), when it reports one
+    /// and has been read (`refresh_system_accent`).
+    pub(super) system_accent: Option<u32>,
+    /// `system_accent` was read at least once.
+    pub(super) system_accent_probed: bool,
+    /// Settings → Appearance: the searchable font family list.
+    pub(super) font_picker: Entity<
+        gpui_kit::component::select::SelectState<
+            gpui_kit::component::select::SearchableVec<SharedString>,
+        >,
+    >,
     /// Settings → Appearance: the custom accent color field (kit
     /// `ColorSelect`), tdesktop's "custom" accent circle. Holds the last
     /// custom color; choosing one sets `appearance.accent_rgb`.

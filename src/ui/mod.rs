@@ -11,6 +11,7 @@ mod accounts;
 mod anim_layer;
 mod app_slice;
 mod appearance;
+mod appearance_power;
 mod auth_recovery;
 mod bidi_line;
 mod chat_theme;

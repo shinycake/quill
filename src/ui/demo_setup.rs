@@ -1474,6 +1474,24 @@ impl QuillApp {
                 "screenshot demo — appearance settings".into()
             };
         }
+        // Appearance cluster: the system accent, a font family and the
+        // power-saving switches, with fixture values (the OS accent and the
+        // installed fonts differ per machine).
+        if matches!(demo, Some(ScreenshotDemo::ReadyAppearancePower)) {
+            self.system_accent = Some(0xa550a7);
+            self.system_accent_probed = true;
+            self.appearance.system_accent = true;
+            self.appearance.font_family = "Georgia".into();
+            self.font_picker.update(cx, |picker, cx| {
+                picker.set_selected_value(&SharedString::from("Georgia"), window, cx)
+            });
+            self.appearance.power_saving = quill::power_saving::Flag::StickersChat.bit()
+                | quill::power_saving::Flag::ChatSpoiler.bit()
+                | quill::power_saving::Flag::Calls.bit();
+            self.appearance_open = true;
+            self.appearance_power_screenshot = true;
+            self.status_note = "screenshot demo — appearance: accent, font and power saving".into();
+        }
         // Appearance slice: interface scale and Telegram wallpapers.
         if matches!(demo, Some(ScreenshotDemo::ReadyAppearanceWallpapers)) {
             if let Some(session) = self.demo_session.as_mut() {
