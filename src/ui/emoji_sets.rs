@@ -63,7 +63,12 @@ impl QuillApp {
         cx.notify();
     }
     fn search_emoji_sets(&mut self, cx: &mut Context<Self>) {
-        let query = self.emoji_set_search_input.read(cx).value().to_string();
+        let query = self
+            .pickers
+            .emoji_set_search_input
+            .read(cx)
+            .value()
+            .to_string();
         if let Some(live) = self.live.as_mut()
             && live.driver.search_emoji_packs(&query).is_err()
         {
@@ -148,7 +153,7 @@ impl QuillApp {
         section = section
             .child(durations)
             .child(
-                Textarea::new(&self.emoji_status_hours_input)
+                Textarea::new(&self.pickers.emoji_status_hours_input)
                     .aria_label("Emoji status duration in hours"),
             )
             .child(
@@ -156,6 +161,7 @@ impl QuillApp {
                     .label("Use custom duration")
                     .on_click(cx.listener(|this, _, _, cx| {
                         let hours = this
+                            .pickers
                             .emoji_status_hours_input
                             .read(cx)
                             .value()
@@ -484,7 +490,10 @@ impl QuillApp {
                     .child(div().child("Dynamic emoji pack order")),
             )
             .child(tabs)
-            .child(Textarea::new(&self.emoji_set_search_input).aria_label("Search emoji packs"))
+            .child(
+                Textarea::new(&self.pickers.emoji_set_search_input)
+                    .aria_label("Search emoji packs"),
+            )
             .child(
                 Button::new("emoji-pack-search")
                     .label("Search packs")

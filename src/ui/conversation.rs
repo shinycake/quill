@@ -657,12 +657,13 @@ impl QuillApp {
                 |this, banner| this.child(banner),
             )
             .when(composer.is_some() && part.bottom(), |this| {
-                let show_attach = matches!(mode, PaneMode::Ready) && self.pending_edit.is_none();
+                let show_attach =
+                    matches!(mode, PaneMode::Ready) && self.composer_ui.pending_edit.is_none();
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
                 let sendable = !show_attach
                     || self.forward_bar_here()
-                    || !self.pending_attachments.is_empty()
+                    || !self.composer_ui.pending_attachments.is_empty()
                     || !self.composer.read(cx).value().trim().is_empty();
                 this.child(
                     div()
@@ -671,7 +672,7 @@ impl QuillApp {
                         // The emoji / sticker / GIF popover floats above the
                         // composer, anchored to its left edge.
                         .when(
-                            self.media_panel_open() && self.media_panel.reaction.is_none(),
+                            self.media_panel_open() && self.pickers.media_panel.reaction.is_none(),
                             |this| {
                                 let panel = self.media_panel(cx);
                                 // Over the history: animations under it are
@@ -711,15 +712,15 @@ impl QuillApp {
                             this.child(self.record_bar(cx))
                         })
                         .when(
-                            show_attach && !self.pending_attachments.is_empty(),
+                            show_attach && !self.composer_ui.pending_attachments.is_empty(),
                             |this| this.child(self.composer_attachment_tray(cx)),
                         )
-                        .when_some(self.forward_result.clone(), |this, result| {
+                        .when_some(self.share.forward_result.clone(), |this, result| {
                             this.child(self.forward_success_banner(&result, cx))
                         })
                         .when(
-                            self.pending_forward.is_some()
-                                && !self.forward_picker_open
+                            self.share.pending_forward.is_some()
+                                && !self.share.forward_picker_open
                                 && !self.forward_bar_here()
                                 // Selecting here: the header carries the buttons.
                                 && !self
@@ -727,7 +728,7 @@ impl QuillApp {
                                     .and_then(|s| s.open_chat)
                                     .is_some_and(|chat| self.selecting_in(chat)),
                             |this| {
-                                this.when_some(self.pending_forward.clone(), |this, draft| {
+                                this.when_some(self.share.pending_forward.clone(), |this, draft| {
                                     this.child(self.forward_selection_banner(&draft, cx))
                                 })
                             },
@@ -735,12 +736,14 @@ impl QuillApp {
                         .when(self.forward_bar_here(), |this| {
                             this.child(self.forward_bar(cx))
                         })
-                        .when(self.send_as_open, |this| this.child(self.send_as_panel(cx)))
-                        .when_some(self.pending_delete.clone(), |this, _| {
+                        .when(self.composer_ui.send_as_open, |this| {
+                            this.child(self.send_as_panel(cx))
+                        })
+                        .when_some(self.message_ui.pending_delete.clone(), |this, _| {
                             this.child(self.delete_confirm_banner(cx))
                         })
                         // B4: stop-poll / stop-quiz confirm banner.
-                        .when_some(self.pending_stop_poll, |this, _| {
+                        .when_some(self.message_ui.pending_stop_poll, |this, _| {
                             this.child(self.stop_poll_confirm_banner(cx))
                         })
                         // Phase B1: close-secret-chat confirm banner.
@@ -751,13 +754,14 @@ impl QuillApp {
                         // Gated on the open chat still being one: a pending
                         // alert from a previous chat never renders elsewhere.
                         .when(
-                            self.pending_inline_bot_alert.is_some() && self.open_chat_is_secret(),
+                            self.composer_ui.pending_inline_bot_alert.is_some()
+                                && self.open_chat_is_secret(),
                             |this| this.child(self.inline_bot_alert_banner(cx)),
                         )
-                        .when_some(self.pending_edit.clone(), |this, edit| {
+                        .when_some(self.composer_ui.pending_edit.clone(), |this, edit| {
                             this.child(self.composer_edit_banner(&edit, cx))
                         })
-                        .when_some(self.pending_reply.clone(), |this, reply| {
+                        .when_some(self.composer_ui.pending_reply.clone(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
                         .when_some(self.reply_elsewhere_panel(cx), |this, panel| {
@@ -829,7 +833,7 @@ impl QuillApp {
                         // schedule picker opens above the input.
                         // Pickers open directly above the input, next to the
                         // buttons that summon them.
-                        .when(self.schedule_popup_open, |this| {
+                        .when(self.composer_ui.schedule_popup_open, |this| {
                             this.child(self.schedule_popup(cx))
                         })
                         .when_some(self.composer_options_row(cx), |this, row| this.child(row))
@@ -936,7 +940,7 @@ impl QuillApp {
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.
-                        .when(self.rich_editor_open, |this| {
+                        .when(self.composer_ui.rich_editor_open, |this| {
                             this.child(self.rich_editor_bar(cx))
                         }),
                 )
@@ -1117,7 +1121,7 @@ impl QuillApp {
                 open.filter(|_| self.pinned_list_open)
                     .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
             )
-            .when(self.forward_picker_open, |this| {
+            .when(self.share.forward_picker_open, |this| {
                 this.child(self.forward_picker_panel(cx))
             })
             .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))
@@ -1326,26 +1330,28 @@ impl QuillApp {
             return None;
         }
         if self.active_playback_id().is_some()
-            || self.playing_animation.is_some()
-            || self.playing_video.is_some()
+            || self.playback.playing_animation.is_some()
+            || self.playback.playing_video.is_some()
         {
             return None;
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.pending_forward
+        self.share
+            .pending_forward
             .as_ref()
             .map(|draft| (draft.from_chat_id.0, &draft.message_ids))
             .hash(&mut hasher);
         let mut positions: Vec<(i64, u64)> = self
-            .playback_positions
+            .playback
+            .positions
             .iter()
             .map(|(id, secs)| (id.0, secs.to_bits()))
             .collect();
         positions.sort_unstable();
         positions.hash(&mut hasher);
-        self.playback_speed.to_bits().hash(&mut hasher);
-        self.playback_volume.to_bits().hash(&mut hasher);
-        self.playback_error.hash(&mut hasher);
+        self.playback.speed.to_bits().hash(&mut hasher);
+        self.playback.volume.to_bits().hash(&mut hasher);
+        self.playback.error.hash(&mut hasher);
         // A bot's streaming reply grows the last row every frame.
         self.stream_rows_hash().hash(&mut hasher);
         self.vanish_rows_hash().hash(&mut hasher);
@@ -1585,21 +1591,23 @@ impl QuillApp {
                             )),
                             _ => None,
                         };
-                        let animation_playing = self.playing_animation == Some(message.id);
+                        let animation_playing = self.playback.playing_animation == Some(message.id);
                         let animation_frame = if animation_playing {
-                            self.animation_frames
-                                .get(self.animation_frame)
+                            self.playback
+                                .animation_frames
+                                .get(self.playback.animation_frame)
                                 .cloned()
-                                .or_else(|| self.animation_frames.first().cloned())
+                                .or_else(|| self.playback.animation_frames.first().cloned())
                         } else {
                             None
                         };
-                        let video_playing = self.playing_video == Some(message.id);
+                        let video_playing = self.playback.playing_video == Some(message.id);
                         let video_frame = if video_playing {
-                            self.video_frames
-                                .get(self.video_frame)
+                            self.playback
+                                .video_frames
+                                .get(self.playback.video_frame)
                                 .cloned()
-                                .or_else(|| self.video_frames.first().cloned())
+                                .or_else(|| self.playback.video_frames.first().cloned())
                         } else {
                             None
                         };
@@ -1910,7 +1918,7 @@ impl QuillApp {
         // reports exhaustion; the loader notifies only when a request was
         // actually sent, so this cannot notify-loop while pinned at top).
         // Inline players for rows that don't render this pass stop.
-        self.inline_videos.borrow_mut().begin_render();
+        self.playback.inline_videos.borrow_mut().begin_render();
         let weak = cx.weak_entity();
         let date_pill = self.scroll_date_pill(cx);
         let probe = self.scroll_probe.clone();
@@ -2164,7 +2172,7 @@ impl QuillApp {
                 // Outside an animation layer (`anim_layer`), and while a
                 // reveal fades the cover, the specks are redrawn with the
                 // history.
-                let covered = !self.spoiler_revealed.contains(&key);
+                let covered = !self.message_ui.spoiler_revealed.contains(&key);
                 let fading = super::spoiler_fx::reveal_fade(key).is_some();
                 if spoiler
                     && (fading
@@ -2211,7 +2219,7 @@ impl QuillApp {
                     inputs.video_playing,
                     inputs.video_frame.clone(),
                     inline,
-                    &self.spoiler_revealed,
+                    &self.message_ui.spoiler_revealed,
                     inputs.is_secret,
                     self.session(),
                     // Settings → Appearance: font size + bubble/plain style;
@@ -2272,10 +2280,11 @@ impl QuillApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.swipe_reply_start = Some((row_chat, row_msg, event.position.x));
+                            this.message_ui.swipe_reply_start =
+                                Some((row_chat, row_msg, event.position.x));
                             // A press that starts on text selects text; any
                             // other press may become a message drag.
-                            this.drag_select_from = (!this.selecting_in(row_chat)
+                            this.message_ui.drag_select_from = (!this.selecting_in(row_chat)
                                 && !gpui_kit::base::TextSelection::has_selection(window, cx))
                             .then_some((row_chat, row_msg));
                             cx.notify();
@@ -2286,7 +2295,7 @@ impl QuillApp {
                             if event.pressed_button != Some(MouseButton::Left) {
                                 return;
                             }
-                            let Some((chat_id, from)) = this.drag_select_from else {
+                            let Some((chat_id, from)) = this.message_ui.drag_select_from else {
                                 return;
                             };
                             if chat_id != row_chat
@@ -2295,17 +2304,17 @@ impl QuillApp {
                             {
                                 return;
                             }
-                            this.drag_select_from = None;
-                            this.swipe_reply_start = None;
+                            this.message_ui.drag_select_from = None;
+                            this.message_ui.swipe_reply_start = None;
                             this.begin_drag_selection(chat_id, from, row_msg, cx);
                         }),
                     )
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            this.drag_select_from = None;
+                            this.message_ui.drag_select_from = None;
                             if let Some((chat_id, message_id, start_x)) =
-                                this.swipe_reply_start.take()
+                                this.message_ui.swipe_reply_start.take()
                                 && chat_id == row_chat
                                 && message_id == row_msg
                                 && start_x - event.position.x > px(24.)

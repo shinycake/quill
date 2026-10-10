@@ -88,11 +88,11 @@ impl QuillApp {
 
     /// The manager is offered when Quill owns the dictionaries.
     pub(super) fn dictionary_manager_available(&self) -> bool {
-        self.dict_manager.demo_rows.is_some() || self.spell_info.kind != EngineKind::System
+        self.spell.dict_manager.demo_rows.is_some() || self.spell.info.kind != EngineKind::System
     }
 
     fn dictionary_rows(&self, query: &str) -> Vec<ManagerRow> {
-        if let Some(rows) = &self.dict_manager.demo_rows {
+        if let Some(rows) = &self.spell.dict_manager.demo_rows {
             return rows
                 .iter()
                 .filter(|r| quill::spell_catalog::matches_query(&r.name, &r.code, query))
@@ -102,17 +102,22 @@ impl QuillApp {
         let managed = Self::dictionaries_dir()
             .map(|dir| installed_codes(&dir))
             .unwrap_or_default();
-        let transfer = self.dict_manager.download.as_ref().map(|d| Transfer {
+        let transfer = self.spell.dict_manager.download.as_ref().map(|d| Transfer {
             code: &d.code,
             percent: d.percent,
         });
         build_rows(
             &RowInputs {
                 managed: &managed,
-                available: &self.spell_info.available,
-                active: &self.spell_info.active,
+                available: &self.spell.info.available,
+                active: &self.spell.info.active,
                 transfer,
-                failed: self.dict_manager.failed.as_ref().map(|(c, _)| c.as_str()),
+                failed: self
+                    .spell
+                    .dict_manager
+                    .failed
+                    .as_ref()
+                    .map(|(c, _)| c.as_str()),
             },
             query,
         )
@@ -120,28 +125,29 @@ impl QuillApp {
 
     /// A row's switch.
     fn toggle_dictionary(&mut self, code: &str, enable: bool, cx: &mut Context<Self>) {
-        if self.dict_manager.demo_rows.is_some() {
+        if self.spell.dict_manager.demo_rows.is_some() {
             return;
         }
         let downloading = self
+            .spell
             .dict_manager
             .download
             .as_ref()
             .is_some_and(|d| d.code == code);
         if downloading {
-            if !enable && let Some(d) = &self.dict_manager.download {
+            if !enable && let Some(d) = &self.spell.dict_manager.download {
                 d.progress.cancel();
             }
             return;
         }
-        let installed = self.spell_info.available.iter().any(|c| c == code);
+        let installed = self.spell.info.available.iter().any(|c| c == code);
         if enable && !installed {
             self.start_dictionary_download(code, cx);
             return;
         }
         let next = next_chosen(
-            &self.spell_info.chosen,
-            &self.spell_info.active,
+            &self.spell.info.chosen,
+            &self.spell.info.active,
             code,
             enable,
         );
@@ -150,7 +156,7 @@ impl QuillApp {
     }
 
     fn start_dictionary_download(&mut self, code: &str, cx: &mut Context<Self>) {
-        if self.dict_manager.download.is_some() {
+        if self.spell.dict_manager.download.is_some() {
             return;
         }
         let (Some(dir), Some(entry)) =
@@ -159,8 +165,8 @@ impl QuillApp {
             return;
         };
         let progress = Arc::new(Progress::default());
-        self.dict_manager.failed = None;
-        self.dict_manager.download = Some(ActiveDownload {
+        self.spell.dict_manager.failed = None;
+        self.spell.dict_manager.download = Some(ActiveDownload {
             code: code.to_string(),
             progress: progress.clone(),
             total: entry.bytes,
@@ -174,14 +180,14 @@ impl QuillApp {
             worker_progress.finish();
             result
         });
-        self.dict_manager.task = Some(cx.spawn(async move |this, cx| {
+        self.spell.dict_manager.task = Some(cx.spawn(async move |this, cx| {
             while !progress.is_finished() {
                 cx.background_executor()
                     .timer(Duration::from_millis(120))
                     .await;
                 let received = progress.received();
                 let _ = this.update(cx, |this, cx| {
-                    if let Some(d) = this.dict_manager.download.as_mut() {
+                    if let Some(d) = this.spell.dict_manager.download.as_mut() {
                         d.percent = percent(received, d.total);
                     }
                     cx.notify();
@@ -189,19 +195,19 @@ impl QuillApp {
             }
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                this.dict_manager.download = None;
+                this.spell.dict_manager.download = None;
                 match result {
                     Ok(()) => {
                         let next = next_chosen(
-                            &this.spell_info.chosen,
-                            &this.spell_info.active,
+                            &this.spell.info.chosen,
+                            &this.spell.info.active,
                             &code,
                             true,
                         );
                         this.set_spell_languages(next, cx);
                     }
                     Err(message) if message == "Cancelled." => {}
-                    Err(message) => this.dict_manager.failed = Some((code.clone(), message)),
+                    Err(message) => this.spell.dict_manager.failed = Some((code.clone(), message)),
                 }
                 cx.notify();
             });
@@ -218,7 +224,8 @@ impl QuillApp {
             self.status_note = format!("Couldn't remove the dictionary: {err}");
         }
         let chosen: Vec<String> = self
-            .spell_info
+            .spell
+            .info
             .chosen
             .iter()
             .filter(|c| *c != code)
@@ -281,7 +288,7 @@ impl QuillApp {
 
     /// The "Manage dictionaries" button and, open, the filter and list.
     pub(super) fn dictionary_manager_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let open = self.dict_manager.open;
+        let open = self.spell.dict_manager.open;
         let mut section = div().flex().flex_col().gap_2().child(
             Button::new("spell-dictionaries-toggle")
                 .label(if open {
@@ -292,12 +299,12 @@ impl QuillApp {
                 .outline()
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.dict_manager.open = !this.dict_manager.open;
+                    this.spell.dict_manager.open = !this.spell.dict_manager.open;
                     cx.notify();
                 })),
         );
         if open {
-            let query = self.dict_filter_input.read(cx).value().to_string();
+            let query = self.spell.dict_filter_input.read(cx).value().to_string();
             let rows = self.dictionary_rows(&query);
             let mut list = div()
                 .id("spell-dictionaries-list")
@@ -318,7 +325,7 @@ impl QuillApp {
             for row in &rows {
                 list = list.child(self.dictionary_row(row, cx));
             }
-            if let Some((_, message)) = &self.dict_manager.failed {
+            if let Some((_, message)) = &self.spell.dict_manager.failed {
                 list = list.child(
                     div()
                         .text_xs()
@@ -328,7 +335,7 @@ impl QuillApp {
             }
             section = section
                 .child(
-                    Textarea::new(&self.dict_filter_input)
+                    Textarea::new(&self.spell.dict_filter_input)
                         .aria_label("Filter dictionaries")
                         .w_full(),
                 )

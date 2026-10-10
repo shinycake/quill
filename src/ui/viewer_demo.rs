@@ -136,9 +136,9 @@ impl QuillApp {
             }
             // As the video demo: frames are extracted and decoded here so the
             // capture is deterministic; the viewer then loops them for real.
-            self.viewer_demo_sync_frames = true;
+            self.viewer.demo_sync_frames = true;
             self.open_media_viewer(ChatId(11), MessageId(301), cx);
-            if let Some(item) = self.media_viewer.current().cloned()
+            if let Some(item) = self.viewer.state.current().cloned()
                 && let Some(path) = self.viewer_clip_path(&item)
             {
                 let file_id = -item.play_file_id.map(|id| id.0).unwrap_or(0);
@@ -150,11 +150,11 @@ impl QuillApp {
                     &path, &mime, &cache, &slot, &cancel,
                 ) && let Ok(decoded) = Self::decode_viewer_frames(&frames.frames)
                 {
-                    self.viewer_video_frames = decoded;
-                    self.viewer_video_fps = frames.fps;
-                    self.viewer_frame_cache_file = Some(file_id);
+                    self.viewer.video_frames = decoded;
+                    self.viewer.video_fps = frames.fps;
+                    self.viewer.frame_cache_file = Some(file_id);
                     self.play_viewer_video(&item, &path, cx);
-                    if let Some(clock) = self.viewer_clock.as_mut() {
+                    if let Some(clock) = self.viewer.clock.as_mut() {
                         clock.seek(0.3);
                     }
                 }
@@ -168,9 +168,9 @@ impl QuillApp {
             }
             // As the video demo: decode the frames here so the capture is
             // deterministic, then play for real from the 5 s mark.
-            self.viewer_demo_sync_frames = true;
+            self.viewer.demo_sync_frames = true;
             self.open_media_viewer(ChatId(11), MessageId(205), cx);
-            if let Some(item) = self.media_viewer.current().cloned()
+            if let Some(item) = self.viewer.state.current().cloned()
                 && let Some(path) = self.viewer_clip_path(&item)
             {
                 let file_id = -item.play_file_id.map(|id| id.0).unwrap_or(0);
@@ -186,12 +186,12 @@ impl QuillApp {
                     duration,
                 ) && let Ok(decoded) = Self::decode_viewer_frames(&frames.frames)
                 {
-                    self.viewer_video_frames = decoded;
-                    self.viewer_video_fps = frames.fps;
-                    self.viewer_frame_cache_file = Some(file_id);
-                    self.playback_speed = 1.5;
+                    self.viewer.video_frames = decoded;
+                    self.viewer.video_fps = frames.fps;
+                    self.viewer.frame_cache_file = Some(file_id);
+                    self.playback.speed = 1.5;
                     self.play_viewer_video(&item, &path, cx);
-                    if let Some(clock) = self.viewer_clock.as_mut() {
+                    if let Some(clock) = self.viewer.clock.as_mut() {
                         clock.seek(5.0);
                     }
                 }
@@ -203,7 +203,7 @@ impl QuillApp {
             );
             // `QUILL_DEMO_NO_DIAL=1` keeps the dial closed, to see the
             // caption and toast it would cover.
-            self.viewer_extra.demo_speed_dial_open =
+            self.viewer.extra.demo_speed_dial_open =
                 std::env::var_os("QUILL_DEMO_NO_DIAL").is_none();
             self.status_note = "screenshot demo — viewer extras".into();
         }

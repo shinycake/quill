@@ -125,7 +125,7 @@ impl QuillApp {
                     .pressable(cx.theme())
                     .bg(cx.theme().sidebar)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.new_secret_picker_open = false;
+                        this.share.new_secret_picker_open = false;
                         this.start_secret_chat_for_user(user_id, cx);
                     }))
                     .child(

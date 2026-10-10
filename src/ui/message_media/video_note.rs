@@ -131,6 +131,7 @@ pub(in crate::ui) fn video_note_attachment(
         // A muted inline loop: play it once with sound (Telegram Desktop).
         if live {
             if this
+                .playback
                 .inline_videos
                 .borrow_mut()
                 .toggle_sound(chat_id.0, message_id.0)

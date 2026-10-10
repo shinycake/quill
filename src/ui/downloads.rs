@@ -38,23 +38,37 @@ impl QuillApp {
     }
 
     fn clear_pending_media_playback(&mut self, file_id: FileId) {
-        self.pending_gif_play.take_if(|(_, id, _)| *id == file_id);
-        self.pending_video_play
+        self.playback
+            .pending_gif_play
+            .take_if(|(_, id, _)| *id == file_id);
+        self.playback
+            .pending_video_play
             .take_if(|(_, id, ..)| *id == file_id);
-        self.pending_audio_play
+        self.playback
+            .pending_audio_play
             .take_if(|(_, _, id, _)| *id == file_id);
-        self.pending_voice_play
+        self.playback
+            .pending_voice_play
             .take_if(|(_, _, id, ..)| *id == file_id);
-        self.viewer_pending_play.take_if(|(_, id)| *id == file_id);
+        self.viewer.pending_play.take_if(|(_, id)| *id == file_id);
     }
 
     pub(super) fn discard_stopped_media_playback(&mut self, cx: &mut Context<Self>) {
         let failed: Vec<_> = [
-            self.pending_gif_play.as_ref().map(|(_, id, _)| *id),
-            self.pending_video_play.as_ref().map(|(_, id, ..)| *id),
-            self.pending_audio_play.as_ref().map(|(_, _, id, _)| *id),
-            self.viewer_pending_play.map(|(_, id)| id),
-            self.pending_voice_play.map(|(_, _, id, ..)| id),
+            self.playback
+                .pending_gif_play
+                .as_ref()
+                .map(|(_, id, _)| *id),
+            self.playback
+                .pending_video_play
+                .as_ref()
+                .map(|(_, id, ..)| *id),
+            self.playback
+                .pending_audio_play
+                .as_ref()
+                .map(|(_, _, id, _)| *id),
+            self.viewer.pending_play.map(|(_, id)| id),
+            self.playback.pending_voice_play.map(|(_, _, id, ..)| id),
         ]
         .into_iter()
         .flatten()

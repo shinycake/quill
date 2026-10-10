@@ -181,7 +181,7 @@ impl QuillApp {
                 cx,
             );
         });
-        self.rich_editor_open = true;
+        self.composer_ui.rich_editor_open = true;
         self.status_note = "screenshot demo — rich editor AI tools: Fix · Rewrite · Create".into();
     }
 
@@ -197,7 +197,7 @@ impl QuillApp {
                     cx,
                 );
             });
-        self.rich_editor_open = true;
+        self.composer_ui.rich_editor_open = true;
         self.status_note = "screenshot demo — rich editor".into();
     }
 
@@ -223,7 +223,7 @@ impl QuillApp {
                 cx,
             );
         });
-        self.rich_editor_open = false;
+        self.composer_ui.rich_editor_open = false;
         self.status_note = "Rich messages require Telegram Premium".into();
     }
 

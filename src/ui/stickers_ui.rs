@@ -376,7 +376,12 @@ impl QuillApp {
     }
 
     fn search_sticker_picker(&mut self, cx: &mut Context<Self>) {
-        let query = self.sticker_search_input.read(cx).value().to_string();
+        let query = self
+            .pickers
+            .sticker_search_input
+            .read(cx)
+            .value()
+            .to_string();
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.search_sticker_picker(&query) {
                 Ok(_) => "searching stickers…".into(),
@@ -848,7 +853,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             div().flex_1().min_w_0().child(
-                                Textarea::new(&self.sticker_search_input)
+                                Textarea::new(&self.pickers.sticker_search_input)
                                     .aria_label("Search stickers")
                                     .h(px(36.)),
                             ),

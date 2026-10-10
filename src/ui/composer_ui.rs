@@ -119,7 +119,7 @@ impl QuillApp {
     /// interceptor; Esc / blur / outside tap dismisses.
     pub(super) fn command_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (_, items) = self.command_menu_state(cx)?;
-        let selected = self.command_menu_selected.min(items.len() - 1);
+        let selected = self.composer_ui.command_menu_selected.min(items.len() - 1);
         let has_specific = items.iter().any(|item| !item.global);
         let has_global = items.iter().any(|item| item.global);
         let show_headers = has_specific && has_global;
@@ -278,6 +278,7 @@ impl QuillApp {
             return;
         }
         let reply = self
+            .composer_ui
             .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_target(chat_id));
@@ -368,6 +369,7 @@ impl QuillApp {
             return;
         }
         let reply = self
+            .composer_ui
             .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_target(chat_id));
@@ -489,14 +491,14 @@ impl QuillApp {
         if already {
             return;
         }
-        self.composer_preview_token = self.composer_preview_token.wrapping_add(1);
-        let token = self.composer_preview_token;
+        self.composer_ui.preview_token = self.composer_ui.preview_token.wrapping_add(1);
+        let token = self.composer_ui.preview_token;
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(500))
                 .await;
             this.update(cx, |this, cx| {
-                if this.composer_preview_token != token {
+                if this.composer_ui.preview_token != token {
                     return;
                 }
                 // Re-check the URL survived the quiet window; a newer
@@ -534,25 +536,25 @@ impl QuillApp {
     /// while editing (tdesktop seeds the edit draft with the message's own
     /// `WebPageDraft`), otherwise the next send's.
     pub(super) fn preview_choice(&self) -> LinkPreviewChoice {
-        match self.pending_edit.as_ref() {
+        match self.composer_ui.pending_edit.as_ref() {
             Some(edit) => edit.link_preview,
             None => LinkPreviewChoice {
-                disabled: self.composer_preview_disabled,
-                above_text: self.composer_preview_above,
-                media: self.composer_preview_media,
-                link_index: self.composer_preview_link,
+                disabled: self.composer_ui.preview_disabled,
+                above_text: self.composer_ui.preview_above,
+                media: self.composer_ui.preview_media,
+                link_index: self.composer_ui.preview_link,
             },
         }
     }
 
     pub(super) fn set_preview_choice(&mut self, choice: LinkPreviewChoice) {
-        match self.pending_edit.as_mut() {
+        match self.composer_ui.pending_edit.as_mut() {
             Some(edit) => edit.link_preview = choice,
             None => {
-                self.composer_preview_disabled = choice.disabled;
-                self.composer_preview_above = choice.above_text;
-                self.composer_preview_media = choice.media;
-                self.composer_preview_link = choice.link_index;
+                self.composer_ui.preview_disabled = choice.disabled;
+                self.composer_ui.preview_above = choice.above_text;
+                self.composer_ui.preview_media = choice.media;
+                self.composer_ui.preview_link = choice.link_index;
             }
         }
     }
@@ -679,10 +681,13 @@ impl QuillApp {
     /// `inputMessageText.link_preview_options`.
     pub(super) fn preview_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editing_text = self
+            .composer_ui
             .pending_edit
             .as_ref()
             .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Text));
-        if !self.pending_attachments.is_empty() || (self.pending_edit.is_some() && !editing_text) {
+        if !self.composer_ui.pending_attachments.is_empty()
+            || (self.composer_ui.pending_edit.is_some() && !editing_text)
+        {
             return None;
         }
         let text = self.composer.read(cx).value().to_string();
@@ -810,7 +815,7 @@ impl QuillApp {
     /// tdesktop's "Send as a document" (outside albums) and the spoiler
     /// option for photos and videos, and a way to drop it again.
     pub(super) fn edit_replacement_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let edit = self.pending_edit.as_ref()?;
+        let edit = self.composer_ui.pending_edit.as_ref()?;
         let replacement = edit.media_edit.replacement.as_ref()?;
         let as_file_toggle = edit.can_toggle_as_file(replacement);
         let spoiler_toggle = matches!(
@@ -885,31 +890,33 @@ impl QuillApp {
     /// `message_caption_length_max` option. Shown while attachments are
     /// pending or a caption is being edited.
     pub(super) fn caption_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let editing_caption = self
-            .pending_edit
-            .as_ref()
-            .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Caption));
-        if self.pending_attachments.is_empty() && !editing_caption {
+        let editing_caption =
+            self.composer_ui.pending_edit.as_ref().is_some_and(|edit| {
+                matches!(edit.kind, quill::composer::ComposerEditKind::Caption)
+            });
+        if self.composer_ui.pending_attachments.is_empty() && !editing_caption {
             return None;
         }
         // Documents and music have no caption position; photos, videos and
         // GIFs do (`show_caption_above_media`), also after a replacement.
         let captionable = self
+            .composer_ui
             .pending_edit
             .as_ref()
             .is_some_and(|edit| editing_caption && edit.caption_position_applies())
-            || self.pending_attachments.iter().any(|att| {
+            || self.composer_ui.pending_attachments.iter().any(|att| {
                 matches!(
                     att.kind,
                     quill::composer::AttachmentKind::Photo | quill::composer::AttachmentKind::Video
                 )
             });
         let above = if editing_caption {
-            self.pending_edit
+            self.composer_ui
+                .pending_edit
                 .as_ref()
                 .is_some_and(|edit| edit.caption_above)
         } else {
-            self.composer_caption_above
+            self.composer_ui.caption_above
         };
         let text_len = self.composer.read(cx).value().chars().count();
         let limit = self
@@ -944,11 +951,11 @@ impl QuillApp {
                                     .label("Caption above media")
                                     .checked(above)
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(edit) = this.pending_edit.as_mut() {
+                                        if let Some(edit) = this.composer_ui.pending_edit.as_mut() {
                                             edit.caption_above = !edit.caption_above;
                                         } else {
-                                            this.composer_caption_above =
-                                                !this.composer_caption_above;
+                                            this.composer_ui.caption_above =
+                                                !this.composer_ui.caption_above;
                                         }
                                         cx.notify();
                                     })),
@@ -970,10 +977,10 @@ impl QuillApp {
     /// editing. A new message over the limit is not an error (it is sent as
     /// several messages), so the label says how many.
     pub(super) fn text_limit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.pending_attachments.is_empty() {
+        if !self.composer_ui.pending_attachments.is_empty() {
             return None;
         }
-        let editing = self.pending_edit.as_ref();
+        let editing = self.composer_ui.pending_edit.as_ref();
         if editing.is_some_and(|edit| !matches!(edit.kind, quill::composer::ComposerEditKind::Text))
         {
             return None;
@@ -1003,7 +1010,7 @@ impl QuillApp {
     }
 
     pub(super) fn delete_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let confirm = self.pending_delete.clone();
+        let confirm = self.message_ui.pending_delete.clone();
         let can_revoke = confirm.as_ref().is_some_and(|c| c.can_revoke);
         let revoke = confirm.as_ref().is_some_and(|c| c.revoke);
         composer_context_bar(
@@ -1029,7 +1036,7 @@ impl QuillApp {
                                 .label("Delete for everyone")
                                 .checked(revoke)
                                 .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                    if let Some(confirm) = this.pending_delete.as_mut() {
+                                    if let Some(confirm) = this.message_ui.pending_delete.as_mut() {
                                         confirm.revoke = on;
                                     }
                                     cx.notify();
@@ -1392,7 +1399,7 @@ impl QuillApp {
     pub(super) fn composer_attachment_tray(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut group =
             AttachmentGroup::new("composer-attachments").with_edge_fade(cx.theme().background);
-        for (index, attachment) in self.pending_attachments.iter().enumerate() {
+        for (index, attachment) in self.composer_ui.pending_attachments.iter().enumerate() {
             let (icon, kind) = match attachment.kind {
                 AttachmentKind::Photo => (IconName::Image, "Photo"),
                 AttachmentKind::Video => (IconName::Film, "Video"),
@@ -1470,12 +1477,14 @@ impl QuillApp {
                     }),
             );
         }
-        let several = self.pending_attachments.len() >= 2;
+        let several = self.composer_ui.pending_attachments.len() >= 2;
         let grouped = self.composer_group_media_effective();
         // Telegram Desktop's "Send without compression".
-        let can_files = ComposerAttachment::can_send_as_files(&self.pending_attachments);
+        let can_files =
+            ComposerAttachment::can_send_as_files(&self.composer_ui.pending_attachments);
         let as_files = can_files
             && self
+                .composer_ui
                 .pending_attachments
                 .iter()
                 .all(|attachment| attachment.kind == AttachmentKind::Document);
@@ -1485,7 +1494,7 @@ impl QuillApp {
             .unwrap_or(false);
         let timer = self.self_destruct_picker_visible().then(|| {
             let owner = cx.entity().downgrade();
-            let current = self.composer_self_destruct;
+            let current = self.composer_ui.self_destruct;
             Button::new("self-destruct-menu")
                 .icon(IconName::Timer)
                 .label(self.self_destruct_button_label())
@@ -1538,7 +1547,7 @@ impl QuillApp {
                                 .checked(as_files)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     ComposerAttachment::set_send_as_files(
-                                        &mut this.pending_attachments,
+                                        &mut this.composer_ui.pending_attachments,
                                         !as_files,
                                     );
                                     cx.notify();
@@ -1583,7 +1592,7 @@ impl QuillApp {
         if items.is_empty() {
             return None;
         }
-        let selected = self.mention_selected.min(items.len() - 1);
+        let selected = self.composer_ui.mention_selected.min(items.len() - 1);
         let mut list = div()
             .id("mention-menu")
             .role(gpui_kit::Role::ListBox)

@@ -116,11 +116,11 @@ impl QuillApp {
         use crate::ui::demo::demo_history_extra;
         let sticker = quill::ids::MessageId(crate::ui::demo::HISTORY_ANIM_STICKER);
         if demo_history_extra("panel") {
-            self.media_panel.open = true;
-            self.media_panel.tab = crate::ui::media_panel::PanelTab::Emoji;
+            self.pickers.media_panel.open = true;
+            self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Emoji;
         }
         if demo_history_extra("menu") {
-            self.message_menu = Some(crate::ui::menu_states::MessageMenuState {
+            self.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
                 chat_id: ChatId(11),
                 message_id: sticker,
                 position: point(px(340.), px(380.)),
@@ -155,7 +155,7 @@ impl QuillApp {
     }
 
     fn demo_ready_deep_link_share(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.share_link_text = Some("https://example.com/article\nWorth a look".into());
+        self.share.link_text = Some("https://example.com/article\nWorth a look".into());
     }
 
     fn demo_ready_paste_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -179,11 +179,11 @@ impl QuillApp {
     ) {
         self.chat_prefs.spellcheck_enabled = true;
         // Ignore persisted app words so this fixture always shows typos.
-        self.spellchecker = Self::new_spellchecker(false).0;
+        self.spell.checker = Self::new_spellchecker(false).0;
         // Off macOS the fixture must not depend on the host's dictionaries.
         #[cfg(not(target_os = "macos"))]
         {
-            self.spellchecker = std::sync::Arc::new(quill::spellcheck::SpellChecker::wordlist());
+            self.spell.checker = std::sync::Arc::new(quill::spellcheck::SpellChecker::wordlist());
         }
         // `-panel`: a multi-line draft proving the skip rules — the
         // link, mention, hashtag, command and code stay unmarked.
@@ -203,7 +203,7 @@ impl QuillApp {
     fn demo_suggest(&mut self, demo: SuggestDemo, window: &mut Window, cx: &mut Context<Self>) {
         // In-memory fixtures; nothing is persisted.
         self.chat_prefs.suggest_emoji = true;
-        self.suggest.hashtags = quill::suggest::RecentHashtags::default();
+        self.composer_ui.suggest.hashtags = quill::suggest::RecentHashtags::default();
         for tag in [
             "#rustlang",
             "#rust",
@@ -212,7 +212,7 @@ impl QuillApp {
             "#gpui",
             "#rustlang",
         ] {
-            self.suggest.hashtags.record_message(tag);
+            self.composer_ui.suggest.hashtags.record_message(tag);
         }
         let draft = if matches!(demo, SuggestDemo::SuggestHashtag) {
             "shipping the new composer today #ru"

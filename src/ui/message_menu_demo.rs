@@ -689,31 +689,31 @@ impl QuillApp {
         match chosen.dialog {
             DemoDialog::None => {
                 if chosen_card(&scenario_name()) {
-                    self.message_menu_link = Some(quill::text::LinkTarget::BankCard(
+                    self.message_ui.menu_link = Some(quill::text::LinkTarget::BankCard(
                         "4111 1111 1111 1111".into(),
                     ));
                 }
                 if scenario_name() == "voice-timecode" {
-                    self.playing_voice = Some(message_id);
+                    self.playback.playing_voice = Some(message_id);
                     let mut clock = quill::playback::PlaybackClock::new(8.0);
                     clock.seek(5.0);
-                    self.playback_clock = Some(clock);
+                    self.playback.clock = Some(clock);
                 }
-                self.message_menu = Some(MessageMenuState {
+                self.message_ui.menu = Some(MessageMenuState {
                     chat_id,
                     message_id,
                     position: point(px(chosen.position.0), px(chosen.position.1)),
                 });
-                self.message_menu_ui.page = chosen.page;
+                self.message_ui.menu_ui.page = chosen.page;
                 if scenario_name() == "group-reactors-tab" {
-                    self.message_menu_ui.audience_tab = Some(ReactionType::emoji("\u{1F44D}"));
+                    self.message_ui.menu_ui.audience_tab = Some(ReactionType::emoji("\u{1F44D}"));
                 }
             }
             DemoDialog::ReportPick
             | DemoDialog::ReportSub
             | DemoDialog::ReportText
-            | DemoDialog::ReportDone => self.message_menu_ui.report_open = true,
-            DemoDialog::StickerSet => self.message_menu_ui.sticker_set_open = true,
+            | DemoDialog::ReportDone => self.message_ui.menu_ui.report_open = true,
+            DemoDialog::StickerSet => self.message_ui.menu_ui.sticker_set_open = true,
             DemoDialog::CustomEmojiCard => {}
             DemoDialog::FactCheck => {
                 let existing = self
