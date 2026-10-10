@@ -5,6 +5,7 @@ use super::*;
 use crate::telegram::envelope::{
     AddedReactionsPage, MessageReadDate, MessageViewer, ReactionType, ReportChatOutcome,
 };
+use crate::text::TextEntityKind;
 
 /// Where the report flow stands. TDLib walks it: an empty `reportChat`
 /// answers `OptionRequired` (the reason list), choosing a reason may answer
@@ -130,6 +131,32 @@ pub struct CustomEmojiPreview {
 }
 
 impl Session {
+    /// The distinct emoji packs of the custom emoji in a message's text
+    /// (tdesktop `CollectEmojiPacks`), in order of appearance. Emoji whose
+    /// sticker is not loaded yet have no pack to name.
+    pub fn message_emoji_pack_ids(&self, content: &MessageContent) -> Vec<i64> {
+        let MessageContent::Text(text) = content else {
+            return Vec::new();
+        };
+        let mut sets: Vec<i64> = Vec::new();
+        for entity in &text.entities {
+            let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
+                continue;
+            };
+            let set_id = self
+                .emoji
+                .custom_emoji_stickers
+                .iter()
+                .find(|s| s.custom_emoji_id == Some(custom_emoji_id))
+                .map(|s| s.set_id)
+                .unwrap_or(0);
+            if set_id != 0 && !sets.contains(&set_id) {
+                sets.push(set_id);
+            }
+        }
+        sets
+    }
+
     /// The pack of a tapped custom emoji arrived.
     pub(crate) fn accept_custom_emoji_preview(
         &mut self,

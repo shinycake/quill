@@ -211,12 +211,15 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        let draft = self.composer.read(cx).value().to_string();
+        let draft = self.composer_markup(cx);
         let next = append_mention(&draft, &mention_text(user_id, &username, &name));
+        self.set_composer_markup(&next, window, cx);
         self.composer.update(cx, |input, cx| {
-            input.set_value(&next, window, cx);
+            let end = input.value().len();
+            input.set_selected_range(end..end, cx);
             input.focus(window, cx);
         });
+        let next = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&next);
         cx.notify();
     }

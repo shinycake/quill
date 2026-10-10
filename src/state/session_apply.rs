@@ -149,10 +149,14 @@ impl Session {
                 }
             }
             EnvelopePayload::UpdateConnectionState(state) => self.connection = state,
+            EnvelopePayload::UpdateChatAccentColors { chat_id, accent } => {
+                self.chat_accents.insert(chat_id, accent);
+            }
             EnvelopePayload::UpdateNewChat {
                 chat_id,
                 title,
                 kind,
+                accent,
                 unread_count,
                 last_read_inbox_message_id,
                 last_read_outbox_message_id,
@@ -189,6 +193,7 @@ impl Session {
                 if let Some(view_as_topics) = view_as_topics {
                     self.set_chat_view_as_topics(chat_id.0, view_as_topics);
                 }
+                self.chat_accents.insert(chat_id.0, accent);
                 if let Some(silent) = default_disable_notification {
                     self.sync.set_default_silent(chat_id.0, silent);
                 }
@@ -2622,6 +2627,12 @@ impl Session {
                     pending.map(|p| p.purpose)
                 {
                     self.accept_custom_emoji_preview(emoji_id, set_id, title);
+                } else if let Some(RequestPurpose::EmojiPackTitle { set_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    if !title.is_empty() {
+                        self.emoji_pack_titles.insert(set_id, title);
+                    }
                 } else if let Some(RequestPurpose::LoadLibrarySet { set_id }) =
                     pending.map(|p| p.purpose)
                 {

@@ -326,8 +326,9 @@ impl QuillApp {
         // prefetched preview (no live TDLib in demo mode) with large
         // media on offer so the size toggle renders too.
         let text = "Here is the fix:\n```\nfn main() {\n    println!(\"hi\");\n}\n```";
+        // The fence becomes a code block in the field.
+        self.set_composer_markup(text, window, cx);
         self.composer.update(cx, |input, cx| {
-            input.set_value(text, window, cx);
             input.set_selected_range(40..40, cx);
         });
         self.open_code_language_dialog(window, cx);

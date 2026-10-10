@@ -79,6 +79,13 @@ impl QuillApp {
                     quill::telegram::envelope::effective_content(&m.content, m.ephemeral.as_ref())
                         .clone()
                 });
+            let packs = content
+                .as_ref()
+                .map(|content| live.driver.session.message_emoji_pack_ids(content))
+                .unwrap_or_default();
+            if let [only] = packs[..] {
+                let _ = live.driver.fetch_emoji_pack_title(only);
+            }
             match content {
                 Some(quill::telegram::envelope::MessageContent::Sticker(_)) => {
                     let _ = live.driver.fetch_sticker_menu_facts();

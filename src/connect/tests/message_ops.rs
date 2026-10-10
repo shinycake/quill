@@ -14,6 +14,62 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 #[test]
+fn driver_sends_a_reply_aimed_at_another_chat_as_external() {
+    use crate::composer::{ComposerReplyTo, QuoteSelection};
+
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+    let reply = ComposerReplyTo::with_quote(
+        ChatId(12),
+        MessageId(40),
+        "from elsewhere",
+        QuoteSelection {
+            text: "else".into(),
+            position: 5,
+        },
+    );
+    // Not aimed at chat 7: no reply goes out.
+    let snap = crate::composer::ComposerSnapshot::capture(
+        ChatId(7),
+        driver.session.view_generation,
+        "plain",
+    )
+    .with_reply(Some(reply.clone()));
+    driver.send_snapshot(&snap).unwrap();
+    let sent: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert!(sent["reply_to"].is_null());
+
+    // Aimed at chat 7: an external reply with the quote.
+    let snap = crate::composer::ComposerSnapshot::capture(
+        ChatId(7),
+        driver.session.view_generation,
+        "answer",
+    )
+    .with_reply(Some(reply.into_chat(ChatId(7))));
+    driver.send_snapshot(&snap).unwrap();
+    let sent: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(sent["@type"], "sendMessage");
+    assert_eq!(sent["chat_id"], 7);
+    assert_eq!(
+        sent["reply_to"]["@type"],
+        "inputMessageReplyToExternalMessage"
+    );
+    assert_eq!(sent["reply_to"]["chat_id"], 12);
+    assert_eq!(sent["reply_to"]["message_id"], 40);
+    assert_eq!(sent["reply_to"]["quote"]["text"]["text"], "else");
+    assert_eq!(sent["reply_to"]["quote"]["position"], 5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn driver_send_reply_shape_and_jump_to_replied() {
     use crate::composer::ComposerReplyTo;
 

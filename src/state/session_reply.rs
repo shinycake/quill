@@ -45,6 +45,12 @@ pub struct ReplyHeader {
     pub thumb: Vec<FileId>,
     /// Whether a click can take the user to the original.
     pub clickable: bool,
+    /// Custom emoji repeated behind the strip in the sender's color
+    /// (`background_custom_emoji_id` of the replied sender), if they have one.
+    pub background_emoji: Option<i64>,
+    /// The replied story's id for a reply to a story; the strip then reads
+    /// "Story" and `target_chat` is the poster's chat.
+    pub story: Option<i32>,
 }
 
 impl ReplyHeader {
@@ -137,6 +143,23 @@ pub fn thumb_candidates(content: &MessageContent) -> Vec<FileId> {
     ids
 }
 
+/// Files worth showing as a small thumbnail of a story: the smallest
+/// size of a photo, the cover of a video.
+pub fn story_thumb_candidates(story: &ParsedStory) -> Vec<FileId> {
+    use crate::telegram::envelope::StoryContentView;
+    let mut ids = Vec::new();
+    match &story.content {
+        StoryContentView::Photo { sizes } => {
+            ids.extend(sizes.iter().map(|size| size.file_id));
+        }
+        StoryContentView::Video { thumb_file_id, .. } => ids.extend(*thumb_file_id),
+        StoryContentView::Live { .. } | StoryContentView::Unsupported => {}
+    }
+    ids.retain(|id| id.0 != 0);
+    ids.dedup();
+    ids
+}
+
 /// Replies the loader asks for per ingest, so one huge history does not
 /// flood TDLib.
 const REPLY_FETCH_BATCH: usize = 24;
@@ -154,9 +177,77 @@ impl Session {
             },
             Some(MessageSender::Chat { chat_id }) => (
                 self.chats.get(&chat_id).map(|chat| chat.title.clone()),
-                Some(chat_id.rem_euclid(7) as i32),
+                Some(self.chat_accents.get(&chat_id).map_or_else(
+                    || chat_id.rem_euclid(7) as i32,
+                    |accent| accent.accent_color_id,
+                )),
             ),
             None => (None, None),
+        }
+    }
+
+    /// The custom emoji behind a sender's replies, if they chose one.
+    pub fn sender_background_emoji(&self, sender: Option<MessageSender>) -> Option<i64> {
+        let id = match sender? {
+            MessageSender::User { user_id } => self.user(user_id)?.background_custom_emoji_id,
+            MessageSender::Chat { chat_id } => {
+                self.chat_accents.get(&chat_id)?.background_custom_emoji_id
+            }
+        };
+        (id > 0).then_some(id)
+    }
+
+    fn origin_background_emoji(&self, origin: &MessageOrigin) -> Option<i64> {
+        match origin {
+            MessageOrigin::User { user_id } => {
+                self.sender_background_emoji(Some(MessageSender::User { user_id: user_id.0 }))
+            }
+            MessageOrigin::HiddenUser { .. } => None,
+            MessageOrigin::Chat { chat_id, .. } | MessageOrigin::Channel { chat_id, .. } => {
+                self.sender_background_emoji(Some(MessageSender::Chat { chat_id: chat_id.0 }))
+            }
+        }
+    }
+
+    /// The strip of a reply to a story (tdesktop draws the poster's name
+    /// over "Story" and the story's picture).
+    fn story_reply_header(&self, reply: &MessageReplyTo) -> ReplyHeader {
+        let poster = reply.chat_id;
+        // A user's stories come from their private chat.
+        let user = self.chats.get(&poster.0).and_then(|chat| match chat.kind {
+            ChatKind::Private { user_id } => Some(user_id),
+            _ => None,
+        });
+        let sender = match user {
+            Some(user_id) => MessageSender::User { user_id: user_id.0 },
+            None => MessageSender::Chat { chat_id: poster.0 },
+        };
+        let (name, accent) = match user {
+            Some(_) => self.sender_name_and_accent(Some(sender)),
+            None => (
+                self.chats.get(&poster.0).map(|chat| chat.title.clone()),
+                self.sender_name_and_accent(Some(sender)).1,
+            ),
+        };
+        let story = self.stories.get(&(poster.0, reply.story_id));
+        let in_tray = self.story_tray.get(&poster.0).is_some_and(|tray| {
+            tray.stories
+                .iter()
+                .any(|info| info.story_id == reply.story_id)
+        });
+        ReplyHeader {
+            target_chat: poster,
+            target_id: MessageId(0),
+            state: ReplyState::Ready,
+            name,
+            accent,
+            text: "Story".to_string(),
+            is_quote: false,
+            external_chat: None,
+            thumb: story.map(story_thumb_candidates).unwrap_or_default(),
+            clickable: in_tray,
+            background_emoji: self.sender_background_emoji(Some(sender)),
+            story: Some(reply.story_id),
         }
     }
 
@@ -181,6 +272,9 @@ impl Session {
     /// The reply strip of `message`, or `None` when it replies to nothing.
     pub fn reply_header(&self, message: &HistoryMessage) -> Option<ReplyHeader> {
         let reply = message.reply_to.as_ref()?;
+        if reply.story_id != 0 {
+            return Some(self.story_reply_header(reply));
+        }
         let target_chat = if reply.chat_id.0 == 0 {
             message.chat_id
         } else {
@@ -213,6 +307,11 @@ impl Session {
             (Some(found), _) => self.sender_name_and_accent(found.sender),
             (None, Some(origin)) => self.origin_name_and_accent(origin),
             (None, None) => (None, None),
+        };
+        let background_emoji = match (original, &reply.origin) {
+            (Some(found), _) => self.sender_background_emoji(found.sender),
+            (None, Some(origin)) => self.origin_background_emoji(origin),
+            (None, None) => None,
         };
         let name = name.or_else(|| {
             original
@@ -263,6 +362,8 @@ impl Session {
             external_chat,
             thumb,
             clickable,
+            background_emoji,
+            story: None,
         })
     }
 
@@ -384,6 +485,9 @@ impl Session {
             let Some(reply) = &message.reply_to else {
                 continue;
             };
+            if reply.story_id != 0 {
+                continue;
+            }
             if self
                 .reply_targets
                 .contains_key(&(message.chat_id.0, message.id.0))
@@ -453,9 +557,53 @@ impl Session {
                 {
                     ids.extend(thumb_candidates(content));
                 }
+                if let Some(story) = message
+                    .reply_to
+                    .as_ref()
+                    .filter(|reply| reply.story_id != 0)
+                    .and_then(|reply| self.stories.get(&(reply.chat_id.0, reply.story_id)))
+                {
+                    ids.extend(story_thumb_candidates(story));
+                }
             }
         }
         ids
+    }
+
+    /// Stories the open chat's rows reply to that are not cached yet, for
+    /// `getStory` (the strip's picture comes from them).
+    pub fn reply_story_candidates(&self) -> Vec<(ChatId, i32)> {
+        let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
+            return Vec::new();
+        };
+        let mut wanted: Vec<(ChatId, i32)> = history
+            .messages
+            .values()
+            .filter_map(|message| message.reply_to.as_ref())
+            .filter(|reply| reply.story_id != 0 && reply.chat_id.0 != 0)
+            .map(|reply| (reply.chat_id, reply.story_id))
+            .filter(|(chat, story)| {
+                !self.stories.contains_key(&(chat.0, *story))
+                    && !self.story_reply_attempted.contains(&(chat.0, *story))
+            })
+            .collect();
+        wanted.sort_by_key(|(chat, story)| (chat.0, *story));
+        wanted.dedup();
+        wanted.truncate(REPLY_FETCH_BATCH);
+        wanted
+    }
+
+    /// Custom emoji behind the reply strips of the open chat.
+    pub fn reply_background_emoji_ids(&self) -> Vec<i64> {
+        let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
+            return Vec::new();
+        };
+        history
+            .messages
+            .values()
+            .filter(|message| message.reply_to.is_some())
+            .filter_map(|message| self.reply_header(message)?.background_emoji)
+            .collect()
     }
 }
 

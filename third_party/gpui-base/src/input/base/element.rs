@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
+// bidirectional text support and formatting spans in the input engine. See
+// third_party/gpui-base/QUILL-CHANGES.md.
 use crate::input::{InputExtras as _, InputModeKind};
 use gpui::Corners;
 use gpui::Half;
@@ -98,6 +99,35 @@ fn compose_decorations(
     // Decorations are application-authored overrides and must win over syntax
     // and semantic highlighting when both set the same style property.
     Some(gpui::combine_highlights(styles, visible_decorations).collect())
+}
+
+/// `range` cut where a span's font family starts or ends, each piece with the
+/// family over it (Quill patch).
+fn split_by_families(
+    range: &Range<usize>,
+    families: &[(Range<usize>, SharedString)],
+) -> SmallVec<[(Range<usize>, Option<SharedString>); 1]> {
+    let mut cuts: SmallVec<[usize; 4]> = smallvec::smallvec![range.start, range.end];
+    for (r, _) in families {
+        if r.start < range.end && range.start < r.end {
+            cuts.push(r.start.clamp(range.start, range.end));
+            cuts.push(r.end.clamp(range.start, range.end));
+        }
+    }
+    if cuts.len() == 2 {
+        return smallvec::smallvec![(range.clone(), None)];
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts.windows(2)
+        .map(|w| {
+            let family = families
+                .iter()
+                .find(|(r, _)| r.start <= w[0] && w[0] < r.end)
+                .map(|(_, family)| family.clone());
+            (w[0]..w[1], family)
+        })
+        .collect()
 }
 
 fn compose_decoration_collections<'a>(
@@ -1889,7 +1919,38 @@ impl<M: InputModeKind> TextElement<M> {
                         .clone()
                 };
                 let mut lines: SmallVec<[InputLine; 1]> = SmallVec::new();
+                // Right-to-left content takes the bidi path with the tokens as
+                // inline objects (Quill patch).
+                let paragraph = Paragraph::analyze(&text);
+                let paragraph_rtl = paragraph.as_ref().is_some_and(|p| p.is_rtl());
+                let mut line_has_background = false;
+                let line_tokens: Vec<(Range<usize>, Pixels)> = spans
+                    [spans.partition_point(|s| s.range().end <= line_start)..]
+                    .iter()
+                    .take_while(|s| s.range().start < line_start + text.len())
+                    .map(|span| {
+                        (
+                            span.range().start - line_start..span.range().end - line_start,
+                            cache.widths.get(span.token()).copied().unwrap_or_default(),
+                        )
+                    })
+                    .collect();
                 for range in ranges {
+                    if let Some(paragraph) = &paragraph {
+                        let (row, has_bg) = Self::layout_bidi_token_row(
+                            paragraph,
+                            &text,
+                            range,
+                            &line_tokens,
+                            run_offset,
+                            runs,
+                            font_size,
+                            window,
+                        );
+                        line_has_background |= has_bg;
+                        lines.push(row);
+                        continue;
+                    }
                     let mut fragments = Vec::new();
                     let mut offset = range.start;
                     let mut x = px(0.);
@@ -1902,10 +1963,12 @@ impl<M: InputModeKind> TextElement<M> {
                         let local = span.range().start - line_start..span.range().end - line_start;
                         if offset < local.start {
                             let part = offset..local.start;
+                            let part_runs = runs_for_range(runs, run_offset, &part);
+                            line_has_background |= has_background(&part_runs);
                             let shaped = window.text_system().shape_line(
                                 text[part.clone()].to_owned().into(),
                                 font_size,
-                                &runs_for_range(runs, run_offset, &part),
+                                &part_runs,
                                 None,
                             );
                             let width = shaped.width;
@@ -1929,10 +1992,12 @@ impl<M: InputModeKind> TextElement<M> {
                     }
                     if offset < range.end {
                         let part = offset..range.end;
+                        let part_runs = runs_for_range(runs, run_offset, &part);
+                        line_has_background |= has_background(&part_runs);
                         let shaped = window.text_system().shape_line(
                             text[part.clone()].to_owned().into(),
                             font_size,
-                            &runs_for_range(runs, run_offset, &part),
+                            &part_runs,
                             None,
                         );
                         let width = shaped.width;
@@ -1958,9 +2023,107 @@ impl<M: InputModeKind> TextElement<M> {
                 run_offset += text.len() + 1;
                 LineLayout::new()
                     .inline_lines(lines)
+                    .rtl(paragraph_rtl)
+                    .with_background(line_has_background)
                     .wrap_indent(wrap_indent)
             })
             .collect()
+    }
+
+    /// [`Self::layout_bidi_row`] for a row holding inline tokens: each visual
+    /// run is cut at its tokens, a token is an object of its measured width
+    /// placed in the run's visual order, and a token is never split between
+    /// runs (it stays with the run its first byte is in). Quill patch.
+    #[allow(clippy::too_many_arguments)]
+    fn layout_bidi_token_row(
+        paragraph: &Paragraph<'_>,
+        line_text: &str,
+        range: Range<usize>,
+        tokens: &[(Range<usize>, Pixels)],
+        run_offset: usize,
+        runs: &[TextRun],
+        font_size: Pixels,
+        window: &mut Window,
+    ) -> (InputLine, bool) {
+        use crate::input::display_map::{Cluster, Fragment};
+        let row_text: SharedString = line_text[range.clone()].to_string().into();
+        let mut fragments = Vec::new();
+        let mut shaped_lines = Vec::new();
+        let mut has_bg = false;
+        let mut x = px(0.);
+        for run in paragraph.visual_runs(range.clone()) {
+            // Logical pieces of the run: text between tokens, and each token
+            // that starts in it (with its width).
+            let mut pieces: Vec<(Range<usize>, Option<Pixels>)> = Vec::new();
+            let mut at = run.range.start;
+            for (token, width) in tokens {
+                if token.end <= at || token.start >= run.range.end {
+                    continue;
+                }
+                if token.start < at {
+                    // Started in an earlier run: its bytes are taken.
+                    at = token.end.min(run.range.end);
+                    continue;
+                }
+                if at < token.start {
+                    pieces.push((at..token.start, None));
+                }
+                pieces.push((token.clone(), Some(*width)));
+                at = token.end.min(run.range.end).max(token.start);
+            }
+            if at < run.range.end {
+                pieces.push((at..run.range.end, None));
+            }
+            if run.rtl {
+                pieces.reverse();
+            }
+            for (piece, token_width) in pieces {
+                let local = piece.start - range.start..piece.end.min(range.end) - range.start;
+                let text = &line_text[piece.start..piece.end.min(range.end)];
+                if let Some(width) = token_width {
+                    let width_f = width.as_f32();
+                    fragments.push(Fragment::new(
+                        local.clone(),
+                        run.rtl,
+                        x.as_f32(),
+                        width_f,
+                        text.to_owned(),
+                        vec![Cluster {
+                            range: 0..text.len(),
+                            left: 0.,
+                            right: width_f,
+                        }],
+                    ));
+                    shaped_lines.push(None);
+                    x += width;
+                    continue;
+                }
+                let piece_runs = runs_for_range(runs, run_offset, &piece);
+                let shaped_text: SharedString = if run.rtl {
+                    mirror_neutral_run(text).unwrap_or_else(|| text.to_string())
+                } else {
+                    text.to_string()
+                }
+                .into();
+                let piece_runs =
+                    align_runs_to_char_boundaries(&shaped_text, &piece_runs).unwrap_or(piece_runs);
+                let shaped =
+                    window
+                        .text_system()
+                        .shape_line(shaped_text, font_size, &piece_runs, None);
+                has_bg |= has_background(&piece_runs);
+                let fragment =
+                    fragment_from_shaped(&shaped, local, run.rtl, x, text, window.text_system());
+                x += px(fragment.width);
+                fragments.push(fragment);
+                shaped_lines.push(Some(shaped));
+            }
+        }
+        let geometry = BidiLine::new(row_text.len(), fragments);
+        (
+            InputLine::bidi_with_objects(row_text, geometry, shaped_lines),
+            has_bg,
+        )
     }
 
     fn prepaint_tokens(
@@ -1998,8 +2161,10 @@ impl<M: InputModeKind> TextElement<M> {
             let spans = state.token_spans();
             let first = spans.partition_point(|s| s.range().end <= start);
             for span in spans[first..].iter().take_while(|s| s.range().start < end) {
-                if let Some(position) =
-                    layout.lines[ix].position_for_index(span.range().start - start, layout, false)
+                // The token's own box: in a right-to-left run its start is
+                // its right edge (Quill patch).
+                if let Some(position) = layout.lines[ix]
+                    .object_position(span.range().start - start..span.range().end - start, layout)
                 {
                     placements.push((
                         state.token_context(span, layout.line_height, width),
@@ -2215,7 +2380,11 @@ impl<M: InputModeKind> TextElement<M> {
             let run_runs = if bg_segments.is_empty() {
                 run_runs
             } else {
-                split_runs_by_bg_segments(line_byte_offset + run.range.start, &run_runs, bg_segments)
+                split_runs_by_bg_segments(
+                    line_byte_offset + run.range.start,
+                    &run_runs,
+                    bg_segments,
+                )
             };
             // A run of brackets alone has no right-to-left context for the platform
             // shaper to mirror them from; mirror them here.
@@ -2233,14 +2402,8 @@ impl<M: InputModeKind> TextElement<M> {
             has_bg |= has_background(&run_runs);
 
             let local = run.range.start - range.start..run.range.end - range.start;
-            let fragment = fragment_from_shaped(
-                &shaped,
-                local,
-                run.rtl,
-                x,
-                text,
-                window.text_system(),
-            );
+            let fragment =
+                fragment_from_shaped(&shaped, local, run.rtl, x, text, window.text_system());
             x += px(fragment.width);
             fragments.push(fragment);
             shaped_lines.push(shaped);
@@ -2269,10 +2432,18 @@ impl<M: InputModeKind> TextElement<M> {
                 ..
             } => (highlighter.borrow_mut(), diagnostics),
             _ => {
+                // Formatting spans first, application decorations over them
+                // (Quill patch, `text_spans.rs`).
+                let spans = compose_decorations(
+                    Vec::new(),
+                    state.span_highlights(&visible_byte_range),
+                    visible_byte_range.clone(),
+                )
+                .unwrap_or_default();
                 return (!state.masked)
                     .then(|| {
                         compose_decoration_collections(
-                            Vec::new(),
+                            spans,
                             state.extras.decoration_layers().into_iter(),
                             visible_byte_range,
                         )
@@ -2857,19 +3028,26 @@ impl<M: InputModeKind> Element for TextElement<M> {
 
         let runs = if let (false, Some(highlight_styles)) = (is_empty, highlight_styles) {
             let mut runs = Vec::with_capacity(highlight_styles.len() + 2);
+            // Span fonts a highlight cannot carry (Quill patch).
+            let families = state.span_families(&(visible_start_offset..visible_end_offset));
 
             for (range, style) in &highlight_styles {
-                let mut run = text_style.clone().highlight(*style).to_run(range.len());
-                if disabled {
-                    run.color = run.color.opacity(0.5);
-                }
+                for (range, family) in split_by_families(range, &families) {
+                    let mut run = text_style.clone().highlight(*style).to_run(range.len());
+                    if let Some(family) = family {
+                        run.font.family = family;
+                    }
+                    if disabled {
+                        run.color = run.color.opacity(0.5);
+                    }
 
-                runs.extend(split_run_for_ime_underline(
-                    run,
-                    range.clone(),
-                    ime_marked_range.clone(),
-                    marked_run.underline,
-                ));
+                    runs.extend(split_run_for_ime_underline(
+                        run,
+                        range,
+                        ime_marked_range.clone(),
+                        marked_run.underline,
+                    ));
+                }
             }
             runs
         } else {

@@ -29,6 +29,10 @@ pub fn input_text_quote_json(text: &str, position: i32) -> Value {
 pub struct SendReply {
     pub message_id: MessageId,
     pub quote: Option<(String, i32)>,
+    /// The chat the replied-to message lives in when it is not the chat
+    /// being sent to (`inputMessageReplyToExternalMessage`); `None` for a
+    /// same-chat reply (`inputMessageReplyToMessage`).
+    pub source_chat: Option<ChatId>,
 }
 
 impl SendReply {
@@ -36,6 +40,20 @@ impl SendReply {
         Self {
             message_id,
             quote: None,
+            source_chat: None,
+        }
+    }
+
+    /// A reply to a message of another chat, optionally quoting part of it.
+    pub fn external(
+        source_chat: ChatId,
+        message_id: MessageId,
+        quote: Option<(String, i32)>,
+    ) -> Self {
+        Self {
+            message_id,
+            quote,
+            source_chat: Some(source_chat),
         }
     }
 }
@@ -44,15 +62,38 @@ impl SendReply {
 /// `input_message_reply_to_with_quote` so whole-message replies keep
 /// the exact shape the old `input_message_reply_to` produced.
 pub(crate) fn send_reply_value(reply_to: Option<&SendReply>) -> Value {
-    input_message_reply_to_with_quote(
-        reply_to.map(|reply| reply.message_id),
-        reply_to.and_then(|reply| {
-            reply
-                .quote
-                .as_ref()
-                .map(|(text, position)| (text.as_str(), *position))
-        }),
-    )
+    let quote = reply_to.and_then(|reply| {
+        reply
+            .quote
+            .as_ref()
+            .map(|(text, position)| (text.as_str(), *position))
+    });
+    match reply_to.and_then(|reply| reply.source_chat.map(|chat| (chat, reply.message_id))) {
+        Some((chat_id, message_id)) => input_message_reply_to_external(chat_id, message_id, quote),
+        None => input_message_reply_to_with_quote(reply_to.map(|reply| reply.message_id), quote),
+    }
+}
+
+/// Reply to a message of another chat (TDLib 1.8.68, `schema/td_api.tl:3404`):
+/// `inputMessageReplyToExternalMessage chat_id:int53 message_id:int53
+/// quote:inputTextQuote checklist_task_id:int32 poll_option_id:string`.
+/// Not supported in secret chats; the message must have
+/// `messageProperties.can_be_replied_in_another_chat`.
+pub fn input_message_reply_to_external(
+    chat_id: ChatId,
+    message_id: MessageId,
+    quote: Option<(&str, i32)>,
+) -> Value {
+    json!({
+        "@type": "inputMessageReplyToExternalMessage",
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "quote": quote
+            .map(|(text, position)| input_text_quote_json(text, position))
+            .unwrap_or(Value::Null),
+        "checklist_task_id": 0,
+        "poll_option_id": ""
+    })
 }
 
 /// Slice G1: same-chat reply with an optional quote (TDLib 1.8.67,
@@ -122,6 +163,10 @@ pub fn format_entity_json(entity: &ComposerEntity) -> Value {
         FormatKind::TextUrl => json!({
             "@type": "textEntityTypeTextUrl",
             "url": entity.url,
+        }),
+        FormatKind::MentionName => json!({
+            "@type": "textEntityTypeMentionName",
+            "user_id": crate::composer::mention_user_id(&entity.url).unwrap_or_default(),
         }),
         FormatKind::CustomEmoji => json!({
             "@type": "textEntityTypeCustomEmoji",

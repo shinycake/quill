@@ -92,7 +92,7 @@ impl QuillApp {
 
     /// The typed query changed: ask the server too (`searchChatsOnServer`).
     pub(super) fn sync_share_search(&mut self, text: &str, cx: &mut Context<Self>) {
-        if !self.forward_picker_open {
+        if !self.forward_picker_open && !self.reply_elsewhere_open {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -245,8 +245,7 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.select_listed_chat(dest, window, cx);
         if !comment.is_empty() {
-            self.composer
-                .update(cx, |input, cx| input.set_value(comment, window, cx));
+            self.set_composer_markup(&comment, window, cx);
         }
         self.status_note = "forward bar ready — press Send".into();
         cx.notify();

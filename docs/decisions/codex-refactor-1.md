@@ -48,12 +48,12 @@ Where the code lives now:
   groups_admin, bots_profile), the same grouping as the old
   `demo_setup_<area>` functions. Each demo became one method; blocks that
   served several kinds became one method with a private enum. All files are
-  under 1000 lines (largest: `privacy_media.rs`, 860).
+  under 1000 lines (largest: `privacy_media.rs`, 861).
 - `demo_setup.rs` is gone; `app_demo.rs` lost the seed table, the
-  attachment list, the sign-in fixtures and the setup call list (3101 to
-  1421 lines). `main.rs` lost `DEMO_TABLE` and the marker match (1931 to
-  1320 lines). `screenshot_demo.rs` went from a 938-line enum to the
-  registry (270 lines). `demo_setup.rs` had 3257 lines.
+  attachment list, the sign-in fixtures and the setup call list (3132 to
+  1461 lines). `main.rs` lost `DEMO_TABLE` and the marker match (1939 to
+  1320 lines). `screenshot_demo.rs` went from a 950-line enum to the
+  registry (270 lines). `demo_setup.rs` had 3301 lines.
 
 ### Registry: `inventory`
 
@@ -83,7 +83,7 @@ prints the kind (`ready-chats`) instead of the old variant name
 
 ## Verification
 
-- `every_earlier_kind_is_still_registered` (`ui/demos/mod.rs`): the 286
+- `every_earlier_kind_is_still_registered` (`ui/demos/mod.rs`): the 291
   kinds from the old `DEMO_TABLE` (frozen in
   `ui/demos/kinds_before_registry.txt`) all resolve. New kinds need no entry
   there.

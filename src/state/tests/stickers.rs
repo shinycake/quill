@@ -199,3 +199,44 @@ fn sound_list_refetch_prunes_file_ids() {
     assert!(!session.sound_file_ids.contains_key(&91));
     assert_eq!(session.sound_file_ids.get(&92), Some(&8));
 }
+
+#[test]
+fn message_emoji_packs_are_distinct_and_skip_unresolved_emoji() {
+    use crate::telegram::envelope::{StickerFormat, StickerItem, TextContent};
+    use crate::text::{TextEntity, TextEntityKind};
+    let (mut session, _) = session();
+    let sticker = |emoji_id: i64, set_id: i64| StickerItem {
+        custom_emoji_id: Some(emoji_id),
+        id: emoji_id,
+        set_id,
+        emoji: String::new(),
+        width: 64,
+        height: 64,
+        format: StickerFormat::Webp,
+        file_id: crate::ids::FileId(1),
+        thumb_file_id: None,
+        thumb_width: 0,
+        thumb_height: 0,
+        requires_premium: false,
+    };
+    session.emoji.custom_emoji_stickers = vec![sticker(1, 70), sticker(2, 70), sticker(3, 71)];
+    let entity = |id: i64, at: usize| TextEntity {
+        utf8_start: at,
+        utf8_end: at + 1,
+        kind: TextEntityKind::CustomEmoji {
+            custom_emoji_id: id,
+        },
+    };
+    let content = MessageContent::Text(TextContent {
+        text: "abcd".into(),
+        // Emoji 9 has no sticker yet.
+        entities: vec![entity(1, 0), entity(2, 1), entity(3, 2), entity(9, 3)],
+        link_preview: None,
+    });
+    assert_eq!(session.message_emoji_pack_ids(&content), vec![70, 71]);
+    assert!(
+        session
+            .message_emoji_pack_ids(&MessageContent::Text("plain".into()))
+            .is_empty()
+    );
+}

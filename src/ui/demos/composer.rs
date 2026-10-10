@@ -2,7 +2,7 @@
 
 use super::attachments;
 use crate::ui::app::QuillApp;
-use crate::ui::demo::seed_ready_send_media_session;
+use crate::ui::demo::{seed_ready_custom_emoji_session, seed_ready_send_media_session};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::composer::AttachmentKind;
@@ -56,6 +56,16 @@ register_demos![
         window,
         cx
     )),
+    // codex:composer-input: a draft whose formatting, mention tag and custom
+    // emoji show in the field as they will be sent.
+    // `QUILL_DEMO_WYSIWYG=rtl|wrap|select` picks a Persian draft, a long
+    // bold line that wraps, or a selection across formats.
+    DemoSpec::ready(
+        "ready-composer-wysiwyg",
+        seed_ready_custom_emoji_session,
+        "screenshot demo — formatted composer field"
+    )
+    .setup(QuillApp::demo_ready_composer_wysiwyg),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,6 +81,35 @@ enum SuggestDemo {
 }
 
 impl QuillApp {
+    fn demo_ready_composer_wysiwyg(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // codex:composer-input: formats, a mention tag and a custom emoji
+        // (id 4242 resolves in this seed) shown in the field.
+        let variant = std::env::var("QUILL_DEMO_WYSIWYG").unwrap_or_default();
+        let markup = match variant.as_str() {
+            "rtl" => {
+                "سلام **دوستان**، پیش‌نویس با _قالب‌بندی_ و ![😀](tg://emoji?id=4242) آماده است\nنسخهٔ ۲ برای [Ann](tg://user?id=777) ارسال شد"
+            }
+            "wrap" => {
+                "**A long bold line that has to wrap inside the composer, measured with the bold font so no word sticks out past the edge** and plain text after it"
+            }
+            _ => {
+                "Release notes: **bold**, _italic_, __underline__, ~~struck~~, ||spoiler||, `code` and a [link](https://telegram.org)\nThanks [Ann](tg://user?id=777) for the ![😀](tg://emoji?id=4242) review!\n> Quoted feedback stays a quote"
+            }
+        };
+        self.set_composer_markup(markup, window, cx);
+        let select = variant == "select";
+        self.composer.update(cx, |input, cx| {
+            input.focus(window, cx);
+            if select {
+                input.set_selected_range(15..43, cx);
+            } else {
+                let end = input.value().len();
+                input.set_selected_range(end..end, cx);
+            }
+        });
+        self.status_note = "screenshot demo — formatted composer".into();
+    }
+
     fn demo_ready_chats(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // `QUILL_DEMO_HISTORY_ANIM=…,panel|menu|select`: something over the
         // animated history, to check what the animation layer draws under it.
@@ -100,8 +139,7 @@ impl QuillApp {
 
     fn demo_ready_deep_link_info(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         self.deep_link_dialog = Some(
-            "This link requires a newer version of Telegram. Please update your app to open it."
-                .into(),
+            "This link requires a newer version of Quill. Please update Quill to open it.".into(),
         );
     }
 

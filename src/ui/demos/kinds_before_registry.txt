@@ -72,6 +72,7 @@ ready-community-create
 ready-community-hub
 ready-community-info
 ready-composer-preview
+ready-composer-wysiwyg
 ready-contacts
 ready-contacts-manage
 ready-custom-emoji
@@ -175,10 +176,14 @@ ready-proxy
 ready-reactions
 ready-reconnecting
 ready-recovery-email
+ready-render-followups
 ready-rendering-leftovers
 ready-reply
+ready-reply-elsewhere
+ready-reply-external
 ready-reply-keyboard
 ready-reply-media
+ready-reply-quote
 ready-restricted-composer
 ready-reveal
 ready-rich-ai-tools

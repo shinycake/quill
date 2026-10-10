@@ -236,7 +236,8 @@ impl QuillApp {
     }
 
     /// A media-timestamp link: seek the message's own voice, audio or
-    /// video, or the one it replies to (Telegram Desktop).
+    /// video, or the one it replies to; a YouTube preview opens at the
+    /// moment (Telegram Desktop `OpenMediaTimestamp`).
     pub(super) fn seek_media_timestamp(
         &mut self,
         chat_id: ChatId,
@@ -244,7 +245,7 @@ impl QuillApp {
         seconds: i32,
         cx: &mut Context<Self>,
     ) {
-        let secs = f64::from(seconds.max(0));
+        use quill::media_timestamp::{SeekTarget, clamp_seek, seek_target};
         let Some(session) = self.session() else {
             return;
         };
@@ -255,47 +256,59 @@ impl QuillApp {
             .and_then(|message| message.reply_to.as_ref())
             .filter(|reply| reply.is_same_chat(chat_id))
             .and_then(|reply| message(reply.message_id.0));
-        let target = [own, replied].into_iter().flatten().find(|message| {
-            matches!(
-                message.content,
-                MessageContent::VoiceNote(_) | MessageContent::Audio(_) | MessageContent::Video(_)
-            )
-        });
-        let Some(target) = target else {
-            self.status_note = "no audio or video to seek".into();
+        let target = [own, replied]
+            .into_iter()
+            .flatten()
+            .find_map(|message| Some((message, seek_target(&message.content, seconds)?)));
+        let Some((target, kind)) = target else {
+            self.status_note = "nothing to seek".into();
             return;
         };
         let target_id = target.id;
-        match &target.content {
-            MessageContent::VoiceNote(voice) => {
+        match (&target.content, kind) {
+            (MessageContent::VoiceNote(voice), SeekTarget::VoiceNote) => {
                 let (file_id, listened, duration) =
-                    (voice.file_id, voice.is_listened, f64::from(voice.duration));
-                self.playback_positions
-                    .insert(target_id, secs.min(duration.max(0.)));
+                    (voice.file_id, voice.is_listened, voice.duration);
+                let secs = clamp_seek(seconds, duration);
+                self.playback_positions.insert(target_id, secs);
                 if self.playing_voice == Some(target_id)
                     && self.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
-                    self.toggle_voice_playback(chat_id, target_id, file_id, listened, duration, cx);
+                    self.toggle_voice_playback(
+                        chat_id,
+                        target_id,
+                        file_id,
+                        listened,
+                        f64::from(duration),
+                        cx,
+                    );
                 }
             }
-            MessageContent::Audio(audio) => {
-                let (file_id, duration) = (audio.file_id, f64::from(audio.duration));
-                self.playback_positions
-                    .insert(target_id, secs.min(duration.max(0.)));
+            (MessageContent::Audio(audio), SeekTarget::Audio) => {
+                let (file_id, duration) = (audio.file_id, audio.duration);
+                let secs = clamp_seek(seconds, duration);
+                self.playback_positions.insert(target_id, secs);
                 if self.playing_audio == Some(target_id)
                     && self.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
-                    self.toggle_audio_playback(chat_id, target_id, file_id, duration, cx);
+                    self.toggle_audio_playback(
+                        chat_id,
+                        target_id,
+                        file_id,
+                        f64::from(duration),
+                        cx,
+                    );
                 }
             }
-            MessageContent::Video(_) => {
-                self.pending_viewer_seek = Some((target_id, secs));
+            (MessageContent::Video(video), SeekTarget::Video) => {
+                self.pending_viewer_seek = Some((target_id, clamp_seek(seconds, video.duration)));
                 self.open_media_viewer(chat_id, target_id, cx);
             }
+            (_, SeekTarget::Web(url)) => self.open_message_url(&url, cx),
             _ => {}
         }
     }

@@ -177,6 +177,19 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        if !self.rich_editor_open {
+            // The selected text becomes a link, shown in the link colour.
+            self.composer.update(cx, |input, cx| {
+                input.set_selected_range(range.clone(), cx);
+            });
+            self.toggle_composer_tag(quill::composer_doc::ComposerTag::Link(url), window, cx);
+            self.composer.update(cx, |input, cx| {
+                input.set_selected_range(range.end..range.end, cx);
+                input.focus(window, cx);
+            });
+            cx.notify();
+            return;
+        }
         let (new_text, new_selection) = apply_format_markup(&text, range, &FormatAction::Link(url));
         self.composer.update(cx, |input, cx| {
             input.set_value(&new_text, window, cx);
@@ -238,12 +251,23 @@ impl QuillApp {
     ) {
         let text = self.composer.read(cx).value().to_string();
         let caret = self.composer.read(cx).selected_range().start;
-        let Some(fence) = quill::code_language::fence_at(&text, caret) else {
-            self.status_note = "Put the cursor inside a code block first.".into();
-            cx.notify();
-            return;
+        // A code block is formatting in the field (codex:composer-input);
+        // the rich editor still writes fences.
+        let (block, current) = if self.rich_editor_open {
+            let Some(fence) = quill::code_language::fence_at(&text, caret) else {
+                self.status_note = "Put the cursor inside a code block first.".into();
+                cx.notify();
+                return;
+            };
+            (fence.block.clone(), fence.current(&text).to_string())
+        } else {
+            let Some(found) = self.composer_code_block_at_caret(cx) else {
+                self.status_note = "Put the cursor inside a code block first.".into();
+                cx.notify();
+                return;
+            };
+            found
         };
-        let current = fence.current(&text).to_string();
         let input = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
                 .placeholder("Auto-Detect")
@@ -263,7 +287,7 @@ impl QuillApp {
             input.select_all(window, cx);
         });
         self.composer_code_language = Some(CodeLanguageDialog {
-            block: fence.block,
+            block,
             input,
             error: None,
         });
@@ -289,6 +313,30 @@ impl QuillApp {
         };
         let typed = dialog.input.read(cx).value().to_string();
         let block = dialog.block.clone();
+        if !self.rich_editor_open {
+            let still_there = self
+                .composer_code_block_at_caret(cx)
+                .is_some_and(|(range, _)| range == block);
+            if !still_there {
+                self.close_code_language_dialog(window, cx);
+                self.status_note = "The text changed. Open Code Language again.".into();
+                cx.notify();
+                return;
+            }
+            match quill::code_language::validate_language(&typed) {
+                Ok(language) => {
+                    self.close_code_language_dialog(window, cx);
+                    self.set_composer_code_language(block, language, window, cx);
+                }
+                Err(error) => {
+                    if let Some(dialog) = self.composer_code_language.as_mut() {
+                        dialog.error = Some(error.note());
+                    }
+                }
+            }
+            cx.notify();
+            return;
+        }
         let text = self.composer.read(cx).value().to_string();
         let fence =
             quill::code_language::fence_at(&text, block.start).filter(|fence| fence.block == block);

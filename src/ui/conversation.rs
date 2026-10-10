@@ -760,6 +760,10 @@ impl QuillApp {
                         .when_some(self.pending_reply.clone(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
+                        .when_some(self.reply_elsewhere_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
+                        .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
                         // Phase 4.2: poll creation dialog above the composer.
                         .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))
                         // B15: checklist composer / "Add Tasks" and the poll
@@ -887,6 +891,9 @@ impl QuillApp {
                                                 .appearance(false)
                                                 .bordered(false)
                                                 .aria_label("Message")
+                                                // Custom emoji drawn inline
+                                                // (codex:composer-input).
+                                                .token(self.composer_token_renderer(cx))
                                                 // codex:spellcheck-native:
                                                 // suggestions / Add to
                                                 // Dictionary / Ignore on a
@@ -2191,6 +2198,14 @@ impl QuillApp {
                             .as_ref()
                             .and_then(|s| self.history_dice_sticker(s.file_id, s.format, cx)),
                         _ => None,
+                    },
+                    match &message.content {
+                        MessageContent::Dice(dice) => dice
+                            .slot_layers
+                            .iter()
+                            .map(|s| self.history_dice_sticker(s.file_id, s.format, cx))
+                            .collect(),
+                        _ => Vec::new(),
                     },
                     self.message_custom_emoji_frames(message, cx),
                     inputs.video_playing,

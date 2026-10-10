@@ -2552,6 +2552,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 })
                 .collect(),
         }),
+        "updateChatAccentColors" => Ok(EnvelopePayload::UpdateChatAccentColors {
+            chat_id: int53(value.get("chat_id"))?,
+            accent: ChatAccent::parse(&value),
+        }),
         "updateChatIsTranslatable" => Ok(EnvelopePayload::UpdateChatIsTranslatable {
             chat_id: int53(value.get("chat_id"))?,
             is_translatable: value
