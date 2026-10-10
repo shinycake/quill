@@ -5,6 +5,7 @@ use crate::calls::engine::{
     RtcServer, TransportState, VideoFrame, video_wanted,
 };
 use crate::ids::RequestId;
+use crate::state::CallsPurpose;
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -657,12 +658,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.active_call.is_some()
-            || self
-                .session
-                .requests
-                .pending
-                .values()
-                .any(|pending| matches!(pending.purpose, RequestPurpose::CreateCall { .. }))
+            || self.session.requests.pending.values().any(|pending| {
+                matches!(
+                    pending.purpose,
+                    RequestPurpose::Calls(CallsPurpose::CreateCall { .. })
+                )
+            })
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -672,9 +673,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if user.is_none() || is_bot || is_self {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request_for_user(RequestPurpose::CreateCall { is_video }, user_id);
+        let extra = self.session.request_for_user(
+            RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }),
+            user_id,
+        );
         let protocol = self.engine_protocol_json();
         if let Err(err) = self.sender.send_json(&create_call_with_protocol(
             extra, user_id, is_video, &protocol,
@@ -1118,9 +1120,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             CallPrivacySetting::AllowCalls,
             CallPrivacySetting::PeerToPeer,
         ] {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetCallPrivacyRules { setting }, None);
+            let extra = self.session.request(
+                RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }),
+                None,
+            );
             if let Err(err) = self
                 .sender
                 .send_json(&get_user_privacy_setting_rules(extra, setting))
@@ -1146,9 +1149,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::SetCallPrivacyRules { setting }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&set_user_privacy_setting_rules(extra, setting, who))

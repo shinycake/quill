@@ -45,7 +45,9 @@ impl Session {
 
     /// `pingProxy` answer, in seconds.
     pub(crate) fn apply_proxy_ping(&mut self, pending: Option<&PendingRequest>, seconds: f64) {
-        if let Some(RequestPurpose::PingProxy { proxy_id }) = pending.map(|p| p.purpose) {
+        if let Some(RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id })) =
+            pending.map(|p| p.purpose)
+        {
             let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
             self.proxy.pings.insert(proxy_id, PingStatus::Available(ms));
         }
@@ -55,7 +57,9 @@ impl Session {
     pub(crate) fn apply_proxy_ok(&mut self, pending: Option<&PendingRequest>) {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::MutateProxy) => self.proxy_mutation_succeeded(),
-            Some(RequestPurpose::SetPreferIpv6 { on }) => self.proxy.prefer_ipv6 = on,
+            Some(RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { on })) => {
+                self.proxy.prefer_ipv6 = on
+            }
             _ => {}
         }
     }
@@ -73,10 +77,10 @@ impl Session {
                 self.proxy.error = Some(sessions_error_line("change the proxy", err));
             }
             // A failed ping is the answer: the proxy is not available.
-            RequestPurpose::PingProxy { proxy_id } => {
+            RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id }) => {
                 self.proxy.pings.insert(proxy_id, PingStatus::Unavailable);
             }
-            RequestPurpose::SetPreferIpv6 { .. } => {
+            RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { .. }) => {
                 self.proxy.error = Some(sessions_error_line("change the IPv6 setting", err));
             }
             _ => {}

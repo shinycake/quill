@@ -2,6 +2,7 @@
 use super::*;
 use crate::calls::engine::{GroupVideoSource, group_offer_audio_source_id};
 use crate::ids::RequestId;
+use crate::state::CallsPurpose;
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{ChatKind, MessageSender};
 use crate::telegram::requests::{
@@ -264,9 +265,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             start_date.min(i32::MAX as i64) as i32
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::CreateVideoChat { chat_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::CreateVideoChat { chat_id }),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&create_video_chat(
             extra, chat_id, &title, start_date, false,
         )) {
@@ -304,9 +306,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C2g: the native group context is created inside
         // `group_join_params` so the join carries the real tgcalls offer.
         let params = self.group_join_params(group_call_id, is_muted_self);
-        let extra = self
-            .session
-            .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id }),
+            None,
+        );
         if let Err(err) =
             self.sender
                 .send_json(&self.group_join_request(extra, group_call_id, &params))
@@ -383,7 +386,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             call.join_as_requested = true;
         }
         let extra = self.session.request(
-            RequestPurpose::GetVideoChatAvailableParticipants { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
+                group_call_id,
+            }),
             None,
         );
         if let Err(err) = self
@@ -418,7 +423,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
         };
         let extra = self.session.request(
-            RequestPurpose::SetVideoChatDefaultParticipant { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::SetVideoChatDefaultParticipant { group_call_id }),
             None,
         );
         if let Err(err) = self.sender.send_json(&set_video_chat_default_participant(
@@ -472,9 +477,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::GetGroupCall { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id }),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&get_group_call(extra, group_call_id)) {
             self.session.requests.take(extra);
             return Err(err);
@@ -522,9 +528,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id }),
+            None,
+        );
         // Review fix: the new native context starts unconnected, and
         // `create_group_call` below replaces the old media entry — a
         // live presentation would be orphaned (still capturing on the
@@ -646,9 +653,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call) => call.id,
             None => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::LeaveGroupCall { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&leave_group_call(extra, group_call_id))
@@ -691,9 +699,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call) if call.can_be_managed => call.id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::EndGroupCall { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::EndGroupCall { group_call_id }),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&end_group_call(extra, group_call_id)) {
             self.session.requests.take(extra);
             return Err(err);
@@ -741,7 +750,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
         if sharing {
             let extra = self.session.request(
-                RequestPurpose::EndGroupCallScreenSharing { group_call_id },
+                RequestPurpose::Calls(CallsPurpose::EndGroupCallScreenSharing { group_call_id }),
                 None,
             );
             if let Err(err) = self
@@ -779,7 +788,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         let extra = self.session.request(
-            RequestPurpose::StartGroupCallScreenSharing { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::StartGroupCallScreenSharing { group_call_id }),
             None,
         );
         if let Err(err) = self.sender.send_json(&start_group_call_screen_sharing(
@@ -849,9 +858,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call) => (call.id, !call.is_my_video_enabled),
             None => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::ToggleGroupCallVideo { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallVideo { group_call_id }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&toggle_group_call_is_my_video_enabled(
@@ -876,9 +886,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call) if call.is_my_video_enabled => (call.id, !call.is_my_video_paused),
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::ToggleGroupCallVideo { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallVideo { group_call_id }),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&toggle_group_call_is_my_video_paused(
             extra,
             group_call_id,
@@ -910,7 +921,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
         };
         let extra = self.session.request(
-            RequestPurpose::ToggleGroupCallParticipantMute { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantMute { group_call_id }),
             None,
         );
         if let Err(err) = self
@@ -949,7 +960,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
         };
         let extra = self.session.request(
-            RequestPurpose::ToggleGroupCallParticipantHand { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantHand { group_call_id }),
             None,
         );
         if let Err(err) = self
@@ -981,7 +992,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::InviteGroupCallParticipant { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::InviteGroupCallParticipant { group_call_id }),
             None,
         );
         if let Err(err) = self.sender.send_json(&invite_group_call_participant(
@@ -1013,7 +1024,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::BanGroupCallParticipants { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::BanGroupCallParticipants { group_call_id }),
             None,
         );
         if let Err(err) = self.sender.send_json(&ban_group_call_participants(
@@ -1047,7 +1058,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
         };
         let extra = self.session.request(
-            RequestPurpose::SetGroupCallParticipantVolumeLevel { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::SetGroupCallParticipantVolumeLevel {
+                group_call_id,
+            }),
             None,
         );
         if let Err(err) = self
@@ -1111,10 +1124,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::DeclineGroupCallInvitation {
+            RequestPurpose::Calls(CallsPurpose::DeclineGroupCallInvitation {
                 chat_id,
                 message_id,
-            },
+            }),
             None,
         );
         if let Err(err) = self
@@ -1140,7 +1153,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::ToggleVideoChatMuteNew { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::ToggleVideoChatMuteNew { group_call_id }),
             None,
         );
         if let Err(err) = self
@@ -1171,9 +1184,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if title.is_empty() || title.chars().count() > 64 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::SetVideoChatTitle { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::SetVideoChatTitle { group_call_id }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&set_video_chat_title(extra, group_call_id, &title))
@@ -1200,7 +1214,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::GetVideoChatInviteLink { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink { group_call_id }),
             None,
         );
         if let Err(err) = self.sender.send_json(&get_video_chat_invite_link(
@@ -1225,7 +1239,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::RevokeVideoChatInviteLink { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::RevokeVideoChatInviteLink { group_call_id }),
             None,
         );
         if let Err(err) = self
@@ -1259,7 +1273,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::StartGroupCallRecording { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::StartGroupCallRecording { group_call_id }),
             None,
         );
         if let Err(err) = self.sender.send_json(&start_group_call_recording(
@@ -1287,7 +1301,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::EndGroupCallRecording { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::EndGroupCallRecording { group_call_id }),
             None,
         );
         if let Err(err) = self
@@ -1316,7 +1330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::StartScheduledVideoChat { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::StartScheduledVideoChat { group_call_id }),
             None,
         );
         if let Err(err) = self
@@ -1347,10 +1361,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::ToggleVideoChatEnabledStartNotification {
+            RequestPurpose::Calls(CallsPurpose::ToggleVideoChatEnabledStartNotification {
                 group_call_id,
                 enabled,
-            },
+            }),
             None,
         );
         if let Err(err) = self
@@ -1394,9 +1408,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = chat_id else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::GetVideoChatRtmpUrl { chat_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::GetVideoChatRtmpUrl { chat_id }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&get_video_chat_rtmp_url(extra, chat_id))
@@ -1433,9 +1448,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = chat_id else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::ReplaceVideoChatRtmpUrl { chat_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::ReplaceVideoChatRtmpUrl { chat_id }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&replace_video_chat_rtmp_url(extra, chat_id))
@@ -1466,9 +1482,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if text.is_empty() || text.chars().count() > 4096 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::SendGroupCallMessage { group_call_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::SendGroupCallMessage { group_call_id }),
+            None,
+        );
         if let Err(err) =
             self.sender
                 .send_json(&send_group_call_message(extra, group_call_id, &text))
@@ -1495,7 +1512,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::ToggleGroupCallAreMessagesAllowed { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallAreMessagesAllowed {
+                group_call_id,
+            }),
             None,
         );
         if let Err(err) = self
@@ -1524,7 +1543,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::LoadGroupCallParticipants { group_call_id },
+            RequestPurpose::Calls(CallsPurpose::LoadGroupCallParticipants { group_call_id }),
             None,
         );
         if let Err(err) =

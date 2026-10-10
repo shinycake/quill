@@ -4,6 +4,7 @@
 use quill::data_settings::{AutoDownloadNetSettings, NetworkKind};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::AccountKey;
+use quill::state::SettingsPurpose;
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -36,10 +37,10 @@ fn set_auto_download_settings_ok_applies_confirmed_settings() {
         ..Default::default()
     };
     let extra = session.request(
-        RequestPurpose::SetAutoDownloadSettings {
+        RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings {
             network: NetworkKind::Mobile,
             settings,
-        },
+        }),
         None,
     );
     apply_json(
@@ -76,10 +77,10 @@ fn set_auto_download_settings_error_surfaces_without_applying() {
         ..Default::default()
     };
     let extra = session.request(
-        RequestPurpose::SetAutoDownloadSettings {
+        RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings {
             network: NetworkKind::WiFi,
             settings,
-        },
+        }),
         None,
     );
     apply_json(

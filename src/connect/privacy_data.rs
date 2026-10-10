@@ -5,6 +5,7 @@ use super::*;
 use crate::ids::RequestId;
 use crate::privacy::{GiftSettings, NewChatPrivacy, NewChatPrivacyState};
 use crate::state::RequestPurpose;
+use crate::state::SettingsPurpose;
 use crate::telegram::requests::set_option_boolean;
 use crate::telegram::requests_privacy::{
     get_network_statistics, get_new_chat_privacy_settings, get_recovery_email_address,
@@ -53,9 +54,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             ..current
         };
         let extra = self.session.request(
-            RequestPurpose::SetNewChatPrivacy {
+            RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy {
                 previous_allow: current.allow_from_unknown,
-            },
+            }),
             None,
         );
         if let Err(err) = self.sender.send_json(&set_new_chat_privacy_settings(
@@ -226,9 +227,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         match crate::chatlist_suggestions::dismiss_action(suggestion) {
             Some(action) => {
-                let extra = self
-                    .session
-                    .request(RequestPurpose::HideSuggestedAction { action }, None);
+                let extra = self.session.request(
+                    RequestPurpose::Settings(SettingsPurpose::HideSuggestedAction { action }),
+                    None,
+                );
                 if let Err(err) = self.sender.send_json(&hide_suggested_action(extra, action)) {
                     self.session.requests.take(extra);
                     return Err(err);

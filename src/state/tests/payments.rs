@@ -169,7 +169,10 @@ fn star_subscriptions_apply_only_to_own_request() {
     };
     apply_json(&mut session, &seq, &sink, &subs_json("999"));
     assert!(session.star_subscriptions.is_none());
-    let extra = session.request(RequestPurpose::GetStarSubscriptions { append: false }, None);
+    let extra = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
+        None,
+    );
     session.star_subscriptions_loading = true;
     apply_json(&mut session, &seq, &sink, &subs_json(&extra.0.to_string()));
     let subs = session.star_subscriptions.as_ref().expect("list applies");
@@ -191,7 +194,10 @@ fn star_subscriptions_append_page_merges() {
             r#"{{"@type":"starSubscriptions","@extra":"{extra}","star_amount":{{"@type":"starAmount","star_count":500,"nanostar_count":0}},"required_star_count":0,"next_offset":"{next}","subscriptions":[{{"@type":"starSubscription","id":"{id}","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{{"@type":"starSubscriptionPricing","period":2592000,"star_count":100}},"type":{{"@type":"starSubscriptionTypeChannel","invite_link":null}}}}]}}"#
         )
     };
-    let extra = session.request(RequestPurpose::GetStarSubscriptions { append: false }, None);
+    let extra = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -199,7 +205,10 @@ fn star_subscriptions_append_page_merges() {
         &subs_json(&extra.0.to_string(), "sub1", "50"),
     );
     assert_eq!(session.star_subscriptions_offset, "50");
-    let extra = session.request(RequestPurpose::GetStarSubscriptions { append: true }, None);
+    let extra = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: true }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -239,7 +248,10 @@ fn star_subscriptions_error_surfaces() {
     // `getStarSubscriptions` surfaces the reason and stops the spinner.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(RequestPurpose::GetStarSubscriptions { append: false }, None);
+    let extra = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
+        None,
+    );
     session.star_subscriptions_loading = true;
     apply_json(
         &mut session,

@@ -4,6 +4,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::moderation::ModerationStep;
 use crate::state::RequestPurpose;
+use crate::state::{MessagesPurpose, StickersPurpose};
 use crate::telegram::envelope::{ChatKind, ChatPermissions, MessageActions, MessageSender};
 use crate::telegram::requests::{
     MessageSenderRef, add_profile_audio, delete_chat_messages_by_sender,
@@ -134,10 +135,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|r| r.can_get_added_reactions && !r.reactions.is_empty());
         if actions.can_get_viewers && !private {
             let extra = self.session.request(
-                RequestPurpose::GetMessageViewers {
+                RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
                     chat_id,
                     message_id,
-                },
+                }),
                 Some(chat_id),
             );
             self.send_audience(extra, &get_message_viewers(extra, chat_id, message_id))?;
@@ -145,10 +146,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if actions.can_get_read_date && private {
             let extra = self.session.request(
-                RequestPurpose::GetMessageReadDate {
+                RequestPurpose::Messages(MessagesPurpose::GetMessageReadDate {
                     chat_id,
                     message_id,
-                },
+                }),
                 Some(chat_id),
             );
             self.send_audience(extra, &get_message_read_date(extra, chat_id, message_id))?;
@@ -156,12 +157,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if can_react_list {
             let extra = self.session.request(
-                RequestPurpose::GetMessageAddedReactions {
+                RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
                     chat_id,
                     message_id,
                     filter: 0,
                     append: false,
-                },
+                }),
                 Some(chat_id),
             );
             self.send_audience(
@@ -236,12 +237,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             String::new()
         };
         let extra = self.session.request(
-            RequestPurpose::GetMessageAddedReactions {
+            RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
                 chat_id,
                 message_id,
                 filter,
                 append: more,
-            },
+            }),
             Some(chat_id),
         );
         self.send_audience(
@@ -354,10 +355,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageSender::Chat { .. } => 0,
         };
         let extra = self.session.request(
-            RequestPurpose::DeleteMessageReactionsFromSender {
+            RequestPurpose::Messages(MessagesPurpose::DeleteMessageReactionsFromSender {
                 message_id: message_id.0,
                 user_id,
-            },
+            }),
             Some(chat_id),
         );
         let sender = match sender {
@@ -425,9 +426,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             stage: crate::state::StickerSetViewStage::Loading,
             files_requested: false,
         });
-        let extra = self
-            .session
-            .request(RequestPurpose::ViewStickerSet { set_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id }),
+            None,
+        );
         match self.sender.send_json(&get_sticker_set(extra, set_id)) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -447,9 +449,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(());
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::EmojiPackTitle { set_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Stickers(StickersPurpose::EmojiPackTitle { set_id }),
+            None,
+        );
         match self.sender.send_json(&get_sticker_set(extra, set_id)) {
             Ok(()) => Ok(()),
             Err(err) => {
@@ -470,9 +473,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 || emoji_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::CustomEmojiPack { emoji_id, set_id }, None);
+        let extra = self.session.request(
+            RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack { emoji_id, set_id }),
+            None,
+        );
         match self.sender.send_json(&get_sticker_set(extra, set_id)) {
             Ok(()) => Ok(extra),
             Err(err) => {

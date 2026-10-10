@@ -1,6 +1,7 @@
 //! Connect driver: phone auth and two-step verification.
 use super::*;
 use crate::ids::RequestId;
+use crate::state::AuthPurpose;
 use crate::state::{PasswordOp, RequestPurpose};
 use crate::telegram::envelope::{AuthorizationState, EmailResetState};
 use crate::telegram::requests::{
@@ -314,9 +315,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.password_op_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::PasswordStateOp { op }, None);
+        let extra = self.session.request(
+            RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op }),
+            None,
+        );
         self.session.password_state_loading = true;
         match self.sender.send_json(&build(extra)) {
             Ok(()) => Ok(extra),

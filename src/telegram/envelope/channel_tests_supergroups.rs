@@ -9,7 +9,7 @@ fn supergroup_full_info_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::SupergroupFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo {
             description,
             member_count,
             linked_chat_id,
@@ -26,7 +26,7 @@ fn supergroup_full_info_parsed() {
             sticker_set_id,
             custom_emoji_sticker_set_id,
             admin: _,
-        } => {
+        }) => {
             assert_eq!(description, "CANARY group description");
             assert_eq!(member_count, 1234);
             // Parity slice: no `linked_chat_id` → 0 (no discussion group).
@@ -55,13 +55,13 @@ fn supergroup_full_info_parses_slow_mode_fields() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::SupergroupFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo {
             slow_mode_delay,
             slow_mode_delay_expires_in,
             my_boost_count,
             unrestrict_boost_count,
             ..
-        } => {
+        }) => {
             assert_eq!(slow_mode_delay, 30);
             assert_eq!(slow_mode_delay_expires_in, 12.5);
             assert_eq!(my_boost_count, 2);
@@ -80,7 +80,7 @@ fn supergroup_full_info_parses_linked_chat_id() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::SupergroupFullInfo { linked_chat_id, .. } => {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo { linked_chat_id, .. }) => {
             assert_eq!(linked_chat_id, 77)
         }
         other => panic!("{other:?}"),
@@ -93,21 +93,21 @@ fn message_parses_author_signature() {
     // — present → Some; absent or empty → None.
     let json = r#"{"@type":"updateNewMessage","message":{"id":8,"chat_id":4,"is_outgoing":false,"author_signature":"News Desk","content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#;
     let env = parse_envelope(json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     assert_eq!(message.author_signature.as_deref(), Some("News Desk"));
 
     let json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"is_outgoing":false,"author_signature":"","content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#;
     let env = parse_envelope(json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     assert_eq!(message.author_signature, None);
 
     let json = r#"{"@type":"updateNewMessage","message":{"id":10,"chat_id":4,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#;
     let env = parse_envelope(json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     assert_eq!(message.author_signature, None);
@@ -122,9 +122,9 @@ fn supergroup_full_info_parses_can_get_statistics() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::SupergroupFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo {
             can_get_statistics, ..
-        } => assert!(can_get_statistics),
+        }) => assert!(can_get_statistics),
         other => panic!("{other:?}"),
     }
     let env = parse_envelope(
@@ -132,9 +132,9 @@ fn supergroup_full_info_parses_can_get_statistics() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::SupergroupFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo {
             can_get_statistics, ..
-        } => assert!(!can_get_statistics),
+        }) => assert!(!can_get_statistics),
         other => panic!("{other:?}"),
     }
 }
@@ -150,11 +150,11 @@ fn g2_supergroup_parses_sign_and_anti_spam_fields() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::Supergroup {
+        EnvelopePayload::Groups(GroupsPayload::Supergroup {
             sign_messages,
             show_message_sender,
             ..
-        } => {
+        }) => {
             assert!(sign_messages);
             assert!(show_message_sender);
         }
@@ -165,11 +165,11 @@ fn g2_supergroup_parses_sign_and_anti_spam_fields() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
             sign_messages,
             show_message_sender,
             ..
-        } => {
+        }) => {
             assert!(!sign_messages);
             assert!(!show_message_sender);
         }
@@ -180,11 +180,11 @@ fn g2_supergroup_parses_sign_and_anti_spam_fields() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::SupergroupFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo {
             has_aggressive_anti_spam_enabled,
             can_toggle_aggressive_anti_spam,
             ..
-        } => {
+        }) => {
             assert!(has_aggressive_anti_spam_enabled);
             assert!(can_toggle_aggressive_anti_spam);
         }
@@ -195,11 +195,11 @@ fn g2_supergroup_parses_sign_and_anti_spam_fields() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroupFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroupFullInfo {
             has_aggressive_anti_spam_enabled,
             can_toggle_aggressive_anti_spam,
             ..
-        } => {
+        }) => {
             assert!(has_aggressive_anti_spam_enabled);
             assert!(!can_toggle_aggressive_anti_spam);
         }
@@ -216,7 +216,7 @@ fn g2_welcome_and_boost_payloads_parse() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatWelcomeMessages { chat_id, messages } => {
+        EnvelopePayload::Groups(GroupsPayload::UpdateChatWelcomeMessages { chat_id, messages }) => {
             assert_eq!(chat_id, 7);
             assert_eq!(messages.len(), 1);
             assert_eq!(messages[0].id, 3);
@@ -229,10 +229,10 @@ fn g2_welcome_and_boost_payloads_parse() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatHasWelcomeMessages {
+        EnvelopePayload::Groups(GroupsPayload::UpdateChatHasWelcomeMessages {
             chat_id,
             has_welcome_messages,
-        } => {
+        }) => {
             assert_eq!(chat_id, 7);
             assert!(has_welcome_messages);
         }
@@ -245,7 +245,7 @@ fn g2_welcome_and_boost_payloads_parse() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::ChatBoostStatus { level, boost_count } => {
+        EnvelopePayload::Groups(GroupsPayload::ChatBoostStatus { level, boost_count }) => {
             assert_eq!(level, 3);
             assert_eq!(boost_count, 42);
         }
@@ -256,7 +256,7 @@ fn g2_welcome_and_boost_payloads_parse() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::ChatBoostSlots { slots } => {
+        EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots { slots }) => {
             assert_eq!(slots, vec![1]);
         }
         other => panic!("{other:?}"),
@@ -272,14 +272,14 @@ fn update_supergroup_full_info_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroupFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroupFullInfo {
             supergroup_id,
             description,
             member_count,
             linked_chat_id,
             slow_mode_delay,
             ..
-        } => {
+        }) => {
             assert_eq!(supergroup_id, 13);
             assert_eq!(description, "CANARY channel");
             assert_eq!(member_count, 12345);
@@ -300,11 +300,11 @@ fn update_supergroup_full_info_parses_slow_mode_fields() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroupFullInfo {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroupFullInfo {
             slow_mode_delay,
             slow_mode_delay_expires_in,
             ..
-        } => {
+        }) => {
             assert_eq!(slow_mode_delay, 60);
             assert_eq!(slow_mode_delay_expires_in, 44.0);
         }
@@ -321,7 +321,7 @@ fn b7_full_info_parses_the_admin_toggle_flags() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::SupergroupFullInfo { admin, .. } => {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo { admin, .. }) => {
             assert!(admin.can_hide_members);
             assert!(admin.has_hidden_members);
             assert!(admin.is_all_history_available);
@@ -334,7 +334,7 @@ fn b7_full_info_parses_the_admin_toggle_flags() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroupFullInfo { admin, .. } => {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroupFullInfo { admin, .. }) => {
             assert!(admin.is_all_history_available);
             // Absent flags read as false.
             assert!(!admin.can_hide_members);
@@ -351,18 +351,18 @@ fn b7_supergroup_parses_join_to_send_messages() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSupergroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
             join_to_send_messages,
             ..
-        } => assert!(join_to_send_messages),
+        }) => assert!(join_to_send_messages),
         other => panic!("{other:?}"),
     }
     let env = parse_envelope(r#"{"@type":"supergroup","@extra":"1","id":9}"#).unwrap();
     match env.payload {
-        EnvelopePayload::Supergroup {
+        EnvelopePayload::Groups(GroupsPayload::Supergroup {
             join_to_send_messages,
             ..
-        } => assert!(!join_to_send_messages),
+        }) => assert!(!join_to_send_messages),
         other => panic!("{other:?}"),
     }
 }
@@ -374,12 +374,12 @@ fn b7_basic_group_keeps_status_and_activity() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateBasicGroup {
+        EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup {
             status,
             can_change_info,
             is_active,
             ..
-        } => {
+        }) => {
             assert_eq!(status, ChannelMemberStatus::Administrator);
             assert_eq!(can_change_info, Some(true));
             assert!(!is_active);
@@ -396,10 +396,10 @@ fn b7_chat_available_reactions_parse_all_some_and_junk() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatAvailableReactions {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatAvailableReactions {
             chat_id,
             available_reactions,
-        } => {
+        }) => {
             assert_eq!(chat_id, 5);
             assert_eq!(
                 available_reactions,
@@ -423,10 +423,10 @@ fn b7_chat_available_reactions_parse_all_some_and_junk() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatAvailableReactions {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatAvailableReactions {
             available_reactions,
             ..
-        } => assert_eq!(available_reactions.max_reaction_count(), 11),
+        }) => assert_eq!(available_reactions.max_reaction_count(), 11),
         other => panic!("{other:?}"),
     }
     assert!(

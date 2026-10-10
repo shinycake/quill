@@ -7,9 +7,9 @@ fn password_state_response_replaces_cache_and_clears_error() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(
-        RequestPurpose::PasswordStateOp {
+        RequestPurpose::Auth(AuthPurpose::PasswordStateOp {
             op: PasswordOp::SetPassword,
-        },
+        }),
         None,
     );
     session.password_state_loading = true;
@@ -57,7 +57,10 @@ fn password_state_error_surfaces_honest_classified_line() {
     ] {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        let extra = session.request(RequestPurpose::PasswordStateOp { op }, None);
+        let extra = session.request(
+            RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op }),
+            None,
+        );
         session.password_state_loading = true;
         apply_json(
             &mut session,
@@ -211,7 +214,10 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
         ..Default::default()
     }]);
     session.sessions_mutating = true;
-    let extra = session.request(RequestPurpose::TerminateSession { session_id: 22 }, None);
+    let extra = session.request(
+        RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -231,7 +237,10 @@ fn terminate_session_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.sessions_mutating = true;
-    let extra = session.request(RequestPurpose::TerminateSession { session_id: 22 }, None);
+    let extra = session.request(
+        RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -467,7 +476,10 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
         location: "Boston, United States".into(),
     }]);
     session.websites_mutating = true;
-    let extra = session.request(RequestPurpose::DisconnectWebsite { website_id: 55 }, None);
+    let extra = session.request(
+        RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id: 55 }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -555,7 +567,10 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
         ..Default::default()
     }]);
     session.sessions_mutating = true;
-    let extra = session.request(RequestPurpose::ToggleSessionCalls { session_id: 22 }, None);
+    let extra = session.request(
+        RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { session_id: 22 }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -577,7 +592,7 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
     let seq = AtomicU64::new(0);
     session.sessions_mutating = true;
     let extra = session.request(
-        RequestPurpose::ToggleSessionSecretChats { session_id: 22 },
+        RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats { session_id: 22 }),
         None,
     );
     apply_json(

@@ -2,6 +2,7 @@
 use super::*;
 use crate::ids::FileId;
 use crate::ids::RequestId;
+use crate::state::StickersPurpose;
 use crate::state::{RequestPurpose, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::telegram::requests::{
@@ -44,7 +45,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             files_requested: false,
         });
         let extra = self.session.request(
-            RequestPurpose::GetAttachedStickerSets { file_id: file_id.0 },
+            RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets {
+                file_id: file_id.0,
+            }),
             None,
         );
         match self
@@ -276,7 +279,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.pending.values().any(|p| {
             matches!(
                 p.purpose,
-                RequestPurpose::ManageStickerSet { .. }
+                RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
                     | RequestPurpose::ReorderInstalledStickerSets
             )
         }) {
@@ -319,13 +322,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let busy = [(true, false), (false, true), (false, false)]
             .into_iter()
             .any(|(installed, archived)| {
-                self.session
-                    .requests
-                    .has_purpose(RequestPurpose::ManageStickerSet {
+                self.session.requests.has_purpose(RequestPurpose::Stickers(
+                    StickersPurpose::ManageStickerSet {
                         set_id,
                         installed,
                         archived,
-                    })
+                    },
+                ))
             });
         if busy
             || self
@@ -336,11 +339,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.sticker_request(
-            RequestPurpose::ManageStickerSet {
+            RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
                 set_id,
                 installed,
                 archived,
-            },
+            }),
             |id| change_sticker_set(id, set_id, installed, archived),
         )
     }
@@ -383,7 +386,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             || self.session.requests.pending.values().any(|pending| {
                 matches!(
                     pending.purpose,
-                    RequestPurpose::ManageStickerSet { .. }
+                    RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
                         | RequestPurpose::ReorderInstalledStickerSets
                         | RequestPurpose::GetInstalledStickerSets
                 )

@@ -1,4 +1,5 @@
 use quill::ids::{ChatId, RequestId};
+use quill::telegram::envelope::StoriesPayload;
 use quill::telegram::envelope::{EnvelopePayload, StoryChosenExtraReaction, parse_envelope};
 use quill::telegram::requests::set_story_custom_emoji_reaction;
 
@@ -16,7 +17,7 @@ fn story_chosen_reaction_custom_emoji_and_paid_parsed() {
     ))
     .unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
             assert_eq!(story.chosen_reaction_emoji, None);
             assert_eq!(
                 story.chosen_reaction_extra,
@@ -27,7 +28,7 @@ fn story_chosen_reaction_custom_emoji_and_paid_parsed() {
     }
     let env = parse_envelope(&reaction_json(r#"{"@type":"reactionTypePaid"}"#)).unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
             assert_eq!(story.chosen_reaction_emoji, None);
             assert_eq!(
                 story.chosen_reaction_extra,
@@ -39,7 +40,7 @@ fn story_chosen_reaction_custom_emoji_and_paid_parsed() {
     // Unknown reaction types still parse to (None, None) — never an error.
     let env = parse_envelope(&reaction_json(r#"{"@type":"reactionTypeUnknown"}"#)).unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
             assert_eq!(story.chosen_reaction_emoji, None);
             assert_eq!(story.chosen_reaction_extra, None);
         }
@@ -57,7 +58,7 @@ fn story_interactions_extra_reactions_parse() {
     ],"next_offset":""}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::StoryInteractions { interactions } => {
+        EnvelopePayload::Stories(StoriesPayload::StoryInteractions { interactions }) => {
             assert_eq!(interactions.interactions.len(), 2);
             assert_eq!(interactions.interactions[0].reaction_emoji, None);
             assert_eq!(

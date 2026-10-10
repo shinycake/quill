@@ -3,6 +3,7 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::state::RequestPurpose;
+use crate::state::SettingsPurpose;
 use crate::telegram::requests::{
     accept_terms_of_service, confirm_session, set_option_boolean, terminate_session,
 };
@@ -52,9 +53,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.notices.review_error = None;
         self.session.notices.review_pending = ids.len();
         for id in ids {
-            let extra = self
-                .session
-                .request(RequestPurpose::ReviewUnconfirmedSession { confirmed }, None);
+            let extra = self.session.request(
+                RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession { confirmed }),
+                None,
+            );
             let json = if confirmed {
                 confirm_session(extra, id)
             } else {

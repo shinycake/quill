@@ -20,7 +20,7 @@ fn message_photo_parses_sizes_caption_and_flags() {
     );
     let env = parse_envelope(&json).unwrap();
     match &env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Photo(photo) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -51,7 +51,7 @@ fn message_document_parses_name_mime_and_file() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Document(doc) = message.content else {
                 panic!("{:?}", message.content);
             };
@@ -71,7 +71,7 @@ fn update_file_and_file_response_are_typed() {
     let file = local_file_json(4, "/tmp/done.bin", true, true);
     let update = parse_envelope(&format!(r#"{{"@type":"updateFile","file":{file}}}"#)).unwrap();
     match update.payload {
-        EnvelopePayload::UpdateFile(parsed) => {
+        EnvelopePayload::Media(MediaPayload::UpdateFile(parsed)) => {
             assert_eq!(parsed.id.0, 4);
             assert_eq!(parsed.usable_path(), Some("/tmp/done.bin"));
         }
@@ -82,7 +82,7 @@ fn update_file_and_file_response_are_typed() {
         )
         .unwrap();
     match response.payload {
-        EnvelopePayload::File(parsed) => {
+        EnvelopePayload::Media(MediaPayload::File(parsed)) => {
             assert_eq!(parsed.id.0, 4);
             assert!(parsed.local.is_downloading_active);
             assert!(parsed.needs_download());
@@ -100,7 +100,7 @@ fn download_progress_uses_downloaded_size_over_expected_size() {
             r#"{"@type":"file","id":9,"size":0,"expected_size":100,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":40,"downloaded_size":42},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":100}}"#,
         )
         .unwrap();
-    let EnvelopePayload::File(parsed) = parsed.payload else {
+    let EnvelopePayload::Media(MediaPayload::File(parsed)) = parsed.payload else {
         panic!("expected File");
     };
     assert_eq!(parsed.local.downloaded_size, 42);
@@ -161,7 +161,7 @@ fn message_sticker_keeps_webp_thumb_and_file() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Sticker(sticker) = &message.content else {
                 panic!("{:?}", message.content);
             };
@@ -184,7 +184,7 @@ fn sticker_sets_and_sticker_set_parse_1_8_67() {
         )
         .unwrap();
     match sets.payload {
-        EnvelopePayload::StickerSets { total_count, sets } => {
+        EnvelopePayload::Stickers(StickersPayload::StickerSets { total_count, sets }) => {
             assert_eq!(total_count, 1);
             assert_eq!(sets[0].id, 77);
             assert!(sets[0].is_installed);
@@ -199,7 +199,7 @@ fn sticker_sets_and_sticker_set_parse_1_8_67() {
         ))
         .unwrap();
     match set.payload {
-        EnvelopePayload::StickerSet { id, stickers, .. } => {
+        EnvelopePayload::Stickers(StickersPayload::StickerSet { id, stickers, .. }) => {
             assert_eq!(id, 77);
             assert_eq!(stickers[0].format, StickerFormat::Tgs);
             assert_eq!(stickers[0].file_id, FileId(41));
@@ -218,11 +218,11 @@ fn s8_trending_sticker_sets_and_stickers_parse_1_8_67() {
         )
         .unwrap();
     match trending.payload {
-        EnvelopePayload::TrendingStickerSets {
+        EnvelopePayload::Stickers(StickersPayload::TrendingStickerSets {
             total_count,
             sets,
             is_premium,
-        } => {
+        }) => {
             assert_eq!(total_count, 2);
             assert!(is_premium);
             assert_eq!(sets[0].id, 77);
@@ -240,7 +240,7 @@ fn s8_trending_sticker_sets_and_stickers_parse_1_8_67() {
         ))
         .unwrap();
     match found.payload {
-        EnvelopePayload::Stickers { stickers, files } => {
+        EnvelopePayload::Stickers(StickersPayload::Stickers { stickers, files }) => {
             assert_eq!(stickers.len(), 1);
             assert_eq!(stickers[0].file_id, FileId(41));
             assert_eq!(stickers[0].emoji, "😀");
@@ -279,7 +279,7 @@ fn s9_gif_search_page_parses_animation_items_1_8_67() {
         ))
         .unwrap();
     let page = match env.payload {
-        EnvelopePayload::InlineQueryResults(page) => page,
+        EnvelopePayload::Bots(BotsPayload::InlineQueryResults(page)) => page,
         other => panic!("unexpected {other:?}"),
     };
     assert_eq!(page.next_offset, "50");
@@ -299,7 +299,10 @@ fn s9_gif_search_page_parses_animation_items_1_8_67() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateAnimationSearchParameters { provider, emojis } => {
+        EnvelopePayload::Stickers(StickersPayload::UpdateAnimationSearchParameters {
+            provider,
+            emojis,
+        }) => {
             assert_eq!(provider, "GIPHY");
             assert_eq!(emojis, vec!["😀".to_string(), "🐱".to_string()]);
         }
@@ -315,7 +318,7 @@ fn message_video_parses_1_8_67_fields() {
         r#"{{"@type":"updateNewMessage","message":{{"id":9,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":42,"width":640,"height":360,"file_name":"clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":68,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":3,"caption":{{"@type":"formattedText","text":"see this","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
     );
     let env = parse_envelope(&json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     let MessageContent::Video(video) = &message.content else {
@@ -349,7 +352,7 @@ fn message_video_note_parses_1_8_67_fields() {
         r#"{{"@type":"updateNewMessage","message":{{"id":9,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":8,"waveform":"{waveform}","length":240,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":120,"file":{thumb}}},"speech_recognition_result":null,"video":{clip}}},"is_viewed":false,"is_secret":false}}}}}}"#
     );
     let env = parse_envelope(&json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     let MessageContent::VideoNote(note) = &message.content else {
@@ -378,7 +381,7 @@ fn message_animation_and_saved_list_parse_1_8_67() {
         r#"{{"@type":"updateNewMessage","message":{{"id":8,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"wave.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":70,"file":{thumb}}},"animation":{clip}}},"caption":{{"@type":"formattedText","text":"loop","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
     );
     let env = parse_envelope(&json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     let MessageContent::Animation(animation) = &message.content else {
@@ -394,7 +397,7 @@ fn message_animation_and_saved_list_parse_1_8_67() {
         )
         .unwrap();
     match saved.payload {
-        EnvelopePayload::Animations { animations, .. } => {
+        EnvelopePayload::Stickers(StickersPayload::Animations { animations, .. }) => {
             assert_eq!(animations.len(), 1);
             assert_eq!(animations[0].file_id, FileId(33));
             assert!(animations[0].thumb_file_id.is_none());
@@ -411,7 +414,7 @@ fn secret_photo_is_flagged() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Photo(photo) = message.content else {
                 panic!("{:?}", message.content);
             };
@@ -440,7 +443,7 @@ fn spoiler_placeholder_follows_file_state_and_may_download() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Photo(photo) = message.content else {
                 panic!("{:?}", message.content);
             };
@@ -469,7 +472,7 @@ fn message_voice_note_keeps_duration_waveform_and_listened() {
         r#"{{"@type":"updateNewMessage","message":{{"id":8,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVoiceNote","voice_note":{{"@type":"voiceNote","duration":12,"waveform":"{waveform}","mime_type":"audio/ogg","speech_recognition_result":null,"voice":{{"@type":"file","id":4,"size":9,"expected_size":9,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"CANARY_REMOTE","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":9}}}}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"is_listened":false}}}}}}"#
     );
     let env = parse_envelope(&json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("voice note");
     };
     let MessageContent::VoiceNote(note) = &message.content else {
@@ -486,10 +489,10 @@ fn message_voice_note_keeps_duration_waveform_and_listened() {
         parse_envelope(r#"{"@type":"updateMessageContentOpened","chat_id":11,"message_id":8}"#)
             .unwrap();
     match opened.payload {
-        EnvelopePayload::UpdateMessageContentOpened {
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageContentOpened {
             chat_id,
             message_id,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 11);
             assert_eq!(message_id.0, 8);
         }
@@ -545,7 +548,7 @@ fn speech_recognition_result_shapes_parse() {
 fn voice_note_transcription_text_parses_end_to_end() {
     let json = r#"{"@type":"updateNewMessage","message":{"id":8,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageVoiceNote","voice_note":{"@type":"voiceNote","duration":12,"waveform":"","mime_type":"audio/ogg","speech_recognition_result":{"@type":"speechRecognitionResultText","text":"buy milk"},"voice":{"@type":"file","id":4,"size":9,"expected_size":9,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":9}}}},"caption":{"@type":"formattedText","text":"","entities":[]},"is_listened":false}}"#;
     let env = parse_envelope(json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("voice note");
     };
     let MessageContent::VoiceNote(note) = &message.content else {
@@ -569,7 +572,7 @@ fn message_audio_parses_1_8_67_fields() {
         r#"{{"@type":"updateNewMessage","message":{{"id":12,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":214,"title":"Night Drive","performer":"Ada","file_name":"night.mp3","mime_type":"audio/mpeg","album_cover_minithumbnail":{{"@type":"minithumbnail","width":8,"height":8,"data":"{mini}"}},"album_cover_thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":90,"file":{cover}}},"external_album_covers":[{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":320,"height":320,"file":{external}}}],"audio":{track}}},"caption":{{"@type":"formattedText","text":"from the album","entities":[]}}}}}}}}"#
     );
     let env = parse_envelope(&json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     let MessageContent::Audio(audio) = &message.content else {
@@ -601,7 +604,7 @@ fn message_audio_parses_1_8_67_fields() {
 #[test]
 fn standalone_animated_emoji_keeps_readable_content() {
     let env = parse_envelope(r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"content":{"@type":"messageAnimatedEmoji","emoji":"🥰","animated_emoji":null}}}"#).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("Expected message")
     };
     assert!(matches!(message.content, MessageContent::Text(_)));

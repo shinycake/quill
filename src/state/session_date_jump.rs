@@ -30,7 +30,7 @@ impl Session {
         days: Vec<CalendarDay>,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(RequestPurpose::GetChatMessageCalendar { generation }) =
+        let Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation })) =
             pending.map(|p| p.purpose)
         else {
             return;
@@ -46,7 +46,7 @@ impl Session {
     }
 
     pub(crate) fn fail_message_calendar(&mut self, pending: Option<&PendingRequest>) {
-        let Some(RequestPurpose::GetChatMessageCalendar { generation }) =
+        let Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation })) =
             pending.map(|p| p.purpose)
         else {
             return;

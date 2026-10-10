@@ -471,6 +471,7 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::telegram::envelope::CommonPayload;
     #[test]
     fn streamed_export_pages_archives_preserves_unknown_fields_and_cancels() {
         let root = std::env::temp_dir().join(format!(
@@ -586,7 +587,9 @@ mod tests {
                 let encoded=json!({"@type":value["@type"],"@extra":{"quill_account_export":id.as_extra()},"content":value}).to_string();
                 let parsed = crate::telegram::envelope::parse_envelope(&encoded).unwrap();
                 assert_eq!(parsed.extra, Some(id));
-                let crate::telegram::envelope::EnvelopePayload::AccountExport(raw) = parsed.payload
+                let crate::telegram::envelope::EnvelopePayload::Common(
+                    CommonPayload::AccountExport(raw),
+                ) = parsed.payload
                 else {
                     panic!("Raw response was projected");
                 };
