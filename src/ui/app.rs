@@ -798,6 +798,8 @@ pub struct QuillApp {
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
     /// Saved Messages: "Add Name" / "Edit Name" for a tag.
     pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
+    /// The message menu's "Add Fact Check" / "Edit Fact Check" dialog.
+    pub(super) fact_check_dialog: Option<super::fact_check::FactCheckDialog>,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
     /// B15: the inline "Add an Option" panel (`addPollOption`).

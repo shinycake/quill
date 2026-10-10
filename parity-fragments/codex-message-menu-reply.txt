@@ -1,0 +1,6 @@
+parity:polls-retract-menu
+parity:menu-fact-check-edit
+parity:menu-save-notification-tone
+parity:menu-reply-timecode
+parity:menu-copy-card-number
+parity:menu-copy-post-link-wording

@@ -19,6 +19,7 @@ use super::app::{PaneMode, QuillApp};
 use super::pressable::PressableDiv;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -151,7 +152,8 @@ fn chat_search_hit_row(
             )
         })
         .collect();
-    div()
+    let owner = cx.entity().downgrade();
+    let row = div()
         .id(("chat-search-hit", message_id.0 as u64))
         .flex()
         .items_center()
@@ -185,7 +187,20 @@ fn chat_search_hit_row(
                     .text_color(cx.theme().muted_foreground)
                     .child(stamp),
             )
-        })
+        });
+    // Telegram Desktop's "Go To Message" on a result.
+    div().w_full().child(row).context_menu(move |menu, _, _| {
+        let owner = owner.clone();
+        menu.item(
+            gpui_kit::component::menu::PopupMenuItem::new("Go To Message")
+                .icon(gpui_kit::assets::IconName::MessageSquare)
+                .on_click(move |_, _, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.jump_chat_search_message(message_id, cx);
+                    });
+                }),
+        )
+    })
 }
 
 /// Byte ranges in `text` matching `query` case-insensitively. Empty when the

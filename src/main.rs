@@ -130,7 +130,10 @@ gpui_kit::assets::icon_assets!(
         Drama,
         PartyPopper,
         TrendingUp,
-        Briefcase
+        Briefcase,
+        BellPlus,
+        Tag,
+        TagX
     ]
 );
 

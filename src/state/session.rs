@@ -645,6 +645,8 @@ pub struct Session {
     pub payment_form: Option<PaymentFormData>,
     pub marketplace_gift: Option<crate::marketplace::GiftPurchase>,
     pub gift_text_length_max: Option<usize>,
+    /// Notification-tone limits (`notification_sound_*_max` options).
+    pub tone_limits: crate::message_menu::ToneLimits,
     /// Slice P1: `getPaymentForm` is in flight (dialog shows a spinner).
     pub payment_form_loading: bool,
     /// Slice P1: the validated order info + shipping options from
@@ -1427,6 +1429,7 @@ impl Session {
             payment_form: None,
             marketplace_gift: None,
             gift_text_length_max: None,
+            tone_limits: crate::message_menu::ToneLimits::default(),
             payment_form_loading: false,
             payment_validated: None,
             payment_shipping_id: None,

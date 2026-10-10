@@ -89,6 +89,19 @@ impl Session {
                 {
                     self.gift_text_length_max = usize::try_from(*limit).ok();
                 }
+                if let OptionValue::Integer(limit) = &value {
+                    match name.as_str() {
+                        "notification_sound_size_max" => self.tone_limits.max_size = *limit,
+                        "notification_sound_duration_max" => {
+                            self.tone_limits.max_duration =
+                                (*limit).clamp(0, i64::from(i32::MAX)) as i32
+                        }
+                        "notification_sound_count_max" => {
+                            self.tone_limits.max_count = usize::try_from(*limit).unwrap_or(0)
+                        }
+                        _ => {}
+                    }
+                }
                 if name == "pending_text_message_period"
                     && let OptionValue::Integer(period) = &value
                 {
@@ -1756,6 +1769,15 @@ impl Session {
             EnvelopePayload::UpdateMessageSendAcknowledged { .. } => {
                 // Not success. Keep the pending row until Succeeded/Failed.
             }
+            EnvelopePayload::UpdateMessageFactCheck {
+                chat_id,
+                message_id,
+                text,
+            } => {
+                self.edit_loaded_message(chat_id, message_id, |message| {
+                    message.extras.fact_check = text.clone();
+                });
+            }
             EnvelopePayload::UpdateMessageInteractionInfo {
                 chat_id,
                 message_id,
@@ -2996,6 +3018,9 @@ impl Session {
                 self.gifs.provider_emojis = emojis;
             }
             EnvelopePayload::NotificationSounds { sounds } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::AddSavedNotificationSound) {
+                    self.saved_sounds_stale = true;
+                }
                 // Parity slice: `getSavedNotificationSounds` answer.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedNotificationSounds) {
                     let files: Vec<ParsedFile> = sounds.iter().map(|s| s.sound.clone()).collect();

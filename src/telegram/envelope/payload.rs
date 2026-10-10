@@ -963,6 +963,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 can_delete_reactions: flag("can_delete_reactions"),
                 can_edit_scheduling_state: flag("can_edit_scheduling_state"),
                 can_get_poll_vote_statistics: flag("can_get_poll_vote_statistics"),
+                can_be_replied_in_another_chat: flag("can_be_replied_in_another_chat"),
+                can_set_fact_check: flag("can_set_fact_check"),
             }))
         }
         // B4: `pollVoters` — the `getPollVoters` answer. Unparseable
@@ -1835,6 +1837,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             )
             .unwrap_or(ReactionType::Unknown),
         }),
+        // `addSavedNotificationSound` answers with the one new sound.
+        "notificationSound" => Ok(EnvelopePayload::NotificationSounds {
+            sounds: parse_notification_sound(&value).into_iter().collect(),
+        }),
         "notificationSounds" => {
             let sounds = value
                 .get("notification_sounds")
@@ -2138,6 +2144,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
             },
+        }),
+        "updateMessageFactCheck" => Ok(EnvelopePayload::UpdateMessageFactCheck {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53(value.get("message_id"))?),
+            text: crate::telegram::envelope::message::parse_fact_check_text(
+                value.get("fact_check"),
+            ),
         }),
         "updateMessageInteractionInfo" => Ok(EnvelopePayload::UpdateMessageInteractionInfo {
             chat_id: ChatId(int53(value.get("chat_id"))?),

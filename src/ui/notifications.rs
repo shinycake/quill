@@ -426,12 +426,7 @@ impl QuillApp {
                 .live
                 .as_ref()
                 .is_some_and(|live| live.driver.session.message_link_public);
-            self.status_note = if public {
-                "Link copied to clipboard."
-            } else {
-                "This link will only work for members of this chat."
-            }
-            .into();
+            self.status_note = quill::message_menu::link_copied_note(public).into();
             progressed = true;
         }
         // Batch 7: keep a translated chat's translations coming.
