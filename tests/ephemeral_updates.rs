@@ -13,6 +13,7 @@ use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::AccountKey;
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
+use quill::telegram::envelope::MessagesPayload;
 use quill::telegram::envelope::{EnvelopePayload, MessageContent, parse_envelope};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -36,11 +37,11 @@ fn update_message_ephemeral_content_is_typed() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateMessageEphemeralContent {
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageEphemeralContent {
             chat_id,
             message_id,
             ephemeral,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 11);
             assert_eq!(message_id.0, 102);
             let ephemeral = ephemeral.expect("ephemeral content present");
@@ -117,7 +118,10 @@ fn update_message_ephemeral_content_null_clears_stored_content() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateMessageEphemeralContent { ephemeral, .. } => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageEphemeralContent {
+            ephemeral,
+            ..
+        }) => {
             assert!(ephemeral.is_none());
         }
         other => panic!("{other:?}"),

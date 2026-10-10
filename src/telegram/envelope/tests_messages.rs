@@ -12,7 +12,7 @@ fn b1_message_game_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let MessageContent::Game(game) = &message.content else {
                 panic!("expected Game, got {:?}", message.content)
             };
@@ -55,11 +55,11 @@ fn last_message_positions_are_typed() {
     let json = r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":{"id":1,"chat_id":3,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"preview","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"5","is_pinned":true}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatLastMessage {
+        EnvelopePayload::ChatList(ChatListPayload::UpdateChatLastMessage {
             chat_id,
             last_message,
             positions,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 3);
             assert_eq!(
                 last_message.unwrap().content,
@@ -85,7 +85,7 @@ fn message_text_parses_link_entities_and_article_preview() {
         text_json = serde_json::to_string(text).unwrap(),
     );
     let env = parse_envelope(&json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     let MessageContent::Text(content) = message.content else {
@@ -127,7 +127,7 @@ fn message_text_parses_custom_emoji_entities() {
     // sits on a valid span ("hi") and is skipped for its id, not its range.
     let json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi 😀 bye","entities":[{"@type":"textEntity","offset":3,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"12345"}},{"@type":"textEntity","offset":0,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":0}}]}}}}"#;
     let env = parse_envelope(json).unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("expected message");
     };
     let MessageContent::Text(content) = message.content else {
@@ -150,7 +150,7 @@ fn message_text_parses_custom_emoji_entities() {
 fn web_page_instant_view_parses_blocks() {
     let json = r#"{"@type":"webPageInstantView","blocks":[{"@type":"pageBlockTitle","title":{"@type":"richTextPlain","text":"Headline"}},{"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"Body"}}],"view_count":3,"version":2,"is_rtl":false,"is_full":true,"feedback_link":null}"#;
     let payload = parse_payload("webPageInstantView", json).unwrap();
-    let EnvelopePayload::WebPageInstantView { rich } = payload else {
+    let EnvelopePayload::Messages(MessagesPayload::WebPageInstantView { rich }) = payload else {
         panic!("expected WebPageInstantView, got {payload:?}");
     };
     assert!(rich.is_full);
@@ -220,7 +220,7 @@ fn message_reply_to_message_is_typed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let reply = message.reply_to.expect("reply_to");
             assert_eq!(reply.chat_id.0, 11);
             assert_eq!(reply.message_id.0, 101);
@@ -237,7 +237,7 @@ fn message_reply_to_message_is_typed() {
         )
         .unwrap();
     match story.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             // A story reply keeps the poster's chat and the story id.
             let reply = message.reply_to.expect("story reply");
             assert_eq!((reply.chat_id, reply.story_id), (ChatId(11), 3));
@@ -267,12 +267,12 @@ fn update_message_content_is_typed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateMessageContent {
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageContent {
             chat_id,
             message_id,
             content,
             files,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 11);
             assert_eq!(message_id.0, 102);
             assert_eq!(content, MessageContent::Text("CANARY_EDITED".into()));
@@ -298,7 +298,7 @@ fn message_forward_info_and_messages_are_typed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let info = message.forward_info.expect("forward_info");
             assert_eq!(
                 info.origin,
@@ -315,7 +315,7 @@ fn message_forward_info_and_messages_are_typed() {
         )
         .unwrap();
     match messages.payload {
-        EnvelopePayload::Messages(parsed) => {
+        EnvelopePayload::Messages(MessagesPayload::Messages(parsed)) => {
             assert_eq!(parsed.len(), 1);
             assert_eq!(parsed[0].id.0, 80);
             assert_eq!(parsed[0].chat_id.0, 12);
@@ -345,7 +345,7 @@ fn message_interaction_info_and_update_are_typed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             let info = message.interaction_info.expect("interaction_info");
             assert_eq!(info.view_count, 4);
             assert_eq!(info.forward_count, 1);
@@ -365,11 +365,11 @@ fn message_interaction_info_and_update_are_typed() {
         )
         .unwrap();
     match update.payload {
-        EnvelopePayload::UpdateMessageInteractionInfo {
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageInteractionInfo {
             chat_id,
             message_id,
             interaction_info,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 11);
             assert_eq!(message_id.0, 101);
             let info = interaction_info.expect("interaction_info");
@@ -383,9 +383,10 @@ fn message_interaction_info_and_update_are_typed() {
         )
         .unwrap();
     match cleared.payload {
-        EnvelopePayload::UpdateMessageInteractionInfo {
-            interaction_info, ..
-        } => assert_eq!(interaction_info, None),
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageInteractionInfo {
+            interaction_info,
+            ..
+        }) => assert_eq!(interaction_info, None),
         other => panic!("{other:?}"),
     }
     let after_unreact = toggle_chosen_emoji_reaction(
@@ -438,7 +439,7 @@ fn message_is_pinned_and_update_are_typed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             assert!(message.is_pinned);
             assert_eq!(message.id.0, 101);
         }
@@ -449,11 +450,11 @@ fn message_is_pinned_and_update_are_typed() {
     )
     .unwrap();
     match update.payload {
-        EnvelopePayload::UpdateMessageIsPinned {
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageIsPinned {
             chat_id,
             message_id,
             is_pinned,
-        } => {
+        }) => {
             assert_eq!(chat_id.0, 11);
             assert_eq!(message_id.0, 101);
             assert!(!is_pinned);

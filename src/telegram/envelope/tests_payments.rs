@@ -8,18 +8,20 @@ fn p1_payment_parses() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => match &message.content {
-            MessageContent::Invoice(invoice) => {
-                assert_eq!(invoice.title, "Time machine");
-                assert_eq!(invoice.description, "Visit your ancestors");
-                assert_eq!(invoice.currency, "USD");
-                assert_eq!(invoice.total_amount, 1999);
-                assert!(invoice.is_test);
-                assert!(invoice.need_shipping_address);
-                assert_eq!(invoice.receipt_message_id, 0);
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+            match &message.content {
+                MessageContent::Invoice(invoice) => {
+                    assert_eq!(invoice.title, "Time machine");
+                    assert_eq!(invoice.description, "Visit your ancestors");
+                    assert_eq!(invoice.currency, "USD");
+                    assert_eq!(invoice.total_amount, 1999);
+                    assert!(invoice.is_test);
+                    assert!(invoice.need_shipping_address);
+                    assert_eq!(invoice.receipt_message_id, 0);
+                }
+                other => panic!("{other:?}"),
             }
-            other => panic!("{other:?}"),
-        },
+        }
         other => panic!("{other:?}"),
     }
     // `messagePaymentSuccessful` (schema 1.8.67, line 5436).
@@ -28,16 +30,18 @@ fn p1_payment_parses() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => match &message.content {
-            MessageContent::PaymentSuccessful(success) => {
-                assert_eq!(success.invoice_message_id, 401);
-                assert_eq!(success.currency, "USD");
-                assert_eq!(success.total_amount, 1999);
-                assert!(!success.is_recurring);
-                assert_eq!(success.invoice_name, "Time machine");
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+            match &message.content {
+                MessageContent::PaymentSuccessful(success) => {
+                    assert_eq!(success.invoice_message_id, 401);
+                    assert_eq!(success.currency, "USD");
+                    assert_eq!(success.total_amount, 1999);
+                    assert!(!success.is_recurring);
+                    assert_eq!(success.invoice_name, "Time machine");
+                }
+                other => panic!("{other:?}"),
             }
-            other => panic!("{other:?}"),
-        },
+        }
         other => panic!("{other:?}"),
     }
     // `messagePaymentSuccessfulBot` (schema 1.8.67, line 5449) —
@@ -47,14 +51,16 @@ fn p1_payment_parses() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => match &message.content {
-            MessageContent::PaymentReceived(received) => {
-                assert_eq!(received.currency, "USD");
-                assert_eq!(received.total_amount, 1999);
-                assert!(received.is_recurring);
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+            match &message.content {
+                MessageContent::PaymentReceived(received) => {
+                    assert_eq!(received.currency, "USD");
+                    assert_eq!(received.total_amount, 1999);
+                    assert!(received.is_recurring);
+                }
+                other => panic!("{other:?}"),
             }
-            other => panic!("{other:?}"),
-        },
+        }
         other => panic!("{other:?}"),
     }
     // Previews.
@@ -81,7 +87,7 @@ fn p1_payment_form_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::PaymentForm(form) => {
+        EnvelopePayload::Payments(PaymentsPayload::PaymentForm(form)) => {
             assert_eq!(form.id, 7);
             assert_eq!(form.product_title, "Time machine");
             assert_eq!(form.product_description, "Visit your ancestors");
@@ -117,7 +123,7 @@ fn p1_payment_form_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::PaymentForm(form) => {
+        EnvelopePayload::Payments(PaymentsPayload::PaymentForm(form)) => {
             assert_eq!(
                 form.form_type,
                 PaymentFormTypeData::Stars { star_count: 50 }
@@ -135,7 +141,7 @@ fn p1_validated_order_info_and_result_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::ValidatedOrderInfo(validated) => {
+        EnvelopePayload::Payments(PaymentsPayload::ValidatedOrderInfo(validated)) => {
             assert_eq!(validated.order_info_id, "oi1");
             assert_eq!(validated.shipping_options.len(), 1);
             assert_eq!(validated.shipping_options[0].id, "fast");
@@ -149,7 +155,7 @@ fn p1_validated_order_info_and_result_parsed() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::PaymentResult(result) => {
+        EnvelopePayload::Payments(PaymentsPayload::PaymentResult(result)) => {
             assert!(result.success);
             assert!(result.verification_url.is_empty());
         }
@@ -161,7 +167,7 @@ fn p1_validated_order_info_and_result_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::PaymentReceipt(receipt) => {
+        EnvelopePayload::Payments(PaymentsPayload::PaymentReceipt(receipt)) => {
             assert_eq!(receipt.product_title, "Time machine");
             assert_eq!(receipt.currency, "USD");
             assert_eq!(receipt.total_amount, 1999);
@@ -182,7 +188,7 @@ fn p1_unknown_payment_form_type_parses_honestly() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::PaymentForm(form) => {
+        EnvelopePayload::Payments(PaymentsPayload::PaymentForm(form)) => {
             assert_eq!(form.form_type, PaymentFormTypeData::Unknown);
         }
         other => panic!("{other:?}"),
@@ -210,7 +216,7 @@ fn payment_recurring_star_subscriptions_parse() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::StarSubscriptions(subs) => {
+        EnvelopePayload::Payments(PaymentsPayload::StarSubscriptions(subs)) => {
             assert_eq!(subs.star_amount, 500);
             assert_eq!(subs.required_star_count, 100);
             assert_eq!(subs.next_offset, "50");
@@ -263,7 +269,7 @@ fn payment_recurring_star_subscriptions_tolerate_gaps() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::StarSubscriptions(subs) => {
+        EnvelopePayload::Payments(PaymentsPayload::StarSubscriptions(subs)) => {
             assert_eq!(subs.subscriptions.len(), 1);
             let sub = &subs.subscriptions[0];
             assert_eq!(sub.id, "sub9");
@@ -285,7 +291,7 @@ fn paid_media_keeps_locked_previews_and_caption() {
         r#"{"@type":"updateNewMessage","message":{"id":402,"chat_id":21,"is_outgoing":false,"content":{"@type":"messagePaidMedia","star_count":25,"media":[{"@type":"paidMediaPreview","width":800,"height":600,"duration":0,"minithumbnail":{"@type":"minithumbnail","width":40,"height":30,"data":"AQID"}},{"@type":"paidMediaPreview","width":400,"height":400,"duration":12,"minithumbnail":null},{"@type":"paidMediaUnsupported"}],"caption":{"@type":"formattedText","text":"Behind the scenes","entities":[]},"show_caption_above_media":false}}}"#,
     )
     .unwrap();
-    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
         panic!("not a new message");
     };
     let MessageContent::Action(action) = &message.content else {

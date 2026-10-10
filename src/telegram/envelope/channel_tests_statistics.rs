@@ -27,7 +27,7 @@ fn channel_statistics_json() -> String {
 #[test]
 fn chat_statistics_channel_parses_values_graphs_and_interactions() {
     let env = parse_envelope(&channel_statistics_json()).unwrap();
-    let EnvelopePayload::ChatStatistics { statistics } = env.payload else {
+    let EnvelopePayload::Groups(GroupsPayload::ChatStatistics { statistics }) = env.payload else {
         panic!("expected statistics");
     };
     let ChatStatistics::Channel(stats) = statistics else {
@@ -107,7 +107,7 @@ fn chat_statistics_supergroup_parses_top_lists() {
     // with top senders / administrators / inviters.
     let json = r#"{"@type":"chatStatisticsSupergroup","@extra":"7","period":{"@type":"dateRange","start_date":1788000000,"end_date":1788604800},"member_count":{"@type":"statisticalValue","value":420.0,"previous_value":400.0,"growth_rate_percentage":5.0},"message_count":{"@type":"statisticalValue","value":1234.0,"previous_value":1100.0,"growth_rate_percentage":12.2},"viewer_count":{"@type":"statisticalValue","value":380.0,"previous_value":360.0,"growth_rate_percentage":5.6},"sender_count":{"@type":"statisticalValue","value":95.0,"previous_value":90.0,"growth_rate_percentage":5.6},"member_count_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"join_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"join_by_source_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"language_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"message_content_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"action_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"day_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"week_graph":{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""},"top_senders":[{"@type":"chatStatisticsMessageSenderInfo","user_id":31,"sent_message_count":250,"average_character_count":120}],"top_administrators":[{"@type":"chatStatisticsAdministratorActionsInfo","user_id":32,"deleted_message_count":3,"banned_user_count":1,"restricted_user_count":0}],"top_inviters":[{"@type":"chatStatisticsInviterInfo","user_id":33,"added_member_count":7}]}"#;
     let env = parse_envelope(json).unwrap();
-    let EnvelopePayload::ChatStatistics { statistics } = env.payload else {
+    let EnvelopePayload::Groups(GroupsPayload::ChatStatistics { statistics }) = env.payload else {
         panic!("expected statistics");
     };
     let ChatStatistics::Supergroup(stats) = statistics else {

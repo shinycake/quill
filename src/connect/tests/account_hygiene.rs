@@ -6,6 +6,7 @@ use super::*;
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::platform::MemorySecretStore;
+use crate::state::AuthPurpose;
 use crate::state::{LoginReview, PasswordOp, RequestPurpose, TwofaNotice};
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
@@ -680,7 +681,7 @@ fn password_ops_carry_distinct_error_lines() {
     ] {
         assert!(op.action_label().contains(expect));
     }
-    let _ = RequestPurpose::PasswordStateOp {
+    let _ = RequestPurpose::Auth(AuthPurpose::PasswordStateOp {
         op: PasswordOp::ResetPassword,
-    };
+    });
 }

@@ -2,6 +2,7 @@
 //! message reaction picker.
 use super::*;
 use crate::ids::{ChatId, FileId, MessageId, RequestId};
+use crate::state::{MessagesPurpose, StickersPurpose};
 use crate::state::{ReactionChoice, RequestPurpose};
 use crate::telegram::requests::{
     get_installed_sticker_sets, get_message_available_reactions, get_recent_stickers,
@@ -82,9 +83,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         for set_id in self.session.library_sets_to_load(wanted) {
-            let extra = self
-                .session
-                .request(RequestPurpose::LoadLibrarySet { set_id }, None);
+            let extra = self.session.request(
+                RequestPurpose::Stickers(StickersPurpose::LoadLibrarySet { set_id }),
+                None,
+            );
             if let Err(err) = self.sender.send_json(&get_sticker_set(extra, set_id)) {
                 self.session.requests.take(extra);
                 return Err(err);
@@ -124,9 +126,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.session.message_reaction_options = None;
-        let purpose = RequestPurpose::GetMessageAvailableReactions {
+        let purpose = RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
             message_id: message_id.0,
-        };
+        });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -158,10 +160,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.message_menu_actions = None;
         let extra = self.session.request(
-            RequestPurpose::GetMessageMenuActions {
+            RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
                 chat_id,
                 message_id,
-            },
+            }),
             Some(chat_id),
         );
         match self

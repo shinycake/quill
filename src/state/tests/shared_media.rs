@@ -199,10 +199,10 @@ fn shared_media_pages_older_messages_for_the_viewer() {
         "one page in flight at a time"
     );
     let extra = session.request(
-        RequestPurpose::GetSharedMediaMore {
+        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore {
             tab,
             generation: more_generation,
-        },
+        }),
         Some(chat),
     );
     // The page repeats message 150 (TDLib includes `from_message_id`).
@@ -241,7 +241,7 @@ fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
     );
     let (g, _) = session.shared_media.begin_fetch_more(tab).unwrap();
     let extra = session.request(
-        RequestPurpose::GetSharedMediaMore { tab, generation: g },
+        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation: g }),
         Some(chat),
     );
     apply_json(
@@ -264,7 +264,7 @@ fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
     // A page that lands after the gallery closed is dropped.
     let (g, _) = session.shared_media.begin_fetch_more(tab).unwrap();
     let extra = session.request(
-        RequestPurpose::GetSharedMediaMore { tab, generation: g },
+        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation: g }),
         Some(chat),
     );
     session.shared_media.close();

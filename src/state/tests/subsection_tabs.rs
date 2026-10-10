@@ -231,7 +231,7 @@ fn forum_topic_answer_replaces_unread_count() {
         &topics_answer(extra.0, 41, &[2, 3]),
     );
     let extra = session.request(
-        RequestPurpose::GetForumTopic { forum_topic_id: 3 },
+        RequestPurpose::Threads(ThreadsPurpose::GetForumTopic { forum_topic_id: 3 }),
         Some(ChatId(41)),
     );
     apply_json(

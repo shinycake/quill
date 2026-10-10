@@ -95,7 +95,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     // First search page lands in `GifPanel` under GetGifSearchResults
     // (not the composer's inline_query slot).
     let extra = with_purpose.request(
-        RequestPurpose::GetGifSearchResults { first_page: true },
+        RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
         None,
     );
     apply_json(
@@ -115,7 +115,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     // Second page appends new entries (deduped by file id) and
     // refreshes the offset.
     let extra = with_purpose.request(
-        RequestPurpose::GetGifSearchResults { first_page: false },
+        RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         None,
     );
     apply_json(

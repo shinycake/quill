@@ -291,7 +291,9 @@ impl Session {
         }
         if matches!(
             pending.map(|p| p.purpose),
-            Some(RequestPurpose::JumpToUnread { .. })
+            Some(RequestPurpose::Messages(
+                MessagesPurpose::JumpToUnread { .. }
+            ))
         ) {
             if pending.and_then(|p| p.chat_id) == self.open_chat {
                 self.unread_jump = oldest_message_id(messages.iter().map(|m| m.id));
@@ -354,7 +356,7 @@ impl Session {
                 next_from_message_id,
             );
         }
-        if let Some(RequestPurpose::GetSharedMediaMore { tab, generation }) =
+        if let Some(RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {

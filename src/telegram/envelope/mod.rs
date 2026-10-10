@@ -14,6 +14,7 @@ mod chat_members;
 mod chat_notifications;
 mod chat_themes;
 mod communities;
+mod domains;
 mod envelope_types;
 mod forum;
 mod gift_card;
@@ -50,6 +51,8 @@ mod users;
 
 #[cfg(test)]
 mod account_change_tests;
+#[cfg(test)]
+mod channel_tests_admin;
 #[cfg(test)]
 mod channel_tests_geo;
 #[cfg(test)]
@@ -116,6 +119,7 @@ pub use chat_members::*;
 pub use chat_notifications::*;
 pub use chat_themes::*;
 pub use communities::*;
+pub use domains::*;
 pub use envelope_types::*;
 pub use forum::*;
 pub use gift_card::*;

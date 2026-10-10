@@ -294,6 +294,7 @@ mod tests {
     use super::*;
     use crate::diagnostics::MemorySink;
     use crate::telegram::envelope::EnvelopePayload;
+    use crate::telegram::envelope::{AuthPayload, MessagesPayload};
 
     #[test]
     fn receive_order_matches_injection_order() {
@@ -311,12 +312,12 @@ mod tests {
         assert_eq!(c.seq, 3);
         assert!(matches!(
             a.envelope.payload,
-            EnvelopePayload::UpdateAuthorizationState(_)
+            EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(_))
         ));
         assert!(matches!(b.envelope.payload, EnvelopePayload::Ok));
         assert!(matches!(
             c.envelope.payload,
-            EnvelopePayload::UpdateNewMessage(_)
+            EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(_))
         ));
         assert_eq!(a.seq + 1, b.seq);
     }

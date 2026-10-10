@@ -496,7 +496,7 @@ pub(crate) fn parse_animations(value: &Value) -> EnvelopePayload {
         }
     }
     files.retain(|file| file.id.0 != 0);
-    EnvelopePayload::Animations { animations, files }
+    EnvelopePayload::Stickers(StickersPayload::Animations { animations, files })
 }
 
 pub(crate) fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedFile>) {

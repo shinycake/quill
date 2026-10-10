@@ -4,6 +4,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::state::BotsPurpose;
 use quill::state::{RequestPurpose, unix_ms_now};
 
 impl QuillApp {
@@ -19,7 +20,7 @@ impl QuillApp {
         let failed = draft.stop_failed;
         let stopped = draft.stopped;
         let stopping = session.requests.has_purpose_for_chat(
-            RequestPurpose::StopPendingMessage { topic_id, draft_id },
+            RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id }),
             chat_id,
         );
         // The reply itself renders in the history as the bot's next

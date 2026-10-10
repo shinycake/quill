@@ -8,7 +8,7 @@ fn update_chat_active_stories_parses_tray_fields() {
     let json = r#"{"@type":"updateChatActiveStories","active_stories":{"@type":"chatActiveStories","chat_id":11,"list":{"@type":"storyListMain"},"order":"9000","can_be_archived":true,"max_read_story_id":4,"stories":[{"@type":"storyInfo","story_id":5,"date":1700000000,"is_for_close_friends":false,"is_live":false},{"@type":"storyInfo","story_id":3,"date":1699990000,"is_for_close_friends":true,"is_live":false}]}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatActiveStories { active_stories } => {
+        EnvelopePayload::Stories(StoriesPayload::UpdateChatActiveStories { active_stories }) => {
             assert_eq!(active_stories.chat_id, 11);
             assert_eq!(active_stories.list, Some(StoryListView::Main));
             assert_eq!(active_stories.order, 9000);
@@ -28,7 +28,7 @@ fn chat_active_stories_null_list_and_no_unread() {
     let json = r#"{"@type":"chatActiveStories","chat_id":12,"list":null,"order":"0","can_be_archived":false,"max_read_story_id":9,"stories":[{"@type":"storyInfo","story_id":9,"date":1,"is_for_close_friends":false,"is_live":false}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ChatActiveStories { active_stories } => {
+        EnvelopePayload::Stories(StoriesPayload::ChatActiveStories { active_stories }) => {
             assert_eq!(active_stories.list, None);
             assert!(!active_stories.has_unread());
         }
@@ -48,7 +48,7 @@ fn story_chosen_reaction_interactions_and_flags_parsed() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
             assert_eq!(story.chosen_reaction_emoji.as_deref(), Some("❤"));
             let info = story.interaction_info.expect("interaction_info");
             assert!(info.any_nonzero());
@@ -75,7 +75,7 @@ fn story_reaction_absent_or_non_emoji_parses_to_none() {
     for reaction in ["null", r#"{"@type":"reactionTypeEmoji","emoji":""}"#] {
         let env = parse_envelope(&reaction_json(reaction)).unwrap();
         match env.payload {
-            EnvelopePayload::Story { story, .. } => {
+            EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
                 assert_eq!(story.chosen_reaction_emoji, None, "reaction {reaction}");
                 assert_eq!(story.chosen_reaction_extra, None, "reaction {reaction}");
             }
@@ -89,7 +89,7 @@ fn story_interaction_info_absent_stays_none() {
     let json = r#"{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
             assert_eq!(story.interaction_info, None);
             assert!(!story.can_be_deleted);
             assert!(!story.can_be_replied);
@@ -115,7 +115,7 @@ fn story_repost_info_and_manage_gates_parsed() {
     let json = r#"{"@type":"story","id":8,"poster_chat_id":11,"date":1,"is_edited":true,"can_be_edited":true,"can_be_forwarded":true,"can_set_privacy_settings":true,"repost_info":{"@type":"storyRepostInfo","origin":{"@type":"storyOriginPublicStory","chat_id":22,"story_id":3},"is_content_modified":false},"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
             assert!(story.can_be_edited);
             assert!(story.can_be_forwarded);
             assert!(story.can_set_privacy_settings);
@@ -148,7 +148,7 @@ fn story_repost_hidden_user_origin_parsed() {
     ))
     .unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
             let repost = story.repost_info.expect("repost_info");
             assert_eq!(
                 repost.origin,
@@ -166,7 +166,7 @@ fn story_repost_hidden_user_origin_parsed() {
         ] {
             let env = parse_envelope(&json(&repost_info)).unwrap();
             match env.payload {
-                EnvelopePayload::Story { story, .. } => {
+                EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
                     assert_eq!(story.repost_info, None, "repost {repost_info}");
                 }
                 other => panic!("{other:?}"),
@@ -182,7 +182,7 @@ fn story_area_link_and_reaction_texts_prefill_edit() {
     let json = r#"{"@type":"story","id":8,"poster_chat_id":11,"date":1,"areas":[{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":1.0,"y_percentage":1.0,"width_percentage":1.0,"height_percentage":1.0,"rotation_angle":0.0,"corner_radius_percentage":0.0},"type":{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}},{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":1.0,"y_percentage":1.0,"width_percentage":1.0,"height_percentage":1.0,"rotation_angle":0.0,"corner_radius_percentage":0.0},"type":{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"total_count":2,"is_dark":false,"is_flipped":false}},{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":1.0,"y_percentage":1.0,"width_percentage":1.0,"height_percentage":1.0,"rotation_angle":0.0,"corner_radius_percentage":0.0},"type":{"@type":"storyAreaTypeWeather","temperature":21.0,"emoji":"☀","background_color":0}}],"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
             assert_eq!(story.area_link_url.as_deref(), Some("https://t.me/quill"));
             assert_eq!(story.area_reaction_emojis, vec!["🔥".to_string()]);
         }
@@ -197,10 +197,10 @@ fn update_story_deleted_parsed() {
         parse_envelope(r#"{"@type":"updateStoryDeleted","story_poster_chat_id":11,"story_id":7}"#)
             .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateStoryDeleted {
+        EnvelopePayload::Stories(StoriesPayload::UpdateStoryDeleted {
             poster_chat_id,
             story_id,
-        } => {
+        }) => {
             assert_eq!(poster_chat_id, 11);
             assert_eq!(story_id, 7);
         }
@@ -218,7 +218,7 @@ fn update_group_call_parsed() {
     let json = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Team standup","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":4,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[{"@type":"groupCallRecentSpeaker","participant_id":{"@type":"messageSenderUser","user_id":43},"is_speaking":true}],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateGroupCall { group_call } => {
+        EnvelopePayload::Calls(CallsPayload::UpdateGroupCall { group_call }) => {
             assert_eq!(group_call.id, 555);
             assert_eq!(group_call.title, "Team standup");
             assert!(group_call.is_active);
@@ -253,7 +253,7 @@ fn update_group_call_recording_live_parsed() {
     let json = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"title":"Weekly design sync","is_active":true,"is_video_chat":true,"record_duration":125,"is_video_recorded":true}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateGroupCall { group_call } => {
+        EnvelopePayload::Calls(CallsPayload::UpdateGroupCall { group_call }) => {
             assert_eq!(group_call.record_duration, 125);
             assert!(group_call.is_video_recorded);
         }
@@ -266,7 +266,7 @@ fn rtmp_url_parsed() {
     let json = r#"{"@type":"rtmpUrl","url":"rtmp://dc1-rtmp.telegram.org:443/live","stream_key":"demo-stream-key-9f3a2b1c"}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::RtmpUrl { url, stream_key } => {
+        EnvelopePayload::Calls(CallsPayload::RtmpUrl { url, stream_key }) => {
             assert_eq!(url, "rtmp://dc1-rtmp.telegram.org:443/live");
             assert_eq!(stream_key, "demo-stream-key-9f3a2b1c");
         }
@@ -279,10 +279,10 @@ fn group_call_message_updates_parsed() {
     let json = r#"{"@type":"updateNewGroupCallMessage","group_call_id":555,"message":{"@type":"groupCallMessage","message_id":7,"sender_id":{"@type":"messageSenderUser","user_id":41},"date":1788000000,"text":{"@type":"formattedText","text":"Can everyone hear me?","entities":[]},"paid_message_star_count":0,"is_from_owner":false,"can_be_deleted":true}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewGroupCallMessage {
+        EnvelopePayload::Calls(CallsPayload::UpdateNewGroupCallMessage {
             group_call_id,
             message,
-        } => {
+        }) => {
             assert_eq!(group_call_id, 555);
             assert_eq!(message.message_id, 7);
             assert_eq!(message.sender_id, MessageSender::User { user_id: 41 });
@@ -296,11 +296,11 @@ fn group_call_message_updates_parsed() {
     let json = r#"{"@type":"updateGroupCallMessageSendFailed","group_call_id":555,"message_id":9,"error":{"@type":"error","code":400,"message":"MESSAGE_TOO_LONG"}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateGroupCallMessageSendFailed {
+        EnvelopePayload::Calls(CallsPayload::UpdateGroupCallMessageSendFailed {
             group_call_id,
             message_id,
             error,
-        } => {
+        }) => {
             assert_eq!(group_call_id, 555);
             assert_eq!(message_id, 9);
             assert_eq!(error.code, 400);
@@ -312,10 +312,10 @@ fn group_call_message_updates_parsed() {
         r#"{"@type":"updateGroupCallMessagesDeleted","group_call_id":555,"message_ids":[7,8]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateGroupCallMessagesDeleted {
+        EnvelopePayload::Calls(CallsPayload::UpdateGroupCallMessagesDeleted {
             group_call_id,
             message_ids,
-        } => {
+        }) => {
             assert_eq!(group_call_id, 555);
             assert_eq!(message_ids, vec![7, 8]);
         }
@@ -328,10 +328,10 @@ fn update_group_call_participant_parsed() {
     let json = r#"{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{"@type":"groupCallParticipant","participant_id":{"@type":"messageSenderUser","user_id":44},"audio_source_id":7,"screen_sharing_audio_source_id":0,"video_info":null,"screen_sharing_video_info":null,"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":true,"can_be_muted_for_all_users":true,"can_be_unmuted_for_all_users":false,"can_be_muted_for_current_user":true,"can_be_unmuted_for_current_user":true,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"zz9"}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateGroupCallParticipant {
+        EnvelopePayload::Calls(CallsPayload::UpdateGroupCallParticipant {
             group_call_id,
             participant,
-        } => {
+        }) => {
             assert_eq!(group_call_id, 555);
             assert_eq!(
                 participant.participant_id,
@@ -354,7 +354,9 @@ fn update_group_call_participant_video_info_parsed() {
     let json = r#"{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{"@type":"groupCallParticipant","participant_id":{"@type":"messageSenderUser","user_id":42},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[111,112]}],"endpoint_id":"ep-42","is_paused":false},"screen_sharing_video_info":{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[222]}],"endpoint_id":"ep-42-screen","is_paused":true},"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":false,"can_be_muted_for_all_users":false,"can_be_unmuted_for_all_users":false,"can_be_muted_for_current_user":false,"can_be_unmuted_for_current_user":false,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"a2"}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateGroupCallParticipant { participant, .. } => {
+        EnvelopePayload::Calls(CallsPayload::UpdateGroupCallParticipant {
+            participant, ..
+        }) => {
             assert!(participant.video_enabled);
             assert!(participant.screen_sharing_enabled);
             let camera = participant.video_info.expect("camera video info");
@@ -379,10 +381,10 @@ fn update_group_call_participants_parsed() {
     let json = r#"{"@type":"updateGroupCallParticipants","group_call_id":555,"participant_user_ids":[41,42,43]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateGroupCallParticipants {
+        EnvelopePayload::Calls(CallsPayload::UpdateGroupCallParticipants {
             group_call_id,
             participant_user_ids,
-        } => {
+        }) => {
             assert_eq!(group_call_id, 555);
             assert_eq!(participant_user_ids, vec![41, 42, 43]);
         }
@@ -395,11 +397,11 @@ fn update_group_call_verification_state_parsed() {
     let json = r#"{"@type":"updateGroupCallVerificationState","group_call_id":555,"generation":7,"emojis":["🍎","🍌","🍒","🍇"]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateGroupCallVerificationState {
+        EnvelopePayload::Calls(CallsPayload::UpdateGroupCallVerificationState {
             group_call_id,
             generation,
             emojis,
-        } => {
+        }) => {
             assert_eq!(group_call_id, 555);
             assert_eq!(generation, 7);
             assert_eq!(emojis, vec!["🍎", "🍌", "🍒", "🍇"]);
@@ -415,10 +417,10 @@ fn update_chat_video_chat_parsed() {
     let json = r#"{"@type":"updateChatVideoChat","chat_id":100,"video_chat":{"@type":"videoChat","group_call_id":555,"has_participants":true,"default_participant_id":{"@type":"messageSenderUser","user_id":41}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatVideoChat {
+        EnvelopePayload::Calls(CallsPayload::UpdateChatVideoChat {
             chat_id,
             video_chat,
-        } => {
+        }) => {
             assert_eq!(chat_id, 100);
             assert_eq!(video_chat.group_call_id, 555);
             assert!(video_chat.has_participants);
@@ -433,11 +435,11 @@ fn update_story_post_succeeded_parsed() {
     let json = r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":6}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateStoryPostSucceeded {
+        EnvelopePayload::Stories(StoriesPayload::UpdateStoryPostSucceeded {
             story,
             old_story_id,
             ..
-        } => {
+        }) => {
             assert_eq!(story.id, 7);
             assert_eq!(story.poster_chat_id, 11);
             assert_eq!(old_story_id, 6);
@@ -452,7 +454,7 @@ fn update_story_post_failed_parsed() {
     let json = r#"{"@type":"updateStoryPostFailed","story":{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"error":{"@type":"error","code":400,"message":"STORY_SEND_FAILED"},"error_type":{"@type":"canPostStoryResultOk"}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateStoryPostFailed { story, error } => {
+        EnvelopePayload::Stories(StoriesPayload::UpdateStoryPostFailed { story, error }) => {
             assert_eq!(story.id, 7);
             assert_eq!(story.poster_chat_id, 11);
             assert_eq!(error.code, 400);
@@ -498,7 +500,7 @@ fn can_post_story_results_parsed() {
     for (json, expected) in cases {
         let env = parse_envelope(json).unwrap();
         match env.payload {
-            EnvelopePayload::CanPostStoryResult { result } => {
+            EnvelopePayload::Stories(StoriesPayload::CanPostStoryResult { result }) => {
                 assert_eq!(result, expected);
             }
             other => panic!("{other:?}"),
@@ -521,7 +523,7 @@ fn available_reactions_parsed_with_custom_emoji_and_paid_kinds() {
     let json = r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"123"},"needs_premium":true},{"@type":"availableReaction","type":{"@type":"reactionTypePaid"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::StoryAvailableReactions { reactions, .. } => {
+        EnvelopePayload::Stories(StoriesPayload::StoryAvailableReactions { reactions, .. }) => {
             assert_eq!(reactions.len(), 4);
             assert_eq!(
                 reactions[0].kind,
@@ -559,7 +561,7 @@ fn get_story_photo_parses_content_and_caption() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, files } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, files }) => {
             assert_eq!(story.id, 5);
             assert_eq!(story.poster_chat_id, 11);
             assert_eq!(story.date, 1700000000);
@@ -589,7 +591,7 @@ fn get_story_video_parses_thumb_and_duration() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::Story { story, files } => {
+        EnvelopePayload::Stories(StoriesPayload::Story { story, files }) => {
             match story.content {
                 StoryContentView::Video {
                     thumb_file_id,
@@ -628,22 +630,24 @@ fn story_live_and_unsupported_degrade_to_placeholder() {
         );
         let env = parse_envelope(&json).unwrap();
         match env.payload {
-            EnvelopePayload::Story { story, .. } => match (&story.content, is_live) {
-                (
-                    StoryContentView::Live {
-                        group_call_id,
-                        is_rtmp_stream,
-                    },
-                    true,
-                ) => {
-                    // stories-live-play: the group call id rides along for
-                    // the viewer's Join button.
-                    assert_eq!(*group_call_id, 7);
-                    assert!(!is_rtmp_stream);
+            EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
+                match (&story.content, is_live) {
+                    (
+                        StoryContentView::Live {
+                            group_call_id,
+                            is_rtmp_stream,
+                        },
+                        true,
+                    ) => {
+                        // stories-live-play: the group call id rides along for
+                        // the viewer's Join button.
+                        assert_eq!(*group_call_id, 7);
+                        assert!(!is_rtmp_stream);
+                    }
+                    (StoryContentView::Unsupported, false) => {}
+                    (other, _) => panic!("{other:?}"),
                 }
-                (StoryContentView::Unsupported, false) => {}
-                (other, _) => panic!("{other:?}"),
-            },
+            }
             other => panic!("{other:?}"),
         }
     }

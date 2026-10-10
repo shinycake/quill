@@ -1,6 +1,7 @@
 use super::envelope::{
     EnvelopePayload, StickerItem, int53, json_field_str, parse_file, parse_sticker_value,
 };
+use crate::telegram::envelope::StickersPayload;
 use serde_json::Value;
 
 /// Slice S10: the `emojiStatusTypeUpgradedGift` row detail (schema 1.8.67,
@@ -77,7 +78,7 @@ pub(crate) fn parse_emoji_statuses(value: &Value) -> EnvelopePayload {
             })
         })
         .collect();
-    EnvelopePayload::EmojiStatuses { statuses }
+    EnvelopePayload::Stickers(StickersPayload::EmojiStatuses { statuses })
 }
 
 /// Slice S10: the `emojiStatusTypeUpgradedGift` fields (schema 1.8.67, line
@@ -115,7 +116,7 @@ pub(crate) fn parse_emoji_status_custom_emojis(value: &Value) -> EnvelopePayload
         .flatten()
         .filter_map(|id| int53(Some(id)).ok())
         .collect();
-    EnvelopePayload::EmojiStatusCustomEmojis { custom_emoji_ids }
+    EnvelopePayload::Stickers(StickersPayload::EmojiStatusCustomEmojis { custom_emoji_ids })
 }
 
 /// Slice S10: `animatedEmoji` — `getAnimatedEmoji` (schema 1.8.67, line
@@ -127,7 +128,7 @@ pub(crate) fn parse_animated_emoji(value: &Value) -> EnvelopePayload {
     {
         files.push(file);
     }
-    EnvelopePayload::AnimatedEmoji { sticker, files }
+    EnvelopePayload::Stickers(StickersPayload::AnimatedEmoji { sticker, files })
 }
 
 /// Slice S10: `emojiKeywords` — `searchEmojis` (schema 1.8.67, line 6429).
@@ -144,7 +145,7 @@ pub(crate) fn parse_emoji_keywords(value: &Value) -> EnvelopePayload {
             })
         })
         .collect();
-    EnvelopePayload::EmojiKeywords { keywords }
+    EnvelopePayload::Stickers(StickersPayload::EmojiKeywords { keywords })
 }
 
 /// Slice S10: `emojiCategories` — `getEmojiCategories` (schema 1.8.67, line
@@ -166,7 +167,7 @@ pub(crate) fn parse_emoji_categories(value: &Value) -> EnvelopePayload {
             });
         }
     }
-    EnvelopePayload::EmojiCategories { categories, files }
+    EnvelopePayload::Stickers(StickersPayload::EmojiCategories { categories, files })
 }
 #[cfg(test)]
 mod tests {
@@ -196,7 +197,7 @@ mod tests {
         )
         .unwrap();
         match recent.payload {
-            EnvelopePayload::EmojiStatuses { statuses } => {
+            EnvelopePayload::Stickers(StickersPayload::EmojiStatuses { statuses }) => {
                 assert_eq!(statuses.len(), 2);
                 assert_eq!(statuses[0].custom_emoji_id, 12345);
                 assert_eq!(statuses[0].expiration_date, 3600);
@@ -216,7 +217,9 @@ mod tests {
             parse_envelope(r#"{"@type":"emojiStatusCustomEmojis","custom_emoji_ids":["11","22"]}"#)
                 .unwrap();
         match themed.payload {
-            EnvelopePayload::EmojiStatusCustomEmojis { custom_emoji_ids } => {
+            EnvelopePayload::Stickers(StickersPayload::EmojiStatusCustomEmojis {
+                custom_emoji_ids,
+            }) => {
                 assert_eq!(custom_emoji_ids, vec![11, 22]);
             }
             other => panic!("{other:?}"),
@@ -230,7 +233,7 @@ mod tests {
         ))
         .unwrap();
         match animated.payload {
-            EnvelopePayload::AnimatedEmoji { sticker, files } => {
+            EnvelopePayload::Stickers(StickersPayload::AnimatedEmoji { sticker, files }) => {
                 let sticker = sticker.expect("sticker");
                 assert_eq!(sticker.file_id, FileId(41));
                 assert_eq!(sticker.emoji, "🔥");
@@ -245,7 +248,7 @@ mod tests {
         )
         .unwrap();
         match keywords.payload {
-            EnvelopePayload::EmojiKeywords { keywords } => {
+            EnvelopePayload::Stickers(StickersPayload::EmojiKeywords { keywords }) => {
                 assert_eq!(keywords.len(), 2);
                 assert_eq!(keywords[0].emoji, "🔥");
                 assert_eq!(keywords[0].keyword, "fire");
@@ -259,7 +262,7 @@ mod tests {
         ))
         .unwrap();
         match categories.payload {
-            EnvelopePayload::EmojiCategories { categories, files } => {
+            EnvelopePayload::Stickers(StickersPayload::EmojiCategories { categories, files }) => {
                 assert_eq!(categories.len(), 1);
                 assert_eq!(categories[0].name, "Smileys");
                 assert!(!categories[0].is_greeting);

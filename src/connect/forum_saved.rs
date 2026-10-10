@@ -2,6 +2,7 @@
 //! sublists and tags (batch B16).
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
+use crate::state::ThreadsPurpose;
 use crate::state::{RequestPurpose, SAVED_PAGE, SAVED_TOPICS_PAGE};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
@@ -123,7 +124,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// "Mark all mentions as read" in one topic.
     pub fn read_all_forum_topic_mentions(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Sent {
-        let purpose = RequestPurpose::ReadAllForumTopicMentions { forum_topic_id };
+        let purpose =
+            RequestPurpose::Threads(ThreadsPurpose::ReadAllForumTopicMentions { forum_topic_id });
         let sent = self.send_purpose(purpose, Some(chat_id), |extra| {
             read_all_forum_topic_mentions(extra, chat_id, forum_topic_id)
         })?;
@@ -133,7 +135,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// "Read all reactions" in one topic.
     pub fn read_all_forum_topic_reactions(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Sent {
-        let purpose = RequestPurpose::ReadAllForumTopicReactions { forum_topic_id };
+        let purpose =
+            RequestPurpose::Threads(ThreadsPurpose::ReadAllForumTopicReactions { forum_topic_id });
         let sent = self.send_purpose(purpose, Some(chat_id), |extra| {
             read_all_forum_topic_reactions(extra, chat_id, forum_topic_id)
         })?;
@@ -143,7 +146,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// "Unpin all messages" in one topic.
     pub fn unpin_all_forum_topic_messages(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Sent {
-        let purpose = RequestPurpose::UnpinAllForumTopicMessages { forum_topic_id };
+        let purpose =
+            RequestPurpose::Threads(ThreadsPurpose::UnpinAllForumTopicMessages { forum_topic_id });
         self.send_purpose(purpose, Some(chat_id), |extra| {
             unpin_all_forum_topic_messages(extra, chat_id, forum_topic_id)
         })
@@ -151,7 +155,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getForumTopic` so the badges come from TDLib again.
     fn refetch_topic(&mut self, chat_id: ChatId, forum_topic_id: i32) {
-        let purpose = RequestPurpose::GetForumTopic { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::GetForumTopic { forum_topic_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return;
         }
@@ -199,7 +203,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if name.trim().is_empty() || icon_custom_emoji_id < 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let purpose = RequestPurpose::EditForumTopic { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::EditForumTopic { forum_topic_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -281,7 +285,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Pin or unpin a sublist (`toggleSavedMessagesTopicIsPinned`); the new
     /// order arrives with `updateSavedMessagesTopic`.
     pub fn toggle_saved_topic_pinned(&mut self, topic_id: i64, pinned: bool) -> Sent {
-        let purpose = RequestPurpose::ToggleSavedMessagesTopicPinned { topic_id };
+        let purpose =
+            RequestPurpose::Threads(ThreadsPurpose::ToggleSavedMessagesTopicPinned { topic_id });
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
@@ -293,7 +298,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Delete everything saved from one chat
     /// (`deleteSavedMessagesTopicHistory`). The UI confirms first.
     pub fn delete_saved_topic_history(&mut self, topic_id: i64) -> Sent {
-        let purpose = RequestPurpose::DeleteSavedMessagesTopicHistory { topic_id };
+        let purpose =
+            RequestPurpose::Threads(ThreadsPurpose::DeleteSavedMessagesTopicHistory { topic_id });
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }

@@ -1,6 +1,7 @@
 //! Group/channel admins replay tests.
 //! Split from `tests/replay.rs` — pure code motion.
 mod replay_common;
+use quill::state::GroupsPurpose;
 use replay_common::*;
 
 /// Phase D3b: `getChatAdministrators` response populates the admin-list
@@ -64,10 +65,10 @@ fn replay_admin_list_load_and_gate() {
 
     // `ok` to `setChatMemberStatus` invalidates the cached admin list.
     let promote_extra = session.request(
-        RequestPurpose::SetChatMemberStatus {
+        RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
             user_id: 5,
             kind: MemberStatusChange::Promote,
-        },
+        }),
         Some(chat_id),
     );
     apply_all_seq(
@@ -175,8 +176,10 @@ fn replay_admin_rights_lookup_and_demote() {
         ],
     );
 
-    let rights_extra =
-        session.request(RequestPurpose::GetAdminRights { user_id: 2 }, Some(chat_id));
+    let rights_extra = session.request(
+        RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 2 }),
+        Some(chat_id),
+    );
     apply_all_seq(
         &mut session,
         &sink,
@@ -197,10 +200,10 @@ fn replay_admin_rights_lookup_and_demote() {
 
     // Demote's `ok` invalidates the admin list too.
     let demote_extra = session.request(
-        RequestPurpose::SetChatMemberStatus {
+        RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
             user_id: 2,
             kind: MemberStatusChange::Demote,
-        },
+        }),
         Some(chat_id),
     );
     session.admin_lists.insert(13, AdminListFetch::Loading);
@@ -237,9 +240,9 @@ fn replay_supergroup_members_picker_cache() {
     );
 
     let members_extra = session.request(
-        RequestPurpose::GetSupergroupMembers {
+        RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
             filter: MemberListFilter::Recent,
-        },
+        }),
         Some(chat_id),
     );
     apply_all_seq(
@@ -272,9 +275,9 @@ fn replay_supergroup_members_picker_cache() {
 
     // A TDLib error records a failed fetch with the action label.
     let retry_extra = session.request(
-        RequestPurpose::GetSupergroupMembers {
+        RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
             filter: MemberListFilter::Recent,
-        },
+        }),
         Some(chat_id),
     );
     apply_all_seq(

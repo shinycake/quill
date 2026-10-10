@@ -35,7 +35,7 @@ fn secret_chat_states_parsed_with_key_hash() {
         );
         let env = parse_envelope(&json).unwrap();
         match env.payload {
-            EnvelopePayload::UpdateSecretChat { secret_chat } => {
+            EnvelopePayload::Users(UsersPayload::UpdateSecretChat { secret_chat }) => {
                 assert_eq!(secret_chat.id, 7);
                 assert_eq!(secret_chat.user_id, 41);
                 assert_eq!(secret_chat.state, expected);
@@ -78,7 +78,7 @@ fn secret_chat_unknown_state_degrades() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSecretChat { secret_chat } => {
+        EnvelopePayload::Users(UsersPayload::UpdateSecretChat { secret_chat }) => {
             assert_eq!(
                 secret_chat.state,
                 SecretChatState::Unknown("secretChatStateFuture".to_string())
@@ -158,7 +158,7 @@ fn int64_order_is_not_float() {
     let json = r#"{"@type":"updateChatPosition","chat_id":42,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9223372036854775806","is_pinned":false}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatPosition(pos) => {
+        EnvelopePayload::ChatList(ChatListPayload::UpdateChatPosition(pos)) => {
             assert_eq!(pos.order, 9223372036854775806);
         }
         other => panic!("{other:?}"),
@@ -175,11 +175,11 @@ fn deep_link_info_parses_text_and_tg_entities() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::DeepLinkInfo {
+        EnvelopePayload::Chats(ChatsPayload::DeepLinkInfo {
             text,
             need_update,
             entities,
-        } => {
+        }) => {
             assert_eq!(text, "Open the chat");
             assert!(!need_update);
             assert_eq!(entities.len(), 1);

@@ -4,6 +4,7 @@ use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::search_filters::{SearchMediaKind, YearMonth};
 use crate::state::DateJumpMode;
 use crate::state::{ChatSearchJumpNeed, RequestPurpose, SearchStatus, SharedMediaTab};
+use crate::state::{MediaPurpose, SearchPurpose};
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests::{
@@ -793,7 +794,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         let extra = self.session.request(
-            RequestPurpose::GetSharedMediaMore { tab, generation },
+            RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation }),
             Some(chat_id),
         );
         let filter = search_messages_filter_json(tab.filter_constructor());
@@ -1077,7 +1078,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             calendar.oldest_loaded,
         );
         let extra = self.session.request(
-            RequestPurpose::GetChatMessageCalendar { generation },
+            RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation }),
             Some(chat_id),
         );
         if let Some(calendar) = self.session.history_calendar.as_mut() {
