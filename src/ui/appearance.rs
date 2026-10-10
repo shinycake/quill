@@ -1875,6 +1875,14 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    Appearance => DialogSpec::new(
+        6600,
+        |app| app.appearance_open,
+        QuillApp::build_appearance_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     use super::{accent_rgb_from, limit_custom_accent};

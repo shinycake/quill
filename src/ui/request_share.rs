@@ -322,3 +322,12 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// A bot keyboard's share-phone / share-users / share-chat request.
+    RequestShare => DialogSpec::new(
+        2600,
+        |app| app.request_share.is_some(),
+        QuillApp::build_request_share_dialog,
+    ),
+}

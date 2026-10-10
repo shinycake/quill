@@ -120,3 +120,13 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Slice parity:platform-shortcuts-reference: read-only keyboard
+    /// shortcuts reference dialog.
+    Shortcuts => DialogSpec::new(
+        7200,
+        |app| app.shortcuts_open,
+        QuillApp::build_shortcuts_dialog,
+    ),
+}

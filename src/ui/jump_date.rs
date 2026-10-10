@@ -236,3 +236,14 @@ impl QuillApp {
             .into_any_element()
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Find in history: the "Jump to date" calendar box.
+    JumpToDate => DialogSpec::new(
+        // Slice parity:platform-shortcuts-reference: informational, lowest
+        // priority.
+        7100,
+        |app| app.session().is_some_and(|s| s.history_calendar.is_some()),
+        QuillApp::build_jump_date_dialog,
+    ),
+}
