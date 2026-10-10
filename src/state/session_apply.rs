@@ -58,6 +58,11 @@ impl Session {
                 self.storage_limits.apply_option(&name, &value);
                 self.folder_limits.apply_option(&name, &value);
                 self.apply_privacy_option(&name, &value);
+                if name == "disable_contact_registered_notifications"
+                    && let OptionValue::Boolean(off) = &value
+                {
+                    self.disable_contact_registered_notifications = *off;
+                }
                 if name == "disable_top_chats"
                     && let OptionValue::Boolean(off) = &value
                 {
@@ -1124,11 +1129,15 @@ impl Session {
                         "status: unread totals chats list={list:?} total_count={total_count} unread_count={unread_count} unread_unmuted_count={unread_unmuted_count} marked_as_unread_count={marked_as_unread_count} marked_as_unread_unmuted_count={marked_as_unread_unmuted_count}"
                     );
                 }
+                let pair = UnreadPair {
+                    all: unread_count,
+                    unmuted: unread_unmuted_count,
+                };
+                if let ChatList::Folder(id) = &list {
+                    self.folder_unread_chats.insert(*id, pair);
+                }
                 if let Some(totals) = self.unread_totals.list_mut(&list) {
-                    totals.chats = Some(UnreadPair {
-                        all: unread_count,
-                        unmuted: unread_unmuted_count,
-                    });
+                    totals.chats = Some(pair);
                 }
             }
             EnvelopePayload::UpdateChatReadInbox {

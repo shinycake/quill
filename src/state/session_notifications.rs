@@ -74,17 +74,27 @@ impl Session {
         self.scope_settings_for(scope).show_story_poster
     }
 
-    /// Phase 8.1: pure notify / don't-notify decision for an `updateNewMessage`.
-    /// Both the UI's `app_active` write and the reducer run on the UI thread,
-    /// so no locking is needed. Returns `None` when the chat is unknown (no
-    /// title, no verified mute/read state) rather than guessing.
-    pub(crate) fn notification_for_new_message(
-        &self,
-        message: &ParsedMessage,
-    ) -> Option<OsNotification> {
-        if !self.desktop_notifications {
-            return None;
+    /// Effective "notify about pinned messages" for a chat: its own
+    /// `disable_pinned_message_notifications`, or the scope default's when
+    /// it keeps `use_default_disable_pinned_message_notifications`.
+    pub fn effective_pinned_allowed(&self, chat: &ChatSummary) -> bool {
+        let settings = &chat.notification_settings;
+        if !settings.use_default_disable_pinned_message_notifications {
+            return !settings.disable_pinned_message_notifications;
         }
+        let scope = scope_for_chat_kind(&chat.kind);
+        !self
+            .scope_settings_for(scope)
+            .disable_pinned_message_notifications
+    }
+
+    /// Phase 8.1: pure notify / don't-notify decision for an `updateNewMessage`,
+    /// without the "Desktop notifications" switch (the caller applies it:
+    /// tdesktop's alert, flash and bounce, is independent of it). Both the
+    /// UI's `app_active` write and the reducer run on the UI thread, so no
+    /// locking is needed. Returns `None` when the chat is unknown (no
+    /// title, no verified mute/read state) rather than guessing.
+    pub(crate) fn notification_decision(&self, message: &ParsedMessage) -> Option<OsNotification> {
         let chat = self.chats.get(&message.chat_id.0)?;
         let chat_muted = self.effective_muted(chat);
         let chat_preview_allowed = self.effective_preview_allowed(chat);
@@ -97,6 +107,8 @@ impl Session {
             app_active: self.app_active,
             hide_previews: self.hide_notification_previews,
             chat_preview_allowed,
+            pinned_allowed: self.effective_pinned_allowed(chat),
+            contact_joined_allowed: !self.disable_contact_registered_notifications,
         })
     }
 
