@@ -1,0 +1,32 @@
+[package]
+name = "quill-webview"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT"
+description = "Quill's mini-app window: a system web view (WKWebView, WebView2, WebKitGTK) in its own process, driven over stdin/stdout"
+repository = "https://github.com/shinycake/quill"
+publish = false
+
+[[bin]]
+name = "quill-webview"
+path = "src/main.rs"
+
+[dependencies]
+quill-webview-protocol = { path = "../webview-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Windowing for the helper only. tao runs a GTK main loop on Linux, which
+# is exactly why the web view cannot live in the GPUI process
+# (docs/decisions/codex-miniapp-webview.md). `dbus` (Linux taskbar progress)
+# is not needed.
+tao = { version = "0.37", default-features = false, features = ["rwh_06", "x11"] }
+wry = "0.57"
+
+# `--capture <png>` (screenshot demos): WebKit's own snapshot, written as PNG.
+# Same objc2 generation wry 0.57 links.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphics"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString", "NSObject"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }

@@ -40,7 +40,9 @@ impl Session {
                 // Phase 6: `getContacts` answer — only answers to our own
                 // fetch are accepted (matched by `@extra`); the user
                 // objects themselves arrive via `updateUser`.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
+                if self.apply_web_app_users(&user_ids, pending) {
+                    // Apps tab: `getGrossingWebAppBots`.
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
                     self.contacts = Some(user_ids);
                     self.contacts_error = false;
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {

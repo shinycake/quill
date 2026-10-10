@@ -224,6 +224,7 @@ impl Session {
             share_search: ShareSearch::default(),
             last_forward: None,
             last_callback_answer: None,
+            web_apps: WebApps::default(),
             last_login_url_info: None,
             login_url_request: None,
             payment_request: None,

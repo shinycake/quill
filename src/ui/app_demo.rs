@@ -810,6 +810,7 @@ impl QuillApp {
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),
             request_share: None,
+            mini_apps: Default::default(),
             permissions_dialog: None,
             username_dialog: None,
             community_ui: CommunityUi::default(),

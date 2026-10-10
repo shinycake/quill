@@ -74,6 +74,16 @@ impl Session {
                     }
                 }
             }
+            payload @ (BotsPayload::WebAppInfo { .. }
+            | BotsPayload::WebAppUrl { .. }
+            | BotsPayload::MainWebApp { .. }
+            | BotsPayload::FoundWebApp(_)
+            | BotsPayload::AttachmentMenuBot(_)
+            | BotsPayload::UpdateAttachmentMenuBots(_)
+            | BotsPayload::UpdateWebAppMessageSent { .. }
+            | BotsPayload::CustomRequestResult { .. }) => {
+                self.apply_web_app_payload(payload, pending);
+            }
             BotsPayload::LoginUrlInfo(info) => {
                 // B1: `getLoginUrlInfo` response to our own login-button
                 // press (matched by `@extra`).

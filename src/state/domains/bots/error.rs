@@ -150,5 +150,6 @@ impl Session {
                 .unwrap_or_default();
             self.last_login_url_info = Some(LoginUrlInfo::Failed { fallback_url });
         }
+        self.apply_web_app_error(pending, err);
     }
 }

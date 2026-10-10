@@ -11,7 +11,7 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 631
+- MIT License: 632
 - Apache License 2.0: 41
 - ISC License: 22
 - Unicode License v3: 19
@@ -10251,6 +10251,7 @@ SOFTWARE.
 
 Used by:
 - [ntgcalls-sys 0.1.0](https://github.com/shinycake/quill)
+- [quill-webview-protocol 0.1.0](https://github.com/shinycake/quill)
 - [accesskit 0.24.1](https://github.com/AccessKit/accesskit)
 - [accesskit_atspi_common 0.19.1](https://github.com/AccessKit/accesskit)
 - [accesskit_consumer 0.38.0](https://github.com/AccessKit/accesskit)

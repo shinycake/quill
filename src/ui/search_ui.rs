@@ -725,6 +725,9 @@ impl QuillApp {
             if let Err(err) = live.driver.set_search_filters(filters) {
                 self.status_note = format!("could not apply search filters: {err:?}");
             }
+            if filters.scope == SearchScope::Apps {
+                let _ = live.driver.fetch_grossing_web_app_bots();
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.filters = filters;
         }
@@ -1311,10 +1314,10 @@ impl QuillApp {
     /// (tdesktop `lng_search_filter_*`), content tab and date window.
     pub(super) fn search_filter_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if session.search.query.trim().is_empty() {
+        let filters = session.search.filters;
+        if session.search.query.trim().is_empty() && filters.scope != SearchScope::Apps {
             return None;
         }
-        let filters = session.search.filters;
         let query = session.search.query.trim().to_string();
         let has_chat = session.open_chat.is_some();
         // tdesktop's search tabs: This chat / My messages / Public posts.
@@ -1644,6 +1647,7 @@ impl QuillApp {
             .unwrap_or_default();
         let public_scope =
             session.is_some_and(|s| s.search.filters.scope == SearchScope::PublicPosts && !recents);
+        let apps_scope = session.is_some_and(|s| s.search.filters.scope == SearchScope::Apps);
         let limits_exceeded = session.is_some_and(|s| s.search.public_limits_exceeded);
         let messages: Vec<(ChatId, MessageId, String, String, i32)> = session
             .map(|s| {
@@ -1701,6 +1705,7 @@ impl QuillApp {
         // Only states the results don't already show: still loading with
         // nothing yet, nothing found, failure.
         let hint = match status {
+            _ if apps_scope => String::new(),
             SearchStatus::Idle if recents && has_results => String::new(),
             SearchStatus::Idle => "Type to search chats and messages.".to_string(),
             SearchStatus::Searching if has_results => String::new(),
@@ -1731,8 +1736,14 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .when_some(self.search_filter_bar(cx), |this, bar| this.child(bar))
+            .when_some(self.apps_entry_chip(cx), |this, chip| this.child(chip))
+            .when(apps_scope, |this| {
+                this.child(self.apps_tab_block(&query, cx))
+            })
             .when_some(
-                recents.then(|| self.frequent_contacts(cx)).flatten(),
+                (recents && !apps_scope)
+                    .then(|| self.frequent_contacts(cx))
+                    .flatten(),
                 |this, strip| this.child(strip),
             )
             .when_some(confirm, |this, confirm| {
@@ -1749,7 +1760,7 @@ impl QuillApp {
                         .child(hint),
                 )
             })
-            .when(!chats.is_empty(), |this| {
+            .when(!chats.is_empty() && !apps_scope, |this| {
                 let mut block = div().id("search-chats").flex().flex_col().gap_1().child(
                     div()
                         .flex()
@@ -1815,7 +1826,7 @@ impl QuillApp {
             .when_some(self.story_search_section(&query, cx), |this, section| {
                 this.child(section)
             })
-            .when(!public_chats.is_empty(), |this| {
+            .when(!public_chats.is_empty() && !apps_scope, |this| {
                 let mut block = div()
                     .id("search-public-chats")
                     .flex()
@@ -1837,7 +1848,7 @@ impl QuillApp {
                 }
                 this.child(block)
             })
-            .when(!messages.is_empty(), |this| {
+            .when(!messages.is_empty() && !apps_scope, |this| {
                 let mut block = div()
                     .id("search-messages")
                     .flex()
@@ -1866,7 +1877,7 @@ impl QuillApp {
 
 impl QuillApp {
     /// A chat's downloaded photo, sandboxed for display (search rows).
-    fn chat_photo_for_row(&self, chat_id: ChatId) -> Option<std::path::PathBuf> {
+    pub(super) fn chat_photo_for_row(&self, chat_id: ChatId) -> Option<std::path::PathBuf> {
         self.session()
             .and_then(|s| s.chat_photo_path(chat_id))
             .and_then(|path| {

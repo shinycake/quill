@@ -279,6 +279,9 @@ mod video_pip;
 mod viewer_demo;
 mod wallpaper;
 mod wallpaper_pattern;
+mod web_app_demo;
+mod web_app_tab;
+mod web_app_ui;
 mod window_chrome;
 
 pub use app::QuillApp;
