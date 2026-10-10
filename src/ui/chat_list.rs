@@ -1283,14 +1283,7 @@ impl QuillApp {
             }
             PaneMode::Ready => {
                 if self.contacts_tab_open {
-                    list = list.child(
-                        div()
-                            .id("contacts-scroll")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .child(self.contacts_list(cx)),
-                    );
+                    list = list.child(self.contacts_panel(cx));
                 } else if self.calls_tab_open {
                     list = list.child(
                         div()
@@ -1303,6 +1296,7 @@ impl QuillApp {
                 } else {
                     // Searching spans every chat: the folder tabs step aside.
                     if !self.search_is_open() {
+                        list = list.children(self.suggestion_card(cx));
                         list = list.child(self.folder_tabs_with_community_banner(cx));
                         // A shared folder whose owner added chats.
                         list = list.children(self.folder_new_chats_bar(cx));

@@ -304,6 +304,18 @@ impl QuillApp {
                             )),
                         )),
                 )
+                .child(div().flex_1())
+                .child(
+                    Button::new("thread-info-toggle")
+                        .icon(gpui_kit::assets::IconName::Info)
+                        .ghost()
+                        .tooltip("Thread info")
+                        .accessibility_label("Thread info")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.thread_info_open = !this.thread_info_open;
+                            cx.notify();
+                        })),
+                )
                 .into_any_element(),
         )
     }

@@ -771,9 +771,9 @@ impl QuillApp {
     /// clients paint on the area (glyph + one-line summary).
     pub(super) fn story_area_label(kind: &StoryAreaKind) -> String {
         match kind {
-            StoryAreaKind::Location { address, location } => {
-                Self::story_area_pin_label(&[address, &location.coords_label()])
-            }
+            StoryAreaKind::Location {
+                address, location, ..
+            } => Self::story_area_pin_label(&[address, &location.coords_label()]),
             StoryAreaKind::Venue { title, .. } => Self::story_area_pin_label(&[title]),
             StoryAreaKind::SuggestedReaction { emoji, total_count } => {
                 if *total_count > 0 {

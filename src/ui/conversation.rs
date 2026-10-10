@@ -1082,6 +1082,10 @@ impl QuillApp {
             .when_some(topic_info.clone().filter(|_| !tabs_used), |this, info| {
                 this.child(self.forum_topic_strip(&info, cx))
             })
+            .when_some(
+                topic_info.clone().filter(|_| self.topic_info_open),
+                |this, info| this.child(self.topic_info_card(&info, cx)),
+            )
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
             .children(self.saved_tags_bar(cx))
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
@@ -1168,6 +1172,9 @@ impl QuillApp {
                         .min_h_0()
                         .min_w_0()
                         .children(self.thread_root_bar(cx))
+                        .when(self.thread_info_open, |this| {
+                            this.children(self.thread_info_card(cx))
+                        })
                         .child(list)
                         .into_any_element()
                 } else if is_forum

@@ -763,6 +763,7 @@ impl Session {
                 status_text: user.status.display(),
                 is_online: user.status.is_online(),
                 is_contact: user.is_contact,
+                last_seen: crate::contacts_index::last_seen_rank(&user.status),
             })
             .collect();
         rows.sort_by(|a, b| {
