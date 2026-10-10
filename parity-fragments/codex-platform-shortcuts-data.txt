@@ -1,5 +1,0 @@
-# platform-shortcuts-data: only full matches
-parity:platform-shortcut-lock
-parity:data-window-close
-parity:data-mac-quit-warning
-parity:data-ipv6
