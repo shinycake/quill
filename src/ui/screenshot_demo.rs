@@ -407,6 +407,9 @@ pub enum ScreenshotDemo {
     /// (Parity slice 5.)
     ReadyVideoPlayback,
     ReadyVideoPip,
+    /// A playing video in the viewer with a formatted caption, the saved
+    /// toast and the open speed dial.
+    ReadyViewerExtras,
     /// A GIF looping in the viewer, with a custom emoji in its caption.
     ReadyViewerGif,
     /// The viewer paging over the Shared Media panel's photos.
