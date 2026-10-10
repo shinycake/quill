@@ -1094,3 +1094,17 @@ impl QuillApp {
             .into_any_element()
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    Permissions => DialogSpec::new(
+        4400,
+        |app| app.permissions_dialog.is_some(),
+        QuillApp::build_permissions_dialog,
+    ),
+
+    Restrict => DialogSpec::new(
+        4600,
+        |app| app.restrict_dialog.is_some(),
+        QuillApp::build_restrict_dialog,
+    ),
+}

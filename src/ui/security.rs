@@ -1654,3 +1654,23 @@ pub(super) fn quiet_danger(cx: &App) -> ButtonCustomVariant {
         .hover(cx.theme().danger.opacity(0.12))
         .active(cx.theme().danger.opacity(0.2))
 }
+
+crate::ui::shell::register_dialogs! {
+    Websites => DialogSpec::new(
+        600,
+        |app| app.websites_open,
+        QuillApp::build_websites_dialog,
+    ),
+
+    Sessions => DialogSpec::new(
+        700,
+        |app| app.sessions_open,
+        QuillApp::build_sessions_dialog,
+    ),
+
+    TwoFa => DialogSpec::new(
+        800,
+        |app| app.twofa.open,
+        QuillApp::build_twofa_dialog,
+    ),
+}

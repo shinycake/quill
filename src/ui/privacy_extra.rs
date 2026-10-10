@@ -964,6 +964,16 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    /// B13: the warning before opening an executable, unknown or
+    /// IP-revealing file.
+    FileOpenConfirm => DialogSpec::new(
+        3400,
+        |app| app.privacy_ui.file_open.is_some(),
+        QuillApp::build_file_open_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     use super::new_chat_privacy_value;

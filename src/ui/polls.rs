@@ -1171,3 +1171,11 @@ impl QuillApp {
             )
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    PollVoters => DialogSpec::new(
+        5500,
+        |app| app.poll_voters_dialog.is_some(),
+        QuillApp::build_poll_voters_dialog,
+    ),
+}

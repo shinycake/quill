@@ -1157,3 +1157,12 @@ impl QuillApp {
         section
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Local passcode settings.
+    Passcode => DialogSpec::new(
+        200,
+        |app| app.passcode_ui.open,
+        QuillApp::build_passcode_dialog,
+    ),
+}

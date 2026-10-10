@@ -802,6 +802,14 @@ fn tag_name(choices: &[SavedMessagesTag], all: &[SavedMessagesTag], tag: &Reacti
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    SavedTagName => DialogSpec::new(
+        5300,
+        |app| app.saved_tag_dialog.is_some(),
+        QuillApp::build_saved_tag_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     use super::{count_line, tag_name};
