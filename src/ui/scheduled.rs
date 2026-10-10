@@ -741,3 +741,11 @@ impl QuillApp {
             .into_any_element()
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    Scheduled => DialogSpec::new(
+        300,
+        |app| app.scheduled_dialog_open,
+        QuillApp::build_scheduled_dialog,
+    ),
+}

@@ -1135,6 +1135,14 @@ fn letter_icon(name: &str, color: i32, size: f32) -> AnyElement {
         .into_any_element()
 }
 
+crate::ui::shell::register_dialogs! {
+    ForumManage => DialogSpec::new(
+        5200,
+        |app| app.forum_manage_dialog.is_some(),
+        QuillApp::build_forum_manage_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod forum_editor_tests {
     use super::{next_topic_color, topic_letter};

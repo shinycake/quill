@@ -433,3 +433,15 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Slice parity:auth-multi-account (UI): the Accounts dialog (list /
+    /// switch / add / remove accounts).
+    Accounts => DialogSpec::new(
+        // Slice parity:auth-multi-account (UI): accounts sit with the
+        // other settings-level dialogs (lowest priority band).
+        7000,
+        |app| app.accounts_ui.open,
+        QuillApp::build_accounts_dialog,
+    ),
+}

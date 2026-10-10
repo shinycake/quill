@@ -1343,3 +1343,14 @@ impl QuillApp {
 fn muted_fg(cx: &App) -> Hsla {
     cx.theme().muted_foreground
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Batch 7: the translate box and its language choosers.
+    Translate => DialogSpec::new(
+        // Opened from the Appearance dialog's translation options: it
+        // takes over and Appearance returns when it closes.
+        6500,
+        |app| app.translate_ui.dialog.is_some(),
+        QuillApp::build_translate_dialog,
+    ),
+}

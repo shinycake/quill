@@ -631,3 +631,11 @@ impl QuillApp {
         }
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    Member => DialogSpec::new(
+        4300,
+        |app| app.member_dialog.is_some(),
+        QuillApp::build_member_dialog,
+    ),
+}

@@ -5,7 +5,7 @@
 //! see the decision doc).
 
 use super::app::QuillApp;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use super::web_app_ui::{PendingOpen, WebAppConfirm};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -38,16 +38,17 @@ fn apply_bot(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     session.open_chat(ChatId(21));
 }
 
+register_demos![
+    // Mini apps: the first-open and add-to-menu boxes (`QUILL_DEMO_MINIAPP`).
+    DemoSpec::chats(
+        "ready-mini-app",
+        "screenshot demo — mini app boxes (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_setup_mini_app),
+];
+
 impl QuillApp {
-    pub(super) fn demo_setup_mini_app(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if demo != Some(ScreenshotDemo::ReadyMiniApp) {
-            return;
-        }
+    fn demo_setup_mini_app(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         quill::web_app::trust::set_persistence(false);
         let mode = std::env::var("QUILL_DEMO_MINIAPP").unwrap_or_else(|_| "terms".into());
         if let Some(session) = self.demo_session.as_mut() {

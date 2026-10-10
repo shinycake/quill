@@ -1636,3 +1636,12 @@ mod tests {
         assert_eq!(hsla_rgb(gpui_kit::black()), Rgb(0, 0, 0));
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Mini apps: the first-open terms box / add to the attachment menu.
+    WebAppConfirm => DialogSpec::new(
+        2550,
+        |app| app.mini_apps.confirm.is_some(),
+        QuillApp::build_web_app_confirm_dialog,
+    ),
+}

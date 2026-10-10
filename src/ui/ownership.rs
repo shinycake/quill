@@ -441,3 +441,12 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Transfer ownership / the owner's leave box.
+    Ownership => DialogSpec::new(
+        4700,
+        |app| app.ownership_dialog.is_some(),
+        QuillApp::build_ownership_dialog,
+    ),
+}

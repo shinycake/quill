@@ -1770,6 +1770,22 @@ pub(super) fn stack_rows(mut rows: Vec<MenuRow>) -> Vec<AnyElement> {
     rows.into_iter().map(|(_, row)| row).collect()
 }
 
+crate::ui::shell::register_dialogs! {
+    /// The message menu's Report flow.
+    MessageReport => DialogSpec::new(
+        5600,
+        |app| app.message_menu_ui.report_open,
+        QuillApp::build_message_report_dialog,
+    ),
+
+    /// "View Sticker Set" / "Add Stickers" from a sticker message.
+    StickerSet => DialogSpec::new(
+        5700,
+        |app| app.message_menu_ui.sticker_set_open,
+        QuillApp::build_sticker_set_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

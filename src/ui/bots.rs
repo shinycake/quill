@@ -935,3 +935,17 @@ impl QuillApp {
         self.sync_command_menu(cx);
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    CallbackPassword => DialogSpec::new(
+        2400,
+        |app| app.callback_password_dialog.is_some(),
+        QuillApp::build_callback_password_dialog,
+    ),
+
+    LoginUrlConfirm => DialogSpec::new(
+        2500,
+        |app| app.login_url_confirm.is_some(),
+        QuillApp::build_login_url_confirm_dialog,
+    ),
+}

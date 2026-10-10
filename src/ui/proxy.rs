@@ -5,6 +5,7 @@
 //! (`boxes/connection_box.cpp`); the data lives in TDLib, so everything
 //! here is a view over `Session::proxy` plus driver calls.
 use super::app::QuillApp;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
@@ -1157,18 +1158,21 @@ fn demo_proxy_entries() -> Vec<ProxyEntry> {
     ]
 }
 
+register_demos![
+    // `parity:proxy-settings`: proxy list / editor / link confirmation
+    // (`QUILL_DEMO_PROXY=list|edit|link|link-bad`; injected data, no live
+    // Telegram, no real proxy).
+    DemoSpec::chats(
+        "ready-proxy",
+        "screenshot demo — proxy settings (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_setup_proxy),
+];
+
 impl QuillApp {
     /// `QUILL_DEMO_PROXY=list|edit|link|link-bad` over the seeded chat
-    /// list (`ScreenshotDemo::ReadyProxy`).
-    pub(super) fn demo_setup_proxy(
-        &mut self,
-        demo: Option<super::ScreenshotDemo>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if demo != Some(super::ScreenshotDemo::ReadyProxy) {
-            return;
-        }
+    /// list (`ready-proxy`).
+    fn demo_setup_proxy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_PROXY").unwrap_or_else(|_| "list".into());
         if let Some(session) = self.demo_session.as_mut() {
             session.connection = ConnectionState::Ready;
@@ -1201,6 +1205,29 @@ impl QuillApp {
         }
         self.status_note = "screenshot demo — proxy settings".into();
     }
+}
+
+crate::ui::shell::register_dialogs! {
+    ProxyEdit => DialogSpec::new(
+        // The edit / link boxes open over the list, so they rank first.
+        3000,
+        |app| app.proxy_ui.editor.is_some(),
+        QuillApp::build_proxy_edit_dialog,
+    ),
+
+    ProxyLink => DialogSpec::new(
+        3100,
+        |app| app.proxy_ui.link.is_some(),
+        QuillApp::build_proxy_link_dialog,
+    ),
+
+    /// `parity:proxy-settings`: proxy list, add / edit box, and the
+    /// `tg://proxy` link confirmation.
+    ProxyList => DialogSpec::new(
+        3200,
+        |app| app.proxy_ui.list_open,
+        QuillApp::build_proxy_list_dialog,
+    ),
 }
 
 #[cfg(test)]

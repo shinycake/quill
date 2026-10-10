@@ -60,7 +60,7 @@ Features Quill does not have answer with the bridge's failure events at once (`l
 
 - macOS: WKWebView, verified here. The custom scheme is a secure context (the frame reports `isSecureContext` and `crypto.subtle` works). The helper runs as an accessory app, so no second Dock icon.
 - Windows: WebView2 through `wry`, custom scheme mapped to `https://quill.localhost`. The Evergreen runtime ships with Windows 10/11; if it is missing the helper fails to create its view and Quill says so. Not run here.
-- Linux: WebKitGTK 4.1 through `tao`'s GTK window. The package depends on the distro's `libwebkit2gtk-4.1` and `libsoup-3.0` (allow-listed in `check-bundle-elf.sh`); without them the helper fails to start and Quill says what to install. Not run here.
+- Linux: WebKitGTK 4.1 through `tao`'s GTK window. `libwebkit2gtk-4.1` and `libsoup-3.0` are optional: the tarball declares no dependency on them (it has no package metadata), `README.txt` lists them under "Optional", and `check-bundle-elf.sh` only allow-lists them as system libraries; a .deb/.rpm built later should use Recommends/Suggests. Without them the helper fails to start and Quill says what to install. Not run here.
 
 ## Packaging
 

@@ -5,7 +5,7 @@
 
 use super::app::QuillApp;
 use super::dialogs::GroupSettingsView;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
@@ -100,17 +100,21 @@ fn apply_group_admin(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomic
     );
 }
 
+register_demos![
+    // B7: group and channel settings dialog
+    // (`QUILL_DEMO_GROUP_ADMIN=group|channel|basic|reactions|discussion|
+    // linked|confirm`; injected data, no live Telegram).
+    DemoSpec::chats(
+        "ready-group-admin-settings",
+        "screenshot demo — group and channel settings (injected, no live Telegram)"
+    )
+    .setup(|app, _, cx| app.demo_setup_group_admin_settings(cx)),
+];
+
 impl QuillApp {
     /// `QUILL_DEMO_GROUP_ADMIN=group|channel|basic|reactions|discussion|
     /// linked|confirm` (default `group`).
-    pub(super) fn demo_setup_group_admin_settings(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        cx: &mut Context<Self>,
-    ) {
-        if demo != Some(ScreenshotDemo::ReadyGroupAdminSettings) {
-            return;
-        }
+    fn demo_setup_group_admin_settings(&mut self, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_GROUP_ADMIN").unwrap_or_else(|_| "group".into());
         let (chat, view) = match mode.as_str() {
             "channel" => (CHANNEL, GroupSettingsView::Main),

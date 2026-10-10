@@ -184,3 +184,12 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// The "Export chat history" options box.
+    ChatExport => DialogSpec::new(
+        1500,
+        |app| app.chat_export_dialog.is_some(),
+        QuillApp::build_chat_export_dialog,
+    ),
+}

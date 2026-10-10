@@ -5,7 +5,7 @@
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::group_invites::apply_ready_admin_log;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
@@ -13,18 +13,20 @@ use quill::state::{InfoPanelTarget, RequestPurpose};
 use quill::telegram::client::copy_and_parse;
 use std::sync::atomic::Ordering;
 
+register_demos![
+    // Admin extras (`QUILL_DEMO_ADMIN_EXTRAS=log|title|broadcast|warning|
+    // delete`; injected data, no live Telegram).
+    DemoSpec::chats(
+        "ready-admin-extras",
+        "screenshot demo — admin extras (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_setup_admin_extras),
+];
+
 impl QuillApp {
     /// `QUILL_DEMO_ADMIN_EXTRAS=log|title|broadcast|warning|delete`
     /// (default `log`).
-    pub(super) fn demo_setup_admin_extras(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if demo != Some(ScreenshotDemo::ReadyAdminExtras) {
-            return;
-        }
+    fn demo_setup_admin_extras(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_ADMIN_EXTRAS").unwrap_or_else(|_| "log".into());
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);

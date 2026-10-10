@@ -818,6 +818,14 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    ChatLook => DialogSpec::new(
+        2100,
+        |app| app.chat_look_dialog.is_some(),
+        QuillApp::build_chat_look_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

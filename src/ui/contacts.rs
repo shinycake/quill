@@ -634,3 +634,17 @@ impl QuillApp {
         cx.notify();
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    ImportContacts => DialogSpec::new(
+        5900,
+        |app| app.import_contacts_dialog.is_some(),
+        QuillApp::build_import_contacts_dialog,
+    ),
+
+    AddContact => DialogSpec::new(
+        6200,
+        |app| app.add_contact_dialog.is_some(),
+        QuillApp::build_add_contact_dialog,
+    ),
+}
