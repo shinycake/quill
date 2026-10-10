@@ -133,7 +133,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     fn call_connect_params(&self, is_outgoing: bool, ready: &ReadyParams) -> ConnectParams {
         let library_versions = ready.library_versions.clone();
-        let is_video = self.session.active_call.as_ref().is_some_and(|call| {
+        let is_video = self.session.calls.active_call.as_ref().is_some_and(|call| {
             // A camera toggle before the transport existed is stored in
             // `camera_on` and must survive into the connect params (a
             // camera-off toggle means the call is negotiated without
@@ -185,6 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn call_video_ready(&self) -> bool {
         let is_video = self
             .session
+            .calls
             .active_call
             .as_ref()
             .is_some_and(|call| call.is_video);
@@ -247,7 +248,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2i: enabling the camera clears the screen-share intent —
     /// ntgcalls forbids camera+screen in Capture mode.
     pub fn set_call_camera(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
-        let Some(call) = self.session.active_call.as_mut() else {
+        let Some(call) = self.session.calls.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
         };
         if call.id != call_id {
@@ -285,7 +286,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Gate first: it borrows `&self`, which can't overlap the
         // mutable call borrow below.
         let screen_available = self.call_screen_source_available();
-        let Some(call) = self.session.active_call.as_mut() else {
+        let Some(call) = self.session.calls.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
         };
         if call.id != call_id {
@@ -315,10 +316,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn select_call_camera(&mut self, camera: Option<String>) -> Result<(), EngineError> {
         let camera_on = self
             .session
+            .calls
             .active_call
             .as_ref()
             .is_some_and(|call| call.camera_on);
-        if let Some(call) = self.session.active_call.as_ref()
+        if let Some(call) = self.session.calls.active_call.as_ref()
             && call.transport.is_some()
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
@@ -338,6 +340,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<(), ConnectSendError> {
         let active_call_after = self
             .session
+            .calls
             .active_call
             .as_ref()
             .map(|call| (call.id, call.user_id, call.is_outgoing, call.ready.clone()));
@@ -357,7 +360,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // TDLib remains the source of truth; engine startup failures must
             // not erase the reducer's honest signaling-only call state.
             if let Err(err) = engine.start_call(*call_id, *user_id, *is_outgoing)
-                && let Some(call) = self.session.active_call.as_mut()
+                && let Some(call) = self.session.calls.active_call.as_mut()
             {
                 call.transport_error = Some(err.to_string());
             }
@@ -367,7 +370,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             if let Some(summary) = self
                 .session
-                .call_summary
+                .calls
+                .summary
                 .as_mut()
                 .filter(|summary| summary.call_id == call_id)
             {
@@ -404,6 +408,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some((call_id, _, is_outgoing, Some(ready))) = &active_call_after
             && self
                 .session
+                .calls
                 .active_call
                 .as_ref()
                 .is_some_and(|call| call.transport.is_none())
@@ -411,7 +416,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let call_id = *call_id;
             let is_outgoing = *is_outgoing;
             if ready.encryption_key.is_empty() {
-                if let Some(call) = self.session.active_call.as_mut() {
+                if let Some(call) = self.session.calls.active_call.as_mut() {
                     call.transport = Some(TransportState::Failed);
                     call.transport_error =
                         Some("call became ready without an encryption key".into());
@@ -430,6 +435,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // can retry).
                 let pre_sharing = self
                     .session
+                    .calls
                     .active_call
                     .as_ref()
                     .is_some_and(|call| call.screen_sharing);
@@ -439,7 +445,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 {
                     let _ = engine.set_screen_share_enabled(call_id, true);
                 }
-                if let Some(call) = self.session.active_call.as_mut() {
+                if let Some(call) = self.session.calls.active_call.as_mut() {
                     match result {
                         Ok(()) => {
                             call.transport = Some(TransportState::Connecting);
@@ -465,6 +471,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if !self
                 .session
+                .calls
                 .active_call
                 .as_ref()
                 .is_some_and(|call| call.id == call_id)
@@ -482,7 +489,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     Some("call engine is unavailable for reconnect".to_string())
                 } else if let Some(params) = self.call_connect_params.clone() {
                     self.reconnect_attempts += 1;
-                    if let Some(call) = self.session.active_call.as_mut() {
+                    if let Some(call) = self.session.calls.active_call.as_mut() {
                         call.transport = Some(TransportState::Reconnecting);
                         call.transport_error = None;
                     }
@@ -499,12 +506,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     Some("no retained call parameters for reconnect".to_string())
                 };
                 if let Some(error) = failure
-                    && let Some(call) = self.session.active_call.as_mut()
+                    && let Some(call) = self.session.calls.active_call.as_mut()
                 {
                     call.transport = Some(TransportState::Failed);
                     call.transport_error = Some(error);
                 }
-            } else if let Some(call) = self.session.active_call.as_mut() {
+            } else if let Some(call) = self.session.calls.active_call.as_mut() {
                 if state == TransportState::Connected {
                     self.reconnect_attempts = 0;
                 }
@@ -527,6 +534,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if let Some(call) = self
                 .session
+                .calls
                 .active_call
                 .as_mut()
                 .filter(|call| call.id == call_id)
@@ -555,6 +563,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if let Some(call) = self
                 .session
+                .calls
                 .active_call
                 .as_mut()
                 .filter(|call| call.id == call_id)
@@ -608,6 +617,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<(), EngineError> {
         let muted = self
             .session
+            .calls
             .active_call
             .as_ref()
             .is_some_and(|call| call.muted);

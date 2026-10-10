@@ -325,7 +325,12 @@ fn message_corner_actions(
 ) -> (AnyElement, Pixels) {
     let more = message_actions_button(chat_id, message_id, cx);
     let (reply, react) = quill::corner_buttons::visible(
-        session.map(|s| (s.media_prefs.corner_reply, s.media_prefs.corner_reaction)),
+        session.map(|s| {
+            (
+                s.settings.media_prefs.corner_reply,
+                s.settings.media_prefs.corner_reaction,
+            )
+        }),
         !message.pending && message.id.0 > 0,
         message.can_react(),
     );
@@ -662,7 +667,7 @@ pub(super) fn session_history_row(
     let emoji_only = match &message.content {
         MessageContent::Text(text) => {
             text.link_preview.is_none()
-                && session.is_none_or(|s| s.media_prefs.big_emoji)
+                && session.is_none_or(|s| s.settings.media_prefs.big_emoji)
                 && quill::emoji_catalog::big_emoji_count_with_entities(&text.text, &text.entities)
                     .is_some()
         }
@@ -1411,7 +1416,7 @@ pub(super) fn session_history_row(
             revealed,
             // Settings → Appearance: message font size.
             look.font,
-            session.is_none_or(|s| s.media_prefs.big_emoji),
+            session.is_none_or(|s| s.settings.media_prefs.big_emoji),
             reserve_footer.then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
             cx,
         )),

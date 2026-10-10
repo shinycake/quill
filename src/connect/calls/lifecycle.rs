@@ -17,7 +17,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.has_call_engine() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.active_call.is_some()
+        if self.session.calls.active_call.is_some()
             || self.session.requests.pending.values().any(|pending| {
                 matches!(
                     pending.purpose,
@@ -54,7 +54,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.has_call_engine() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let call_id = match &self.session.active_call {
+        let call_id = match &self.session.calls.active_call {
             Some(call) if !call.is_outgoing && matches!(call.state, CallState::Pending { .. }) => {
                 call.id
             }
@@ -85,7 +85,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (call_id, duration_secs, is_video) = match &self.session.active_call {
+        let (call_id, duration_secs, is_video) = match &self.session.calls.active_call {
             Some(call) => (call.id, call.connected_secs() as i32, call.is_video),
             None => return Err(ConnectSendError::InvalidRequest),
         };
@@ -100,7 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        if let Some(call) = self.session.active_call.as_mut() {
+        if let Some(call) = self.session.calls.active_call.as_mut() {
             call.state = CallState::HangingUp;
         }
         if let Some(engine) = self.call_engine.as_deref_mut() {
@@ -120,7 +120,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let (call_id, _user_id, is_video) = self
             .session
-            .call_swap_pending
+            .calls
+            .swap_pending
             .take()
             .ok_or(ConnectSendError::InvalidRequest)?;
         let extra = self.session.request(RequestPurpose::DiscardCall, None);
@@ -145,11 +146,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let (pending_id, _user_id, is_video) = self
             .session
-            .call_swap_pending
+            .calls
+            .swap_pending
             .take()
             .ok_or(ConnectSendError::InvalidRequest)?;
-        self.session.call_swap_accept_queued = Some((pending_id, is_video));
-        if self.session.active_call.is_some() {
+        self.session.calls.swap_accept_queued = Some((pending_id, is_video));
+        if self.session.calls.active_call.is_some() {
             self.discard_call().map(|_| ())
         } else {
             self.maybe_accept_queued_swap()
@@ -161,10 +163,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `maybe_decline_busy_calls`. If the caller hung up meanwhile,
     /// the server rejects the accept and the update stream records it.
     pub(crate) fn maybe_accept_queued_swap(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() || self.session.active_call.is_some() {
+        if !self.chats_path_active() || self.session.calls.active_call.is_some() {
             return Ok(());
         }
-        let Some((call_id, _is_video)) = self.session.call_swap_accept_queued.take() else {
+        let Some((call_id, _is_video)) = self.session.calls.swap_accept_queued.take() else {
             return Ok(());
         };
         let extra = self.session.request(RequestPurpose::AcceptCall, None);
@@ -188,7 +190,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// session flag; otherwise the flag is stored (it applies to the
     /// transport on connect).
     pub fn set_call_muted(&mut self, muted: bool) -> Result<(), EngineError> {
-        let Some(call) = self.session.active_call.as_mut() else {
+        let Some(call) = self.session.calls.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
         };
         if call.transport.is_some()
@@ -213,7 +215,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         speaker: Option<String>,
     ) -> Result<(), EngineError> {
         let selection = (mic, speaker);
-        if let Some(call) = self.session.active_call.as_ref()
+        if let Some(call) = self.session.calls.active_call.as_ref()
             && call.transport.is_some()
             && let Some(engine) = self.call_engine.as_deref_mut()
         {
@@ -238,7 +240,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let call_id = match &self.session.call_summary {
+        let call_id = match &self.session.calls.summary {
             Some(summary) if summary.need_rating && !summary.rating_sent => summary.call_id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
@@ -249,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        if let Some(summary) = self.session.call_summary.as_mut() {
+        if let Some(summary) = self.session.calls.summary.as_mut() {
             summary.rating_sent = true;
         }
         Ok(extra)

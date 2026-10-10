@@ -47,9 +47,9 @@ impl QuillApp {
     /// The notice to show, if any.
     pub(crate) fn account_notice(&self) -> Option<AccountNotice> {
         let session = self.session()?;
-        if session.notices.terms.is_some() {
+        if session.settings.notices.terms.is_some() {
             Some(AccountNotice::Terms)
-        } else if !session.notices.service.is_empty() {
+        } else if !session.settings.notices.service.is_empty() {
             Some(AccountNotice::Service)
         } else if self.auth_ui.login_prevented.is_some() {
             Some(AccountNotice::LoginPrevented)
@@ -68,7 +68,7 @@ impl QuillApp {
         let outcome = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.notices.review_outcome.take());
+            .and_then(|live| live.driver.session.settings.notices.review_outcome.take());
         match outcome {
             Some(LoginReview::Allowed) => {
                 self.connection.status_note =
@@ -84,7 +84,7 @@ impl QuillApp {
     /// answers, above the chat list (tdesktop's top-bar suggestion).
     pub(crate) fn unconfirmed_login_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let notices = &session.notices;
+        let notices = &session.settings.notices;
         if notices.unconfirmed_count == 0 || notices.unconfirmed_entries.is_empty() {
             return None;
         }
@@ -148,8 +148,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.review_unconfirmed_sessions(confirmed);
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.notices.unconfirmed_count = 0;
-            demo.notices.unconfirmed_entries.clear();
+            demo.settings.notices.unconfirmed_count = 0;
+            demo.settings.notices.unconfirmed_entries.clear();
             if !confirmed {
                 self.auth_ui.login_prevented = Some(vec!["Berlin, Germany (Pixel 9)".into()]);
             }
@@ -225,7 +225,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> (SharedString, AnyElement, AnyElement, bool) {
         let session = self.session();
-        let terms = session.as_ref().and_then(|s| s.notices.terms.clone());
+        let terms = session
+            .as_ref()
+            .and_then(|s| s.settings.notices.terms.clone());
         let Some(terms) = terms else {
             return (
                 "".into(),
@@ -234,10 +236,18 @@ impl QuillApp {
                 true,
             );
         };
-        let in_flight = session.as_ref().is_some_and(|s| s.notices.terms_in_flight);
-        let error = session.as_ref().and_then(|s| s.notices.terms_error.clone());
-        let busy_delete = session.as_ref().is_some_and(|s| s.account_mutating);
-        let account_error = session.as_ref().and_then(|s| s.account_error.clone());
+        let in_flight = session
+            .as_ref()
+            .is_some_and(|s| s.settings.notices.terms_in_flight);
+        let error = session
+            .as_ref()
+            .and_then(|s| s.settings.notices.terms_error.clone());
+        let busy_delete = session
+            .as_ref()
+            .is_some_and(|s| s.settings.account_mutating);
+        let account_error = session
+            .as_ref()
+            .and_then(|s| s.settings.account_error.clone());
         match self.auth_ui.terms_step {
             TermsStep::Terms => {
                 let min_age = terms.min_user_age;
@@ -301,7 +311,7 @@ impl QuillApp {
                                 } else if let Some(live) = this.live.as_mut() {
                                     let _ = live.driver.accept_terms();
                                 } else if let Some(demo) = this.demo_session.as_mut() {
-                                    demo.notices.terms = None;
+                                    demo.settings.notices.terms = None;
                                 }
                                 cx.notify();
                             })),
@@ -401,7 +411,7 @@ impl QuillApp {
     ) -> (SharedString, AnyElement, AnyElement, bool) {
         let notice = self
             .session()
-            .and_then(|s| s.notices.service.front().cloned());
+            .and_then(|s| s.settings.notices.service.front().cloned());
         let Some(notice) = notice else {
             return (
                 "".into(),

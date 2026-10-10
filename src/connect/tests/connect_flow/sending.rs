@@ -32,7 +32,7 @@ fn less_data_for_calls_pushes_all_networks_and_refuses_unseeded() {
             .all(|json| !json.contains(r#""@type":"setAutoDownloadSettings""#))
     );
 
-    driver.session.data_storage.seeded = true;
+    driver.session.settings.data_storage.seeded = true;
     driver.set_less_data_for_calls(true).unwrap();
     let sent: Vec<Value> = recorder
         .snapshot()

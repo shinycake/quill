@@ -17,8 +17,8 @@ impl Session {
             // error line on the overlay — never a fake success,
             // never an optimistic state change.
             Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) => {
-                self.password_state_loading = false;
-                self.password_op_error = Some(password_op_error_line(op, err));
+                self.auth_state.password_state_loading = false;
+                self.auth_state.password_op_error = Some(password_op_error_line(op, err));
             }
             // Slice A8: a refused change-number op (code send /
             // resend, code check) clears the in-flight flags and
@@ -30,13 +30,13 @@ impl Session {
             // code is still valid — the user can retry or resend.
             // A failed check likewise keeps the pending number.
             Some(RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode) => {
-                self.change_number_loading = false;
-                self.change_number_error =
+                self.auth_state.change_number_loading = false;
+                self.auth_state.change_number_error =
                     Some(sessions_error_line("send the verification code", err));
             }
             Some(RequestPurpose::CheckPhoneNumberCode) => {
-                self.change_number_checking = false;
-                self.change_number_error =
+                self.auth_state.change_number_checking = false;
+                self.auth_state.change_number_error =
                     Some(sessions_error_line("check the verification code", err));
             }
             _ => {}

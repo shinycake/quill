@@ -72,7 +72,7 @@ fn speaking_is_sent_to_tdlib_and_withdrawn_on_mute() {
     assert!(sent().is_empty());
 
     // Joined and unmuted: the tap opens; a quiet window sends nothing.
-    driver.session.active_group_call = Some(joined_unmuted_call(4242));
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
     *level.0.lock().unwrap() = Some(0.05);
     driver.pump_call_audio().unwrap();
     assert!(driver.call_audio.is_open());
@@ -96,6 +96,7 @@ fn speaking_is_sent_to_tdlib_and_withdrawn_on_mute() {
     // Muting closes the tap and withdraws the speaking mark.
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -119,7 +120,7 @@ fn an_unknown_audio_source_sends_nothing() {
     let (dir, recorder, mut driver, _seq) = group_call_test_driver();
     let level = Arc::new(TestLevel(Mutex::new(Some(1.5))));
     driver.call_audio.inject(Box::new(SharedLevel(level)));
-    driver.session.active_group_call = Some(joined_unmuted_call(0));
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(0));
     driver.pump_call_audio().unwrap();
     assert_eq!(
         driver.group_call_self_level(),
@@ -159,6 +160,7 @@ fn peer_microphone_state_follows_the_engine_hook() {
     let muted = |driver: &ConnectDriver<Arc<RecordingSender>>| {
         driver
             .session
+            .calls
             .active_call
             .as_ref()
             .unwrap()

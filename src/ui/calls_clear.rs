@@ -17,7 +17,7 @@ impl QuillApp {
     pub(super) fn open_clear_calls(&mut self, cx: &mut Context<Self>) {
         let (count, clearing) = self
             .session()
-            .map(|s| (s.recent_calls.len(), s.recent_calls_clearing))
+            .map(|s| (s.calls.recent_calls.len(), s.calls.recent_calls_clearing))
             .unwrap_or_default();
         if !can_clear(count, clearing) {
             return;
@@ -41,7 +41,7 @@ impl QuillApp {
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.recent_calls.clear();
+                    session.calls.recent_calls.clear();
                 }
             }
         }

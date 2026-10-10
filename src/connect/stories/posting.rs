@@ -26,13 +26,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let purpose = RequestPurpose::SetCloseFriends;
         let extra = self.session.request(purpose, None);
-        self.session.close_friends_pending = Some(user_ids.to_vec());
+        self.session.stories.close_friends_pending = Some(user_ids.to_vec());
         self.session
             .begin_story_page_op(story_page_op_label(purpose));
         let json = set_close_friends_request(extra, user_ids);
         let sent = self.send_story_page(purpose, extra, &json);
         if sent.is_err() {
-            self.session.close_friends_pending = None;
+            self.session.stories.close_friends_pending = None;
         }
         sent
     }
@@ -66,6 +66,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let allowed = self
             .session
             .stories
+            .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| story.can_toggle_is_posted_to_chat_page);
         if !self.story_page_chat(chat_id) || !allowed {
@@ -93,6 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let repliable = self
             .session
+            .stories
             .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| story.can_be_replied);
@@ -138,6 +140,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let can_get = self
             .session
             .stories
+            .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| story.can_get_interactions);
         if !can_get {
@@ -156,7 +159,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_story_interactions_request(extra, story_id, "", offset, 50);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                if let Some(state) = self.session.story_viewers.as_mut()
+                if let Some(state) = self.session.stories.viewers.as_mut()
                     && state.chat_id == chat_id.0
                     && state.story_id == story_id
                 {
@@ -188,6 +191,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let reportable = self
             .session
+            .stories
             .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| !story.can_be_deleted);
@@ -230,7 +234,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&activate_story_stealth_mode_request(extra))
         {
             Ok(()) => {
-                self.session.story_stealth_error = None;
+                self.session.stories.stealth_error = None;
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -392,6 +396,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let editable = self
             .session
             .stories
+            .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| story.can_be_edited);
         if !editable {
@@ -400,15 +405,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_story(RequestPurpose::EditStory, chat_id, story_id);
-        self.session.story_manage.pending = true;
-        self.session.story_manage.error = None;
+        self.session.stories.manage.pending = true;
+        self.session.stories.manage.error = None;
         match self.sender.send_json(&edit_story_request(
             extra, chat_id, story_id, content, areas, caption,
         )) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.story_manage.pending = false;
+                self.session.stories.manage.pending = false;
                 Err(err)
             }
         }
@@ -428,6 +433,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let editable = self
             .session
             .stories
+            .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| story.can_be_edited);
         if !editable {
@@ -436,8 +442,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra =
             self.session
                 .request_for_story(RequestPurpose::EditStoryCover, chat_id, story_id);
-        self.session.story_manage.pending = true;
-        self.session.story_manage.error = None;
+        self.session.stories.manage.pending = true;
+        self.session.stories.manage.error = None;
         match self.sender.send_json(&edit_story_cover_request(
             extra,
             chat_id,
@@ -447,7 +453,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.story_manage.pending = false;
+                self.session.stories.manage.pending = false;
                 Err(err)
             }
         }
@@ -468,6 +474,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let settable = self
             .session
             .stories
+            .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| story.can_set_privacy_settings);
         if !settable {
@@ -478,8 +485,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             story_id,
         );
-        self.session.story_manage.pending = true;
-        self.session.story_manage.error = None;
+        self.session.stories.manage.pending = true;
+        self.session.stories.manage.error = None;
         match self.sender.send_json(&set_story_privacy_settings_request(
             extra,
             story_id,
@@ -488,7 +495,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.story_manage.pending = false;
+                self.session.stories.manage.pending = false;
                 Err(err)
             }
         }

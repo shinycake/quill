@@ -550,14 +550,14 @@ impl Session {
             )
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            let albums = self.story_albums.entry(chat_id.0).or_default();
+            let albums = self.stories.albums.entry(chat_id.0).or_default();
             if let Some(existing) = albums.iter_mut().find(|a| a.id == album.id) {
                 *existing = album.clone();
             } else {
                 albums.push(album.clone());
             }
             if !matches!(purpose, RequestPurpose::SetStoryAlbumName) {
-                self.story_album_stories.remove(&(chat_id.0, album.id));
+                self.stories.album_stories.remove(&(chat_id.0, album.id));
             }
             self.succeed_story_page_op(purpose);
         }
@@ -603,7 +603,7 @@ impl Session {
         // composer's "post as" picker options. Runs before the
         // search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
-            self.story_post_as_chats = chat_ids.iter().map(|id| id.0).collect();
+            self.stories.post_as_chats = chat_ids.iter().map(|id| id.0).collect();
         }
         // Parity slice: `getChatNotificationSettingsExceptions`
         // answer — the scope is correlated via `pending.scope`
@@ -611,9 +611,10 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
         {
-            self.notification_exceptions
+            self.settings
+                .notification_exceptions
                 .insert(scope, chat_ids.iter().map(|id| id.0).collect());
-            self.notification_exceptions_loading.remove(&scope);
+            self.settings.notification_exceptions_loading.remove(&scope);
         }
         if let Some(pending) = pending
             && matches!(

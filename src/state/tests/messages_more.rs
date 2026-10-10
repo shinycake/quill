@@ -468,8 +468,8 @@ fn b1_force_reply_arms_pending_target() {
 fn delete_account_ok_clears_mutating_without_local_teardown() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.account_mutating = true;
-    session.account_error = Some("stale".into());
+    session.settings.account_mutating = true;
+    session.settings.account_error = Some("stale".into());
     let extra = session.request(RequestPurpose::DeleteAccount, None);
     apply_json(
         &mut session,
@@ -477,15 +477,15 @@ fn delete_account_ok_clears_mutating_without_local_teardown() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.account_mutating);
-    assert!(session.account_error.is_none());
+    assert!(!session.settings.account_mutating);
+    assert!(session.settings.account_error.is_none());
 }
 
 #[test]
 fn delete_account_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.account_mutating = true;
+    session.settings.account_mutating = true;
     let extra = session.request(RequestPurpose::DeleteAccount, None);
     apply_json(
         &mut session,
@@ -496,9 +496,9 @@ fn delete_account_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.account_mutating);
+    assert!(!session.settings.account_mutating);
     assert_eq!(
-        session.account_error.as_deref(),
+        session.settings.account_error.as_deref(),
         Some("Could not update the account: Telegram refused the request")
     );
 }
@@ -507,9 +507,9 @@ fn delete_account_error_surfaces_honestly() {
 fn code_send_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.change_number_phone = Some("+15550199".into());
-    session.change_number_timeout = Some(60);
-    session.change_number_loading = true;
+    session.auth_state.change_number_phone = Some("+15550199".into());
+    session.auth_state.change_number_timeout = Some(60);
+    session.auth_state.change_number_loading = true;
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
     apply_json(
         &mut session,
@@ -520,11 +520,14 @@ fn code_send_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.change_number_loading);
-    assert_eq!(session.change_number_phone.as_deref(), Some("+15550199"));
-    assert_eq!(session.change_number_timeout, Some(60));
+    assert!(!session.auth_state.change_number_loading);
     assert_eq!(
-        session.change_number_error.as_deref(),
+        session.auth_state.change_number_phone.as_deref(),
+        Some("+15550199")
+    );
+    assert_eq!(session.auth_state.change_number_timeout, Some(60));
+    assert_eq!(
+        session.auth_state.change_number_error.as_deref(),
         Some("Could not send the verification code: Telegram refused the request")
     );
 }
@@ -543,10 +546,10 @@ fn validated_order_info_selects_first_shipping() {
             extra.0
         ),
     );
-    let validated = session.payment_validated.as_ref().expect("validated");
+    let validated = session.payments.validated.as_ref().expect("validated");
     assert_eq!(validated.order_info_id, "oid1");
     assert_eq!(validated.shipping_options.len(), 2);
-    assert_eq!(session.payment_shipping_id.as_deref(), Some("ship1"));
+    assert_eq!(session.payments.shipping_id.as_deref(), Some("ship1"));
 }
 
 #[test]

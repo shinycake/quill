@@ -101,14 +101,20 @@ pub(super) fn demo_country_fixtures() -> Vec<Country> {
 impl QuillApp {
     fn signin_countries(&self) -> Vec<Country> {
         match self.live.as_ref() {
-            Some(live) => live.driver.session.countries.clone().unwrap_or_default(),
+            Some(live) => live
+                .driver
+                .session
+                .auth_state
+                .countries
+                .clone()
+                .unwrap_or_default(),
             None => self.auth_ui.signin.demo_countries.clone(),
         }
     }
 
     fn signin_guess_iso(&self) -> Option<String> {
         match self.live.as_ref() {
-            Some(live) => live.driver.session.guessed_country_iso.clone(),
+            Some(live) => live.driver.session.auth_state.guessed_country_iso.clone(),
             None => self.auth_ui.signin.demo_guess.clone(),
         }
     }
@@ -293,7 +299,7 @@ impl QuillApp {
     fn signin_error(&mut self) -> Option<(AuthRequestError, i64)> {
         let err = self
             .session()
-            .and_then(|session| session.last_auth_error)
+            .and_then(|session| session.auth_state.last_auth_error)
             .or(self.auth_ui.signin.demo_error);
         let Some(err) = err else {
             self.auth_ui.signin.error_clock = None;

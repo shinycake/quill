@@ -13,17 +13,17 @@ fn contact_joined_option_gates_the_notification() {
     apply_json(&mut session, &seq, &sink, ADA_CHAT);
     session.app_active = false;
     apply_json(&mut session, &seq, &sink, JOINED);
-    assert_eq!(session.pending_notifications.len(), 1);
-    session.pending_notifications.clear();
+    assert_eq!(session.settings.pending_notifications.len(), 1);
+    session.settings.pending_notifications.clear();
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateOption","name":"disable_contact_registered_notifications","value":{"@type":"optionValueBoolean","value":true}}"#,
     );
-    assert!(session.disable_contact_registered_notifications);
+    assert!(session.settings.disable_contact_registered_notifications);
     apply_json(&mut session, &seq, &sink, JOINED);
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
 }
 
 #[test]
@@ -33,10 +33,10 @@ fn pinned_scope_default_gates_the_notification() {
     apply_json(&mut session, &seq, &sink, ADA_CHAT);
     session.app_active = false;
     apply_json(&mut session, &seq, &sink, PINNED);
-    assert_eq!(session.pending_notifications.len(), 1);
-    session.pending_notifications.clear();
+    assert_eq!(session.settings.pending_notifications.len(), 1);
+    session.settings.pending_notifications.clear();
     // The private-chat scope turns pinned-message notifications off.
-    session.scope_notification_settings.insert(
+    session.settings.scope_notification_settings.insert(
         NotificationSettingsScope::PrivateChats,
         ScopeNotificationSettings {
             disable_pinned_message_notifications: true,
@@ -44,7 +44,7 @@ fn pinned_scope_default_gates_the_notification() {
         },
     );
     apply_json(&mut session, &seq, &sink, PINNED);
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
     // Ordinary messages still notify.
     apply_json(
         &mut session,
@@ -52,7 +52,7 @@ fn pinned_scope_default_gates_the_notification() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":62,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
     );
-    assert_eq!(session.pending_notifications.len(), 1);
+    assert_eq!(session.settings.pending_notifications.len(), 1);
 }
 
 #[test]
@@ -61,14 +61,14 @@ fn attention_follows_the_flash_pref_not_the_desktop_switch() {
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, ADA_CHAT);
     session.app_active = false;
-    session.desktop_notifications = false;
+    session.settings.desktop_notifications = false;
     apply_json(&mut session, &seq, &sink, JOINED);
-    assert!(session.pending_notifications.is_empty());
-    assert!(session.pending_attention);
-    session.pending_attention = false;
-    session.badge_prefs.flash_bounce = false;
+    assert!(session.settings.pending_notifications.is_empty());
+    assert!(session.settings.pending_attention);
+    session.settings.pending_attention = false;
+    session.settings.badge_prefs.flash_bounce = false;
     apply_json(&mut session, &seq, &sink, JOINED);
-    assert!(!session.pending_attention);
+    assert!(!session.settings.pending_attention);
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn a_focused_open_chat_does_not_ask_for_attention() {
     session.app_active = true;
     session.open_chat = Some(ChatId(7));
     apply_json(&mut session, &seq, &sink, JOINED);
-    assert!(!session.pending_attention);
+    assert!(!session.settings.pending_attention);
 }
 
 #[test]

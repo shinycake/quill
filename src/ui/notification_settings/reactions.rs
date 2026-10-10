@@ -15,7 +15,12 @@ impl QuillApp {
             // Guard: never send schema-defaults as current state — no
             // getter exists, so wait for the first
             // `updateReactionNotificationSettings` instead.
-            let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
+            let Some(mut settings) = live
+                .driver
+                .session
+                .settings
+                .reaction_notification_settings
+                .clone()
             else {
                 self.connection.status_note = "reaction settings still loading…".into();
                 cx.notify();
@@ -34,6 +39,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
             let mut settings = session
+                .settings
                 .reaction_notification_settings
                 .clone()
                 .unwrap_or_default();
@@ -42,7 +48,7 @@ impl QuillApp {
                 ReactionSourceKind::Story => settings.story_reaction_source = source,
                 ReactionSourceKind::PollVote => settings.poll_vote_source = source,
             }
-            session.reaction_notification_settings = Some(settings);
+            session.settings.reaction_notification_settings = Some(settings);
             self.connection.status_note = "reaction notification setting updated".into();
         }
         cx.notify();
@@ -56,7 +62,12 @@ impl QuillApp {
             // Guard: never send schema-defaults as current state — no
             // getter exists, so wait for the first
             // `updateReactionNotificationSettings` instead.
-            let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
+            let Some(mut settings) = live
+                .driver
+                .session
+                .settings
+                .reaction_notification_settings
+                .clone()
             else {
                 self.connection.status_note = "reaction settings still loading…".into();
                 cx.notify();
@@ -71,11 +82,12 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
             let mut settings = session
+                .settings
                 .reaction_notification_settings
                 .clone()
                 .unwrap_or_default();
             settings.sound_id = sound_id;
-            session.reaction_notification_settings = Some(settings);
+            session.settings.reaction_notification_settings = Some(settings);
             self.connection.status_note = "reaction sound updated".into();
         }
         cx.notify();
@@ -92,7 +104,12 @@ impl QuillApp {
             // Guard: never send schema-defaults as current state — no
             // getter exists, so wait for the first
             // `updateReactionNotificationSettings` instead.
-            let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
+            let Some(mut settings) = live
+                .driver
+                .session
+                .settings
+                .reaction_notification_settings
+                .clone()
             else {
                 self.connection.status_note = "reaction settings still loading…".into();
                 cx.notify();
@@ -107,11 +124,12 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
             let mut settings = session
+                .settings
                 .reaction_notification_settings
                 .clone()
                 .unwrap_or_default();
             settings.show_preview = show_preview;
-            session.reaction_notification_settings = Some(settings);
+            session.settings.reaction_notification_settings = Some(settings);
             self.connection.status_note = "reaction preview updated".into();
         }
         cx.notify();
@@ -128,11 +146,11 @@ impl QuillApp {
     ) -> AnyElement {
         let settings: ReactionNotificationSettings = self
             .session()
-            .and_then(|s| s.reaction_notification_settings.clone())
+            .and_then(|s| s.settings.reaction_notification_settings.clone())
             .unwrap_or_default();
         let loaded = self
             .session()
-            .is_some_and(|s| s.reaction_notification_settings.is_some());
+            .is_some_and(|s| s.settings.reaction_notification_settings.is_some());
         let sound_label = match settings.sound_id {
             -1 => "Default".to_string(),
             0 => "None".to_string(),

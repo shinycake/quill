@@ -162,8 +162,11 @@ impl super::app::QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let (call, summary) = (session.active_call.clone(), session.call_summary.clone());
-        let enabled = session.inapp_sounds_enabled;
+        let (call, summary) = (
+            session.calls.active_call.clone(),
+            session.calls.summary.clone(),
+        );
+        let enabled = session.settings.inapp_sounds_enabled;
         let marks = &mut self.calls.sound_marks;
         let sounds = &mut self.calls.sounds;
         sounds.set_enabled(enabled);

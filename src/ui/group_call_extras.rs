@@ -23,7 +23,7 @@ use std::time::Duration;
 impl QuillApp {
     fn ptt_config(&self) -> PttConfig {
         self.session()
-            .map(|s| s.call_prefs.push_to_talk.sanitized())
+            .map(|s| s.calls.prefs.push_to_talk.sanitized())
             .unwrap_or_default()
     }
 
@@ -33,7 +33,7 @@ impl QuillApp {
 
     fn group_call_joined(&self) -> bool {
         self.session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .is_some_and(|call| call.is_joined)
     }
 
@@ -70,7 +70,7 @@ impl QuillApp {
         // An admin-muted participant cannot open the microphone by key.
         let forced = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .and_then(|call| call.participants.iter().find(|p| p.is_current_user))
             .is_some_and(|me| me.is_muted_for_all_users && !me.can_unmute_self);
         if forced {

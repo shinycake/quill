@@ -181,7 +181,7 @@ impl QuillApp {
 
         if self
             .session()
-            .is_some_and(|s| s.privacy_data.check_password_suggested)
+            .is_some_and(|s| s.settings.privacy_data.check_password_suggested)
         {
             body = body.child(self.password_check_card(cx));
         }
@@ -331,12 +331,12 @@ impl QuillApp {
     /// "Block…" contact picker, and paging.
     fn privacy_blocked_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let total = session.map(|s| s.blocked_total).unwrap_or(0);
+        let total = session.map(|s| s.settings.blocked_total).unwrap_or(0);
         let list: Vec<i64> = session
-            .and_then(|s| s.blocked_senders.clone())
+            .and_then(|s| s.settings.blocked_senders.clone())
             .unwrap_or_default();
-        let loading = session.is_some_and(|s| s.blocked_loading);
-        let error = session.is_some_and(|s| s.blocked_error);
+        let loading = session.is_some_and(|s| s.settings.blocked_loading);
+        let error = session.is_some_and(|s| s.settings.blocked_error);
 
         let mut section = div().flex().flex_col().gap_1();
         section = section.child(
@@ -539,10 +539,10 @@ impl QuillApp {
                 self.connection.status_note = format!("block failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            let list = demo.blocked_senders.get_or_insert_with(Vec::new);
+            let list = demo.settings.blocked_senders.get_or_insert_with(Vec::new);
             if !list.contains(&user_id) {
                 list.push(user_id);
-                demo.blocked_total += 1;
+                demo.settings.blocked_total += 1;
             }
         }
         cx.notify();
@@ -561,10 +561,10 @@ impl QuillApp {
                 self.connection.status_note = format!("unblock failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut()
-            && let Some(list) = demo.blocked_senders.as_mut()
+            && let Some(list) = demo.settings.blocked_senders.as_mut()
         {
             list.retain(|id| *id != user_id);
-            demo.blocked_total = demo.blocked_total.saturating_sub(1);
+            demo.settings.blocked_total = demo.settings.blocked_total.saturating_sub(1);
         }
         cx.notify();
     }
@@ -584,16 +584,15 @@ impl QuillApp {
             _ => {}
         }
         let session = self.session();
-        let current: Option<PrivacyWho> =
-            match target {
-                PrivacyEditorTarget::Rule(key) => session
-                    .and_then(|s| s.privacy.get(&key))
-                    .and_then(|st| match st {
-                        PrivacyKeyState::Ready(d) => d.who,
-                        _ => None,
-                    }),
-                PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => None,
-            };
+        let current: Option<PrivacyWho> = match target {
+            PrivacyEditorTarget::Rule(key) => session
+                .and_then(|s| s.settings.privacy.get(&key))
+                .and_then(|st| match st {
+                    PrivacyKeyState::Ready(d) => d.who,
+                    _ => None,
+                }),
+            PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => None,
+        };
         let mut body = div().flex().flex_col().gap_1();
         if let PrivacyEditorTarget::Rule(key) = target {
             body = body.child(
@@ -628,7 +627,7 @@ impl QuillApp {
             }
             if key.has_exceptions() {
                 let detail = session
-                    .and_then(|s| s.privacy.get(&key))
+                    .and_then(|s| s.settings.privacy.get(&key))
                     .and_then(|st| match st {
                         PrivacyKeyState::Ready(d) => Some(d.clone()),
                         _ => None,
@@ -664,7 +663,7 @@ impl QuillApp {
                 }
             }
             if key.restriction_needs_premium()
-                && !session.is_some_and(|s| s.premium_option == Some(true))
+                && !session.is_some_and(|s| s.payments.premium_option == Some(true))
             {
                 body = body.child(
                     div()
@@ -734,7 +733,7 @@ impl QuillApp {
             && who != PrivacyWho::Everybody
             && !self
                 .session()
-                .is_some_and(|s| s.premium_option == Some(true))
+                .is_some_and(|s| s.payments.premium_option == Some(true))
         {
             self.connection.status_note =
                 "Restricting who can send you voice messages needs Telegram Premium.".into();
@@ -750,7 +749,7 @@ impl QuillApp {
                     PrivacyEditorTarget::Rule(key) => {
                         // Not Ready (Loading/Failed): ignore the click — sending
                         // a base-only detail here would wipe the server exceptions.
-                        let detail = match live.driver.session.privacy.get(&key) {
+                        let detail = match live.driver.session.settings.privacy.get(&key) {
                             Some(PrivacyKeyState::Ready(d)) => d.with_base(who),
                             _ => return,
                         };
@@ -767,11 +766,13 @@ impl QuillApp {
                 PrivacyEditorTarget::Rule(key) => {
                     // Not Ready (Loading/Failed): ignore the click — inserting
                     // a base-only detail here would wipe the server exceptions.
-                    let detail = match demo.privacy.get(&key) {
+                    let detail = match demo.settings.privacy.get(&key) {
                         Some(PrivacyKeyState::Ready(d)) => d.with_base(who),
                         _ => return,
                     };
-                    demo.privacy.insert(key, PrivacyKeyState::Ready(detail));
+                    demo.settings
+                        .privacy
+                        .insert(key, PrivacyKeyState::Ready(detail));
                 }
                 PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => return,
             }
@@ -824,9 +825,9 @@ impl QuillApp {
     fn read_date_toggle_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let hidden = !self
             .session()
-            .and_then(|s| s.read_date_show)
+            .and_then(|s| s.settings.read_date_show)
             .unwrap_or(true);
-        let loading = self.session().is_some_and(|s| s.read_date_loading);
+        let loading = self.session().is_some_and(|s| s.settings.read_date_loading);
         div()
             .id("privacy-hide-read-time")
             .role(gpui_kit::Role::Button)
@@ -867,7 +868,7 @@ impl QuillApp {
     fn toggle_read_date(&mut self, cx: &mut Context<Self>) {
         let next = !self
             .session()
-            .and_then(|s| s.read_date_show)
+            .and_then(|s| s.settings.read_date_show)
             .unwrap_or(true);
         if self.live.is_some() {
             let result = {
@@ -878,7 +879,7 @@ impl QuillApp {
                 self.connection.status_note = format!("read-date update failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.read_date_show = Some(next);
+            demo.settings.read_date_show = Some(next);
         }
         cx.notify();
     }
@@ -894,6 +895,7 @@ impl QuillApp {
             return None;
         };
         let detail = session
+            .settings
             .privacy
             .get(&key)
             .and_then(|st| match st {
@@ -1216,7 +1218,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let current = self.session().and_then(|s| {
-            s.privacy.get(&key).and_then(|st| match st {
+            s.settings.privacy.get(&key).and_then(|st| match st {
                 PrivacyKeyState::Ready(d) => Some(d.clone()),
                 _ => None,
             })
@@ -1234,7 +1236,9 @@ impl QuillApp {
                 self.connection.status_note = format!("privacy update failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.privacy.insert(key, PrivacyKeyState::Ready(detail));
+            demo.settings
+                .privacy
+                .insert(key, PrivacyKeyState::Ready(detail));
         }
         cx.notify();
     }
@@ -1380,7 +1384,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
         }
     }
     let mut ready = |key: PrivacySettingKey, who: PrivacyWho, always: &[i64], never: &[i64]| {
-        session.privacy.insert(
+        session.settings.privacy.insert(
             key,
             PrivacyKeyState::Ready(PrivacyRuleDetail {
                 who: Some(who),
@@ -1466,19 +1470,22 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     // tdesktop offers Premium users in the Always list of "Groups &
     // Channels" and Mini Apps in both lists of "Gifts".
     if let Some(PrivacyKeyState::Ready(detail)) = session
+        .settings
         .privacy
         .get_mut(&PrivacySettingKey::AllowChatInvites)
     {
         detail.allow_premium = true;
         detail.always_chats = vec![9001];
     }
-    if let Some(PrivacyKeyState::Ready(detail)) =
-        session.privacy.get_mut(&PrivacySettingKey::AutosaveGifts)
+    if let Some(PrivacyKeyState::Ready(detail)) = session
+        .settings
+        .privacy
+        .get_mut(&PrivacySettingKey::AutosaveGifts)
     {
         detail.never_bots = true;
     }
     session.my_user_id = Some(60);
-    session.premium_option = Some(true);
+    session.payments.premium_option = Some(true);
     session.user_full_infos.insert(
         60,
         quill::state::UserFullInfoData {
@@ -1493,33 +1500,33 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
             ..Default::default()
         },
     );
-    session.privacy_data.new_chat = Some(quill::privacy::NewChatPrivacyState::Ready(
+    session.settings.privacy_data.new_chat = Some(quill::privacy::NewChatPrivacyState::Ready(
         quill::privacy::NewChatPrivacy {
             allow_from_unknown: false,
             incoming_paid_message_star_count: 0,
         },
     ));
-    session.privacy_data.can_ignore_sensitive = true;
-    session.privacy_data.ignore_sensitive = Some(false);
-    session.privacy_data.check_password_suggested = true;
-    session.privacy_data.inactive_session_ttl_days = Some(180);
-    session.read_date_show = Some(true);
+    session.settings.privacy_data.can_ignore_sensitive = true;
+    session.settings.privacy_data.ignore_sensitive = Some(false);
+    session.settings.privacy_data.check_password_suggested = true;
+    session.settings.privacy_data.inactive_session_ttl_days = Some(180);
+    session.settings.read_date_show = Some(true);
     session.archive_chat_list_settings = Some(quill::telegram::requests::ArchiveChatListSettings {
         archive_and_mute_new_chats_from_unknown_users: true,
         keep_unmuted_chats_archived: false,
         keep_chats_from_folders_archived: true,
     });
-    session.call_privacy_allow_calls = Some(PrivacyWho::Contacts);
-    session.call_privacy_p2p = Some(PrivacyWho::Everybody);
-    session.blocked_senders = Some(vec![63]);
-    session.blocked_total = 1;
+    session.calls.privacy_allow_calls = Some(PrivacyWho::Contacts);
+    session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
+    session.settings.blocked_senders = Some(vec![63]);
+    session.settings.blocked_total = 1;
     session.contacts = Some(vec![61, 62, 63]);
 }
 /// Slice S3: the Privacy-screen row value for one rule key: the base
 /// choice, with the always/never exception counts when non-zero (TGX
 /// `SettingsPrivacyKeyController` shows the mode plus exceptions).
 fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
-    match session.privacy.get(&key) {
+    match session.settings.privacy.get(&key) {
         None | Some(PrivacyKeyState::Loading) => "Loading…".to_string(),
         Some(PrivacyKeyState::Failed) => "Couldn't load".to_string(),
         Some(PrivacyKeyState::Ready(detail)) => {
@@ -1538,7 +1545,7 @@ fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
 
 /// B13: the "Who can message me" row value (tdesktop Messages privacy).
 pub(super) fn new_chat_privacy_value(session: &Session) -> String {
-    match session.privacy_data.new_chat {
+    match session.settings.privacy_data.new_chat {
         None | Some(quill::privacy::NewChatPrivacyState::Loading) => "Loading…".to_string(),
         Some(quill::privacy::NewChatPrivacyState::Failed) => "Couldn't load".to_string(),
         Some(quill::privacy::NewChatPrivacyState::Ready(settings)) => {

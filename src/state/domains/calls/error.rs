@@ -22,19 +22,19 @@ impl Session {
                 // from elsewhere and must survive. The driver
                 // also refuses a second `createCall` while one
                 // is active.
-                self.call_error = Some(call_request_error_line(err, "Could not start the call"));
+                self.calls.error = Some(call_request_error_line(err, "Could not start the call"));
             }
             Some(RequestPurpose::AcceptCall) => {
-                self.call_error = Some(call_request_error_line(err, "Could not answer the call"));
+                self.calls.error = Some(call_request_error_line(err, "Could not answer the call"));
             }
             Some(RequestPurpose::DiscardCall) => {
-                self.call_error = Some(call_request_error_line(err, "Could not hang up the call"));
+                self.calls.error = Some(call_request_error_line(err, "Could not hang up the call"));
             }
             Some(RequestPurpose::SendCallRating) => {
-                self.call_error = Some(call_request_error_line(err, "Could not send the rating"));
+                self.calls.error = Some(call_request_error_line(err, "Could not send the rating"));
             }
             Some(RequestPurpose::SendCallDebugInformation) => {
-                if let Some(summary) = self.call_summary.as_mut() {
+                if let Some(summary) = self.calls.summary.as_mut() {
                     summary.debug_information_sent = false;
                     summary.debug_information_error =
                         Some(call_request_error_line(err, "Could not upload diagnostics"));
@@ -44,30 +44,30 @@ impl Session {
             // surface on the Recent-calls tab (the UI reads the
             // flags), not the call overlay.
             Some(RequestPurpose::SearchCallMessages) => {
-                self.recent_calls_loading = false;
-                self.recent_calls_error = true;
+                self.calls.recent_calls_loading = false;
+                self.calls.recent_calls_error = true;
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                self.recent_calls_clearing = false;
+                self.calls.recent_calls_clearing = false;
                 self.chat_action_error = Some(crate::chatlist_calls::clear_failed(err.code));
             }
             Some(RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { .. })) => {
                 self.privacy_roundtrip_done();
-                self.call_privacy_error = true;
+                self.calls.privacy_error = true;
             }
             // Phase C2i: a failed `setUserPrivacySettingRules`
             // clears the optimistic value (the next fetch
             // restores the truth) and flags the error.
             Some(RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting })) => {
                 match setting {
-                    CallPrivacySetting::AllowCalls => self.call_privacy_allow_calls = None,
-                    CallPrivacySetting::PeerToPeer => self.call_privacy_p2p = None,
+                    CallPrivacySetting::AllowCalls => self.calls.privacy_allow_calls = None,
+                    CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = None,
                 }
                 self.privacy_roundtrip_done();
-                self.call_privacy_error = true;
+                self.calls.privacy_error = true;
             }
             Some(RequestPurpose::SendCallLog) => {
-                if let Some(summary) = self.call_summary.as_mut() {
+                if let Some(summary) = self.calls.summary.as_mut() {
                     summary.log_sent = false;
                     summary.log_error = Some(call_request_error_line(
                         err,
@@ -81,7 +81,7 @@ impl Session {
             // call in place — `updateGroupCall` is the source
             // of truth for join state.
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChat { .. })) => {
-                self.group_call_error = Some(call_request_error_line(
+                self.calls.group_call_error = Some(call_request_error_line(
                     err,
                     "Could not start the voice chat",
                 ));
@@ -95,22 +95,23 @@ impl Session {
                 // as a rejoin (only `rejoin_group_call`
                 // increments the counter).
                 let rejoin_attempt = self
+                    .calls
                     .active_group_call
                     .as_ref()
                     .map(|call| call.rejoin_attempts)
                     .unwrap_or(0);
                 if rejoin_attempt > 0 {
-                    if let Some(call) = self.active_group_call.as_mut() {
+                    if let Some(call) = self.calls.active_group_call.as_mut() {
                         // Keep the banner + manual Rejoin
                         // available even after exhaustion.
                         call.reconnecting = true;
                         if call.rejoin_attempts >= 3 {
-                            self.group_call_error =
+                            self.calls.group_call_error =
                                 Some("Reconnect attempts exhausted.".to_string());
                         }
                     }
                 } else {
-                    self.group_call_error = Some(call_request_error_line(
+                    self.calls.group_call_error = Some(call_request_error_line(
                         err,
                         "Could not join the voice chat",
                     ));
@@ -122,14 +123,14 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::StartGroupCallScreenSharing {
                 group_call_id,
             })) => {
-                if let Some(tracked) = self.active_group_call.as_mut()
+                if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
                     tracked.screen_share_pending = false;
                     tracked.screen_sharing = false;
                     tracked.screen_share_answer.clear();
                 }
-                self.group_call_error = Some(call_request_error_line(
+                self.calls.group_call_error = Some(call_request_error_line(
                     err,
                     "Could not start screen sharing",
                 ));
@@ -137,14 +138,14 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::EndGroupCallScreenSharing {
                 group_call_id,
             })) => {
-                if let Some(tracked) = self.active_group_call.as_mut()
+                if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
                     tracked.screen_share_pending = false;
                     tracked.screen_sharing = false;
                     tracked.screen_share_answer.clear();
                 }
-                self.group_call_error = Some(call_request_error_line(
+                self.calls.group_call_error = Some(call_request_error_line(
                     err,
                     "Could not stop screen sharing",
                 ));
@@ -178,7 +179,7 @@ impl Session {
                 | RequestPurpose::JoinGroupCallInvitation
                 | RequestPurpose::Calls(CallsPurpose::DeclineGroupCallInvitation { .. }),
             ) => {
-                self.group_call_error =
+                self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
             }
             // The "join as" list is optional: a failure just leaves the

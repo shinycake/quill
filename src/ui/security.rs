@@ -33,9 +33,13 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let session = this.session();
-            let state = session.as_ref().and_then(|s| s.password_state.clone());
-            let loading = session.is_some_and(|s| s.password_state_loading);
-            let error = session.as_ref().and_then(|s| s.password_op_error.clone());
+            let state = session
+                .as_ref()
+                .and_then(|s| s.auth_state.password_state.clone());
+            let loading = session.is_some_and(|s| s.auth_state.password_state_loading);
+            let error = session
+                .as_ref()
+                .and_then(|s| s.auth_state.password_op_error.clone());
             // A finished recovery / reset / login-email step reports on the
             // status screen.
             if this.twofa_step_finished()
@@ -130,12 +134,12 @@ impl QuillApp {
             let session = this.session();
             let sessions = session
                 .as_ref()
-                .and_then(|s| s.sessions.clone())
+                .and_then(|s| s.settings.sessions.clone())
                 .unwrap_or_default();
-            let loading = session.is_some_and(|s| s.sessions_loading);
-            let mutating = session.is_some_and(|s| s.sessions_mutating);
-            let stale = session.is_some_and(|s| s.sessions_stale);
-            let error = session.as_ref().and_then(|s| s.sessions_error.clone());
+            let loading = session.is_some_and(|s| s.settings.sessions_loading);
+            let mutating = session.is_some_and(|s| s.settings.sessions_mutating);
+            let stale = session.is_some_and(|s| s.settings.sessions_stale);
+            let error = session.as_ref().and_then(|s| s.settings.sessions_error.clone());
             let current = sessions.iter().find(|s| s.is_current);
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()
@@ -348,16 +352,16 @@ impl QuillApp {
             let session = this.session();
             let has_websites = session
                 .as_ref()
-                .is_some_and(|s| s.connected_websites.is_some());
+                .is_some_and(|s| s.settings.connected_websites.is_some());
             let mut websites = session
                 .as_ref()
-                .and_then(|s| s.connected_websites.clone())
+                .and_then(|s| s.settings.connected_websites.clone())
                 .unwrap_or_default();
             websites.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
-            let loading = session.is_some_and(|s| s.connected_websites_loading);
-            let mutating = session.is_some_and(|s| s.websites_mutating);
-            let stale = session.is_some_and(|s| s.websites_stale);
-            let error = session.as_ref().and_then(|s| s.websites_error.clone());
+            let loading = session.is_some_and(|s| s.settings.connected_websites_loading);
+            let mutating = session.is_some_and(|s| s.settings.websites_mutating);
+            let stale = session.is_some_and(|s| s.settings.websites_stale);
+            let error = session.as_ref().and_then(|s| s.settings.websites_error.clone());
 
             let mut body = div().flex().flex_col().gap_2();
             if let Some(line) = error {
@@ -560,8 +564,8 @@ impl QuillApp {
             live.driver.refresh_storage_statistics();
             let _ = live.driver.maybe_fetch_storage_statistics();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.storage_stats = Some(demo_storage_stats());
-            session.storage_stats_loading = false;
+            session.settings.storage_stats = Some(demo_storage_stats());
+            session.settings.storage_stats_loading = false;
         }
         cx.notify();
     }
@@ -588,7 +592,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.privacy_data
+            demo.settings
+                .privacy_data
                 .inactive_session_ttl_days
                 .get_or_insert(180);
         }
@@ -630,13 +635,13 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(super) fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.sessions = None;
-            live.driver.session.sessions_stale = false;
+            live.driver.session.settings.sessions = None;
+            live.driver.session.settings.sessions_stale = false;
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.sessions = Some(demo_sessions());
-            session.sessions_loading = false;
-            session.sessions_error = None;
+            session.settings.sessions = Some(demo_sessions());
+            session.settings.sessions_loading = false;
+            session.settings.sessions_error = None;
         }
         cx.notify();
     }
@@ -650,9 +655,9 @@ impl QuillApp {
         if view == TwofaView::Status {
             self.clear_twofa_flow();
         } else if let Some(session) = self.live.as_mut().map(|l| &mut l.driver.session) {
-            session.twofa_flow.notice = None;
+            session.auth_state.twofa_flow.notice = None;
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.twofa_flow.notice = None;
+            session.auth_state.twofa_flow.notice = None;
         }
     }
 
@@ -852,7 +857,7 @@ impl QuillApp {
         if state.has_password
             && self
                 .session()
-                .is_some_and(|s| s.privacy_data.check_password_suggested)
+                .is_some_and(|s| s.settings.privacy_data.check_password_suggested)
         {
             body = body.child(self.password_check_card(cx));
         }
@@ -1441,13 +1446,13 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(super) fn refresh_websites(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.connected_websites = None;
-            live.driver.session.websites_stale = false;
+            live.driver.session.settings.connected_websites = None;
+            live.driver.session.settings.websites_stale = false;
             let _ = live.driver.maybe_fetch_connected_websites();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.connected_websites = Some(demo_websites());
-            session.connected_websites_loading = false;
-            session.websites_error = None;
+            session.settings.connected_websites = Some(demo_websites());
+            session.settings.connected_websites_loading = false;
+            session.settings.websites_error = None;
         }
         cx.notify();
     }

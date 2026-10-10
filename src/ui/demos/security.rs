@@ -39,8 +39,8 @@ impl QuillApp {
     fn demo_ready_marketplace_gift(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             let quote=quill::marketplace::GiftQuote::parse(&serde_json::json!({"name":"PlushPepe-123","title":"Plush Pepe","resale_parameters":{"star_count":25,"gram_cent_count":0,"gram_only":false}})).unwrap();
-            session.gift_text_length_max = Some(128);
-            session.marketplace_gift = Some(quill::marketplace::GiftPurchase {
+            session.payments.gift_text_length_max = Some(128);
+            session.payments.marketplace_gift = Some(quill::marketplace::GiftPurchase {
                 chat_id: ChatId(11),
                 recipient: quill::telegram::envelope::MessageSender::User { user_id: 11 },
                 recipient_name: "Demo chat A".into(),
@@ -70,9 +70,9 @@ impl QuillApp {
         // the overlay open (injected, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            session.sessions = Some(demo_sessions());
-            session.sessions_loading = false;
-            session.sessions_error = None;
+            session.settings.sessions = Some(demo_sessions());
+            session.settings.sessions_loading = false;
+            session.settings.sessions_error = None;
         }
         self.privacy.sessions_open = true;
         if std::env::var_os("QUILL_DEMO_DEVICE_LINK").is_some() {
@@ -89,10 +89,10 @@ impl QuillApp {
         // Telegram).
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            session.storage_stats = Some(demo_storage_stats());
-            session.storage_stats_loading = false;
-            session.data_storage = demo_data_storage_prefs();
-            session.storage_freed = Some(54_525_952);
+            session.settings.storage_stats = Some(demo_storage_stats());
+            session.settings.storage_stats_loading = false;
+            session.settings.data_storage = demo_data_storage_prefs();
+            session.settings.storage_freed = Some(54_525_952);
         }
         self.settings.storage_usage_open = true;
         self.connection.status_note = "screenshot demo — data & storage".into();

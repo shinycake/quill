@@ -152,7 +152,7 @@ fn message_reaction_options_parse_and_custom_emoji_reactions_toggle() {
             ReactionChoice::Emoji("🔥".into()),
         ]
     );
-    assert!(h.driver.session.story_available_reactions.is_none());
+    assert!(h.driver.session.stories.available_reactions.is_none());
 
     h.driver
         .toggle_reaction_choice(ChatId(7), MessageId(50), &ReactionChoice::CustomEmoji(77))

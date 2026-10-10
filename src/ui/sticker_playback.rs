@@ -224,7 +224,7 @@ impl QuillApp {
             .and_then(|f| f.usable_path())
             .and_then(|p| sandboxed_display_path(p, &self.media_display_roots()));
         let Some(path) = path else {
-            if !session.media_prefs.data_saver
+            if !session.settings.media_prefs.data_saver
                 && session.should_download(id)
                 && let Some(live) = self.live.as_mut()
             {
@@ -449,7 +449,7 @@ impl QuillApp {
             let looping = !once
                 && self
                     .session()
-                    .is_none_or(|s| s.media_prefs.loop_animated_stickers);
+                    .is_none_or(|s| s.settings.media_prefs.loop_animated_stickers);
             self.layered_clip(id, format, size, looping, cx)
                 .map(AnimatedVisual::Layered)
         } else {
@@ -529,7 +529,7 @@ impl QuillApp {
             return out;
         };
         let roots = self.media_display_roots();
-        let looping = session.media_prefs.loop_animated_stickers;
+        let looping = session.settings.media_prefs.loop_animated_stickers;
         for entity in entities {
             let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
                 continue;
@@ -680,7 +680,7 @@ impl QuillApp {
             let looping = !once
                 && app
                     .session()
-                    .is_none_or(|s| s.media_prefs.loop_animated_stickers);
+                    .is_none_or(|s| s.settings.media_prefs.loop_animated_stickers);
             let count = clip.frames.len();
             let index = if !play {
                 0

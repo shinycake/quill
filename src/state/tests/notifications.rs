@@ -57,8 +57,8 @@ fn scope_mute_default_suppresses_toast_and_sound() {
         r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey","entities":[]}}}}"#,
     );
     // …but the scope default mute suppresses both the toast and the sound.
-    assert!(session.pending_notifications.is_empty());
-    assert!(session.pending_sound_plays.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
+    assert!(session.settings.pending_sound_plays.is_empty());
     let chat = session.chats.get(&14).unwrap();
     assert!(session.effective_muted(chat));
     assert!(session.notification_sound_for(chat).is_none());
@@ -86,9 +86,9 @@ fn scope_mute_default_suppresses_toast_and_sound() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":43,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey again","entities":[]}}}}"#,
     );
-    assert_eq!(session.pending_notifications.len(), 1);
+    assert_eq!(session.settings.pending_notifications.len(), 1);
     assert_eq!(
-        session.pending_notifications[0].sound,
+        session.settings.pending_notifications[0].sound,
         Some(notify::NotificationSoundKind::Default)
     );
 }
@@ -116,16 +116,16 @@ fn scope_show_preview_default_gates_preview_body() {
     );
     session.app_active = false;
     // Global previews enabled, but the scope default disables them.
-    session.hide_notification_previews = false;
+    session.settings.hide_notification_previews = false;
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"secret text","entities":[]}}}}"#,
     );
-    assert_eq!(session.pending_notifications.len(), 1);
+    assert_eq!(session.settings.pending_notifications.len(), 1);
     assert_eq!(
-        session.pending_notifications[0].for_display().body,
+        session.settings.pending_notifications[0].for_display().body,
         "New message"
     );
     let chat = session.chats.get(&14).unwrap();
@@ -143,6 +143,7 @@ fn failed_scope_settings_fetch_retries() {
     // `maybe_fetch_scope_notification_settings` marks the scope in-flight
     // when it sends the request.
     session
+        .settings
         .scope_settings_loading
         .insert(NotificationSettingsScope::GroupChats);
     // TDLib answers with an error.
@@ -157,12 +158,14 @@ fn failed_scope_settings_fetch_retries() {
     );
     assert!(
         !session
+            .settings
             .scope_settings_loading
             .contains(&NotificationSettingsScope::GroupChats),
         "failed fetch must free the scope for retry"
     );
     assert!(
         !session
+            .settings
             .scope_notification_settings
             .contains_key(&NotificationSettingsScope::GroupChats)
     );
@@ -172,6 +175,7 @@ fn failed_scope_settings_fetch_retries() {
         NotificationSettingsScope::GroupChats,
     );
     session
+        .settings
         .scope_settings_loading
         .insert(NotificationSettingsScope::GroupChats);
     apply_json(
@@ -182,11 +186,13 @@ fn failed_scope_settings_fetch_retries() {
     );
     assert!(
         session
+            .settings
             .scope_notification_settings
             .contains_key(&NotificationSettingsScope::GroupChats)
     );
     assert!(
         !session
+            .settings
             .scope_settings_loading
             .contains(&NotificationSettingsScope::GroupChats)
     );
@@ -212,25 +218,25 @@ fn phase81_desktop_notification_replay() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey you","entities":[]}}}}"#,
     );
-    assert_eq!(session.pending_notifications.len(), 1);
-    let queued = &session.pending_notifications[0];
+    assert_eq!(session.settings.pending_notifications.len(), 1);
+    let queued = &session.settings.pending_notifications[0];
     assert_eq!(queued.chat_id, ChatId(7));
     assert_eq!(queued.title, "Ada");
     assert_eq!(queued.count, 1);
     assert_eq!(queued.for_display().body, "New message");
-    session.pending_notifications.clear();
+    session.settings.pending_notifications.clear();
 
     // Previews enabled → body is the message preview.
-    session.hide_notification_previews = false;
+    session.settings.hide_notification_previews = false;
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":43,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey you","entities":[]}}}}"#,
     );
-    assert_eq!(session.pending_notifications.len(), 1);
+    assert_eq!(session.settings.pending_notifications.len(), 1);
     assert_eq!(
-        session.pending_notifications[0].for_display().body,
+        session.settings.pending_notifications[0].for_display().body,
         "hey you"
     );
 
@@ -241,13 +247,13 @@ fn phase81_desktop_notification_replay() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"and more","entities":[]}}}}"#,
     );
-    assert_eq!(session.pending_notifications.len(), 1);
-    assert_eq!(session.pending_notifications[0].count, 2);
+    assert_eq!(session.settings.pending_notifications.len(), 1);
+    assert_eq!(session.settings.pending_notifications[0].count, 2);
     assert_eq!(
-        session.pending_notifications[0].for_display().body,
+        session.settings.pending_notifications[0].for_display().body,
         "2 new messages"
     );
-    session.pending_notifications.clear();
+    session.settings.pending_notifications.clear();
 }
 
 #[test]
@@ -269,7 +275,7 @@ fn phase81_desktop_notification_suppressed_cases() {
         r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Noor","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
     );
     session.app_active = false;
-    session.hide_notification_previews = false;
+    session.settings.hide_notification_previews = false;
     let incoming = |id: i64, chat_id: i64| {
         format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}}}"#
@@ -277,7 +283,7 @@ fn phase81_desktop_notification_suppressed_cases() {
     };
     // Muted → nothing.
     apply_json(&mut session, &seq, &sink, &incoming(1, 7));
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
     // Outgoing → nothing.
     apply_json(
         &mut session,
@@ -285,20 +291,20 @@ fn phase81_desktop_notification_suppressed_cases() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":2,"chat_id":8,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
     );
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
     // Unknown chat → nothing.
     apply_json(&mut session, &seq, &sink, &incoming(3, 99));
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
     // Currently open chat while the app is active → nothing.
     session.app_active = true;
     session.open_chat(ChatId(8));
     apply_json(&mut session, &seq, &sink, &incoming(4, 8));
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
     // Same chat, app in background → notifies.
     session.app_active = false;
     apply_json(&mut session, &seq, &sink, &incoming(5, 8));
-    assert_eq!(session.pending_notifications.len(), 1);
-    session.pending_notifications.clear();
+    assert_eq!(session.settings.pending_notifications.len(), 1);
+    session.settings.pending_notifications.clear();
     // Already-read message (at/below the inbox read marker) → nothing.
     apply_json(
         &mut session,
@@ -307,7 +313,7 @@ fn phase81_desktop_notification_suppressed_cases() {
         r#"{"@type":"updateChatReadInbox","chat_id":8,"last_read_inbox_message_id":6,"unread_count":0}"#,
     );
     apply_json(&mut session, &seq, &sink, &incoming(6, 8));
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
 }
 
 #[test]
@@ -365,7 +371,7 @@ fn reset_all_notification_settings_ok_clears_cached_scope_settings() {
     // defaults instead of the stale pre-reset ones.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.scope_notification_settings.insert(
+    session.settings.scope_notification_settings.insert(
         NotificationSettingsScope::GroupChats,
         ScopeNotificationSettings {
             mute_for: 2147483647,
@@ -379,7 +385,7 @@ fn reset_all_notification_settings_ok_clears_cached_scope_settings() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.scope_notification_settings.is_empty());
+    assert!(session.settings.scope_notification_settings.is_empty());
 }
 
 #[test]
@@ -411,7 +417,7 @@ fn inapp_sounds_toggle_gates_notification_sound() {
         Some(notify::NotificationSoundKind::Default)
     );
     // Toggle off: no sound, regardless of mute/focus state.
-    session.inapp_sounds_enabled = false;
+    session.settings.inapp_sounds_enabled = false;
     let chat = session.chats.get(&14).unwrap();
     assert!(session.notification_sound_for(chat).is_none());
 }
@@ -434,6 +440,7 @@ fn notification_exceptions_answer_lands_per_scope() {
         NotificationSettingsScope::PrivateChats,
     );
     session
+        .settings
         .notification_exceptions_loading
         .insert(NotificationSettingsScope::PrivateChats);
     apply_json(
@@ -446,11 +453,12 @@ fn notification_exceptions_answer_lands_per_scope() {
         ),
     );
     assert_eq!(
-        session.notification_exceptions[&NotificationSettingsScope::PrivateChats],
+        session.settings.notification_exceptions[&NotificationSettingsScope::PrivateChats],
         vec![11, 12]
     );
     assert!(
         !session
+            .settings
             .notification_exceptions_loading
             .contains(&NotificationSettingsScope::PrivateChats)
     );
@@ -469,6 +477,7 @@ fn failed_notification_exceptions_fetch_retries() {
         NotificationSettingsScope::GroupChats,
     );
     session
+        .settings
         .notification_exceptions_loading
         .insert(NotificationSettingsScope::GroupChats);
     apply_json(
@@ -482,11 +491,13 @@ fn failed_notification_exceptions_fetch_retries() {
     );
     assert!(
         !session
+            .settings
             .notification_exceptions_loading
             .contains(&NotificationSettingsScope::GroupChats)
     );
     assert!(
         !session
+            .settings
             .notification_exceptions
             .contains_key(&NotificationSettingsScope::GroupChats)
     );
@@ -539,6 +550,7 @@ fn chat_notification_settings_update_refreshes_exceptions() {
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"m","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
     );
     session
+        .settings
         .notification_exceptions
         .insert(NotificationSettingsScope::PrivateChats, vec![7, 9]);
     // Reset to default prunes just the chat.
@@ -552,7 +564,7 @@ fn chat_notification_settings_update_refreshes_exceptions() {
         ),
     );
     assert_eq!(
-        session.notification_exceptions[&NotificationSettingsScope::PrivateChats],
+        session.settings.notification_exceptions[&NotificationSettingsScope::PrivateChats],
         vec![9]
     );
     // A custom change drops the whole cached list.
@@ -564,6 +576,7 @@ fn chat_notification_settings_update_refreshes_exceptions() {
     );
     assert!(
         !session
+            .settings
             .notification_exceptions
             .contains_key(&NotificationSettingsScope::PrivateChats)
     );
@@ -582,7 +595,7 @@ fn story_settings_effective_mute_and_poster_follow_scope_then_chat_exception() {
     );
     // Scope defaults: stories muted, poster shown — the chat's
     // `use_default_*` flags defer to these.
-    session.scope_notification_settings.insert(
+    session.settings.scope_notification_settings.insert(
         NotificationSettingsScope::PrivateChats,
         ScopeNotificationSettings {
             mute_stories: true,
@@ -652,15 +665,18 @@ fn reading_a_chat_withdraws_its_shown_notification() {
     apply_json(&mut session, &seq, &sink, GROUP_CHAT);
     session.app_active = false;
     apply_json(&mut session, &seq, &sink, NEW_TEXT);
-    assert_eq!(session.pending_notifications.len(), 1);
+    assert_eq!(session.settings.pending_notifications.len(), 1);
     // The UI shows the toast and drains the queue.
-    session.pending_notifications.clear();
+    session.settings.pending_notifications.clear();
     apply_json(&mut session, &seq, &sink, READ_ALL);
-    assert_eq!(session.pending_notification_clears, vec![ChatId(14)]);
+    assert_eq!(
+        session.settings.pending_notification_clears,
+        vec![ChatId(14)]
+    );
     // Nothing is cleared twice.
-    session.pending_notification_clears.clear();
+    session.settings.pending_notification_clears.clear();
     apply_json(&mut session, &seq, &sink, READ_ALL);
-    assert!(session.pending_notification_clears.is_empty());
+    assert!(session.settings.pending_notification_clears.is_empty());
 }
 
 #[test]
@@ -671,7 +687,7 @@ fn reading_before_the_toast_is_shown_drops_the_queued_one() {
     session.app_active = false;
     apply_json(&mut session, &seq, &sink, NEW_TEXT);
     apply_json(&mut session, &seq, &sink, READ_ALL);
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
 }
 
 #[test]
@@ -681,14 +697,14 @@ fn a_partial_read_keeps_the_notification() {
     apply_json(&mut session, &seq, &sink, GROUP_CHAT);
     session.app_active = false;
     apply_json(&mut session, &seq, &sink, NEW_TEXT);
-    session.pending_notifications.clear();
+    session.settings.pending_notifications.clear();
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateChatReadInbox","chat_id":14,"last_read_inbox_message_id":40,"unread_count":2}"#,
     );
-    assert!(session.pending_notification_clears.is_empty());
+    assert!(session.settings.pending_notification_clears.is_empty());
 }
 
 #[test]
@@ -698,7 +714,7 @@ fn an_emptied_notification_group_withdraws_the_toast() {
     apply_json(&mut session, &seq, &sink, GROUP_CHAT);
     session.app_active = false;
     apply_json(&mut session, &seq, &sink, NEW_TEXT);
-    session.pending_notifications.clear();
+    session.settings.pending_notifications.clear();
     // Still has notifications: nothing happens.
     apply_json(
         &mut session,
@@ -706,14 +722,17 @@ fn an_emptied_notification_group_withdraws_the_toast() {
         &sink,
         r#"{"@type":"updateNotificationGroup","notification_group_id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"notification_settings_chat_id":14,"notification_sound_id":"0","total_count":1,"added_notifications":[],"removed_notification_ids":[5]}"#,
     );
-    assert!(session.pending_notification_clears.is_empty());
+    assert!(session.settings.pending_notification_clears.is_empty());
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateNotificationGroup","notification_group_id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"notification_settings_chat_id":14,"notification_sound_id":"0","total_count":0,"added_notifications":[],"removed_notification_ids":[6]}"#,
     );
-    assert_eq!(session.pending_notification_clears, vec![ChatId(14)]);
+    assert_eq!(
+        session.settings.pending_notification_clears,
+        vec![ChatId(14)]
+    );
 }
 
 #[test]
@@ -727,10 +746,23 @@ fn active_notifications_from_a_previous_launch_can_be_cleared() {
         &sink,
         r#"{"@type":"updateActiveNotifications","groups":[{"@type":"notificationGroup","id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"total_count":2,"notifications":[]},{"@type":"notificationGroup","id":2,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":15,"total_count":0,"notifications":[]}]}"#,
     );
-    assert!(session.shown_notification_chats.contains(&ChatId(14)));
-    assert!(!session.shown_notification_chats.contains(&ChatId(15)));
+    assert!(
+        session
+            .settings
+            .shown_notification_chats
+            .contains(&ChatId(14))
+    );
+    assert!(
+        !session
+            .settings
+            .shown_notification_chats
+            .contains(&ChatId(15))
+    );
     apply_json(&mut session, &seq, &sink, READ_ALL);
-    assert_eq!(session.pending_notification_clears, vec![ChatId(14)]);
+    assert_eq!(
+        session.settings.pending_notification_clears,
+        vec![ChatId(14)]
+    );
 }
 
 const REACTION_SETTINGS_ALL: &str = r#"{"@type":"updateReactionNotificationSettings","notification_settings":{"@type":"reactionNotificationSettings","message_reaction_source":{"@type":"reactionNotificationSourceAll"},"story_reaction_source":{"@type":"reactionNotificationSourceNone"},"poll_vote_source":{"@type":"reactionNotificationSourceNone"},"sound_id":"-1","show_preview":true}}"#;
@@ -750,13 +782,13 @@ fn a_new_reaction_notifies_when_the_setting_allows_it() {
     session.app_active = false;
     // The default source is "none": the reaction badge updates silently.
     apply_json(&mut session, &seq, &sink, &reaction_update(1));
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
     assert_eq!(session.chats[&14].unread_reaction_count, 1);
 
     apply_json(&mut session, &seq, &sink, REACTION_SETTINGS_ALL);
-    session.hide_notification_previews = false;
+    session.settings.hide_notification_previews = false;
     apply_json(&mut session, &seq, &sink, &reaction_update(2));
-    let queued = &session.pending_notifications;
+    let queued = &session.settings.pending_notifications;
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].title, "Crew");
     assert_eq!(
@@ -778,7 +810,7 @@ fn reading_a_reaction_does_not_notify() {
         &sink,
         r#"{"@type":"updateMessageUnreadReactions","chat_id":14,"message_id":7,"unread_reactions":[],"unread_reaction_count":0}"#,
     );
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
 }
 
 #[test]
@@ -798,7 +830,7 @@ fn the_contacts_source_ignores_strangers() {
         ),
     );
     apply_json(&mut session, &seq, &sink, &reaction_update(1));
-    assert!(session.pending_notifications.is_empty());
+    assert!(session.settings.pending_notifications.is_empty());
 }
 
 #[test]
@@ -806,7 +838,7 @@ fn default_auto_delete_roundtrip_and_failure() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetDefaultAutoDelete, None);
-    session.default_auto_delete_busy = true;
+    session.settings.default_auto_delete_busy = true;
     apply_json(
         &mut session,
         &seq,
@@ -816,27 +848,27 @@ fn default_auto_delete_roundtrip_and_failure() {
             extra.0
         ),
     );
-    assert_eq!(session.default_auto_delete_secs, Some(604_800));
-    assert!(!session.default_auto_delete_busy);
+    assert_eq!(session.settings.default_auto_delete_secs, Some(604_800));
+    assert!(!session.settings.default_auto_delete_busy);
 
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 86_400 }),
         None,
     );
-    session.default_auto_delete_busy = true;
+    session.settings.default_auto_delete_busy = true;
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.default_auto_delete_secs, Some(86_400));
+    assert_eq!(session.settings.default_auto_delete_secs, Some(86_400));
 
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 0 }),
         None,
     );
-    session.default_auto_delete_busy = true;
+    session.settings.default_auto_delete_busy = true;
     apply_json(
         &mut session,
         &seq,
@@ -847,10 +879,10 @@ fn default_auto_delete_roundtrip_and_failure() {
         ),
     );
     assert_eq!(
-        session.default_auto_delete_secs,
+        session.settings.default_auto_delete_secs,
         Some(86_400),
         "a refusal keeps the old value"
     );
-    assert!(session.default_auto_delete_error.is_some());
-    assert!(!session.default_auto_delete_busy);
+    assert!(session.settings.default_auto_delete_error.is_some());
+    assert!(!session.settings.default_auto_delete_busy);
 }

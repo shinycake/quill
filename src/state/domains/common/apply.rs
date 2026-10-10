@@ -16,7 +16,7 @@ impl Session {
             CommonPayload::AccountExport(value) => {
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::ExportAccount
-                    && let Some(export) = self.account_export.as_mut()
+                    && let Some(export) = self.settings.account_export.as_mut()
                 {
                     export.reply(pending.id, value);
                 }
@@ -26,13 +26,13 @@ impl Session {
             // media-send captions); every other option parses but is
             // ignored, never an error.
             CommonPayload::UpdateOption { name, value } => {
-                self.storage_limits.apply_option(&name, &value);
+                self.settings.storage_limits.apply_option(&name, &value);
                 self.folder_limits.apply_option(&name, &value);
                 self.apply_privacy_option(&name, &value);
                 if name == "disable_contact_registered_notifications"
                     && let OptionValue::Boolean(off) = &value
                 {
-                    self.disable_contact_registered_notifications = *off;
+                    self.settings.disable_contact_registered_notifications = *off;
                 }
                 if name == "disable_top_chats"
                     && let OptionValue::Boolean(off) = &value
@@ -52,10 +52,10 @@ impl Session {
                 if name == "prefer_ipv6"
                     && let OptionValue::Boolean(on) = &value
                 {
-                    self.proxy.prefer_ipv6 = *on;
+                    self.settings.proxy.prefer_ipv6 = *on;
                 }
                 if name == "is_premium" {
-                    self.premium_option = match &value {
+                    self.payments.premium_option = match &value {
                         OptionValue::Boolean(on) => Some(*on),
                         _ => Some(false),
                     };
@@ -63,7 +63,7 @@ impl Session {
                 if name == "gift_text_length_max"
                     && let OptionValue::Integer(limit) = &value
                 {
-                    self.gift_text_length_max = usize::try_from(*limit).ok();
+                    self.payments.gift_text_length_max = usize::try_from(*limit).ok();
                 }
                 if let OptionValue::Integer(limit) = &value {
                     match name.as_str() {
@@ -145,7 +145,7 @@ impl Session {
                 Some(RequestPurpose::GetCountryCode) => {
                     let iso = text.trim().to_ascii_uppercase();
                     if iso.len() == 2 && iso.chars().all(|c| c.is_ascii_alphabetic()) {
-                        self.guessed_country_iso = Some(iso);
+                        self.auth_state.guessed_country_iso = Some(iso);
                     }
                 }
                 Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })) => {

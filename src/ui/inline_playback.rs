@@ -192,8 +192,8 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        if !session.media_prefs.autoplay_gifs
-            || session.media_prefs.data_saver
+        if !session.settings.media_prefs.autoplay_gifs
+            || session.settings.media_prefs.data_saver
             || session.open_chat != Some(row.message.chat_id)
             || self.playback.autoplayed_gifs.contains(&row.message.id)
         {

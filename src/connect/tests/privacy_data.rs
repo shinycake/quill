@@ -57,7 +57,7 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
     assert_invalid(f.1.set_new_chat_privacy(false));
     f.1.fetch_new_chat_privacy().unwrap();
     assert_eq!(
-        f.1.session.privacy_data.new_chat,
+        f.1.session.settings.privacy_data.new_chat,
         Some(NewChatPrivacyState::Loading)
     );
     let request = last_request(&f);
@@ -70,7 +70,7 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
         ),
     );
     assert!(matches!(
-        f.1.session.privacy_data.new_chat,
+        f.1.session.settings.privacy_data.new_chat,
         Some(NewChatPrivacyState::Ready(s))
             if s.allow_from_unknown && s.incoming_paid_message_star_count == 25
     ));
@@ -80,7 +80,7 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
     assert_eq!(set["settings"]["allow_new_chats_from_unknown_users"], false);
     assert_eq!(set["settings"]["incoming_paid_message_star_count"], 25);
     assert!(matches!(
-        f.1.session.privacy_data.new_chat,
+        f.1.session.settings.privacy_data.new_chat,
         Some(NewChatPrivacyState::Ready(s)) if !s.allow_from_unknown
     ));
     // A refusal rolls the optimistic choice back and says so.
@@ -92,10 +92,10 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
         ),
     );
     assert!(matches!(
-        f.1.session.privacy_data.new_chat,
+        f.1.session.settings.privacy_data.new_chat,
         Some(NewChatPrivacyState::Ready(s)) if s.allow_from_unknown
     ));
-    assert!(f.1.session.privacy_data.error.is_some());
+    assert!(f.1.session.settings.privacy_data.error.is_some());
     cleanup(f);
 }
 
@@ -143,14 +143,17 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
         ),
     );
     assert_eq!(
-        f.1.session.privacy_data.inactive_session_ttl_days,
+        f.1.session.settings.privacy_data.inactive_session_ttl_days,
         Some(180)
     );
     f.1.set_inactive_session_ttl(30).unwrap();
     let set = last_request(&f);
     assert_eq!(set["@type"], "setInactiveSessionTtl");
     assert_eq!(set["inactive_session_ttl_days"], 30);
-    assert_eq!(f.1.session.privacy_data.inactive_session_ttl_days, Some(30));
+    assert_eq!(
+        f.1.session.settings.privacy_data.inactive_session_ttl_days,
+        Some(30)
+    );
     // A refusal drops the optimistic value and reports it.
     ingest(
         &mut f,
@@ -159,8 +162,11 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
             extra_of(&set)
         ),
     );
-    assert_eq!(f.1.session.privacy_data.inactive_session_ttl_days, None);
-    assert!(f.1.session.privacy_data.error.is_some());
+    assert_eq!(
+        f.1.session.settings.privacy_data.inactive_session_ttl_days,
+        None
+    );
+    assert!(f.1.session.settings.privacy_data.error.is_some());
     cleanup(f);
 }
 
@@ -183,12 +189,18 @@ fn sensitive_content_switch_follows_the_options_only() {
     assert_eq!(request["name"], "ignore_sensitive_content_restrictions");
     assert_eq!(request["value"]["value"], true);
     // Not applied until TDLib says so.
-    assert_eq!(f.1.session.privacy_data.ignore_sensitive, Some(false));
+    assert_eq!(
+        f.1.session.settings.privacy_data.ignore_sensitive,
+        Some(false)
+    );
     ingest(
         &mut f,
         r#"{"@type":"updateOption","name":"ignore_sensitive_content_restrictions","value":{"@type":"optionValueBoolean","value":true}}"#,
     );
-    assert_eq!(f.1.session.privacy_data.ignore_sensitive, Some(true));
+    assert_eq!(
+        f.1.session.settings.privacy_data.ignore_sensitive,
+        Some(true)
+    );
     cleanup(f);
 }
 
@@ -199,7 +211,7 @@ fn network_usage_fetch_and_reset() {
     let request = last_request(&f);
     assert_eq!(request["@type"], "getNetworkStatistics");
     assert_eq!(request["only_current"], false);
-    assert!(f.1.session.privacy_data.network_loading);
+    assert!(f.1.session.settings.privacy_data.network_loading);
     ingest(
         &mut f,
         &format!(
@@ -207,9 +219,15 @@ fn network_usage_fetch_and_reset() {
             extra_of(&request)
         ),
     );
-    let usage = f.1.session.privacy_data.network_usage.clone().unwrap();
+    let usage =
+        f.1.session
+            .settings
+            .privacy_data
+            .network_usage
+            .clone()
+            .unwrap();
     assert_eq!(usage.grand_total().total(), 100);
-    assert!(!f.1.session.privacy_data.network_loading);
+    assert!(!f.1.session.settings.privacy_data.network_loading);
     // Reset sends the request and asks for the fresh start date.
     f.1.reset_network_statistics().unwrap();
     let sent: Vec<String> =
@@ -219,7 +237,7 @@ fn network_usage_fetch_and_reset() {
             .collect();
     assert!(sent.contains(&"\"resetNetworkStatistics\"".to_string()));
     assert_eq!(sent.last().unwrap(), "\"getNetworkStatistics\"");
-    assert!(f.1.session.privacy_data.network_usage.is_none());
+    assert!(f.1.session.settings.privacy_data.network_usage.is_none());
     cleanup(f);
 }
 
@@ -231,14 +249,14 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
         &mut f,
         r#"{"@type":"updateSuggestedActions","added_actions":[{"@type":"suggestedActionCheckPassword"}],"removed_actions":[]}"#,
     );
-    assert!(f.1.session.privacy_data.check_password_suggested);
+    assert!(f.1.session.settings.privacy_data.check_password_suggested);
 
     f.1.check_remembered_password("wrong").unwrap();
     let request = last_request(&f);
     assert_eq!(request["@type"], "getRecoveryEmailAddress");
     assert_eq!(request["password"], "wrong");
     assert_eq!(
-        f.1.session.privacy_data.password_check,
+        f.1.session.settings.privacy_data.password_check,
         PasswordCheck::Checking
     );
     ingest(
@@ -249,7 +267,7 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
         ),
     );
     assert_eq!(
-        f.1.session.privacy_data.password_check,
+        f.1.session.settings.privacy_data.password_check,
         PasswordCheck::Wrong
     );
 
@@ -263,16 +281,16 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
         ),
     );
     assert_eq!(
-        f.1.session.privacy_data.password_check,
+        f.1.session.settings.privacy_data.password_check,
         PasswordCheck::Remembered
     );
     // The card stays for the finish step; Done hides the suggestion.
-    assert!(f.1.session.privacy_data.check_password_suggested);
+    assert!(f.1.session.settings.privacy_data.check_password_suggested);
     f.1.hide_check_password_suggestion().unwrap();
     let hide = last_request(&f);
     assert_eq!(hide["@type"], "hideSuggestedAction");
     assert_eq!(hide["action"]["@type"], "suggestedActionCheckPassword");
-    assert!(!f.1.session.privacy_data.check_password_suggested);
+    assert!(!f.1.session.settings.privacy_data.check_password_suggested);
     // The server may also withdraw it from another device.
     ingest(
         &mut f,
@@ -282,7 +300,7 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
         &mut f,
         r#"{"@type":"updateSuggestedActions","added_actions":[],"removed_actions":[{"@type":"suggestedActionCheckPassword"}]}"#,
     );
-    assert!(!f.1.session.privacy_data.check_password_suggested);
+    assert!(!f.1.session.settings.privacy_data.check_password_suggested);
     cleanup(f);
 }
 

@@ -14,16 +14,16 @@ impl QuillApp {
     ) {
         let mut prefs = self
             .session()
-            .map(|session| session.badge_prefs)
+            .map(|session| session.settings.badge_prefs)
             .unwrap_or_default();
         update(&mut prefs);
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.badge_prefs = prefs;
+            live.driver.session.settings.badge_prefs = prefs;
             if let Err(err) = live.driver.save_badge_prefs() {
                 self.connection.status_note = format!("couldn’t save badge settings: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.badge_prefs = prefs;
+            demo.settings.badge_prefs = prefs;
             self.connection.status_note = "demo: badge settings are not saved".into();
         }
         cx.notify();
@@ -36,33 +36,35 @@ impl QuillApp {
     /// the tray menu's "Disable/Enable notifications".
     pub(crate) fn set_desktop_notifications(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.desktop_notifications = on;
+            live.driver.session.settings.desktop_notifications = on;
             if let Err(err) = live.driver.save_desktop_notifications() {
                 self.connection.status_note = format!("couldn’t save desktop notifications: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.desktop_notifications = on;
+            demo.settings.desktop_notifications = on;
             self.connection.status_note = "demo: desktop notifications are not saved".into();
         }
         cx.notify();
     }
 
     pub(crate) fn desktop_notifications_enabled(&self) -> bool {
-        self.session().is_none_or(|s| s.desktop_notifications)
+        self.session()
+            .is_none_or(|s| s.settings.desktop_notifications)
     }
 
     pub(crate) fn notification_sounds_enabled(&self) -> bool {
-        self.session().is_none_or(|s| s.inapp_sounds_enabled)
+        self.session()
+            .is_none_or(|s| s.settings.inapp_sounds_enabled)
     }
 
     pub(crate) fn set_inapp_sounds_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.inapp_sounds_enabled = on;
+            live.driver.session.settings.inapp_sounds_enabled = on;
             if let Err(err) = live.driver.save_inapp_sounds_enabled() {
                 self.connection.status_note = format!("couldn’t save notification sounds: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.inapp_sounds_enabled = on;
+            demo.settings.inapp_sounds_enabled = on;
             self.connection.status_note = "demo: in-app sounds are not saved".into();
         }
         cx.notify();
@@ -92,7 +94,7 @@ impl QuillApp {
             let session = this.session();
             let saved_sounds: Vec<NotificationSound> = session
                 .as_ref()
-                .map(|s| s.saved_notification_sounds.clone())
+                .map(|s| s.settings.saved_notification_sounds.clone())
                 .unwrap_or_default();
             let mut body = div().flex().flex_col().gap_3();
             body = body.child(
@@ -205,7 +207,10 @@ impl QuillApp {
     /// Toggling persists via `set_badge_pref`; the tray picks the new
     /// count up on its next 1s sync.
     pub(in crate::ui) fn badge_counter_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let prefs = self.session().map(|s| s.badge_prefs).unwrap_or_default();
+        let prefs = self
+            .session()
+            .map(|s| s.settings.badge_prefs)
+            .unwrap_or_default();
         div()
             .id("badge-counter-section")
             .flex()
@@ -266,7 +271,7 @@ impl QuillApp {
     pub(in crate::ui) fn attention_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let on = self
             .session()
-            .map(|s| s.badge_prefs)
+            .map(|s| s.settings.badge_prefs)
             .unwrap_or_default()
             .flash_bounce;
         let label = quill::notify_focus::attention_label();
@@ -300,7 +305,7 @@ impl QuillApp {
     pub(in crate::ui) fn events_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let on = self
             .session()
-            .is_none_or(|s| !s.disable_contact_registered_notifications);
+            .is_none_or(|s| !s.settings.disable_contact_registered_notifications);
         div()
             .id("events-section")
             .flex()
@@ -348,7 +353,7 @@ impl QuillApp {
                 self.connection.status_note = format!("couldn’t change the setting: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.disable_contact_registered_notifications = !on;
+            demo.settings.disable_contact_registered_notifications = !on;
         }
         cx.notify();
     }
@@ -394,7 +399,7 @@ impl QuillApp {
     pub(in crate::ui) fn inapp_sounds_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let enabled = self
             .session()
-            .map(|s| s.inapp_sounds_enabled)
+            .map(|s| s.settings.inapp_sounds_enabled)
             .unwrap_or(true);
         div()
             .id("inapp-sounds-section")
@@ -445,6 +450,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             for scope in NotificationSettingsScope::ALL {
                 session
+                    .settings
                     .scope_notification_settings
                     .insert(scope, ScopeNotificationSettings::default());
             }

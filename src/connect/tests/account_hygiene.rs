@@ -115,13 +115,13 @@ fn sessions_answer(extra: u64) -> String {
 /// list, and the user's answer confirms or terminates exactly that session.
 fn unconfirmed_alert(f: &mut Fixture) {
     ingest(&mut f.1, &f.4, &f.3, UNCONFIRMED_UPDATE);
-    assert_eq!(f.1.session.notices.unconfirmed_count, 1);
+    assert_eq!(f.1.session.settings.notices.unconfirmed_count, 1);
     // The update marked the list stale: the same ingest refetched it.
     let fetch = requests_of(&f.2, "getActiveSessions");
     assert_eq!(fetch.len(), 1);
     let extra: u64 = fetch[0]["@extra"].as_str().unwrap().parse().unwrap();
     ingest(&mut f.1, &f.4, &f.3, &sessions_answer(extra));
-    let entries = &f.1.session.notices.unconfirmed_entries;
+    let entries = &f.1.session.settings.notices.unconfirmed_entries;
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].id, 77);
     assert_eq!(entries[0].device, "Pixel 9");
@@ -145,11 +145,11 @@ fn new_login_yes_confirms_the_unconfirmed_session() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert_eq!(
-        f.1.session.notices.review_outcome,
+        f.1.session.settings.notices.review_outcome,
         Some(LoginReview::Allowed)
     );
-    assert_eq!(f.1.session.notices.unconfirmed_count, 0);
-    assert!(f.1.session.notices.unconfirmed_entries.is_empty());
+    assert_eq!(f.1.session.settings.notices.unconfirmed_count, 0);
+    assert!(f.1.session.settings.notices.unconfirmed_entries.is_empty());
     cleanup(f);
 }
 
@@ -169,7 +169,7 @@ fn new_login_no_terminates_and_names_the_attempt() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert_eq!(
-        f.1.session.notices.review_outcome,
+        f.1.session.settings.notices.review_outcome,
         Some(LoginReview::Prevented {
             places: vec!["Berlin, Germany (Pixel 9)".into()]
         })
@@ -191,10 +191,10 @@ fn new_login_review_error_keeps_the_alert() {
             r#"{{"@type":"error","code":400,"message":"SESSION_NOT_FOUND","@extra":"{extra}"}}"#
         ),
     );
-    assert!(f.1.session.notices.review_error.is_some());
-    assert!(f.1.session.notices.review_outcome.is_none());
-    assert_eq!(f.1.session.notices.unconfirmed_count, 1);
-    assert_eq!(f.1.session.notices.review_pending, 0);
+    assert!(f.1.session.settings.notices.review_error.is_some());
+    assert!(f.1.session.settings.notices.review_outcome.is_none());
+    assert_eq!(f.1.session.settings.notices.unconfirmed_count, 1);
+    assert_eq!(f.1.session.settings.notices.review_pending, 0);
     cleanup(f);
 }
 
@@ -208,9 +208,9 @@ fn unconfirmed_update_with_none_left_clears_the_alert() {
         &f.3,
         r#"{"@type":"updateUnconfirmedSession","session":null,"unconfirmed_session_count":0}"#,
     );
-    assert_eq!(f.1.session.notices.unconfirmed_count, 0);
-    assert!(f.1.session.notices.unconfirmed.is_none());
-    assert!(f.1.session.notices.unconfirmed_entries.is_empty());
+    assert_eq!(f.1.session.settings.notices.unconfirmed_count, 0);
+    assert!(f.1.session.settings.notices.unconfirmed.is_none());
+    assert!(f.1.session.settings.notices.unconfirmed_entries.is_empty());
     cleanup(f);
 }
 
@@ -233,6 +233,7 @@ fn service_notifications_queue_in_order_and_skip_withdrawal_ones() {
     }
     let queue: Vec<&str> =
         f.1.session
+            .settings
             .notices
             .service
             .iter()
@@ -240,7 +241,10 @@ fn service_notifications_queue_in_order_and_skip_withdrawal_ones() {
             .collect();
     assert_eq!(queue, ["First", "Second"]);
     f.1.session.dismiss_service_notice();
-    assert_eq!(f.1.session.notices.service.front().unwrap().text, "Second");
+    assert_eq!(
+        f.1.session.settings.notices.service.front().unwrap().text,
+        "Second"
+    );
     cleanup(f);
 }
 
@@ -254,12 +258,15 @@ fn terms_of_service_accept_round_trip() {
         &f.3,
         r#"{"@type":"updateTermsOfService","terms_of_service_id":"tos-1","terms_of_service":{"@type":"termsOfService","text":{"@type":"formattedText","text":"Be nice.","entities":[]},"min_user_age":0,"show_popup":true}}"#,
     );
-    assert_eq!(f.1.session.notices.terms.as_ref().unwrap().id, "tos-1");
+    assert_eq!(
+        f.1.session.settings.notices.terms.as_ref().unwrap().id,
+        "tos-1"
+    );
     f.1.accept_terms().unwrap();
     let request = last_request(&f.2);
     assert_eq!(request["@type"], "acceptTermsOfService");
     assert_eq!(request["terms_of_service_id"], "tos-1");
-    assert!(f.1.session.notices.terms_in_flight);
+    assert!(f.1.session.settings.notices.terms_in_flight);
     assert_invalid(f.1.accept_terms());
     let extra = request["@extra"].as_str().unwrap().to_string();
     ingest(
@@ -268,8 +275,8 @@ fn terms_of_service_accept_round_trip() {
         &f.3,
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
-    assert!(f.1.session.notices.terms.is_none());
-    assert!(!f.1.session.notices.terms_in_flight);
+    assert!(f.1.session.settings.notices.terms.is_none());
+    assert!(!f.1.session.settings.notices.terms_in_flight);
     cleanup(f);
 }
 
@@ -290,9 +297,9 @@ fn terms_accept_failure_keeps_the_prompt_with_an_error() {
         &f.3,
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
-    assert!(f.1.session.notices.terms.is_some());
-    assert!(!f.1.session.notices.terms_in_flight);
-    assert!(f.1.session.notices.terms_error.is_some());
+    assert!(f.1.session.settings.notices.terms.is_some());
+    assert!(!f.1.session.settings.notices.terms_in_flight);
+    assert!(f.1.session.settings.notices.terms_error.is_some());
     cleanup(f);
 }
 
@@ -311,7 +318,7 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
     assert_eq!(request["file_types"][1]["@type"], "fileTypeVideo");
     assert_eq!(request["chat_ids"], serde_json::json!([]));
     assert_eq!(request["return_deleted_file_statistics"], true);
-    assert!(f.1.session.storage_clearing);
+    assert!(f.1.session.settings.storage_clearing);
     // One clear at a time.
     assert_invalid(f.1.clear_storage(&[], &[]));
     let extra = request["@extra"].as_str().unwrap().to_string();
@@ -323,10 +330,10 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
             r#"{{"@type":"storageStatistics","size":"5242880","count":3,"by_chat":[],"@extra":"{extra}"}}"#
         ),
     );
-    assert_eq!(f.1.session.storage_freed, Some(5_242_880));
-    assert!(!f.1.session.storage_clearing);
+    assert_eq!(f.1.session.settings.storage_freed, Some(5_242_880));
+    assert!(!f.1.session.settings.storage_clearing);
     // The usage numbers are refetched on the same ingest.
-    assert!(f.1.session.storage_stats_loading);
+    assert!(f.1.session.settings.storage_stats_loading);
     assert_eq!(requests_of(&f.2, "getStorageStatistics").len(), 1);
     cleanup(f);
 }
@@ -352,9 +359,9 @@ fn clear_storage_failure_reports_and_frees_the_gate() {
         &f.3,
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
-    assert!(!f.1.session.storage_clearing);
-    assert!(f.1.session.data_storage_error.is_some());
-    assert!(f.1.session.storage_freed.is_none());
+    assert!(!f.1.session.settings.storage_clearing);
+    assert!(f.1.session.settings.data_storage_error.is_some());
+    assert!(f.1.session.settings.storage_freed.is_none());
     cleanup(f);
 }
 
@@ -402,7 +409,7 @@ fn storage_limits_send_the_four_options_and_read_them_back() {
             &format!(r#"{{"@type":"updateOption","name":"{name}","value":{value}}}"#),
         );
     }
-    let limits = f.1.session.storage_limits;
+    let limits = f.1.session.settings.storage_limits;
     assert_eq!(limits.size_limit(), Some(2 * 1024 * 1024 * 1024));
     assert_eq!(limits.keep_for(), Some(31 * 86_400));
     cleanup(f);
@@ -430,6 +437,7 @@ fn recovery_email_code_confirms_the_pending_address() {
     ingest(&mut f.1, &f.4, &f.3, &done);
     assert_eq!(
         f.1.session
+            .auth_state
             .password_state
             .as_ref()
             .unwrap()
@@ -437,7 +445,7 @@ fn recovery_email_code_confirms_the_pending_address() {
         None
     );
     assert_eq!(
-        f.1.session.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice,
         Some(TwofaNotice::RecoveryEmailConfirmed)
     );
     cleanup(f);
@@ -461,11 +469,12 @@ fn wrong_recovery_email_code_reports_without_changing_state() {
         &f.3,
         &format!(r#"{{"@type":"error","code":400,"message":"CODE_INVALID","@extra":"{extra}"}}"#),
     );
-    let line = f.1.session.password_op_error.clone().unwrap();
+    let line = f.1.session.auth_state.password_op_error.clone().unwrap();
     assert!(line.contains("confirm the recovery email"), "{line}");
     assert!(line.contains("wrong or has expired"), "{line}");
     assert!(
         f.1.session
+            .auth_state
             .password_state
             .as_ref()
             .unwrap()
@@ -494,10 +503,14 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
         ),
     );
     assert_eq!(
-        f.1.session.twofa_flow.recovery_code_sent_to.as_deref(),
+        f.1.session
+            .auth_state
+            .twofa_flow
+            .recovery_code_sent_to
+            .as_deref(),
         Some("i***@example.com")
     );
-    assert!(!f.1.session.password_state_loading);
+    assert!(!f.1.session.auth_state.password_state_loading);
 
     assert_invalid(f.1.recover_twofa_password("", "new", "hint"));
     f.1.recover_twofa_password("654321", "newpw", "new hint")
@@ -514,9 +527,15 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
         &f.3,
         &PASSWORD_STATE_ON.replace("EXTRA", &extra),
     );
-    assert!(f.1.session.twofa_flow.recovery_code_sent_to.is_none());
+    assert!(
+        f.1.session
+            .auth_state
+            .twofa_flow
+            .recovery_code_sent_to
+            .is_none()
+    );
     assert_eq!(
-        f.1.session.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice,
         Some(TwofaNotice::PasswordRecovered)
     );
     cleanup(f);
@@ -533,7 +552,7 @@ fn recovering_with_an_empty_password_reports_removal() {
     );
     ingest(&mut f.1, &f.4, &f.3, &removed);
     assert_eq!(
-        f.1.session.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice,
         Some(TwofaNotice::PasswordRemoved)
     );
     cleanup(f);
@@ -556,7 +575,7 @@ fn reset_password_pending_refetches_the_state_for_the_date() {
         ),
     );
     assert_eq!(
-        f.1.session.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice,
         Some(TwofaNotice::ResetPending {
             reset_date: 1_760_604_800
         })
@@ -581,7 +600,7 @@ fn reset_password_declined_reports_the_retry_date() {
         ),
     );
     assert_eq!(
-        f.1.session.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice,
         Some(TwofaNotice::ResetDeclined {
             retry_date: 1_760_700_000
         })
@@ -611,7 +630,7 @@ fn cancel_password_reset_needs_a_pending_reset() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert_eq!(
-        f.1.session.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice,
         Some(TwofaNotice::ResetCancelled)
     );
     assert_eq!(requests_of(&f.2, "getPasswordState").len(), 3);
@@ -638,7 +657,11 @@ fn login_email_change_is_code_confirmed() {
         ),
     );
     assert_eq!(
-        f.1.session.twofa_flow.login_email_code_sent_to.as_deref(),
+        f.1.session
+            .auth_state
+            .twofa_flow
+            .login_email_code_sent_to
+            .as_deref(),
         Some("m***@example.com")
     );
     f.1.resend_login_email_code().unwrap();
@@ -664,9 +687,15 @@ fn login_email_change_is_code_confirmed() {
         &f.3,
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
-    assert!(f.1.session.twofa_flow.login_email_code_sent_to.is_none());
+    assert!(
+        f.1.session
+            .auth_state
+            .twofa_flow
+            .login_email_code_sent_to
+            .is_none()
+    );
     assert_eq!(
-        f.1.session.twofa_flow.notice,
+        f.1.session.auth_state.twofa_flow.notice,
         Some(TwofaNotice::LoginEmailChanged)
     );
     cleanup(f);

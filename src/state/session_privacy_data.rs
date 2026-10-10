@@ -46,10 +46,10 @@ impl Session {
     pub(crate) fn apply_privacy_option(&mut self, name: &str, value: &OptionValue) {
         match (name, value) {
             ("ignore_sensitive_content_restrictions", OptionValue::Boolean(on)) => {
-                self.privacy_data.ignore_sensitive = Some(*on);
+                self.settings.privacy_data.ignore_sensitive = Some(*on);
             }
             ("can_ignore_sensitive_content_restrictions", OptionValue::Boolean(on)) => {
-                self.privacy_data.can_ignore_sensitive = *on;
+                self.settings.privacy_data.can_ignore_sensitive = *on;
             }
             _ => {}
         }
@@ -65,15 +65,16 @@ impl Session {
         match payload {
             SettingsPayload::NewChatPrivacySettings(settings) => {
                 if purpose == Some(RequestPurpose::GetNewChatPrivacy) {
-                    self.privacy_data.new_chat = Some(NewChatPrivacyState::Ready(*settings));
+                    self.settings.privacy_data.new_chat =
+                        Some(NewChatPrivacyState::Ready(*settings));
                 }
                 true
             }
             SettingsPayload::NetworkStatistics(usage) => {
                 if purpose == Some(RequestPurpose::GetNetworkStatistics) {
-                    self.privacy_data.network_usage = Some(usage.clone());
-                    self.privacy_data.network_loading = false;
-                    self.privacy_data.error = None;
+                    self.settings.privacy_data.network_usage = Some(usage.clone());
+                    self.settings.privacy_data.network_loading = false;
+                    self.settings.privacy_data.error = None;
                 }
                 true
             }
@@ -81,7 +82,7 @@ impl Session {
                 if purpose == Some(RequestPurpose::CheckRememberedPassword) {
                     // The finish step shows until the user taps Done, which
                     // sends `hideSuggestedAction`.
-                    self.privacy_data.password_check = PasswordCheck::Remembered;
+                    self.settings.privacy_data.password_check = PasswordCheck::Remembered;
                 }
                 true
             }
@@ -94,10 +95,10 @@ impl Session {
                 }
                 const CHECK: &str = "suggestedActionCheckPassword";
                 if added.iter().any(|name| name == CHECK) {
-                    self.privacy_data.check_password_suggested = true;
+                    self.settings.privacy_data.check_password_suggested = true;
                 }
                 if removed.iter().any(|name| name == CHECK) {
-                    self.privacy_data.check_password_suggested = false;
+                    self.settings.privacy_data.check_password_suggested = false;
                 }
                 true
             }
@@ -110,13 +111,13 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::ResetNetworkStatistics) => {
                 // The old numbers are gone; the next open refetches.
-                self.privacy_data.network_usage = None;
-                self.privacy_data.error = None;
+                self.settings.privacy_data.network_usage = None;
+                self.settings.privacy_data.error = None;
             }
             Some(RequestPurpose::HideCheckPasswordSuggestion) => {
-                self.privacy_data.check_password_suggested = false;
+                self.settings.privacy_data.check_password_suggested = false;
             }
-            Some(RequestPurpose::SetInactiveSessionTtl) => self.privacy_data.error = None,
+            Some(RequestPurpose::SetInactiveSessionTtl) => self.settings.privacy_data.error = None,
             _ => {}
         }
     }
@@ -142,7 +143,7 @@ impl Session {
             }
             _ => {}
         }
-        let data = &mut self.privacy_data;
+        let data = &mut self.settings.privacy_data;
         match purpose {
             RequestPurpose::GetNewChatPrivacy => {
                 data.new_chat = Some(NewChatPrivacyState::Failed);
@@ -193,7 +194,7 @@ impl Session {
 
     /// Optimistic write of the new-chat row (kept when the answer is `ok`).
     pub fn set_new_chat_privacy_local(&mut self, settings: NewChatPrivacy) {
-        self.privacy_data.new_chat = Some(NewChatPrivacyState::Ready(settings));
+        self.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Ready(settings));
     }
 
     /// The own user's gift settings once `userFullInfo` was seen.
@@ -218,8 +219,8 @@ impl Session {
     /// whenever the rule detail for a call key changes.
     pub fn mirror_call_privacy(&mut self, key: PrivacySettingKey, detail: &PrivacyRuleDetail) {
         match key {
-            PrivacySettingKey::AllowCalls => self.call_privacy_allow_calls = detail.who,
-            PrivacySettingKey::PeerToPeer => self.call_privacy_p2p = detail.who,
+            PrivacySettingKey::AllowCalls => self.calls.privacy_allow_calls = detail.who,
+            PrivacySettingKey::PeerToPeer => self.calls.privacy_p2p = detail.who,
             _ => {}
         }
     }

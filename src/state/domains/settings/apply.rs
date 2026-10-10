@@ -29,7 +29,7 @@ impl Session {
             SettingsPayload::UpdateActiveNotifications { chat_ids } => {
                 // Notifications of a previous launch: remember the chats so
                 // a later read clears them too.
-                self.shown_notification_chats.extend(chat_ids);
+                self.settings.shown_notification_chats.extend(chat_ids);
             }
             // Phase C2i: `getUserPrivacySettingRules` answer — map the
             // rule list to the simple Everybody / Contacts / Nobody
@@ -45,16 +45,18 @@ impl Session {
                             let who = PrivacyWho::from_rule_names(&names);
                             match setting {
                                 CallPrivacySetting::AllowCalls => {
-                                    self.call_privacy_allow_calls = who
+                                    self.calls.privacy_allow_calls = who
                                 }
-                                CallPrivacySetting::PeerToPeer => self.call_privacy_p2p = who,
+                                CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = who,
                             }
                             self.privacy_roundtrip_done();
                         }
                         RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }) => {
                             let detail = PrivacyRuleDetail::from_rules(&rules);
                             self.mirror_call_privacy(key, &detail);
-                            self.privacy.insert(key, PrivacyKeyState::Ready(detail));
+                            self.settings
+                                .privacy
+                                .insert(key, PrivacyKeyState::Ready(detail));
                         }
                         _ => {}
                     }
@@ -70,7 +72,9 @@ impl Session {
                     .find(|k| k.td_type() == setting)
                 {
                     self.mirror_call_privacy(key, &detail);
-                    self.privacy.insert(key, PrivacyKeyState::Ready(detail));
+                    self.settings
+                        .privacy
+                        .insert(key, PrivacyKeyState::Ready(detail));
                 }
             }
             // Slice S3: `readDatePrivacySettings` answer.
@@ -79,9 +83,9 @@ impl Session {
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::GetReadDatePrivacy)
                 ) {
-                    self.read_date_show = Some(show_read_date);
-                    self.read_date_loading = false;
-                    self.read_date_error = false;
+                    self.settings.read_date_show = Some(show_read_date);
+                    self.settings.read_date_loading = false;
+                    self.settings.read_date_error = false;
                 }
             }
             // Slice S3: `messageSenders` answer — one blocked-senders
@@ -100,19 +104,19 @@ impl Session {
                     offset,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.blocked_total = total_count;
+                    self.settings.blocked_total = total_count;
                     if offset == 0 {
-                        self.blocked_senders = Some(sender_ids);
-                    } else if let Some(list) = self.blocked_senders.as_mut() {
+                        self.settings.blocked_senders = Some(sender_ids);
+                    } else if let Some(list) = self.settings.blocked_senders.as_mut() {
                         list.extend(sender_ids);
                     }
-                    self.blocked_loading = false;
-                    self.blocked_error = false;
+                    self.settings.blocked_loading = false;
+                    self.settings.blocked_error = false;
                 }
             }
             SettingsPayload::NotificationSounds { sounds } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddSavedNotificationSound) {
-                    self.saved_sounds_stale = true;
+                    self.settings.saved_sounds_stale = true;
                 }
                 // Parity slice: `getSavedNotificationSounds` answer.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedNotificationSounds) {
@@ -123,16 +127,17 @@ impl Session {
                     // longer saved — stale file→sound mappings would
                     // otherwise accumulate forever.
                     let live_ids: HashSet<i64> = sounds.iter().map(|s| s.id).collect();
-                    self.sound_file_ids
+                    self.settings
+                        .sound_file_ids
                         .retain(|_, sound_id| live_ids.contains(sound_id));
-                    self.saved_notification_sounds = sounds;
-                    self.saved_sounds_loaded = true;
-                    self.saved_sounds_stale = false;
+                    self.settings.saved_notification_sounds = sounds;
+                    self.settings.saved_sounds_loaded = true;
+                    self.settings.saved_sounds_stale = false;
                 }
             }
             SettingsPayload::UpdateSavedNotificationSounds { .. } => {
                 // The list changed server-side; refetch on the next ingest.
-                self.saved_sounds_stale = true;
+                self.settings.saved_sounds_stale = true;
             }
             SettingsPayload::StorageStatistics {
                 total_size,
@@ -142,23 +147,23 @@ impl Session {
                 // Phase S2: `getStorageStatistics` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStorageStatistics) {
-                    self.storage_stats = Some(StorageStats {
+                    self.settings.storage_stats = Some(StorageStats {
                         total_size,
                         by_file_type,
                         by_chat,
                     });
-                    self.storage_stats_loading = false;
+                    self.settings.storage_stats_loading = false;
                 }
                 // Batch 6: `optimizeStorage` answers with the statistics
                 // of the files it deleted. Drop the usage cache so the
                 // driver refetches the post-clear numbers on this same
                 // ingest.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
-                    self.storage_freed = Some(total_size);
-                    self.storage_clearing = false;
-                    self.storage_stats = None;
-                    self.storage_stats_loading = false;
-                    self.data_storage_error = None;
+                    self.settings.storage_freed = Some(total_size);
+                    self.settings.storage_clearing = false;
+                    self.settings.storage_stats = None;
+                    self.settings.storage_stats_loading = false;
+                    self.settings.data_storage_error = None;
                 }
             }
             SettingsPayload::AutoDownloadSettingsPresets { low, medium, high } => {
@@ -169,12 +174,14 @@ impl Session {
                 // the seed on the next ingest (`data_storage_dirty`).
                 if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
-                    && !self.data_storage.seeded
+                    && !self.settings.data_storage.seeded
                 {
-                    self.data_storage.seed_from_presets(low, medium, high);
-                    self.data_storage_dirty = true;
-                    self.auto_download_presets_loading = false;
-                    self.data_storage_error = None;
+                    self.settings
+                        .data_storage
+                        .seed_from_presets(low, medium, high);
+                    self.settings.data_storage_dirty = true;
+                    self.settings.auto_download_presets_loading = false;
+                    self.settings.data_storage_error = None;
                 }
             }
             SettingsPayload::UpdateUnconfirmedSession { session, count } => {
@@ -187,8 +194,8 @@ impl Session {
                         op: PasswordOp::ResetPassword
                     }))
                 ) {
-                    self.password_state_loading = false;
-                    self.password_op_error = None;
+                    self.auth_state.password_state_loading = false;
+                    self.auth_state.password_op_error = None;
                     self.apply_reset_password_result(outcome);
                 }
             }
@@ -202,9 +209,9 @@ impl Session {
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { .. }))
                 ) {
-                    self.password_state = Some(state);
-                    self.password_state_loading = false;
-                    self.password_op_error = None;
+                    self.auth_state.password_state = Some(state);
+                    self.auth_state.password_state_loading = false;
+                    self.auth_state.password_op_error = None;
                     if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                         pending.map(|p| p.purpose)
                     {
@@ -214,13 +221,13 @@ impl Session {
             }
             SettingsPayload::DeviceLoginResult { result } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
-                    self.device_login_result = Some(result);
-                    self.sessions_mutating = false;
+                    self.settings.device_login_result = Some(result);
+                    self.settings.sessions_mutating = false;
                     if result != crate::auth::DeviceLoginResult::Failed {
-                        self.sessions_stale = true;
-                        self.sessions_error = None;
+                        self.settings.sessions_stale = true;
+                        self.settings.sessions_error = None;
                     } else {
-                        self.sessions_error =
+                        self.settings.sessions_error =
                             Some("Telegram returned an invalid device session.".into());
                     }
                 }
@@ -251,13 +258,14 @@ impl Session {
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
                     self.resolve_unconfirmed_entries(&sessions);
-                    self.sessions = Some(sessions);
+                    self.settings.sessions = Some(sessions);
                     if inactive_session_ttl_days.is_some() {
-                        self.privacy_data.inactive_session_ttl_days = inactive_session_ttl_days;
+                        self.settings.privacy_data.inactive_session_ttl_days =
+                            inactive_session_ttl_days;
                     }
-                    self.sessions_loading = false;
-                    self.sessions_error = None;
-                    self.sessions_stale = false;
+                    self.settings.sessions_loading = false;
+                    self.settings.sessions_error = None;
+                    self.settings.sessions_stale = false;
                 }
             }
             SettingsPayload::AccountTtl { days } => {
@@ -266,9 +274,9 @@ impl Session {
                 // `@extra`). Authoritative: replaces the cached days and
                 // clears any stale error.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
-                    self.account_ttl_days = Some(days);
-                    self.account_ttl_loading = false;
-                    self.account_error = None;
+                    self.settings.account_ttl_days = Some(days);
+                    self.settings.account_ttl_loading = false;
+                    self.settings.account_error = None;
                 }
             }
             SettingsPayload::ConnectedWebsites { websites } => {
@@ -278,10 +286,10 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.connected_websites = Some(websites);
-                    self.connected_websites_loading = false;
-                    self.websites_error = None;
-                    self.websites_stale = false;
+                    self.settings.connected_websites = Some(websites);
+                    self.settings.connected_websites_loading = false;
+                    self.settings.websites_error = None;
+                    self.settings.websites_stale = false;
                 }
             }
             SettingsPayload::ScopeNotificationSettings { settings, .. } => {
@@ -291,21 +299,25 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
                     && let Some(scope) = pending.and_then(|p| p.scope)
                 {
-                    self.scope_notification_settings.insert(scope, settings);
-                    self.scope_settings_loading.remove(&scope);
+                    self.settings
+                        .scope_notification_settings
+                        .insert(scope, settings);
+                    self.settings.scope_settings_loading.remove(&scope);
                 }
             }
             SettingsPayload::UpdateScopeNotificationSettings { scope, settings } => {
                 // Parity slice: scope defaults changed (or our own
                 // `setScopeNotificationSettings` was confirmed).
-                self.scope_notification_settings.insert(scope, settings);
-                self.scope_settings_loading.remove(&scope);
+                self.settings
+                    .scope_notification_settings
+                    .insert(scope, settings);
+                self.settings.scope_settings_loading.remove(&scope);
             }
             SettingsPayload::UpdateReactionNotificationSettings { settings } => {
                 // Parity slice: no getter exists — the update stream is the
                 // source of truth (it also confirms our own
                 // `setReactionNotificationSettings`).
-                self.reaction_notification_settings = Some(settings);
+                self.settings.reaction_notification_settings = Some(settings);
             }
         }
     }

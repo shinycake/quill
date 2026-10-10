@@ -60,9 +60,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.notification_exceptions.contains_key(&scope)
+        if self
+            .session
+            .settings
+            .notification_exceptions
+            .contains_key(&scope)
             || self
                 .session
+                .settings
                 .notification_exceptions_loading
                 .contains(&scope)
             || self
@@ -75,7 +80,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_scope(RequestPurpose::GetChatNotificationSettingsExceptions, scope);
-        self.session.notification_exceptions_loading.insert(scope);
+        self.session
+            .settings
+            .notification_exceptions_loading
+            .insert(scope);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_notification_settings_exceptions(
@@ -83,7 +91,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session.notification_exceptions_loading.remove(&scope);
+            self.session
+                .settings
+                .notification_exceptions_loading
+                .remove(&scope);
             return Err(err);
         }
         Ok(())
@@ -227,7 +238,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.saved_sounds_loaded
+        if self.session.settings.saved_sounds_loaded
             || self
                 .session
                 .requests
@@ -252,10 +263,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_notification_sounds_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.saved_sounds_stale {
+        if !self.session.settings.saved_sounds_stale {
             return Ok(None);
         }
-        self.session.saved_sounds_loaded = false;
+        self.session.settings.saved_sounds_loaded = false;
         self.maybe_fetch_notification_sounds()
     }
 
@@ -268,9 +279,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         for scope in NotificationSettingsScope::ALL {
             if self
                 .session
+                .settings
                 .scope_notification_settings
                 .contains_key(&scope)
-                || self.session.scope_settings_loading.contains(&scope)
+                || self
+                    .session
+                    .settings
+                    .scope_settings_loading
+                    .contains(&scope)
                 || self
                     .session
                     .requests
@@ -281,13 +297,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self
                 .session
                 .request_for_scope(RequestPurpose::GetScopeNotificationSettings, scope);
-            self.session.scope_settings_loading.insert(scope);
+            self.session.settings.scope_settings_loading.insert(scope);
             if let Err(err) = self
                 .sender
                 .send_json(&get_scope_notification_settings(extra, scope))
             {
                 self.session.requests.take(extra);
-                self.session.scope_settings_loading.remove(&scope);
+                self.session.settings.scope_settings_loading.remove(&scope);
                 return Err(err);
             }
         }
@@ -380,6 +396,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let Some(entry) = self
             .session
+            .settings
             .saved_notification_sounds
             .iter()
             .find(|s| s.id == sound_id)
@@ -392,8 +409,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Not local yet: mark the file as a notification sound, request
         // playback on completion, and start the download (deduped).
-        self.session.sound_file_ids.insert(file_id.0, sound_id);
-        self.session.pending_sound_downloads.insert(sound_id);
+        self.session
+            .settings
+            .sound_file_ids
+            .insert(file_id.0, sound_id);
+        self.session
+            .settings
+            .pending_sound_downloads
+            .insert(sound_id);
         // A play request is explicit: retry even if an earlier attempt
         // stalled (the stall mark only stops per-ingest auto retries).
         self.session.stalled_auto_downloads.remove(&file_id.0);

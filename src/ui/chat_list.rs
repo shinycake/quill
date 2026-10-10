@@ -566,7 +566,7 @@ impl QuillApp {
         // with sync off the tab shows the last loaded snapshot.
         let sync_on = self
             .session()
-            .map(|s| s.contact_prefs.sync_enabled)
+            .map(|s| s.settings.contact_prefs.sync_enabled)
             .unwrap_or(true);
         if sync_on
             && let Some(live) = self.live.as_mut()

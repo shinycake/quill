@@ -40,7 +40,12 @@ fn email_login_transitions_errors_resend_and_transport_retry() {
         json!({"@type":"error","@extra":first.as_extra(),"code":429,"message":"FLOOD_WAIT_10"}),
     );
     assert_eq!(
-        driver.session.last_auth_error.unwrap().user_message(),
+        driver
+            .session
+            .auth_state
+            .last_auth_error
+            .unwrap()
+            .user_message(),
         "too many email attempts — try again in 10 seconds"
     );
     let old = driver.submit_email("alice@example.com").unwrap();
@@ -51,12 +56,12 @@ fn email_login_transitions_errors_resend_and_transport_retry() {
     assert!(
         matches!(&driver.session.auth,AuthorizationState::WaitEmailCode { email_pattern, code_length:Some(6), .. } if email_pattern=="a***@example.com")
     );
-    assert!(driver.session.last_auth_error.is_none());
+    assert!(driver.session.auth_state.last_auth_error.is_none());
     ingest(
         &mut driver,
         json!({"@type":"error","@extra":old.as_extra(),"code":400,"message":"private-email"}),
     );
-    assert!(driver.session.last_auth_error.is_none()); // Old phase cannot overwrite the current screen.
+    assert!(driver.session.auth_state.last_auth_error.is_none()); // Old phase cannot overwrite the current screen.
     assert!(driver.submit_email("alice@example.com").is_err());
     assert!(driver.submit_code(" ").is_err());
     let code = driver.submit_code("123456").unwrap();
@@ -70,7 +75,12 @@ fn email_login_transitions_errors_resend_and_transport_retry() {
         json!({"@type":"error","@extra":code.as_extra(),"code":400,"message":"123456"}),
     );
     assert_eq!(
-        driver.session.last_auth_error.unwrap().user_message(),
+        driver
+            .session
+            .auth_state
+            .last_auth_error
+            .unwrap()
+            .user_message(),
         "code not accepted"
     );
     let resend = driver.resend_code().unwrap();

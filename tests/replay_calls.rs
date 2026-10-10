@@ -27,7 +27,11 @@ fn replay_call_signaling_lifecycle() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
         ],
     );
-    let call = session.active_call.as_ref().expect("incoming call tracked");
+    let call = session
+        .calls
+        .active_call
+        .as_ref()
+        .expect("incoming call tracked");
     assert_eq!(call.id, 77);
     assert_eq!(call.user_id, 41);
     assert!(!call.is_outgoing);
@@ -38,7 +42,7 @@ fn replay_call_signaling_lifecycle() {
             is_received: false
         }
     ));
-    assert!(session.call_summary.is_none());
+    assert!(session.calls.summary.is_none());
 
     // A second incoming call while one is active raises the swap
     // prompt (the busy-decline queue stays empty for the first one).
@@ -50,9 +54,17 @@ fn replay_call_signaling_lifecycle() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":78,"unique_id":"100","user_id":42,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
         ],
     );
-    assert_eq!(session.active_call.as_ref().expect("still call 77").id, 77);
-    assert_eq!(session.call_swap_pending, Some((78, 42, false)));
-    assert!(session.call_busy_decline_queue.is_empty());
+    assert_eq!(
+        session
+            .calls
+            .active_call
+            .as_ref()
+            .expect("still call 77")
+            .id,
+        77
+    );
+    assert_eq!(session.calls.swap_pending, Some((78, 42, false)));
+    assert!(session.calls.busy_decline_queue.is_empty());
 
     // Keys exchange, then Ready; signaling data is queued honestly.
     apply_all_seq(
@@ -66,7 +78,7 @@ fn replay_call_signaling_lifecycle() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":[],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}}}"#,
         ],
     );
-    let call = session.active_call.as_ref().expect("call 77 ready");
+    let call = session.calls.active_call.as_ref().expect("call 77 ready");
     assert!(matches!(call.state, CallState::Ready));
     assert!(call.ready_at.is_some());
     // Only the tracked call's signaling data is kept (call 78's is
@@ -83,8 +95,8 @@ fn replay_call_signaling_lifecycle() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":true,"need_debug_information":false,"need_log":false}}}"#,
         ],
     );
-    assert!(session.active_call.is_none());
-    let summary = session.call_summary.as_ref().expect("end summary");
+    assert!(session.calls.active_call.is_none());
+    let summary = session.calls.summary.as_ref().expect("end summary");
     assert_eq!(summary.call_id, 77);
     assert_eq!(summary.end_line, "Call ended");
     assert!(summary.need_rating);
@@ -107,8 +119,8 @@ fn replay_call_signaling_lifecycle() {
             extra.0
         )],
     );
-    assert!(session.active_call.is_none());
-    let error = session.call_error.as_ref().expect("call error shown");
+    assert!(session.calls.active_call.is_none());
+    let error = session.calls.error.as_ref().expect("call error shown");
     assert!(error.contains("Could not start the call"));
     assert!(error.contains("400"));
     assert!(!error.contains("PHONE_CALL_PROTOCOL_ERROR"));
@@ -127,12 +139,16 @@ fn replay_call_signaling_lifecycle() {
             extra.0
         )],
     );
-    let call = session.active_call.as_ref().expect("outgoing tracked");
+    let call = session
+        .calls
+        .active_call
+        .as_ref()
+        .expect("outgoing tracked");
     assert_eq!(call.id, 79);
     assert!(call.is_outgoing);
     // The failed request did not leave a tracked call behind earlier,
     // and the error is cleared when a new call is tracked.
-    assert!(session.call_error.is_none());
+    assert!(session.calls.error.is_none());
 
     // Hang up the outgoing call.
     apply_all_seq(
@@ -143,7 +159,7 @@ fn replay_call_signaling_lifecycle() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":79,"unique_id":"103","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
         ],
     );
-    assert!(session.active_call.is_none());
+    assert!(session.calls.active_call.is_none());
 
     // A missed incoming call we never tracked still records a summary.
     apply_all_seq(
@@ -154,7 +170,7 @@ fn replay_call_signaling_lifecycle() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":80,"unique_id":"101","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonMissed"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
         ],
     );
-    let summary = session.call_summary.as_ref().expect("missed summary");
+    let summary = session.calls.summary.as_ref().expect("missed summary");
     assert_eq!(summary.end_line, "Missed call");
 
     // A call error with the documented 4005000 timeout code.
@@ -166,7 +182,7 @@ fn replay_call_signaling_lifecycle() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":81,"unique_id":"102","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateError","error":{"@type":"error","code":4005000,"message":"CALL_TIMEOUT"}}}}"#,
         ],
     );
-    let summary = session.call_summary.as_ref().expect("error summary");
+    let summary = session.calls.summary.as_ref().expect("error summary");
     assert!(summary.end_line.contains("timed out"));
 }
 
@@ -203,6 +219,7 @@ fn replay_video_call_signaling() {
         )],
     );
     let call = session
+        .calls
         .active_call
         .as_ref()
         .expect("outgoing video tracked");
@@ -221,7 +238,7 @@ fn replay_video_call_signaling() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":90,"unique_id":"200","user_id":41,"is_outgoing":true,"is_video":true,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":false,"udp_reflector":false,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":[],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}}}"#,
         ],
     );
-    let call = session.active_call.as_ref().expect("call 90 ready");
+    let call = session.calls.active_call.as_ref().expect("call 90 ready");
     assert!(matches!(call.state, CallState::Ready));
     assert!(call.is_video);
     assert!(call.ready_at.is_some());
@@ -236,8 +253,16 @@ fn replay_video_call_signaling() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":91,"unique_id":"201","user_id":42,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
         ],
     );
-    assert_eq!(session.active_call.as_ref().expect("still call 90").id, 90);
-    assert_eq!(session.call_swap_pending, Some((91, 42, true)));
+    assert_eq!(
+        session
+            .calls
+            .active_call
+            .as_ref()
+            .expect("still call 90")
+            .id,
+        90
+    );
+    assert_eq!(session.calls.swap_pending, Some((91, 42, true)));
 
     // Remote hangup → the summary keeps `is_video: true` (the driver
     // sends it back in `discardCall`).
@@ -249,8 +274,8 @@ fn replay_video_call_signaling() {
             r#"{"@type":"updateCall","call":{"@type":"call","id":90,"unique_id":"200","user_id":41,"is_outgoing":true,"is_video":true,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":true,"need_debug_information":false,"need_log":false}}}"#,
         ],
     );
-    assert!(session.active_call.is_none());
-    let summary = session.call_summary.as_ref().expect("end summary");
+    assert!(session.calls.active_call.is_none());
+    let summary = session.calls.summary.as_ref().expect("end summary");
     assert_eq!(summary.call_id, 90);
     assert!(summary.is_video);
     assert!(summary.need_rating);
@@ -266,6 +291,7 @@ fn replay_video_call_signaling() {
         ],
     );
     let call = session
+        .calls
         .active_call
         .as_ref()
         .expect("incoming video tracked");
@@ -324,7 +350,7 @@ fn replay_group_call_signaling() {
         &seq,
         &[&group_call_json(false, false, true)],
     );
-    let call = session.active_group_call.as_ref().expect("tracked");
+    let call = session.calls.active_group_call.as_ref().expect("tracked");
     assert_eq!(call.id, 555);
     assert_eq!(call.title, "Demo voice");
     assert!(!call.is_joined);
@@ -351,7 +377,7 @@ fn replay_group_call_signaling() {
             ),
         ],
     );
-    let call = session.active_group_call.as_ref().expect("joined");
+    let call = session.calls.active_group_call.as_ref().expect("joined");
     assert!(call.is_joined);
     assert_eq!(call.join_payload, "JOIN_PAYLOAD_BYTES");
 
@@ -371,7 +397,11 @@ fn replay_group_call_signaling() {
             ),
         ],
     );
-    let call = session.active_group_call.as_ref().expect("participants");
+    let call = session
+        .calls
+        .active_group_call
+        .as_ref()
+        .expect("participants");
     assert_eq!(call.participants.len(), 3);
     // Bob first (recent speaker), then Alice, then Carol by `order`.
     let ids: Vec<i64> = call
@@ -406,7 +436,7 @@ fn replay_group_call_signaling() {
         &seq,
         &[&participant_json(42, "", "a2")],
     );
-    let call = session.active_group_call.as_ref().expect("updated");
+    let call = session.calls.active_group_call.as_ref().expect("updated");
     let bob = call
         .participants
         .iter()
@@ -423,7 +453,7 @@ fn replay_group_call_signaling() {
             r#"{"@type":"updateGroupCallParticipants","group_call_id":555,"participant_user_ids":[41,42]}"#,
         ],
     );
-    let call = session.active_group_call.as_ref().expect("pruned");
+    let call = session.calls.active_group_call.as_ref().expect("pruned");
     assert_eq!(call.participants.len(), 2);
 
     // E2E verification state arrives.
@@ -435,7 +465,7 @@ fn replay_group_call_signaling() {
             r#"{"@type":"updateGroupCallVerificationState","group_call_id":555,"generation":7,"emojis":["🍎","🍌"]}"#,
         ],
     );
-    let call = session.active_group_call.as_ref().expect("verified");
+    let call = session.calls.active_group_call.as_ref().expect("verified");
     let v = call.verification.as_ref().expect("verification stored");
     assert_eq!(v.generation, 7);
     assert_eq!(v.emojis, vec!["🍎", "🍌"]);
@@ -444,6 +474,7 @@ fn replay_group_call_signaling() {
     session.set_group_call_self_muted(true);
     assert!(
         session
+            .calls
             .active_group_call
             .as_ref()
             .expect("call")
@@ -457,12 +488,13 @@ fn replay_group_call_signaling() {
         &seq,
         &[&group_call_json(true, true, true)],
     );
-    let call = session.active_group_call.as_ref().expect("rejoining");
+    let call = session.calls.active_group_call.as_ref().expect("rejoining");
     assert!(call.need_rejoin);
     assert!(call.reconnecting);
     session.clear_group_call_reconnecting();
     assert!(
         !session
+            .calls
             .active_group_call
             .as_ref()
             .expect("call")
@@ -476,7 +508,7 @@ fn replay_group_call_signaling() {
         &seq,
         &[&group_call_json(false, false, false)],
     );
-    assert!(session.active_group_call.is_none());
+    assert!(session.calls.active_group_call.is_none());
 
     // Local leave also clears.
     apply_all_seq(
@@ -485,9 +517,9 @@ fn replay_group_call_signaling() {
         &seq,
         &[&group_call_json(true, false, true)],
     );
-    assert!(session.active_group_call.is_some());
+    assert!(session.calls.active_group_call.is_some());
     session.leave_group_call_local();
-    assert!(session.active_group_call.is_none());
+    assert!(session.calls.active_group_call.is_none());
 }
 
 /// Phase C3a (reviewer-found regression): `getGroupCall` (schema 1.8.67,
@@ -522,6 +554,7 @@ fn replay_get_group_call_bare_response_populates_tracker() {
 
     // Tracker populated from the bare response…
     let call = session
+        .calls
         .active_group_call
         .as_ref()
         .expect("tracker created from bare groupCall");

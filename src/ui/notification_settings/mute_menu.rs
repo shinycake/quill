@@ -90,7 +90,7 @@ impl QuillApp {
         let story_sound_label = self.story_sound_label(&chat_settings);
         let saved_sounds: Vec<NotificationSound> = session
             .as_ref()
-            .map(|s| s.saved_notification_sounds.clone())
+            .map(|s| s.settings.saved_notification_sounds.clone())
             .unwrap_or_default();
         let status = format!(
             "{} \u{b7} Sound: {} \u{b7} Previews: {}",

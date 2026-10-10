@@ -344,7 +344,8 @@ mod tests {
                 extra.0,
             ),
         );
-        let PrivacyKeyState::Ready(detail) = &session.privacy[&PrivacySettingKey::ShowStatus]
+        let PrivacyKeyState::Ready(detail) =
+            &session.settings.privacy[&PrivacySettingKey::ShowStatus]
         else {
             panic!("expected Ready");
         };
@@ -380,7 +381,7 @@ mod tests {
     fn privacy_set_failure_marks_failed() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        session.privacy.insert(
+        session.settings.privacy.insert(
             PrivacySettingKey::ShowPhoneNumber,
             PrivacyKeyState::Ready(PrivacyRuleDetail {
                 who: Some(PrivacyWho::Nobody),
@@ -403,7 +404,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            session.privacy[&PrivacySettingKey::ShowPhoneNumber],
+            session.settings.privacy[&PrivacySettingKey::ShowPhoneNumber],
             PrivacyKeyState::Failed
         );
     }
@@ -420,7 +421,8 @@ mod tests {
             &sink,
             r#"{"@type":"updateUserPrivacySettingRules","setting":{"@type":"userPrivacySettingShowStatus"},"rules":{"@type":"userPrivacySettingRules","rules":[{"@type":"userPrivacySettingRuleAllowAll"}]}}"#,
         );
-        let PrivacyKeyState::Ready(detail) = &session.privacy[&PrivacySettingKey::ShowStatus]
+        let PrivacyKeyState::Ready(detail) =
+            &session.settings.privacy[&PrivacySettingKey::ShowStatus]
         else {
             panic!("expected Ready");
         };
@@ -432,7 +434,7 @@ mod tests {
             &sink,
             r#"{"@type":"updateUserPrivacySettingRules","setting":{"@type":"userPrivacySettingNope"},"rules":{"@type":"userPrivacySettingRules","rules":[]}}"#,
         );
-        assert_eq!(session.privacy.len(), 1);
+        assert_eq!(session.settings.privacy.len(), 1);
     }
 
     /// Slice S3: the read-date roundtrip — `get` stores the value and
@@ -442,7 +444,7 @@ mod tests {
     fn read_date_get_and_set_failure() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        session.read_date_loading = true;
+        session.settings.read_date_loading = true;
         let extra = session.request(RequestPurpose::GetReadDatePrivacy, None);
         apply_json(
             &mut session,
@@ -453,11 +455,11 @@ mod tests {
                 extra.0,
             ),
         );
-        assert_eq!(session.read_date_show, Some(false));
-        assert!(!session.read_date_loading);
-        assert!(!session.read_date_error);
+        assert_eq!(session.settings.read_date_show, Some(false));
+        assert!(!session.settings.read_date_loading);
+        assert!(!session.settings.read_date_error);
 
-        session.read_date_show = Some(true); // optimistic set
+        session.settings.read_date_show = Some(true); // optimistic set
         let extra = session.request(RequestPurpose::SetReadDatePrivacy, None);
         apply_json(
             &mut session,
@@ -468,9 +470,9 @@ mod tests {
                 extra.0,
             ),
         );
-        assert!(session.read_date_error);
-        assert!(!session.read_date_loading);
-        assert_eq!(session.read_date_show, None);
+        assert!(session.settings.read_date_error);
+        assert!(!session.settings.read_date_loading);
+        assert_eq!(session.settings.read_date_show, None);
     }
 
     /// Slice S3: blocked-senders paging — page 0 replaces, later pages
@@ -492,9 +494,9 @@ mod tests {
                 extra.0,
             ),
         );
-        assert_eq!(session.blocked_senders, Some(vec![61, 62]));
-        assert_eq!(session.blocked_total, 3);
-        assert!(!session.blocked_loading);
+        assert_eq!(session.settings.blocked_senders, Some(vec![61, 62]));
+        assert_eq!(session.settings.blocked_total, 3);
+        assert!(!session.settings.blocked_loading);
 
         let extra = session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
@@ -509,7 +511,7 @@ mod tests {
                 extra.0,
             ),
         );
-        assert_eq!(session.blocked_senders, Some(vec![61, 62, 63]));
+        assert_eq!(session.settings.blocked_senders, Some(vec![61, 62, 63]));
     }
 }
 

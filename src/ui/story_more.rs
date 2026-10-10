@@ -269,7 +269,7 @@ impl QuillApp {
     /// The stories tray list of the current story's chat.
     fn story_chat_hidden(&self, chat_id: i64) -> bool {
         self.session()
-            .and_then(|s| s.story_tray.get(&chat_id))
+            .and_then(|s| s.stories.tray.get(&chat_id))
             .is_some_and(|tray| tray.list == Some(StoryListView::Archive))
     }
 
@@ -299,7 +299,7 @@ impl QuillApp {
         };
         let posted = self
             .session()
-            .and_then(|s| s.stories.get(&(item.chat_id.0, item.story_id)))
+            .and_then(|s| s.stories.stories.get(&(item.chat_id.0, item.story_id)))
             .is_some_and(|story| story.is_posted_to_chat_page);
         let sent = self.live.as_mut().map(|live| {
             live.driver
@@ -350,7 +350,7 @@ impl QuillApp {
         };
         let allowed = self
             .session()
-            .and_then(|s| s.stories.get(&(item.chat_id.0, item.story_id)))
+            .and_then(|s| s.stories.stories.get(&(item.chat_id.0, item.story_id)))
             .is_some_and(can_save_story);
         if !allowed {
             self.stories.notice = Some("Saving is not allowed for this story".into());
@@ -429,7 +429,7 @@ impl QuillApp {
         }
         let current = self
             .session()
-            .and_then(|s| s.close_friends.clone())
+            .and_then(|s| s.stories.close_friends.clone())
             .unwrap_or_default();
         self.stories.close_friends_edit = Some(CloseFriendsEdit::new(&current));
         self.stories.close_friends_saving = false;
@@ -473,7 +473,7 @@ impl QuillApp {
     /// Per-tick upkeep of the editor: adopt the loaded list while the user
     /// has not touched it, close after a confirmed save.
     pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) {
-        let loaded = self.session().and_then(|s| s.close_friends.clone());
+        let loaded = self.session().and_then(|s| s.stories.close_friends.clone());
         let Some(edit) = self.stories.close_friends_edit.as_mut() else {
             return;
         };
@@ -488,7 +488,7 @@ impl QuillApp {
                 self.refresh_story_pause(cx);
             } else if self
                 .session()
-                .and_then(|s| s.story_page_op.as_ref())
+                .and_then(|s| s.stories.page_op.as_ref())
                 .is_some_and(|op| {
                     matches!(op.state, quill::story_page::StoryPageOpState::Failed(_))
                 })
@@ -616,7 +616,7 @@ impl QuillApp {
         if let Some(notice) = self.stories.notice.clone() {
             column = column.child(div().text_xs().text_color(text_muted()).child(notice));
         }
-        if let Some(op) = self.session().and_then(|s| s.story_page_op.clone()) {
+        if let Some(op) = self.session().and_then(|s| s.stories.page_op.clone()) {
             use quill::story_page::StoryPageOpState as S;
             match op.state {
                 S::Sending | S::Checking => {

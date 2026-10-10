@@ -92,7 +92,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // MED3: data saver pauses all automatic downloads (the per-kind
         // media-type grid governs chat media; avatars are display chrome).
-        if self.session.media_prefs.data_saver {
+        if self.session.settings.media_prefs.data_saver {
             return Ok(Vec::new());
         }
         let ids = self.session.take_due_chat_list_photos();

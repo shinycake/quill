@@ -138,9 +138,9 @@ impl Session {
         if let Some(pending) = pending
             && let RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }) = pending.purpose
             && let Some(user_id) = pending.user_id
-            && self.active_call.is_none()
+            && self.calls.active_call.is_none()
         {
-            self.active_call = Some(ActiveCall {
+            self.calls.active_call = Some(ActiveCall {
                 id,
                 user_id,
                 is_outgoing: true,
@@ -167,8 +167,8 @@ impl Session {
                 signaling_queue: Vec::new(),
                 signaling_dropped: 0,
             });
-            self.call_summary = None;
-            self.call_error = None;
+            self.calls.summary = None;
+            self.calls.error = None;
         }
     }
 }

@@ -77,7 +77,7 @@ pub(crate) fn format_retry_after(seconds: i32) -> String {
 }
 
 /// Phase 9.1: `storyInfo` — basic information about one active story
-/// (TDLib 1.8.67, `schema/td_api.tl:6767-6773`). `chatActiveStories.stories`
+/// (TDLib 1.8.67, `schema/td_api.tl:6767-6773`). `chatActiveStories.stories.stories`
 /// arrive in chronological order (increasing `story_id`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoryInfoView {

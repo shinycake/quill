@@ -86,8 +86,8 @@ fn the_list_is_fetched_once_before_authorization() {
         "an in-flight fetch is not repeated"
     );
     rig.answer("getProxies", proxies_json(&[(1, true), (2, false)]));
-    assert_eq!(rig.driver.session.proxy.entries().len(), 2);
-    assert!(rig.driver.session.proxy.shield());
+    assert_eq!(rig.driver.session.settings.proxy.entries().len(), 2);
+    assert!(rig.driver.session.settings.proxy.shield());
     assert!(!rig.driver.proxy_tick(200));
     assert_eq!(rig.count("getProxies"), 1);
 }
@@ -112,8 +112,13 @@ fn a_mutation_refetches_the_authoritative_list() {
     // The ack marked the list stale and ingest refetched on the same turn.
     assert_eq!(rig.count("getProxies"), 1);
     rig.answer("getProxies", proxies_json(&[(7, true)]));
-    assert_eq!(rig.driver.session.proxy.enabled().map(|p| p.id), Some(7));
-    assert!(!rig.driver.session.proxy.stale && !rig.driver.session.proxy.mutating);
+    assert_eq!(
+        rig.driver.session.settings.proxy.enabled().map(|p| p.id),
+        Some(7)
+    );
+    assert!(
+        !rig.driver.session.settings.proxy.stale && !rig.driver.session.settings.proxy.mutating
+    );
 }
 
 #[test]
@@ -134,7 +139,7 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
         "removeProxy",
         json!({"@type": "error", "code": 400, "message": "PROXY_NOT_FOUND"}),
     );
-    let proxy = &rig.driver.session.proxy;
+    let proxy = &rig.driver.session.settings.proxy;
     assert!(!proxy.mutating);
     assert!(
         proxy
@@ -151,12 +156,12 @@ fn ping_answers_and_failures_set_the_row_status() {
     rig.load_list(&[(1, false), (2, false)]);
     rig.driver.ping_listed_proxy(1).unwrap();
     assert_eq!(
-        rig.driver.session.proxy.pings.get(&1),
+        rig.driver.session.settings.proxy.pings.get(&1),
         Some(&PingStatus::Checking)
     );
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     assert_eq!(
-        rig.driver.session.proxy.pings.get(&1),
+        rig.driver.session.settings.proxy.pings.get(&1),
         Some(&PingStatus::Available(42))
     );
     rig.driver.ping_listed_proxy(2).unwrap();
@@ -165,7 +170,7 @@ fn ping_answers_and_failures_set_the_row_status() {
         json!({"@type": "error", "code": 400, "message": "Request timeout"}),
     );
     assert_eq!(
-        rig.driver.session.proxy.pings.get(&2),
+        rig.driver.session.settings.proxy.pings.get(&2),
         Some(&PingStatus::Unavailable)
     );
 }
@@ -178,19 +183,22 @@ fn prefer_ipv6_follows_the_ack_and_the_option_update() {
         sent_request(&rig.recorder, "setOption")["name"],
         "prefer_ipv6"
     );
-    assert!(!rig.driver.session.proxy.prefer_ipv6, "never optimistic");
+    assert!(
+        !rig.driver.session.settings.proxy.prefer_ipv6,
+        "never optimistic"
+    );
     rig.answer("setOption", json!({"@type": "ok"}));
-    assert!(rig.driver.session.proxy.prefer_ipv6);
+    assert!(rig.driver.session.settings.proxy.prefer_ipv6);
     rig.feed(json!({"@type": "updateOption", "name": "prefer_ipv6",
         "value": {"@type": "optionValueBoolean", "value": false}}));
-    assert!(!rig.driver.session.proxy.prefer_ipv6);
+    assert!(!rig.driver.session.settings.proxy.prefer_ipv6);
 }
 
 #[test]
 fn auto_switch_probes_then_enables_a_working_proxy() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, true), (2, false), (3, false)]);
-    rig.driver.session.proxy.prefs = ProxyPrefs {
+    rig.driver.session.settings.proxy.prefs = ProxyPrefs {
         auto_switch: true,
         auto_switch_secs: 10,
     };

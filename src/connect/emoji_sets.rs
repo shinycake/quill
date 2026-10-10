@@ -161,6 +161,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut ids = self.session.message_custom_emoji_ids_to_resolve();
         ids.extend(
             self.session
+                .settings
                 .media_prefs
                 .recent_custom_emoji_ids
                 .iter()

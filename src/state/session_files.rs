@@ -46,21 +46,21 @@ impl Session {
         {
             self.unstick_download(file.id.0);
         }
-        let sound_id = self.sound_file_ids.get(&file.id.0).copied();
+        let sound_id = self.settings.sound_file_ids.get(&file.id.0).copied();
         if let Some(sound_id) = sound_id {
             if let Some(path) = file.usable_path() {
-                if self.pending_sound_downloads.remove(&sound_id) {
+                if self.settings.pending_sound_downloads.remove(&sound_id) {
                     // Parity slice: a completed notification-sound download
                     // with playback requested → hand the path to the UI for
                     // the in-process player. The reducer never spawns processes.
-                    self.pending_sound_plays.push(path.into());
+                    self.settings.pending_sound_plays.push(path.into());
                 }
             } else if from_file_update && file.local.is_idle_incomplete() {
                 // Parity slice: a sound download that errored/cancelled
                 // (active → idle without completing) must not leave the id in
                 // `pending_sound_downloads` — otherwise a stale late
                 // completion could trigger a belated play.
-                self.pending_sound_downloads.remove(&sound_id);
+                self.settings.pending_sound_downloads.remove(&sound_id);
             }
         }
         self.note_avatar_file_changed(file.id.0);
@@ -260,8 +260,8 @@ impl Session {
             }
         }
         // The received-gifts dialog shows each gift's sticker.
-        if self.hub.gifts_open {
-            for gift in &self.hub.gifts {
+        if self.payments.hub.gifts_open {
+            for gift in &self.payments.hub.gifts {
                 if let Some(file_id) = gift
                     .gift
                     .sticker
@@ -349,7 +349,7 @@ impl Session {
         let Some(chat_id) = self.open_chat else {
             return Vec::new();
         };
-        if self.media_prefs.data_saver {
+        if self.settings.media_prefs.data_saver {
             return Vec::new();
         }
         let Some(history) = self.histories.get(&chat_id.0) else {
@@ -424,17 +424,17 @@ impl Session {
     /// bitfield (TGX `settings_autodownload` private/group/channel shifts).
     /// Secret chats use the private bucket.
     pub fn auto_download_allowed(&self, chat_id: ChatId, flag: u8) -> bool {
-        if self.media_prefs.data_saver {
+        if self.settings.media_prefs.data_saver {
             return false;
         }
         let bits = match self.chats.get(&chat_id.0).map(|chat| &chat.kind) {
             Some(ChatKind::Supergroup {
                 is_channel: true, ..
-            }) => self.media_prefs.auto_download_channels,
+            }) => self.settings.media_prefs.auto_download_channels,
             Some(ChatKind::BasicGroup { .. }) | Some(ChatKind::Supergroup { .. }) => {
-                self.media_prefs.auto_download_groups
+                self.settings.media_prefs.auto_download_groups
             }
-            _ => self.media_prefs.auto_download_private,
+            _ => self.settings.media_prefs.auto_download_private,
         };
         bits & flag != 0
     }

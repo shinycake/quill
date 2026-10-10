@@ -288,7 +288,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Contacts tab (same account-scoped dir as the other settings
     /// files).
     pub fn save_contact_prefs(&mut self) -> std::io::Result<()> {
-        save_contact_prefs(&self.paths, &self.session.contact_prefs)
+        save_contact_prefs(&self.paths, &self.session.settings.contact_prefs)
     }
 
     /// Phase 6: download the small profile photo for the user info panel

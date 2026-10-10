@@ -15,7 +15,7 @@ impl Session {
                 | AuthorizationState::Closing
                 | AuthorizationState::Closed
         ) {
-            self.account_export = None;
+            self.settings.account_export = None;
         }
         // List paging belongs to one authorization. TDLib only leaves Ready
         // through LoggingOut / Closing / Closed, so a later Ready (another
@@ -61,7 +61,7 @@ impl Session {
         }
         self.auth = state;
         self.auth_view = view_for(&self.auth);
-        self.last_auth_error = None;
+        self.auth_state.last_auth_error = None;
     }
 
     pub(crate) fn apply_position_fields(&mut self, pos: ChatPositionUpdate) {

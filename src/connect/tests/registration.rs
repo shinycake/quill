@@ -76,7 +76,12 @@ fn registration_requires_current_terms_and_valid_names_without_auto_acceptance()
         json!({"@type":"error","@extra":first.as_extra(),"code":400,"message":"private name"}),
     );
     assert_eq!(
-        driver.session.last_auth_error.unwrap().user_message(),
+        driver
+            .session
+            .auth_state
+            .last_auth_error
+            .unwrap()
+            .user_message(),
         "registration not accepted — check your name"
     );
     driver

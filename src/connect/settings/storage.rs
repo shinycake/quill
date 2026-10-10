@@ -13,7 +13,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.storage_stats.is_some()
+        if self.session.settings.storage_stats.is_some()
             || self
                 .session
                 .requests
@@ -24,12 +24,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStorageStatistics, None);
-        self.session.storage_stats_loading = true;
+        self.session.settings.storage_stats_loading = true;
         match self.sender.send_json(&get_storage_statistics(extra, 50)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.storage_stats_loading = false;
+                self.session.settings.storage_stats_loading = false;
                 Err(err)
             }
         }
@@ -42,8 +42,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// data yet." until the old answer lands (late answers to the dropped
     /// `@extra` are ignored by the purpose match).
     pub fn refresh_storage_statistics(&mut self) {
-        self.session.storage_stats = None;
-        self.session.storage_stats_loading = false;
+        self.session.settings.storage_stats = None;
+        self.session.settings.storage_stats_loading = false;
         self.session
             .requests
             .take_purpose(RequestPurpose::GetStorageStatistics);
@@ -58,7 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.data_storage.seeded
+        if self.session.settings.data_storage.seeded
             || self
                 .session
                 .requests
@@ -69,14 +69,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetAutoDownloadSettingsPresets, None);
-        self.session.auto_download_presets_loading = true;
+        self.session.settings.auto_download_presets_loading = true;
         if let Err(err) = self
             .sender
             .send_json(&get_auto_download_settings_presets(extra))
         {
             self.session.requests.take(extra);
-            self.session.auto_download_presets_loading = false;
-            self.session.data_storage_error =
+            self.session.settings.auto_download_presets_loading = false;
+            self.session.settings.data_storage_error =
                 Some("Couldn't load auto-download settings.".to_string());
             return Err(err);
         }
@@ -109,7 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let payload = set_auto_download_settings(extra, settings.to_json(), network.td_type());
         if let Err(err) = self.sender.send_json(&payload) {
             self.session.requests.take(extra);
-            self.session.data_storage_error =
+            self.session.settings.data_storage_error =
                 Some("Couldn't save auto-download settings.".to_string());
             return Err(err);
         }
@@ -124,14 +124,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// all-off defaults would silently disable the user's
     /// auto-downloads account-wide.
     pub fn set_less_data_for_calls(&mut self, on: bool) -> Result<(), ConnectSendError> {
-        if !self.session.data_storage.seeded {
+        if !self.session.settings.data_storage.seeded {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         for network in NetworkKind::ALL {
-            let mut settings = *self.session.data_storage.for_network(network);
+            let mut settings = *self.session.settings.data_storage.for_network(network);
             settings.use_less_data_for_calls = on;
             self.set_auto_download_settings(network, settings)?;
         }
@@ -150,7 +150,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         file_types: &[&str],
         chat_ids: &[i64],
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.storage_clearing {
+        if !self.chats_path_active() || self.session.settings.storage_clearing {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::OptimizeStorage, None);
@@ -159,13 +159,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_ids,
             ..OptimizeStorage::everything(50)
         };
-        self.session.storage_freed = None;
-        self.session.storage_clearing = true;
-        self.session.data_storage_error = None;
+        self.session.settings.storage_freed = None;
+        self.session.settings.storage_clearing = true;
+        self.session.settings.data_storage_error = None;
         if let Err(err) = self.sender.send_json(&optimize_storage(extra, &params)) {
             self.session.requests.take(extra);
-            self.session.storage_clearing = false;
-            self.session.data_storage_error = Some("Couldn't clear the cache.".to_string());
+            self.session.settings.storage_clearing = false;
+            self.session.settings.data_storage_error =
+                Some("Couldn't clear the cache.".to_string());
             return Err(err);
         }
         Ok(extra)
@@ -195,7 +196,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if let Err(err) = self.sender.send_json(&json) {
                 self.session.requests.take(extra);
-                self.session.data_storage_error =
+                self.session.settings.data_storage_error =
                     Some("Couldn't save the storage limits.".to_string());
                 return Err(err);
             }
@@ -206,6 +207,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Slice S4: persist the per-network auto-download settings
     /// (`data_storage.json`) next to the account.
     pub fn save_data_storage_prefs(&mut self) -> std::io::Result<()> {
-        save_data_storage_prefs(&self.paths, &self.session.data_storage)
+        save_data_storage_prefs(&self.paths, &self.session.settings.data_storage)
     }
 }

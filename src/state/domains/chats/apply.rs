@@ -238,16 +238,17 @@ impl Session {
                 // open refetches it.
                 if fully_default {
                     if kind_unknown {
-                        for list in self.notification_exceptions.values_mut() {
+                        for list in self.settings.notification_exceptions.values_mut() {
                             list.retain(|id| *id != chat_id.0);
                         }
-                    } else if let Some(list) = self.notification_exceptions.get_mut(&scope) {
+                    } else if let Some(list) = self.settings.notification_exceptions.get_mut(&scope)
+                    {
                         list.retain(|id| *id != chat_id.0);
                     }
                 } else if kind_unknown {
-                    self.notification_exceptions.clear();
+                    self.settings.notification_exceptions.clear();
                 } else {
-                    self.notification_exceptions.remove(&scope);
+                    self.settings.notification_exceptions.remove(&scope);
                 }
             }
             ChatsPayload::UpdateChatDefaultDisableNotification {

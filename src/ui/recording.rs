@@ -48,7 +48,7 @@ impl QuillApp {
     pub(super) fn record_mode(&self) -> RecordMode {
         if self
             .session()
-            .is_some_and(|session| session.media_prefs.prefer_video_mode)
+            .is_some_and(|session| session.settings.media_prefs.prefer_video_mode)
         {
             RecordMode::Video
         } else {
@@ -160,7 +160,7 @@ impl QuillApp {
         }
         let hq = self
             .session()
-            .is_some_and(|session| session.media_prefs.hq_round_videos);
+            .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
         match VideoNoteCapture::start(hq) {
             Ok(capture) => {
                 self.recording.video_note_capture = Some(capture);

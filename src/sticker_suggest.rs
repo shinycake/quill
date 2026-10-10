@@ -259,14 +259,14 @@ mod tests {
         assert!(with_purpose.stickers.found_stickers.is_empty());
 
         // InstalledOnly: the set-99 sticker is filtered out.
-        with_purpose.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
+        with_purpose.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
         let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
         assert_eq!(with_purpose.stickers.suggestions.len(), 1);
         assert_eq!(with_purpose.stickers.suggestions[0].set_id, 77);
 
         // None: the answer is dropped and the slot cleared.
-        with_purpose.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
+        with_purpose.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
         let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
         assert!(with_purpose.stickers.suggestions.is_empty());

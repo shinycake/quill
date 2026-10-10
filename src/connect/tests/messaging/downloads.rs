@@ -200,7 +200,7 @@ fn chat_list_photos_download_whenever_they_become_due() {
     );
     assert_eq!(downloads(&recorder, 91), 1, "pre-Ready avatar after Ready");
 
-    driver.session.media_prefs.data_saver = true;
+    driver.session.settings.media_prefs.data_saver = true;
     ingest(
         &mut driver,
         &format!(
@@ -209,7 +209,7 @@ fn chat_list_photos_download_whenever_they_become_due() {
         ),
     );
     assert_eq!(downloads(&recorder, 93), 0, "data saver pauses avatars");
-    driver.session.media_prefs.data_saver = false;
+    driver.session.settings.media_prefs.data_saver = false;
     ingest(&mut driver, tick);
     assert_eq!(downloads(&recorder, 93), 1, "sent once data saver is off");
 

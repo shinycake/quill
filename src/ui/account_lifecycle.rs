@@ -152,7 +152,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.set_default_auto_delete(seconds);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.default_auto_delete_secs = Some(seconds);
+            session.settings.default_auto_delete_secs = Some(seconds);
         }
         cx.notify();
     }
@@ -283,15 +283,17 @@ impl QuillApp {
         );
         app.update(cx, |this, cx| {
             let session = this.session();
-            let ttl_days = session.as_ref().and_then(|s| s.account_ttl_days);
-            let ttl_loading = session.is_some_and(|s| s.account_ttl_loading);
-            let mutating = session.is_some_and(|s| s.account_mutating);
-            let error = session.as_ref().and_then(|s| s.account_error.clone());
+            let ttl_days = session.as_ref().and_then(|s| s.settings.account_ttl_days);
+            let ttl_loading = session.is_some_and(|s| s.settings.account_ttl_loading);
+            let mutating = session.is_some_and(|s| s.settings.account_mutating);
+            let error = session
+                .as_ref()
+                .and_then(|s| s.settings.account_error.clone());
             let has_password = session
                 .as_ref()
-                .and_then(|s| s.password_state.as_ref())
+                .and_then(|s| s.auth_state.password_state.as_ref())
                 .is_some_and(|p| p.has_password);
-            let pw_loading = session.is_some_and(|s| s.password_state_loading);
+            let pw_loading = session.is_some_and(|s| s.auth_state.password_state_loading);
 
             let mut body = div().flex().flex_col().gap_3();
             if let Some(line) = error {
@@ -302,11 +304,13 @@ impl QuillApp {
                         .child(format!("Error: {line}")),
                 );
             }
-            let auto_delete = session.as_ref().and_then(|s| s.default_auto_delete_secs);
-            let auto_delete_busy = session.is_some_and(|s| s.default_auto_delete_busy);
+            let auto_delete = session
+                .as_ref()
+                .and_then(|s| s.settings.default_auto_delete_secs);
+            let auto_delete_busy = session.is_some_and(|s| s.settings.default_auto_delete_busy);
             let auto_delete_error = session
                 .as_ref()
-                .and_then(|s| s.default_auto_delete_error.clone());
+                .and_then(|s| s.settings.default_auto_delete_error.clone());
             body = this.account_auto_delete_body(
                 cx,
                 body,

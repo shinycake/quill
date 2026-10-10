@@ -258,9 +258,9 @@ fn qr_recovery_accepts_supported_states_and_waits_for_pending_auth() {
         ).unwrap();
         driver.ingest(error).unwrap();
         assert!(!driver.session.requests.has_auth_submit());
-        assert!(driver.session.last_auth_error.is_some());
+        assert!(driver.session.auth_state.last_auth_error.is_some());
         let retry = driver.request_qr_login().unwrap();
-        assert!(driver.session.last_auth_error.is_none());
+        assert!(driver.session.auth_state.last_auth_error.is_none());
         driver.session.requests.take(retry);
     }
     for state in [
@@ -361,8 +361,8 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
                 .unwrap(),
             )
             .unwrap();
-    assert!(driver.session.password_state.is_some());
-    assert!(!driver.session.password_state_loading);
+    assert!(driver.session.auth_state.password_state.is_some());
+    assert!(!driver.session.auth_state.password_state_loading);
 
     // Enable: empty old password, email in the same call.
     let enable_extra = driver
@@ -398,6 +398,7 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
     assert!(
         driver
             .session
+            .auth_state
             .password_state
             .as_ref()
             .is_some_and(|s| s.has_password)
@@ -433,6 +434,7 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
     assert_eq!(
         driver
             .session
+            .auth_state
             .password_state
             .as_ref()
             .and_then(|s| s.pending_email_pattern.clone())

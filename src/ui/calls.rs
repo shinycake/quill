@@ -80,7 +80,7 @@ impl QuillApp {
         }
         if self
             .session()
-            .is_some_and(|session| session.call_prefs.confirm_before_calling)
+            .is_some_and(|session| session.calls.prefs.confirm_before_calling)
         {
             self.calls.confirm = Some((user_id, is_video));
             cx.notify();
@@ -154,16 +154,16 @@ impl QuillApp {
     ) {
         let mut prefs = self
             .session()
-            .map(|session| session.call_prefs.clone())
+            .map(|session| session.calls.prefs.clone())
             .unwrap_or_default();
         update(&mut prefs);
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.call_prefs = prefs;
+            live.driver.session.calls.prefs = prefs;
             if let Err(err) = live.driver.save_call_prefs() {
                 self.connection.status_note = format!("couldn’t save call settings: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.call_prefs = prefs;
+            demo.calls.prefs = prefs;
             self.connection.status_note = "demo: call settings are not saved".into();
         }
         self.sync_ptt_with_call(cx);
@@ -175,6 +175,7 @@ impl QuillApp {
             let muted = live
                 .driver
                 .session
+                .calls
                 .active_call
                 .as_ref()
                 .is_some_and(|call| !call.muted);
@@ -191,7 +192,7 @@ impl QuillApp {
         } else if let Some(call) = self
             .demo_session
             .as_mut()
-            .and_then(|session| session.active_call.as_mut())
+            .and_then(|session| session.calls.active_call.as_mut())
         {
             call.muted = !call.muted;
         }
@@ -204,7 +205,7 @@ impl QuillApp {
     /// contract). Demo: flips the flag only, no live Telegram.
     pub(super) fn toggle_call_camera(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let Some(call) = live.driver.session.active_call.as_ref() else {
+            let Some(call) = live.driver.session.calls.active_call.as_ref() else {
                 return;
             };
             let (call_id, camera_on) = (call.id, !call.camera_on);
@@ -223,7 +224,7 @@ impl QuillApp {
         } else if let Some(call) = self
             .demo_session
             .as_mut()
-            .and_then(|session| session.active_call.as_mut())
+            .and_then(|session| session.calls.active_call.as_mut())
         {
             call.camera_on = !call.camera_on;
             self.connection.status_note = "demo: camera toggle (no live Telegram)".into();
@@ -238,7 +239,7 @@ impl QuillApp {
     /// Telegram.
     pub(super) fn toggle_call_screen_share(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let Some(call) = live.driver.session.active_call.as_ref() else {
+            let Some(call) = live.driver.session.calls.active_call.as_ref() else {
                 return;
             };
             let (call_id, sharing) = (call.id, !call.screen_sharing);
@@ -256,7 +257,7 @@ impl QuillApp {
         } else if let Some(call) = self
             .demo_session
             .as_mut()
-            .and_then(|session| session.active_call.as_mut())
+            .and_then(|session| session.calls.active_call.as_mut())
         {
             call.screen_sharing = !call.screen_sharing;
             self.connection.status_note = "demo: screen share toggle (no live Telegram)".into();
@@ -407,7 +408,7 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             self.connection.status_note = "demo: call rating (no live Telegram)".into();
             if let Some(session) = self.demo_session.as_mut()
-                && let Some(summary) = session.call_summary.as_mut()
+                && let Some(summary) = session.calls.summary.as_mut()
             {
                 summary.rating_sent = true;
             }
@@ -424,7 +425,7 @@ impl QuillApp {
         } else if let Some(summary) = self
             .demo_session
             .as_mut()
-            .and_then(|session| session.call_summary.as_mut())
+            .and_then(|session| session.calls.summary.as_mut())
         {
             summary.debug_information_sent = true;
             summary.debug_information_error = None;
@@ -444,7 +445,7 @@ impl QuillApp {
         } else if let Some(summary) = self
             .demo_session
             .as_mut()
-            .and_then(|session| session.call_summary.as_mut())
+            .and_then(|session| session.calls.summary.as_mut())
         {
             summary.log_sent = true;
             summary.log_error = None;
@@ -463,7 +464,7 @@ impl QuillApp {
             .into_iter()
             .chain(self.demo_session.as_mut())
         {
-            session.call_summary = None;
+            session.calls.summary = None;
         }
         cx.notify();
     }
@@ -477,7 +478,7 @@ impl QuillApp {
             .into_iter()
             .chain(self.demo_session.as_mut())
         {
-            session.call_error = None;
+            session.calls.error = None;
         }
         cx.notify();
     }
@@ -486,7 +487,9 @@ impl QuillApp {
     /// ringing / connected clock fresh. Mirrors the Phase A1 slow-mode
     /// tick (at most one task; exits when no call is active).
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
-        let call_active = self.session().is_some_and(|s| s.active_call.is_some());
+        let call_active = self
+            .session()
+            .is_some_and(|s| s.calls.active_call.is_some());
         if !call_active || self.calls.tick_active {
             return;
         }
@@ -501,7 +504,9 @@ impl QuillApp {
                 cx.background_executor().timer(interval).await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        let still_active = this.session().is_some_and(|s| s.active_call.is_some());
+                        let still_active = this
+                            .session()
+                            .is_some_and(|s| s.calls.active_call.is_some());
                         if still_active {
                             cx.notify();
                             true
@@ -528,7 +533,7 @@ impl QuillApp {
     pub(super) fn call_tick_interval(&self) -> Duration {
         let fast = self
             .session()
-            .and_then(|s| s.active_call.as_ref())
+            .and_then(|s| s.calls.active_call.as_ref())
             .is_some_and(|call| {
                 call.is_video
                     && matches!(call.state, CallState::Ready)
@@ -642,10 +647,10 @@ impl QuillApp {
                 Err(_) => "could not answer the call".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some((call_id, user_id, is_video)) = session.call_swap_pending.take() {
-                session.active_call = None;
-                session.call_summary = None;
-                session.active_call = Some(ActiveCall {
+            if let Some((call_id, user_id, is_video)) = session.calls.swap_pending.take() {
+                session.calls.active_call = None;
+                session.calls.summary = None;
+                session.calls.active_call = Some(ActiveCall {
                     id: call_id,
                     user_id,
                     is_outgoing: false,
@@ -683,7 +688,7 @@ impl QuillApp {
                 Err(_) => "could not decline the call".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.call_swap_pending = None;
+            session.calls.swap_pending = None;
             self.connection.status_note = "demo: swap declined (no live Telegram)".into();
         }
         cx.notify();
@@ -705,7 +710,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let Some((_call_id, user_id, is_video)) =
-                this.session().and_then(|s| s.call_swap_pending)
+                this.session().and_then(|s| s.calls.swap_pending)
             else {
                 return dialog
                     .overlay(true)
@@ -821,7 +826,7 @@ impl QuillApp {
     /// Phase C2i: busy-decline banner for `call_busy_declined` — the
     /// incoming calls declined while another call was active.
     pub(super) fn call_busy_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let declined = self.session()?.call_busy_declined.clone();
+        let declined = self.session()?.calls.busy_declined.clone();
         if declined.is_empty() {
             return None;
         }
@@ -858,9 +863,9 @@ impl QuillApp {
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(live) = this.live.as_mut() {
-                                live.driver.session.call_busy_declined.clear();
+                                live.driver.session.calls.busy_declined.clear();
                             } else if let Some(session) = this.demo_session.as_mut() {
-                                session.call_busy_declined.clear();
+                                session.calls.busy_declined.clear();
                             }
                             cx.notify();
                         })),
@@ -883,7 +888,7 @@ impl QuillApp {
         }
         let confirm = self
             .session()
-            .is_some_and(|session| session.call_prefs.confirm_before_calling);
+            .is_some_and(|session| session.calls.prefs.confirm_before_calling);
         if confirm {
             self.calls.confirm = Some((user_id, is_video));
             cx.notify();
@@ -899,11 +904,11 @@ impl QuillApp {
             .session()
             .map(|session| {
                 (
-                    session.recent_calls.clone(),
-                    session.recent_calls_loading,
-                    session.recent_calls_error,
-                    !session.recent_calls_offset.is_empty(),
-                    session.recent_calls_clearing,
+                    session.calls.recent_calls.clone(),
+                    session.calls.recent_calls_loading,
+                    session.calls.recent_calls_error,
+                    !session.calls.recent_calls_offset.is_empty(),
+                    session.calls.recent_calls_clearing,
                 )
             })
             .unwrap_or_default();
@@ -1076,7 +1081,7 @@ crate::ui::shell::register_dialogs! {
     CallSwap => DialogSpec::new(
         // Swap prompt is call-urgent: same priority band as CallConfirm.
         1200,
-        |app| app.session().is_some_and(|s| s.call_swap_pending.is_some()),
+        |app| app.session().is_some_and(|s| s.calls.swap_pending.is_some()),
         QuillApp::build_call_swap_dialog,
     ),
 }

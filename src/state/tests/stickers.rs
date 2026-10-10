@@ -182,8 +182,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
 fn sound_list_refetch_prunes_file_ids() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.sound_file_ids.insert(91, 7); // dropped from the list
-    session.sound_file_ids.insert(92, 8); // still saved
+    session.settings.sound_file_ids.insert(91, 7); // dropped from the list
+    session.settings.sound_file_ids.insert(92, 8); // still saved
     let extra = session.request(RequestPurpose::GetSavedNotificationSounds, None);
     let sound_file = r#"{"@type":"file","id":92,"size":12,"expected_size":12,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":12}}"#;
     apply_json(
@@ -195,9 +195,9 @@ fn sound_list_refetch_prunes_file_ids() {
             sound_file, extra.0
         ),
     );
-    assert!(session.saved_sounds_loaded);
-    assert!(!session.sound_file_ids.contains_key(&91));
-    assert_eq!(session.sound_file_ids.get(&92), Some(&8));
+    assert!(session.settings.saved_sounds_loaded);
+    assert!(!session.settings.sound_file_ids.contains_key(&91));
+    assert_eq!(session.settings.sound_file_ids.get(&92), Some(&8));
 }
 
 #[test]

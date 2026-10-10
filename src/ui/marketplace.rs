@@ -40,8 +40,8 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx,|this,cx|{
-            let gift=this.session().and_then(|s|s.marketplace_gift.clone());
-            let limit=this.session().and_then(|s|s.gift_text_length_max);
+            let gift=this.session().and_then(|s|s.payments.marketplace_gift.clone());
+            let limit=this.session().and_then(|s|s.payments.gift_text_length_max);
             let busy=gift.as_ref().is_some_and(|g|g.loading || g.sending);
             let mut body=div().flex().flex_col().gap_3()
                 .child(div().id("gift-instructions").role(Role::Label).aria_label("Load a collectible by its Telegram gift name, then review the recipient and price before buying.").child("Load a collectible by its Telegram gift name, then review the recipient and price before buying."))
@@ -57,7 +57,7 @@ impl QuillApp {
                     body=body.child(div().id("gift-title").role(Role::Label).aria_label(title.clone()).font_semibold().child(title));
                     for price in [quote.stars,quote.ton].into_iter().flatten() {
                         body=body.child(Button::new(format!("gift-price-{}",price.label())).label(price.label()).selected(gift.price==Some(price)).disabled(busy || gift.completed).on_click(cx.listener(move|this,_,_,cx|{
-                            if let Some(live)=this.live.as_mut() && let Some(g)=live.driver.session.marketplace_gift.as_mut() && !g.sending { g.price=Some(price); }
+                            if let Some(live)=this.live.as_mut() && let Some(g)=live.driver.session.payments.marketplace_gift.as_mut() && !g.sending { g.price=Some(price); }
                             cx.notify();
                         })));
                     }

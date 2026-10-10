@@ -531,7 +531,7 @@ impl QuillApp {
             return None;
         }
         let session = self.session()?;
-        let prefs = &session.media_prefs;
+        let prefs = &session.settings.media_prefs;
         if prefs.data_saver {
             return None;
         }

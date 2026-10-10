@@ -8,7 +8,7 @@ fn story_report_flow_through_option_and_text_steps() {
     let seq = AtomicU64::new(0);
     session.begin_story_report(12, 6);
     assert!(matches!(
-        session.story_report.as_ref().unwrap().stage,
+        session.stories.report.as_ref().unwrap().stage,
         StoryReportStage::Checking
     ));
     let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
@@ -21,7 +21,7 @@ fn story_report_flow_through_option_and_text_steps() {
             extra.0
         ),
     );
-    match &session.story_report.as_ref().unwrap().stage {
+    match &session.stories.report.as_ref().unwrap().stage {
         StoryReportStage::PickOption { title, options } => {
             assert_eq!(title, "Why?");
             assert_eq!(options[0].id, "aGk=");
@@ -40,7 +40,7 @@ fn story_report_flow_through_option_and_text_steps() {
         ),
     );
     assert!(matches!(
-        session.story_report.as_ref().unwrap().stage,
+        session.stories.report.as_ref().unwrap().stage,
         StoryReportStage::TextRequired { ref option_id, .. } if option_id == "aGk="
     ));
     let extra3 = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
@@ -54,7 +54,7 @@ fn story_report_flow_through_option_and_text_steps() {
         ),
     );
     assert!(matches!(
-        session.story_report.as_ref().unwrap().stage,
+        session.stories.report.as_ref().unwrap().stage,
         StoryReportStage::Reported
     ));
     // A late error after the flow closed does not resurrect it.
@@ -69,7 +69,7 @@ fn story_report_flow_through_option_and_text_steps() {
             extra4.0
         ),
     );
-    assert!(session.story_report.is_none());
+    assert!(session.stories.report.is_none());
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn story_report_empty_options_means_reported() {
         ),
     );
     assert!(matches!(
-        session.story_report.as_ref().unwrap().stage,
+        session.stories.report.as_ref().unwrap().stage,
         StoryReportStage::Reported
     ));
 }
@@ -99,14 +99,14 @@ fn story_report_send_failure_ends_flow() {
     session.begin_story_report(12, 6);
     session.fail_story_report_send(12, 6, "could not report story".into());
     assert!(matches!(
-        session.story_report.as_ref().unwrap().stage,
+        session.stories.report.as_ref().unwrap().stage,
         StoryReportStage::Failed(_)
     ));
     // A different story's flow is untouched.
     session.begin_story_report(12, 7);
     session.fail_story_report_send(12, 6, "could not report story".into());
     assert!(matches!(
-        session.story_report.as_ref().unwrap().stage,
+        session.stories.report.as_ref().unwrap().stage,
         StoryReportStage::Checking
     ));
 }
@@ -122,16 +122,16 @@ fn update_story_stealth_mode_stored() {
         r#"{"@type":"updateStoryStealthMode","active_until_date":1700003600,"cooldown_until_date":1700007200}"#,
     );
     assert_eq!(
-        session.story_stealth,
+        session.stories.stealth,
         StoryStealthMode {
             active_until_date: 1700003600,
             cooldown_until_date: 1700007200,
         }
     );
-    assert!(session.story_stealth.is_active(1700000000));
-    assert!(!session.story_stealth.is_active(1700003600));
-    assert!(session.story_stealth.is_cooling_down(1700003600));
-    assert!(!session.story_stealth.is_cooling_down(1700007200));
+    assert!(session.stories.stealth.is_active(1700000000));
+    assert!(!session.stories.stealth.is_active(1700003600));
+    assert!(session.stories.stealth.is_cooling_down(1700003600));
+    assert!(!session.stories.stealth.is_cooling_down(1700007200));
 }
 
 #[test]
@@ -145,11 +145,11 @@ fn update_story_post_succeeded_upserts_and_queues_tray_refresh() {
         &sink,
         r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":9,"poster_chat_id":11,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":8}"#,
     );
-    let story = session.stories.get(&(11, 9)).expect("story cached");
+    let story = session.stories.stories.get(&(11, 9)).expect("story cached");
     assert_eq!(story.poster_chat_id, 11);
     // The driver's `tick` drains this into a `getChatActiveStories`
     // refresh for the poster's tray entry.
-    assert!(session.story_tray_refresh.contains(&11));
+    assert!(session.stories.tray_refresh.contains(&11));
 }
 
 #[test]
@@ -171,7 +171,8 @@ fn story_post_outcome_transitions() {
         ),
     );
     let eligibility = session
-        .story_post
+        .stories
+        .post
         .eligibility
         .clone()
         .expect("eligibility stored");
@@ -185,7 +186,7 @@ fn story_post_outcome_transitions() {
         &sink,
         r#"{"@type":"canPostStoryResultOk","story_count":1}"#,
     );
-    assert!(!session.story_post.eligibility.clone().unwrap().can_post());
+    assert!(!session.stories.post.eligibility.clone().unwrap().can_post());
 
     // `postStory` answer → Posting with the temporary story id.
     let extra = session.request(RequestPurpose::PostStory, None);
@@ -199,7 +200,7 @@ fn story_post_outcome_transitions() {
         ),
     );
     assert_eq!(
-        session.story_post.outcome,
+        session.stories.post.outcome,
         StoryPostOutcome::Posting { story_id: 8 }
     );
 
@@ -211,8 +212,8 @@ fn story_post_outcome_transitions() {
         &sink,
         r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":9,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":8}"#,
     );
-    assert_eq!(session.story_post.outcome, StoryPostOutcome::Succeeded);
-    assert!(session.stories.contains_key(&(777, 9)));
+    assert_eq!(session.stories.post.outcome, StoryPostOutcome::Succeeded);
+    assert!(session.stories.stories.contains_key(&(777, 9)));
 
     // Failed path: new pending post, then `updateStoryPostFailed`.
     let extra = session.request(RequestPurpose::PostStory, None);
@@ -232,7 +233,7 @@ fn story_post_outcome_transitions() {
         r#"{"@type":"updateStoryPostFailed","story":{"@type":"story","id":10,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"error":{"@type":"error","code":400,"message":"x"},"error_type":{"@type":"canPostStoryResultOk"}}"#,
     );
     assert!(matches!(
-        session.story_post.outcome,
+        session.stories.post.outcome,
         StoryPostOutcome::Failed(_)
     ));
 
@@ -249,7 +250,7 @@ fn story_post_outcome_transitions() {
         ),
     );
     assert!(matches!(
-        session.story_post.outcome,
+        session.stories.post.outcome,
         StoryPostOutcome::Failed(_)
     ));
     let extra = session.request(RequestPurpose::CheckCanPostStory, None);
@@ -262,7 +263,7 @@ fn story_post_outcome_transitions() {
             extra.0
         ),
     );
-    assert!(session.story_post.check_error.is_some());
+    assert!(session.stories.post.check_error.is_some());
 }
 
 #[test]
@@ -275,18 +276,18 @@ fn story_manage_state_transitions() {
     let seq = AtomicU64::new(0);
 
     let extra = session.request(RequestPurpose::EditStory, None);
-    session.story_manage.pending = true;
+    session.stories.manage.pending = true;
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.story_manage.pending);
-    assert_eq!(session.story_manage.error, None);
+    assert!(!session.stories.manage.pending);
+    assert_eq!(session.stories.manage.error, None);
 
     let extra = session.request(RequestPurpose::EditStoryCover, None);
-    session.story_manage.pending = true;
+    session.stories.manage.pending = true;
     apply_json(
         &mut session,
         &seq,
@@ -296,8 +297,8 @@ fn story_manage_state_transitions() {
             extra.0
         ),
     );
-    assert!(!session.story_manage.pending);
-    let error = session.story_manage.error.clone().expect("manage error");
+    assert!(!session.stories.manage.pending);
+    let error = session.stories.manage.error.clone().expect("manage error");
     assert!(error.contains("Story update failed"), "{error}");
 
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
@@ -310,7 +311,7 @@ fn story_manage_state_transitions() {
             extra.0
         ),
     );
-    assert_eq!(session.story_post_as_chats, vec![111, 222]);
+    assert_eq!(session.stories.post_as_chats, vec![111, 222]);
 
     // Review fix-up: a failed `getChatsToPostStories` surfaces a
     // transient error instead of silently leaving only "Myself".
@@ -325,7 +326,8 @@ fn story_manage_state_transitions() {
         ),
     );
     let error = session
-        .story_post
+        .stories
+        .post
         .check_error
         .clone()
         .expect("post-as error");
@@ -355,7 +357,7 @@ fn story_post_second_answer_without_pending_is_absorbed() {
         ),
     );
     assert_eq!(
-        session.story_post.outcome,
+        session.stories.post.outcome,
         StoryPostOutcome::Posting { story_id: 8 }
     );
     assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
@@ -369,11 +371,11 @@ fn story_post_second_answer_without_pending_is_absorbed() {
         r#"{"@type":"story","id":8,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
     );
     assert_eq!(
-        session.story_post.outcome,
+        session.stories.post.outcome,
         StoryPostOutcome::Posting { story_id: 8 }
     );
     assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
-    assert!(session.stories.contains_key(&(777, 8)));
+    assert!(session.stories.stories.contains_key(&(777, 8)));
 }
 
 #[test]
@@ -390,7 +392,7 @@ fn get_story_response_lands_in_story_cache() {
             extra.0
         ),
     );
-    let story = session.stories.get(&(11, 5)).expect("story cached");
+    let story = session.stories.stories.get(&(11, 5)).expect("story cached");
     assert_eq!(story.caption, "CANARY_STORY");
     assert!(matches!(
         story.content,
@@ -435,10 +437,10 @@ fn call_history_pages_accumulate_and_track_offset() {
             extra.0,
         ),
     );
-    assert_eq!(session.recent_calls.len(), 1);
-    assert_eq!(session.recent_calls_offset, "page2");
-    assert!(!session.recent_calls_loading);
-    assert!(!session.recent_calls_error);
+    assert_eq!(session.calls.recent_calls.len(), 1);
+    assert_eq!(session.calls.recent_calls_offset, "page2");
+    assert!(!session.calls.recent_calls_loading);
+    assert!(!session.calls.recent_calls_error);
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
     apply_json(
         &mut session,
@@ -449,18 +451,18 @@ fn call_history_pages_accumulate_and_track_offset() {
             extra.0,
         ),
     );
-    assert_eq!(session.recent_calls.len(), 2);
-    assert_eq!(session.recent_calls_offset, "");
-    assert_eq!(session.recent_calls[0].id.0, 901);
-    assert_eq!(session.recent_calls[1].id.0, 900);
+    assert_eq!(session.calls.recent_calls.len(), 2);
+    assert_eq!(session.calls.recent_calls_offset, "");
+    assert_eq!(session.calls.recent_calls[0].id.0, 901);
+    assert_eq!(session.calls.recent_calls[1].id.0, 900);
 }
 
 #[test]
 fn set_account_ttl_ok_stores_confirmed_days() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.account_ttl_days = Some(90);
-    session.account_mutating = true;
+    session.settings.account_ttl_days = Some(90);
+    session.settings.account_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
@@ -471,17 +473,17 @@ fn set_account_ttl_ok_stores_confirmed_days() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.account_ttl_days, Some(365));
-    assert!(!session.account_mutating);
-    assert!(session.account_error.is_none());
+    assert_eq!(session.settings.account_ttl_days, Some(365));
+    assert!(!session.settings.account_mutating);
+    assert!(session.settings.account_error.is_none());
 }
 
 #[test]
 fn code_info_answer_stores_pending_number_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.change_number_loading = true;
-    session.change_number_error = Some("stale".into());
+    session.auth_state.change_number_loading = true;
+    session.auth_state.change_number_error = Some("stale".into());
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
     apply_json(
         &mut session,
@@ -492,10 +494,13 @@ fn code_info_answer_stores_pending_number_for_matching_request() {
             extra.0
         ),
     );
-    assert_eq!(session.change_number_phone.as_deref(), Some("+15550199"));
-    assert_eq!(session.change_number_timeout, Some(60));
-    assert!(!session.change_number_loading);
-    assert!(session.change_number_error.is_none());
+    assert_eq!(
+        session.auth_state.change_number_phone.as_deref(),
+        Some("+15550199")
+    );
+    assert_eq!(session.auth_state.change_number_timeout, Some(60));
+    assert!(!session.auth_state.change_number_loading);
+    assert!(session.auth_state.change_number_error.is_none());
 }
 
 #[test]
@@ -553,7 +558,7 @@ fn b14_close_friends_load_and_save_round_trip() {
         &sink,
         r#"{"@type":"users","@extra":"no-such","total_count":1,"user_ids":[9]}"#,
     );
-    assert!(session.close_friends.is_none());
+    assert!(session.stories.close_friends.is_none());
 
     let extra = session.request(RequestPurpose::GetCloseFriends, None);
     session.begin_story_page_check(crate::story_page::story_page_op_label(
@@ -568,11 +573,11 @@ fn b14_close_friends_load_and_save_round_trip() {
             extra.0
         ),
     );
-    assert_eq!(session.close_friends, Some(vec![31, 33]));
-    assert!(session.story_page_op.is_none());
+    assert_eq!(session.stories.close_friends, Some(vec![31, 33]));
+    assert!(session.stories.page_op.is_none());
 
     // `setCloseFriends` applies the staged ids on `ok`.
-    session.close_friends_pending = Some(vec![33]);
+    session.stories.close_friends_pending = Some(vec![33]);
     let extra = session.request(RequestPurpose::SetCloseFriends, None);
     apply_json(
         &mut session,
@@ -580,16 +585,16 @@ fn b14_close_friends_load_and_save_round_trip() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.close_friends, Some(vec![33]));
-    assert!(session.close_friends_pending.is_none());
+    assert_eq!(session.stories.close_friends, Some(vec![33]));
+    assert!(session.stories.close_friends_pending.is_none());
 }
 
 #[test]
 fn b14_close_friends_error_drops_staged_ids() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.close_friends = Some(vec![31]);
-    session.close_friends_pending = Some(vec![31, 32]);
+    session.stories.close_friends = Some(vec![31]);
+    session.stories.close_friends_pending = Some(vec![31, 32]);
     session.begin_story_page_op(crate::story_page::story_page_op_label(
         RequestPurpose::SetCloseFriends,
     ));
@@ -603,10 +608,10 @@ fn b14_close_friends_error_drops_staged_ids() {
             extra.0
         ),
     );
-    assert_eq!(session.close_friends, Some(vec![31]));
-    assert!(session.close_friends_pending.is_none());
+    assert_eq!(session.stories.close_friends, Some(vec![31]));
+    assert!(session.stories.close_friends_pending.is_none());
     assert!(matches!(
-        session.story_page_op.as_ref().map(|op| &op.state),
+        session.stories.page_op.as_ref().map(|op| &op.state),
         Some(crate::story_page::StoryPageOpState::Failed(_))
     ));
 }
@@ -628,7 +633,7 @@ fn b14_hide_and_profile_ops_finish_on_ok() {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
         assert_eq!(
-            session.story_page_op.as_ref().map(|op| &op.state),
+            session.stories.page_op.as_ref().map(|op| &op.state),
             Some(&crate::story_page::StoryPageOpState::Succeeded)
         );
     }
@@ -644,7 +649,7 @@ fn b14_story_parses_profile_and_statistics_flags() {
         &sink,
         r#"{"@type":"updateStory","story":{"@type":"story","id":5,"poster_chat_id":11,"date":1,"is_posted_to_chat_page":true,"can_toggle_is_posted_to_chat_page":true,"can_get_statistics":true,"can_be_forwarded":true,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}}"#,
     );
-    let story = session.stories.get(&(11, 5)).expect("story cached");
+    let story = session.stories.stories.get(&(11, 5)).expect("story cached");
     assert!(story.is_posted_to_chat_page);
     assert!(story.can_toggle_is_posted_to_chat_page);
     assert!(story.can_get_statistics);
@@ -673,7 +678,9 @@ fn story_custom_emoji_stickers_are_bounded() {
     let total = crate::state::STORY_CUSTOM_EMOJI_CAP as i64 * 3;
     for id in 1..=total {
         session.accept_story_custom_emoji_stickers(vec![sticker(id)]);
-        assert!(session.story_custom_emoji_stickers.len() <= crate::state::STORY_CUSTOM_EMOJI_CAP);
+        assert!(
+            session.stories.custom_emoji_stickers.len() <= crate::state::STORY_CUSTOM_EMOJI_CAP
+        );
     }
-    assert!(session.story_custom_emoji_stickers.contains_key(&total));
+    assert!(session.stories.custom_emoji_stickers.contains_key(&total));
 }

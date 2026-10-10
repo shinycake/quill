@@ -46,6 +46,7 @@ fn join_video_chat_guard_allows_tracked_unjoined_call() {
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|c| c.id == 555 && !c.is_joined)
@@ -66,7 +67,13 @@ fn join_video_chat_guard_allows_tracked_unjoined_call() {
     // A different tracked call id is rejected…
     assert_invalid(driver.join_video_chat(777));
     // …and so is the same call once joined.
-    driver.session.active_group_call.as_mut().unwrap().is_joined = true;
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_mut()
+        .unwrap()
+        .is_joined = true;
     assert_invalid(driver.join_video_chat(555));
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -211,7 +218,13 @@ fn call_engine_absent_keeps_signaling_only() {
         r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"ZGlhZ25vc3RpYw=="}"#,
     );
     assert_eq!(
-        driver.session.active_call.as_ref().unwrap().signaling_queue,
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .signaling_queue,
         vec![b"diagnostic".to_vec()]
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -252,7 +265,7 @@ fn call_engine_ignores_signaling_for_untracked_call() {
         &sink,
         r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"aW5ib3VuZA=="}"#,
     );
-    assert!(driver.session.active_call.is_none());
+    assert!(driver.session.calls.active_call.is_none());
     assert!(handle.signaling_received().is_empty());
 
     // Tracked call 77, then signaling for a different call id: gated.
@@ -325,7 +338,7 @@ fn call_ready_connects_transport_once_with_mapped_params() {
     assert!(!webrtc.tcp);
     assert!(webrtc.peer_tag.is_empty());
 
-    let call = driver.session.active_call.as_ref().unwrap();
+    let call = driver.session.calls.active_call.as_ref().unwrap();
     assert_eq!(call.transport, Some(TransportState::Connecting));
     assert_eq!(call.transport_error, None);
 
@@ -342,7 +355,7 @@ fn call_ready_without_key_fails_transport_honestly() {
     ingest_call_json(&mut driver, &seq, &sink, &no_key);
 
     assert!(handle.connects().is_empty());
-    let call = driver.session.active_call.as_ref().unwrap();
+    let call = driver.session.calls.active_call.as_ref().unwrap();
     assert_eq!(call.transport, Some(TransportState::Failed));
     assert_eq!(
         call.transport_error.as_deref(),
@@ -359,7 +372,7 @@ fn call_transport_callback_updates_session() {
     // The next pump drains the transport outbox into the session.
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
 
-    let call = driver.session.active_call.as_ref().unwrap();
+    let call = driver.session.calls.active_call.as_ref().unwrap();
     assert_eq!(call.transport, Some(TransportState::Connected));
     assert_eq!(call.transport_error, None);
     assert_eq!(handle.connects().len(), 1);
@@ -380,7 +393,7 @@ fn call_transport_retries_same_params_three_times_then_stops() {
         assert_eq!(handle.connects().last().unwrap().1, original);
         assert_eq!(handle.mute_changes(), vec![(77, true); expected_connects]);
         assert_eq!(
-            driver.session.active_call.as_ref().unwrap().transport,
+            driver.session.calls.active_call.as_ref().unwrap().transport,
             Some(TransportState::Reconnecting)
         );
     }
@@ -388,7 +401,7 @@ fn call_transport_retries_same_params_three_times_then_stops() {
     handle.emit_transport_state(77, TransportState::Failed);
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     assert_eq!(handle.connects().len(), 4);
-    let call = driver.session.active_call.as_ref().unwrap();
+    let call = driver.session.calls.active_call.as_ref().unwrap();
     assert_eq!(call.transport, Some(TransportState::Failed));
     assert_eq!(
         call.transport_error.as_deref(),
@@ -414,7 +427,7 @@ fn call_transport_connected_resets_reconnect_attempts() {
     }
     assert_eq!(handle.connects().len(), 6);
     assert_eq!(
-        driver.session.active_call.as_ref().unwrap().transport,
+        driver.session.calls.active_call.as_ref().unwrap().transport,
         Some(TransportState::Reconnecting)
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -428,19 +441,19 @@ fn call_transport_reconnect_error_is_reported() {
     handle.emit_transport_state(77, TransportState::Failed);
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
 
-    let call = driver.session.active_call.as_ref().unwrap();
+    let call = driver.session.calls.active_call.as_ref().unwrap();
     assert_eq!(call.transport, Some(TransportState::Failed));
     assert_eq!(
         call.transport_error.as_deref(),
         Some("call engine operation connect failed with code -1")
     );
     assert_eq!(handle.connects().len(), 2);
-    driver.session.active_call.as_mut().unwrap().muted = true;
+    driver.session.calls.active_call.as_mut().unwrap().muted = true;
     handle.fail_mute();
     handle.emit_transport_state(77, TransportState::Failed);
     handle.emit_transport_state(77, TransportState::Connecting);
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
-    let call = driver.session.active_call.as_ref().unwrap();
+    let call = driver.session.calls.active_call.as_ref().unwrap();
     assert_eq!(call.transport, Some(TransportState::Failed));
     assert!(call.transport_error.as_ref().unwrap().contains("set_muted"));
     assert_eq!(handle.hung_up_calls(), vec![77]);
@@ -488,10 +501,10 @@ fn call_mute_goes_through_engine_first() {
 
     assert!(driver.set_call_muted(true).is_ok());
     assert_eq!(handle.mute_changes(), vec![(77, true)]);
-    assert!(driver.session.active_call.as_ref().unwrap().muted);
+    assert!(driver.session.calls.active_call.as_ref().unwrap().muted);
     assert!(driver.set_call_muted(false).is_ok());
     assert_eq!(handle.mute_changes(), vec![(77, true), (77, false)]);
-    assert!(!driver.session.active_call.as_ref().unwrap().muted);
+    assert!(!driver.session.calls.active_call.as_ref().unwrap().muted);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -505,7 +518,7 @@ fn call_mute_failure_leaves_state_unchanged() {
     handle.fail_mute();
     let err = driver.set_call_muted(true).unwrap_err();
     assert!(matches!(err, EngineError::Engine { .. }));
-    assert!(!driver.session.active_call.as_ref().unwrap().muted);
+    assert!(!driver.session.calls.active_call.as_ref().unwrap().muted);
     assert!(handle.mute_changes().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }

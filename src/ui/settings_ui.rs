@@ -248,7 +248,7 @@ impl QuillApp {
     pub(super) fn contacts_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let sync_on = self
             .session()
-            .map(|s| s.contact_prefs.sync_enabled)
+            .map(|s| s.settings.contact_prefs.sync_enabled)
             .unwrap_or(true);
         let notice: Option<String> = self.session().and_then(|s| s.contacts_notice.clone());
         let mut section = div()
@@ -335,13 +335,13 @@ impl QuillApp {
     pub(super) fn call_settings_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let prefs = self
             .session()
-            .map(|session| session.call_prefs.clone())
+            .map(|session| session.calls.prefs.clone())
             .unwrap_or_default();
         // The same rules as Privacy and security > Who can call me, with
         // their exceptions: a choice made here keeps the exception lists.
         let rule_state = |key: PrivacySettingKey| {
             self.session()
-                .and_then(|session| session.privacy.get(&key).cloned())
+                .and_then(|session| session.settings.privacy.get(&key).cloned())
         };
         let who_of = |key: PrivacySettingKey| match rule_state(key) {
             Some(PrivacyKeyState::Ready(detail)) => detail.who,
@@ -452,10 +452,13 @@ impl QuillApp {
                 // schema 1.8.67 :9856) — one toggle driving all three
                 // networks — replacing the old local-only CallPrefs flag.
                 let on = self.session().is_some_and(|s| {
-                    s.data_storage.seeded
-                        && NetworkKind::ALL
-                            .iter()
-                            .all(|n| s.data_storage.for_network(*n).use_less_data_for_calls)
+                    s.settings.data_storage.seeded
+                        && NetworkKind::ALL.iter().all(|n| {
+                            s.settings
+                                .data_storage
+                                .for_network(*n)
+                                .use_less_data_for_calls
+                        })
                 });
                 div()
                     .id("call-pref-less-data")
@@ -479,11 +482,12 @@ impl QuillApp {
                                     // Demo: show the chosen value immediately
                                     // (no live TDLib to confirm it).
                                     for n in NetworkKind::ALL {
-                                        demo.data_storage
+                                        demo.settings
+                                            .data_storage
                                             .for_network_mut(n)
                                             .use_less_data_for_calls = on;
                                     }
-                                    demo.data_storage.seeded = true;
+                                    demo.settings.data_storage.seeded = true;
                                 }
                                 cx.notify();
                             })),
@@ -567,11 +571,11 @@ impl QuillApp {
     pub(super) fn media_settings_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let hq = self
             .session()
-            .is_some_and(|session| session.media_prefs.hq_round_videos);
+            .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
         // MED4: Instant View mode (TGX: None / Telegram-internal / All).
         let iv_mode = self
             .session()
-            .map(|session| session.media_prefs.instant_view_mode)
+            .map(|session| session.settings.media_prefs.instant_view_mode)
             .unwrap_or(quill::settings::InstantViewMode::Telegram);
         // Phase 6: single-choice group (was: "tap to cycle" row).
         let iv_modes = [
@@ -662,7 +666,10 @@ impl QuillApp {
                     .py_1()
                     .child(
                         Switch::new("media-pref-autoplay-gifs")
-                            .checked(self.session().is_none_or(|s| s.media_prefs.autoplay_gifs))
+                            .checked(
+                                self.session()
+                                    .is_none_or(|s| s.settings.media_prefs.autoplay_gifs),
+                            )
                             .accessibility_label("Autoplay GIFs")
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
@@ -684,7 +691,10 @@ impl QuillApp {
                     .py_1()
                     .child(
                         Switch::new("media-pref-autoplay-videos")
-                            .checked(self.session().is_none_or(|s| s.media_prefs.autoplay_videos))
+                            .checked(
+                                self.session()
+                                    .is_none_or(|s| s.settings.media_prefs.autoplay_videos),
+                            )
                             .accessibility_label("Autoplay videos")
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.autoplay_videos = on, cx);
@@ -707,7 +717,7 @@ impl QuillApp {
                         Switch::new("media-pref-loop-stickers")
                             .checked(
                                 self.session()
-                                    .is_none_or(|s| s.media_prefs.loop_animated_stickers),
+                                    .is_none_or(|s| s.settings.media_prefs.loop_animated_stickers),
                             )
                             .accessibility_label("Loop Animated Stickers")
                             .on_click(cx.listener(|this, &on, _, cx| {
@@ -733,7 +743,7 @@ impl QuillApp {
     ) -> impl IntoElement {
         let prefs = self
             .session()
-            .map(|s| s.media_prefs.clone())
+            .map(|s| s.settings.media_prefs.clone())
             .unwrap_or_default();
         let section = div()
             .flex()

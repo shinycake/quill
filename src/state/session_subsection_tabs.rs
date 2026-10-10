@@ -200,7 +200,8 @@ impl Session {
 
     /// The saved tab layout for a chat (Telegram Desktop default: Top).
     pub fn subsection_tabs_mode(&self, chat_id: ChatId) -> SubsectionTabsMode {
-        self.media_prefs
+        self.settings
+            .media_prefs
             .subsection_tabs_modes
             .get(&chat_id.0)
             .copied()
@@ -212,9 +213,13 @@ impl Session {
     pub fn cycle_subsection_tabs_mode(&mut self, chat_id: ChatId) -> SubsectionTabsMode {
         let next = self.subsection_tabs_mode(chat_id).next();
         if next == SubsectionTabsMode::default() {
-            self.media_prefs.subsection_tabs_modes.remove(&chat_id.0);
+            self.settings
+                .media_prefs
+                .subsection_tabs_modes
+                .remove(&chat_id.0);
         } else {
-            self.media_prefs
+            self.settings
+                .media_prefs
                 .subsection_tabs_modes
                 .insert(chat_id.0, next);
         }

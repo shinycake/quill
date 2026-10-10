@@ -400,7 +400,7 @@ impl QuillApp {
             session_revision: self.session().map_or(0, |s| s.revision),
             recent_emoji: self
                 .session()
-                .map_or(0, |s| s.media_prefs.recent_emoji.len()),
+                .map_or(0, |s| s.settings.media_prefs.recent_emoji.len()),
             premium: self.session().is_some_and(|s| s.my_is_premium()),
         };
         if self.pickers.media_panel.key.as_ref() == Some(&key) {
@@ -478,6 +478,7 @@ impl QuillApp {
         let recent: Vec<PanelCell> = session
             .map(|s| {
                 let custom = s
+                    .settings
                     .media_prefs
                     .recent_custom_emoji_ids
                     .iter()
@@ -491,7 +492,8 @@ impl QuillApp {
                                 ix,
                             })
                     });
-                s.media_prefs
+                s.settings
+                    .media_prefs
                     .recent_emoji
                     .iter()
                     .take(quill::emoji_catalog::RECENT_LIMIT)
@@ -795,9 +797,13 @@ impl QuillApp {
         // A recently used emoji offers "Reset recent emoji" (the list is
         // local; tdesktop clears it from the same section).
         let in_recent = self.pickers.media_panel.reaction.is_none()
-            && self
-                .session()
-                .is_some_and(|s| s.media_prefs.recent_emoji.iter().any(|e| *e == *emoji));
+            && self.session().is_some_and(|s| {
+                s.settings
+                    .media_prefs
+                    .recent_emoji
+                    .iter()
+                    .any(|e| *e == *emoji)
+            });
         let owner = cx.entity().downgrade();
         let this_emoji = emoji.to_string();
         let cell = div()

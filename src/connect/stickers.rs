@@ -540,7 +540,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let emoji = match self.session.media_prefs.sticker_suggest_mode {
+        let emoji = match self.session.settings.media_prefs.sticker_suggest_mode {
             StickerSuggestMode::None => None,
             _ => suggest_emoji_for(text),
         };
@@ -553,7 +553,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.clear_sticker_suggestions();
             return Ok(None);
         };
-        if self.session.media_prefs.sticker_suggest_mode == StickerSuggestMode::InstalledOnly
+        if self.session.settings.media_prefs.sticker_suggest_mode
+            == StickerSuggestMode::InstalledOnly
             && !self.session.stickers.installed_loaded
         {
             drop(

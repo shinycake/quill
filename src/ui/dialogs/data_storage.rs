@@ -61,16 +61,17 @@ impl QuillApp {
         self.settings.data_storage_editor = None;
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.storage_freed = None;
+            live.driver.session.settings.storage_freed = None;
             let _ = live.driver.maybe_fetch_storage_statistics();
             let _ = live.driver.fetch_auto_download_presets();
             let _ = live.driver.fetch_network_statistics();
         }
         self.privacy.extra.network_reset_confirm = false;
         if let Some(demo) = self.demo_session.as_mut() {
-            demo.storage_freed = None;
-            if demo.privacy_data.network_usage.is_none() {
-                demo.privacy_data.network_usage = Some(super::data_extra::demo_network_usage());
+            demo.settings.storage_freed = None;
+            if demo.settings.privacy_data.network_usage.is_none() {
+                demo.settings.privacy_data.network_usage =
+                    Some(super::data_extra::demo_network_usage());
             }
         }
         cx.notify();
@@ -96,7 +97,7 @@ impl QuillApp {
                     && Some(&live.driver.session.account) == account.as_ref()
                     && let Err(error) = live.driver.start_account_export(folder, media)
                 {
-                    live.driver.session.data_storage_error = Some(error.to_string());
+                    live.driver.session.settings.data_storage_error = Some(error.to_string());
                 }
                 cx.notify();
             });
@@ -165,8 +166,9 @@ impl QuillApp {
                                     } else {
                                         // Demo mode: apply locally.
                                         if let Some(demo) = this.demo_session.as_mut() {
-                                            *demo.data_storage.for_network_mut(network) = draft;
-                                            demo.data_storage.seeded = true;
+                                            *demo.settings.data_storage.for_network_mut(network) =
+                                                draft;
+                                            demo.settings.data_storage.seeded = true;
                                         }
                                     }
                                     cx.notify();
@@ -222,7 +224,10 @@ impl QuillApp {
         let session = self.session();
         let mut body = div().flex().flex_col().gap_3();
         // Failures surface here, never as toasts (the S3 pattern).
-        if let Some(err) = session.as_ref().and_then(|s| s.data_storage_error.clone()) {
+        if let Some(err) = session
+            .as_ref()
+            .and_then(|s| s.settings.data_storage_error.clone())
+        {
             body = body.child(
                 div()
                     .text_xs()
@@ -232,7 +237,10 @@ impl QuillApp {
         }
         body = body.child(section_header("Export Telegram data"))
             .child(div().text_xs().child("Profile, contacts, sessions and all accessible main and archived chat histories. Choose a folder; media is optional."));
-        if let Some(export) = session.as_ref().and_then(|s| s.account_export.as_ref()) {
+        if let Some(export) = session
+            .as_ref()
+            .and_then(|s| s.settings.account_export.as_ref())
+        {
             let label = export.label();
             let folder = export.folder.clone();
             let finished = export.finished.load(std::sync::atomic::Ordering::Acquire);
@@ -268,7 +276,7 @@ impl QuillApp {
                                 })
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(live) = this.live.as_mut() {
-                                        live.driver.session.account_export = None;
+                                        live.driver.session.settings.account_export = None;
                                     }
                                     cx.notify();
                                 })),
@@ -301,9 +309,9 @@ impl QuillApp {
         }
         // --- Automatic downloads ---
         body = body.child(section_header("Automatic downloads"));
-        let prefs = session.as_ref().map(|s| &s.data_storage);
+        let prefs = session.as_ref().map(|s| &s.settings.data_storage);
         if !prefs.is_some_and(|p| p.seeded) {
-            let loading = session.is_some_and(|s| s.auto_download_presets_loading);
+            let loading = session.is_some_and(|s| s.settings.auto_download_presets_loading);
             body = body.child(
                 div()
                     .text_xs()
@@ -357,7 +365,8 @@ impl QuillApp {
                                     let _ = live.driver.set_less_data_for_calls(on);
                                 } else if let Some(demo) = this.demo_session.as_mut() {
                                     for n in NetworkKind::ALL {
-                                        demo.data_storage
+                                        demo.settings
+                                            .data_storage
                                             .for_network_mut(n)
                                             .use_less_data_for_calls = on;
                                     }
@@ -371,8 +380,10 @@ impl QuillApp {
         body = body.child(self.download_folder_section(cx));
         // --- Storage usage ---
         body = body.child(section_header("Storage usage"));
-        let stats = session.as_ref().and_then(|s| s.storage_stats.clone());
-        let loading = session.is_some_and(|s| s.storage_stats_loading);
+        let stats = session
+            .as_ref()
+            .and_then(|s| s.settings.storage_stats.clone());
+        let loading = session.is_some_and(|s| s.settings.storage_stats_loading);
         match stats {
             None => {
                 body = body.child(
@@ -430,7 +441,9 @@ impl QuillApp {
             )
             .child(Icon::new(IconName::ChevronRight).size_4())
             .on_click(cx.listener(move |this, _, _, cx| {
-                let draft = this.session().map(|s| *s.data_storage.for_network(network));
+                let draft = this
+                    .session()
+                    .map(|s| *s.settings.data_storage.for_network(network));
                 if let Some(draft) = draft {
                     this.settings.data_storage_editor = Some((network, draft));
                     cx.notify();

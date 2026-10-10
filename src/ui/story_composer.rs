@@ -39,12 +39,12 @@ impl QuillApp {
             .composer_reaction
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.story_post = StoryPostState::default();
+            live.driver.session.stories.post = StoryPostState::default();
             // Phase 9.5: eligible "post as" chats (channels/supergroups).
             let _ = live.driver.get_chats_to_post_stories();
         }
         if let Some(session) = self.demo_session.as_mut() {
-            session.story_post = StoryPostState::default();
+            session.stories.post = StoryPostState::default();
         }
         cx.notify();
     }
@@ -62,7 +62,7 @@ impl QuillApp {
         self.stories.composer = StoryComposer::open_edit(poster_chat_id, story_id);
         let (caption, link_url, reactions) = self
             .session()
-            .and_then(|s| s.stories.get(&(poster_chat_id, story_id)))
+            .and_then(|s| s.stories.stories.get(&(poster_chat_id, story_id)))
             .map(|story| {
                 (
                     story.caption.clone(),
@@ -112,11 +112,11 @@ impl QuillApp {
             .composer_reaction
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.story_post = StoryPostState::default();
+            live.driver.session.stories.post = StoryPostState::default();
             let _ = live.driver.get_chats_to_post_stories();
         }
         if let Some(session) = self.demo_session.as_mut() {
-            session.story_post = StoryPostState::default();
+            session.stories.post = StoryPostState::default();
         }
         cx.notify();
     }
@@ -193,9 +193,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.stories.composer.local_error = None;
             self.stories.composer.check_sent = true;
-            live.driver.session.story_post.check_error = None;
-            live.driver.session.story_post.eligibility = None;
-            live.driver.session.story_post.outcome = StoryPostOutcome::None;
+            live.driver.session.stories.post.check_error = None;
+            live.driver.session.stories.post.eligibility = None;
+            live.driver.session.stories.post.outcome = StoryPostOutcome::None;
             if live.driver.check_can_post_story(target).is_err() {
                 self.stories.composer.check_sent = false;
                 self.stories.composer.local_error =
@@ -263,8 +263,8 @@ impl QuillApp {
     pub(super) fn story_composer_after_check(&mut self, cx: &mut Context<Self>) {
         let (eligibility, check_error) = match self.session() {
             Some(session) => (
-                session.story_post.eligibility.clone(),
-                session.story_post.check_error.clone(),
+                session.stories.post.eligibility.clone(),
+                session.stories.post.check_error.clone(),
             ),
             None => (None, None),
         };
@@ -319,7 +319,7 @@ impl QuillApp {
                             // duplicate story.
                             self.stories.composer.post_sent = true;
                             // Fresh eligibility for the next post.
-                            live.driver.session.story_post.eligibility = None;
+                            live.driver.session.stories.post.eligibility = None;
                         }
                         Err(_) => {
                             self.stories.composer.local_error =
@@ -348,7 +348,7 @@ impl QuillApp {
         if composer.is_edit() {
             return composer.save_sent.then(|| "Saving…".into());
         }
-        let post = self.session().map(|session| session.story_post.clone())?;
+        let post = self.session().map(|session| session.stories.post.clone())?;
         match &post.outcome {
             StoryPostOutcome::Posting { .. } => Some("Posting…".into()),
             StoryPostOutcome::Succeeded => {
@@ -576,7 +576,10 @@ impl QuillApp {
             || self.stories.composer.post_sent
             || self.stories.composer.save_sent
             || self.session().is_some_and(|session| {
-                matches!(session.story_post.outcome, StoryPostOutcome::Posting { .. })
+                matches!(
+                    session.stories.post.outcome,
+                    StoryPostOutcome::Posting { .. }
+                )
             });
 
         // Phase 9.5: "Post as" picker — the user's own stories plus the
@@ -588,7 +591,8 @@ impl QuillApp {
                 .session()
                 .map(|session| {
                     session
-                        .story_post_as_chats
+                        .stories
+                        .post_as_chats
                         .iter()
                         .map(|id| {
                             let title = session

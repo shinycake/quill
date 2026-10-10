@@ -108,7 +108,7 @@ pub(super) fn apply_ready_sticker_playback(
             history.messages.remove(&id);
         }
     }
-    session.media_prefs.loop_animated_stickers =
+    session.settings.media_prefs.loop_animated_stickers =
         std::env::var("QUILL_DEMO_LOOP_STICKERS").as_deref() != Ok("off");
 }
 
@@ -1490,7 +1490,7 @@ impl QuillApp {
                 .all(|attachment| attachment.kind == AttachmentKind::Document);
         let remember = self
             .session()
-            .map(|s| s.media_prefs.remember_media_grouping)
+            .map(|s| s.settings.media_prefs.remember_media_grouping)
             .unwrap_or(false);
         let timer = self.self_destruct_picker_visible().then(|| {
             let owner = cx.entity().downgrade();

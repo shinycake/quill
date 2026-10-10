@@ -632,12 +632,12 @@ fn render_platform_icon(unread: u32, muted: bool, dark: bool) -> (Vec<u8>, u32, 
 /// tdesktop's `unreadBadgeMuted`: every counted unread chat is muted.
 #[cfg(feature = "ui")]
 fn badge_all_muted(session: &Session, unread: u32) -> bool {
-    if unread == 0 || !session.badge_prefs.include_muted {
+    if unread == 0 || !session.settings.badge_prefs.include_muted {
         return false;
     }
     let unmuted = BadgePrefs {
         include_muted: false,
-        ..session.badge_prefs
+        ..session.settings.badge_prefs
     };
     badge_count(session, &unmuted) == 0
 }
@@ -662,10 +662,12 @@ thread_local! {
 /// unchanged or no system tray exists.
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn sync_tray(session: Option<&Session>) {
-    let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    let unread = session
+        .map(|s| badge_count(s, &s.settings.badge_prefs))
+        .unwrap_or(0);
     let muted = session.is_some_and(|s| badge_all_muted(s, unread));
-    let notifications = session.is_none_or(|s| s.desktop_notifications);
-    let sounds = session.is_none_or(|s| s.inapp_sounds_enabled);
+    let notifications = session.is_none_or(|s| s.settings.desktop_notifications);
+    let sounds = session.is_none_or(|s| s.settings.inapp_sounds_enabled);
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
         if !tray_enabled() {
@@ -695,10 +697,12 @@ pub fn sync_tray(session: Option<&Session>) {
 /// Linux: drive the StatusNotifierItem lifecycle (see [`crate::tray_sni`]).
 #[cfg(all(feature = "ui", target_os = "linux"))]
 pub fn sync_tray(session: Option<&Session>) {
-    let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    let unread = session
+        .map(|s| badge_count(s, &s.settings.badge_prefs))
+        .unwrap_or(0);
     let toggles = (
-        session.is_none_or(|s| s.desktop_notifications),
-        session.is_none_or(|s| s.inapp_sounds_enabled),
+        session.is_none_or(|s| s.settings.desktop_notifications),
+        session.is_none_or(|s| s.settings.inapp_sounds_enabled),
     );
     TRAY.with(|cell| {
         let mut state = cell.borrow_mut();

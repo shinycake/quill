@@ -483,7 +483,11 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Switch::new("dynamic-emoji-pack-order")
-                            .checked(session.is_none_or(|s| s.media_prefs.dynamic_emoji_pack_order))
+                            .checked(
+                                session.is_none_or(|s| {
+                                    s.settings.media_prefs.dynamic_emoji_pack_order
+                                }),
+                            )
                             .accessibility_label("Dynamic emoji pack order")
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.dynamic_emoji_pack_order = on, cx)

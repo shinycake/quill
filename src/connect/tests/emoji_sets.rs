@@ -250,7 +250,14 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
     assert!(expiry >= before + 3600 && expiry <= crate::state::unix_ms_now() / 1000 + 3600);
     assert!(driver.clear_recent_emoji_statuses().unwrap().is_none());
     assert_eq!(driver.session.emoji.recent_statuses.len(), 1);
-    assert!(driver.session.media_prefs.recent_emoji_packs.is_empty());
+    assert!(
+        driver
+            .session
+            .settings
+            .media_prefs
+            .recent_emoji_packs
+            .is_empty()
+    );
     ingest(
         &mut driver,
         json!({"@type":"error","@extra":set.as_extra(),"code":400,"message":"PRIVATE_DETAIL"}),
@@ -271,7 +278,10 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         0
     );
     ingest(&mut driver, json!({"@type":"ok","@extra":set.as_extra()}));
-    assert_eq!(driver.session.media_prefs.recent_emoji_packs, vec![1]);
+    assert_eq!(
+        driver.session.settings.media_prefs.recent_emoji_packs,
+        vec![1]
+    );
     assert_eq!(
         crate::settings::load_media_prefs(&driver.paths).recent_emoji_packs,
         vec![1]
@@ -292,7 +302,10 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         &mut driver,
         json!({"@type":"updateMessageSendSucceeded","old_message_id":900,"message":{"@type":"message","id":901,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"😀","entities":[{"@type":"textEntity","offset":0,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"92"}}]}}}}),
     );
-    assert_eq!(driver.session.media_prefs.recent_emoji_packs, vec![2, 1]);
+    assert_eq!(
+        driver.session.settings.media_prefs.recent_emoji_packs,
+        vec![2, 1]
+    );
     assert_eq!(
         crate::settings::load_media_prefs(&driver.paths).recent_emoji_packs,
         vec![2, 1]

@@ -47,7 +47,7 @@ fn driver_group_call_participant_management_shapes_and_gates() {
     assert_eq!(sent["chat_id"], 3);
     assert_eq!(sent["message_id"], 42);
 
-    driver.session.active_group_call = Some(tracked_group_call(false, true, false));
+    driver.session.calls.active_group_call = Some(tracked_group_call(false, true, false));
 
     // Invite: shape follows schema 1.8.67 :14375; `is_video`
     // follows the tracked call.
@@ -64,13 +64,13 @@ fn driver_group_call_participant_management_shapes_and_gates() {
     // plural constructor), owner-gated on `groupCall.is_owned` —
     // `can_be_managed` is "for video chats and live stories only"
     // and does NOT grant ban rights in a voice chat.
-    driver.session.active_group_call = Some(tracked_group_call(false, true, false));
+    driver.session.calls.active_group_call = Some(tracked_group_call(false, true, false));
     assert_eq!(
         driver.ban_group_call_participant(9),
         Err(ConnectSendError::InvalidRequest),
         "can_be_managed=true but is_owned=false must refuse"
     );
-    driver.session.active_group_call = Some(tracked_group_call(false, false, true));
+    driver.session.calls.active_group_call = Some(tracked_group_call(false, false, true));
     driver
         .ban_group_call_participant(9)
         .expect("ban sends for owner");
@@ -78,7 +78,7 @@ fn driver_group_call_participant_management_shapes_and_gates() {
     assert_eq!(sent["@type"], "banGroupCallParticipants");
     assert_eq!(sent["group_call_id"], 77);
     assert_eq!(sent["user_ids"], serde_json::json!([9]));
-    driver.session.active_group_call = Some(tracked_group_call(false, true, true));
+    driver.session.calls.active_group_call = Some(tracked_group_call(false, true, true));
 
     // Volume: schema :14438, 1-20000 (hundreds of percents).
     driver
@@ -111,7 +111,7 @@ fn driver_group_call_participant_management_shapes_and_gates() {
     assert_eq!(sent["input_group_call"]["@type"], "inputGroupCallMessage");
     assert_eq!(sent["input_group_call"]["chat_id"], 3);
     assert_eq!(sent["input_group_call"]["message_id"], 42);
-    driver.session.active_call = Some(ActiveCall {
+    driver.session.calls.active_call = Some(ActiveCall {
         id: 5,
         user_id: 11,
         is_outgoing: true,
@@ -152,9 +152,10 @@ fn driver_group_call_management_shapes_and_gates() {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let last_sent = || serde_json::from_str::<Value>(recorder.snapshot().last().unwrap()).unwrap();
 
-    driver.session.active_group_call = Some(tracked_group_call(false, true, false));
+    driver.session.calls.active_group_call = Some(tracked_group_call(false, true, false));
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -176,6 +177,7 @@ fn driver_group_call_management_shapes_and_gates() {
     assert_eq!(last_sent()["group_call_id"], 77);
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -187,6 +189,7 @@ fn driver_group_call_management_shapes_and_gates() {
     );
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -196,6 +199,7 @@ fn driver_group_call_management_shapes_and_gates() {
     // `can_be_managed` for a still-scheduled call.
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -207,6 +211,7 @@ fn driver_group_call_management_shapes_and_gates() {
     assert_eq!(last_sent()["group_call_id"], 77);
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -218,12 +223,14 @@ fn driver_group_call_management_shapes_and_gates() {
     );
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
         .can_be_managed = true;
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -240,12 +247,14 @@ fn driver_group_call_management_shapes_and_gates() {
     // `enabled_start_notification` flag.
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
         .scheduled_start_date = 1_788_000_000;
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -262,6 +271,7 @@ fn driver_group_call_management_shapes_and_gates() {
     // Same shape with the flag on: the driver turns it off.
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -272,6 +282,7 @@ fn driver_group_call_management_shapes_and_gates() {
     assert_eq!(last_sent()["enabled_start_notification"], false);
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -293,7 +304,7 @@ fn driver_group_call_management_shapes_and_gates() {
     // In-call chat: `sendGroupCallMessage` (:14341), gated on
     // `can_send_messages && are_messages_allowed`.
     {
-        let call = driver.session.active_group_call.as_mut().unwrap();
+        let call = driver.session.calls.active_group_call.as_mut().unwrap();
         call.can_send_messages = true;
         call.are_messages_allowed = true;
     }
@@ -307,6 +318,7 @@ fn driver_group_call_management_shapes_and_gates() {
     assert_eq!(sent["paid_message_star_count"], 0);
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -318,6 +330,7 @@ fn driver_group_call_management_shapes_and_gates() {
     );
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -326,6 +339,7 @@ fn driver_group_call_management_shapes_and_gates() {
     // gated on `can_toggle_are_messages_allowed`; flips the flag.
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -350,7 +364,13 @@ fn driver_group_call_management_shapes_and_gates() {
     assert_eq!(sent["chat_id"], 51);
     // Regenerate is owner-gated (`replaceVideoChatRtmpUrl` mints a
     // new stream key).
-    driver.session.active_group_call.as_mut().unwrap().is_owned = true;
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_mut()
+        .unwrap()
+        .is_owned = true;
     driver
         .replace_video_chat_rtmp_url()
         .expect("rtmp replace sends");
@@ -361,7 +381,7 @@ fn driver_group_call_management_shapes_and_gates() {
     // Scheduling: `createVideoChat` start_date (schema :14256) —
     // 0 starts immediately; scheduled dates must be ≥10s and ≤8d
     // ahead. Requires no tracked call (a start/join target).
-    driver.session.active_group_call = None;
+    driver.session.calls.active_group_call = None;
     driver
         .start_video_chat(51, "Planning".to_string(), 0)
         .expect("immediate start sends");
@@ -419,7 +439,7 @@ fn driver_group_call_invitation_accept_starts_tracking() {
     let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
     assert_eq!(sent["@type"], "getGroupCall");
     assert_eq!(sent["group_call_id"], 555);
-    assert_eq!(driver.session.group_call_error, None);
+    assert_eq!(driver.session.calls.group_call_error, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -460,9 +480,10 @@ fn driver_auto_rejoin_group_call_discipline() {
     assert!(driver.maybe_auto_rejoin_group_call().is_ok());
     assert_eq!(join_sends(), 0);
 
-    driver.session.active_group_call = Some(tracked_group_call(true, false, false));
+    driver.session.calls.active_group_call = Some(tracked_group_call(true, false, false));
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -482,6 +503,7 @@ fn driver_auto_rejoin_group_call_discipline() {
         assert_eq!(
             driver
                 .session
+                .calls
                 .active_group_call
                 .as_ref()
                 .unwrap()
@@ -493,7 +515,7 @@ fn driver_auto_rejoin_group_call_discipline() {
     // Exhausted: the error line is honest and no more attempts go
     // out — the banner + manual Rejoin remain the way out.
     assert_eq!(
-        driver.session.group_call_error.as_deref(),
+        driver.session.calls.group_call_error.as_deref(),
         Some("Reconnect attempts exhausted.")
     );
     assert!(driver.maybe_auto_rejoin_group_call().is_ok());
@@ -511,10 +533,10 @@ fn driver_auto_rejoin_group_call_discipline() {
                 .unwrap(),
             )
             .unwrap();
-    let call = driver.session.active_group_call.as_ref().unwrap();
+    let call = driver.session.calls.active_group_call.as_ref().unwrap();
     assert_eq!(call.rejoin_attempts, 0);
     assert!(!call.reconnecting);
-    assert_eq!(driver.session.group_call_error, None);
+    assert_eq!(driver.session.calls.group_call_error, None);
 
     // Manual retry resets the counter: with `need_rejoin` back,
     // three fresh auto attempts are allowed after
@@ -524,6 +546,7 @@ fn driver_auto_rejoin_group_call_discipline() {
     assert_eq!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .unwrap()

@@ -15,14 +15,14 @@ impl Session {
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::PostStory) => {
-                self.story_post.outcome =
+                self.stories.post.outcome =
                     StoryPostOutcome::Failed(format!("Posting failed: {}", error_reason(err)));
             }
             Some(RequestPurpose::CheckCanPostStory) => {
                 // S14: a chat-level story restriction surfaces the
                 // TGX-verbatim notice; anything else keeps the
                 // generic eligibility failure.
-                self.story_post.check_error = Some(
+                self.stories.post.check_error = Some(
                     crate::story_restriction::notice_for_error_class(err.class)
                         .map(str::to_string)
                         .unwrap_or_else(|| {
@@ -66,7 +66,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ActivateStoryStealthMode) => {
-                self.story_stealth_error =
+                self.stories.stealth_error =
                     Some(format!("Stealth mode failed: {}", error_reason(err)));
             }
             // Phase 9.5: a posted-story management call failed —
@@ -76,15 +76,15 @@ impl Session {
                 | RequestPurpose::EditStoryCover
                 | RequestPurpose::SetStoryPrivacySettings,
             ) => {
-                self.story_manage.pending = false;
-                self.story_manage.error =
+                self.stories.manage.pending = false;
+                self.stories.manage.error =
                     Some(format!("Story update failed: {}", error_reason(err)));
             }
             // Phase 9.5 (review fix-up): `getChatsToPostStories`
             // failed — surface a transient error so the "Post as"
             // picker doesn't silently show only "Myself".
             Some(RequestPurpose::GetChatsToPostStories) => {
-                self.story_post.check_error = Some(format!(
+                self.stories.post.check_error = Some(format!(
                     "Could not load \"Post as\" chats: {}",
                     error_reason(err)
                 ));
@@ -110,7 +110,7 @@ impl Session {
                 | RequestPurpose::ToggleStoryIsPostedToChatPage),
             ) => {
                 if purpose == RequestPurpose::SetCloseFriends {
-                    self.close_friends_pending = None;
+                    self.stories.close_friends_pending = None;
                 }
                 self.fail_story_page_op(purpose, error_reason(err).to_string());
             }

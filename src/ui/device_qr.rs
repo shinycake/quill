@@ -100,7 +100,7 @@ impl QuillApp {
         if let Some(linked) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.device_login_result.take())
+            .and_then(|live| live.driver.session.settings.device_login_result.take())
         {
             self.privacy.device_link_notice = Some(match linked {
                 quill::auth::DeviceLoginResult::Linked => "Device linked.",

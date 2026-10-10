@@ -62,7 +62,7 @@ impl QuillApp {
 
     fn story_tile_hidden(&self, chat_id: i64) -> bool {
         self.session()
-            .and_then(|s| s.story_tray.get(&chat_id))
+            .and_then(|s| s.stories.tray.get(&chat_id))
             .is_some_and(|tray| tray.list == Some(StoryListView::Archive))
     }
 

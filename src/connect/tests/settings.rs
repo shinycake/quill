@@ -291,7 +291,7 @@ fn sessions_fetch_guards() {
     );
     assert_eq!(recorder.snapshot().len(), sent_before);
     // Cached: no refetch.
-    driver.session.sessions = Some(vec![]);
+    driver.session.settings.sessions = Some(vec![]);
     assert!(
         driver
             .maybe_fetch_active_sessions()
@@ -307,7 +307,7 @@ fn sessions_fetch_guards() {
 #[test]
 fn sessions_terminate_guards() {
     let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
-    driver.session.sessions = Some(vec![
+    driver.session.settings.sessions = Some(vec![
         session_fixture(11, true, false),
         session_fixture(22, false, false),
     ]);
@@ -333,7 +333,7 @@ fn sessions_terminate_guards() {
 #[test]
 fn sessions_terminate_ok_triggers_authoritative_refetch() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
-    driver.session.sessions = Some(vec![
+    driver.session.settings.sessions = Some(vec![
         session_fixture(11, true, false),
         session_fixture(22, false, false),
     ]);
@@ -355,9 +355,9 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     let snapshot = recorder.snapshot();
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
-    assert_eq!(driver.session.sessions.as_ref().unwrap().len(), 2);
-    assert!(driver.session.sessions_stale);
-    assert!(!driver.session.sessions_mutating);
+    assert_eq!(driver.session.settings.sessions.as_ref().unwrap().len(), 2);
+    assert!(driver.session.settings.sessions_stale);
+    assert!(!driver.session.settings.sessions_mutating);
     // The authoritative answer lands — the @extra comes from the
     // recorded outbound JSON (what TDLib would echo back).
     let fetch_extra: i64 = {
@@ -382,10 +382,15 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
                 .unwrap(),
             )
             .unwrap();
-    let sessions = driver.session.sessions.as_ref().expect("refetched");
+    let sessions = driver
+        .session
+        .settings
+        .sessions
+        .as_ref()
+        .expect("refetched");
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, 11);
-    assert!(!driver.session.sessions_stale);
+    assert!(!driver.session.settings.sessions_stale);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -395,7 +400,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
 #[test]
 fn session_toggle_guards() {
     let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
-    driver.session.sessions = Some(vec![
+    driver.session.settings.sessions = Some(vec![
         session_fixture(11, true, false),
         session_fixture(22, false, false),
     ]);
@@ -428,7 +433,7 @@ fn session_toggle_guards() {
 #[test]
 fn session_toggle_ok_triggers_authoritative_refetch() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
-    driver.session.sessions = Some(vec![
+    driver.session.settings.sessions = Some(vec![
         session_fixture(11, true, false),
         session_fixture(22, false, false),
     ]);
@@ -453,8 +458,8 @@ fn session_toggle_ok_triggers_authoritative_refetch() {
     let snapshot = recorder.snapshot();
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
-    assert!(driver.session.sessions.as_ref().unwrap()[1].can_accept_calls);
-    assert!(driver.session.sessions_stale);
+    assert!(driver.session.settings.sessions.as_ref().unwrap()[1].can_accept_calls);
+    assert!(driver.session.settings.sessions_stale);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -481,7 +486,7 @@ fn websites_fetch_guards() {
     );
     assert_eq!(recorder.snapshot().len(), sent_after_first);
     // Cached: no refetch.
-    driver.session.connected_websites = Some(vec![]);
+    driver.session.settings.connected_websites = Some(vec![]);
     assert!(
         driver
             .maybe_fetch_connected_websites()
@@ -502,10 +507,10 @@ fn websites_disconnect_guards() {
     // nothing sent.
     let sent_before = recorder.snapshot().len();
     assert_invalid(driver.disconnect_all_websites());
-    driver.session.connected_websites = Some(vec![]);
+    driver.session.settings.connected_websites = Some(vec![]);
     assert_invalid(driver.disconnect_all_websites());
     assert_eq!(recorder.snapshot().len(), sent_before);
-    driver.session.connected_websites = Some(vec![ParsedWebsite {
+    driver.session.settings.connected_websites = Some(vec![ParsedWebsite {
         id: 55,
         domain_name: "example.com".into(),
         bot_user_id: 77,
@@ -541,7 +546,7 @@ fn websites_disconnect_guards() {
 #[test]
 fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
-    driver.session.connected_websites = Some(vec![ParsedWebsite {
+    driver.session.settings.connected_websites = Some(vec![ParsedWebsite {
         id: 55,
         domain_name: "example.com".into(),
         bot_user_id: 77,
@@ -570,8 +575,17 @@ fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
     let snapshot = recorder.snapshot();
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getConnectedWebsites\""));
-    assert_eq!(driver.session.connected_websites.as_ref().unwrap().len(), 1);
-    assert!(driver.session.websites_stale);
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .connected_websites
+            .as_ref()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(driver.session.settings.websites_stale);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -604,8 +618,8 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
             serde_json::json!({"@type":"session","id":11}),
         ))
         .unwrap();
-    assert!(driver.session.sessions_mutating);
-    assert_eq!(driver.session.device_login_result, None);
+    assert!(driver.session.settings.sessions_mutating);
+    assert_eq!(driver.session.settings.device_login_result, None);
     driver
         .ingest(response(
             request,
@@ -613,10 +627,10 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert_eq!(
-        driver.session.device_login_result,
+        driver.session.settings.device_login_result,
         Some(crate::auth::DeviceLoginResult::Linked)
     );
-    assert!(!driver.session.sessions_mutating);
+    assert!(!driver.session.settings.sessions_mutating);
     assert!(
         recorder.snapshot()[sent..]
             .iter()
@@ -629,10 +643,10 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         let request = driver.confirm_device_login(link).unwrap();
         driver.ingest(response(request, body)).unwrap();
         assert_eq!(
-            driver.session.device_login_result,
+            driver.session.settings.device_login_result,
             Some(crate::auth::DeviceLoginResult::Failed)
         );
-        assert!(!driver.session.sessions_mutating);
+        assert!(!driver.session.settings.sessions_mutating);
     }
     let request = driver.confirm_device_login(link).unwrap();
     driver
@@ -642,7 +656,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert_eq!(
-        driver.session.device_login_result,
+        driver.session.settings.device_login_result,
         Some(crate::auth::DeviceLoginResult::PasswordRequired)
     );
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
@@ -710,7 +724,10 @@ fn default_auto_delete_fetch_and_set() {
     driver
         .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.default_auto_delete_secs, Some(86_400));
+    assert_eq!(
+        driver.session.settings.default_auto_delete_secs,
+        Some(86_400)
+    );
     // Cached: no refetch.
     assert!(driver.get_default_auto_delete().expect("cached").is_none());
 
@@ -733,6 +750,9 @@ fn default_auto_delete_fetch_and_set() {
     driver
         .ingest(copy_and_parse(&ok, &seq, &dyn_sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.default_auto_delete_secs, Some(604_800));
+    assert_eq!(
+        driver.session.settings.default_auto_delete_secs,
+        Some(604_800)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

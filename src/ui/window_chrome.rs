@@ -34,7 +34,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return window_title(None, 0, None);
         };
-        let total = quill::tray::badge_count(session, &session.badge_prefs);
+        let total = quill::tray::badge_count(session, &session.settings.badge_prefs);
         let open = session.open_chat.and_then(|id| session.chats.get(&id.0));
         let topic = open.and_then(|chat| session.open_topic_info(chat.id));
         let name = open.map(|chat| {

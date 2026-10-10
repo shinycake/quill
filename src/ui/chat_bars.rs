@@ -893,6 +893,7 @@ impl QuillApp {
         let chat = session.chats.get(&chat_id.0)?;
         let video_chat = chat.video_chat.as_ref()?;
         if session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.is_joined)

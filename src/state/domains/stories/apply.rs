@@ -31,9 +31,11 @@ impl Session {
                 // its id is the temporary id the succeeded/failed updates
                 // correlate against.
                 if pending.is_some_and(|p| p.purpose == RequestPurpose::PostStory) {
-                    self.story_post.outcome = StoryPostOutcome::Posting { story_id: story.id };
+                    self.stories.post.outcome = StoryPostOutcome::Posting { story_id: story.id };
                 }
-                self.stories.insert((story.poster_chat_id, story.id), story);
+                self.stories
+                    .stories
+                    .insert((story.poster_chat_id, story.id), story);
             }
             StoriesPayload::StoryAlbums { albums } => {
                 // Phase 9.7: `getChatStoryAlbums` — honored only for the
@@ -42,7 +44,7 @@ impl Session {
                 if pending.is_some_and(|p| p.purpose == RequestPurpose::GetChatStoryAlbums)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
-                    self.story_albums.insert(chat_id.0, albums);
+                    self.stories.albums.insert(chat_id.0, albums);
                     self.clear_story_page_op(RequestPurpose::GetChatStoryAlbums);
                 }
             }
@@ -59,8 +61,8 @@ impl Session {
                 // composer's own check (purpose-gated, so a stray result
                 // never flips the UI).
                 if pending.is_some_and(|p| p.purpose == RequestPurpose::CheckCanPostStory) {
-                    self.story_post.eligibility = Some(result);
-                    self.story_post.check_error = None;
+                    self.stories.post.eligibility = Some(result);
+                    self.stories.post.check_error = None;
                 }
             }
             StoriesPayload::UpdateStoryDeleted {
@@ -70,15 +72,15 @@ impl Session {
                 // Phase 9.2: drop the story from the cache and from the
                 // poster's tray entry. The UI closes the viewer when its
                 // current story disappears from the cache.
-                self.stories.remove(&(poster_chat_id, story_id));
-                let empty = if let Some(tray) = self.story_tray.get_mut(&poster_chat_id) {
+                self.stories.stories.remove(&(poster_chat_id, story_id));
+                let empty = if let Some(tray) = self.stories.tray.get_mut(&poster_chat_id) {
                     tray.stories.retain(|info| info.story_id != story_id);
                     tray.stories.is_empty()
                 } else {
                     false
                 };
                 if empty {
-                    self.story_tray.remove(&poster_chat_id);
+                    self.stories.tray.remove(&poster_chat_id);
                 }
             }
             StoriesPayload::UpdateStoryPostSucceeded {
@@ -94,13 +96,15 @@ impl Session {
                 // Phase 9.3: our own pending post went live — the composer
                 // shows "Posted".
                 if matches!(
-                    self.story_post.outcome,
+                    self.stories.post.outcome,
                     StoryPostOutcome::Posting { story_id } if story_id == old_story_id
                 ) {
-                    self.story_post.outcome = StoryPostOutcome::Succeeded;
+                    self.stories.post.outcome = StoryPostOutcome::Succeeded;
                 }
-                self.stories.insert((story.poster_chat_id, story.id), story);
-                self.story_tray_refresh.insert(poster_chat_id);
+                self.stories
+                    .stories
+                    .insert((story.poster_chat_id, story.id), story);
+                self.stories.tray_refresh.insert(poster_chat_id);
             }
             StoriesPayload::UpdateStoryPostFailed { story, error } => {
                 // Phase 9.2: a story failed to post — drop it like a delete
@@ -110,23 +114,25 @@ impl Session {
                 // `postStory`, schema `td_api.tl:13715`) and the composer
                 // shows it.
                 if matches!(
-                    self.story_post.outcome,
+                    self.stories.post.outcome,
                     StoryPostOutcome::Posting { story_id } if story_id == story.id
                 ) {
-                    self.story_post.outcome = StoryPostOutcome::Failed(format!(
+                    self.stories.post.outcome = StoryPostOutcome::Failed(format!(
                         "Posting failed: {}",
                         error_reason(&error)
                     ));
                 }
-                self.stories.remove(&(story.poster_chat_id, story.id));
-                let empty = if let Some(tray) = self.story_tray.get_mut(&story.poster_chat_id) {
+                self.stories
+                    .stories
+                    .remove(&(story.poster_chat_id, story.id));
+                let empty = if let Some(tray) = self.stories.tray.get_mut(&story.poster_chat_id) {
                     tray.stories.retain(|info| info.story_id != story.id);
                     tray.stories.is_empty()
                 } else {
                     false
                 };
                 if empty {
-                    self.story_tray.remove(&story.poster_chat_id);
+                    self.stories.tray.remove(&story.poster_chat_id);
                 }
             }
             StoriesPayload::StoryAvailableReactions {
@@ -152,7 +158,7 @@ impl Session {
                 } else {
                     // Phase 9.2: `getStoryAvailableReactions` answer — the
                     // viewer picker options.
-                    self.story_available_reactions = Some(reactions);
+                    self.stories.available_reactions = Some(reactions);
                 }
             }
             StoriesPayload::StoryInteractions { interactions } => {

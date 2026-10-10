@@ -88,10 +88,16 @@ fn call_rules_keep_their_exceptions_and_feed_the_call_fields() {
         ),
     );
     assert_eq!(
-        f.1.session.call_privacy_allow_calls,
+        f.1.session.calls.privacy_allow_calls,
         Some(PrivacyWho::Contacts)
     );
-    let detail = match f.1.session.privacy.get(&PrivacySettingKey::AllowCalls) {
+    let detail = match f
+        .1
+        .session
+        .settings
+        .privacy
+        .get(&PrivacySettingKey::AllowCalls)
+    {
         Some(crate::privacy::PrivacyKeyState::Ready(d)) => d.clone(),
         other => panic!("{other:?}"),
     };
@@ -119,7 +125,7 @@ fn call_rules_keep_their_exceptions_and_feed_the_call_fields() {
         "{rules}"
     );
     assert_eq!(
-        f.1.session.call_privacy_allow_calls,
+        f.1.session.calls.privacy_allow_calls,
         Some(PrivacyWho::Nobody)
     );
 
@@ -128,9 +134,12 @@ fn call_rules_keep_their_exceptions_and_feed_the_call_fields() {
         &mut f,
         r#"{"@type":"updateUserPrivacySettingRules","setting":{"@type":"userPrivacySettingAllowPeerToPeerCalls"},"rules":{"@type":"userPrivacySettingRules","rules":[{"@type":"userPrivacySettingRuleAllowAll"}]}}"#,
     );
-    assert_eq!(f.1.session.call_privacy_p2p, Some(PrivacyWho::Everybody));
+    assert_eq!(f.1.session.calls.privacy_p2p, Some(PrivacyWho::Everybody));
     assert!(matches!(
-        f.1.session.privacy.get(&PrivacySettingKey::PeerToPeer),
+        f.1.session
+            .settings
+            .privacy
+            .get(&PrivacySettingKey::PeerToPeer),
         Some(crate::privacy::PrivacyKeyState::Ready(_))
     ));
     cleanup(f);

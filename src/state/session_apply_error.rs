@@ -235,7 +235,7 @@ impl Session {
         if let Some(pending) = pending
             && is_auth_submit(pending.purpose)
         {
-            self.last_auth_error = Some(AuthRequestError {
+            self.auth_state.last_auth_error = Some(AuthRequestError {
                 purpose: pending.purpose,
                 class: err.class,
                 flood_wait_secs: err.flood_wait_secs,

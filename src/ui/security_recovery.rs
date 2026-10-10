@@ -43,7 +43,7 @@ impl QuillApp {
     /// The one-time result line of a finished step (tdesktop's inform
     /// boxes), shown above the status screen.
     pub(super) fn twofa_notice_line(&self) -> Option<String> {
-        let notice = self.session()?.twofa_flow.notice?;
+        let notice = self.session()?.auth_state.twofa_flow.notice?;
         Some(match notice {
             TwofaNotice::PasswordRemoved => "Two-step verification was disabled.".to_string(),
             TwofaNotice::PasswordRecovered => "Your cloud password was updated.".to_string(),
@@ -64,9 +64,11 @@ impl QuillApp {
     /// Forget the one-time notice and any half-finished recovery step.
     pub(super) fn clear_twofa_flow(&mut self) {
         let flow = if let Some(live) = self.live.as_mut() {
-            Some(&mut live.driver.session.twofa_flow)
+            Some(&mut live.driver.session.auth_state.twofa_flow)
         } else {
-            self.demo_session.as_mut().map(|s| &mut s.twofa_flow)
+            self.demo_session
+                .as_mut()
+                .map(|s| &mut s.auth_state.twofa_flow)
         };
         if let Some(flow) = flow {
             flow.notice = None;
@@ -220,11 +222,15 @@ impl QuillApp {
     /// Recovery / reset screen.
     pub(super) fn twofa_recover_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
         let session = self.session();
-        let state = session.as_ref().and_then(|s| s.password_state.clone());
+        let state = session
+            .as_ref()
+            .and_then(|s| s.auth_state.password_state.clone());
         let code_sent_to = session
             .as_ref()
-            .and_then(|s| s.twofa_flow.recovery_code_sent_to.clone());
-        let loading = session.as_ref().is_some_and(|s| s.password_state_loading);
+            .and_then(|s| s.auth_state.twofa_flow.recovery_code_sent_to.clone());
+        let loading = session
+            .as_ref()
+            .is_some_and(|s| s.auth_state.password_state_loading);
         let Some(state) = state else {
             return body.child(muted_line(cx, "Loading\u{2026}"));
         };
@@ -482,8 +488,10 @@ impl QuillApp {
         let session = self.session();
         let code_sent_to = session
             .as_ref()
-            .and_then(|s| s.twofa_flow.login_email_code_sent_to.clone());
-        let loading = session.as_ref().is_some_and(|s| s.password_state_loading);
+            .and_then(|s| s.auth_state.twofa_flow.login_email_code_sent_to.clone());
+        let loading = session
+            .as_ref()
+            .is_some_and(|s| s.auth_state.password_state_loading);
         let body = if let Some(pattern) = code_sent_to {
             body.child(heading("Check Your New Email"))
                 .child(div().text_sm().child(format!(
@@ -598,6 +606,6 @@ impl QuillApp {
     /// screen: a finished step reports there.
     pub(super) fn twofa_step_finished(&self) -> bool {
         self.session()
-            .is_some_and(|s| s.twofa_flow.notice.is_some())
+            .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some())
     }
 }

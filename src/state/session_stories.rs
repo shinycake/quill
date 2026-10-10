@@ -12,20 +12,20 @@ impl Session {
     /// `ordered_story_tray`.
     pub(crate) fn upsert_story_tray_entry(&mut self, entry: ChatActiveStoriesView) {
         if entry.stories.is_empty() {
-            self.story_tray.remove(&entry.chat_id);
+            self.stories.tray.remove(&entry.chat_id);
         } else {
-            self.story_tray.insert(entry.chat_id, entry);
+            self.stories.tray.insert(entry.chat_id, entry);
         }
     }
 
     /// The story ring for a chat's avatar in the chat list.
     pub fn chat_story_ring(&self, chat_id: i64) -> Option<crate::story_ring::StoryRing> {
-        crate::story_ring::StoryRing::from_active(self.story_tray.get(&chat_id)?)
+        crate::story_ring::StoryRing::from_active(self.stories.tray.get(&chat_id)?)
     }
 
     /// Phase 9.7: start tracking a story-page mutation (`Sending`).
     pub fn begin_story_page_op(&mut self, label: impl Into<String>) {
-        self.story_page_op = Some(StoryPageOp {
+        self.stories.page_op = Some(StoryPageOp {
             label: label.into(),
             state: StoryPageOpState::Sending,
         });
@@ -33,7 +33,7 @@ impl Session {
 
     /// Phase 9.7: start tracking a story-page read (`Checking`).
     pub fn begin_story_page_check(&mut self, label: impl Into<String>) {
-        self.story_page_op = Some(StoryPageOp {
+        self.stories.page_op = Some(StoryPageOp {
             label: label.into(),
             state: StoryPageOpState::Checking,
         });
@@ -44,11 +44,12 @@ impl Session {
     /// the label from the same purpose).
     pub(crate) fn succeed_story_page_op(&mut self, purpose: RequestPurpose) {
         if self
-            .story_page_op
+            .stories
+            .page_op
             .as_ref()
             .is_some_and(|op| op.label == story_page_op_label(purpose))
         {
-            self.story_page_op = Some(StoryPageOp {
+            self.stories.page_op = Some(StoryPageOp {
                 label: story_page_op_label(purpose),
                 state: StoryPageOpState::Succeeded,
             });
@@ -58,11 +59,12 @@ impl Session {
     /// Phase 9.7: mark the story-page op `Failed` on a TDLib error.
     pub(crate) fn fail_story_page_op(&mut self, purpose: RequestPurpose, reason: String) {
         if self
-            .story_page_op
+            .stories
+            .page_op
             .as_ref()
             .is_some_and(|op| op.label == story_page_op_label(purpose))
         {
-            self.story_page_op = Some(StoryPageOp {
+            self.stories.page_op = Some(StoryPageOp {
                 label: story_page_op_label(purpose),
                 state: StoryPageOpState::Failed(reason),
             });
@@ -73,11 +75,12 @@ impl Session {
     /// loaded list itself is the honest state — no status line needed).
     pub(crate) fn clear_story_page_op(&mut self, purpose: RequestPurpose) {
         if self
-            .story_page_op
+            .stories
+            .page_op
             .as_ref()
             .is_some_and(|op| op.label == story_page_op_label(purpose))
         {
-            self.story_page_op = None;
+            self.stories.page_op = None;
         }
     }
 
@@ -86,7 +89,8 @@ impl Session {
     /// (schema `chatActiveStories` comment, line 6781).
     pub fn ordered_story_tray(&self) -> Vec<&ChatActiveStoriesView> {
         let mut entries: Vec<&ChatActiveStoriesView> = self
-            .story_tray
+            .stories
+            .tray
             .values()
             .filter(|entry| entry.list == Some(StoryListView::Main))
             .collect();
@@ -99,11 +103,12 @@ impl Session {
     /// story is re-opened.
     pub fn begin_story_viewers(&mut self, chat_id: i64, story_id: i32) {
         let same = self
-            .story_viewers
+            .stories
+            .viewers
             .as_ref()
             .is_some_and(|state| state.chat_id == chat_id && state.story_id == story_id);
         if !same {
-            self.story_viewers = Some(StoryViewersState {
+            self.stories.viewers = Some(StoryViewersState {
                 chat_id,
                 story_id,
                 ..Default::default()
@@ -112,7 +117,7 @@ impl Session {
     }
 
     pub fn clear_story_viewers(&mut self) {
-        self.story_viewers = None;
+        self.stories.viewers = None;
     }
 
     /// Phase 9.2+: store `getCustomEmojiStickers` answers for the story
@@ -121,12 +126,14 @@ impl Session {
         for sticker in stickers {
             // Bounded: past the cap the cache restarts empty; the story
             // viewer refetches the ids it still shows.
-            if self.story_custom_emoji_stickers.len() >= STORY_CUSTOM_EMOJI_CAP
-                && !self.story_custom_emoji_stickers.contains_key(&sticker.id)
+            if self.stories.custom_emoji_stickers.len() >= STORY_CUSTOM_EMOJI_CAP
+                && !self.stories.custom_emoji_stickers.contains_key(&sticker.id)
             {
-                self.story_custom_emoji_stickers.clear();
+                self.stories.custom_emoji_stickers.clear();
             }
-            self.story_custom_emoji_stickers.insert(sticker.id, sticker);
+            self.stories
+                .custom_emoji_stickers
+                .insert(sticker.id, sticker);
         }
     }
 
@@ -141,7 +148,7 @@ impl Session {
         let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
             return;
         };
-        let Some(state) = self.story_viewers.as_mut() else {
+        let Some(state) = self.stories.viewers.as_mut() else {
             return;
         };
         if state.chat_id != chat_id.0 || state.story_id != story_id {
@@ -160,7 +167,7 @@ impl Session {
         let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
             return;
         };
-        if let Some(state) = self.story_viewers.as_mut()
+        if let Some(state) = self.stories.viewers.as_mut()
             && state.chat_id == chat_id.0
             && state.story_id == story_id
         {
@@ -172,7 +179,7 @@ impl Session {
     /// Phase 9.5: start the `reportStory` flow for a story — the UI
     /// renders `Checking` until the first answer lands.
     pub fn begin_story_report(&mut self, chat_id: i64, story_id: i32) {
-        self.story_report = Some(StoryReportFlow {
+        self.stories.report = Some(StoryReportFlow {
             chat_id,
             story_id,
             stage: StoryReportStage::Checking,
@@ -180,7 +187,7 @@ impl Session {
     }
 
     pub fn clear_story_report(&mut self) {
-        self.story_report = None;
+        self.stories.report = None;
     }
 
     /// Phase 9.5: apply a `ReportStoryResult` answer. A result for a
@@ -191,7 +198,7 @@ impl Session {
         let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
             return;
         };
-        let Some(flow) = self.story_report.as_mut() else {
+        let Some(flow) = self.stories.report.as_mut() else {
             return;
         };
         if flow.chat_id != chat_id.0 || flow.story_id != story_id {
@@ -218,7 +225,7 @@ impl Session {
     /// Phase 9.5: the follow-up `reportStory` (reason picked / details
     /// submitted) is in flight.
     pub fn story_report_sending(&mut self, chat_id: i64, story_id: i32) {
-        if let Some(flow) = self.story_report.as_mut()
+        if let Some(flow) = self.stories.report.as_mut()
             && flow.chat_id == chat_id
             && flow.story_id == story_id
         {
@@ -233,7 +240,7 @@ impl Session {
         let (Some(chat_id), Some(story_id)) = (pending.chat_id, pending.story_id) else {
             return;
         };
-        if let Some(flow) = self.story_report.as_mut()
+        if let Some(flow) = self.stories.report.as_mut()
             && flow.chat_id == chat_id.0
             && flow.story_id == story_id
         {
@@ -246,7 +253,7 @@ impl Session {
     /// flow with the error instead of spinning on `Checking`/`Sending`
     /// forever.
     pub fn fail_story_report_send(&mut self, chat_id: i64, story_id: i32, message: String) {
-        if let Some(flow) = self.story_report.as_mut()
+        if let Some(flow) = self.stories.report.as_mut()
             && flow.chat_id == chat_id
             && flow.story_id == story_id
         {
@@ -260,7 +267,7 @@ impl Session {
         active_until_date: i32,
         cooldown_until_date: i32,
     ) {
-        self.story_stealth = StoryStealthMode {
+        self.stories.stealth = StoryStealthMode {
             active_until_date,
             cooldown_until_date,
         };

@@ -125,7 +125,10 @@ fn mute_state(call: &ActiveGroupCall) -> MuteState {
 impl QuillApp {
     /// The group call window's content, built with the app's context.
     pub(super) fn group_call_panel_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(call) = self.session().and_then(|s| s.active_group_call.clone()) else {
+        let Some(call) = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.clone())
+        else {
             return div().size_full().bg(rgb(BG)).into_any_element();
         };
         let state = mute_state(&call);
@@ -286,7 +289,7 @@ impl QuillApp {
         // A request that failed (invite, ban, volume, rejoin…).
         let error = self
             .session()
-            .and_then(|s| s.group_call_error.clone())
+            .and_then(|s| s.calls.group_call_error.clone())
             .map(|error| {
                 div()
                     .id("group-call-error")
@@ -719,7 +722,7 @@ impl QuillApp {
     pub(super) fn close_group_call_window(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.id)
         {
             self.group_call.window_closed_by_user = Some(id);
@@ -732,7 +735,7 @@ impl QuillApp {
         self.sync_global_ptt(cx);
         let wanted = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|call| call.id)
             .filter(|id| self.group_call.window_closed_by_user != Some(*id));
         self.prune_group_video_images(wanted);
@@ -776,7 +779,7 @@ impl QuillApp {
                             app.group_call.window = None;
                             app.group_call.window_closed_by_user = app
                                 .session()
-                                .and_then(|s| s.active_group_call.as_ref())
+                                .and_then(|s| s.calls.active_group_call.as_ref())
                                 .map(|c| c.id);
                             cx.notify();
                         });
@@ -831,7 +834,7 @@ impl QuillApp {
     /// The main window's bar for a joined voice chat: mute, the chat's
     /// title and count, leave; a click brings the window back.
     pub(super) fn group_call_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let call = self.session()?.active_group_call.as_ref()?;
+        let call = self.session()?.calls.active_group_call.as_ref()?;
         if !call.is_joined {
             return None;
         }
@@ -942,7 +945,9 @@ impl Render for GroupCallPanel {
         let fullscreen = window.is_fullscreen();
         let body = owner.update(cx, |app, cx| {
             let wants_stage = fullscreen || app.demo_ui.group_stage;
-            let call = app.session().and_then(|s| s.active_group_call.clone());
+            let call = app
+                .session()
+                .and_then(|s| s.calls.active_group_call.clone());
             let stage = call
                 .filter(|_| wants_stage)
                 .and_then(|call| app.group_call_stage(&call, cx));

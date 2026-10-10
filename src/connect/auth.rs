@@ -31,16 +31,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         phone_number: &str,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.change_number_loading
-            || self.session.change_number_checking
+            || self.session.auth_state.change_number_loading
+            || self.session.auth_state.change_number_checking
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.change_number_error = None;
+        self.session.auth_state.change_number_error = None;
         let extra = self
             .session
             .request(RequestPurpose::SendPhoneNumberCode, None);
-        self.session.change_number_loading = true;
+        self.session.auth_state.change_number_loading = true;
         match self
             .sender
             .send_json(&send_phone_number_code(extra, phone_number))
@@ -48,7 +48,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.change_number_loading = false;
+                self.session.auth_state.change_number_loading = false;
                 Err(err)
             }
         }
@@ -60,22 +60,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// time.
     pub fn resend_phone_number_code(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.change_number_phone.is_none()
-            || self.session.change_number_loading
-            || self.session.change_number_checking
+            || self.session.auth_state.change_number_phone.is_none()
+            || self.session.auth_state.change_number_loading
+            || self.session.auth_state.change_number_checking
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.change_number_error = None;
+        self.session.auth_state.change_number_error = None;
         let extra = self
             .session
             .request(RequestPurpose::ResendPhoneNumberCode, None);
-        self.session.change_number_loading = true;
+        self.session.auth_state.change_number_loading = true;
         match self.sender.send_json(&resend_phone_number_code(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.change_number_loading = false;
+                self.session.auth_state.change_number_loading = false;
                 Err(err)
             }
         }
@@ -91,22 +91,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         // previous verification server-side (a stale check gets an honest
         // server refusal), and a user may verify an already-received code
         // while a resend round-trips.
-        if !self.chats_path_active() || self.session.change_number_checking {
+        if !self.chats_path_active() || self.session.auth_state.change_number_checking {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.change_number_phone.is_none() {
+        if self.session.auth_state.change_number_phone.is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.change_number_error = None;
+        self.session.auth_state.change_number_error = None;
         let extra = self
             .session
             .request(RequestPurpose::CheckPhoneNumberCode, None);
-        self.session.change_number_checking = true;
+        self.session.auth_state.change_number_checking = true;
         match self.sender.send_json(&check_phone_number_code(extra, code)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.change_number_checking = false;
+                self.session.auth_state.change_number_checking = false;
                 Err(err)
             }
         }
@@ -114,7 +114,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Fetch the sign-in country list once (works before authorization).
     pub fn fetch_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.countries.is_some()
+        if self.session.auth_state.countries.is_some()
             || self
                 .session
                 .requests
@@ -132,7 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Fetch the IP-based default country once.
     pub fn fetch_country_code(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.guessed_country_iso.is_some()
+        if self.session.auth_state.guessed_country_iso.is_some()
             || self
                 .session
                 .requests
@@ -181,7 +181,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if phone.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.last_auth_error = None;
+        self.session.auth_state.last_auth_error = None;
         let extra = self.session.request(RequestPurpose::SetPhoneNumber, None);
         self.sender
             .send_json(&set_authentication_phone_number(extra, phone))?;
@@ -276,7 +276,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.last_auth_error = None;
+        self.session.auth_state.last_auth_error = None;
         let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
@@ -311,20 +311,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.password_state_loading {
+        if self.session.auth_state.password_state_loading {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.password_op_error = None;
+        self.session.auth_state.password_op_error = None;
         let extra = self.session.request(
             RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op }),
             None,
         );
-        self.session.password_state_loading = true;
+        self.session.auth_state.password_state_loading = true;
         match self.sender.send_json(&build(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.password_state_loading = false;
+                self.session.auth_state.password_state_loading = false;
                 Err(err)
             }
         }
@@ -335,7 +335,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// duplicated; `password_op_send` enforces the connection gate.
     /// `Ok(None)` = no request needed.
     pub fn fetch_password_state(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.password_state.is_some() || self.session.password_state_loading {
+        if self.session.auth_state.password_state.is_some()
+            || self.session.auth_state.password_state_loading
+        {
             return Ok(None);
         }
         self.password_op_send(PasswordOp::Fetch, get_password_state)
@@ -392,6 +394,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn resend_recovery_email_code(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self
             .session
+            .auth_state
             .password_state
             .as_ref()
             .is_some_and(|s| s.pending_email_pattern.is_some())
@@ -407,6 +410,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn cancel_recovery_email_setup(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self
             .session
+            .auth_state
             .password_state
             .as_ref()
             .is_some_and(|s| s.pending_email_pattern.is_some())
@@ -432,6 +436,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if code.is_empty()
             || !self
                 .session
+                .auth_state
                 .password_state
                 .as_ref()
                 .is_some_and(|s| s.pending_email_pattern.is_some())
@@ -448,13 +453,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn request_twofa_recovery_code(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self
             .session
+            .auth_state
             .password_state
             .as_ref()
             .is_some_and(|s| s.has_password && s.has_recovery_email_address)
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.twofa_flow.recovery_code_sent_to = None;
+        self.session.auth_state.twofa_flow.recovery_code_sent_to = None;
         self.password_op_send(PasswordOp::RequestRecoveryCode, request_password_recovery)
     }
 
@@ -480,6 +486,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn reset_twofa_password(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self
             .session
+            .auth_state
             .password_state
             .as_ref()
             .is_some_and(|s| s.has_password)
@@ -494,6 +501,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn cancel_twofa_password_reset(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self
             .session
+            .auth_state
             .password_state
             .as_ref()
             .is_some_and(|s| s.pending_reset_date > 0)
@@ -510,7 +518,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if email.trim().is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.twofa_flow.login_email_code_sent_to = None;
+        self.session.auth_state.twofa_flow.login_email_code_sent_to = None;
         self.password_op_send(PasswordOp::SetLoginEmail, |extra| {
             set_login_email_address(extra, email.trim())
         })
@@ -518,7 +526,13 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Batch 6: `resendLoginEmailAddressCode` (schema 1.8.67, line 11446).
     pub fn resend_login_email_code(&mut self) -> Result<RequestId, ConnectSendError> {
-        if self.session.twofa_flow.login_email_code_sent_to.is_none() {
+        if self
+            .session
+            .auth_state
+            .twofa_flow
+            .login_email_code_sent_to
+            .is_none()
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.password_op_send(PasswordOp::SetLoginEmail, resend_login_email_address_code)
@@ -526,7 +540,14 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Batch 6: `checkLoginEmailAddressCode` (schema 1.8.67, line 11449).
     pub fn check_login_email_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
-        if code.is_empty() || self.session.twofa_flow.login_email_code_sent_to.is_none() {
+        if code.is_empty()
+            || self
+                .session
+                .auth_state
+                .twofa_flow
+                .login_email_code_sent_to
+                .is_none()
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.password_op_send(PasswordOp::CheckLoginEmailCode, |extra| {
@@ -544,7 +565,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if password.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.last_auth_error = None;
+        self.session.auth_state.last_auth_error = None;
         let extra = self
             .session
             .request(RequestPurpose::CheckAuthenticationPassword, None);
@@ -567,7 +588,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.last_auth_error = None;
+        self.session.auth_state.last_auth_error = None;
         let extra = self
             .session
             .request(RequestPurpose::RequestAuthenticationPasswordRecovery, None);
@@ -587,7 +608,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if code.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.last_auth_error = None;
+        self.session.auth_state.last_auth_error = None;
         let extra = self
             .session
             .request(RequestPurpose::RecoverAuthenticationPassword, None);

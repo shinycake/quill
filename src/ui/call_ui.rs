@@ -22,11 +22,12 @@ impl QuillApp {
         // The call itself lives in the call window; the main window only
         // asks for a rating afterwards, or reports a failure to start.
         let rating = session
-            .call_summary
+            .calls
+            .summary
             .as_ref()
             .is_some_and(|summary| summary.need_rating && !summary.rating_sent)
-            && session.active_call.is_none();
-        let failed = session.call_error.is_some() && session.active_call.is_none();
+            && session.calls.active_call.is_none();
+        let failed = session.calls.error.is_some() && session.calls.active_call.is_none();
         if !rating && !failed {
             return None;
         }
@@ -47,9 +48,9 @@ impl QuillApp {
 
     pub(super) fn call_card(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
-        let active = session.and_then(|s| s.active_call.clone());
-        let summary = session.and_then(|s| s.call_summary.clone());
-        let error = session.and_then(|s| s.call_error.clone());
+        let active = session.and_then(|s| s.calls.active_call.clone());
+        let summary = session.and_then(|s| s.calls.summary.clone());
+        let error = session.and_then(|s| s.calls.error.clone());
 
         let mut card = div()
             .id("call-card")

@@ -131,7 +131,7 @@ impl QuillApp {
             .unwrap_or_default();
         let mut slots = build_slots(&folders);
         if let Some(session) = self.session() {
-            let include_muted = session.badge_prefs.include_muted_folders;
+            let include_muted = session.settings.badge_prefs.include_muted_folders;
             for slot in &mut slots {
                 let pair = match slot.kind {
                     FolderSlotKind::All => session.unread_totals.main.chats,

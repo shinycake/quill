@@ -37,21 +37,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// are known.
     pub fn review_unconfirmed_sessions(&mut self, confirmed: bool) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.notices.review_pending > 0
-            || self.session.notices.unconfirmed_entries.is_empty()
+            || self.session.settings.notices.review_pending > 0
+            || self.session.settings.notices.unconfirmed_entries.is_empty()
         {
             return Err(ConnectSendError::InvalidRequest);
         }
         let ids: Vec<i64> = self
             .session
+            .settings
             .notices
             .unconfirmed_entries
             .iter()
             .map(|entry| entry.id)
             .collect();
-        self.session.notices.review_confirmed = confirmed;
-        self.session.notices.review_error = None;
-        self.session.notices.review_pending = ids.len();
+        self.session.settings.notices.review_confirmed = confirmed;
+        self.session.settings.notices.review_error = None;
+        self.session.settings.notices.review_pending = ids.len();
         for id in ids {
             let extra = self.session.request(
                 RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession { confirmed }),
@@ -75,17 +76,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `acceptTermsOfService` (schema 1.8.67, :16143) for the pending
     /// `updateTermsOfService`.
     pub fn accept_terms(&mut self) -> Result<RequestId, ConnectSendError> {
-        let Some(terms) = self.session.notices.terms.clone() else {
+        let Some(terms) = self.session.settings.notices.terms.clone() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if !self.chats_path_active() || self.session.notices.terms_in_flight {
+        if !self.chats_path_active() || self.session.settings.notices.terms_in_flight {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::AcceptTermsOfService, None);
-        self.session.notices.terms_in_flight = true;
-        self.session.notices.terms_error = None;
+        self.session.settings.notices.terms_in_flight = true;
+        self.session.settings.notices.terms_error = None;
         match self
             .sender
             .send_json(&accept_terms_of_service(extra, &terms.id))
@@ -93,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.notices.terms_in_flight = false;
+                self.session.settings.notices.terms_in_flight = false;
                 Err(err)
             }
         }

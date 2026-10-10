@@ -63,7 +63,7 @@ fn can_post_story_error_surfaces_tgx_notice() {
             ),
         );
         assert_eq!(
-            session.story_post.check_error.as_deref(),
+            session.stories.post.check_error.as_deref(),
             Some(expected),
             "message {message}"
         );
@@ -86,6 +86,6 @@ fn can_post_story_unknown_error_keeps_generic_failure() {
             extra.0
         ),
     );
-    let error = session.story_post.check_error.expect("check error");
+    let error = session.stories.post.check_error.expect("check error");
     assert!(error.starts_with("Eligibility check failed:"), "{error}");
 }

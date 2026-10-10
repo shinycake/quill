@@ -268,7 +268,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the request actually left: a transport failure must not wipe the
         // already-loaded list.
         if sent.is_ok() && from_story_id == 0 {
-            self.session.chat_page_stories.remove(&chat_id.0);
+            self.session.stories.chat_page_stories.remove(&chat_id.0);
         }
         sent
     }
