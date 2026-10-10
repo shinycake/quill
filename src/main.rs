@@ -1366,7 +1366,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             );
             // kit Phase 9: honor the OS reduce-motion preference.
             quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
-        cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
+            cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {

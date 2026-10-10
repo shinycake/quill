@@ -135,11 +135,7 @@ fn read_native() -> Option<u32> {
     })
 }
 
-#[cfg(not(any(
-    all(target_os = "macos", feature = "ui"),
-    windows,
-    target_os = "linux"
-)))]
+#[cfg(not(any(all(target_os = "macos", feature = "ui"), windows, target_os = "linux")))]
 fn read_native() -> Option<u32> {
     None
 }

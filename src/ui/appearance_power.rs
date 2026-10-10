@@ -3,9 +3,9 @@
 //! `chat/font` in `settings_chat.cpp`).
 
 use super::QuillApp;
-use gpui_kit::component::{IndexPath, StyledExt as _};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::theme::{ActiveTheme, Theme};
+use gpui_kit::component::{IndexPath, StyledExt as _};
 use gpui_kit::*;
 use quill::power_saving::{Flag, GROUPS, with_flag};
 use std::sync::OnceLock;
@@ -67,7 +67,11 @@ impl QuillApp {
     ) -> Entity<SelectState<SearchableVec<SharedString>>> {
         let installed = installed_fonts(cx);
         let mut items: Vec<SharedString> = vec![DEFAULT_LABEL.into()];
-        items.extend(installed.iter().map(|name| SharedString::from(name.clone())));
+        items.extend(
+            installed
+                .iter()
+                .map(|name| SharedString::from(name.clone())),
+        );
         let selected = quill::font_choice::resolve(stored, installed)
             .and_then(|name| installed.iter().position(|n| n == name))
             .map_or(0, |ix| ix + 1);
