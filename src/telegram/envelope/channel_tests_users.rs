@@ -10,7 +10,7 @@ fn update_user_parses_full_user() {
     let json = r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","usernames":{"@type":"usernames","active_usernames":["adalove"],"disabled_usernames":[],"editable_username":"adalove","collectible_usernames":[]},"phone_number":"+15550131","status":{"@type":"userStatusOnline","expires":9999999999},"profile_photo":{"@type":"profilePhoto","id":7,"small":{"@type":"file","id":41,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_delete":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"big":{"@type":"file","id":42,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_delete":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"minithumbnail":null,"has_animation":false,"is_personal":false},"accent_color_id":0,"background_custom_emoji_id":0,"upgraded_gift_colors":null,"profile_accent_color_id":-1,"profile_background_custom_emoji_id":0,"emoji_status":null,"is_contact":true,"is_mutual_contact":true,"is_close_friend":false,"verification_status":null,"is_premium":false,"is_support":false,"restriction_info":null,"active_story_state":null,"restricts_new_chats":false,"paid_message_star_count":0,"have_access":true,"type":{"@type":"userTypeRegular"},"language_code":"en","added_to_attachment_menu":false}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateUser { user_id, user } => {
+        EnvelopePayload::Users(UsersPayload::UpdateUser { user_id, user }) => {
             assert_eq!(user_id, UserId(31));
             assert_eq!(user.first_name, "Ada");
             assert_eq!(user.last_name, "Lovelace");
@@ -62,7 +62,7 @@ fn check_chat_username_results_parsed() {
     for (type_name, expected) in cases {
         let env = parse_envelope(&format!("{{\"@type\":\"{type_name}\"}}")).unwrap();
         match env.payload {
-            EnvelopePayload::CheckChatUsernameResult(result) => {
+            EnvelopePayload::Users(UsersPayload::CheckChatUsernameResult(result)) => {
                 assert_eq!(result, expected, "{type_name}");
             }
             other => panic!("{type_name}: {other:?}"),
@@ -79,7 +79,7 @@ fn user_full_info_photo_id_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UserFullInfo { photo_id, .. } => {
+        EnvelopePayload::Users(UsersPayload::UserFullInfo { photo_id, .. }) => {
             assert_eq!(photo_id, Some(987));
         }
         other => panic!("{other:?}"),
@@ -132,7 +132,7 @@ fn update_user_status_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateUserStatus { user_id, status } => {
+        EnvelopePayload::Users(UsersPayload::UpdateUserStatus { user_id, status }) => {
             assert_eq!(user_id, UserId(31));
             assert_eq!(status, UserStatusKind::LastWeek);
         }
@@ -144,7 +144,7 @@ fn update_user_status_parsed() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateUserStatus { status, .. } => {
+        EnvelopePayload::Users(UsersPayload::UpdateUserStatus { status, .. }) => {
             assert_eq!(status, UserStatusKind::Empty)
         }
         other => panic!("{other:?}"),
@@ -160,10 +160,10 @@ fn update_profile_accent_colors_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateProfileAccentColors {
+        EnvelopePayload::Chats(ChatsPayload::UpdateProfileAccentColors {
             colors,
             available_ids,
-        } => {
+        }) => {
             assert_eq!(available_ids, vec![1, 3, 5]);
             assert_eq!(colors.len(), 1);
             assert_eq!(colors[0].id, 3);
@@ -177,10 +177,10 @@ fn update_profile_accent_colors_parsed() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateProfileAccentColors {
+        EnvelopePayload::Chats(ChatsPayload::UpdateProfileAccentColors {
             colors,
             available_ids,
-        } => {
+        }) => {
             assert!(colors.is_empty());
             assert!(available_ids.is_empty());
         }
@@ -195,7 +195,9 @@ fn users_response_parsed() {
         parse_envelope(r#"{"@type":"users","@extra":"3","total_count":2,"user_ids":[31,32]}"#)
             .unwrap();
     match env.payload {
-        EnvelopePayload::Users { user_ids } => assert_eq!(user_ids, vec![31, 32]),
+        EnvelopePayload::Users(UsersPayload::Users { user_ids }) => {
+            assert_eq!(user_ids, vec![31, 32])
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -208,14 +210,14 @@ fn user_full_info_bio_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UserFullInfo {
+        EnvelopePayload::Users(UsersPayload::UserFullInfo {
             extras: _,
             bio,
             bot_info,
             photo,
             photo_id: _,
             blocked,
-        } => {
+        }) => {
             assert_eq!(bio, "CANARY bio text");
             assert!(bot_info.is_none());
             assert!(photo.is_none());
@@ -241,7 +243,7 @@ fn user_full_info_photo_parsed_from_chat_photo() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::UserFullInfo { photo, .. } => {
+        EnvelopePayload::Users(UsersPayload::UserFullInfo { photo, .. }) => {
             let photo = photo.expect("chatPhoto size");
             assert_eq!(photo.id.0, 902);
         }
@@ -252,7 +254,9 @@ fn user_full_info_photo_parsed_from_chat_photo() {
         parse_envelope(r#"{"@type":"userFullInfo","@extra":"10","bio":null,"bot_info":null}"#)
             .unwrap();
     match env.payload {
-        EnvelopePayload::UserFullInfo { photo, .. } => assert!(photo.is_none()),
+        EnvelopePayload::Users(UsersPayload::UserFullInfo { photo, .. }) => {
+            assert!(photo.is_none())
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -265,7 +269,7 @@ fn update_user_parses_is_premium() {
     let json = r#"{"@type":"updateUser","user":{"@type":"user","id":31,"first_name":"Ada","last_name":"","usernames":null,"phone_number":"","status":null,"profile_photo":null,"accent_color_id":0,"background_custom_emoji_id":0,"upgraded_gift_colors":null,"profile_accent_color_id":-1,"profile_background_custom_emoji_id":0,"emoji_status":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"verification_status":null,"is_premium":true,"is_support":false,"restriction_info":null,"active_story_state":null,"restricts_new_chats":false,"paid_message_star_count":0,"have_access":true,"type":{"@type":"userTypeRegular"},"language_code":"en","added_to_attachment_menu":false}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateUser { user, .. } => assert!(user.is_premium),
+        EnvelopePayload::Users(UsersPayload::UpdateUser { user, .. }) => assert!(user.is_premium),
         other => panic!("{other:?}"),
     }
 }

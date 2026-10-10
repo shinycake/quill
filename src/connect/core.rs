@@ -9,6 +9,10 @@ use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, EnvelopePayload, MessageContent, RichMessageContent, UsernameCheckResult,
 };
+use crate::telegram::envelope::{
+    CallsPayload, ChatsPayload, CommonPayload, GroupsPayload, MediaPayload, MessagesPayload,
+    SearchPayload, SettingsPayload, StickersPayload, UsersPayload,
+};
 use crate::telegram::requests::{
     close_request, get_authorization_state, load_archive_chats, load_chats, log_out,
 };
@@ -115,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let active_call_before = self.session.active_call.as_ref().map(|call| call.id);
         let active_group_call_before = self.session.active_group_call.as_ref().map(|call| call.id);
         let bridge_signaling = match &owned.envelope.payload {
-            EnvelopePayload::UpdateNewCallSignalingData { call_id, data } => {
+            EnvelopePayload::Calls(CallsPayload::UpdateNewCallSignalingData { call_id, data }) => {
                 Some((*call_id, data.clone()))
             }
             _ => None,
@@ -149,7 +153,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .extra
             .and_then(|id| self.session.requests.purpose(id));
         let view_after = match &owned.envelope.payload {
-            EnvelopePayload::Messages(_) | EnvelopePayload::UpdateNewMessage(_) => true,
+            EnvelopePayload::Messages(MessagesPayload::Messages(_))
+            | EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(_)) => true,
             EnvelopePayload::Ok | EnvelopePayload::Error(_)
                 if view_purpose == Some(RequestPurpose::ViewMessages) =>
             {
@@ -172,7 +177,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
         let installed_stickers_answer = view_purpose
             == Some(RequestPurpose::GetInstalledStickerSets)
-            && matches!(owned.envelope.payload, EnvelopePayload::StickerSets { .. });
+            && matches!(
+                owned.envelope.payload,
+                EnvelopePayload::Stickers(StickersPayload::StickerSets { .. })
+            );
         let archive_catalog_changed = sticker_set_changed
             && matches!(
                 view_purpose,
@@ -183,7 +191,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let emoji_trending_answer = view_purpose == Some(RequestPurpose::GetTrendingEmojiSets)
             && matches!(
                 owned.envelope.payload,
-                EnvelopePayload::TrendingStickerSets { .. }
+                EnvelopePayload::Stickers(StickersPayload::TrendingStickerSets { .. })
             )
             && self.session.emoji.open
             && self.session.emoji.tab == crate::emoji::EmojiSetTab::Trending;
@@ -191,14 +199,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             && view_purpose == Some(RequestPurpose::ChangeEmojiSet))
             || matches!(
                 owned.envelope.payload,
-                EnvelopePayload::UpdateInstalledStickerSets {
+                EnvelopePayload::Stickers(StickersPayload::UpdateInstalledStickerSets {
                     is_regular: false,
                     ..
-                }
+                })
             );
         let gif_saved_changed = matches!(
             owned.envelope.payload,
-            EnvelopePayload::UpdateSavedAnimations { .. }
+            EnvelopePayload::Stickers(StickersPayload::UpdateSavedAnimations { .. })
         );
         let gif_mutation_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
             && matches!(
@@ -206,7 +214,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
             );
         let gif_bot_changed = match &owned.envelope.payload {
-            EnvelopePayload::UpdateOption { name, value }
+            EnvelopePayload::Common(CommonPayload::UpdateOption { name, value })
                 if name == "animation_search_bot_username" =>
             {
                 match value {
@@ -222,27 +230,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             && view_purpose == Some(RequestPurpose::ClearRecentStickers);
         let trending_answer = matches!(
             owned.envelope.payload,
-            EnvelopePayload::TrendingStickerSets { .. }
+            EnvelopePayload::Stickers(StickersPayload::TrendingStickerSets { .. })
         ) && view_purpose == Some(RequestPurpose::GetTrendingStickerSets);
         let thumbs_after = matches!(
             owned.envelope.payload,
-            EnvelopePayload::Messages(_)
-                | EnvelopePayload::UpdateNewMessage(_)
-                | EnvelopePayload::UpdateMessageContent { .. }
-                | EnvelopePayload::UpdateFile(_)
-                | EnvelopePayload::File(_)
+            EnvelopePayload::Messages(MessagesPayload::Messages(_))
+                | EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(_))
+                | EnvelopePayload::Messages(MessagesPayload::UpdateMessageContent { .. })
+                | EnvelopePayload::Media(MediaPayload::UpdateFile(_))
+                | EnvelopePayload::Media(MediaPayload::File(_))
         );
         // Only the first page jumps to its first hit; "older" pages append.
         let chat_search_hits = matches!(
             owned.envelope.payload,
-            EnvelopePayload::FoundChatMessages { .. }
+            EnvelopePayload::Search(SearchPayload::FoundChatMessages { .. })
         ) && view_purpose != Some(RequestPurpose::SearchChatMessagesMore);
         // M2: capture the `getFullRichMessage` answer before `apply`
         // takes the pending request; the full blocks replace the
         // partial message's blocks in history after apply.
         let full_rich_answer: Option<(ChatId, MessageId, RichMessageContent)> =
             match &owned.envelope.payload {
-                EnvelopePayload::RichMessage { rich } => owned
+                EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
                     .envelope
                     .extra
                     .and_then(|id| self.session.requests.purpose(id))
@@ -259,7 +267,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // pending request; the UI drains `Session::message_link_result`
         // into the clipboard.
         let message_link_answer: Option<(String, bool)> = match &owned.envelope.payload {
-            EnvelopePayload::MessageLink { link, is_public } => owned
+            EnvelopePayload::Messages(MessagesPayload::MessageLink { link, is_public }) => owned
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
@@ -279,8 +287,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // variants); the UI drains `Session::ai_composer_text` into the
         // composer draft.
         let ai_text_answer: Option<(ChatId, String)> = match &owned.envelope.payload {
-            EnvelopePayload::FixedText { text, .. }
-            | EnvelopePayload::FormattedText { text, .. } => owned
+            EnvelopePayload::Common(CommonPayload::FixedText { text, .. })
+            | EnvelopePayload::Common(CommonPayload::FormattedText { text, .. }) => owned
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.get(id))
@@ -301,7 +309,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // records which method answered.
         let ai_rich_answer: Option<(ChatId, RichMessageContent, &'static str)> =
             match &owned.envelope.payload {
-                EnvelopePayload::RichMessage { rich } => owned
+                EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
                     .envelope
                     .extra
                     .and_then(|id| self.session.requests.get(id))
@@ -322,7 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // M1 fix-up: capture the `getMessageProperties` answer for the
         // "Share link" gate before `apply` takes the pending request.
         let link_gate: Option<(ChatId, MessageId, bool)> = match &owned.envelope.payload {
-            EnvelopePayload::MessageProperties(actions) => owned
+            EnvelopePayload::Messages(MessagesPayload::MessageProperties(actions)) => owned
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
@@ -339,7 +347,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // reacted lookups they allow (`getMessageViewers`, ...).
         let audience_gate: Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)> =
             match &owned.envelope.payload {
-                EnvelopePayload::MessageProperties(actions) => owned
+                EnvelopePayload::Messages(MessagesPayload::MessageProperties(actions)) => owned
                     .envelope
                     .extra
                     .and_then(|id| self.session.requests.purpose(id))
@@ -358,7 +366,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // stale answers for superseded text.
         let username_check_answer: Option<(String, UsernameCheckResult)> =
             match &owned.envelope.payload {
-                EnvelopePayload::CheckChatUsernameResult(result) => owned
+                EnvelopePayload::Users(UsersPayload::CheckChatUsernameResult(result)) => owned
                     .envelope
                     .extra
                     .and_then(|id| self.session.requests.purpose(id))
@@ -377,7 +385,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `Session::instant_view_urls` (the purpose stays `Copy`).
         let instant_view_answer: Option<(String, RichMessageContent)> =
             match &owned.envelope.payload {
-                EnvelopePayload::WebPageInstantView { rich } => owned
+                EnvelopePayload::Messages(MessagesPayload::WebPageInstantView { rich }) => owned
                     .envelope
                     .extra
                     .and_then(|id| {
@@ -409,7 +417,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `Session::composer_preview`. A late answer for a superseded URL
         // is dropped (the chip only cares about the latest request).
         let link_preview_answer: Option<ComposerLinkPreview> = match &owned.envelope.payload {
-            EnvelopePayload::LinkPreview { preview } => owned
+            EnvelopePayload::Messages(MessagesPayload::LinkPreview { preview }) => owned
                 .envelope
                 .extra
                 .and_then(|id| {
@@ -444,7 +452,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // pending request; opened through the normal `select_chat`
         // flow (openChat + history) after apply inserts the chat.
         let created_chat: Option<ChatId> = match &owned.envelope.payload {
-            EnvelopePayload::UpdateNewChat { chat_id, .. } => owned
+            EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { chat_id, .. }) => owned
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
@@ -481,7 +489,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // guaranteed to have arrived first, so the id chains straight
         // into `getCommunityFullInfo` after apply.
         let created_community_id: Option<i64> = match &owned.envelope.payload {
-            EnvelopePayload::CommunityId { id } => owned
+            EnvelopePayload::Groups(GroupsPayload::CommunityId { id }) => owned
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
@@ -509,12 +517,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         // and nothing refetches.
         let cleared_download_cache = matches!(
             &owned.envelope.payload,
-            EnvelopePayload::StorageStatistics { .. }
+            EnvelopePayload::Settings(SettingsPayload::StorageStatistics { .. })
         ) && owned.envelope.extra.is_some_and(|id| {
             self.session.requests.purpose(id) == Some(RequestPurpose::OptimizeStorage)
         });
         let used_emoji: Vec<_> = match &owned.envelope.payload {
-            EnvelopePayload::UpdateMessageSendSucceeded { message, .. } if message.is_outgoing => {
+            EnvelopePayload::Messages(MessagesPayload::UpdateMessageSendSucceeded {
+                message,
+                ..
+            }) if message.is_outgoing => {
                 if let crate::telegram::envelope::MessageContent::Text(text) = &message.content {
                     text.entities
                         .iter()
@@ -534,11 +545,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A pin in the open chat refetches its pinned list (the pinned
         // message may not be loaded); a confirmed unpin-all empties it.
         let pins_changed: Option<ChatId> = match &owned.envelope.payload {
-            EnvelopePayload::UpdateMessageIsPinned {
+            EnvelopePayload::Messages(MessagesPayload::UpdateMessageIsPinned {
                 chat_id,
                 is_pinned: true,
                 ..
-            } => Some(*chat_id),
+            }) => Some(*chat_id),
             _ => None,
         };
         let unpinned_all: Option<ChatId> = match &owned.envelope.payload {

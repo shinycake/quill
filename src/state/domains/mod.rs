@@ -9,6 +9,7 @@ mod bots;
 mod calls;
 mod chat_list;
 mod chats;
+mod common;
 mod groups;
 mod media;
 mod messages;

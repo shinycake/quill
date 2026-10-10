@@ -220,7 +220,7 @@ fn message_call_parses() {
     let json = r#"{"@type":"message","id":901,"chat_id":71,"is_outgoing":false,"date":1700000000,"content":{"@type":"messageCall","unique_id":901,"is_video":true,"discard_reason":{"@type":"callDiscardReasonHungUp"},"duration":372}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Message(message) => {
+        EnvelopePayload::Messages(MessagesPayload::Message(message)) => {
             assert_eq!(
                 message.content,
                 MessageContent::Call {
@@ -333,10 +333,10 @@ fn update_chat_folders_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatFolders {
+        EnvelopePayload::ChatList(ChatListPayload::UpdateChatFolders {
             folders,
             are_tags_enabled,
-        } => {
+        }) => {
             assert_eq!(folders.len(), 2);
             assert!(!are_tags_enabled);
             assert_eq!(
@@ -375,7 +375,7 @@ fn chat_list_folder_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatPosition(pos) => {
+        EnvelopePayload::ChatList(ChatListPayload::UpdateChatPosition(pos)) => {
             assert_eq!(pos.list, ChatList::Folder(3));
             assert_eq!(pos.order, 50);
         }

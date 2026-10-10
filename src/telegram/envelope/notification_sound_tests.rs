@@ -12,7 +12,7 @@ fn notification_sounds_parsed() {
     );
     let env = parse_envelope(&json).unwrap();
     match env.payload {
-        EnvelopePayload::NotificationSounds { sounds } => {
+        EnvelopePayload::Settings(SettingsPayload::NotificationSounds { sounds }) => {
             assert_eq!(sounds.len(), 1);
             assert_eq!(sounds[0].id, 99);
             assert_eq!(sounds[0].title, "Chime");
@@ -31,7 +31,7 @@ fn update_saved_notification_sounds_parsed() {
     )
     .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateSavedNotificationSounds { sound_ids } => {
+        EnvelopePayload::Settings(SettingsPayload::UpdateSavedNotificationSounds { sound_ids }) => {
             assert_eq!(sound_ids, vec![7, 8]);
         }
         other => panic!("unexpected {other:?}"),
@@ -46,7 +46,9 @@ fn scope_notification_settings_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::ScopeNotificationSettings { settings, .. } => {
+        EnvelopePayload::Settings(SettingsPayload::ScopeNotificationSettings {
+            settings, ..
+        }) => {
             assert_eq!(settings.mute_for, 3600);
             assert_eq!(settings.sound_id, -1);
             assert!(settings.show_preview);
@@ -64,7 +66,10 @@ fn update_scope_notification_settings_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateScopeNotificationSettings { scope, settings } => {
+        EnvelopePayload::Settings(SettingsPayload::UpdateScopeNotificationSettings {
+            scope,
+            settings,
+        }) => {
             assert_eq!(scope, NotificationSettingsScope::GroupChats);
             assert_eq!(settings.sound_id, 0);
             assert!(!settings.show_preview);
@@ -81,7 +86,9 @@ fn update_reaction_notification_settings_parsed() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateReactionNotificationSettings { settings } => {
+        EnvelopePayload::Settings(SettingsPayload::UpdateReactionNotificationSettings {
+            settings,
+        }) => {
             assert_eq!(
                 settings.message_reaction_source,
                 ReactionNotificationSource::Contacts
@@ -167,7 +174,7 @@ fn schema_pins_call_constructors() {
 fn call_updates_parsed_in_every_state() {
     let pending = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#;
     match parse_envelope(pending).unwrap().payload {
-        EnvelopePayload::UpdateCall { call } => {
+        EnvelopePayload::Calls(CallsPayload::UpdateCall { call }) => {
             assert_eq!(call.id, 77);
             assert_eq!(call.unique_id, 99);
             assert_eq!(call.user_id, 41);
@@ -188,7 +195,7 @@ fn call_updates_parsed_in_every_state() {
     // schema's `call` type carries it, 1.8.67 :7287).
     let video = r#"{"@type":"updateCall","call":{"@type":"call","id":83,"unique_id":"105","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":false,"udp_reflector":false,"min_layer":65,"max_layer":92,"library_versions":[]},"servers":[],"config":"{}","encryption_key":"","emojis":[],"allow_p2p":false,"is_group_call_supported":false,"custom_parameters":"{}"}}}"#;
     match parse_envelope(video).unwrap().payload {
-        EnvelopePayload::UpdateCall { call } => {
+        EnvelopePayload::Calls(CallsPayload::UpdateCall { call }) => {
             assert!(call.is_video);
             assert!(!call.is_outgoing);
             assert!(matches!(call.state, CallState::Ready));
@@ -216,7 +223,7 @@ fn call_updates_parsed_in_every_state() {
             r#"{{"@type":"updateCall","call":{{"@type":"call","id":78,"unique_id":"100","user_id":41,"is_outgoing":true,"is_video":false,"state":{state_json}}}}}"#
         );
         match parse_envelope(&json).unwrap().payload {
-            EnvelopePayload::UpdateCall { call } => {
+            EnvelopePayload::Calls(CallsPayload::UpdateCall { call }) => {
                 assert!(call.is_outgoing);
                 assert_eq!(call.state.is_terminal(), terminal, "for {state_json}");
             }
@@ -228,7 +235,7 @@ fn call_updates_parsed_in_every_state() {
     // message that would leak if retained and assert it is gone.
     let err = r#"{"@type":"updateCall","call":{"@type":"call","id":82,"unique_id":"104","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateError","error":{"@type":"error","code":500,"message":"SECRET_LEAK_TEXT"}}}}"#;
     match parse_envelope(err).unwrap().payload {
-        EnvelopePayload::UpdateCall { call } => {
+        EnvelopePayload::Calls(CallsPayload::UpdateCall { call }) => {
             assert_eq!(call.state, CallState::Error { code: 500 });
             assert!(
                 !format!("{call:?}").contains("SECRET_LEAK_TEXT"),
@@ -248,7 +255,7 @@ fn call_updates_parsed_in_every_state() {
     // Signaling data arrives as base64 bytes.
     let sig = r#"{"@type":"updateNewCallSignalingData","call_id":77,"data":"AAEC"}"#;
     match parse_envelope(sig).unwrap().payload {
-        EnvelopePayload::UpdateNewCallSignalingData { call_id, data } => {
+        EnvelopePayload::Calls(CallsPayload::UpdateNewCallSignalingData { call_id, data }) => {
             assert_eq!(call_id, 77);
             assert_eq!(data, vec![0x00, 0x01, 0x02]);
         }
@@ -257,7 +264,7 @@ fn call_updates_parsed_in_every_state() {
     // `callId` is the `createCall` answer.
     let id = r#"{"@type":"callId","id":77,"@extra":"9"}"#;
     match parse_envelope(id).unwrap().payload {
-        EnvelopePayload::CallId { id } => assert_eq!(id, 77),
+        EnvelopePayload::Calls(CallsPayload::CallId { id }) => assert_eq!(id, 77),
         other => panic!("unexpected {other:?}"),
     }
 }
@@ -265,7 +272,9 @@ fn call_updates_parsed_in_every_state() {
 #[test]
 fn call_ready_parses_transport_parameters_and_server_kinds() {
     let json = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":92,"max_layer":92,"library_versions":["13.0.0"]},"servers":[{"@type":"callServer","id":"7","ip_address":"149.154.167.40","ipv6_address":"2001:b28:f23d:f001::a","port":443,"type":{"@type":"callServerTypeTelegramReflector","peer_tag":"AAEC","is_tcp":true}},{"@type":"callServer","id":"8","ip_address":"203.0.113.1","ipv6_address":"","port":3478,"type":{"@type":"callServerTypeWebrtc","username":"alice","password":"secret","supports_turn":true,"supports_stun":false}}],"config":"{}","encryption_key":"AQIDBA==","emojis":["🍎","🍌"],"allow_p2p":true,"is_group_call_supported":false,"custom_parameters":"{\"x\":1}"}}}"#;
-    let EnvelopePayload::UpdateCall { call } = parse_envelope(json).unwrap().payload else {
+    let EnvelopePayload::Calls(CallsPayload::UpdateCall { call }) =
+        parse_envelope(json).unwrap().payload
+    else {
         panic!("expected updateCall");
     };
     assert_eq!(call.state, CallState::Ready);
@@ -312,7 +321,7 @@ fn invite_link_parses_all_fields() {
     let json = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+paid","name":"Quill","creator_user_id":101,"date":1700000000,"edit_date":1700000001,"expiration_date":1800000000,"subscription_pricing":{"@type":"starSubscriptionPricing","period":2592000,"star_count":250},"member_limit":50,"member_count":12,"expired_member_count":3,"pending_join_request_count":4,"creates_join_request":true,"is_primary":false,"is_revoked":false}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ChatInviteLink { link } => {
+        EnvelopePayload::Groups(GroupsPayload::ChatInviteLink { link }) => {
             assert_eq!(link.invite_link, "https://t.me/+paid");
             assert_eq!(link.name, "Quill");
             assert_eq!(link.creator_user_id, 101);
@@ -344,7 +353,7 @@ fn invite_link_without_subscription_pricing() {
     let json = r#"{"@type":"chatInviteLink","invite_link":"https://t.me/+free","name":"","creator_user_id":101,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":0,"member_count":12,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":true,"is_revoked":false}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ChatInviteLink { link } => {
+        EnvelopePayload::Groups(GroupsPayload::ChatInviteLink { link }) => {
             assert_eq!(link.invite_link, "https://t.me/+free");
             assert_eq!(link.subscription_pricing, None);
             assert!(link.is_primary);
@@ -360,7 +369,7 @@ fn invite_links_and_join_requests_lists_parse() {
     let json = r#"{"@type":"chatInviteLinks","total_count":2,"invite_links":[{"@type":"chatInviteLink","invite_link":"https://t.me/+one","name":"One","creator_user_id":101,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":0,"member_count":5,"expired_member_count":0,"pending_join_request_count":1,"creates_join_request":false,"is_primary":false,"is_revoked":false},{"@type":"chatInviteLink","invite_link":"https://t.me/+two","name":"Two","creator_user_id":101,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":10,"member_count":0,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":true,"is_primary":false,"is_revoked":true}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ChatInviteLinks { total_count, links } => {
+        EnvelopePayload::Groups(GroupsPayload::ChatInviteLinks { total_count, links }) => {
             assert_eq!(total_count, 2);
             assert_eq!(links.len(), 2);
             assert_eq!(links[0].invite_link, "https://t.me/+one");
@@ -373,10 +382,10 @@ fn invite_links_and_join_requests_lists_parse() {
     let json = r#"{"@type":"chatJoinRequests","total_count":1,"requests":[{"@type":"chatJoinRequest","user_id":7001,"date":1700000100,"bio":"Hello from Quill"}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ChatJoinRequests {
+        EnvelopePayload::Groups(GroupsPayload::ChatJoinRequests {
             total_count,
             requests,
-        } => {
+        }) => {
             assert_eq!(total_count, 1);
             assert_eq!(
                 requests,
@@ -398,13 +407,13 @@ fn join_request_updates_parse() {
     let json = r#"{"@type":"updateNewChatJoinRequest","chat_id":-1001234567890,"request":{"@type":"chatJoinRequest","user_id":7002,"date":1700000200,"bio":"Please let me in"},"user_chat_id":9002,"invite_link":{"@type":"chatInviteLink","invite_link":"https://t.me/+request","name":"","creator_user_id":101,"date":1700000000,"edit_date":0,"expiration_date":0,"member_limit":0,"member_count":0,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":true,"is_primary":false,"is_revoked":false},"query_id":8000000000}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewChatJoinRequest {
+        EnvelopePayload::Groups(GroupsPayload::UpdateNewChatJoinRequest {
             chat_id,
             request,
             user_chat_id,
             invite_link,
             query_id,
-        } => {
+        }) => {
             assert_eq!(chat_id, -1001234567890);
             assert_eq!(request.user_id, 7002);
             assert_eq!(request.bio, "Please let me in");
@@ -417,11 +426,11 @@ fn join_request_updates_parse() {
     let json = r#"{"@type":"updateChatPendingJoinRequests","chat_id":-1001234567890,"pending_join_requests":{"@type":"chatJoinRequestsInfo","total_count":3,"user_ids":[7001,7003]}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::UpdateChatPendingJoinRequests {
+        EnvelopePayload::Groups(GroupsPayload::UpdateChatPendingJoinRequests {
             chat_id,
             total_count,
             user_ids,
-        } => {
+        }) => {
             assert_eq!(chat_id, -1001234567890);
             assert_eq!(total_count, 3);
             assert_eq!(user_ids, vec![7001, 7003]);
@@ -473,7 +482,7 @@ fn chat_administrators_list_parses() {
     let json = r#"{"@type":"chatAdministrators","administrators":[{"@type":"chatAdministrator","user_id":777,"custom_title":"","is_owner":true,"can_be_edited":false},{"@type":"chatAdministrator","user_id":888,"custom_title":"News Desk","is_owner":false,"can_be_edited":true},{"@type":"chatAdministrator","user_id":999,"custom_title":"","is_owner":false,"can_be_edited":false}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ChatAdministrators { administrators } => {
+        EnvelopePayload::Groups(GroupsPayload::ChatAdministrators { administrators }) => {
             assert_eq!(administrators.len(), 3);
             assert!(administrators[0].is_owner);
             assert_eq!(administrators[0].user_id, 777);
@@ -492,10 +501,10 @@ fn chat_members_list_parses_with_admin_rights() {
     let json = r#"{"@type":"chatMembers","total_count":2,"members":[{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"tag":"","inviter_user_id":777,"joined_chat_date":1700000000,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{"@type":"chatAdministratorRights","can_manage_chat":true,"can_change_info":true,"can_post_messages":true,"can_edit_messages":true,"can_delete_messages":true,"can_invite_users":true,"can_restrict_members":true,"can_pin_messages":true,"can_manage_topics":false,"can_promote_members":true,"can_manage_video_chats":true,"can_post_stories":true,"can_edit_stories":true,"can_delete_stories":true,"can_manage_direct_messages":false,"can_manage_tags":false,"can_send_welcome_messages":false,"is_anonymous":false}}},{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":111},"tag":"","inviter_user_id":777,"joined_chat_date":1700000100,"status":{"@type":"chatMemberStatusMember","member_until_date":0}}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::SupergroupMembers {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupMembers {
             members,
             total_count,
-        } => {
+        }) => {
             assert_eq!(total_count, 2);
             assert_eq!(members.len(), 2);
             let admin = &members[0];
@@ -536,7 +545,7 @@ fn chat_admin_rights_round_trip() {
     let json = r#"{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::ChatMember { member } => {
+        EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
             assert_eq!(member.status, ChannelMemberStatus::Administrator);
             assert_eq!(member.admin_rights, None);
         }
@@ -754,7 +763,7 @@ fn chat_events_parse_handled_actions() {
         );
     let env = parse_envelope(&json).unwrap();
     let events = match env.payload {
-        EnvelopePayload::ChatEvents { events } => events,
+        EnvelopePayload::Groups(GroupsPayload::ChatEvents { events }) => events,
         other => panic!("unexpected {other:?}"),
     };
     assert_eq!(events.len(), 19);
@@ -908,7 +917,7 @@ fn chat_events_unsupported_and_actorless() {
         ]}"#;
     let env = parse_envelope(json).unwrap();
     let events = match env.payload {
-        EnvelopePayload::ChatEvents { events } => events,
+        EnvelopePayload::Groups(GroupsPayload::ChatEvents { events }) => events,
         other => panic!("unexpected {other:?}"),
     };
     // The two actor-less events are dropped; `chatEventMemberLeft`
@@ -992,7 +1001,7 @@ fn message_group_call_parses_invitation_state() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::UpdateNewMessage(message) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
             assert_eq!(
                 message.content,
                 MessageContent::GroupCallInvitation {
@@ -1026,12 +1035,12 @@ fn invite_group_call_participant_results_parse() {
     .unwrap();
     assert_eq!(
         env.payload,
-        EnvelopePayload::InviteGroupCallParticipantResult(
+        EnvelopePayload::Calls(CallsPayload::InviteGroupCallParticipantResult(
             InviteGroupCallParticipantResult::Success {
                 chat_id: 51,
                 message_id: 90
             }
-        )
+        ))
     );
     for (json, expected) in [
         (
@@ -1050,7 +1059,7 @@ fn invite_group_call_participant_results_parse() {
         let env = parse_envelope(json).unwrap();
         assert_eq!(
             env.payload,
-            EnvelopePayload::InviteGroupCallParticipantResult(expected)
+            EnvelopePayload::Calls(CallsPayload::InviteGroupCallParticipantResult(expected))
         );
     }
 }
@@ -1065,7 +1074,7 @@ fn g1_basic_group_full_info_parses() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::BasicGroupFullInfo { members } => {
+        EnvelopePayload::Groups(GroupsPayload::BasicGroupFullInfo { members }) => {
             assert_eq!(members.len(), 2);
         }
         other => panic!("unexpected {other:?}"),
@@ -1082,10 +1091,10 @@ fn group_call_info_parses() {
     .unwrap();
     assert_eq!(
         env.payload,
-        EnvelopePayload::GroupCallInfo {
+        EnvelopePayload::Calls(CallsPayload::GroupCallInfo {
             group_call_id: 555,
             join_payload: "tgcalls-payload".to_string(),
-        }
+        })
     );
 }
 
@@ -1101,7 +1110,7 @@ fn g1_created_basic_group_chat_parses() {
         .unwrap();
     assert_eq!(
         env.payload,
-        EnvelopePayload::CreatedBasicGroupChat { chat_id: 99 }
+        EnvelopePayload::Groups(GroupsPayload::CreatedBasicGroupChat { chat_id: 99 })
     );
 }
 
@@ -1118,7 +1127,7 @@ fn g1_failed_to_add_members_parses() {
         .unwrap();
     assert_eq!(
         env.payload,
-        EnvelopePayload::FailedToAddMembers { failed_count: 2 }
+        EnvelopePayload::Groups(GroupsPayload::FailedToAddMembers { failed_count: 2 })
     );
 }
 
@@ -1152,17 +1161,16 @@ fn report_story_results_parse() {
     let ok = parse_envelope(r#"{"@type":"reportStoryResultOk"}"#).unwrap();
     assert!(matches!(
         ok.payload,
-        EnvelopePayload::ReportStoryResult(ReportStoryResult::Ok)
+        EnvelopePayload::Stories(StoriesPayload::ReportStoryResult(ReportStoryResult::Ok))
     ));
     let options = parse_envelope(
             r#"{"@type":"reportStoryResultOptionRequired","title":"Why report?","options":[{"@type":"reportOption","id":"aGk=","text":"Spam"},{"@type":"reportOption","id":"","text":""}]}"#,
         )
         .unwrap();
     match options.payload {
-        EnvelopePayload::ReportStoryResult(ReportStoryResult::OptionRequired {
-            title,
-            options,
-        }) => {
+        EnvelopePayload::Stories(StoriesPayload::ReportStoryResult(
+            ReportStoryResult::OptionRequired { title, options },
+        )) => {
             assert_eq!(title, "Why report?");
             assert_eq!(options.len(), 2);
             assert_eq!(options[0].id, "aGk=");
@@ -1176,10 +1184,10 @@ fn report_story_results_parse() {
     .unwrap();
     assert!(matches!(
         text.payload,
-        EnvelopePayload::ReportStoryResult(ReportStoryResult::TextRequired {
+        EnvelopePayload::Stories(StoriesPayload::ReportStoryResult(ReportStoryResult::TextRequired {
             option_id,
             is_optional: true,
-        }) if option_id == "aGk="
+        })) if option_id == "aGk="
     ));
 }
 
@@ -1197,7 +1205,7 @@ fn story_interactions_parse() {
         ],"next_offset":"50"}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::StoryInteractions { interactions } => {
+        EnvelopePayload::Stories(StoriesPayload::StoryInteractions { interactions }) => {
             assert_eq!(interactions.total_count, 4);
             assert_eq!(interactions.next_offset, "50");
             assert_eq!(interactions.interactions.len(), 3);
@@ -1228,10 +1236,10 @@ fn update_story_stealth_mode_parses() {
         .unwrap();
     assert!(matches!(
         env.payload,
-        EnvelopePayload::UpdateStoryStealthMode {
+        EnvelopePayload::Stories(StoriesPayload::UpdateStoryStealthMode {
             active_until_date: 1700003600,
             cooldown_until_date: 1700007200,
-        }
+        })
     ));
 }
 
@@ -1257,7 +1265,7 @@ fn inline_query_results_parses() {
     )
     .unwrap();
     let page = match env.payload {
-        EnvelopePayload::InlineQueryResults(page) => page,
+        EnvelopePayload::Bots(BotsPayload::InlineQueryResults(page)) => page,
         other => panic!("unexpected {other:?}"),
     };
     assert_eq!(page.inline_query_id, 9001);
@@ -1288,7 +1296,7 @@ fn inline_query_results_parses() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::InlineQueryResults(page) => {
+        EnvelopePayload::Bots(BotsPayload::InlineQueryResults(page)) => {
             assert_eq!(page.inline_query_id, 9002);
             assert_eq!(
                 page.button,

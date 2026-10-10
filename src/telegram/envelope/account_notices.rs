@@ -43,10 +43,10 @@ pub(crate) fn parse_unconfirmed_session_update(value: &Value) -> EnvelopePayload
             device_model: json_field_str(session, "device_model"),
             location: json_field_str(session, "location"),
         });
-    EnvelopePayload::UpdateUnconfirmedSession {
+    EnvelopePayload::Settings(SettingsPayload::UpdateUnconfirmedSession {
         session,
         count: json_i32(value.get("unconfirmed_session_count"), 0).max(0),
-    }
+    })
 }
 
 /// `updateServiceNotification type:string content:MessageContent`: the
@@ -63,10 +63,10 @@ pub(crate) fn parse_service_notification(value: &Value) -> EnvelopePayload {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    EnvelopePayload::UpdateServiceNotification {
+    EnvelopePayload::Common(CommonPayload::UpdateServiceNotification {
         kind: json_field_str(value, "type"),
         text,
-    }
+    })
 }
 
 pub(crate) fn parse_terms_of_service(value: &Value) -> Option<TermsOfService> {
@@ -88,7 +88,7 @@ pub(crate) fn parse_terms_of_service(value: &Value) -> Option<TermsOfService> {
 }
 
 pub(crate) fn parse_reset_password_result(type_name: &str, value: &Value) -> EnvelopePayload {
-    EnvelopePayload::ResetPasswordResult(match type_name {
+    EnvelopePayload::Settings(SettingsPayload::ResetPasswordResult(match type_name {
         "resetPasswordResultPending" => ResetPasswordOutcome::Pending {
             reset_date: json_i32(value.get("pending_reset_date"), 0),
         },
@@ -96,11 +96,12 @@ pub(crate) fn parse_reset_password_result(type_name: &str, value: &Value) -> Env
             retry_date: json_i32(value.get("retry_date"), 0),
         },
         _ => ResetPasswordOutcome::Ok,
-    })
+    }))
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::telegram::envelope::{AuthPayload, CommonPayload, SettingsPayload};
     use crate::telegram::envelope::{EnvelopePayload, ResetPasswordOutcome, parse_envelope};
 
     #[test]
@@ -108,7 +109,10 @@ mod tests {
         let json = r#"{"@type":"updateUnconfirmedSession","session":{"@type":"unconfirmedSession","type":{"@type":"sessionTypeAndroid"},"date":1760000000,"device_model":"Pixel 9","location":"Berlin, Germany"},"unconfirmed_session_count":2}"#;
         let env = parse_envelope(json).unwrap();
         match env.payload {
-            EnvelopePayload::UpdateUnconfirmedSession { session, count } => {
+            EnvelopePayload::Settings(SettingsPayload::UpdateUnconfirmedSession {
+                session,
+                count,
+            }) => {
                 let session = session.expect("session");
                 assert_eq!(session.device_model, "Pixel 9");
                 assert_eq!(session.location, "Berlin, Germany");
@@ -124,7 +128,10 @@ mod tests {
         let json =
             r#"{"@type":"updateUnconfirmedSession","session":null,"unconfirmed_session_count":0}"#;
         match parse_envelope(json).unwrap().payload {
-            EnvelopePayload::UpdateUnconfirmedSession { session, count } => {
+            EnvelopePayload::Settings(SettingsPayload::UpdateUnconfirmedSession {
+                session,
+                count,
+            }) => {
                 assert!(session.is_none());
                 assert_eq!(count, 0);
             }
@@ -136,7 +143,7 @@ mod tests {
     fn service_notification_keeps_type_and_text() {
         let json = r#"{"@type":"updateServiceNotification","type":"AUTH_KEY_DROP_DUPLICATE","content":{"@type":"messageText","text":{"@type":"formattedText","text":"Your session was terminated.","entities":[]}}}"#;
         match parse_envelope(json).unwrap().payload {
-            EnvelopePayload::UpdateServiceNotification { kind, text } => {
+            EnvelopePayload::Common(CommonPayload::UpdateServiceNotification { kind, text }) => {
                 assert_eq!(kind, "AUTH_KEY_DROP_DUPLICATE");
                 assert_eq!(text, "Your session was terminated.");
             }
@@ -148,7 +155,9 @@ mod tests {
     fn service_notification_media_uses_caption() {
         let json = r#"{"@type":"updateServiceNotification","type":"","content":{"@type":"messagePhoto","caption":{"@type":"formattedText","text":"Look","entities":[]}}}"#;
         match parse_envelope(json).unwrap().payload {
-            EnvelopePayload::UpdateServiceNotification { text, .. } => assert_eq!(text, "Look"),
+            EnvelopePayload::Common(CommonPayload::UpdateServiceNotification { text, .. }) => {
+                assert_eq!(text, "Look")
+            }
             other => panic!("unexpected {other:?}"),
         }
     }
@@ -157,7 +166,7 @@ mod tests {
     fn terms_of_service_update_parses() {
         let json = r#"{"@type":"updateTermsOfService","terms_of_service_id":"tos-2026","terms_of_service":{"@type":"termsOfService","text":{"@type":"formattedText","text":"New terms.","entities":[]},"min_user_age":16,"show_popup":true}}"#;
         match parse_envelope(json).unwrap().payload {
-            EnvelopePayload::UpdateTermsOfService { terms } => {
+            EnvelopePayload::Auth(AuthPayload::UpdateTermsOfService { terms }) => {
                 assert_eq!(terms.id, "tos-2026");
                 assert_eq!(terms.text, "New terms.");
                 assert_eq!(terms.min_user_age, 16);
@@ -178,7 +187,9 @@ mod tests {
         let ok = parse_envelope(r#"{"@type":"resetPasswordResultOk"}"#).unwrap();
         assert_eq!(
             ok.payload,
-            EnvelopePayload::ResetPasswordResult(ResetPasswordOutcome::Ok)
+            EnvelopePayload::Settings(SettingsPayload::ResetPasswordResult(
+                ResetPasswordOutcome::Ok
+            ))
         );
         let pending = parse_envelope(
             r#"{"@type":"resetPasswordResultPending","pending_reset_date":1760604800}"#,
@@ -186,18 +197,22 @@ mod tests {
         .unwrap();
         assert_eq!(
             pending.payload,
-            EnvelopePayload::ResetPasswordResult(ResetPasswordOutcome::Pending {
-                reset_date: 1_760_604_800
-            })
+            EnvelopePayload::Settings(SettingsPayload::ResetPasswordResult(
+                ResetPasswordOutcome::Pending {
+                    reset_date: 1_760_604_800
+                }
+            ))
         );
         let declined =
             parse_envelope(r#"{"@type":"resetPasswordResultDeclined","retry_date":1760700000}"#)
                 .unwrap();
         assert_eq!(
             declined.payload,
-            EnvelopePayload::ResetPasswordResult(ResetPasswordOutcome::Declined {
-                retry_date: 1_760_700_000
-            })
+            EnvelopePayload::Settings(SettingsPayload::ResetPasswordResult(
+                ResetPasswordOutcome::Declined {
+                    retry_date: 1_760_700_000
+                }
+            ))
         );
     }
 
@@ -205,7 +220,7 @@ mod tests {
     fn email_code_info_parses() {
         let json = r#"{"@type":"emailAddressAuthenticationCodeInfo","email_address_pattern":"i***@example.com","length":6}"#;
         match parse_envelope(json).unwrap().payload {
-            EnvelopePayload::EmailCodeInfo { pattern, length } => {
+            EnvelopePayload::Auth(AuthPayload::EmailCodeInfo { pattern, length }) => {
                 assert_eq!(pattern, "i***@example.com");
                 assert_eq!(length, 6);
             }

@@ -5,6 +5,7 @@ use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::state::ThreadsPurpose;
 use crate::subsection_tabs::SubsectionTabsMode;
+use crate::telegram::envelope::{ChatsPayload, MessagesPayload, ThreadsPayload, UsersPayload};
 use crate::telegram::envelope::{EnvelopePayload, MUTE_FOREVER};
 use crate::telegram::requests::{
     get_forum_topic, set_forum_topic_notification_settings, view_messages,
@@ -26,10 +27,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// chat (`updateNewChat`): the chat to check after `apply`.
     pub(crate) fn possible_topic_chat(payload: &EnvelopePayload) -> Option<ChatId> {
         match payload {
-            EnvelopePayload::UpdateUser { user_id, user } if user.has_topics => {
+            EnvelopePayload::Users(UsersPayload::UpdateUser { user_id, user })
+                if user.has_topics =>
+            {
                 Some(ChatId(user_id.0))
             }
-            EnvelopePayload::UpdateNewChat { chat_id, .. } => Some(*chat_id),
+            EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { chat_id, .. }) => Some(*chat_id),
             _ => None,
         }
     }
@@ -50,13 +53,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// a new topic) or a new message in it. Checked before `apply`.
     pub(crate) fn possible_topic_refresh(payload: &EnvelopePayload) -> Option<(ChatId, i32)> {
         match payload {
-            EnvelopePayload::UpdateForumTopic(update) => {
+            EnvelopePayload::Threads(ThreadsPayload::UpdateForumTopic(update)) => {
                 Some((ChatId(update.chat_id), update.forum_topic_id))
             }
-            EnvelopePayload::UpdateForumTopicInfo(info) => {
+            EnvelopePayload::Threads(ThreadsPayload::UpdateForumTopicInfo(info)) => {
                 Some((ChatId(info.chat_id), info.forum_topic_id))
             }
-            EnvelopePayload::UpdateNewMessage(message) => {
+            EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
                 message.topic_id.map(|topic| (message.chat_id, topic))
             }
             _ => None,

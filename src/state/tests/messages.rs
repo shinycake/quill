@@ -1,6 +1,7 @@
 //! State reducer tests: messages.
 use super::common::*;
 use super::*;
+use crate::telegram::envelope::MessagesPayload;
 
 #[test]
 fn effective_preview_prefers_ephemeral_content() {
@@ -1078,7 +1079,9 @@ fn update_poll_reaches_polls_loaded_by_every_path() {
             &(sink.clone() as Arc<dyn DiagnosticSink>),
         )
         .unwrap();
-        let EnvelopePayload::UpdatePoll { poll } = owned.envelope.payload else {
+        let EnvelopePayload::Messages(MessagesPayload::UpdatePoll { poll }) =
+            owned.envelope.payload
+        else {
             panic!("updatePoll");
         };
         updated += session.apply_update_poll(poll);

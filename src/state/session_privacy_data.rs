@@ -5,6 +5,7 @@
 use super::*;
 use crate::network_usage::NetworkUsage;
 use crate::privacy::{NewChatPrivacy, NewChatPrivacyState};
+use crate::telegram::envelope::SettingsPayload;
 
 /// Outcome of the "Do you still remember your password?" check.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -57,18 +58,18 @@ impl Session {
     /// Payloads of this block. Returns true when handled.
     pub(crate) fn apply_privacy_data_payload(
         &mut self,
-        payload: &EnvelopePayload,
+        payload: &SettingsPayload,
         pending: Option<&PendingRequest>,
     ) -> bool {
         let purpose = pending.map(|p| p.purpose);
         match payload {
-            EnvelopePayload::NewChatPrivacySettings(settings) => {
+            SettingsPayload::NewChatPrivacySettings(settings) => {
                 if purpose == Some(RequestPurpose::GetNewChatPrivacy) {
                     self.privacy_data.new_chat = Some(NewChatPrivacyState::Ready(*settings));
                 }
                 true
             }
-            EnvelopePayload::NetworkStatistics(usage) => {
+            SettingsPayload::NetworkStatistics(usage) => {
                 if purpose == Some(RequestPurpose::GetNetworkStatistics) {
                     self.privacy_data.network_usage = Some(usage.clone());
                     self.privacy_data.network_loading = false;
@@ -76,7 +77,7 @@ impl Session {
                 }
                 true
             }
-            EnvelopePayload::RecoveryEmailAddress => {
+            SettingsPayload::RecoveryEmailAddress => {
                 if purpose == Some(RequestPurpose::CheckRememberedPassword) {
                     // The finish step shows until the user taps Done, which
                     // sends `hideSuggestedAction`.
@@ -84,7 +85,7 @@ impl Session {
                 }
                 true
             }
-            EnvelopePayload::UpdateSuggestedActions { added, removed } => {
+            SettingsPayload::UpdateSuggestedActions { added, removed } => {
                 for name in added {
                     self.suggestions.actions.insert(name.clone());
                 }

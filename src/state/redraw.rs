@@ -17,6 +17,10 @@
 use super::Session;
 use crate::ids::{ChatId, UserId};
 use crate::telegram::envelope::{ChatKind, Envelope, EnvelopePayload, ParsedFile};
+use crate::telegram::envelope::{
+    ChatListPayload, ChatsPayload, CommonPayload, GroupsPayload, MediaPayload, MessagesPayload,
+    UsersPayload,
+};
 
 /// What an envelope's effect on screen asks for, least urgent first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -58,15 +62,18 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
         P::Unknown(_) => RedrawNeed::Nothing,
         // Unread totals feed the tray and the dock badge, which sync on
         // their own timer; no pane draws them.
-        P::UpdateUnreadMessageCount { .. } | P::UpdateUnreadChatCount { .. } => RedrawNeed::Nothing,
+        P::ChatList(ChatListPayload::UpdateUnreadMessageCount { .. })
+        | P::ChatList(ChatListPayload::UpdateUnreadChatCount { .. }) => RedrawNeed::Nothing,
         // Our own id (which chat is Saved Messages) and Premium change
         // what is drawn; other options are limits and flags read when the
         // user acts.
-        P::UpdateOption { name, .. } if matches!(name.as_str(), "my_id" | "is_premium") => {
+        P::Common(CommonPayload::UpdateOption { name, .. })
+            if matches!(name.as_str(), "my_id" | "is_premium") =>
+        {
             RedrawNeed::Now
         }
-        P::UpdateOption { .. } => RedrawNeed::Later,
-        P::UpdateUserStatus { user_id, status } => {
+        P::Common(CommonPayload::UpdateOption { .. }) => RedrawNeed::Later,
+        P::Users(UsersPayload::UpdateUserStatus { user_id, status }) => {
             let Some(user) = session.user(user_id.0) else {
                 // The reducer only updates users it knows.
                 return RedrawNeed::Nothing;
@@ -83,36 +90,44 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
                 RedrawNeed::Later
             }
         }
-        P::UpdateChatAction { chat_id, .. } => list_unless_shown(session, *chat_id),
-        P::UpdateNewMessage(message) => list_unless_shown(session, message.chat_id),
-        P::UpdateChatLastMessage { chat_id, .. }
-        | P::UpdateChatReadInbox { chat_id, .. }
-        | P::UpdateChatReadOutbox { chat_id, .. }
-        | P::UpdateChatUnreadMentionCount { chat_id, .. }
-        | P::UpdateChatUnreadReactionCount { chat_id, .. }
-        | P::UpdateChatUnreadPollVoteCount { chat_id, .. }
-        | P::UpdateChatIsMarkedAsUnread { chat_id, .. }
-        | P::UpdateChatDraftMessage { chat_id, .. }
-        | P::UpdateChatNotificationSettings { chat_id, .. }
-        | P::UpdateChatAddedToList { chat_id, .. }
-        | P::UpdateChatRemovedFromList { chat_id, .. } => list_unless_shown(session, *chat_id),
-        P::UpdateChatPosition(position) => list_unless_shown(session, position.chat_id),
-        P::UpdateChatOnlineMemberCount { chat_id, .. } => {
+        P::Chats(ChatsPayload::UpdateChatAction { chat_id, .. }) => {
+            list_unless_shown(session, *chat_id)
+        }
+        P::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+            list_unless_shown(session, message.chat_id)
+        }
+        P::ChatList(ChatListPayload::UpdateChatLastMessage { chat_id, .. })
+        | P::Chats(ChatsPayload::UpdateChatReadInbox { chat_id, .. })
+        | P::Chats(ChatsPayload::UpdateChatReadOutbox { chat_id, .. })
+        | P::Chats(ChatsPayload::UpdateChatUnreadMentionCount { chat_id, .. })
+        | P::Chats(ChatsPayload::UpdateChatUnreadReactionCount { chat_id, .. })
+        | P::Chats(ChatsPayload::UpdateChatUnreadPollVoteCount { chat_id, .. })
+        | P::ChatList(ChatListPayload::UpdateChatIsMarkedAsUnread { chat_id, .. })
+        | P::Messages(MessagesPayload::UpdateChatDraftMessage { chat_id, .. })
+        | P::Chats(ChatsPayload::UpdateChatNotificationSettings { chat_id, .. })
+        | P::ChatList(ChatListPayload::UpdateChatAddedToList { chat_id, .. })
+        | P::ChatList(ChatListPayload::UpdateChatRemovedFromList { chat_id, .. }) => {
+            list_unless_shown(session, *chat_id)
+        }
+        P::ChatList(ChatListPayload::UpdateChatPosition(position)) => {
+            list_unless_shown(session, position.chat_id)
+        }
+        P::Chats(ChatsPayload::UpdateChatOnlineMemberCount { chat_id, .. }) => {
             if shows_chat(session, ChatId(*chat_id)) {
                 RedrawNeed::Now
             } else {
                 RedrawNeed::Later
             }
         }
-        P::UpdateFile(file) => file_need(session, file),
-        P::UpdateFileDownload { file_id, .. } => {
+        P::Media(MediaPayload::UpdateFile(file)) => file_need(session, file),
+        P::Media(MediaPayload::UpdateFileDownload { file_id, .. }) => {
             if session.user_downloads.contains(file_id) {
                 RedrawNeed::Now
             } else {
                 RedrawNeed::Later
             }
         }
-        P::UpdateUser { user_id, .. } => {
+        P::Users(UsersPayload::UpdateUser { user_id, .. }) => {
             // Our own record answers the user's profile edits (name,
             // photo, username), which arrive as `updateUser`.
             if shows_user(session, *user_id) || session.my_user_id == Some(user_id.0) {
@@ -123,11 +138,11 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
         }
         // The open group's header (member count) and composer (our
         // rights) read its record.
-        P::UpdateSupergroup { supergroup_id, .. } => group_need(
+        P::Groups(GroupsPayload::UpdateSupergroup { supergroup_id, .. }) => group_need(
             session,
             |kind| matches!(kind, ChatKind::Supergroup { supergroup_id: id, .. } if id == supergroup_id),
         ),
-        P::UpdateBasicGroup { basic_group_id, .. } => group_need(
+        P::Groups(GroupsPayload::UpdateBasicGroup { basic_group_id, .. }) => group_need(
             session,
             |kind| matches!(kind, ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id),
         ),

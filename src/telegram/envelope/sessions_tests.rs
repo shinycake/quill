@@ -15,7 +15,7 @@ fn sessions_parse_current_other_and_password_pending() {
 ]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Sessions { sessions, .. } => {
+        EnvelopePayload::Settings(SettingsPayload::Sessions { sessions, .. }) => {
             assert_eq!(sessions.len(), 3);
             let current = sessions.iter().find(|s| s.id == 11).expect("current");
             assert!(current.is_current);

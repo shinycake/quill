@@ -41,6 +41,7 @@ pub fn get_auto_download_settings_presets(extra: RequestId) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::telegram::envelope::SettingsPayload;
     use crate::telegram::envelope::{EnvelopePayload, parse_envelope};
     use serde_json::Value;
 
@@ -51,7 +52,11 @@ mod tests {
         let json = r#"{"@type":"autoDownloadSettingsPresets","low":{"@type":"autoDownloadSettings","is_auto_download_enabled":false,"max_photo_file_size":0,"max_video_file_size":0,"max_other_file_size":0,"video_upload_bitrate":0,"preload_large_videos":false,"preload_next_audio":false,"preload_stories":false,"use_less_data_for_calls":false},"medium":{"@type":"autoDownloadSettings","is_auto_download_enabled":true,"max_photo_file_size":1048576,"max_video_file_size":15728640,"max_other_file_size":0,"video_upload_bitrate":0,"preload_large_videos":false,"preload_next_audio":true,"preload_stories":false,"use_less_data_for_calls":false},"high":{"@type":"autoDownloadSettings","is_auto_download_enabled":true,"max_photo_file_size":52428800,"max_video_file_size":524288000,"max_other_file_size":524288000,"video_upload_bitrate":0,"preload_large_videos":true,"preload_next_audio":true,"preload_stories":true,"use_less_data_for_calls":false}}"#;
         let env = parse_envelope(json).unwrap();
         match env.payload {
-            EnvelopePayload::AutoDownloadSettingsPresets { low, medium, high } => {
+            EnvelopePayload::Settings(SettingsPayload::AutoDownloadSettingsPresets {
+                low,
+                medium,
+                high,
+            }) => {
                 assert!(!low.is_auto_download_enabled);
                 assert!(medium.is_auto_download_enabled);
                 assert_eq!(medium.max_photo_file_size, 1048576);

@@ -225,10 +225,10 @@ pub(crate) fn parse_sticker_sets(value: &Value) -> EnvelopePayload {
         .flatten()
         .filter_map(parse_sticker_set_info)
         .collect();
-    EnvelopePayload::StickerSets {
+    EnvelopePayload::Stickers(StickersPayload::StickerSets {
         total_count: int53_or_zero(value.get("total_count")).sat_i32(),
         sets,
-    }
+    })
 }
 
 pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
@@ -243,7 +243,7 @@ pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
             files.extend(item_files);
         }
     }
-    EnvelopePayload::StickerSet {
+    EnvelopePayload::Stickers(StickersPayload::StickerSet {
         id: int64(value.get("id")).unwrap_or(0),
         title: value
             .get("title")
@@ -263,7 +263,7 @@ pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
             == Some("stickerTypeCustomEmoji"),
         stickers,
         files,
-    }
+    })
 }
 
 /// Slice S8: `trendingStickerSets` — same `stickerSetInfo` rows as
@@ -276,14 +276,14 @@ pub(crate) fn parse_trending_sticker_sets(value: &Value) -> EnvelopePayload {
         .flatten()
         .filter_map(parse_sticker_set_info)
         .collect();
-    EnvelopePayload::TrendingStickerSets {
+    EnvelopePayload::Stickers(StickersPayload::TrendingStickerSets {
         total_count: int53_or_zero(value.get("total_count")).sat_i32(),
         sets,
         is_premium: value
             .get("is_premium")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-    }
+    })
 }
 
 /// Slice S8: `stickers` — bare `vector<sticker>` (search / favorites /
@@ -300,5 +300,5 @@ pub(crate) fn parse_stickers(value: &Value) -> EnvelopePayload {
             files.extend(item_files);
         }
     }
-    EnvelopePayload::Stickers { stickers, files }
+    EnvelopePayload::Stickers(StickersPayload::Stickers { stickers, files })
 }

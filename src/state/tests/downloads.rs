@@ -1,6 +1,7 @@
 //! State reducer tests: downloads.
 use super::common::*;
 use super::*;
+use crate::telegram::envelope::MediaPayload;
 
 #[test]
 fn sound_download_error_drops_pending_playback() {
@@ -509,7 +510,9 @@ fn nested_file_snapshots_cannot_erase_downloaded_media() {
         .unwrap()
         .payload
         {
-            crate::telegram::envelope::EnvelopePayload::UpdateFile(file) => file,
+            crate::telegram::envelope::EnvelopePayload::Media(MediaPayload::UpdateFile(file)) => {
+                file
+            }
             _ => unreachable!(),
         };
     session.remember_files(&[stale]);
