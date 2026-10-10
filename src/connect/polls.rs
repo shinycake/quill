@@ -51,6 +51,42 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let option_ids =
             poll_answer_for_tap(&poll, option_index).ok_or(ConnectSendError::InvalidRequest)?;
+        self.send_poll_option_ids(chat_id, message_id, option_ids)
+    }
+
+    /// The menu's "Retract vote": `setPollAnswer` with no options, only
+    /// when `poll::can_retract_vote` allows it (open, not a quiz, revoting
+    /// on, a vote exists).
+    pub fn retract_poll_vote(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let retractable = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .filter(|message| !message.pending && message.id.0 > 0)
+            .is_some_and(|message| match &message.content {
+                MessageContent::Poll(poll) => crate::poll::can_retract_vote(&poll.poll),
+                _ => false,
+            });
+        if !retractable {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.send_poll_option_ids(chat_id, message_id, Vec::new())
+    }
+
+    fn send_poll_option_ids(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_ids: Vec<i32>,
+    ) -> Result<RequestId, ConnectSendError> {
         // Capture the previous chosen marks: the optimistic flip below is
         // rolled back if the send fails (the server's `updatePoll` corrects
         // counts/percentages in place on success).

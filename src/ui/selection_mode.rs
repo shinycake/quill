@@ -74,6 +74,8 @@ impl QuillApp {
             now,
         );
         let interactive = self.selecting_in(chat_id);
+        let focused = interactive && self.selection_focus == Some(message_id);
+        let ring_color = cx.theme().ring;
         let overlay = (mode > 0.).then(|| {
             let ring = cx.theme().background;
             let (fill, tick) = motion::check_frame(checked);
@@ -84,6 +86,10 @@ impl QuillApp {
                 .id(("selection-overlay", message_id.0 as u64))
                 .absolute()
                 .inset_0()
+                .when(focused, |this| {
+                    // Keyboard focus (Up / Down while selecting).
+                    this.rounded_md().border_2().border_color(ring_color)
+                })
                 .when(interactive, |this| {
                     this.occlude()
                         .cursor_pointer()
@@ -223,6 +229,17 @@ impl QuillApp {
                         this.copy_selection_text(cx);
                     })),
             )
+            .when(!self.selection_missing_files(chat_id).is_empty(), |bar| {
+                bar.child(
+                    Button::new("selection-download")
+                        .label("Download")
+                        .ghost()
+                        .tooltip("Download Selected")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.download_selection(cx);
+                        })),
+                )
+            })
             .when(self.selection_has_media(chat_id), |bar| {
                 bar.child(
                     Button::new("selection-save")
@@ -288,17 +305,12 @@ impl QuillApp {
         shift: bool,
         cx: &mut Context<Self>,
     ) {
+        self.selection_focus = Some(message_id);
         let anchor = self.selection_anchor.filter(|_| shift);
         if let Some(anchor) = anchor {
             let ids = self.loaded_selectable_ids(chat_id);
             let range = quill::selection_pin::range_between(&ids, anchor, message_id);
-            if let Some(draft) = self.pending_forward.as_mut() {
-                for id in range {
-                    if !draft.contains(id) {
-                        draft.toggle(chat_id, id, false);
-                    }
-                }
-            }
+            self.add_to_selection(chat_id, range);
             self.selection_drag = None;
             cx.notify();
             return;
@@ -313,7 +325,7 @@ impl QuillApp {
     }
 
     /// The pointer crossed a row while pressed: give it the drag's state.
-    fn selection_drag_over(
+    pub(super) fn selection_drag_over(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
@@ -330,14 +342,98 @@ impl QuillApp {
             .pending_forward
             .as_ref()
             .is_some_and(|draft| draft.contains(message_id));
-        if selected != want {
+        let full = self
+            .pending_forward
+            .as_ref()
+            .is_some_and(|draft| quill::selection_pin::room_for(draft.count()) == 0);
+        if selected != want && !(want && full) {
             self.toggle_forward_select(chat_id, message_id, pending, cx);
         }
         self.selection_anchor = Some(message_id);
+        self.selection_focus = Some(message_id);
+    }
+
+    /// Select `ids` that are not selected yet, up to the selection limit
+    /// (`Data::MaxSelectedItems`).
+    pub(super) fn add_to_selection(&mut self, chat_id: ChatId, ids: Vec<MessageId>) {
+        let Some(draft) = self.pending_forward.as_mut() else {
+            return;
+        };
+        let room = quill::selection_pin::room_for(draft.count());
+        let fresh: Vec<_> = ids
+            .into_iter()
+            .filter(|id| !draft.contains(*id))
+            .take(room)
+            .collect();
+        for id in fresh {
+            draft.toggle(chat_id, id, false);
+        }
+    }
+
+    /// "Select up to this message" (`selectItemsUpTo`): fill the gap
+    /// between the message and the nearest selected one.
+    pub(super) fn select_up_to(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(draft) = self.pending_forward.as_ref() else {
+            return;
+        };
+        let ids = self.loaded_selectable_ids(chat_id);
+        let span = quill::selection_pin::up_to(
+            &ids,
+            &draft.message_ids,
+            message_id,
+            quill::selection_pin::room_for(draft.count()),
+        );
+        self.add_to_selection(chat_id, span);
+        self.selection_anchor = Some(message_id);
+        self.selection_focus = Some(message_id);
+        cx.notify();
+    }
+
+    /// Whether "Select up to this message" applies to `message_id`: a
+    /// selection is on in the chat and the message is not part of it, with
+    /// a selected message among the loaded ones.
+    pub(super) fn can_select_up_to(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        let Some(draft) = self.pending_forward.as_ref() else {
+            return false;
+        };
+        draft.from_chat_id == chat_id
+            && !draft.contains(message_id)
+            && quill::selection_pin::room_for(draft.count()) > 0
+            && !quill::selection_pin::up_to(
+                &self.loaded_selectable_ids(chat_id),
+                &draft.message_ids,
+                message_id,
+                1,
+            )
+            .is_empty()
+    }
+
+    /// A press that turns into a drag over another row starts selecting
+    /// when it did not begin on text (`HistoryInner` drag selection).
+    pub(super) fn begin_drag_selection(
+        &mut self,
+        chat_id: ChatId,
+        from: MessageId,
+        to: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selecting_in(chat_id) || from == to {
+            return;
+        }
+        self.toggle_forward_select(chat_id, from, false, cx);
+        self.selection_anchor = Some(from);
+        self.selection_focus = Some(from);
+        self.selection_drag = Some(true);
+        self.selection_drag_over(chat_id, to, false, cx);
     }
 
     /// Loaded, sent messages of the chat in history order.
-    fn loaded_selectable_ids(&self, chat_id: ChatId) -> Vec<MessageId> {
+    pub(super) fn loaded_selectable_ids(&self, chat_id: ChatId) -> Vec<MessageId> {
         self.session()
             .and_then(|s| s.histories.get(&chat_id.0))
             .map(|history| {
@@ -392,6 +488,41 @@ impl QuillApp {
     /// Whether the selection holds anything to save.
     fn selection_has_media(&self, chat_id: ChatId) -> bool {
         self.selecting_in(chat_id) && !self.selected_media().is_empty()
+    }
+
+    /// Files of the selected media that are not on disk yet.
+    fn selection_missing_files(&self, chat_id: ChatId) -> Vec<quill::ids::FileId> {
+        if !self.selecting_in(chat_id) {
+            return Vec::new();
+        }
+        self.selected_media()
+            .into_iter()
+            .filter(|(id, _)| self.menu_media_local(chat_id, *id).is_none())
+            .map(|(_, target)| target.file_id)
+            .collect()
+    }
+
+    /// "Download Selected": start the downloads of every selected media
+    /// message that is not on disk yet (Save then copies them out).
+    fn download_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.pending_forward.as_ref().map(|d| d.from_chat_id) else {
+            return;
+        };
+        if self.refuse_protected_copy(chat_id, cx) {
+            return;
+        }
+        let missing = self.selection_missing_files(chat_id);
+        if missing.is_empty() {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.ensure_media_files(&missing);
+        }
+        self.status_note = match missing.len() {
+            1 => "downloading 1 file…".into(),
+            n => format!("downloading {n} files…"),
+        };
+        cx.notify();
     }
 
     /// "Save Selected": pick a folder and copy the downloaded media of the

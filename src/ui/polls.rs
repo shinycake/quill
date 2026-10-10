@@ -577,6 +577,34 @@ impl QuillApp {
         }
     }
 
+    /// The menu's "Retract vote": `setPollAnswer` with no options.
+    pub(super) fn retract_poll_vote(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.retract_poll_vote(chat_id, message_id) {
+                Ok(_) => "vote retracted".into(),
+                Err(_) => "could not retract the vote".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut()
+            && let Some(message) = session
+                .histories
+                .get_mut(&chat_id.0)
+                .and_then(|history| history.messages.get_mut(&message_id.0))
+            && let MessageContent::Poll(poll_content) = &mut message.content
+            && quill::poll::can_retract_vote(&poll_content.poll)
+        {
+            for option in &mut poll_content.poll.options {
+                option.is_chosen = false;
+            }
+            self.status_note = "vote retracted (demo)".into();
+        }
+        cx.notify();
+    }
+
     /// Phase 4.2: open the poll creation dialog above the composer.
     pub(super) fn open_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // B4: defensive gate — the composer hides the Poll entry when

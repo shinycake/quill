@@ -12,6 +12,7 @@ use super::shell::DialogKind;
 use super::shell::QuillShell;
 use gpui_kit::component::button::*;
 use gpui_kit::component::calendar::Matcher;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState, DateRangePreset, DateTime};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::time_field::{HourCycle, TimePrecision};
@@ -54,6 +55,8 @@ pub(super) enum ScheduleTarget {
     Composer,
     /// An already scheduled message (`editMessageSchedulingState`).
     Reschedule(MessageId),
+    /// Every message ticked in the scheduled-messages dialog.
+    RescheduleSelected,
     /// The share box's destinations (`forwardMessages` scheduling state).
     Share,
 }
@@ -190,7 +193,7 @@ impl QuillApp {
                 ComposerScheduling::SendAtDate(date) => Some(date),
                 _ => None,
             },
-            ScheduleTarget::Share => None,
+            ScheduleTarget::Share | ScheduleTarget::RescheduleSelected => None,
             ScheduleTarget::Reschedule(id) => self.session().and_then(|s| {
                 s.scheduled_messages
                     .iter()
@@ -220,7 +223,7 @@ impl QuillApp {
     pub(super) fn close_schedule_picker(&mut self, cx: &mut Context<Self>) {
         let reopen = matches!(
             self.schedule_picker.as_ref().map(|p| p.target),
-            Some(ScheduleTarget::Reschedule(_))
+            Some(ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected)
         );
         self.schedule_popup_open = false;
         self.schedule_picker = None;
@@ -279,6 +282,12 @@ impl QuillApp {
             }
             ScheduleTarget::Reschedule(message_id) => {
                 self.edit_scheduled_state(message_id, scheduling, cx);
+                self.open_scheduled_dialog(cx);
+            }
+            ScheduleTarget::RescheduleSelected => {
+                for id in std::mem::take(&mut self.scheduled_selected) {
+                    self.edit_scheduled_state(id, scheduling, cx);
+                }
                 self.open_scheduled_dialog(cx);
             }
             ScheduleTarget::Share => {
@@ -418,7 +427,10 @@ impl QuillApp {
                 .ghost()
                 .tooltip(title)
                 .accessibility_label(title)
-                .on_click(cx.listener(|this, _, _, cx| this.open_scheduled_dialog(cx)))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.scheduled_selected.clear();
+                    this.open_scheduled_dialog(cx);
+                }))
                 .into_any_element(),
         )
     }
@@ -460,6 +472,139 @@ impl QuillApp {
         })
     }
 
+    /// The scheduled messages that are ticked and still scheduled.
+    fn selected_scheduled(&self) -> Vec<MessageId> {
+        let mut selected = self.scheduled_selected.clone();
+        let existing: Vec<MessageId> = self
+            .session()
+            .map(|s| s.scheduled_messages.iter().map(|m| m.id).collect())
+            .unwrap_or_default();
+        quill::selection_pin::prune_selected(&mut selected, &existing);
+        selected
+    }
+
+    /// "Send now" for the ticked messages, after Telegram Desktop's
+    /// `lng_scheduled_send_now_many` question.
+    fn confirm_send_selected_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.selected_scheduled();
+        if ids.is_empty() {
+            return;
+        }
+        let question = quill::selection_pin::send_now_question(ids.len());
+        let app = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (app, ids) = (app.clone(), ids.clone());
+            alert
+                .description(question.clone())
+                .ok_text("Send")
+                .cancel_text("Cancel")
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    let ids = ids.clone();
+                    let _ = app.update(cx, |this, cx| {
+                        for id in ids {
+                            this.edit_scheduled_state(id, ComposerScheduling::None, cx);
+                        }
+                        this.scheduled_selected.clear();
+                        cx.notify();
+                    });
+                    true
+                })
+        });
+    }
+
+    /// "Delete" for the ticked messages
+    /// (`lng_selected_delete_sure*`).
+    fn confirm_delete_selected_scheduled(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.selected_scheduled();
+        if ids.is_empty() {
+            return;
+        }
+        let question = quill::selection_pin::delete_question(ids.len());
+        let app = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (app, ids) = (app.clone(), ids.clone());
+            alert
+                .description(question.clone())
+                .ok_text("Delete")
+                .cancel_text("Cancel")
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    let ids = ids.clone();
+                    let _ = app.update(cx, |this, cx| {
+                        for id in ids {
+                            this.delete_scheduled_message(id, cx);
+                        }
+                        this.scheduled_selected.clear();
+                        cx.notify();
+                    });
+                    true
+                })
+        });
+    }
+
+    /// The bar above the list while messages are ticked: the count, Send
+    /// now, Reschedule, Delete and Clear.
+    fn scheduled_selection_bar(&self, count: usize, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("scheduled-selection-bar")
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(format!("{count} selected")),
+            )
+            .child(
+                Button::new("scheduled-selection-send")
+                    .label("Send now")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.confirm_send_selected_now(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("scheduled-selection-reschedule")
+                    .label("Reschedule")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.scheduled_dialog_open = false;
+                        this.open_schedule_picker(ScheduleTarget::RescheduleSelected, window, cx);
+                        this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
+                    })),
+            )
+            .child(
+                Button::new("scheduled-selection-delete")
+                    .label("Delete")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.confirm_delete_selected_scheduled(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("scheduled-selection-clear")
+                    .label("Clear")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.scheduled_selected.clear();
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
+    }
+
     /// kit Phase 2 (redo): list body extracted from the old
     /// `scheduled_dialog` — kept pure (no custom scrim/panel).
     pub(super) fn scheduled_dialog_body(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -468,6 +613,8 @@ impl QuillApp {
             .session()
             .map(|session| session.scheduled_messages.clone())
             .unwrap_or_default();
+        let selected = self.selected_scheduled();
+        let bar = (!selected.is_empty()).then(|| self.scheduled_selection_bar(selected.len(), cx));
         let mut list = div()
             .id("scheduled-list")
             .flex()
@@ -554,20 +701,43 @@ impl QuillApp {
                     .child(
                         div()
                             .flex()
-                            .flex_col()
-                            .min_w_0()
-                            .w_full()
-                            .child(div().text_sm().child(preview))
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Checkbox::new(format!("scheduled-pick-{}", id.0))
+                                    .checked(selected.contains(&id))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        quill::selection_pin::toggle_id(
+                                            &mut this.scheduled_selected,
+                                            id,
+                                        );
+                                        cx.notify();
+                                    })),
+                            )
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(label),
+                                    .flex()
+                                    .flex_col()
+                                    .min_w_0()
+                                    .w_full()
+                                    .child(div().text_sm().child(preview))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(label),
+                                    ),
                             ),
                     )
                     .child(actions),
             );
         }
-        list.into_any_element()
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(bar)
+            .child(list)
+            .into_any_element()
     }
 }

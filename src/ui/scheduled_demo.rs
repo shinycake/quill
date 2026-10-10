@@ -20,6 +20,8 @@ pub(super) enum ScheduledView {
     Button,
     Picker,
     List,
+    /// The list with two of three messages ticked.
+    ListSelected,
     Reminder,
     ReminderList,
 }
@@ -29,6 +31,7 @@ impl ScheduledView {
         match std::env::var("QUILL_DEMO_SCHEDULED").as_deref() {
             Ok("picker") => Self::Picker,
             Ok("list") => Self::List,
+            Ok("list-selected") => Self::ListSelected,
             Ok("reminder") => Self::Reminder,
             Ok("reminder-list") => Self::ReminderList,
             _ => Self::Button,
@@ -91,11 +94,25 @@ pub(super) fn apply_ready_scheduled(
         )
     };
     let extra = session.request(RequestPurpose::GetChatScheduledMessages, Some(ChatId(chat)));
-    jsons.push(format!(
-        r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{},{}]}}"#,
-        extra.0,
+    let mut scheduled = vec![
         text_message(501, chat, 0, true, first, &at_date(now + 2 * 3600)),
         text_message(502, chat, 0, true, second, &at_date(now + 30 * 3600)),
+    ];
+    if view == ScheduledView::ListSelected {
+        scheduled.push(text_message(
+            503,
+            chat,
+            0,
+            true,
+            "Bring the cake.",
+            &at_date(now + 50 * 3600),
+        ));
+    }
+    jsons.push(format!(
+        r#"{{"@type":"messages","@extra":"{}","total_count":{},"messages":[{}]}}"#,
+        extra.0,
+        scheduled.len(),
+        scheduled.join(","),
     ));
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {

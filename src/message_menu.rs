@@ -17,12 +17,16 @@ use crate::telegram::envelope::{MessageContent, MessageReadDate};
 pub mod order {
     pub const OPEN_LINK: u8 = 4;
     pub const REPLY: u8 = 10;
+    /// "Reply with timecode" follows Reply on a playing voice message.
+    pub const REPLY_TIMECODE: u8 = 11;
     pub const COPY_SELECTED: u8 = 12;
     /// "Translate Selected Text" (`ui/translate_ui.rs`).
     pub const TRANSLATE_SELECTED: u8 = 13;
     pub const GO_TO_MESSAGE: u8 = 14;
     pub const VIEW_COMMENTS: u8 = 15;
     pub const EDIT: u8 = 20;
+    /// "Add Fact Check" / "Edit Fact Check" follows Edit.
+    pub const FACT_CHECK: u8 = 21;
     pub const PIN: u8 = 30;
     /// First slot of the media block; each action adds its index.
     pub const MEDIA: u8 = 32;
@@ -33,7 +37,9 @@ pub mod order {
     pub const COPY_POST_LINK: u8 = 45;
     pub const FORWARD: u8 = 50;
     /// "Poll Stats" (`getPollVoteStatistics`).
-    pub const POLL_STATS: u8 = 54;
+    pub const POLL_STATS: u8 = 53;
+    /// "Retract vote" sits above "Stop Poll" (`AddPollActions`).
+    pub const RETRACT_VOTE: u8 = 54;
     pub const STOP_POLL: u8 = 55;
     pub const SEND_NOW: u8 = 56;
     pub const RETRY: u8 = 58;
@@ -161,6 +167,42 @@ pub struct MediaFacts {
     pub gif_saved: Option<bool>,
     /// The message is in Saved Messages (no "Save to Saved Messages").
     pub in_saved_messages: bool,
+    /// The song or voice message fits the notification-tone limits.
+    pub tone_ok: bool,
+}
+
+/// How long, how big and how many notification tones Telegram accepts
+/// (`notification_sound_*_max`; Telegram Desktop's `Api::Ringtones` defaults
+/// when the server sends none).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToneLimits {
+    pub max_size: i64,
+    pub max_duration: i32,
+    pub max_count: usize,
+}
+
+impl Default for ToneLimits {
+    fn default() -> Self {
+        Self {
+            max_size: 100 * 1024,
+            max_duration: 5,
+            max_count: 100,
+        }
+    }
+}
+
+/// `AddSaveSoundForNotifications`: only songs and voice messages that fit
+/// the limits, while the saved list still has room.
+pub fn tone_offered(
+    target: &MediaTarget,
+    size: i64,
+    saved_count: usize,
+    limits: ToneLimits,
+) -> bool {
+    matches!(target.kind, MediaKind::Audio | MediaKind::Voice)
+        && size <= limits.max_size
+        && target.duration <= limits.max_duration
+        && saved_count < limits.max_count
 }
 
 /// One media action. Telegram Desktop's labels are in [`MediaAction::label`].
@@ -176,6 +218,8 @@ pub enum MediaAction {
         remove: bool,
     },
     ShowInFolder,
+    /// "Save for Notifications" (`addSavedNotificationSound`).
+    SaveForNotifications,
     /// A song: "Save to..." with Profile, Saved Messages and Downloads.
     SaveTo,
     SaveAs,
@@ -195,6 +239,7 @@ impl MediaAction {
             Self::ToggleFavorite { remove: true } => "Remove from Favorites",
             Self::ShowInFolder if finder => "Show in Finder",
             Self::ShowInFolder => "Show in Folder",
+            Self::SaveForNotifications => "Save for Notifications",
             Self::SaveTo => "Save to...",
             Self::SaveAs => "Save As...",
             Self::CopyImage => "Copy Image",
@@ -211,6 +256,7 @@ impl MediaAction {
             Self::ViewStickerSet { .. } => "menu-sticker-set",
             Self::ToggleFavorite { .. } => "menu-favorite-sticker",
             Self::ShowInFolder => "menu-show-in-folder",
+            Self::SaveForNotifications => "menu-save-notification-tone",
             Self::SaveTo => "menu-save-to",
             Self::SaveAs => "menu-save-as",
             Self::CopyImage => "menu-copy-image",
@@ -254,6 +300,9 @@ pub fn media_actions(target: &MediaTarget, facts: &MediaFacts) -> Vec<MediaActio
     }
     if facts.local {
         actions.push(MediaAction::ShowInFolder);
+    }
+    if facts.can_save && facts.tone_ok {
+        actions.push(MediaAction::SaveForNotifications);
     }
     if facts.can_save {
         if target.kind == MediaKind::Audio && target.duration > 0 {
@@ -382,6 +431,56 @@ pub fn copy_link_label(is_channel: bool) -> &'static str {
     }
 }
 
+/// "Add Fact Check" or, once one exists, "Edit Fact Check"
+/// (`lng_context_add_factcheck` / `lng_context_edit_factcheck`).
+pub fn fact_check_label(has_fact_check: bool) -> &'static str {
+    if has_fact_check {
+        "Edit Fact Check"
+    } else {
+        "Add Fact Check"
+    }
+}
+
+/// A playback position as Telegram Desktop writes it into a reply
+/// (`Ui::FormatDurationText`): "0:07", "12:03" or "1:02:03".
+pub fn timecode_text(position_secs: f64) -> String {
+    let total = position_secs.max(0.0) as u64;
+    let (hours, minutes, seconds) = (total / 3600, total % 3600 / 60, total % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+/// "Reply with timecode" is offered on a voice message that is playing (or
+/// paused part-way) when the chat takes replies.
+pub fn timecode_offered(content: &MessageContent, playing_now: bool, can_reply: bool) -> bool {
+    playing_now && can_reply && matches!(content, MessageContent::VoiceNote(_))
+}
+
+/// What the composer receives for the timecode: a space first when the text
+/// before the cursor does not end in whitespace, and a space after
+/// (`Menu::InsertTextAtCursor`).
+pub fn timecode_insertion(before_cursor: &str, timecode: &str) -> String {
+    let space_first = before_cursor
+        .chars()
+        .last()
+        .is_some_and(|c| !c.is_whitespace());
+    format!("{}{timecode} ", if space_first { " " } else { "" })
+}
+
+/// The note after "Copy Post Link" / "Copy Message Link": a public link says
+/// so, a private one warns that only members can open it
+/// (`lng_channel_public_link_copied` / `lng_context_about_private_link`).
+pub fn link_copied_note(public: bool) -> &'static str {
+    if public {
+        "Link copied to clipboard."
+    } else {
+        "This link will only work for members of this chat."
+    }
+}
+
 /// Telegram Desktop's line under a menu with nothing to copy or forward
 /// (`lng_context_noforwards_info_*`).
 pub fn noforwards_info(is_channel: bool, is_group: bool, is_bot: bool, mine: bool) -> &'static str {
@@ -398,13 +497,31 @@ pub fn noforwards_info(is_channel: bool, is_group: bool, is_bot: bool, mine: boo
     }
 }
 
+/// [`noforwards_info`] with the peer named in a private chat the other
+/// side restricted (`lng_context_noforwards_info_his`).
+pub fn noforwards_text(
+    is_channel: bool,
+    is_group: bool,
+    is_bot: bool,
+    mine: bool,
+    peer: Option<&str>,
+) -> String {
+    match peer {
+        Some(name) if !is_channel && !is_group && !is_bot && !mine => {
+            format!("{name} disabled copying and forwarding in this chat.")
+        }
+        _ => noforwards_info(is_channel, is_group, is_bot, mine).to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::local_time::civil_at;
     use crate::message_menu::{
-        MediaAction, MediaFacts, MediaKind, MediaTarget, copy_link_label, media_actions,
-        media_target, reacted_label, read_date_label, read_status_label, seen_kind, seen_label,
-        sent_label, song_name,
+        MediaAction, MediaFacts, MediaKind, MediaTarget, ToneLimits, copy_link_label,
+        fact_check_label, link_copied_note, media_actions, media_target, reacted_label,
+        read_date_label, read_status_label, seen_kind, seen_label, sent_label, song_name,
+        timecode_insertion, timecode_offered, timecode_text, tone_offered,
     };
     use crate::telegram::envelope::{MessageContent, MessageReadDate};
 
@@ -579,6 +696,51 @@ mod tests {
     }
 
     #[test]
+    fn short_songs_and_voice_notes_offer_a_notification_tone() {
+        let limits = ToneLimits::default();
+        let mut voice = target(MediaKind::Voice);
+        voice.duration = 4;
+        assert!(tone_offered(&voice, 20_000, 3, limits));
+        // Too long, too big, or no room left in the saved list.
+        voice.duration = 6;
+        assert!(!tone_offered(&voice, 20_000, 3, limits));
+        voice.duration = 4;
+        assert!(!tone_offered(&voice, 200_000, 3, limits));
+        assert!(!tone_offered(&voice, 20_000, 100, limits));
+        // Videos and documents never qualify.
+        for kind in [MediaKind::Video, MediaKind::Document, MediaKind::VideoNote] {
+            assert!(!tone_offered(&target(kind), 100, 0, limits));
+        }
+    }
+
+    #[test]
+    fn notification_tone_sits_between_show_in_folder_and_save() {
+        let mut voice = target(MediaKind::Voice);
+        voice.copy_name = None;
+        let facts = MediaFacts {
+            tone_ok: true,
+            ..local()
+        };
+        assert_eq!(
+            media_actions(&voice, &facts),
+            vec![
+                MediaAction::ShowInFolder,
+                MediaAction::SaveForNotifications,
+                MediaAction::SaveAs
+            ]
+        );
+        // A protected chat offers neither the tone nor Save As.
+        let protected = MediaFacts {
+            can_save: false,
+            ..facts
+        };
+        assert_eq!(
+            media_actions(&voice, &protected),
+            vec![MediaAction::ShowInFolder]
+        );
+    }
+
+    #[test]
     fn finder_wording_on_macos() {
         assert_eq!(MediaAction::ShowInFolder.label(true), "Show in Finder");
         assert_eq!(MediaAction::ShowInFolder.label(false), "Show in Folder");
@@ -685,8 +847,91 @@ mod tests {
     }
 
     #[test]
+    fn fact_check_wording_follows_the_existing_note() {
+        assert_eq!(fact_check_label(false), "Add Fact Check");
+        assert_eq!(fact_check_label(true), "Edit Fact Check");
+    }
+
+    #[test]
+    fn timecodes_read_like_a_player() {
+        assert_eq!(timecode_text(0.0), "0:00");
+        assert_eq!(timecode_text(7.9), "0:07");
+        assert_eq!(timecode_text(723.0), "12:03");
+        assert_eq!(timecode_text(3723.0), "1:02:03");
+        assert_eq!(timecode_text(-4.0), "0:00");
+    }
+
+    #[test]
+    fn timecode_row_is_for_a_playing_voice_note_you_can_reply_to() {
+        use crate::telegram::envelope::VoiceNoteContent;
+        let voice = MessageContent::VoiceNote(VoiceNoteContent {
+            duration: 20,
+            waveform: Vec::new(),
+            mime_type: String::new(),
+            caption: String::new(),
+            caption_entities: Vec::new(),
+            is_listened: false,
+            file_id: crate::ids::FileId(3),
+            transcription: None,
+        });
+        assert!(timecode_offered(&voice, true, true));
+        assert!(!timecode_offered(&voice, false, true));
+        assert!(!timecode_offered(&voice, true, false));
+        assert!(!timecode_offered(
+            &MessageContent::ScreenshotTaken,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn timecode_insertion_pads_with_spaces() {
+        assert_eq!(timecode_insertion("", "0:07"), "0:07 ");
+        assert_eq!(timecode_insertion("see ", "0:07"), "0:07 ");
+        assert_eq!(timecode_insertion("see", "0:07"), " 0:07 ");
+    }
+
+    #[test]
+    fn private_links_warn_that_only_members_can_open_them() {
+        assert_eq!(link_copied_note(true), "Link copied to clipboard.");
+        assert_eq!(
+            link_copied_note(false),
+            "This link will only work for members of this chat."
+        );
+    }
+
+    #[test]
     fn link_wording() {
         assert_eq!(copy_link_label(true), "Copy Post Link");
         assert_eq!(copy_link_label(false), "Copy Message Link");
+    }
+
+    #[test]
+    fn noforwards_line_names_the_chat() {
+        use crate::message_menu::noforwards_text;
+        assert_eq!(
+            noforwards_text(true, false, false, false, None),
+            "Copying and forwarding is not allowed in this channel."
+        );
+        assert_eq!(
+            noforwards_text(false, true, false, false, None),
+            "Copying and forwarding is not allowed in this group."
+        );
+        assert_eq!(
+            noforwards_text(false, false, true, false, Some("Bot")),
+            "Copying and forwarding is not allowed from this bot."
+        );
+        assert_eq!(
+            noforwards_text(false, false, false, true, Some("Mom")),
+            "You disabled copying and forwarding in this chat."
+        );
+        assert_eq!(
+            noforwards_text(false, false, false, false, Some("Mom")),
+            "Mom disabled copying and forwarding in this chat."
+        );
+        assert_eq!(
+            noforwards_text(false, false, false, false, None),
+            "Copying and forwarding is not allowed in this chat."
+        );
     }
 }
