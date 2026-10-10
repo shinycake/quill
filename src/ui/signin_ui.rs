@@ -127,7 +127,7 @@ impl QuillApp {
         match &auth {
             AuthorizationState::WaitCode { delivery, .. } => {
                 if self.signin.code_clock.as_ref().map(|(d, _)| d) != Some(delivery) {
-                    self.signin.code_clock = Some((*delivery, Instant::now()));
+                    self.signin.code_clock = Some((delivery.clone(), Instant::now()));
                 }
             }
             _ => self.signin.code_clock = None,
@@ -336,15 +336,9 @@ impl QuillApp {
                 code_length,
                 delivery,
             } => {
-                let mut body = String::new();
-                if !self.signin.submitted_phone.is_empty() {
-                    body.push_str(&format!("Code for {}. ", self.signin.submitted_phone));
-                }
-                body.push_str(signin::delivery_description(delivery.kind));
-                if let Some(len) = code_length {
-                    body.push_str(&format!(" It has {len} digits."));
-                }
-                view.body = body;
+                view.title = signin::code_step_title(delivery.kind);
+                view.body =
+                    signin::code_step_body(delivery, *code_length, &self.signin.submitted_phone);
             }
             AuthorizationState::WaitPhoneNumber => {
                 view.body =
@@ -623,6 +617,18 @@ impl QuillApp {
                 let elapsed = self.signin.code_clock.as_ref().map_or(0, |(_, since)| {
                     i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
                 });
+                if let Some(url) = signin::fragment_url(delivery) {
+                    let url = url.to_string();
+                    out.insert(
+                        0,
+                        Button::new("open-fragment")
+                            .label("Open Fragment")
+                            .primary()
+                            .w_full()
+                            .on_click(move |_, _, cx| cx.open_url(&url))
+                            .into_any_element(),
+                    );
+                }
                 if let Some(option) = signin::resend_option(delivery, elapsed) {
                     ticking |= !option.ready;
                     out.push(

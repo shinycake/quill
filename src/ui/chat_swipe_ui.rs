@@ -294,7 +294,7 @@ impl QuillApp {
     /// The configured action on a chat (`PerformQuickDialogAction`). All of
     /// them are the chat menu's own handlers, so gating, live requests and
     /// the Delete confirmation are unchanged.
-    fn perform_swipe_action(&mut self, id: ChatId, cx: &mut Context<Self>) {
+    pub(super) fn perform_swipe_action(&mut self, id: ChatId, cx: &mut Context<Self>) {
         let Some(label) = self
             .session()
             .and_then(|s| s.chats.get(&id.0))

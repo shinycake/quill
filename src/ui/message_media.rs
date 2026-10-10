@@ -2757,7 +2757,7 @@ pub(super) fn spoiler_cover(
     let shade = if preview.is_some() { 0.125 } else { 0.1 };
     // tdesktop's spoiler "mess": the shared, pre-rendered speck tile,
     // drawn by the conversation's animation layer (`anim_layer`).
-    let dust = super::anim_layer::painter(super::spoiler_fx::SPECKS_FPS, |bounds, window| {
+    let dust = super::anim_layer::painter(super::spoiler_fx::specks_fps(), |bounds, window| {
         super::spoiler_fx::paint_media_specks(bounds, window);
     })
     .absolute()

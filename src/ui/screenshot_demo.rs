@@ -12,6 +12,14 @@ pub enum ScreenshotDemo {
     WaitPhoneFormatted,
     /// Sign-in polish: code step with the resend countdown and "Wrong number?".
     WaitCodeResend,
+    /// Code step for `authenticationCodeTypeFirebase*` (official apps only).
+    WaitCodeFirebase,
+    /// Code step for `authenticationCodeTypeFlashCall`.
+    WaitCodeFlash,
+    /// Code step for `authenticationCodeTypeFragment` with "Open Fragment".
+    WaitCodeFragment,
+    /// Code step for `authenticationCodeTypeMissedCall`.
+    WaitCodeMissed,
     /// Sign-in polish: tdesktop's banned-number box (with Help).
     WaitPhoneBanned,
     WaitPassword,
@@ -650,6 +658,9 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Appearance cluster: system accent, font family and the Battery and
+    /// animations switches.
+    ReadyAppearancePower,
     /// Appearance slice: Appearance with Telegram wallpapers and interface scale.
     ReadyAppearanceWallpapers,
     /// Per-chat theme and wallpaper picker open over a private chat.

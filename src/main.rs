@@ -348,7 +348,8 @@ fn ui_main(args: &[String]) {
         // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
         ui::set_high_contrast(std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"));
         // kit Phase 9: honor the OS reduce-motion preference.
-        cx.set_reduce_motion(os_prefers_reduced_motion());
+        quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
+        cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
         ui::bind_keys(cx);
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
@@ -682,6 +683,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-albums", ReadyAlbums),
         ("ready-animated-emoji", ReadyAnimatedEmoji),
         ("ready-appearance", ReadyAppearance),
+        ("ready-appearance-power", ReadyAppearancePower),
         ("ready-appearance-wallpapers", ReadyAppearanceWallpapers),
         ("ready-archive-bar", ReadyArchiveBar),
         ("ready-archive-hint", ReadyArchiveHint),
@@ -942,6 +944,10 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-voice", ReadyVoice),
         ("ready-web-sessions", ReadyWebSessions),
         ("wait-code", WaitCode),
+        ("wait-code-firebase", WaitCodeFirebase),
+        ("wait-code-flash", WaitCodeFlash),
+        ("wait-code-fragment", WaitCodeFragment),
+        ("wait-code-missed", WaitCodeMissed),
         ("wait-code-resend", WaitCodeResend),
         ("wait-password", WaitPassword),
         ("wait-phone", WaitPhone),
@@ -1082,6 +1088,10 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::WaitCode => ".quill-ready-wait-code",
         ScreenshotDemo::WaitPhoneCountry => ".quill-ready-wait-phone-country",
         ScreenshotDemo::WaitPhoneFormatted => ".quill-ready-wait-phone-formatted",
+        ScreenshotDemo::WaitCodeFirebase => ".quill-ready-wait-code-firebase",
+        ScreenshotDemo::WaitCodeFlash => ".quill-ready-wait-code-flash",
+        ScreenshotDemo::WaitCodeFragment => ".quill-ready-wait-code-fragment",
+        ScreenshotDemo::WaitCodeMissed => ".quill-ready-wait-code-missed",
         ScreenshotDemo::WaitCodeResend => ".quill-ready-wait-code-resend",
         ScreenshotDemo::WaitPhoneBanned => ".quill-ready-wait-phone-banned",
         ScreenshotDemo::WaitPassword => ".quill-ready-wait-password",
@@ -1278,6 +1288,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySecretBotAlert => ".quill-ready-ready-secret-bot-alert",
         ScreenshotDemo::ReadyStorageUsage => ".quill-ready-ready-storage-usage",
         ScreenshotDemo::ReadyAppearance => ".quill-ready-ready-appearance",
+        ScreenshotDemo::ReadyAppearancePower => ".quill-ready-ready-appearance-power",
         ScreenshotDemo::ReadyAppearanceWallpapers => ".quill-ready-ready-appearance-wallpapers",
         ScreenshotDemo::ReadyChatLook => ".quill-ready-ready-chat-look",
         ScreenshotDemo::ReadyChatTheme => ".quill-ready-ready-chat-theme",
@@ -1401,7 +1412,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                 std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
             );
             // kit Phase 9: honor the OS reduce-motion preference.
-            cx.set_reduce_motion(os_prefers_reduced_motion());
+            quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
+            cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {
