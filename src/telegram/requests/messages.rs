@@ -690,6 +690,30 @@ pub fn get_message_link(extra: RequestId, chat_id: ChatId, message_id: MessageId
     .to_string()
 }
 
+/// `setMessageFactCheck chat_id message_id text:formattedText = Ok`; an
+/// empty text removes the fact check (`text: null`). Only for messages whose
+/// `messageProperties.can_set_fact_check` is true.
+pub fn set_message_fact_check(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    text: &str,
+) -> String {
+    let text = text.trim();
+    json!({
+        "@type": "setMessageFactCheck",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "text": if text.is_empty() {
+            serde_json::Value::Null
+        } else {
+            json!({ "@type": "formattedText", "text": text, "entities": [] })
+        },
+    })
+    .to_string()
+}
+
 /// M1 fix-up: `getMessageProperties` (TDLib 1.8.67,
 /// `schema/td_api.tl:11557`). "Share link" sends this first so the
 /// driver can gate `getMessageLink` on `messageProperties.can_get_link`

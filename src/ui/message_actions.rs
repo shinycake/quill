@@ -186,6 +186,50 @@ impl QuillApp {
                 }
             );
         }
+        // A playing voice message also offers a reply stamped with where the
+        // player is (Telegram Desktop `AddTimecodeAction`).
+        let playing_here = self.playing_voice == Some(message_id);
+        if quill::message_menu::timecode_offered(
+            effective_content(&message.content, message.ephemeral.as_ref()),
+            playing_here,
+            can_reply,
+        ) && let Some(position) = self.playback_clock.as_ref().map(|c| c.elapsed_secs())
+        {
+            let timecode = quill::message_menu::timecode_text(position);
+            let label_timecode = timecode.clone();
+            let row_hover = cx.theme().accent;
+            rows.push((
+                order::REPLY_TIMECODE,
+                div()
+                    .id("menu-reply-timecode")
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_3()
+                    .py_1p5()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .text_sm()
+                    .text_color(text_menu())
+                    .hover(|style| style.bg(row_hover))
+                    .role(gpui_kit::Role::MenuItem)
+                    .aria_label(format!("Reply with timecode {timecode}"))
+                    .child(Icon::new(gpui_kit::assets::IconName::Reply).size(px(16.)))
+                    .child(div().flex_1().child("Reply with timecode"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(label_timecode),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.reply_with_timecode(chat_id, message_id, window, cx);
+                        this.message_menu = None;
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            ));
+        }
         let copy = match selection {
             Some(selected) => Some(("Copy Selected Text", selected)),
             None => copyable.map(|text| ("Copy Text", text)),
@@ -347,6 +391,22 @@ impl QuillApp {
                     cx.notify();
                 }
             );
+            if self.can_select_up_to(chat_id, message_id) {
+                item!(
+                    71,
+                    gpui_kit::assets::IconName::CircleCheck,
+                    "menu-select-up-to",
+                    "Select up to this message",
+                    this,
+                    _window,
+                    cx,
+                    {
+                        this.select_up_to(chat_id, message_id, cx);
+                        this.message_menu = None;
+                        cx.notify();
+                    }
+                );
+            }
         }
         if let Some(edit) = quill::composer::ComposerEdit::from_own_content(
             chat_id,
@@ -370,6 +430,24 @@ impl QuillApp {
                     this.begin_edit(edit.clone(), window, cx);
                     this.message_menu = None;
                     cx.notify();
+                }
+            );
+        }
+        // Channel admins (and anyone TDLib allows) add or edit a fact check.
+        if allows(false, |a| a.can_set_fact_check) && message.id.0 > 0 && !message.pending {
+            let existing = message.extras.fact_check.clone();
+            let label = quill::message_menu::fact_check_label(!existing.is_empty());
+            item!(
+                order::FACT_CHECK,
+                gpui_kit::assets::IconName::ShieldCheck,
+                "menu-fact-check",
+                label,
+                this,
+                window,
+                cx,
+                {
+                    this.message_menu = None;
+                    this.open_fact_check(chat_id, message_id, existing.clone(), window, cx);
                 }
             );
         }
@@ -429,6 +507,27 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_stop_poll(chat_id, message_id, is_quiz, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        // Telegram Desktop's "Retract vote" (`AddPollActions`), above Stop.
+        if let MessageContent::Poll(poll_content) = &message.content
+            && quill::poll::can_retract_vote(&poll_content.poll)
+            && message.id.0 > 0
+            && !message.pending
+        {
+            item!(
+                order::RETRACT_VOTE,
+                gpui_kit::assets::IconName::Undo2,
+                "menu-retract-vote",
+                "Retract vote",
+                this,
+                _window,
+                cx,
+                {
+                    this.retract_poll_vote(chat_id, message_id, cx);
                     this.message_menu = None;
                     cx.notify();
                 }
@@ -583,15 +682,28 @@ impl QuillApp {
                 chat_kind,
                 Some(ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. })
             );
+            // A private chat names the peer, or says it is a bot.
+            let peer = match chat_kind {
+                Some(ChatKind::Private { user_id }) => self
+                    .session()
+                    .map(|s| (s.is_bot_user(user_id.0), s.user(user_id.0))),
+                _ => None,
+            };
+            let is_bot = peer.is_some_and(|(bot, _)| bot);
+            let peer_name = peer
+                .and_then(|(_, user)| user)
+                .map(|user| user.first_name.trim().to_string())
+                .filter(|name| !name.is_empty());
             rows.push(info_row(
                 order::SELECT,
                 "menu-noforwards",
                 None,
-                quill::message_menu::noforwards_info(
+                quill::message_menu::noforwards_text(
                     is_channel_post,
                     is_group && !is_channel_post,
-                    false,
+                    is_bot,
                     message.is_outgoing,
+                    peer_name.as_deref(),
                 ),
             ));
         }
@@ -1838,7 +1950,7 @@ impl QuillApp {
                     confirm(
                         window,
                         cx,
-                        "Do you want to unpin all messages?",
+                        quill::selection_pin::UNPIN_ALL_QUESTION,
                         "Unpin",
                         move |cx| {
                             let _ = app.update(cx, |this, cx| {
@@ -1944,7 +2056,7 @@ fn confirm_hide_pinned(
     confirm(
         window,
         cx,
-        "Do you want to hide the pinned message bar? It will stay hidden until a new message is pinned.",
+        quill::selection_pin::HIDE_PINNED_QUESTION,
         "Hide",
         move |cx| {
             let _ = app.update(cx, |this, cx| {

@@ -511,6 +511,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_card_number_entity_offers_copy_card_number() {
+        let text = "Pay to 4111 1111 1111 1111 today";
+        let entity = TextEntity {
+            utf8_start: 7,
+            utf8_end: 26,
+            kind: TextEntityKind::BankCardNumber,
+        };
+        let link = entity.interactive_target(text).expect("a card link");
+        assert_eq!(link.copy_label(), Some("Copy Card Number"));
+        assert_eq!(link.copy_text(), Some("4111 1111 1111 1111"));
+    }
+
+    #[test]
     fn ascii_round_trip() {
         let text = "hello";
         assert_eq!(utf8_to_utf16_offset(text, 0).unwrap(), 0);

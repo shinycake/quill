@@ -106,6 +106,16 @@ pub fn poll_answer_for_tap(poll: &Poll, index: usize) -> Option<Vec<i32>> {
     Some(next)
 }
 
+/// Telegram Desktop's "Retract vote" item (`AddPollActions`): an open,
+/// non-quiz poll you voted in, while revoting is allowed.
+pub fn can_retract_vote(poll: &Poll) -> bool {
+    !poll.is_closed
+        && poll.vote_restriction_reason.is_none()
+        && poll.allows_revoting
+        && !matches!(poll.poll_type, crate::telegram::PollType::Quiz { .. })
+        && !poll.chosen_indexes().is_empty()
+}
+
 /// Human reason for the given `pollVoteRestrictionReason*` (schema
 /// `td_api.tl:494`-`:510`), surfaced where a vote tap would otherwise die
 /// silently. Labels follow the schema descriptions verbatim-ish.
@@ -591,6 +601,22 @@ mod tests {
         assert!(!can_stop_poll(true, &closed));
         assert!(!can_stop_poll(false, &open));
         assert!(!can_stop_poll(false, &closed));
+    }
+
+    #[test]
+    fn retract_offer_needs_an_open_revotable_regular_poll_with_a_vote() {
+        let voted = regular_poll(&[1], false, true, false);
+        assert!(can_retract_vote(&voted));
+        // No vote yet, revoting off, closed, or a quiz: nothing to retract.
+        assert!(!can_retract_vote(&regular_poll(&[], false, true, false)));
+        assert!(!can_retract_vote(&regular_poll(&[1], false, false, false)));
+        assert!(!can_retract_vote(&regular_poll(&[1], false, true, true)));
+        let mut quiz = quiz_poll(&[0]);
+        quiz.allows_revoting = true;
+        assert!(!can_retract_vote(&quiz));
+        let mut restricted = regular_poll(&[1], false, true, false);
+        restricted.vote_restriction_reason = Some(PollVoteRestrictionReason::Closed);
+        assert!(!can_retract_vote(&restricted));
     }
 
     #[test]

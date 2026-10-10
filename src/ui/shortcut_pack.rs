@@ -312,6 +312,90 @@ impl QuillApp {
         true
     }
 
+    /// Cmd/Ctrl+Space: toggle the focused message in the selection, which
+    /// starts selection mode (`HistoryInner::keyPressEvent`). With no
+    /// focused message it acts on the newest loaded one.
+    pub(super) fn toggle_focused_selection_by_key(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.shortcut_blocked(window, cx) {
+            return false;
+        }
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+            return false;
+        };
+        let ids = self.loaded_selectable_ids(chat_id);
+        let focus = self
+            .selection_focus
+            .filter(|id| ids.contains(id))
+            .or(ids.last().copied());
+        let Some(focus) = focus else {
+            return false;
+        };
+        self.selection_anchor = Some(focus);
+        self.selection_focus = Some(focus);
+        self.toggle_forward_select(chat_id, focus, false, cx);
+        true
+    }
+
+    /// Up / Down while selecting move the focused row; with Shift they
+    /// grow or shrink the range from the row the move started on. A
+    /// composer with text keeps its arrow keys.
+    pub(super) fn move_selection_focus_by_key(
+        &mut self,
+        older: bool,
+        extend: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.shortcut_blocked(window, cx) {
+            return false;
+        }
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+            return false;
+        };
+        if !self.selecting_in(chat_id) {
+            return false;
+        }
+        if self.composer_has_focus(window, cx) && !self.composer_text_is_empty(cx) {
+            return false;
+        }
+        let ids = self.loaded_selectable_ids(chat_id);
+        let old = self.selection_focus.filter(|id| ids.contains(id));
+        let Some(new) = quill::selection_pin::step_focus(&ids, old, older) else {
+            return false;
+        };
+        if extend {
+            let anchor = self
+                .selection_anchor
+                .filter(|id| ids.contains(id))
+                .or(old)
+                .unwrap_or(new);
+            let (select, deselect) =
+                quill::selection_pin::range_delta(&ids, anchor, old.unwrap_or(anchor), new);
+            let mut keep = vec![anchor];
+            keep.extend(select);
+            self.add_to_selection(chat_id, keep);
+            if let Some(draft) = self.pending_forward.as_mut() {
+                let leaving: Vec<_> = deselect
+                    .into_iter()
+                    .filter(|id| draft.contains(*id))
+                    .collect();
+                for id in leaving {
+                    draft.toggle(chat_id, id, false);
+                }
+            }
+            self.selection_anchor = Some(anchor);
+        } else {
+            self.selection_anchor = Some(new);
+        }
+        self.selection_focus = Some(new);
+        self.jump_to_replied_message(new, cx);
+        true
+    }
+
     /// Cmd/Ctrl+1..8: the Nth pinned chat of the list on screen.
     pub(super) fn open_pinned_by_key(
         &mut self,

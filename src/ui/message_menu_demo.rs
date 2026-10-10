@@ -35,6 +35,7 @@ enum DemoDialog {
     ReportDone,
     StickerSet,
     ModeratedDelete,
+    FactCheck,
 }
 
 struct Scenario {
@@ -100,6 +101,16 @@ fn scenario(name: &str) -> Scenario {
         "moderate" => Scenario {
             dialog: DemoDialog::ModeratedDelete,
             ..at(31, 3102, 340., 240.)
+        },
+        "voice-tone" => at(11, 910, 380., 260.),
+        "voice-timecode" => at(11, 908, 380., 260.),
+        "poll-retract" => at(11, 911, 380., 260.),
+        "card-number" => at(11, 912, 380., 260.),
+        "fact-check-add" => at(13, 1301, 340., 240.),
+        "fact-check-edit" => at(13, 1302, 340., 240.),
+        "fact-check-dialog" => Scenario {
+            dialog: DemoDialog::FactCheck,
+            ..at(13, 1302, 340., 240.)
         },
         // "photo" and anything unknown.
         _ => at(11, 901, 380., 260.),
@@ -277,6 +288,50 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
                 "document":{"@type":"document","file_name":"Holiday photos.zip","mime_type":"application/zip","document":file(909, "", false)},
                 "caption":text("")}}}),
     );
+    // A short voice message, a poll you voted in and a message with a card
+    // number.
+    apply(
+        &mut session,
+        message(
+            11,
+            910,
+            false,
+            500,
+            json!({
+            "@type":"messageVoiceNote",
+            "voice_note":{"@type":"voiceNote","duration":4,"waveform":quill::voice::waveform_base64(&[6, 14, 22, 10, 18, 8, 20, 12]),"mime_type":"audio/ogg","speech_recognition_result":null,"voice":file(910, &voice_path, true)},
+            "caption":text(""),"is_listened":false}),
+        ),
+    );
+    let option = |id: &str, label: &str, votes: i32, pct: i32, chosen: bool| json!({"@type":"pollOption","id":id,"text":text(label),"voter_count":votes,"vote_percentage":pct,"is_chosen":chosen});
+    apply(
+        &mut session,
+        message(
+            11,
+            911,
+            false,
+            400,
+            json!({
+            "@type":"messagePoll",
+            "poll":{"@type":"poll","id":9111,"question":text("Where should we have lunch?"),
+                "options":[option("0", "Falafel", 5, 50, true), option("1", "Pasta", 3, 30, false), option("2", "Sushi", 2, 20, false)],
+                "total_voter_count":10,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,
+                "is_closed":false,"vote_restriction_reason":null,"type":{"@type":"pollTypeRegular"}},
+            "description":text(""),"can_add_option":false}),
+        ),
+    );
+    apply(
+        &mut session,
+        message(
+            11,
+            912,
+            false,
+            300,
+            json!({"@type":"messageText","text":{"@type":"formattedText",
+                "text":"Pay the deposit to 4111 1111 1111 1111 by Friday.",
+                "entities":[{"@type":"textEntity","offset":19,"length":19,"type":{"@type":"textEntityTypeBankCardNumber"}}]}}),
+        ),
+    );
     session.stickers.installed_loaded = true;
     session.gifs.loaded = true;
 
@@ -344,6 +399,13 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
     );
     apply(
         &mut session,
+        json!({"@type":"updateNewMessage","message":{
+            "id":1302,"chat_id":13,"is_outgoing":false,"date":date(6400),
+            "content":{"@type":"messageText","text":text("The new battery lasts three days on a single charge.")},
+            "fact_check":{"@type":"factCheck","text":text("Independent tests measured about two days of typical use."),"country_code":"US"}}}),
+    );
+    apply(
+        &mut session,
         json!({"@type":"updateNewChat","chat":{"id":32,"title":"Private archive","type":{"@type":"chatTypeSupergroup","supergroup_id":32,"is_channel":false},"has_protected_content":true,"unread_count":0}}),
     );
     apply(
@@ -373,6 +435,7 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
         13 => {
             properties.can_get_link = true;
             properties.can_be_replied = false;
+            properties.can_set_fact_check = true;
         }
         32 => {
             properties.can_be_copied = false;
@@ -562,6 +625,10 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
     session
 }
 
+fn chosen_card(name: &str) -> bool {
+    name == "card-number"
+}
+
 impl QuillApp {
     /// Open the menu (or dialog) of the scenario `QUILL_DEMO_MENU` names.
     pub(super) fn demo_setup_message_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -569,6 +636,17 @@ impl QuillApp {
         let (chat_id, message_id) = (ChatId(chosen.chat_id), MessageId(chosen.message_id));
         match chosen.dialog {
             DemoDialog::None => {
+                if chosen_card(&scenario_name()) {
+                    self.message_menu_link = Some(quill::text::LinkTarget::BankCard(
+                        "4111 1111 1111 1111".into(),
+                    ));
+                }
+                if scenario_name() == "voice-timecode" {
+                    self.playing_voice = Some(message_id);
+                    let mut clock = quill::playback::PlaybackClock::new(8.0);
+                    clock.seek(5.0);
+                    self.playback_clock = Some(clock);
+                }
                 self.message_menu = Some(MessageMenuState {
                     chat_id,
                     message_id,
@@ -581,6 +659,14 @@ impl QuillApp {
             | DemoDialog::ReportText
             | DemoDialog::ReportDone => self.message_menu_ui.report_open = true,
             DemoDialog::StickerSet => self.message_menu_ui.sticker_set_open = true,
+            DemoDialog::FactCheck => {
+                let existing = self
+                    .session()
+                    .and_then(|s| s.histories.get(&chat_id.0)?.messages.get(&message_id.0))
+                    .map(|m| m.extras.fact_check.clone())
+                    .unwrap_or_default();
+                self.open_fact_check(chat_id, message_id, existing, window, cx);
+            }
             DemoDialog::ModeratedDelete => {
                 let message = self.session().and_then(|s| {
                     s.histories
