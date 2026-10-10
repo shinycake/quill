@@ -21,6 +21,53 @@ pub const ADDED_REACTIONS_PAGE: i32 = 50;
 pub use crate::moderation::ModerateChoice as ModerationChoice;
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// `setMessageFactCheck` for the fact-check dialog (empty removes it).
+    pub fn set_fact_check(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        text: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || message_id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetMessageFactCheck, Some(chat_id));
+        let json =
+            crate::telegram::requests::set_message_fact_check(extra, chat_id, message_id, text);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// The menu's "Save for Notifications": `addSavedNotificationSound`
+    /// with the song or voice message's file. The saved-sound list
+    /// refetches once TDLib confirms.
+    pub fn save_notification_tone(
+        &mut self,
+        file_id: crate::ids::FileId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || file_id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::AddSavedNotificationSound, None);
+        let json = crate::telegram::requests::add_saved_notification_sound(extra, file_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
     /// Send one step of the Report flow. The first call (empty
     /// `option_id`) opens the flow; later calls echo the option the user
     /// picked, or the details text. `chosen` is `(option text, current

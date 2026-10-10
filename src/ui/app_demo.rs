@@ -2122,6 +2122,7 @@ impl QuillApp {
             inline_bot_alert_shown: false,
             forum_manage_dialog: None,
             saved_tag_dialog: None,
+            fact_check_dialog: None,
             poll_voters_dialog: None,
             poll_add_option: None,
             checklist_dialog: None,

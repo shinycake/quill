@@ -186,6 +186,50 @@ impl QuillApp {
                 }
             );
         }
+        // A playing voice message also offers a reply stamped with where the
+        // player is (Telegram Desktop `AddTimecodeAction`).
+        let playing_here = self.playing_voice == Some(message_id);
+        if quill::message_menu::timecode_offered(
+            effective_content(&message.content, message.ephemeral.as_ref()),
+            playing_here,
+            can_reply,
+        ) && let Some(position) = self.playback_clock.as_ref().map(|c| c.elapsed_secs())
+        {
+            let timecode = quill::message_menu::timecode_text(position);
+            let label_timecode = timecode.clone();
+            let row_hover = cx.theme().accent;
+            rows.push((
+                order::REPLY_TIMECODE,
+                div()
+                    .id("menu-reply-timecode")
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_3()
+                    .py_1p5()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .text_sm()
+                    .text_color(text_menu())
+                    .hover(|style| style.bg(row_hover))
+                    .role(gpui_kit::Role::MenuItem)
+                    .aria_label(format!("Reply with timecode {timecode}"))
+                    .child(Icon::new(gpui_kit::assets::IconName::Reply).size(px(16.)))
+                    .child(div().flex_1().child("Reply with timecode"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(label_timecode),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.reply_with_timecode(chat_id, message_id, window, cx);
+                        this.message_menu = None;
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            ));
+        }
         let copy = match selection {
             Some(selected) => Some(("Copy Selected Text", selected)),
             None => copyable.map(|text| ("Copy Text", text)),
@@ -389,6 +433,24 @@ impl QuillApp {
                 }
             );
         }
+        // Channel admins (and anyone TDLib allows) add or edit a fact check.
+        if allows(false, |a| a.can_set_fact_check) && message.id.0 > 0 && !message.pending {
+            let existing = message.extras.fact_check.clone();
+            let label = quill::message_menu::fact_check_label(!existing.is_empty());
+            item!(
+                order::FACT_CHECK,
+                gpui_kit::assets::IconName::ShieldCheck,
+                "menu-fact-check",
+                label,
+                this,
+                window,
+                cx,
+                {
+                    this.message_menu = None;
+                    this.open_fact_check(chat_id, message_id, existing.clone(), window, cx);
+                }
+            );
+        }
         if allows(message.can_pin() && !is_channel_post, |a| a.can_be_pinned) {
             let label = if pinned { "Unpin" } else { "Pin" };
             item!(
@@ -445,6 +507,27 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_stop_poll(chat_id, message_id, is_quiz, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        // Telegram Desktop's "Retract vote" (`AddPollActions`), above Stop.
+        if let MessageContent::Poll(poll_content) = &message.content
+            && quill::poll::can_retract_vote(&poll_content.poll)
+            && message.id.0 > 0
+            && !message.pending
+        {
+            item!(
+                order::RETRACT_VOTE,
+                gpui_kit::assets::IconName::Undo2,
+                "menu-retract-vote",
+                "Retract vote",
+                this,
+                _window,
+                cx,
+                {
+                    this.retract_poll_vote(chat_id, message_id, cx);
                     this.message_menu = None;
                     cx.notify();
                 }
