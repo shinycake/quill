@@ -262,6 +262,17 @@ pub fn add_saved_animation(extra: RequestId, file_id: FileId) -> String {
     .to_string()
 }
 
+/// `addSavedNotificationSound sound:InputFile = NotificationSound;` with the
+/// sound as `inputFileId` (the message menu's "Save for Notifications").
+pub fn add_saved_notification_sound(extra: RequestId, file_id: FileId) -> String {
+    json!({
+        "@type": "addSavedNotificationSound",
+        "@extra": extra.as_extra(),
+        "sound": { "@type": "inputFileId", "id": file_id.0 },
+    })
+    .to_string()
+}
+
 /// Slice S9: `removeSavedAnimation animation:InputFile = Ok;` (TDLib
 /// 1.8.67, line 14772) — same `inputFileId` shape as add. Response is
 /// `ok`; same cache invalidation as add.
