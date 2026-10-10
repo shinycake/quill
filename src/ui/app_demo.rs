@@ -295,6 +295,16 @@ pub(super) fn demo_seed_for(
             "screenshot demo — chat list: archive settings dialog".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyArchiveHint
+        | ScreenshotDemo::ReadyChatBadges
+        | ScreenshotDemo::ReadyFoldersChats
+        | ScreenshotDemo::ReadyFoldersChatPicker
+        | ScreenshotDemo::ReadyFoldersToast => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyArchiveRow
         | ScreenshotDemo::ReadyArchiveBar
         | ScreenshotDemo::ReadyArchiveMenu
@@ -720,6 +730,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — message menu".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyServiceMedia => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — service and media cards".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyServiceMessages => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -834,7 +850,9 @@ pub(super) fn demo_seed_for(
             "screenshot demo — fullscreen media viewer".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVideoPlayback | ScreenshotDemo::ReadyVideoPip => (
+        ScreenshotDemo::ReadyVideoPlayback
+        | ScreenshotDemo::ReadyVideoPip
+        | ScreenshotDemo::ReadyViewerExtras => (
             Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — in-viewer video playback".into(),
@@ -2381,6 +2399,7 @@ impl QuillApp {
             folder_tab_menu: None,
             folder_new_chats_dialog: None,
             folder_limit_box: None,
+            archive_hint_open: false,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,

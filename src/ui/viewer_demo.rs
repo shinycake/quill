@@ -73,6 +73,25 @@ fn apply_viewer_shared(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atom
     }
 }
 
+/// A downloaded 12 s video with a formatted caption (bold and a link),
+/// sent on a known date so the viewer header shows the sender line.
+fn apply_viewer_extras(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let clip_path = demo_media_allowlist()
+        .join("demo-clip-12s.mp4")
+        .to_string_lossy()
+        .into_owned();
+    let clip = demo_file_json(96, &clip_path, true);
+    let thumb = demo_file_json(97, &demo_thumb_png_path(), true);
+    let caption = "Sunday hike: full route at https://example.com/hike";
+    let json = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":205,"chat_id":11,"date":1790632500,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":320,"height":180,"file_name":"demo-clip-12s.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"{caption}","entities":[{{"@type":"textEntity","offset":0,"length":12,"type":{{"@type":"textEntityTypeBold"}}}},{{"@type":"textEntity","offset":27,"length":24,"type":{{"@type":"textEntityTypeUrl"}}}}]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
 impl QuillApp {
     pub(super) fn demo_setup_viewer_extras(
         &mut self,
@@ -110,6 +129,52 @@ impl QuillApp {
                 }
             }
             self.status_note = "screenshot demo — GIF looping in the viewer".into();
+        }
+        if demo == Some(ScreenshotDemo::ReadyViewerExtras) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_viewer_extras(session, &self.demo_sink, &self.demo_seq);
+            }
+            // As the video demo: decode the frames here so the capture is
+            // deterministic, then play for real from the 5 s mark.
+            self.viewer_demo_sync_frames = true;
+            self.open_media_viewer(ChatId(11), MessageId(205), cx);
+            if let Some(item) = self.media_viewer.current().cloned()
+                && let Some(path) = self.viewer_clip_path(&item)
+            {
+                let file_id = -item.play_file_id.map(|id| id.0).unwrap_or(0);
+                let cache = quill::video::viewer_frame_cache_dir(file_id);
+                let mime = item.mime_type.clone().unwrap_or_default();
+                let duration = item.duration_secs.unwrap_or(0);
+                let start_timestamp = item.start_timestamp.unwrap_or(0);
+                if let Ok(frames) = quill::video::viewer_playback_frames(
+                    &path,
+                    &mime,
+                    &cache,
+                    start_timestamp,
+                    duration,
+                ) && let Ok(decoded) = Self::decode_viewer_frames(&frames.frames)
+                {
+                    self.viewer_video_frames = decoded;
+                    self.viewer_video_fps = frames.fps;
+                    self.viewer_frame_cache_file = Some(file_id);
+                    self.playback_speed = 1.5;
+                    self.play_viewer_video(&item, &path, cx);
+                    if let Some(clock) = self.viewer_clock.as_mut() {
+                        clock.seek(5.0);
+                    }
+                }
+            }
+            self.show_saved_toast(
+                std::path::PathBuf::from("/Users/demo/Downloads/hike.mp4"),
+                true,
+                cx,
+            );
+            // `QUILL_DEMO_NO_DIAL=1` keeps the dial closed, to see the
+            // caption and toast it would cover.
+            self.viewer_extra.demo_speed_dial_open =
+                std::env::var_os("QUILL_DEMO_NO_DIAL").is_none();
+            self.status_note = "screenshot demo — viewer extras".into();
         }
         if demo == Some(ScreenshotDemo::ReadyViewerShared) {
             if let Some(session) = self.demo_session.as_mut() {

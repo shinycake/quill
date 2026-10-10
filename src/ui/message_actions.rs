@@ -27,6 +27,26 @@ use quill::telegram::envelope::{
 use std::sync::Arc;
 use std::time::Instant;
 impl QuillApp {
+    /// "Stop sharing" on your own live location. The card flips to
+    /// "Live location ended" when Telegram confirms with the new content.
+    pub(super) fn stop_live_location(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = "Stopping a live location needs a live connection (demo)".into();
+            cx.notify();
+            return;
+        };
+        self.status_note = match live.driver.stop_live_location(chat_id, message_id) {
+            Ok(_) => "Stopped sharing your live location".into(),
+            Err(_) => "Couldn't stop sharing; try again.".into(),
+        };
+        cx.notify();
+    }
+
     /// Telegram Desktop's refusal for copying out of a protected chat;
     /// true when the chat is protected (and the note was shown).
     pub(super) fn refuse_protected_copy(
@@ -1090,6 +1110,32 @@ impl QuillApp {
                 ));
             };
         }
+        // Same as `item!`, for bodies that need the window.
+        macro_rules! item_window {
+            ($order:expr, $icon:expr, $id:expr, $label:expr, $this:ident, $window:ident, $cx:ident, $body:block) => {
+                rows.push((
+                    $order,
+                    div()
+                        .id($id)
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .px_3()
+                        .py_1p5()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .text_sm()
+                        .text_color(text_menu())
+                        .hover(|style| style.bg(row_hover))
+                        .role(gpui_kit::Role::MenuItem)
+                        .aria_label($label)
+                        .child(Icon::new($icon).size(px(16.)))
+                        .child($label)
+                        .on_click($cx.listener(move |$this, _, $window, $cx| $body))
+                        .into_any_element(),
+                ));
+            };
+        }
         use gpui_kit::assets::IconName as Lucide;
         item!(
             10,
@@ -1159,6 +1205,97 @@ impl QuillApp {
                 cx.notify();
             }
         );
+        // tdesktop's `Filler`: View profile, and the "mark as read" entries
+        // for unread mentions, reactions and poll votes.
+        let extras = quill::chatlist_menu::row_menu_extras(quill::chatlist_menu::RowMenuFacts {
+            kind: &chat.kind,
+            is_saved_messages: self.session().is_some_and(|s| s.is_saved_messages(chat_id)),
+            unread_mentions: chat.unread_mention_count,
+            unread_reactions: chat.unread_reaction_count,
+            unread_poll_votes: chat.unread_poll_vote_count,
+            protected: self
+                .session()
+                .is_some_and(|s| s.chat_has_protected_content(chat_id)),
+            live: self.live.is_some(),
+        });
+        if let Some(label) = extras.view_profile {
+            item_window!(
+                35,
+                Lucide::CircleUser,
+                "chat-menu-profile",
+                label,
+                this,
+                window,
+                cx,
+                {
+                    this.chat_menu = None;
+                    if let Some(target) = this
+                        .session()
+                        .and_then(|s| s.info_panel_target_for_chat(chat_id))
+                    {
+                        this.open_info_panel_target(target, window, cx);
+                    }
+                    cx.notify();
+                }
+            );
+        }
+        if extras.read_mentions {
+            item!(
+                41,
+                Lucide::AtSign,
+                "chat-menu-read-mentions",
+                "Mark all mentions as read",
+                this,
+                cx,
+                {
+                    this.read_chat_unread_markers(
+                        chat_id,
+                        quill::state::UnreadJumpKind::Mention,
+                        cx,
+                    );
+                    this.chat_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        if extras.read_reactions {
+            item!(
+                42,
+                Lucide::Heart,
+                "chat-menu-read-reactions",
+                "Read all reactions",
+                this,
+                cx,
+                {
+                    this.read_chat_unread_markers(
+                        chat_id,
+                        quill::state::UnreadJumpKind::Reaction,
+                        cx,
+                    );
+                    this.chat_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        if extras.read_poll_votes {
+            item!(
+                43,
+                Lucide::ChartBar,
+                "chat-menu-read-poll-votes",
+                "Read all poll votes",
+                this,
+                cx,
+                {
+                    this.read_chat_unread_markers(
+                        chat_id,
+                        quill::state::UnreadJumpKind::PollVote,
+                        cx,
+                    );
+                    this.chat_menu = None;
+                    cx.notify();
+                }
+            );
+        }
         // Slice CL3: enter multi-select mode with this chat checked.
         item!(
             50,
@@ -1254,6 +1391,21 @@ impl QuillApp {
                         GroupConfirmAction::BlockUser { block: !blocked },
                         cx,
                     );
+                    this.chat_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        if extras.export {
+            item!(
+                85,
+                Lucide::Download,
+                "chat-menu-export",
+                "Export chat history",
+                this,
+                cx,
+                {
+                    this.start_chat_export(chat_id, cx);
                     this.chat_menu = None;
                     cx.notify();
                 }

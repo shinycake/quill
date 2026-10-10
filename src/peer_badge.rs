@@ -90,9 +90,31 @@ impl TitleBadge {
     }
 }
 
+/// Whether a group or channel row shows the active-video-chat badge on its
+/// avatar: tdesktop's `Data::ChannelHasActiveCall` (`CallNotEmpty`), i.e.
+/// the call exists and has participants. A scheduled or empty call shows
+/// nothing.
+pub fn shows_call_badge(video_chat: Option<&crate::state::VideoChatInfo>) -> bool {
+    video_chat.is_some_and(|call| call.group_call_id != 0 && call.has_participants)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TitleBadge, VerificationStatus, header_badges, title_badge};
+    use super::{TitleBadge, VerificationStatus, header_badges, shows_call_badge, title_badge};
+    use crate::state::VideoChatInfo;
+
+    #[test]
+    fn call_badge_needs_a_call_with_participants() {
+        let call = |id, has_participants| VideoChatInfo {
+            group_call_id: id,
+            has_participants,
+            default_participant_id: None,
+        };
+        assert!(!shows_call_badge(None));
+        assert!(!shows_call_badge(Some(&call(0, true))));
+        assert!(!shows_call_badge(Some(&call(5, false))));
+        assert!(shows_call_badge(Some(&call(5, true))));
+    }
 
     const NONE: VerificationStatus = VerificationStatus {
         is_verified: false,

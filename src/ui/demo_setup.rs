@@ -1204,6 +1204,7 @@ impl QuillApp {
             self.status_note = "screenshot demo — folder icon picker".into();
         }
         self.demo_setup_folder_followups(demo, window, cx);
+        self.demo_setup_chatlist_rows(demo, window, cx);
         // Parity slice: manage dialog over the same folder fixture.
         if matches!(demo, Some(ScreenshotDemo::ReadyFoldersManage)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -2144,6 +2145,7 @@ impl QuillApp {
                             duration_secs: 95,
                             audio: false,
                         },
+                        view_button: None,
                     })),
                 });
             }
@@ -2223,6 +2225,17 @@ impl QuillApp {
                 _ => super::premium_demo::apply_ready_gift_cards(session, sink, seq),
             }
             self.status_note = "screenshot demo \u{2014} Stars, gifts and Premium (fixture)".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyServiceMedia)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::service_media_demo::apply_ready_service_media(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                );
+            }
+            self.status_note = "screenshot demo — service and media cards".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyServiceMessages)) {
             if let Some(session) = self.demo_session.as_mut() {
