@@ -32,16 +32,27 @@ message was selected.
   helpers `toggle_id` and `prune_selected`, and the send-now and delete
   questions. The pinned-bar questions moved there as constants so a test
   pins their wording.
-- Keyboard: Cmd/Ctrl+Space, Up, Down, Shift+Up and Shift+Down
+- Keyboard: Cmd/Ctrl+Shift+A, Up, Down, Shift+Up and Shift+Down
   (`ToggleMessageSelection`, `SelectionFocus*`, `SelectionExtend*`), listed
   in the shortcuts dialog. Up and Down only act while a selection is open in
   the chat and no composer text would lose its caret keys; otherwise they
   propagate. The focused row gets a ring and the history scrolls to it.
-  Unlike tdesktop, arrow focus needs selection mode. Cmd/Ctrl+Space starts
-  it on the focused row, or on the newest message when none is focused.
-  Plain Space stays unbound because the composer and story viewer use it.
-  On macOS, Cmd+Space is Spotlight's default, so the chord works only after
-  that shortcut is changed.
+  Unlike tdesktop, arrow focus needs selection mode. Cmd/Ctrl+Shift+A
+  starts it on the focused row, or on the newest message when none is
+  focused. Plain Space stays unbound because the composer and story viewer
+  use it.
+- Why not Cmd/Ctrl+Space, tdesktop's chord: Cmd+Space is Spotlight on
+  macOS, Ctrl+Space toggles the input method for many Windows IME users,
+  and on Linux it is often the IBus or fcitx toggle. The replacement is
+  Cmd+Shift+A on macOS and Ctrl+Shift+A elsewhere. I checked it against
+  the default shortcut lists as I know them: macOS (system and Spotlight
+  shortcuts), Windows (Win and Ctrl+Alt+Del families, IME toggles such as
+  Ctrl+Space and Shift+Space), GNOME and KDE (window manager and desktop
+  defaults), and IBus and fcitx (Ctrl+Space, Super+Space, Ctrl+Shift
+  alone). None uses it. These were checked from documentation and memory,
+  not against a live install of each. No chord with Alt is used, because
+  Ctrl+Alt is AltGr on Windows. Nothing else in Quill or the gpui-kit
+  composer binds it. Finder and Chromium use it, but only inside those apps.
 - "Select up to this message" in the message menu while a selection is open.
 - Drag from a row when nothing is selected: a press that did not start on
   text, then a move onto another row, starts selection and gives the rows

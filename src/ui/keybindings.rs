@@ -952,7 +952,7 @@ fn message_rows() -> Vec<ShortcutRow> {
             DeleteSelection,
         ),
         row(
-            primary!("space"),
+            primary!("shift-a"),
             "Select the focused message",
             "Messages",
             ToggleMessageSelection,
@@ -1512,7 +1512,7 @@ mod tests {
             ("end".to_string(), "HistoryToBottom"),
             ("delete".to_string(), "DeleteSelection"),
             ("backspace".to_string(), "DeleteSelection"),
-            (primary("space"), "ToggleMessageSelection"),
+            (primary("shift-a"), "ToggleMessageSelection"),
             ("up".to_string(), "SelectionFocusOlder"),
             ("down".to_string(), "SelectionFocusNewer"),
             ("shift-up".to_string(), "SelectionExtendOlder"),
