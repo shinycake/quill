@@ -116,6 +116,7 @@ mod demo_setup;
 mod demo_stream;
 mod downloads;
 mod drafts;
+mod drop_zones;
 mod emoji_sets;
 mod entity_links;
 mod event_log;

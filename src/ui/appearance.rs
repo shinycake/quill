@@ -369,6 +369,7 @@ impl QuillApp {
                 body = body.child(this.appearance_bubble_section(cx));
                 body = body.child(this.appearance_chat_list_section(cx));
                 body = body.child(this.appearance_send_key_section(cx));
+                body = body.child(this.appearance_large_emoji_section(cx));
                 // Batch 7: Show Translate Button / Translate Entire Chats /
                 // Do Not Translate.
                 body = body.child(this.translate_settings_section(cx));
@@ -1227,6 +1228,25 @@ impl QuillApp {
                 .into_any_element(),
         };
         self.appearance_section(cx, "Open Telegram links with Quill", &hint, control)
+    }
+
+    /// tdesktop Chat settings "Large emoji": one to three emoji alone in a
+    /// message show as big glyphs (the history renderer reads the same
+    /// `MediaPrefs::big_emoji`).
+    fn appearance_large_emoji_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let on = self.session().is_none_or(|s| s.media_prefs.big_emoji);
+        let control = Switch::new("appearance-large-emoji")
+            .checked(on)
+            .accessibility_label("Large emoji")
+            .on_click(cx.listener(|this, &on, _, cx| {
+                this.set_media_pref(|prefs| prefs.big_emoji = on, cx)
+            }));
+        self.appearance_section(
+            cx,
+            "Large emoji",
+            "Show a message of one to three emoji as big glyphs.",
+            control.into_any_element(),
+        )
     }
 
     fn appearance_send_key_section(&self, cx: &mut Context<Self>) -> AnyElement {

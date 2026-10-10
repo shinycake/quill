@@ -57,6 +57,9 @@ actions!(
         ComposerEditLink,
         /// Cmd/Ctrl+Shift+V: paste the clipboard text as plain text.
         ComposerPastePlain,
+        /// "Code Language…" in the composer's Formatting menu: set the
+        /// language of the fenced code block under the caret.
+        ComposerEditCodeLanguage,
         /// Parity slice 5: step the fullscreen media viewer to the
         /// previous / next item (left/right arrows, viewer-open only).
         ViewerPrev,

@@ -411,6 +411,8 @@ pub struct QuillApp {
     pub(super) motion: super::motion::MotionState,
     /// The composer's link dialog (Cmd/Ctrl+K on a selection).
     pub(super) composer_link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
+    /// The "Code Language" box for the fenced block under the caret.
+    pub(super) composer_code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
     /// Cross-fade timeline of the round Send / Record / Save button.
     pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
     /// Cached child views (chat list, conversation) the frame clock can
@@ -622,6 +624,12 @@ pub struct QuillApp {
     pub(super) record_locked: bool,
     /// MED2: the record bar is showing the discard-confirmation row.
     pub(super) record_discard_confirm: bool,
+    /// Files being dragged over the conversation, and what they hold
+    /// (`drop_zones`).
+    pub(super) drop_paths: Vec<std::path::PathBuf>,
+    pub(super) drop_state: Option<quill::drop_modes::DragState>,
+    /// A demo's fixed drop-zone state (no real drag in a screenshot).
+    pub(super) drop_preview: Option<quill::drop_modes::DragState>,
     pub(super) voice_tick: bool,
     /// A video message reached its time limit: send it next frame.
     pub(super) recording_auto_send: bool,

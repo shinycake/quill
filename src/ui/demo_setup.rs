@@ -843,6 +843,12 @@ impl QuillApp {
             self.media_panel.tab = super::media_panel::PanelTab::Emoji;
             self.status_note = "screenshot demo — emoji panel".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyDropZones)) {
+            self.drop_preview = Some(quill::drop_modes::DragState::PhotoFiles);
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyDropFolder)) {
+            self.drop_preview = Some(quill::drop_modes::DragState::Folder);
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyVoice)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -2079,6 +2085,20 @@ impl QuillApp {
         // detected-URL chip + preview controls render; inject a fake
         // prefetched preview (no live TDLib in demo mode) with large
         // media on offer so the size toggle renders too.
+        if matches!(demo, Some(ScreenshotDemo::ReadyCodeLanguage)) {
+            let text = "Here is the fix:\n```\nfn main() {\n    println!(\"hi\");\n}\n```";
+            self.composer.update(cx, |input, cx| {
+                input.set_value(text, window, cx);
+                input.set_selected_range(40..40, cx);
+            });
+            self.open_code_language_dialog(window, cx);
+            if let Some(dialog) = self.composer_code_language.as_ref() {
+                dialog
+                    .input_for_demo()
+                    .update(cx, |input, cx| input.set_value("rust", window, cx));
+            }
+            self.status_note = "screenshot demo — code language".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyComposerPreview)) {
             self.composer.update(cx, |input, cx| {
                 input.set_value("see https://example.com/story", window, cx);
