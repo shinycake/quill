@@ -37,6 +37,11 @@ impl Session {
             && let Some(chat_id) = p.chat_id
         {
             self.adopt_supergroup_status_for_chat(chat_id);
+            // Not a member (or no access): there is no personal
+            // restriction to find, and the probe must not repeat.
+            if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                chat.my_rights_fetched = true;
+            }
         }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,

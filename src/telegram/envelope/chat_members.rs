@@ -64,6 +64,18 @@ pub struct ParsedChatMember {
     /// non-editable admins (`ProfileController` `YouCantBanX`); the
     /// member dialog mirrors that gate.
     pub can_be_edited: bool,
+    /// `chatMemberStatusRestricted`: the member's own rights and when the
+    /// restriction ends. `None` for every other status.
+    pub restriction: Option<MemberRestriction>,
+}
+
+/// A member's personal restriction (`chatMemberStatusRestricted`, TDLib
+/// 1.8.67): `restricted_until_date` (0 means forever) and the rights the
+/// member keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemberRestriction {
+    pub until_date: i32,
+    pub permissions: ChatPermissions,
 }
 
 /// Phase D3b: `chatAdministratorRights` (TDLib 1.8.67,
@@ -470,6 +482,26 @@ pub(crate) fn parse_chat_member(value: Option<&Value>) -> Option<ParsedChatMembe
             .and_then(|status| status.get("can_be_edited"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        restriction: parse_member_restriction(value.get("status")),
+    })
+}
+
+/// `chatMemberStatusRestricted` (schema 1.8.67: `is_member:Bool
+/// restricted_until_date:int32 permissions:chatPermissions`); `None` for
+/// any other status. A restricted status without a rights block denies
+/// everything, as TDLib does for a missing block.
+pub(crate) fn parse_member_restriction(value: Option<&Value>) -> Option<MemberRestriction> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusRestricted") {
+        return None;
+    }
+    Some(MemberRestriction {
+        until_date: value
+            .get("restricted_until_date")
+            .and_then(Value::as_i64)
+            .map(|date| date.clamp(0, i64::from(i32::MAX)) as i32)
+            .unwrap_or(0),
+        permissions: parse_chat_permissions(value.get("permissions")).unwrap_or_default(),
     })
 }
 

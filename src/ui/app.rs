@@ -672,6 +672,10 @@ pub struct QuillApp {
     pub(super) record_locked: bool,
     /// MED2: the record bar is showing the discard-confirmation row.
     pub(super) record_discard_confirm: bool,
+    /// The paused recording is being played back (position of the preview).
+    pub(super) record_preview: Option<PlaybackClock>,
+    /// "Play once": the voice message goes out as a one-time message.
+    pub(super) record_once: bool,
     /// Files being dragged over the conversation, and what they hold
     /// (`drop_zones`).
     pub(super) drop_paths: Vec<std::path::PathBuf>,

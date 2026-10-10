@@ -207,6 +207,12 @@ pub enum ScreenshotDemo {
     ReadyDropZones,
     /// Composer core: the "Code Language" box over a fenced block.
     ReadyCodeLanguage,
+    /// Composer leftovers: a group that restricts the viewer replaces the
+    /// composer with the reason (`QUILL_DEMO_RESTRICTION`).
+    ReadyRestrictedComposer,
+    /// Composer leftovers: a paused voice recording with its preview and
+    /// the Play once switch.
+    ReadyVoicePause,
     /// Composer core: a dragged folder offers its files or one archive.
     ReadyDropFolder,
     /// MED4: embedded-player + album `linkPreview` cards in bubbles
