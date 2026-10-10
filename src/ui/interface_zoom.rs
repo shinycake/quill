@@ -36,17 +36,18 @@ use std::sync::Arc;
 
 use futures_channel::oneshot;
 use gpui_kit::{
-    A11yCallbacks, Action, ActivityGuard, AnyWindowHandle, AppLifecyclePhase, BackgroundExecutor,
-    Bounds, Capslock, ClipboardItem, ClipboardReadError, CursorStyle, Decorations,
-    DispatchEventResult, ExternalDragPayload, FileDropEvent, ForegroundExecutor, GpuSpecs, Keymap,
-    Menu, MenuItem, Modifiers, OwnedMenu, PathPromptOptions, Pixels, Platform, PlatformAtlas,
-    PlatformDisplay, PlatformGestures, PlatformInput, PlatformInputHandler, PlatformKeyboardLayout,
-    PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, Point, PromptButton, PromptLevel,
-    RequestFrameOptions, ResizeEdge, Scene, ScreenCaptureSource, ScrollDelta, Size,
-    SystemNotification, SystemNotificationResponse, SystemWindowTab, Task, TextInputConfiguration,
+    A11yCallbacks, Action, ActivationPolicy, ActivityGuard, AnyWindowHandle, AppLifecyclePhase,
+    BackgroundExecutor, Bounds, Capslock, ClipboardItem, ClipboardReadError, CursorStyle,
+    Decorations, DispatchEventResult, ExternalDragPayload, FileDropEvent, ForegroundExecutor,
+    GpuSpecs, GraphicalEnvironment, Keymap, Menu, MenuItem, Modifiers, OwnedMenu,
+    PathPromptOptions, Pixels, Platform, PlatformAtlas, PlatformDisplay, PlatformGestures,
+    PlatformInput, PlatformInputHandler, PlatformKeyboardLayout, PlatformKeyboardMapper,
+    PlatformTextSystem, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
+    ResizeEdge, Scene, ScreenCaptureSource, ScrollDelta, Size, SystemNotification,
+    SystemNotificationResponse, SystemWindowTab, Task, TextInputConfiguration,
     TextInputStateChange, ThermalState, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
     WindowButtonLayout, WindowControlArea, WindowControls, WindowDecorations, WindowInsets,
-    WindowParams, WindowVisibility, px,
+    WindowParams, WindowVisibility, WindowingRequest, px,
 };
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
@@ -368,8 +369,17 @@ impl Platform for ZoomPlatform {
     fn quit(&self) {
         self.inner.quit()
     }
+    fn set_initial_windowing(&self, request: WindowingRequest) {
+        self.inner.set_initial_windowing(request)
+    }
+    fn request_windowing(&self, request: WindowingRequest) -> Task<AnyResult<()>> {
+        self.inner.request_windowing(request)
+    }
     fn restart(&self, binary_path: Option<PathBuf>, arguments: Vec<OsString>) {
         self.inner.restart(binary_path, arguments)
+    }
+    fn set_activation_policy(&self, policy: ActivationPolicy) {
+        self.inner.set_activation_policy(policy)
     }
     fn activate(&self, ignoring_other_apps: bool) {
         self.inner.activate(ignoring_other_apps)
@@ -548,6 +558,9 @@ impl Platform for ZoomPlatform {
     }
     fn compositor_name(&self) -> &'static str {
         self.inner.compositor_name()
+    }
+    fn graphical_environment(&self) -> Option<GraphicalEnvironment> {
+        self.inner.graphical_environment()
     }
     fn app_path(&self) -> AnyResult<PathBuf> {
         self.inner.app_path()
