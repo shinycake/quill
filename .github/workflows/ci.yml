@@ -24,6 +24,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: app name copy
         run: bash scripts/check-app-name.sh
+      # docs/contributing/structure.md: file size limit and shared files.
+      - name: file size
+        run: bash scripts/check-file-size.sh
+      - name: hotspots
+        if: github.event_name == 'pull_request'
+        run: bash scripts/check-hotspots.sh ${{ github.event.pull_request.base.sha }}
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy (core)

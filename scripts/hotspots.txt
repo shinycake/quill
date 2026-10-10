@@ -1,0 +1,37 @@
+# Shared files that most feature PRs used to edit, and the change a normal
+# PR may still make to each. Checked by scripts/check-hotspots.sh; see
+# docs/contributing/structure.md for where the code goes instead.
+#
+# <path> | <rule> | <what a normal PR may change>
+# Rules: none, mod-lines, max:N (added + removed lines), re:<regex>.
+
+# Module lists: one line per new or removed module.
+src/lib.rs | mod-lines | add or remove a `pub mod` line for a new core module
+src/ui/mod.rs | mod-lines | add or remove a `mod` line for a new UI module
+src/ui/demos/mod.rs | mod-lines | add or remove a `mod` line (new demos register in their own module)
+src/connect/mod.rs | mod-lines | add or remove a `mod` line
+src/state/mod.rs | mod-lines | add or remove a `mod` line
+src/telegram/mod.rs | mod-lines | add or remove a `mod` line
+src/telegram/envelope/mod.rs | mod-lines | add or remove a `mod` line
+src/telegram/requests/mod.rs | mod-lines | add or remove a `mod` line
+
+# Startup and app shell.
+src/main.rs | none | nothing: demos, dialogs and state register in their own modules
+src/ui/app.rs | max:3 | one `QuillApp` field (doc line and field) for a new ui/<feature>_state.rs struct
+src/ui/app_demo.rs | max:2 | one line in `new_with_demo` that builds a new feature state struct
+src/ui/shell.rs | none | nothing: dialogs register with `register_dialogs!` in their own module
+src/ui/screenshot_demo.rs | none | nothing: demos register with `register_demos!` in their own module
+
+# Central enums and dispatch (refactor 4). Requests and updates go in
+# src/state/domains/<domain>/ and src/telegram/envelope/domains/<domain>/.
+src/state/request_purpose.rs | none | nothing: add the variant to src/state/domains/<domain>/purpose.rs
+src/state/domains/mod.rs | none | nothing (only a new domain changes it)
+src/state/session_apply.rs | none | nothing: handle the payload in src/state/domains/<domain>/apply.rs
+src/state/session_apply_error.rs | none | nothing: handle the error in src/state/domains/<domain>/error.rs
+src/telegram/envelope/envelope_types.rs | none | nothing: add the variant to the domain's <Domain>Payload
+src/telegram/envelope/payload.rs | none | nothing: parse the type in envelope/domains/<domain>/parse.rs
+src/telegram/envelope/domains/mod.rs | none | nothing (only a new domain changes it)
+
+# Session struct: still one struct for all domains.
+src/state/session.rs | max:4 | one or two `Session` fields; put more in a domain struct
+src/state/session_new.rs | max:4 | the initial values for those fields
