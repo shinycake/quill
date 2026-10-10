@@ -50,6 +50,9 @@ pub struct ActiveCall {
     /// so a late PLAYBACK+SCREEN frame arriving after the drain
     /// cannot repopulate a stale tile.
     pub remote_screen: RemoteVideoState,
+    /// The peer's microphone is off (tdesktop `lng_call_microphone_off`),
+    /// from the engine's MediaState signaling; `false` until it says so.
+    pub remote_audio_muted: bool,
 }
 
 /// Phase C1: summary of the most recently ended call, driving the

@@ -4,6 +4,8 @@ mod account_hygiene;
 mod auth;
 mod backgrounds;
 mod bots;
+mod call_audio;
+pub use call_audio::{CallAudio, LevelSource, tap_wanted};
 mod calls;
 mod chat_list;
 mod composer;

@@ -5,7 +5,7 @@ src/ui/demos/privacy_media.rs|Telegram Desktop
 # Detecting another app registered as the tg: link handler.
 src/link_handler.rs|Telegram Desktop
 # Names the official app's theme file format (Quill does not use it).
-src/deep_link_types.rs|Telegram Desktop theme files
+src/deep_link_types/mod.rs|Telegram Desktop theme files
 # Fixture JSON imitating a server session list entry.
 src/telegram/envelope/sessions_tests.rs|Telegram Desktop
 src/state/tests/sessions.rs|Telegram Desktop

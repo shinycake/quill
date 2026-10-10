@@ -12,33 +12,32 @@
 //! so every existing action and helper works from here.
 
 use super::app::QuillApp;
-use super::chat_row::chat_avatar;
 use super::format_helpers::format_starts_in;
 use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::state::ActiveGroupCall;
-use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
+
 use std::time::Duration;
 
 /// lib_ui `colors.palette`.
 const BG: u32 = 0x1a2026;
-const MEMBERS_BG: u32 = 0x2c333d;
-const MEMBERS_BG_OVER: u32 = 0x323a45;
+pub(super) const MEMBERS_BG: u32 = 0x2c333d;
+pub(super) const MEMBERS_BG_OVER: u32 = 0x323a45;
 const ACTIVE_FG: u32 = 0x4db8ff;
-const MEMBER_ACTIVE: u32 = 0x8deb90;
-const MEMBER_INACTIVE_ICON: u32 = 0x84888f;
-const MEMBER_INACTIVE_STATUS: u32 = 0x61c0ff;
-const MEMBER_MUTED_ICON: u32 = 0xed7372;
-const MEMBER_NOT_JOINED: u32 = 0x91979e;
+pub(super) const MEMBER_ACTIVE: u32 = 0x8deb90;
+pub(super) const MEMBER_INACTIVE_ICON: u32 = 0x84888f;
+pub(super) const MEMBER_INACTIVE_STATUS: u32 = 0x61c0ff;
+pub(super) const MEMBER_MUTED_ICON: u32 = 0xed7372;
+pub(super) const MEMBER_NOT_JOINED: u32 = 0x91979e;
 const LEAVE_BG: u32 = 0xf75c5c7f;
 
 /// A member menu entry's effect.
-type MemberAction = Box<dyn Fn(&mut QuillApp, &mut Context<QuillApp>)>;
+pub(super) type MemberAction = Box<dyn Fn(&mut QuillApp, &mut Context<QuillApp>)>;
 
 /// What the big button says and does.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -123,19 +122,6 @@ fn mute_state(call: &ActiveGroupCall) -> MuteState {
     }
 }
 
-/// A member's status line and its color (tdesktop's member row).
-fn member_status(p: &ParsedGroupCallParticipant) -> (&'static str, u32) {
-    if p.is_speaking {
-        ("speaking", MEMBER_ACTIVE)
-    } else if p.is_hand_raised {
-        ("wants to speak", MEMBER_INACTIVE_STATUS)
-    } else if p.is_muted_for_current_user {
-        ("muted for you", MEMBER_MUTED_ICON)
-    } else {
-        ("listening", MEMBER_INACTIVE_STATUS)
-    }
-}
-
 impl QuillApp {
     /// The group call window's content, built with the app's context.
     pub(super) fn group_call_panel_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -143,6 +129,22 @@ impl QuillApp {
             return div().size_full().bg(rgb(BG)).into_any_element();
         };
         let state = mute_state(&call);
+        // Your own microphone: the halo follows the level while live.
+        let (self_level, self_speaking) = self.group_call_self_level();
+        let level_reach = (state == MuteState::Live).then(|| {
+            let now = self.group_call_now_ms();
+            if (self_level - self.group_call.level_seen).abs() > f32::EPSILON {
+                self.group_call.level_seen = self_level;
+                self.group_call
+                    .level_anim
+                    .retarget(self_level.clamp(0.0, 1.0), now);
+            }
+            let value = self.group_call.level_anim.value(now);
+            if self.group_call.level_anim.is_running(now) || value > 0.0 {
+                self.request_animation_tick(30, cx);
+            }
+            quill::calls::audio_level::halo_reach(value)
+        });
         let title = if call.title.is_empty() {
             if call.is_video_chat {
                 "Video Chat"
@@ -200,7 +202,7 @@ impl QuillApp {
         let rows: Vec<AnyElement> = call
             .participants
             .iter()
-            .map(|participant| self.group_member_row(&call, participant, cx))
+            .map(|participant| self.group_member_row(&call, participant, self_speaking, cx))
             .collect();
 
         let members = div()
@@ -445,194 +447,9 @@ impl QuillApp {
             .children(stream)
             .children(self.group_call_join_as_row(&call, cx))
             .child(members)
-            .child(self.group_call_controls(&call, state, cx))
+            .child(self.group_call_controls(&call, state, level_reach, cx))
             .children(invite)
             .children(rename)
-            .into_any_element()
-    }
-
-    /// One member row: avatar, name, status, mic; a click opens what you
-    /// can do with them.
-    fn group_member_row(
-        &mut self,
-        call: &ActiveGroupCall,
-        participant: &ParsedGroupCallParticipant,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let name = self.group_call_participant_name(&participant.participant_id);
-        let photo = match &participant.participant_id {
-            MessageSender::User { user_id } => {
-                self.session().and_then(|s| s.user_photo_path(*user_id))
-            }
-            MessageSender::Chat { chat_id } => self
-                .session()
-                .and_then(|s| s.chat_photo_path(quill::ids::ChatId(*chat_id))),
-        }
-        .and_then(|path| {
-            quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
-        });
-        let (status, status_color) = member_status(participant);
-        let force_muted = participant.is_muted_for_all_users && !participant.can_unmute_self;
-        let (mic, mic_color) = if participant.is_hand_raised {
-            (IconName::Hand, MEMBER_INACTIVE_STATUS)
-        } else if force_muted || participant.is_muted_for_current_user {
-            (IconName::MicOff, MEMBER_MUTED_ICON)
-        } else if participant.is_muted_for_all_users {
-            (IconName::MicOff, MEMBER_INACTIVE_ICON)
-        } else if participant.is_speaking {
-            (IconName::Mic, MEMBER_ACTIVE)
-        } else {
-            (IconName::Mic, MEMBER_INACTIVE_ICON)
-        };
-        let me = participant.is_current_user;
-        let sender = participant.participant_id;
-        let user_id = match sender {
-            MessageSender::User { user_id } => Some(user_id),
-            MessageSender::Chat { .. } => None,
-        };
-        let p = participant.clone();
-        let owned = call.is_owned;
-        let row_id = SharedString::from(format!("group-member-{:?}", participant.participant_id));
-        let owner = cx.entity().downgrade();
-        let row = div()
-            .id(row_id.clone())
-            .h(px(56.))
-            .px(px(14.))
-            .flex()
-            .items_center()
-            .gap(px(14.))
-            .hover(|style| style.bg(rgb(MEMBERS_BG_OVER)))
-            .child(chat_avatar(&name, photo.as_deref(), 40.))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .text_size(px(14.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .truncate()
-                            .child(if me {
-                                format!("{name} (you)")
-                            } else {
-                                name.clone()
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(rgb(status_color))
-                            .child(status),
-                    ),
-            )
-            .when(p.video_enabled || p.screen_sharing_enabled, |this| {
-                this.child(
-                    Icon::new(if p.screen_sharing_enabled {
-                        IconName::ScreenShare
-                    } else {
-                        IconName::Video
-                    })
-                    .with_size(px(16.))
-                    .text_color(rgb(MEMBER_NOT_JOINED)),
-                )
-            })
-            .child(Icon::new(mic).with_size(px(20.)).text_color(rgb(mic_color)));
-        let build = move |mut menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
-            let item = |label: String, action: MemberAction| {
-                let owner = owner.clone();
-                PopupMenuItem::new(label).on_click(move |_, _, cx| {
-                    let _ = owner.update(cx, |this, cx| action(this, cx));
-                })
-            };
-            if me {
-                if p.is_hand_raised {
-                    menu = menu.item(item(
-                        "Lower Hand".into(),
-                        Box::new(|this, cx| this.toggle_group_call_self_hand(false, cx)),
-                    ));
-                } else if force_muted {
-                    menu = menu.item(item(
-                        "Raise Hand".into(),
-                        Box::new(|this, cx| this.toggle_group_call_self_hand(true, cx)),
-                    ));
-                }
-                return menu;
-            }
-            if p.is_hand_raised && p.can_be_unmuted_for_all_users {
-                let allow = sender;
-                let lower = sender;
-                menu = menu
-                    .item(item(
-                        "Allow to Speak".into(),
-                        Box::new(move |this, cx| {
-                            this.toggle_group_call_participant_muted(allow, false, cx)
-                        }),
-                    ))
-                    .item(item(
-                        "Lower Hand".into(),
-                        Box::new(move |this, cx| {
-                            this.toggle_group_call_participant_hand(lower, false, cx)
-                        }),
-                    ));
-            } else if p.can_be_muted_for_all_users || p.can_be_muted_for_current_user {
-                let sender = sender;
-                let label = if p.can_be_muted_for_all_users {
-                    "Mute"
-                } else {
-                    "Mute for Me"
-                };
-                menu = menu.item(item(
-                    label.into(),
-                    Box::new(move |this, cx| {
-                        this.toggle_group_call_participant_muted(sender, true, cx)
-                    }),
-                ));
-            } else if p.can_be_unmuted_for_all_users || p.can_be_unmuted_for_current_user {
-                let sender = sender;
-                let label = if p.can_be_unmuted_for_all_users {
-                    "Allow to Speak"
-                } else {
-                    "Unmute for Me"
-                };
-                menu = menu.item(item(
-                    label.into(),
-                    Box::new(move |this, cx| {
-                        this.toggle_group_call_participant_muted(sender, false, cx)
-                    }),
-                ));
-            }
-            let volume = p.volume_level / 100;
-            for (label, delta) in [
-                (format!("Louder ({volume}%)"), 2000),
-                (format!("Quieter ({volume}%)"), -2000),
-            ] {
-                let sender = sender;
-                menu = menu.item(item(
-                    label,
-                    Box::new(move |this, cx| {
-                        this.adjust_group_call_participant_volume(sender, delta, cx)
-                    }),
-                ));
-            }
-            if let Some(user_id) = user_id.filter(|_| owned) {
-                menu = menu.separator().item(item(
-                    "Remove".into(),
-                    Box::new(move |this, cx| this.ban_group_call_participant(user_id, cx)),
-                ));
-            }
-            menu
-        };
-        row.context_menu(build.clone())
-            .child(
-                Button::new(SharedString::from(format!("{row_id}-more")))
-                    .icon(IconName::EllipsisVertical)
-                    .ghost()
-                    .xsmall()
-                    .text_color(rgb(MEMBER_NOT_JOINED))
-                    .dropdown_menu(build),
-            )
             .into_any_element()
     }
 
@@ -721,6 +538,7 @@ impl QuillApp {
         &self,
         call: &ActiveGroupCall,
         state: MuteState,
+        level_reach: Option<f32>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let (from, to) = state.colors();
@@ -806,6 +624,16 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_center()
+                    // Your voice: a ring that grows with the level
+                    // (tdesktop's blobs follow `setLevel`).
+                    .children(level_reach.map(|reach| {
+                        div()
+                            .absolute()
+                            .inset(px(-reach))
+                            .rounded_full()
+                            .bg(rgb(to))
+                            .opacity(0.22)
+                    }))
                     // The breathing halo (tdesktop's blobs).
                     .child({
                         let halo = div().absolute().inset_0().rounded_full().bg(rgb(to));
@@ -1172,7 +1000,8 @@ impl Render for GroupCallPanel {
 
 #[cfg(test)]
 mod tests {
-    use super::{MuteState, member_status, mute_state};
+    use super::{MuteState, mute_state};
+    use crate::ui::group_call_members::member_status;
     use quill::state::ActiveGroupCall;
     use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
 
@@ -1221,10 +1050,10 @@ mod tests {
     #[test]
     fn member_statuses_read_like_tdesktop() {
         let mut p = me(false, true, false);
-        assert_eq!(member_status(&p).0, "listening");
+        assert_eq!(member_status(&p, p.is_speaking).0, "listening");
         p.is_hand_raised = true;
-        assert_eq!(member_status(&p).0, "wants to speak");
+        assert_eq!(member_status(&p, p.is_speaking).0, "wants to speak");
         p.is_speaking = true;
-        assert_eq!(member_status(&p).0, "speaking");
+        assert_eq!(member_status(&p, p.is_speaking).0, "speaking");
     }
 }
