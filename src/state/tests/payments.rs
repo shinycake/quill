@@ -164,7 +164,7 @@ fn star_subscriptions_apply_only_to_own_request() {
     let seq = AtomicU64::new(0);
     let subs_json = |extra: &str| {
         format!(
-            r#"{{"@type":"starSubscriptions","@extra":"{extra}","star_amount":{{"@type":"starAmount","amount":500,"nanostar_amount":0}},"required_star_count":0,"next_offset":"","subscriptions":[{{"@type":"starSubscription","id":"sub1","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{{"@type":"starSubscriptionPricing","period":2592000,"star_count":100}},"type":{{"@type":"starSubscriptionTypeChannel","invite_link":null}}}}]}}"#
+            r#"{{"@type":"starSubscriptions","@extra":"{extra}","star_amount":{{"@type":"starAmount","star_count":500,"nanostar_count":0}},"required_star_count":0,"next_offset":"","subscriptions":[{{"@type":"starSubscription","id":"sub1","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{{"@type":"starSubscriptionPricing","period":2592000,"star_count":100}},"type":{{"@type":"starSubscriptionTypeChannel","invite_link":null}}}}]}}"#
         )
     };
     apply_json(&mut session, &seq, &sink, &subs_json("999"));
@@ -188,7 +188,7 @@ fn star_subscriptions_append_page_merges() {
     let seq = AtomicU64::new(0);
     let subs_json = |extra: &str, id: &str, next: &str| {
         format!(
-            r#"{{"@type":"starSubscriptions","@extra":"{extra}","star_amount":{{"@type":"starAmount","amount":500,"nanostar_amount":0}},"required_star_count":0,"next_offset":"{next}","subscriptions":[{{"@type":"starSubscription","id":"{id}","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{{"@type":"starSubscriptionPricing","period":2592000,"star_count":100}},"type":{{"@type":"starSubscriptionTypeChannel","invite_link":null}}}}]}}"#
+            r#"{{"@type":"starSubscriptions","@extra":"{extra}","star_amount":{{"@type":"starAmount","star_count":500,"nanostar_count":0}},"required_star_count":0,"next_offset":"{next}","subscriptions":[{{"@type":"starSubscription","id":"{id}","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{{"@type":"starSubscriptionPricing","period":2592000,"star_count":100}},"type":{{"@type":"starSubscriptionTypeChannel","invite_link":null}}}}]}}"#
         )
     };
     let extra = session.request(RequestPurpose::GetStarSubscriptions { append: false }, None);
