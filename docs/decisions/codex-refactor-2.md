@@ -32,8 +32,8 @@ touched the same four places, so they always conflicted.
   0.3, an optional dependency behind the `ui` feature (MIT OR Apache-2.0, and
   already in the lockfile through GPUI). One `macro_rules!` expands to one
   `::inventory::submit!` per spec, and each spec is built with a `const fn`.
-  The `Cargo.toml` hunk is the same as #621's, so the two branches merge
-  cleanly.
+  #621 added the dependency, so this PR only extends the `Cargo.toml` comment
+  to cover dialogs too.
 - **Priorities are numbers with gaps.** Today's `KINDS` order became 100, 200,
   ..., 7300. Lower wins. A new dialog takes an unused number between its
   neighbours, so nothing else gets renumbered.

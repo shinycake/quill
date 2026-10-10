@@ -551,7 +551,7 @@ impl QuillApp {
     }
 }
 
-/// Screenshot demo fixture (`ScreenshotDemo::ReadyInlineResults`): like
+/// Screenshot demo fixture (`ready-inline-results`): like
 /// `apply_ready_bot_chat`, but the Demo Bot is an inline bot (`@gif`,
 /// `is_inline: true`) with an injected resolved slot and a loaded
 /// results page, so the inline-results dropdown renders open above the

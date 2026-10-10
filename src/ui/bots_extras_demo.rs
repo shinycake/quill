@@ -3,7 +3,7 @@
 //! through the real reducers; no live Telegram. English-only text.
 
 use super::app::QuillApp;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
@@ -88,18 +88,21 @@ fn apply_add_bot(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64)
     );
 }
 
+register_demos![
+    // Bot extras demo (injected, no live Telegram): fast buttons mode,
+    // adding a bot to a group or channel, verification badges, sharing
+    // a game and owned bots; the mode comes from `QUILL_DEMO_BOTEXTRAS`.
+    DemoSpec::chats(
+        "ready-bot-extras",
+        "screenshot demo — bot extras (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_setup_bot_extras),
+];
+
 impl QuillApp {
     /// `QUILL_DEMO_BOTEXTRAS=fast|add|add-rights|add-member|share-game` (default
     /// `fast`).
-    pub(super) fn demo_setup_bot_extras(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if demo != Some(ScreenshotDemo::ReadyBotExtras) {
-            return;
-        }
+    fn demo_setup_bot_extras(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         quill::fast_buttons::set_persistence(false);
         let mode = std::env::var("QUILL_DEMO_BOTEXTRAS").unwrap_or_else(|_| "fast".into());
         if let Some(session) = self.demo_session.as_mut() {

@@ -1,5 +1,0 @@
-# Reply in another chat, reply options, emoji pack footer, saved tag menu (already in place, verified)
-parity:menu-reply-another-chat
-parity:menu-reply-options
-parity:menu-emoji-pack-footer
-parity:menu-saved-tag-menu

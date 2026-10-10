@@ -14,7 +14,7 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:inventory", "dep:gpui-base", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:zbus", "dep:objc2-media-player", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus", "dep:resvg", "dep:futures-channel"]
+ui = ["dep:gpui-kit", "dep:gpui-base", "dep:inventory", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:zbus", "dep:objc2-media-player", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus", "dep:resvg", "dep:futures-channel"]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
@@ -58,8 +58,9 @@ smallvec = { version = "1", optional = true }
 # Interface scale (docs/decisions/codex-interface-scale-full.md): the platform
 # decorator names GPUI's oneshot receiver type. Already in the lockfile via GPUI.
 futures-channel = { version = "0.3", optional = true }
-# Screenshot demos register themselves next to their setup code
-# (docs/decisions/codex-refactor-1.md). Already in the lockfile via GPUI.
+# Screenshot demos and kit dialogs register themselves next to their code
+# (docs/decisions/codex-refactor-1.md, codex-refactor-2.md). Already in the
+# lockfile via GPUI.
 inventory = { version = "0.3", optional = true }
 thiserror = "2"
 unicode-segmentation = "1.13"
