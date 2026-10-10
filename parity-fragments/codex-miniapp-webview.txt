@@ -1,5 +1,0 @@
-# Mini apps in a helper web view window (docs/decisions/codex-miniapp-webview.md)
-parity:bots-miniapp-inline
-parity:bots-allow-write
-parity:profile-bot-open-app
-parity:bots-apps-tab
