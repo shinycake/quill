@@ -363,6 +363,7 @@ pub(super) fn demo_seed_for(
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyJoinBar
+        | ScreenshotDemo::ReadyChatHeader
         | ScreenshotDemo::ReadyTopBars
         | ScreenshotDemo::ReadySearchPreviews
         | ScreenshotDemo::ReadyMultilineRows => (
@@ -2231,6 +2232,8 @@ impl QuillApp {
             animation_sound: Default::default(),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             window_active: std::cell::Cell::new(true),
+            window_title_shown: Default::default(),
+            autoscroll: Default::default(),
             presence: Default::default(),
             login_prevented: None,
             terms_step: Default::default(),

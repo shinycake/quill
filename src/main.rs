@@ -688,6 +688,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-channels-admin", ReadyChannelsAdmin),
         ("ready-chat-avatars", ReadyChatAvatars),
         ("ready-chat-badges", ReadyChatBadges),
+        ("ready-chat-header", ReadyChatHeader),
         ("ready-chat-list", ReadyChatListMenu),
         ("ready-chat-list-2", ReadyChatList),
         ("ready-chat-list-3", ReadyChatList3),
@@ -1099,6 +1100,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyStoriesCollapsed => ".quill-ready-ready-stories-collapsed",
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
+        ScreenshotDemo::ReadyChatHeader => ".quill-ready-ready-chat-header",
         ScreenshotDemo::ReadyChatRows => ".quill-ready-ready-chat-rows",
         ScreenshotDemo::ReadyJoinBar => ".quill-ready-ready-join-bar",
         ScreenshotDemo::ReadyTopBars => ".quill-ready-ready-top-bars",
@@ -1428,6 +1430,61 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 cx.background_executor()
                                     .timer(Duration::from_millis(ms))
                                     .await;
+                            }
+                            continue;
+                        }
+                        // `mid:x,y` clicks the middle button (press, short
+                        // pause, release), to start middle-click autoscroll.
+                        if let Some(at) = point.strip_prefix("mid:") {
+                            if let Some((x, y)) = at.split_once(',')
+                                && let (Ok(x), Ok(y)) =
+                                    (x.trim().parse::<f32>(), y.trim().parse::<f32>())
+                            {
+                                use gpui_kit::gpui::{
+                                    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+                                    MouseUpEvent, PlatformInput, point, px,
+                                };
+                                let position = point(px(x), px(y));
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        window.dispatch_event(
+                                            PlatformInput::MouseMove(MouseMoveEvent {
+                                                position,
+                                                pressed_button: None,
+                                                modifiers: Modifiers::default(),
+                                            }),
+                                            cx,
+                                        );
+                                        window.dispatch_event(
+                                            PlatformInput::MouseDown(MouseDownEvent {
+                                                button: MouseButton::Middle,
+                                                position,
+                                                modifiers: Modifiers::default(),
+                                                click_count: 1,
+                                                first_mouse: false,
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
+                                cx.background_executor()
+                                    .timer(Duration::from_millis(60))
+                                    .await;
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        window.dispatch_event(
+                                            PlatformInput::MouseUp(MouseUpEvent {
+                                                button: MouseButton::Middle,
+                                                position,
+                                                modifiers: Modifiers::default(),
+                                                click_count: 1,
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
                             }
                             continue;
                         }
