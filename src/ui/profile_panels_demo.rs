@@ -5,10 +5,12 @@
 
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist};
+use super::dialogs::ProfileDialog;
 use super::screenshot_demo::ScreenshotDemo;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
+use quill::profile_forms::PersonalPhotoMode;
 use quill::state::{InfoPanelTarget, ProfileChatsKind, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -60,13 +62,14 @@ fn apply_profile_panels(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
     let fixtures = demo_media_allowlist();
     let file = |name: &str| fixtures.join(name).to_string_lossy().into_owned();
     let main_photo = photo_json(9001, 9101, 9102, &file("demo-thumb.png"));
+    let personal_photo = photo_json(9500, 9501, 9502, &file("demo-gif-2.png"));
     let info = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
     apply(
         session,
         sink,
         seq,
         &format!(
-            r#"{{"@type":"userFullInfo","@extra":"{}","block_list":null,"photo":{main_photo},"need_phone_number_privacy_exception":true,"group_in_common_count":3,"personal_chat_id":-1001000000004,"birthdate":{{"@type":"birthdate","day":10,"month":12,"year":1815}},"bio":{{"@type":"formattedText","text":"Mathematician. Notes on the Analytical Engine.","entities":[]}},"note":{{"@type":"formattedText","text":"Met at the compilers meetup","entities":[]}},"bot_info":null}}"#,
+            r#"{{"@type":"userFullInfo","@extra":"{}","block_list":null,"photo":{main_photo},"need_phone_number_privacy_exception":true,"uses_unofficial_app":true,"personal_photo":{personal_photo},"group_in_common_count":3,"personal_chat_id":-1001000000004,"birthdate":{{"@type":"birthdate","day":10,"month":12,"year":1815}},"bio":{{"@type":"formattedText","text":"Mathematician. Notes on the Analytical Engine.","entities":[]}},"note":{{"@type":"formattedText","text":"Met at the compilers meetup","entities":[]}},"bot_info":null}}"#,
             info.0
         ),
     );
@@ -166,6 +169,19 @@ impl QuillApp {
             "channel" => self.open_personal_channel_dialog(cx),
             "share" => self.open_share_contact_dialog(31, cx),
             "gallery" => self.open_profile_photos(31, cx),
+            "report" => {
+                self.profile_dialog = Some(ProfileDialog::ReportPhoto {
+                    user_id: 31,
+                    file_id: 9502,
+                });
+            }
+            "personal-photo" => {
+                self.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+                    user_id: 31,
+                    mode: PersonalPhotoMode::Set,
+                    path: Some("/tmp/ada.png".into()),
+                });
+            }
             "contact" => {
                 self.status_note = "Phone number copied to clipboard".into();
             }

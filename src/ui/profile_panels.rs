@@ -6,6 +6,7 @@
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
+use super::chat_theme::accent;
 use super::dialogs::{BirthdayDialog, EditContactDialog, ProfileDialog};
 use super::group_panels::format_phone;
 use super::pressable::action_row;
@@ -22,7 +23,10 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{MediaViewer, profile_photo_items};
-use quill::profile_forms::{parse_birthday, profile_link};
+use quill::profile_forms::{
+    PersonalPhotoMode, PhotoReportReason, is_profile_photo_file, parse_birthday, profile_link,
+    unofficial_warning_text,
+};
 use quill::state::{ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -350,6 +354,54 @@ impl QuillApp {
                 })),
             );
         }
+        if user.is_contact {
+            any = true;
+            column = column.child(
+                action_row(
+                    "info-panel-set-photo",
+                    Some(gpui_kit::assets::IconName::Image),
+                    PersonalPhotoMode::Set.title(),
+                    false,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.start_personal_photo(user_id, PersonalPhotoMode::Set, cx);
+                })),
+            );
+        }
+        if !user.is_bot {
+            any = true;
+            column = column.child(
+                action_row(
+                    "info-panel-suggest-photo",
+                    Some(gpui_kit::assets::IconName::ImagePlus),
+                    PersonalPhotoMode::Suggest.title(),
+                    false,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.start_personal_photo(user_id, PersonalPhotoMode::Suggest, cx);
+                })),
+            );
+        }
+        if session
+            .user_full_info(user_id)
+            .is_some_and(|info| info.extras.personal_photo.is_some())
+        {
+            any = true;
+            column = column.child(
+                action_row(
+                    "info-panel-reset-photo",
+                    Some(gpui_kit::assets::IconName::RotateCcw),
+                    PersonalPhotoMode::Reset.title(),
+                    false,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.start_personal_photo(user_id, PersonalPhotoMode::Reset, cx);
+                })),
+            );
+        }
         if !user.phone_number.is_empty() {
             any = true;
             column = column.child(
@@ -366,6 +418,51 @@ impl QuillApp {
             );
         }
         any.then(|| column.into_any_element())
+    }
+
+    /// tdesktop's divider note under the cover when the user runs an
+    /// unofficial client (`AddUnofficialSecurityRiskWarning`).
+    pub(super) fn unofficial_client_warning(
+        &self,
+        user_id: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session = self.session()?;
+        if session.my_user_id == Some(user_id)
+            || !session
+                .user_full_info(user_id)
+                .is_some_and(|info| info.extras.uses_unofficial_app)
+        {
+            return None;
+        }
+        let first = session.user(user_id)?.first_name.clone();
+        let danger = cx.theme().danger;
+        Some(
+            div()
+                .id(("info-unofficial-warning", user_id as u64))
+                .flex()
+                .items_start()
+                .gap_2()
+                .w_full()
+                .p_3()
+                .rounded_md()
+                .bg(danger.opacity(0.1))
+                .child(
+                    gpui_kit::component::Icon::new(IconName::TriangleAlert)
+                        .size_4()
+                        .text_color(danger)
+                        .flex_shrink_0()
+                        .mt_0p5(),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_sm()
+                        .child(unofficial_warning_text(&first)),
+                )
+                .into_any_element(),
+        )
     }
 
     /// A tappable chat row (avatar and title) for the in-panel lists.
@@ -548,10 +645,10 @@ impl QuillApp {
     /// The list is fetched first when it is not cached; the poll loop
     /// opens the viewer when it lands.
     pub(super) fn open_profile_photos(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        let ready = matches!(
-            self.session().and_then(|s| s.user_profile_photos.get(&user_id)),
-            Some(ProfilePhotosFetch::Loaded { photos, .. }) if !photos.is_empty()
-        );
+        let ready = self
+            .session()
+            .and_then(|s| s.profile_gallery(user_id))
+            .is_some_and(|(photos, _)| !photos.is_empty());
         if ready {
             self.show_profile_gallery(user_id, cx);
             return;
@@ -588,9 +685,13 @@ impl QuillApp {
         else {
             return false;
         };
+        let has_photos = self
+            .session()
+            .and_then(|s| s.profile_gallery(user_id))
+            .is_some_and(|(photos, _)| !photos.is_empty());
         match state {
             ProfilePhotosFetch::Loading => return false,
-            ProfilePhotosFetch::Loaded { photos, .. } if !photos.is_empty() => {
+            ProfilePhotosFetch::Loaded { .. } if has_photos => {
                 self.pending_profile_gallery = None;
                 self.show_profile_gallery(user_id, cx);
             }
@@ -607,10 +708,7 @@ impl QuillApp {
     }
 
     fn show_profile_gallery(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        let Some(ProfilePhotosFetch::Loaded { photos, .. }) = self
-            .session()
-            .and_then(|s| s.user_profile_photos.get(&user_id))
-            .cloned()
+        let Some((photos, personal)) = self.session().and_then(|s| s.profile_gallery(user_id))
         else {
             return;
         };
@@ -620,6 +718,7 @@ impl QuillApp {
         }
         self.media_viewer = MediaViewer::open_profile(items, 0);
         self.viewer_extra.profile_user = Some(user_id);
+        self.viewer_extra.profile_personal = personal;
         self.viewer_open_gen += 1;
         self.viewer_note_activity(false, cx);
         self.reset_viewer_item_state(cx);
@@ -658,6 +757,120 @@ impl QuillApp {
             }
             Err(_) => self.status_note = "Couldn't reach Telegram; try again.".into(),
         }
+        cx.notify();
+    }
+
+    /// Open the viewer's "Report" for the photo on screen: the viewer
+    /// closes first so the reason list is not hidden behind it.
+    pub(super) fn report_viewer_profile_photo(&mut self, cx: &mut Context<Self>) {
+        let Some(user_id) = self.viewer_extra.profile_user else {
+            return;
+        };
+        let Some(file_id) = self
+            .media_viewer
+            .current()
+            .map(|item| item.download_file_id.0)
+        else {
+            return;
+        };
+        self.close_media_viewer(cx);
+        self.profile_dialog = Some(ProfileDialog::ReportPhoto { user_id, file_id });
+        cx.notify();
+    }
+
+    fn submit_photo_report(
+        &mut self,
+        user_id: i64,
+        file_id: i32,
+        reason: PhotoReportReason,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = "Demo mode: reports need a live session.".into();
+            cx.notify();
+            return;
+        };
+        match live
+            .driver
+            .report_profile_photo(user_id, file_id, reason.td_type())
+        {
+            Ok(_) => self.status_note = "Report sent".into(),
+            Err(_) => self.status_note = "Couldn't reach Telegram; try again.".into(),
+        }
+        cx.notify();
+    }
+
+    /// "Set Profile Photo" and "Suggest Profile Photo": pick an image, then
+    /// confirm. "Reset to Original" goes straight to the confirmation.
+    pub(super) fn start_personal_photo(
+        &mut self,
+        user_id: i64,
+        mode: PersonalPhotoMode,
+        cx: &mut Context<Self>,
+    ) {
+        if !mode.needs_file() {
+            self.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+                user_id,
+                mode,
+                path: None,
+            });
+            cx.notify();
+            return;
+        }
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(mode.title().into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = picker.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update(cx, |this, cx| {
+                    if !is_profile_photo_file(&path) {
+                        this.status_note = "Choose a JPEG, PNG or WebP image.".into();
+                        cx.notify();
+                        return;
+                    }
+                    this.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+                        user_id,
+                        mode,
+                        path: Some(path.to_string_lossy().into_owned()),
+                    });
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn submit_personal_photo(
+        &mut self,
+        user_id: i64,
+        mode: PersonalPhotoMode,
+        path: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = "Demo mode: photo changes need a live session.".into();
+            cx.notify();
+            return;
+        };
+        let sent = match (mode, path) {
+            (PersonalPhotoMode::Set, Some(path)) => {
+                live.driver.set_user_personal_photo(user_id, Some(path))
+            }
+            (PersonalPhotoMode::Reset, _) => live.driver.set_user_personal_photo(user_id, None),
+            (PersonalPhotoMode::Suggest, Some(path)) => {
+                live.driver.suggest_user_photo(user_id, path)
+            }
+            _ => return,
+        };
+        self.status_note = match sent {
+            Ok(_) => mode.done_note().into(),
+            Err(_) => "Couldn't reach Telegram; try again.".into(),
+        };
         cx.notify();
     }
 
@@ -789,6 +1002,18 @@ impl QuillApp {
             .day_input
             .update(cx, |input, cx| input.focus(window, cx));
         self.profile_dialog = Some(ProfileDialog::Birthday(dialog));
+        cx.notify();
+    }
+
+    /// "Choose who can see your birthday": close the form and open the
+    /// Privacy editor for the date-of-birth rule (tdesktop links the same
+    /// `Privacy::Key::Birthday` box from the birthday row).
+    pub(super) fn open_birthday_privacy(&mut self, cx: &mut Context<Self>) {
+        self.profile_dialog = None;
+        self.open_privacy(cx);
+        self.privacy_editor = Some(super::privacy::PrivacyEditorTarget::Rule(
+            quill::telegram::requests_privacy::PrivacySettingKey::ShowBirthdate,
+        ));
         cx.notify();
     }
 
@@ -1026,7 +1251,22 @@ impl QuillApp {
                     )
                     .child(div().text_xs().text_color(muted).child(
                         "The year is optional. Your contacts see your birthday on your profile.",
-                    ));
+                    ))
+                    .child(
+                        div()
+                            .id("birthday-privacy-link")
+                            .role(gpui_kit::Role::Button)
+                            .aria_label("Change who can see your birthday")
+                            .tab_index(0)
+                            .cursor_pointer()
+                            .text_sm()
+                            .text_color(accent())
+                            .child("Choose who can see your birthday")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_birthday_privacy(cx);
+                                this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
+                            })),
+                    );
                 if let Some(error) = dialog.error {
                     body = body.child(
                         div()
@@ -1265,6 +1505,75 @@ impl QuillApp {
                         .child(cancel("share-contact-cancel", "Cancel", cx));
                 Some((
                     "Share contact".into(),
+                    body.into_any_element(),
+                    footer.into_any_element(),
+                ))
+            }
+            ProfileDialog::PersonalPhoto {
+                user_id,
+                mode,
+                path,
+            } => {
+                let (user_id, mode, path) = (*user_id, *mode, path.clone());
+                let name = self
+                    .session()
+                    .and_then(|s| s.user(user_id))
+                    .map(|u| u.display_name())
+                    .unwrap_or_default();
+                let body = div().text_sm().child(mode.confirm_text(&name));
+                let footer = div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("personal-photo-confirm")
+                            .label(mode.button())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.submit_personal_photo(user_id, mode, path.as_deref(), cx);
+                                this.close_profile_dialog(cx);
+                                this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
+                            })),
+                    )
+                    .child(cancel("personal-photo-cancel", "Cancel", cx));
+                Some((
+                    mode.title().into(),
+                    body.into_any_element(),
+                    footer.into_any_element(),
+                ))
+            }
+            ProfileDialog::ReportPhoto { user_id, file_id } => {
+                let (user_id, file_id) = (*user_id, *file_id);
+                let mut body = div().flex().flex_col().gap_1().child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .pb_1()
+                        .child("Why are you reporting this photo?"),
+                );
+                for reason in PhotoReportReason::ALL {
+                    body = body.child(
+                        action_row(
+                            ("report-photo-reason", reason as u64),
+                            None,
+                            reason.label(),
+                            false,
+                            cx,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.submit_photo_report(user_id, file_id, reason, cx);
+                                this.close_profile_dialog(cx);
+                                this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
+                            },
+                        )),
+                    );
+                }
+                let footer =
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(cancel("report-photo-cancel", "Cancel", cx));
+                Some((
+                    "Report".into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                 ))

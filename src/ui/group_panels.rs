@@ -737,6 +737,9 @@ impl QuillApp {
         if any_tile {
             body = body.child(tiles);
         }
+        if let Some(warning) = self.unofficial_client_warning(user_id, cx) {
+            body = body.child(warning);
+        }
         // Details: value over label, left-aligned like a contact card.
         // Rows copy on tap and in the right-click menu (B10).
         if let Some(card) = self.profile_details_card(user_id, cx) {

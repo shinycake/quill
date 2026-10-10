@@ -28,6 +28,11 @@ impl Session {
                     .and_then(|chat_id| self.private_chat_user_id(chat_id))
             });
             if let Some(user_id) = user_id {
+                if let Some(personal) = &extras.personal_photo {
+                    for file in &personal.files {
+                        self.upsert_file(file.clone(), false);
+                    }
+                }
                 let photo_file_id = photo.map(|file| {
                     let id = file.id.0;
                     self.upsert_file(file, false);

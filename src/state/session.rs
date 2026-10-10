@@ -150,8 +150,13 @@ pub struct Session {
     pub message_report: Option<MessageReportFlow>,
     /// Viewers, read date and reactors of the message the menu is open on.
     pub message_audience: Option<MessageAudience>,
+    /// A reaction chip was right-clicked: its "who reacted" tab opens as
+    /// soon as the message's audience is loaded.
+    pub wanted_reactor_tab: Option<(ChatId, MessageId, crate::telegram::envelope::ReactionType)>,
     /// The sticker set the message menu's "View Sticker Set" opened.
     pub sticker_set_view: Option<StickerSetView>,
+    /// The pack of the custom emoji the user just tapped in a message.
+    pub custom_emoji_preview: Option<CustomEmojiPreview>,
     /// One-shot result of an admin moderation call from the delete box
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
@@ -1284,7 +1289,9 @@ impl Session {
             message_menu_actions: None,
             message_report: None,
             message_audience: None,
+            wanted_reactor_tab: None,
             sticker_set_view: None,
+            custom_emoji_preview: None,
             message_action_note: None,
             ownership: OwnershipState::default(),
             basic_group_own: HashMap::new(),
