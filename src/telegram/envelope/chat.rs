@@ -149,6 +149,9 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
         // `chat.view_as_topics` (schema 1.8.67, line 3627): a forum shown
         // as topics, or Saved Messages shown as chats. Absent means unset.
         view_as_topics: chat.get("view_as_topics").and_then(Value::as_bool),
+        default_disable_notification: chat
+            .get("default_disable_notification")
+            .and_then(Value::as_bool),
         // `chat.background` / `chat.theme` (schema 1.8.68, line 3937).
         background: parse_chat_background(chat.get("background")),
         theme_name: parse_chat_theme_name(chat.get("theme")),

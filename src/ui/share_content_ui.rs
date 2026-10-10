@@ -119,6 +119,34 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Roll a die from the attach menu's Dice list.
+    pub(super) fn roll_dice(&mut self, emoji: &str, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.share_target() else {
+            return;
+        };
+        if self.slow_mode_blocked(chat_id, cx) {
+            return;
+        }
+        let reply_to = self.share_reply();
+        let options = self.composer_send_options();
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = "sending dice needs a live connection (demo)".into();
+            cx.notify();
+            return;
+        };
+        match live
+            .driver
+            .share_dice_to_chat(chat_id, emoji, reply_to, &options)
+        {
+            Ok(_) => {
+                self.pending_reply = None;
+                self.status_note = "rolling…".into();
+            }
+            Err(_) => self.status_note = "could not send the dice".into(),
+        }
+        cx.notify();
+    }
+
     /// Validate the typed coordinates and send a static location.
     pub(super) fn submit_share_location(&mut self, cx: &mut Context<Self>) {
         let Some(chat_id) = self.share_target() else {

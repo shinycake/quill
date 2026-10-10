@@ -55,3 +55,64 @@ fn stop_live_location_sends_null_location_only_for_a_running_own_share() {
     assert_eq!(v["message_id"], 61);
     assert!(v["location"].is_null());
 }
+
+#[test]
+fn stop_live_location_accepts_a_running_share_that_is_not_loaded() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &sink);
+    // Not in any loaded history; `updateActiveLiveLocationMessages` knows it.
+    assert!(driver.stop_live_location(ChatId(7), MessageId(77)).is_err());
+    let message =
+        live_message_json(77, true, 600).replace(r#"{"@type":"updateNewMessage","message":"#, "");
+    let message = message.strip_suffix('}').unwrap();
+    let update =
+        format!(r#"{{"@type":"updateActiveLiveLocationMessages","messages":[{message}]}}"#);
+    driver
+        .ingest(copy_and_parse(&update, &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.sync.live_shares.len(), 1);
+    let extra = driver.stop_live_location(ChatId(7), MessageId(77)).unwrap();
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "editMessageLiveLocation");
+    assert_eq!(v["@extra"], extra.0.to_string());
+}
+
+#[test]
+fn share_dice_sends_only_listed_emoji() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &sink);
+    let options = crate::composer::SendOptions::default();
+    driver
+        .ingest(
+            copy_and_parse(
+                "{\"@type\":\"updateDiceEmojis\",\"emojis\":[\"\u{1F3B2}\"]}",
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        driver
+            .share_dice_to_chat(ChatId(7), "\u{1F3B0}", None, &options)
+            .is_err()
+    );
+    driver
+        .share_dice_to_chat(ChatId(7), "\u{1F3B2}", None, &options)
+        .unwrap();
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["input_message_content"]["@type"], "inputMessageDice");
+    assert_eq!(v["input_message_content"]["emoji"], "\u{1F3B2}");
+}

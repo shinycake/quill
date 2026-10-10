@@ -173,6 +173,7 @@ impl Session {
                 message_sender,
                 is_translatable,
                 view_as_topics,
+                default_disable_notification,
                 background,
                 theme_name,
                 reply_markup_message_id,
@@ -187,6 +188,9 @@ impl Session {
             } => {
                 if let Some(view_as_topics) = view_as_topics {
                     self.set_chat_view_as_topics(chat_id.0, view_as_topics);
+                }
+                if let Some(silent) = default_disable_notification {
+                    self.sync.set_default_silent(chat_id.0, silent);
                 }
                 self.set_chat_background(chat_id.0, background);
                 self.set_chat_theme_name(chat_id.0, theme_name);
@@ -917,6 +921,42 @@ impl Session {
                 chat_id,
                 view_as_topics,
             } => self.set_chat_view_as_topics(chat_id.0, view_as_topics),
+            EnvelopePayload::UpdateChatDefaultDisableNotification {
+                chat_id,
+                default_disable_notification,
+            } => self
+                .sync
+                .set_default_silent(chat_id.0, default_disable_notification),
+            EnvelopePayload::UpdateFileDownloads {
+                total_size,
+                total_count,
+                downloaded_size,
+            } => self.sync.set_download_totals(DownloadTotals {
+                total_size,
+                total_count,
+                downloaded_size,
+            }),
+            EnvelopePayload::UpdateFileAddedToDownloads(download) => {
+                self.apply_download_added(*download)
+            }
+            EnvelopePayload::UpdateFileRemovedFromDownloads { file_id } => {
+                self.apply_download_removed(file_id)
+            }
+            EnvelopePayload::UpdateDiceEmojis { emojis } => self.sync.set_dice_emojis(emojis),
+            EnvelopePayload::UpdateFreezeState(state) => self.sync.set_freeze(state),
+            EnvelopePayload::UpdateSpeechRecognitionTrial(trial) => {
+                self.sync.set_speech_trial(trial)
+            }
+            EnvelopePayload::UpdateActiveLiveLocationMessages { shares } => {
+                self.sync.set_live_shares(shares)
+            }
+            EnvelopePayload::UpdateMessageLiveLocationViewed {
+                chat_id,
+                message_id,
+            } => self.sync.mark_live_viewed(chat_id, message_id),
+            EnvelopePayload::UpdateAgeVerificationParameters { parameters } => {
+                self.sync.set_age_verification(parameters)
+            }
             EnvelopePayload::UpdateSavedMessagesTopic(topic) => self.apply_saved_topic(*topic),
             EnvelopePayload::UpdateSavedMessagesTopicCount { topic_count } => {
                 self.saved.topic_count = topic_count;
