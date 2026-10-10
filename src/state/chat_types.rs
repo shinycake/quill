@@ -658,6 +658,34 @@ pub struct UnreadPair {
     pub unmuted: i32,
 }
 
+/// What a folder tab shows for its unread chats (tdesktop
+/// `chat_filters_tabs_strip.cpp`): the count, and whether every counted
+/// chat is muted (the badge is then drawn in the muted color).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FolderBadge {
+    pub count: i32,
+    pub muted: bool,
+}
+
+impl UnreadPair {
+    /// Folder tab badge from this list's unread-chat pair. With
+    /// `include_muted` off only the unmuted chats count; with it on, the
+    /// badge is muted-styled when all counted chats are muted. `None` when
+    /// there is nothing to show.
+    pub fn folder_badge(self, include_muted: bool) -> Option<FolderBadge> {
+        let muted_part = (self.all - self.unmuted).max(0);
+        let count = if include_muted {
+            self.all
+        } else {
+            self.unmuted
+        };
+        (count > 0).then_some(FolderBadge {
+            count,
+            muted: include_muted && count == muted_part,
+        })
+    }
+}
+
 /// Server-side unread totals for one chat list. `None` until the matching
 /// update has arrived (TDLib sends them only with a message database).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

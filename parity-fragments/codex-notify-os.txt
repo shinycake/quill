@@ -1,0 +1,5 @@
+# notify-os: only full matches
+parity:notify-alert-attention
+parity:notify-focus-dnd
+parity:notify-events
+parity:notify-muted-counters

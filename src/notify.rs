@@ -136,6 +136,34 @@ pub struct NotifyInput<'a> {
     /// the chat's `show_preview`, or the scope default's when the chat keeps
     /// `use_default_show_preview`.
     pub chat_preview_allowed: bool,
+    /// Effective "notify about pinned messages" (the chat's
+    /// `disable_pinned_message_notifications`, or the scope default's when
+    /// the chat keeps `use_default_...`).
+    pub pinned_allowed: bool,
+    /// "Contact joined Telegram" allowance: the inverse of TDLib's
+    /// `disable_contact_registered_notifications` option.
+    pub contact_joined_allowed: bool,
+}
+
+/// The tdesktop "Events" settings (`lng_settings_events_*`) gate two service
+/// messages; everything else is an ordinary message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotifyEvent {
+    PinnedMessage,
+    ContactJoined,
+}
+
+/// Which gated event a message is, if any.
+pub fn notify_event(content: &crate::telegram::envelope::MessageContent) -> Option<NotifyEvent> {
+    use crate::telegram::envelope::{MessageContent, ServiceAction};
+    match content {
+        MessageContent::Action(action) => match action.as_ref() {
+            ServiceAction::Pin { .. } => Some(NotifyEvent::PinnedMessage),
+            ServiceAction::ContactRegistered => Some(NotifyEvent::ContactJoined),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Decide whether an `updateNewMessage` deserves an OS notification.
@@ -169,6 +197,11 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
     }
     if input.app_active && input.open_chat == Some(chat_id) {
         return None;
+    }
+    match notify_event(&message.content) {
+        Some(NotifyEvent::PinnedMessage) if !input.pinned_allowed => return None,
+        Some(NotifyEvent::ContactJoined) if !input.contact_joined_allowed => return None,
+        _ => {}
     }
     let body = if input.hide_previews || !input.chat_preview_allowed {
         GENERIC_BODY.to_string()
@@ -543,6 +576,8 @@ mod tests {
             app_active,
             hide_previews: false,
             chat_preview_allowed: true,
+            pinned_allowed: true,
+            contact_joined_allowed: true,
         }
     }
 
@@ -939,5 +974,40 @@ mod tests {
             decide_reaction_notify(&custom).unwrap().body,
             "Grace reacted to your message"
         );
+    }
+
+    fn service_message(action: crate::telegram::envelope::ServiceAction) -> ParsedMessage {
+        let mut message = test_message(7, 100, false, "");
+        message.content = MessageContent::Action(Box::new(action));
+        message
+    }
+
+    #[test]
+    fn pinned_message_follows_the_events_setting() {
+        let message =
+            service_message(crate::telegram::envelope::ServiceAction::Pin { message_id: 5 });
+        assert!(decide_notify(&input(&message, false, None)).is_some());
+        let mut ctx = input(&message, false, None);
+        ctx.pinned_allowed = false;
+        assert!(decide_notify(&ctx).is_none());
+    }
+
+    #[test]
+    fn contact_joined_follows_the_events_setting() {
+        let message = service_message(crate::telegram::envelope::ServiceAction::ContactRegistered);
+        assert!(decide_notify(&input(&message, false, None)).is_some());
+        let mut ctx = input(&message, false, None);
+        ctx.contact_joined_allowed = false;
+        assert!(decide_notify(&ctx).is_none());
+    }
+
+    #[test]
+    fn event_switches_do_not_gate_ordinary_messages() {
+        let message = test_message(7, 100, false, "hello");
+        let mut ctx = input(&message, false, None);
+        ctx.pinned_allowed = false;
+        ctx.contact_joined_allowed = false;
+        assert!(decide_notify(&ctx).is_some());
+        assert_eq!(notify_event(&message.content), None);
     }
 }
