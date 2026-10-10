@@ -9,11 +9,11 @@ fn storage_statistics_aggregates_by_file_type() {
     let json = r#"{"@type":"storageStatistics","size":7000,"count":3,"by_chat":[{"chat_id":11,"size":5000,"count":2,"by_file_type":[{"file_type":{"@type":"fileTypeSecret"},"size":4000,"count":1},{"file_type":{"@type":"fileTypePhoto"},"size":1000,"count":1}]},{"chat_id":0,"size":2000,"count":1,"by_file_type":[{"file_type":{"@type":"fileTypeSecret"},"size":2000,"count":1}]}]}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::StorageStatistics {
+        EnvelopePayload::Settings(SettingsPayload::StorageStatistics {
             total_size,
             by_file_type,
             by_chat,
-        } => {
+        }) => {
             assert_eq!(total_size, 7000);
             let secret = by_file_type
                 .iter()

@@ -123,7 +123,10 @@ impl Session {
             },
         );
         self.translate.revision += 1;
-        let extra = self.request(RequestPurpose::TranslateJob { job }, chat_id);
+        let extra = self.request(
+            RequestPurpose::Messages(MessagesPurpose::TranslateJob { job }),
+            chat_id,
+        );
         (job, extra)
     }
 

@@ -67,7 +67,7 @@ impl QuillApp {
                 this.close_group_call_start_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(dialog_state) = this.group_call_start_dialog.as_ref() else {
+            let Some(dialog_state) = this.group_call.start_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title("Start voice chat"))
@@ -389,7 +389,7 @@ impl QuillApp {
     /// Phase C2f: open the invite picker; fetch contacts first when
     /// the cache is empty.
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
-        self.group_call_invite_open = true;
+        self.group_call.invite_open = true;
         if let Some(live) = self.live.as_mut()
             && live.driver.session.contacts.is_none()
         {
@@ -605,22 +605,23 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_default();
         let dialog = GroupCallTitleDialog::new(window, cx, &current);
-        self.group_call_title_dialog = Some(dialog);
+        self.group_call.title_dialog = Some(dialog);
         cx.notify();
     }
 
     pub(super) fn close_group_call_title_dialog(&mut self, cx: &mut Context<Self>) {
-        self.group_call_title_dialog = None;
+        self.group_call.title_dialog = None;
         cx.notify();
     }
 
     pub(super) fn save_group_call_title(&mut self, cx: &mut Context<Self>) {
         let title = self
-            .group_call_title_dialog
+            .group_call
+            .title_dialog
             .as_ref()
             .map(|d| d.title_input.read(cx).value().to_string())
             .unwrap_or_default();
-        self.group_call_title_dialog = None;
+        self.group_call.title_dialog = None;
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.set_video_chat_title(title) {
                 Ok(_) => "Renaming voice chat…".into(),
@@ -644,18 +645,18 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .map(|c| c.title.clone())
             .unwrap_or_default();
-        self.group_call_start_dialog =
+        self.group_call.start_dialog =
             Some(GroupCallStartDialog::new(window, cx, chat_id, &chat_title));
         cx.notify();
     }
 
     pub(super) fn close_group_call_start_dialog(&mut self, cx: &mut Context<Self>) {
-        self.group_call_start_dialog = None;
+        self.group_call.start_dialog = None;
         cx.notify();
     }
 
     pub(super) fn set_group_call_start_schedule(&mut self, offset: i64, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.group_call_start_dialog.as_mut() {
+        if let Some(dialog) = self.group_call.start_dialog.as_mut() {
             dialog.schedule_offset = offset;
         }
         cx.notify();
@@ -664,7 +665,7 @@ impl QuillApp {
     /// Phase C2h: confirm the start dialog — `createVideoChat` with
     /// the chosen title and `start_date` (0 = immediate).
     pub(super) fn confirm_group_call_start(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, title, offset) = match self.group_call_start_dialog.as_ref() {
+        let (chat_id, title, offset) = match self.group_call.start_dialog.as_ref() {
             Some(d) => (
                 d.chat_id,
                 d.title_input.read(cx).value().to_string(),
@@ -672,7 +673,7 @@ impl QuillApp {
             ),
             None => return,
         };
-        self.group_call_start_dialog = None;
+        self.group_call.start_dialog = None;
         let start_date = if offset == 0 {
             0
         } else {
@@ -822,7 +823,7 @@ impl QuillApp {
     /// surfaces via `group_call_error`.
     pub(super) fn send_group_call_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = quill::composer::send_text_on_enter(
-            self.group_call_composer.read(cx).value().to_string(),
+            self.group_call.composer.read(cx).value().to_string(),
             self.chat_prefs.send_key_mode,
         );
         if text.trim().is_empty() {
@@ -831,7 +832,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.send_group_call_message(text) {
                 Ok(_) => {
-                    self.group_call_composer.update(cx, |input, cx| {
+                    self.group_call.composer.update(cx, |input, cx| {
                         input.set_value("", window, cx);
                     });
                 }
@@ -862,7 +863,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     GroupCallStart => DialogSpec::new(
         400,
-        |app| app.group_call_start_dialog.is_some(),
+        |app| app.group_call.start_dialog.is_some(),
         QuillApp::build_group_call_start_dialog,
     ),
 }

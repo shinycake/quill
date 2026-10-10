@@ -911,7 +911,7 @@ impl QuillApp {
                 .rounded_full()
                 .tooltip("Bot menu")
                 .on_click(cx.listener(move |this, _, window, cx| match &url {
-                    Some((_, url)) => this.open_message_url(url, cx),
+                    Some((_, url)) => this.open_bot_menu_web_app(url, cx),
                     None => {
                         this.composer.update(cx, |input, cx| {
                             input.set_value("/", window, cx);

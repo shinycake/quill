@@ -4,6 +4,7 @@ use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::search_filters::{SearchMediaKind, YearMonth};
 use crate::state::DateJumpMode;
 use crate::state::{ChatSearchJumpNeed, RequestPurpose, SearchStatus, SharedMediaTab};
+use crate::state::{MediaPurpose, SearchPurpose};
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests::{
@@ -397,6 +398,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let search_gen = self.session.search.generation;
         if self.session.search.filters.scope == crate::search_filters::SearchScope::PublicPosts {
             return self.send_public_posts_search(trimmed, search_gen);
+        }
+        // The Apps tab lists bots the session already knows; nothing to
+        // search for, so the query resolves at once.
+        if !self.session.search.filters.scope.searches_messages() {
+            self.session.search.accept_chats(Vec::new(), false);
+            self.session.search.accept_messages(Vec::new(), false);
+            self.session.search.accept_public_chats(Vec::new(), false);
+            return Ok(None);
         }
         let chats_extra = self
             .session
@@ -793,7 +802,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         let extra = self.session.request(
-            RequestPurpose::GetSharedMediaMore { tab, generation },
+            RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation }),
             Some(chat_id),
         );
         let filter = search_messages_filter_json(tab.filter_constructor());
@@ -1077,7 +1086,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             calendar.oldest_loaded,
         );
         let extra = self.session.request(
-            RequestPurpose::GetChatMessageCalendar { generation },
+            RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation }),
             Some(chat_id),
         );
         if let Some(calendar) = self.session.history_calendar.as_mut() {

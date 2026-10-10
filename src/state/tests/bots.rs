@@ -200,7 +200,10 @@ fn resolve_inline_bot_private_chat_resolves_with_cached_inline_flag() {
             ..Default::default()
         },
     );
-    let extra = session.request(RequestPurpose::ResolveInlineBot { generation: 1 }, None);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 1 }),
+        None,
+    );
     session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
         username: "gif".into(),
         generation: 1,
@@ -240,7 +243,10 @@ fn resolve_inline_bot_non_bot_username_fails() {
             ..Default::default()
         },
     );
-    let extra = session.request(RequestPurpose::ResolveInlineBot { generation: 1 }, None);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 1 }),
+        None,
+    );
     session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
         username: "alice".into(),
         generation: 1,
@@ -271,7 +277,10 @@ fn resolve_inline_bot_non_bot_username_fails() {
 fn resolve_inline_bot_stale_answer_ignored() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(RequestPurpose::ResolveInlineBot { generation: 1 }, None);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 1 }),
+        None,
+    );
     // A newer resolve already replaced the slot.
     session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
         username: "gifs".into(),
@@ -301,7 +310,10 @@ fn resolve_inline_bot_stale_answer_ignored() {
 fn resolve_inline_bot_error_fails_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(RequestPurpose::ResolveInlineBot { generation: 3 }, None);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 3 }),
+        None,
+    );
     session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
         username: "nosuchbot".into(),
         generation: 3,

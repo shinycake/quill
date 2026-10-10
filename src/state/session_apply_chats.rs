@@ -80,7 +80,7 @@ impl Session {
         // guard drops stale answers (a newer username is already
         // resolving).
         if let Some(p) = pending.as_ref()
-            && let RequestPurpose::ResolveInlineBot { generation } = p.purpose
+            && let RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation }) = p.purpose
             && let Some(InlineBotResolve::Resolving {
                 username,
                 generation: slot_generation,
@@ -126,7 +126,7 @@ impl Session {
         // consumes `ChatReady` once to open it). Generation-guarded like
         // the bot-resolve slot above.
         if let Some(p) = pending.as_ref()
-            && let RequestPurpose::DeepLinkResolve { generation } = p.purpose
+            && let RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation }) = p.purpose
             && let Some(DeepLinkState::ResolvingChat {
                 action,
                 generation: slot_generation,

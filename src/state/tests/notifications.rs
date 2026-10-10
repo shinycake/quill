@@ -820,7 +820,7 @@ fn default_auto_delete_roundtrip_and_failure() {
     assert!(!session.default_auto_delete_busy);
 
     let extra = session.request(
-        RequestPurpose::SetDefaultAutoDelete { seconds: 86_400 },
+        RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 86_400 }),
         None,
     );
     session.default_auto_delete_busy = true;
@@ -832,7 +832,10 @@ fn default_auto_delete_roundtrip_and_failure() {
     );
     assert_eq!(session.default_auto_delete_secs, Some(86_400));
 
-    let extra = session.request(RequestPurpose::SetDefaultAutoDelete { seconds: 0 }, None);
+    let extra = session.request(
+        RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 0 }),
+        None,
+    );
     session.default_auto_delete_busy = true;
     apply_json(
         &mut session,

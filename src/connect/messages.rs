@@ -6,6 +6,7 @@ use crate::composer::{
 };
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::rich::RichBlock;
+use crate::state::MessagesPurpose;
 use crate::state::{ForwardFlight, RequestPurpose};
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
@@ -682,10 +683,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::GetFullRichMessage {
+            RequestPurpose::Messages(MessagesPurpose::GetFullRichMessage {
                 chat_id,
                 message_id,
-            },
+            }),
             Some(chat_id),
         );
         let json = get_full_rich_message(extra, chat_id, message_id);
@@ -1516,10 +1517,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::EditMessageSchedulingState {
+            RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
                 message_id,
                 scheduling,
-            },
+            }),
             Some(chat_id),
         );
         let json = edit_message_scheduling_state(extra, chat_id, message_id, scheduling);

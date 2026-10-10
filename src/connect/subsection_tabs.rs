@@ -3,7 +3,9 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
+use crate::state::ThreadsPurpose;
 use crate::subsection_tabs::SubsectionTabsMode;
+use crate::telegram::envelope::{ChatsPayload, MessagesPayload, ThreadsPayload, UsersPayload};
 use crate::telegram::envelope::{EnvelopePayload, MUTE_FOREVER};
 use crate::telegram::requests::{
     get_forum_topic, set_forum_topic_notification_settings, view_messages,
@@ -25,10 +27,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// chat (`updateNewChat`): the chat to check after `apply`.
     pub(crate) fn possible_topic_chat(payload: &EnvelopePayload) -> Option<ChatId> {
         match payload {
-            EnvelopePayload::UpdateUser { user_id, user } if user.has_topics => {
+            EnvelopePayload::Users(UsersPayload::UpdateUser { user_id, user })
+                if user.has_topics =>
+            {
                 Some(ChatId(user_id.0))
             }
-            EnvelopePayload::UpdateNewChat { chat_id, .. } => Some(*chat_id),
+            EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { chat_id, .. }) => Some(*chat_id),
             _ => None,
         }
     }
@@ -49,13 +53,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// a new topic) or a new message in it. Checked before `apply`.
     pub(crate) fn possible_topic_refresh(payload: &EnvelopePayload) -> Option<(ChatId, i32)> {
         match payload {
-            EnvelopePayload::UpdateForumTopic(update) => {
+            EnvelopePayload::Threads(ThreadsPayload::UpdateForumTopic(update)) => {
                 Some((ChatId(update.chat_id), update.forum_topic_id))
             }
-            EnvelopePayload::UpdateForumTopicInfo(info) => {
+            EnvelopePayload::Threads(ThreadsPayload::UpdateForumTopicInfo(info)) => {
                 Some((ChatId(info.chat_id), info.forum_topic_id))
             }
-            EnvelopePayload::UpdateNewMessage(message) => {
+            EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
                 message.topic_id.map(|topic| (message.chat_id, topic))
             }
             _ => None,
@@ -71,7 +75,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.forum_topics.contains_key(&chat_id.0) {
             return;
         }
-        let purpose = RequestPurpose::GetForumTopic { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::GetForumTopic { forum_topic_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return;
         }
@@ -105,7 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
-        let purpose = RequestPurpose::ReadForumTopic { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::ReadForumTopic { forum_topic_id });
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
@@ -154,7 +158,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .clone()
                 .with_mute_for(if muted { MUTE_FOREVER } else { 0 });
         let previous = std::mem::replace(&mut topic.notification_settings, settings.clone());
-        let purpose = RequestPurpose::SetForumTopicNotificationSettings { forum_topic_id };
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::SetForumTopicNotificationSettings {
+            forum_topic_id,
+        });
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self
             .sender

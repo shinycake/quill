@@ -237,6 +237,7 @@ fn parse_location_address(value: Option<&Value>) -> String {
 #[cfg(test)]
 mod story_areas_tests {
     use super::*;
+    use crate::telegram::envelope::StoriesPayload;
     use crate::telegram::envelope::{EnvelopePayload, parse_envelope};
 
     #[test]
@@ -290,7 +291,7 @@ mod story_areas_tests {
         );
         let env = parse_envelope(&json).unwrap();
         match env.payload {
-            EnvelopePayload::Story { story, .. } => {
+            EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
                 assert_eq!(story.areas.len(), 8);
                 let area = &story.areas[0];
                 assert_eq!(

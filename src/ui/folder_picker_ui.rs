@@ -57,7 +57,7 @@ impl QuillApp {
         mode: PickerMode,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(dialog) = self.folder_editor.as_ref() else {
+        let Some(dialog) = self.folders.editor.as_ref() else {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
@@ -139,7 +139,7 @@ impl QuillApp {
                         .tooltip("Remove")
                         .accessibility_label(format!("Remove {title}"))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(dialog) = this.folder_editor.as_mut() {
+                            if let Some(dialog) = this.folders.editor.as_mut() {
                                 match mode {
                                     PickerMode::Include => dialog.editor.included.remove(&chat_id),
                                     PickerMode::Exclude => dialog.editor.excluded.remove(&chat_id),
@@ -157,7 +157,7 @@ impl QuillApp {
                     .icon(IconName::Plus)
                     .ghost()
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(dialog) = this.folder_editor.as_mut() {
+                        if let Some(dialog) = this.folders.editor.as_mut() {
                             dialog.picker = Some(mode);
                             dialog.picker_search.update(cx, |input, cx| {
                                 input.set_value("", window, cx);
@@ -176,7 +176,7 @@ impl QuillApp {
         mode: PickerMode,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(dialog) = self.folder_editor.as_ref() else {
+        let Some(dialog) = self.folders.editor.as_ref() else {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
@@ -244,7 +244,7 @@ impl QuillApp {
                                 this.show_folder_limit(kind, cx);
                                 return;
                             }
-                            if let Some(dialog) = this.folder_editor.as_mut() {
+                            if let Some(dialog) = this.folders.editor.as_mut() {
                                 match mode {
                                     PickerMode::Include => dialog.editor.toggle_included(chat_id),
                                     PickerMode::Exclude => dialog.editor.toggle_excluded(chat_id),
@@ -281,7 +281,7 @@ impl QuillApp {
                     Button::new("folder-picker-done")
                         .label("Done")
                         .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(dialog) = this.folder_editor.as_mut() {
+                            if let Some(dialog) = this.folders.editor.as_mut() {
                                 dialog.picker = None;
                             }
                             cx.notify();

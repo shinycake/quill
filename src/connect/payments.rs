@@ -1,6 +1,7 @@
 //! Connect driver: payments.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::state::PaymentsPurpose;
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{
@@ -167,9 +168,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             String::new()
         };
-        let extra = self
-            .session
-            .request(RequestPurpose::GetStarSubscriptions { append }, None);
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append }),
+            None,
+        );
         self.session.star_subscriptions_loading = true;
         self.session.star_subscriptions_error = None;
         let json = get_star_subscriptions(extra, false, &offset);

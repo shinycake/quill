@@ -403,7 +403,7 @@ impl QuillApp {
             "thread" => self.thread_info_open = true,
             "stats" => {
                 self.open_story_viewer(ChatId(11), 5, cx);
-                self.story_stats_open = true;
+                self.stories.stats_open = true;
             }
             "search" => {
                 self.search_input.update(cx, |input, cx| {

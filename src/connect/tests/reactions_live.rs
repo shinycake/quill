@@ -5,6 +5,7 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{ChatId, FileId, MessageId};
 use crate::platform::MemorySecretStore;
+use crate::state::StickersPurpose;
 use crate::state::{Audience, ReactionChoice, RequestPurpose, StickerTab};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ReactionType;
@@ -302,6 +303,8 @@ fn greeting_and_attached_stickers_load() {
         driver
             .session
             .requests
-            .has_purpose(RequestPurpose::ViewStickerSet { set_id: 77 })
+            .has_purpose(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {
+                set_id: 77
+            }))
     );
 }

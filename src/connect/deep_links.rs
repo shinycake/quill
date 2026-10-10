@@ -9,6 +9,7 @@
 //! consumes to open the chat.
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::ChatsPurpose;
 use crate::state::{DeepLinkAction, DeepLinkState, RequestPurpose};
 use crate::telegram::requests::{
     check_chat_invite_link, create_private_chat, get_chat, get_chat_boost_link_info,
@@ -283,12 +284,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.deep_link = Some(DeepLinkState::ResolvingInfo { generation });
         let (purpose, build): (_, fn(RequestId, &str) -> String) = if internal {
             (
-                RequestPurpose::DeepLinkInternalType { generation },
+                RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation }),
                 get_internal_link_type,
             )
         } else {
             (
-                RequestPurpose::DeepLinkInfo { generation },
+                RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation }),
                 get_deep_link_info,
             )
         };
@@ -327,9 +328,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if slot != generation {
             return Ok(None);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::DeepLinkJoin { generation }, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation }),
+            None,
+        );
         let json = join_chat_by_invite_link(extra, &format!("https://t.me/+{hash}"));
         self.session.deep_link = Some(DeepLinkState::ResolvingChat {
             action: DeepLinkAction::JoinInvite { hash },
@@ -363,15 +365,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.deep_link_seq = self.session.deep_link_seq.wrapping_add(1);
         let generation = self.session.deep_link_seq;
         let purpose = match &action {
-            DeepLinkAction::JoinInvite { .. } => RequestPurpose::DeepLinkCheckInvite { generation },
-            _ => RequestPurpose::DeepLinkResolve { generation },
+            DeepLinkAction::JoinInvite { .. } => {
+                RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })
+            }
+            _ => RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation }),
         };
         let extra = self.session.request(purpose, None);
         let json = match &action {
             DeepLinkAction::OpenUsername { domain, .. }
             | DeepLinkAction::OpenPublicChatDraft { domain, .. }
             | DeepLinkAction::ShareGame { domain, .. }
-            | DeepLinkAction::AddBot { domain, .. } => search_public_chat(extra, domain),
+            | DeepLinkAction::AddBot { domain, .. }
+            | DeepLinkAction::OpenWebAppLink { domain, .. }
+            | DeepLinkAction::OpenMainWebApp { domain, .. }
+            | DeepLinkAction::OpenAttachmentBot { domain, .. } => search_public_chat(extra, domain),
             DeepLinkAction::MessageLink { url } => get_message_link_info(extra, url),
             DeepLinkAction::BoostLink { url } => get_chat_boost_link_info(extra, url),
             DeepLinkAction::OpenChannelBoost { chat_id } => get_chat(extra, ChatId(*chat_id)),

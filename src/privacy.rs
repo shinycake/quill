@@ -306,6 +306,7 @@ mod tests {
     use super::*;
     use crate::diagnostics::{DiagnosticSink, MemorySink};
     use crate::ids::AccountKey;
+    use crate::state::SettingsPurpose;
     use crate::state::{RequestPurpose, Session};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::requests_privacy::PrivacySettingKey;
@@ -329,9 +330,9 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         let extra = session.request(
-            RequestPurpose::GetPrivacyRules {
+            RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules {
                 key: PrivacySettingKey::ShowStatus,
-            },
+            }),
             None,
         );
         apply_json(
@@ -387,9 +388,9 @@ mod tests {
             }),
         );
         let extra = session.request(
-            RequestPurpose::SetPrivacyRules {
+            RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules {
                 key: PrivacySettingKey::ShowPhoneNumber,
-            },
+            }),
             None,
         );
         apply_json(
@@ -478,7 +479,10 @@ mod tests {
     fn blocked_senders_pages_append() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        let extra = session.request(RequestPurpose::GetBlockedSenders { offset: 0 }, None);
+        let extra = session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 0 }),
+            None,
+        );
         apply_json(
             &mut session,
             &seq,
@@ -492,7 +496,10 @@ mod tests {
         assert_eq!(session.blocked_total, 3);
         assert!(!session.blocked_loading);
 
-        let extra = session.request(RequestPurpose::GetBlockedSenders { offset: 2 }, None);
+        let extra = session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
+            None,
+        );
         apply_json(
             &mut session,
             &seq,
