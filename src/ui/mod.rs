@@ -306,6 +306,7 @@ mod web_app_demo;
 mod web_app_tab;
 mod web_app_ui;
 mod window_chrome;
+pub(crate) mod window_control;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

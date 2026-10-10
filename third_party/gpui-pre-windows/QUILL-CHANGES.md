@@ -36,7 +36,10 @@ The Quill project changed it in 2026 so an idle window stops receiving a
   request, kept running while a forced render is pending (device-loss
   recovery) or a touchpad gesture may be in progress; a draw deferred because
   another draw was in progress, and a Direct Manipulation hit test, unpark
-  the window.
+  the window. `WM_SHOWWINDOW` parks a window that was hidden (it gets no
+  `WM_PAINT`, so the idle decision could not run) and unparks one that is
+  shown again (Quill hides the main window to the tray with `ShowWindow`,
+  `docs/decisions/codex-gpui-window-controls.md`).
 - `src/direct_manipulation.rs`: the viewport runs in manual-update mode and
   only advances when `draw_window` calls `update`, so it reports whether a
   gesture may be in progress: the viewport is running or in inertia, or a

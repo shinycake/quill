@@ -1274,7 +1274,13 @@ impl WindowsWindowInner {
     ) -> Option<isize> {
         self.report_visibility();
         if wparam.0 == 1 {
+            // Quill: shown again (e.g. from the tray), so frames are wanted.
+            self.demand_frames();
             self.draw_window(handle, false);
+        } else {
+            // Quill: a hidden window gets no WM_PAINT, so the idle decision
+            // would never run; park it until it is shown.
+            FRAME_GATE.park(handle);
         }
         None
     }

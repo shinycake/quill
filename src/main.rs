@@ -498,20 +498,9 @@ fn install_link_inbox(
 /// Dock (minimized) or a hidden app.
 #[cfg(feature = "ui")]
 fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
-    #[cfg(target_os = "macos")]
-    {
-        use objc2_app_kit::NSView;
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        if let Ok(handle) = HasWindowHandle::window_handle(window)
-            && let RawWindowHandle::AppKit(handle) = handle.as_raw()
-        {
-            // GPUI retains this native view while the window lives.
-            let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
-            if let Some(native) = view.window() {
-                native.deminiaturize(None);
-            }
-        }
-    }
+    // Hidden to the tray (Windows, X11) or minimized (everywhere): show it
+    // again, then bring it to the front.
+    ui::window_control::set_visible(window, true);
     cx.activate(true);
     window.activate_window();
 }
@@ -533,9 +522,11 @@ fn install_main_window_tray(
         }
     }
     quill::notify_focus::warm();
+    // "Show taskbar icon" off: the window starts out of the taskbar.
+    view.update(cx, |this, _| this.apply_taskbar_icon(window));
     // The title-bar close button: "Run in the background" hides the app
-    // (macOS) or minimizes the window (Linux/Windows, where GPUI cannot hide
-    // a window), otherwise the window closes.
+    // (macOS) or the window (Windows, X11; Wayland can only minimize),
+    // otherwise the window closes.
     window.on_window_should_close(cx, {
         let view = view.downgrade();
         move |window, cx| {
@@ -547,10 +538,17 @@ fn install_main_window_tray(
                 background,
                 quill::tray::tray_available(),
                 cfg!(target_os = "macos"),
+                ui::window_control::hide_supported(window),
             ) {
                 CloseOutcome::Quit => true,
                 CloseOutcome::HideApp => {
                     cx.hide();
+                    false
+                }
+                CloseOutcome::Hide => {
+                    if !ui::window_control::set_visible(window, false) {
+                        window.minimize_window();
+                    }
                     false
                 }
                 CloseOutcome::Minimize => {
@@ -610,24 +608,7 @@ fn install_main_window_tray(
                 });
                 for action in quill::tray::take_tray_actions() {
                     let _ = tray_window.update(cx, |_, window, cx| match action {
-                        quill::tray::TrayAction::Open => {
-                            #[cfg(target_os = "macos")]
-                            {
-                                use objc2_app_kit::NSView;
-                                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-                                if let Ok(handle) = HasWindowHandle::window_handle(window)
-                                    && let RawWindowHandle::AppKit(handle) = handle.as_raw()
-                                {
-                                    // GPUI retains this native view while the window lives.
-                                    let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
-                                    if let Some(native) = view.window() {
-                                        native.deminiaturize(None);
-                                    }
-                                }
-                            }
-                            cx.activate(true);
-                            window.activate_window();
-                        }
+                        quill::tray::TrayAction::Open => raise_main_window(window, cx),
                         quill::tray::TrayAction::Lock => {
                             let _ =
                                 tray_view.update(cx, |this, cx| this.lock_from_tray(window, cx));
