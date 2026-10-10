@@ -31,7 +31,7 @@ the app starts, setup fn, attachments, window title, tray, capture timing)
 and `ScreenshotDemo`, a copyable handle to a registered spec
 (`from_kind`, `all`, `named` in tests). `main.rs` reads everything from the
 handle: the kind list for the error message, the marker name
-(`.quill-ready-<kind>`, which matched the kind for all 280 demos), the window
+(`.quill-ready-<kind>`, which matched the kind for every demo), the window
 title, tray and timings. `new_with_demo` calls `demo.start()`,
 `demo.attachments()`, `demo.auth_inputs()` and, once the app is built,
 `demo.setup(..)`.
@@ -50,10 +50,10 @@ Where the code lives now:
   served several kinds became one method with a private enum. All files are
   under 1000 lines (largest: `privacy_media.rs`, 860).
 - `demo_setup.rs` is gone; `app_demo.rs` lost the seed table, the
-  attachment list, the sign-in fixtures and the setup call list (3031 to
-  about 1410 lines). `main.rs` lost `DEMO_TABLE` and the marker match (1898
-  to about 1300 lines). `screenshot_demo.rs` went from a 915-line enum to the
-  registry (about 270 lines).
+  attachment list, the sign-in fixtures and the setup call list (3101 to
+  1421 lines). `main.rs` lost `DEMO_TABLE` and the marker match (1931 to
+  1320 lines). `screenshot_demo.rs` went from a 938-line enum to the
+  registry (270 lines). `demo_setup.rs` had 3257 lines.
 
 ### Registry: `inventory`
 
@@ -83,14 +83,22 @@ prints the kind (`ready-chats`) instead of the old variant name
 
 ## Verification
 
-- `every_earlier_kind_is_still_registered` (`ui/demos/mod.rs`): the 280 kinds
-  from the old `DEMO_TABLE` (frozen in `ui/demos/kinds_before_registry.txt`)
-  all resolve. New kinds need no entry there.
+- `every_earlier_kind_is_still_registered` (`ui/demos/mod.rs`): the 286
+  kinds from the old `DEMO_TABLE` (frozen in
+  `ui/demos/kinds_before_registry.txt`) all resolve. New kinds need no entry
+  there.
 - `every_demo_kind_parses`, `demo_kinds_are_unique_sorted_and_listed`
   (`main.rs`), `kinds_are_unique`, `kinds_are_cli_names`
   (`screenshot_demo.rs`).
-- Pixel comparison of every demo before and after: see the PR.
-- Tests: CAPTURE_TEST_COUNTS.
+- `--screenshot-demo nope` prints the same kind list and exits 2, before and
+  after.
+- Pixel comparison (in-process capture, 1200x740, dark theme): `ready-chats`,
+  `ready-reply`, `ready-appearance`, `ready-share-box` and
+  `ready-media-viewer` are identical before and after. An earlier sweep over
+  259 kinds found 227 identical; the rest show clock times, the date
+  separator or animation frames that also differ between two runs of the
+  old binary.
+- Tests: core 2953 (unchanged), UI 218 to 221 (the three registry tests).
 
 ## How to add a screenshot demo now
 
