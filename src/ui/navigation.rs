@@ -754,3 +754,11 @@ impl QuillApp {
         }
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    Settings => DialogSpec::new(
+        7300,
+        |app| app.settings_open,
+        QuillApp::build_settings_dialog,
+    ),
+}

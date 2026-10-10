@@ -1044,6 +1044,20 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    FolderShare => DialogSpec::new(
+        1900,
+        |app| app.folder_share.is_some(),
+        QuillApp::build_folder_share_dialog,
+    ),
+
+    FolderInvite => DialogSpec::new(
+        2000,
+        |app| app.folder_invite.is_some(),
+        QuillApp::build_folder_invite_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     use super::{chats_count_label, folder_can_be_shared, short_link};

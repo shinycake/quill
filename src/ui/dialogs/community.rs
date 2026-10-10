@@ -503,3 +503,20 @@ pub fn apply_ready_communities(session: &mut Session, sink: &Arc<MemorySink>, se
         }
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// Slice G10: communities create dialog.
+    CommunityCreate => DialogSpec::new(
+        // Slice G10: communities dialogs render last (lowest priority).
+        6800,
+        |app| app.community_ui.create_dialog.is_some(),
+        build_create_community_dialog,
+    ),
+
+    /// Slice G10: communities hub dialog.
+    CommunityHub => DialogSpec::new(
+        6900,
+        |app| app.community_ui.hub_open,
+        build_community_hub_dialog,
+    ),
+}

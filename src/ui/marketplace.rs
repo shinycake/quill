@@ -85,3 +85,11 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    Marketplace => DialogSpec::new(
+        4100,
+        |app| app.marketplace_open,
+        QuillApp::build_marketplace_dialog,
+    ),
+}

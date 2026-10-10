@@ -105,3 +105,12 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// The Archive menu's "How does it work?" box.
+    ArchiveHint => DialogSpec::new(
+        1400,
+        |app| app.archive_hint_open,
+        QuillApp::build_archive_hint_dialog,
+    ),
+}
