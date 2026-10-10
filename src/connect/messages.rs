@@ -61,11 +61,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `parity:platform-chat-export` — start exporting a chat's history to
-    /// a JSON file. Refuses while another export is running.
+    /// a JSON or HTML file. Refuses while another export is running.
     pub fn start_chat_export(
         &mut self,
         chat_id: ChatId,
         chat_title: String,
+        options: crate::chat_export::ChatExportOptions,
     ) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -79,8 +80,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.chat_has_protected_content(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chat_export = Some(crate::chat_export::ChatExportState::new(
-            chat_id, chat_title,
+        self.session.chat_export = Some(crate::chat_export::ChatExportState::with_options(
+            chat_id,
+            chat_title,
+            options,
+            crate::local_time::now_unix(),
         ));
         self.send_export_page()
     }

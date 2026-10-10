@@ -77,7 +77,6 @@ const WALLPAPER_PRESETS: &[(u32, &str)] = &[
 ];
 
 impl QuillApp {
-    #[cfg(target_os = "macos")]
     pub(crate) fn minimize_to_tray(&self) -> bool {
         self.appearance.minimize_to_tray
     }
@@ -209,6 +208,7 @@ impl QuillApp {
         f: impl FnOnce(&mut AppearancePrefs),
     ) {
         f(&mut self.appearance);
+        quill::tray::set_tray_enabled(self.appearance.show_tray_icon);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
         if let Err(err) = save_appearance_prefs(&Self::appearance_paths(), &self.appearance) {
             self.status_note = format!("Couldn't save appearance settings: {err}");
@@ -337,6 +337,10 @@ impl QuillApp {
             let mut body = div().flex().flex_col().gap_3();
             if this.translate_ui.settings_only {
                 body = body.child(this.translate_settings_section(cx));
+            } else if this.window_settings_screenshot {
+                for section in this.window_behavior_sections(true, cx) {
+                    body = body.child(section);
+                }
             } else if this.keybindings_screenshot {
                 body = body.child(
                     div()
@@ -379,30 +383,8 @@ impl QuillApp {
                 body = body.child(this.general_link_handler_section(cx));
                 body = body.child(this.update_settings_section(cx));
                 body = body.child(this.about_settings_section(cx));
-                // Tray-dependent switches only exist while a tray icon does:
-                // a hidden window with no tray to reopen it from would
-                // strand the user (Linux without a StatusNotifier host).
-                let tray = quill::tray::tray_setting_switches(
-                    quill::tray::tray_available(),
-                    cfg!(target_os = "macos"),
-                );
-                if tray.start_in_tray {
-                    body = body.child(this.appearance_section(
-                        cx, "Start in tray", "Open Quill from its tray menu when needed.",
-                        Switch::new("general-start-in-tray").checked(this.appearance.start_in_tray)
-                            .accessibility_label("Start Quill in the system tray")
-                            .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.start_in_tray = on)))
-                            .into_any_element(),
-                    ));
-                }
-                // Parity slice (platform-custom-keybindings).
-                if tray.minimize_to_tray {
-                    body = body.child(this.appearance_section(
-                        cx, "Minimize to tray", "Use the tray menu to reopen Quill.",
-                        Switch::new("general-minimize-to-tray").checked(this.appearance.minimize_to_tray)
-                            .accessibility_label("Minimize Quill to the system tray")
-                            .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.minimize_to_tray = on))).into_any_element()
-                    ));
+                for section in this.window_behavior_sections(quill::tray::tray_available(), cx) {
+                    body = body.child(section);
                 }
                 body = body.child(this.appearance_keybindings_section(cx));
             }
@@ -565,6 +547,99 @@ impl QuillApp {
                     ),
             )
             .into_any_element()
+    }
+
+    /// Tray and window-close switches of the General settings. `tray_available`
+    /// is a parameter so the screenshot demo can show them without a tray.
+    pub(crate) fn window_behavior_sections(
+        &self,
+        tray_available: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let this = self;
+        let mut body: Vec<AnyElement> = Vec::new();
+        // Tray-dependent switches only exist while a tray icon does:
+        // a hidden window with no tray to reopen it from would
+        // strand the user (Linux without a StatusNotifier host).
+        let tray =
+            quill::tray::tray_setting_switches(tray_available, this.appearance.show_tray_icon);
+        if tray.show_tray_icon {
+            body.push(
+                this.appearance_section(
+                    cx,
+                    "Show tray icon",
+                    "Keep Quill in the system tray with the unread count.",
+                    Switch::new("general-show-tray-icon")
+                        .checked(this.appearance.show_tray_icon)
+                        .accessibility_label("Show the Quill tray icon")
+                        .on_click(cx.listener(|this, &on, _, cx| {
+                            this.set_appearance(cx, |a| a.show_tray_icon = on)
+                        }))
+                        .into_any_element(),
+                ),
+            );
+        }
+        if tray.start_in_tray {
+            body.push(
+                this.appearance_section(
+                    cx,
+                    "Start in tray",
+                    "Open Quill from its tray menu when needed.",
+                    Switch::new("general-start-in-tray")
+                        .checked(this.appearance.start_in_tray)
+                        .accessibility_label("Start Quill in the system tray")
+                        .on_click(cx.listener(|this, &on, _, cx| {
+                            this.set_appearance(cx, |a| a.start_in_tray = on)
+                        }))
+                        .into_any_element(),
+                ),
+            );
+        }
+        if tray.run_in_background {
+            body.push(this.appearance_close_behavior_section(cx));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            body.push(
+                this.appearance_section(
+                    cx,
+                    "Warn before quitting",
+                    "Hold \u{2318}Q to quit instead of quitting on the first press.",
+                    Switch::new("general-mac-warn-before-quit")
+                        .checked(this.appearance.mac_warn_before_quit)
+                        .accessibility_label("Warn before quitting with Command Q")
+                        .on_click(cx.listener(|this, &on, _, cx| {
+                            this.set_appearance(cx, |a| a.mac_warn_before_quit = on)
+                        }))
+                        .into_any_element(),
+                ),
+            );
+        }
+        body
+    }
+
+    /// tdesktop "When the window is closed": run in the background or quit.
+    fn appearance_close_behavior_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let control = RadioGroup::vertical("appearance-close-behavior")
+            .selected_index(Some(usize::from(!self.appearance.minimize_to_tray)))
+            .children([
+                Radio::new("appearance-close-background").label("Run in the background"),
+                Radio::new("appearance-close-quit").label("Quit Quill"),
+            ])
+            .on_click(cx.listener(|this, &ix, _, cx| {
+                this.set_appearance(cx, |a| a.minimize_to_tray = ix == 0);
+            }));
+        let hint = if cfg!(target_os = "macos") {
+            "Quill keeps running and reopens from the tray icon."
+        } else {
+            "The window minimizes and reopens from the tray icon."
+        };
+        self.appearance_section(
+            cx,
+            "When the window is closed",
+            hint,
+            control.into_any_element(),
+        )
     }
 
     fn appearance_theme_section(&self, cx: &mut Context<Self>) -> AnyElement {

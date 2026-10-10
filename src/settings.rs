@@ -528,8 +528,17 @@ pub struct AppearancePrefs {
     pub folder_tabs_mode: crate::folder_icons::FolderTabsMode,
     #[serde(default)]
     pub start_in_tray: bool,
+    /// tdesktop `CloseBehavior::RunInBackground`: closing the window keeps
+    /// Quill running in the tray. (Stored as `minimize_to_tray` since it
+    /// first only covered the macOS minimize button.)
     #[serde(default)]
     pub minimize_to_tray: bool,
+    /// tdesktop `WorkMode` tray bit ("Show tray icon").
+    #[serde(default = "default_true")]
+    pub show_tray_icon: bool,
+    /// tdesktop `macWarnBeforeQuit`: hold Cmd+Q to quit (macOS only).
+    #[serde(default = "default_true")]
+    pub mac_warn_before_quit: bool,
     #[serde(default = "default_true")]
     pub check_updates_on_launch: bool,
 }
@@ -577,6 +586,8 @@ impl Default for AppearancePrefs {
             folder_tabs_mode: crate::folder_icons::FolderTabsMode::Default,
             start_in_tray: false,
             minimize_to_tray: false,
+            show_tray_icon: true,
+            mac_warn_before_quit: true,
             check_updates_on_launch: true,
         }
     }
@@ -1370,6 +1381,8 @@ mod tests {
             folder_tabs_mode: crate::folder_icons::FolderTabsMode::IconsOnly,
             start_in_tray: true,
             minimize_to_tray: true,
+            show_tray_icon: false,
+            mac_warn_before_quit: false,
             check_updates_on_launch: false,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();

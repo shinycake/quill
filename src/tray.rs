@@ -341,23 +341,61 @@ pub fn render_overlay_icon(unread: u32) -> (Vec<u8>, u32, u32) {
     (px.buf, ICON_SIZE, ICON_SIZE)
 }
 
-/// Which tray-dependent switches the General settings may offer. Hidden when
-/// no tray icon exists: a "minimize/start in tray" window with no tray to
-/// reopen it from would strand the user.
+/// Which tray-related switches the General settings may offer.
+///
+/// "Start in tray" and "run in the background" need a live tray icon: a
+/// hidden or minimized window with no tray to reopen it from would strand
+/// the user. The "Show tray icon" switch itself stays offered while the
+/// user has turned the icon off (or it is up), so it can always be turned
+/// back on; it is hidden only where the desktop has no tray host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TraySettingSwitches {
+    pub show_tray_icon: bool,
     pub start_in_tray: bool,
-    pub minimize_to_tray: bool,
+    pub run_in_background: bool,
 }
 
-/// `minimize_to_tray` is additionally macOS-only for now: Windows/Linux
-/// GPUI windows cannot be hidden after creation, so only the menu-bar
-/// hide path exists (`cx.hide()`).
-pub fn tray_setting_switches(tray_available: bool, macos: bool) -> TraySettingSwitches {
+pub fn tray_setting_switches(tray_available: bool, tray_enabled: bool) -> TraySettingSwitches {
     TraySettingSwitches {
+        show_tray_icon: tray_available || !tray_enabled,
         start_in_tray: tray_available,
-        minimize_to_tray: tray_available && macos,
+        run_in_background: tray_available,
     }
+}
+
+/// What closing the window does (the title-bar button, Ctrl/Cmd+W).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseOutcome {
+    /// Close the window and quit.
+    Quit,
+    /// macOS: hide the whole app; the tray and Dock keep it reachable.
+    HideApp,
+    /// Linux and Windows: keep the window but minimize it. GPUI cannot hide
+    /// a window after creation (`third_party/gpui-pre-*` expose no hide), so
+    /// the tray icon's "Open Quill" restores the minimized window instead.
+    Minimize,
+}
+
+/// tdesktop "Run in the background" (`CloseBehavior::RunInBackground`): the
+/// window close button keeps the app alive when a tray icon exists.
+pub fn close_outcome(run_in_background: bool, tray_available: bool, macos: bool) -> CloseOutcome {
+    match (run_in_background && tray_available, macos) {
+        (false, _) => CloseOutcome::Quit,
+        (true, true) => CloseOutcome::HideApp,
+        (true, false) => CloseOutcome::Minimize,
+    }
+}
+
+/// The "Show tray icon" preference, mirrored here so the 1s tray timer needs
+/// no handle on the app. Set from `set_appearance` and at startup.
+static TRAY_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_tray_enabled(enabled: bool) {
+    TRAY_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn tray_enabled() -> bool {
+    TRAY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Red pill in the top-right corner, sized to take up most of the icon so the
@@ -619,6 +657,11 @@ pub fn sync_tray(session: Option<&Session>) {
     let sounds = session.is_none_or(|s| s.inapp_sounds_enabled);
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
+        if !tray_enabled() {
+            // "Show tray icon" is off: dropping the handle removes the icon.
+            *slot = None;
+            return;
+        }
         // AppKit can return a status-item handle before its native window
         // exists during launch. Retry on the running event loop instead of
         // treating an invisible handle as a reachable tray.
@@ -646,7 +689,14 @@ pub fn sync_tray(session: Option<&Session>) {
         session.is_none_or(|s| s.desktop_notifications),
         session.is_none_or(|s| s.inapp_sounds_enabled),
     );
-    TRAY.with(|cell| cell.borrow_mut().poll(unread, toggles));
+    TRAY.with(|cell| {
+        let mut state = cell.borrow_mut();
+        if tray_enabled() {
+            state.poll(unread, toggles);
+        } else {
+            state.hide();
+        }
+    });
 }
 
 /// First sync at window creation. macOS/Windows create the tray
@@ -664,6 +714,9 @@ pub fn sync_tray_startup(session: Option<&Session>) {
         session.is_none_or(|s| s.desktop_notifications),
         session.is_none_or(|s| s.inapp_sounds_enabled),
     );
+    if !tray_enabled() {
+        return;
+    }
     TRAY.with(|cell| {
         cell.borrow_mut()
             .poll_startup(unread, toggles, std::time::Duration::from_millis(1500))
@@ -1038,27 +1091,43 @@ mod tests {
 
     #[test]
     fn tray_switches_hide_without_a_tray() {
+        // No tray host and the icon wanted: nothing to configure.
         assert_eq!(
             tray_setting_switches(false, true),
             TraySettingSwitches {
+                show_tray_icon: false,
                 start_in_tray: false,
-                minimize_to_tray: false
+                run_in_background: false
             }
         );
+        // A live tray offers everything, on every OS.
         assert_eq!(
             tray_setting_switches(true, true),
             TraySettingSwitches {
+                show_tray_icon: true,
                 start_in_tray: true,
-                minimize_to_tray: true
+                run_in_background: true
             }
         );
-        // Windows / Linux: start-in-tray only, minimize-to-tray stays off.
+        // The user turned the icon off: only the way back stays visible.
         assert_eq!(
-            tray_setting_switches(true, false),
+            tray_setting_switches(false, false),
             TraySettingSwitches {
-                start_in_tray: true,
-                minimize_to_tray: false
+                show_tray_icon: true,
+                start_in_tray: false,
+                run_in_background: false
             }
         );
+    }
+
+    #[test]
+    fn closing_runs_in_the_background_only_with_a_tray() {
+        use CloseOutcome::*;
+        assert_eq!(close_outcome(false, true, true), Quit);
+        assert_eq!(close_outcome(true, false, true), Quit);
+        assert_eq!(close_outcome(true, false, false), Quit);
+        assert_eq!(close_outcome(true, true, true), HideApp);
+        // Linux and Windows cannot hide a GPUI window: minimize it.
+        assert_eq!(close_outcome(true, true, false), Minimize);
     }
 }
