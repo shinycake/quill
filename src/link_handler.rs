@@ -11,8 +11,12 @@
 //!   API to hand the scheme back to another app, so the UI offers a
 //!   "Make default" button instead of a switch.
 //! * Linux: `xdg-mime default quill.desktop x-scheme-handler/tg` and
-//!   `xdg-mime query default x-scheme-handler/tg`. Turning off restores
-//!   nothing: xdg has no "previous" handler.
+//!   `xdg-mime query default x-scheme-handler/tg`. `xdg-mime` only accepts a
+//!   desktop file that exists, so a build that was never installed (an
+//!   unpacked tarball, an AppImage) first gets a per-user
+//!   `~/.local/share/applications/quill.desktop`, written atomically like the
+//!   autostart entry. An installed or packaged entry is left alone. Turning
+//!   off restores nothing: xdg has no "previous" handler.
 //! * Windows: per-user keys under `HKCU\Software\Classes\tg`, like
 //!   tdesktop's `psRegisterCustomScheme`. Turning off removes only a
 //!   registration whose command launches a Quill executable.
@@ -105,6 +109,73 @@ pub fn parse_xdg_default(output: &str) -> LinkHandlerState {
     } else {
         LinkHandlerState::Other(name.strip_suffix(".desktop").unwrap_or(name).to_string())
     }
+}
+
+/// Where `xdg-mime` looks for `quill.desktop`: `$XDG_DATA_HOME` (default
+/// `~/.local/share`) then each of `$XDG_DATA_DIRS` (default
+/// `/usr/local/share:/usr/share`), each with an `applications` folder.
+pub fn linux_application_dirs(
+    data_home: Option<&str>,
+    home: Option<&str>,
+    data_dirs: Option<&str>,
+) -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    fn non_empty(v: Option<&str>) -> Option<&str> {
+        v.map(str::trim).filter(|v| !v.is_empty())
+    }
+    let mut roots: Vec<PathBuf> = Vec::new();
+    match (non_empty(data_home), non_empty(home)) {
+        (Some(dir), _) => roots.push(PathBuf::from(dir)),
+        (None, Some(home)) => roots.push(PathBuf::from(home).join(".local/share")),
+        (None, None) => {}
+    }
+    let dirs = non_empty(data_dirs).unwrap_or("/usr/local/share:/usr/share");
+    roots.extend(dirs.split(':').filter(|d| !d.is_empty()).map(PathBuf::from));
+    roots.into_iter().map(|r| r.join("applications")).collect()
+}
+
+/// The executable a desktop entry should launch: the AppImage file when
+/// running from one (the mounted binary disappears on exit), else `exe`.
+pub fn linux_launch_target(exe: &std::path::Path, appimage: Option<&str>) -> std::path::PathBuf {
+    match appimage.map(str::trim).filter(|a| !a.is_empty()) {
+        Some(image) => std::path::PathBuf::from(image),
+        None => exe.to_path_buf(),
+    }
+}
+
+/// Content of the per-user `quill.desktop` that makes Quill selectable for
+/// `tg:` links. `%u` receives the link; `StartupWMClass` is not set because
+/// the window class is not fixed across toolkits.
+pub fn linux_desktop_entry(exe: &std::path::Path) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nName=Quill\n\
+         Comment=Unofficial Telegram desktop client\n\
+         Exec={} %u\nIcon=quill\nTerminal=false\n\
+         Categories=Network;Chat;\nMimeType={LINUX_SCHEME_MIME};\n",
+        crate::autostart::desktop_exec(exe)
+    )
+}
+
+/// Makes sure `xdg-mime` has a `quill.desktop` to point at. Returns the
+/// file written, or `None` when one already exists in `app_dirs` (a package
+/// or `linux-install.sh` put it there) and is left untouched. The first
+/// directory is the per-user one that gets the new file.
+pub fn ensure_linux_desktop_entry(
+    app_dirs: &[std::path::PathBuf],
+    exe: &std::path::Path,
+) -> std::io::Result<Option<std::path::PathBuf>> {
+    if app_dirs
+        .iter()
+        .any(|dir| dir.join(LINUX_DESKTOP_FILE).is_file())
+    {
+        return Ok(None);
+    }
+    let Some(user_dir) = app_dirs.first() else {
+        return Err(std::io::Error::other("no applications folder"));
+    };
+    let path = user_dir.join(LINUX_DESKTOP_FILE);
+    crate::autostart::write_atomic(&path, &linux_desktop_entry(exe))?;
+    Ok(Some(path))
 }
 
 // ---- Windows -------------------------------------------------------------
@@ -350,6 +421,16 @@ fn platform_make_default() -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn platform_make_default() -> Result<(), String> {
+    let env = |key| std::env::var(key).ok();
+    let dirs = linux_application_dirs(
+        env("XDG_DATA_HOME").as_deref(),
+        env("HOME").as_deref(),
+        env("XDG_DATA_DIRS").as_deref(),
+    );
+    let exe = std::env::current_exe().map_err(|e| format!("could not find Quill: {e}"))?;
+    let target = linux_launch_target(&exe, env("APPIMAGE").as_deref());
+    ensure_linux_desktop_entry(&dirs, &target)
+        .map_err(|e| format!("could not write the desktop entry: {e}"))?;
     run_xdg_mime(&linux_set_args()).map(|_| ())
 }
 
@@ -379,7 +460,8 @@ pub fn release() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        LinkHandlerState, WINDOWS_COMMAND_KEY, app_bundle_of_exe, is_quill_command,
+        LinkHandlerState, WINDOWS_COMMAND_KEY, app_bundle_of_exe, ensure_linux_desktop_entry,
+        is_quill_command, linux_application_dirs, linux_desktop_entry, linux_launch_target,
         linux_query_args, linux_set_args, macos_state, parse_xdg_default, status_text,
         windows_scheme_entries, windows_state,
     };
@@ -475,5 +557,96 @@ mod tests {
     fn status_text_names_the_current_handler() {
         assert!(status_text(&LinkHandlerState::Ours).contains("Quill is the default"));
         assert!(status_text(&LinkHandlerState::Other("Telegram".into())).contains("Telegram"));
+    }
+
+    #[test]
+    fn application_dirs_follow_the_xdg_defaults() {
+        let dirs = linux_application_dirs(None, Some("/home/a"), None);
+        assert_eq!(
+            dirs,
+            [
+                "/home/a/.local/share/applications",
+                "/usr/local/share/applications",
+                "/usr/share/applications"
+            ]
+            .map(Path::new)
+        );
+        let dirs =
+            linux_application_dirs(Some("/data"), Some("/home/a"), Some("/opt/s::/usr/share"));
+        assert_eq!(
+            dirs,
+            [
+                "/data/applications",
+                "/opt/s/applications",
+                "/usr/share/applications"
+            ]
+            .map(Path::new)
+        );
+        // An empty variable counts as unset, per the XDG spec.
+        let dirs = linux_application_dirs(Some(""), Some("/home/a"), Some(""));
+        assert_eq!(dirs[0], Path::new("/home/a/.local/share/applications"));
+    }
+
+    #[test]
+    fn desktop_entry_advertises_the_scheme_and_quotes_the_path() {
+        let plain = linux_desktop_entry(Path::new("/opt/quill/quill"));
+        assert!(plain.contains("Exec=/opt/quill/quill %u\n"));
+        assert!(plain.contains("MimeType=x-scheme-handler/tg;\n"));
+        assert!(plain.starts_with("[Desktop Entry]\nType=Application\n"));
+        let spaced = linux_desktop_entry(Path::new("/home/a b/Quill/quill"));
+        assert!(spaced.contains("Exec=\"/home/a b/Quill/quill\" %u\n"));
+    }
+
+    #[test]
+    fn appimage_path_wins_over_the_mounted_binary() {
+        let exe = Path::new("/tmp/.mount_Quill/usr/bin/quill");
+        assert_eq!(
+            linux_launch_target(exe, Some("/home/a/Quill.AppImage")),
+            Path::new("/home/a/Quill.AppImage")
+        );
+        assert_eq!(linux_launch_target(exe, Some(" ")), exe);
+        assert_eq!(linux_launch_target(exe, None), exe);
+    }
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("quill-link-handler-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn missing_desktop_entry_is_written_to_the_user_folder() {
+        let root = temp_dir("write");
+        let user = root.join("home/applications");
+        let system = root.join("sys/applications");
+        let exe = Path::new("/opt/quill/quill");
+        let written = ensure_linux_desktop_entry(&[user.clone(), system], exe)
+            .unwrap()
+            .expect("written");
+        assert_eq!(written, user.join("quill.desktop"));
+        let content = std::fs::read_to_string(&written).unwrap();
+        assert_eq!(content, linux_desktop_entry(exe));
+        // No temp file is left next to it.
+        let names: Vec<_> = std::fs::read_dir(&user)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["quill.desktop"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn installed_desktop_entry_is_left_alone() {
+        let root = temp_dir("keep");
+        let user = root.join("home/applications");
+        let system = root.join("sys/applications");
+        std::fs::create_dir_all(&system).unwrap();
+        std::fs::write(system.join("quill.desktop"), "packaged").unwrap();
+        let out = ensure_linux_desktop_entry(&[user.clone(), system], Path::new("/x/quill"));
+        assert_eq!(out.unwrap(), None);
+        assert!(!user.exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

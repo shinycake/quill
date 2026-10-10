@@ -54,9 +54,12 @@ pub enum InternalLink {
     Invoice {
         name: String,
     },
-    ChatBoost,
+    ChatBoost {
+        url: String,
+    },
     PremiumGiftCode,
     VideoChat {
+        username: String,
         live_stream: bool,
     },
     GroupCall,
@@ -96,6 +99,8 @@ pub enum SettingsTarget {
     NewGroup,
     NewChannel,
     SavedMessages,
+    /// The Telegram Premium page (`internalLinkTypePremiumFeaturesPage`).
+    Premium,
     /// A page Quill has no screen for; the settings list opens instead.
     Unsupported,
 }
@@ -231,9 +236,13 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
         "Invoice" => InternalLink::Invoice {
             name: text(value, "invoice_name"),
         },
-        "ChatBoost" => InternalLink::ChatBoost,
+        "ChatBoost" => InternalLink::ChatBoost {
+            url: text(value, "url"),
+        },
+        "PremiumFeaturesPage" => InternalLink::Settings(SettingsTarget::Premium),
         "PremiumGiftCode" => InternalLink::PremiumGiftCode,
         "VideoChat" => InternalLink::VideoChat {
+            username: text(value, "chat_username"),
             live_stream: flag(value, "is_live_stream"),
         },
         "GroupCall" => InternalLink::GroupCall,
@@ -255,6 +264,40 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
         other => InternalLink::Other(other.to_string()),
     })
 }
+
+/// The sign-in code in a login link: `tg://login?code=12345` (tdesktop
+/// `ResolveLoginCode`) or `https://t.me/login/12345`. Digits only, so
+/// nothing but a code can reach the sign-in field. Checked locally because
+/// TDLib's `getInternalLinkType` needs a signed-in session to be asked.
+pub fn login_code_from_link(link: &str) -> Option<String> {
+    let lower = link.trim().to_ascii_lowercase();
+    let raw = if let Some(rest) = lower.strip_prefix("tg://login") {
+        let query = rest.trim_start_matches('/').strip_prefix('?')?;
+        query
+            .split('#')
+            .next()?
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("code="))?
+            .to_string()
+    } else {
+        let rest = lower
+            .strip_prefix("https://")
+            .or_else(|| lower.strip_prefix("http://"))?;
+        let (host, path) = rest.split_once('/')?;
+        if !matches!(host, "t.me" | "telegram.me" | "telegram.dog") {
+            return None;
+        }
+        path.strip_prefix("login/")?
+            .split(['?', '#', '/'])
+            .next()?
+            .to_string()
+    };
+    (!raw.is_empty() && raw.len() <= MAX_LOGIN_CODE && raw.bytes().all(|b| b.is_ascii_digit()))
+        .then_some(raw)
+}
+
+/// Longest sign-in code accepted from a link (Telegram codes are 5 to 6).
+const MAX_LOGIN_CODE: usize = 8;
 
 /// The invite hash inside `t.me/+<hash>` / `t.me/joinchat/<hash>` /
 /// `tg://join?invite=<hash>`.
@@ -348,11 +391,26 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
         InternalLink::Invoice { .. } => {
             LinkRoute::Message(format!("Paying an invoice from a link {NOT_SUPPORTED}"))
         }
-        InternalLink::ChatBoost => {
-            LinkRoute::Message(format!("Boosting a channel from a link {NOT_SUPPORTED}"))
+        InternalLink::ChatBoost { url } => {
+            if url.is_empty() {
+                LinkRoute::Message("This boost link is broken.".into())
+            } else {
+                LinkRoute::Resolve(A::BoostLink { url: url.clone() })
+            }
         }
         InternalLink::PremiumGiftCode => LinkRoute::Message(format!("Gift codes {NOT_SUPPORTED}")),
-        InternalLink::VideoChat { live_stream } => LinkRoute::Message(if *live_stream {
+        // Opens the group or channel, whose header has the join button.
+        // Joining straight from a link would open the microphone unasked, so
+        // the call itself is not joined here.
+        InternalLink::VideoChat { username, .. } if !username.is_empty() => {
+            LinkRoute::Resolve(A::OpenUsername {
+                domain: username.clone(),
+                start_param: None,
+                post: None,
+                story_id: None,
+            })
+        }
+        InternalLink::VideoChat { live_stream, .. } => LinkRoute::Message(if *live_stream {
             format!("Joining a live stream from a link {NOT_SUPPORTED}")
         } else {
             format!("Joining a video chat from a link {NOT_SUPPORTED}")
@@ -444,7 +502,7 @@ pub fn needs_internal_resolution(link: &str) -> bool {
 mod tests {
     use super::{
         DeepLinkAction, DeepLinkUi, InternalLink, LinkRoute, SettingsTarget, invite_hash,
-        needs_internal_resolution, parse_internal_link, route,
+        login_code_from_link, needs_internal_resolution, parse_internal_link, route,
     };
     use serde_json::{Value, json};
 
@@ -509,7 +567,10 @@ mod tests {
             parsed(
                 json!({"@type":"internalLinkTypeVideoChat","chat_username":"g","invite_hash":"","is_live_stream":true})
             ),
-            InternalLink::VideoChat { live_stream: true }
+            InternalLink::VideoChat {
+                username: "g".into(),
+                live_stream: true
+            }
         );
         assert_eq!(
             parsed(json!({"@type":"internalLinkTypeQrCodeAuthentication"})),
@@ -688,10 +749,38 @@ mod tests {
     }
 
     #[test]
+    fn boost_and_premium_links_route_to_their_screens() {
+        assert_eq!(
+            route(
+                &parsed(
+                    json!({"@type":"internalLinkTypeChatBoost","url":"https://t.me/c/1/?boost"})
+                ),
+                ""
+            ),
+            LinkRoute::Resolve(DeepLinkAction::BoostLink {
+                url: "https://t.me/c/1/?boost".into()
+            })
+        );
+        assert!(matches!(
+            route(
+                &parsed(json!({"@type":"internalLinkTypeChatBoost","url":""})),
+                ""
+            ),
+            LinkRoute::Message(_)
+        ));
+        assert_eq!(
+            route(
+                &parsed(json!({"@type":"internalLinkTypePremiumFeaturesPage","referrer":"x"})),
+                ""
+            ),
+            LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::Premium))
+        );
+    }
+
+    #[test]
     fn unsupported_targets_say_so_and_never_open_a_browser() {
         for ty in [
             "internalLinkTypeInvoice",
-            "internalLinkTypeChatBoost",
             "internalLinkTypePremiumGiftCode",
             "internalLinkTypeVideoChat",
             "internalLinkTypeGroupCall",
@@ -741,6 +830,43 @@ mod tests {
             "https://t.me/durov#t=3",
         ] {
             assert!(!needs_internal_resolution(link), "{link}");
+        }
+    }
+
+    #[test]
+    fn login_codes_come_from_the_two_link_forms_only() {
+        assert_eq!(
+            login_code_from_link("tg://login?code=12345"),
+            Some("12345".into())
+        );
+        assert_eq!(
+            login_code_from_link("tg://login/?code=12345&x=1"),
+            Some("12345".into())
+        );
+        assert_eq!(
+            login_code_from_link("TG://LOGIN?CODE=99999"),
+            Some("99999".into())
+        );
+        assert_eq!(
+            login_code_from_link("https://t.me/login/54321"),
+            Some("54321".into())
+        );
+        assert_eq!(
+            login_code_from_link("http://telegram.me/login/54321?x"),
+            Some("54321".into())
+        );
+        for bad in [
+            "tg://login",
+            "tg://login?code=",
+            "tg://login?code=12a45",
+            "tg://login?code=123456789",
+            "tg://login?code=-1",
+            "tg://resolve?domain=login&code=1",
+            "https://evil.example/login/12345",
+            "https://t.me/login/",
+            "https://t.me/durov",
+        ] {
+            assert_eq!(login_code_from_link(bad), None, "{bad}");
         }
     }
 }
