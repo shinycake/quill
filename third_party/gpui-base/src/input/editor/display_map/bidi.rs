@@ -305,8 +305,11 @@ pub(crate) fn clusters_from_glyphs(
 ///
 /// Platforms let trailing whitespace hang outside the width they report: CoreText puts it at
 /// a negative x in a right-to-left run, and past `reported_width` in a left-to-right one.
-/// `rightmost_advance` is the advance of the glyph that sits furthest right, since nothing
-/// follows it to measure its right edge from.
+/// `rightmost_advance` is the advance of the character of the glyph that sits furthest
+/// right, since nothing follows that glyph to measure its right edge from. It is only read
+/// for a glyph that starts at or past the reported width: a character's own advance can be
+/// wider than the contextual form it was shaped into (an Arabic letter at the start of a
+/// word), so it would overstate the width of a glyph that lies inside the reported width.
 pub(crate) fn fragment_extent(
     glyph_xs: &[f32],
     reported_width: f32,
@@ -314,7 +317,7 @@ pub(crate) fn fragment_extent(
 ) -> (f32, f32) {
     let left = glyph_xs.iter().copied().fold(0f32, f32::min);
     let rightmost = glyph_xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let right = if rightmost.is_finite() {
+    let right = if rightmost.is_finite() && rightmost >= reported_width - EPS {
         reported_width.max(rightmost + rightmost_advance)
     } else {
         reported_width
@@ -1201,6 +1204,11 @@ mod tests {
         // Nothing hangs: the reported width stands.
         let (shift, width) = fragment_extent(&[0., 10.], 20., 10.);
         assert_eq!((shift, width), (0., 20.));
+        // The rightmost glyph is an initial form, narrower than the letter's own advance
+        // (an Arabic or Persian letter at the start of a word): it lies inside the reported
+        // width, which stands.
+        let (shift, width) = fragment_extent(&[0., 10.], 18., 12.);
+        assert_eq!((shift, width), (0., 18.));
         // No glyphs at all.
         assert_eq!(fragment_extent(&[], 0., 0.), (0., 0.));
     }

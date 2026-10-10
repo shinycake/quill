@@ -182,6 +182,13 @@ pub enum ScreenshotDemo {
     /// MED4: composer with a typed URL → detected-URL chip + preview
     /// toggle (injected, no live Telegram).
     ReadyComposerPreview,
+    /// Composer core: files dragged over the chat show two drop zones
+    /// (photos: quick versus without compression).
+    ReadyDropZones,
+    /// Composer core: the "Code Language" box over a fenced block.
+    ReadyCodeLanguage,
+    /// Composer core: a dragged folder offers its files or one archive.
+    ReadyDropFolder,
     /// MED4: embedded-player + album `linkPreview` cards in bubbles
     /// (injected, no live Telegram).
     ReadyPreviewCards,

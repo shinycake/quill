@@ -129,6 +129,40 @@ impl QuillApp {
         }
     }
 
+    /// "Replace emoji automatically": after a keystroke, swap a finished
+    /// trigger (`:-)`, `<3`, `:rocket:`) for its emoji. Returns the new
+    /// text when it replaced something. `set_value` emits no Change, so
+    /// this does not recurse.
+    pub(super) fn apply_instant_replace(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let prev = std::mem::replace(&mut self.composer_prev_text, text.to_string());
+        let range = self.composer.read(cx).selected_range();
+        if !range.is_empty() || self.pending_edit.is_some() {
+            return None;
+        }
+        let replace = quill::emoji_replace::instant_replacement(
+            &prev,
+            text,
+            range.start,
+            self.chat_prefs.replace_emoji,
+        )?;
+        let mut new_text = String::with_capacity(text.len() + replace.with.len());
+        new_text.push_str(&text[..replace.range.start]);
+        new_text.push_str(&replace.with);
+        new_text.push_str(&text[replace.range.end..]);
+        let caret = replace.range.start + replace.with.len();
+        self.composer.update(cx, |input, cx| {
+            input.set_value(&new_text, window, cx);
+            input.set_selected_range(caret..caret, cx);
+        });
+        self.composer_prev_text = new_text.clone();
+        Some(new_text)
+    }
+
     /// Esc / blur: close the popup. True when it was showing.
     pub(super) fn close_suggest_menu(&mut self, remember: bool, cx: &mut Context<Self>) -> bool {
         let Some(active) = self.suggest.active.take() else {

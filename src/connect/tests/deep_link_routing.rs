@@ -264,6 +264,59 @@ fn typed_links_route_through_get_internal_link_type() {
         Some(DeepLinkState::ShowText(_))
     ));
 
+    // Boost link: getChatBoostLinkInfo names the channel, then getChat.
+    let state = open_with(
+        &mut driver,
+        &seq,
+        &sink,
+        "tg://boost?channel=1001",
+        json!({"@type":"internalLinkTypeChatBoost","url":"tg://boost?channel=1001"}),
+    );
+    let action = info_action(state);
+    assert_eq!(
+        action,
+        DeepLinkAction::BoostLink {
+            url: "tg://boost?channel=1001".into()
+        }
+    );
+    let extra = driver.resolve_deep_link(action).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "getChatBoostLinkInfo")["url"],
+        "tg://boost?channel=1001"
+    );
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"chatBoostLinkInfo","@extra":extra.as_extra(),"is_public":false,"chat_id":-1001}),
+    );
+    assert_eq!(
+        info_action(driver.session.deep_link.clone()),
+        DeepLinkAction::OpenChannelBoost { chat_id: -1001 }
+    );
+    // A link that names no channel is explained, not opened.
+    let state = open_with(
+        &mut driver,
+        &seq,
+        &sink,
+        "tg://boost?channel=9",
+        json!({"@type":"internalLinkTypeChatBoost","url":"tg://boost?channel=9"}),
+    );
+    let extra = driver
+        .resolve_deep_link(info_action(state))
+        .unwrap()
+        .unwrap();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"chatBoostLinkInfo","@extra":extra.as_extra(),"is_public":false,"chat_id":0}),
+    );
+    assert!(matches!(
+        driver.session.deep_link,
+        Some(DeepLinkState::ShowText(_))
+    ));
+
     // +phone: searchUserByPhoneNumber, then createPrivateChat with a draft.
     let state = open_with(
         &mut driver,

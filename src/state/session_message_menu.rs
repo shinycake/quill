@@ -110,19 +110,51 @@ pub enum StickerSetViewStage {
     Loading,
     Ready {
         title: String,
+        /// The set's short name, for its `t.me` link (empty if unknown).
+        name: String,
         installed: bool,
+        /// The set holds custom emoji (`addemoji` link, no archive).
+        is_emoji: bool,
         stickers: Vec<StickerItem>,
     },
     Failed,
 }
 
+/// A tapped custom emoji and the pack it comes from (tdesktop's emoji
+/// preview, `ShowReactionPreview`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomEmojiPreview {
+    pub emoji_id: i64,
+    pub set_id: i64,
+    pub title: String,
+}
+
 impl Session {
+    /// The pack of a tapped custom emoji arrived.
+    pub(crate) fn accept_custom_emoji_preview(
+        &mut self,
+        emoji_id: i64,
+        set_id: i64,
+        title: String,
+    ) {
+        if title.is_empty() {
+            return;
+        }
+        self.custom_emoji_preview = Some(CustomEmojiPreview {
+            emoji_id,
+            set_id,
+            title,
+        });
+    }
+
     /// The set's contents arrived.
     pub(crate) fn accept_sticker_set_view(
         &mut self,
         set_id: i64,
         title: String,
+        name: String,
         installed: bool,
+        is_emoji: bool,
         stickers: Vec<StickerItem>,
     ) {
         if let Some(view) = self.sticker_set_view.as_mut()
@@ -130,7 +162,9 @@ impl Session {
         {
             view.stage = StickerSetViewStage::Ready {
                 title,
+                name,
                 installed,
+                is_emoji,
                 stickers,
             };
         }

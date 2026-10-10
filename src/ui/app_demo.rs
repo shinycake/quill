@@ -402,6 +402,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — link + web page preview".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyDropZones
+        | ScreenshotDemo::ReadyDropFolder
+        | ScreenshotDemo::ReadyCodeLanguage => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — file drop zones".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyComposerPreview => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1696,8 +1704,11 @@ impl QuillApp {
             &composer,
             window,
             |this, state, event: &InputEvent, window, cx| {
-                let text = state.read(cx).value().to_string();
+                let mut text = state.read(cx).value().to_string();
                 if matches!(event, InputEvent::Change) {
+                    if let Some(replaced) = this.apply_instant_replace(&text, window, cx) {
+                        text = replaced;
+                    }
                     this.sync_composer_typing(&text);
                     this.note_open_draft(true, cx);
                 }
@@ -2112,6 +2123,7 @@ impl QuillApp {
             composer_preview_link: 0,
             edit_replace_as_file: false,
             composer_preview_token: 0,
+            composer_prev_text: String::new(),
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
             schedule_picker: None,
@@ -2222,6 +2234,7 @@ impl QuillApp {
             frame_clock_running: Default::default(),
             motion: Default::default(),
             composer_link_dialog: None,
+            composer_code_language: None,
             send_morph: Default::default(),
             slices: Default::default(),
             stream_reveal: Default::default(),
@@ -2239,6 +2252,9 @@ impl QuillApp {
             video_note_capture: None,
             record_locked: false,
             record_discard_confirm: false,
+            drop_paths: Vec::new(),
+            drop_state: None,
+            drop_preview: None,
             voice_tick: false,
             recording_auto_send: false,
             round_preview: Default::default(),
@@ -2314,6 +2330,7 @@ impl QuillApp {
             deep_link_invite: None,
             pending_deep_link_ui: None,
             share_link_text: None,
+            custom_emoji_card_seen: None,
             pending_media_seek: None,
             pending_deep_link_open: None,
             pending_link: None,

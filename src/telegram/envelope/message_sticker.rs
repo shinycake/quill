@@ -259,6 +259,8 @@ pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
             .get("is_installed")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        is_custom_emoji: value.pointer("/sticker_type/@type").and_then(Value::as_str)
+            == Some("stickerTypeCustomEmoji"),
         stickers,
         files,
     }

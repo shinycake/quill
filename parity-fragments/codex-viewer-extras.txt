@@ -1,6 +1,0 @@
-parity:viewer-speed-dial
-parity:viewer-saved-toast
-parity:viewer-sender-header
-parity:viewer-view-all
-parity:viewer-os-media-keys
-parity:viewer-caption-entities

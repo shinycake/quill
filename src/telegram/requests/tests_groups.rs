@@ -773,6 +773,10 @@ fn g2_thread_boost_welcome_request_shapes_match_1_8_67() {
     let json = get_chat_boost_status(RequestId(3), ChatId(7));
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "getChatBoostStatus");
+    let json = get_chat_boost_link_info(RequestId(3), "https://t.me/c/1/?boost");
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "getChatBoostLinkInfo");
+    assert_eq!(v["url"], "https://t.me/c/1/?boost");
     let json = get_available_chat_boost_slots(RequestId(3));
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "getAvailableChatBoostSlots");
