@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::folder_picker::PickerMode;
 use quill::ids::ChatId;
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
@@ -592,6 +593,9 @@ impl QuillApp {
                 )
                 .into_any_element();
         }
+        if let Some(mode) = dialog.picker {
+            return self.folder_chat_picker(mode, cx);
+        }
         // Icon picker (tdesktop `FilterIconPanel`): six per row. Until one
         // is chosen the folder shows the icon its rules produce.
         let chosen = dialog.editor.icon_name.clone();
@@ -705,81 +709,11 @@ impl QuillApp {
             );
         }
         panel = panel.child(filters_row);
-        // Per-chat include/exclude multi-select.
-        let mut chats: Vec<(i64, String)> = self
-            .session()
-            .map(|s| {
-                s.chats
-                    .values()
-                    .map(|c| (c.id.0, c.title.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        chats.sort_by_key(|a| a.1.to_lowercase());
-        let mut chat_list = div()
-            .id("folder-editor-chats")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .overflow_y_scroll()
-            .max_h(px(220.))
-            .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Chats (include / exclude):"),
-            );
-        for (chat_id, chat_title) in chats {
-            let included = dialog.editor.included.contains(&chat_id);
-            let excluded = dialog.editor.excluded.contains(&chat_id);
-            chat_list = chat_list.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .child(div().text_sm().min_w_0().child(chat_title))
-                    .child(
-                        div()
-                            .flex()
-                            .gap_1()
-                            .child(
-                                // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
-                                // toggle_* flip membership, so fire only when the
-                                // requested value differs from the rendered one.
-                                Checkbox::new(("folder-include-chat", chat_id as u64))
-                                    .checked(included)
-                                    .label("In")
-                                    .on_click(cx.listener(move |this, &on, _, cx| {
-                                        if on != included {
-                                            if let Some(dialog) = this.folder_editor.as_mut() {
-                                                dialog.editor.toggle_included(chat_id);
-                                            }
-                                            cx.notify();
-                                        }
-                                    })),
-                            )
-                            .child(
-                                Checkbox::new(("folder-exclude-chat", chat_id as u64))
-                                    .checked(excluded)
-                                    .label("Out")
-                                    .on_click(cx.listener(move |this, &on, _, cx| {
-                                        if on != excluded {
-                                            if let Some(dialog) = this.folder_editor.as_mut() {
-                                                dialog.editor.toggle_excluded(chat_id);
-                                            }
-                                            cx.notify();
-                                        }
-                                    })),
-                            ),
-                    ),
-            );
-        }
-        panel = panel.child(chat_list);
+        // Included / excluded chats: a counter, the chosen chats and the
+        // button that opens the picker (tdesktop `edit_filter_box.cpp`).
+        panel = panel
+            .child(self.folder_chat_section(PickerMode::Include, cx))
+            .child(self.folder_chat_section(PickerMode::Exclude, cx));
         // Exclude flags.
         let exclude_flags = [
             ("Muted", dialog.editor.exclude_muted, "exclude-muted"),
@@ -1121,6 +1055,18 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// "{chat} added to {folder} folder" for the folder picker.
+    fn membership_toast(&self, chat_id: ChatId, folder_id: i32, added: bool) -> String {
+        let session = self.session();
+        let chat = session
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .map_or_else(|| "Chat".to_string(), |c| c.title.clone());
+        let folder = session
+            .and_then(|s| s.chat_folders.iter().find(|f| f.id == folder_id))
+            .map_or_else(|| format!("Folder {folder_id}"), |f| f.name.clone());
+        quill::folders::folder_membership_toast(&chat, &folder, added)
+    }
+
     pub(super) fn add_open_chat_to_folder(
         &mut self,
         chat_id: ChatId,
@@ -1134,8 +1080,9 @@ impl QuillApp {
                 .map(|_| ()),
             None => Ok(()),
         };
+        let toast = self.membership_toast(chat_id, folder_id, true);
         self.status_note = match result {
-            Ok(()) => "adding chat to folder…".into(),
+            Ok(()) => toast,
             Err(err) => format!("could not add chat to folder: {err:?}"),
         };
         self.folder_menu_open = false;
@@ -1152,8 +1099,9 @@ impl QuillApp {
             Some(live) => live.driver.remove_chat_from_folder(chat_id, folder_id),
             None => Ok(()),
         };
+        let toast = self.membership_toast(chat_id, folder_id, false);
         self.status_note = match result {
-            Ok(()) => "removing chat from folder…".into(),
+            Ok(()) => toast,
             Err(err) => format!("could not remove chat from folder: {err:?}"),
         };
         self.folder_menu_open = false;

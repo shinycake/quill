@@ -224,9 +224,28 @@ pub fn spec_without_chat(
     edited
 }
 
+/// The confirmation toast after adding or removing a chat from a folder
+/// (`lng_filters_toast_add` / `lng_filters_toast_remove`).
+pub fn folder_membership_toast(chat: &str, folder: &str, added: bool) -> String {
+    let verb = if added { "added to" } else { "removed from" };
+    format!("{chat} {verb} {folder} folder")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn membership_toast_texts() {
+        assert_eq!(
+            folder_membership_toast("Maya", "Work", true),
+            "Maya added to Work folder"
+        );
+        assert_eq!(
+            folder_membership_toast("Maya", "Work", false),
+            "Maya removed from Work folder"
+        );
+    }
     use crate::chatlist_style::ChatPreviewStyle;
     use crate::ids::{ChatId, MessageId, UserId};
     use crate::state::ChatSummary;

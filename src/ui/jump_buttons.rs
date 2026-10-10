@@ -73,6 +73,22 @@ impl QuillApp {
         }
     }
 
+    /// Chat row menu: mark one chat's mentions, reactions or poll votes read.
+    pub(super) fn read_chat_unread_markers(
+        &mut self,
+        chat_id: quill::ids::ChatId,
+        kind: UnreadJumpKind,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.read_all_chat_unread_markers(chat_id, kind) {
+                Ok(()) => String::new(),
+                Err(_) => "could not mark as read".into(),
+            };
+        }
+        cx.notify();
+    }
+
     pub(super) fn read_all_unread_markers(&mut self, kind: UnreadJumpKind, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.read_all_unread_markers(kind) {

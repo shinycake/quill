@@ -297,6 +297,13 @@ impl QuillApp {
             ));
         }
         rows.push(item(
+            "archive-menu-how",
+            IconName::Info,
+            "How does it work?",
+            Box::new(|this, cx| this.open_archive_hint(cx)),
+            cx,
+        ));
+        rows.push(item(
             "archive-menu-settings",
             IconName::Settings,
             "Archive settings",
