@@ -140,6 +140,8 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
+        // The sound was replaced, so a recording preview is over.
+        self.record_preview = None;
         self.playback_error = None;
         match kind {
             PlaybackKind::Voice => self.playing_voice = Some(message_id),

@@ -1,0 +1,2 @@
+parity:composer-restricted-placeholder
+parity:composer-voice-pause

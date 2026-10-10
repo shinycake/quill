@@ -358,6 +358,7 @@ fn send_voice_note_shape_matches_1_8_67() {
             caption: "",
             reply_to: Some(SendReply::plain(MessageId(9))),
             topic_id: None,
+            self_destruct: None,
         },
     );
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -392,6 +393,29 @@ fn send_voice_note_shape_matches_1_8_67() {
     assert_eq!(v["reply_to"]["message_id"], 9);
     assert!(!json.contains("inputMessageVideoNote"));
     assert!(!json.contains("CANARY"));
+}
+
+#[test]
+fn play_once_voice_note_asks_for_an_immediate_self_destruct() {
+    let json = send_voice_note(
+        RequestId(16),
+        ChatId(7),
+        VoiceNoteSend {
+            path: "/tmp/picked.ogg",
+            duration: 3,
+            waveform_b64: "",
+            caption: "",
+            reply_to: None,
+            topic_id: None,
+            self_destruct: Some(SelfDestructSend::Immediately),
+        },
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        v["input_message_content"]["self_destruct_type"]["@type"],
+        "messageSelfDestructTypeImmediately"
+    );
+    assert_eq!(v["input_message_content"]["@type"], "inputMessageVoiceNote");
 }
 
 #[test]
