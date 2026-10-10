@@ -875,12 +875,12 @@ fn chat_export_pages_history_until_a_page_adds_nothing() {
         .unwrap();
 
     driver
-        .start_chat_export(ChatId(16), "Export Chat".into())
+        .start_chat_export(ChatId(16), "Export Chat".into(), Default::default())
         .unwrap();
     // A second export while one is running is refused.
     assert!(
         driver
-            .start_chat_export(ChatId(16), "Export Chat".into())
+            .start_chat_export(ChatId(16), "Export Chat".into(), Default::default())
             .is_err()
     );
     let first = recorder
@@ -1031,7 +1031,7 @@ fn chat_export_refuses_protected_chats() {
 
     assert!(
         driver
-            .start_chat_export(ChatId(16), "Protected".into())
+            .start_chat_export(ChatId(16), "Protected".into(), Default::default())
             .is_err()
     );
     assert!(driver.session.chat_export.is_none());

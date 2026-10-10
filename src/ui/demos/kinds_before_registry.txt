@@ -47,6 +47,7 @@ ready-channels
 ready-channels-admin
 ready-chat-avatars
 ready-chat-badges
+ready-chat-export
 ready-chat-header
 ready-chat-list
 ready-chat-list-2
@@ -269,6 +270,7 @@ ready-viewer-shared
 ready-voice
 ready-voice-pause
 ready-web-sessions
+ready-window-settings
 wait-code
 wait-code-firebase
 wait-code-flash

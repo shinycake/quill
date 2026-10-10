@@ -46,7 +46,7 @@ mod tests {
     #[test]
     fn every_earlier_kind_is_still_registered() {
         let kinds: Vec<&str> = KINDS_BEFORE_REGISTRY.lines().collect();
-        assert_eq!(kinds.len(), 284);
+        assert_eq!(kinds.len(), 286);
         for kind in kinds {
             assert_eq!(ScreenshotDemo::named(kind).kind(), kind);
         }

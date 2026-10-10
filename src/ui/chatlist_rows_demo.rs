@@ -60,23 +60,41 @@ fn apply_ready_chat_badges(session: &mut Session, sink: &Arc<MemorySink>, seq: &
     });
 }
 
+/// Status note of every chat-list rows capture.
+const ROWS_NOTE: &str = "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)";
+
 register_demos![
     // Chat-list rows: the Archive's "How does it work?" box.
-    DemoSpec::chats("ready-archive-hint", "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::ArchiveHint, window, cx)),
+    DemoSpec::chats("ready-archive-hint", ROWS_NOTE)
+        .setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::ArchiveHint, window, cx)),
     // Chat-list rows: video chat badge and emoji status on rows.
-    DemoSpec::chats("ready-chat-badges", "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::ChatBadges, window, cx)),
+    DemoSpec::chats("ready-chat-badges", ROWS_NOTE)
+        .setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::ChatBadges, window, cx)),
+    // The "Export chat history" options box.
+    DemoSpec::chats("ready-chat-export", ROWS_NOTE)
+        .setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::ChatExport, window, cx)),
+    // Appearance box: tray icon, start in tray, close behavior, quit warning.
+    DemoSpec::chats("ready-window-settings", ROWS_NOTE).setup(
+        |app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::WindowSettings, window, cx)
+    ),
     // Chat-list rows: the folder editor's chat picker with search.
-    DemoSpec::chats("ready-folders-chat-picker", "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::FoldersChatPicker, window, cx)),
+    DemoSpec::chats("ready-folders-chat-picker", ROWS_NOTE).setup(
+        |app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::FoldersChatPicker, window, cx)
+    ),
     // Chat-list rows: the folder editor's chat sections.
-    DemoSpec::chats("ready-folders-chats", "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::FoldersChats, window, cx)),
+    DemoSpec::chats("ready-folders-chats", ROWS_NOTE)
+        .setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::FoldersChats, window, cx)),
     // Chat-list rows: toast after adding a chat to a folder.
-    DemoSpec::chats("ready-folders-toast", "screenshot demo — chat-list rows, archive hint and folder pickers (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::FoldersToast, window, cx)),
+    DemoSpec::chats("ready-folders-toast", ROWS_NOTE)
+        .setup(|app, window, cx| app.demo_setup_chatlist_rows(RowsDemo::FoldersToast, window, cx)),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RowsDemo {
     ArchiveHint,
     ChatBadges,
+    ChatExport,
+    WindowSettings,
     FoldersChatPicker,
     FoldersChats,
     FoldersToast,
@@ -93,7 +111,13 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_chat_badges(session, &self.demo_sink, &self.demo_seq);
-            if !matches!(demo, RowsDemo::ArchiveHint | RowsDemo::ChatBadges) {
+            if !matches!(
+                demo,
+                RowsDemo::ArchiveHint
+                    | RowsDemo::ChatBadges
+                    | RowsDemo::ChatExport
+                    | RowsDemo::WindowSettings
+            ) {
                 apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
             }
         }
@@ -101,6 +125,16 @@ impl QuillApp {
             RowsDemo::ArchiveHint => {
                 self.archive_hint_open = true;
                 self.status_note = "screenshot demo — the Archive's How does it work? box".into();
+            }
+            RowsDemo::ChatExport => {
+                self.start_chat_export(quill::ids::ChatId(52), cx);
+                self.status_note = "screenshot demo — the Export chat history box".into();
+            }
+            RowsDemo::WindowSettings => {
+                self.appearance.minimize_to_tray = true;
+                self.window_settings_screenshot = true;
+                self.appearance_open = true;
+                self.status_note = "screenshot demo — tray and window settings".into();
             }
             RowsDemo::ChatBadges => {
                 self.status_note = "screenshot demo — video chat badge and emoji status".into();

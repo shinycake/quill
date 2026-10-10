@@ -49,21 +49,54 @@ fn apply_ready_folder_tags(
     session.folder_chats_to_leave.insert(1, vec![13, 14, 16]);
 }
 
+const NOTE_READY_FOLDERS_NEW_CHATS_JOIN: &str =
+    "screenshot demo — join dialog of a shared folder's new chats (injected, no live Telegram)";
+const NOTE_READY_FOLDERS_DELETE: &str = "screenshot demo — remove a shared folder and choose chats to leave (injected, no live Telegram)";
+
 register_demos![
     // Folder follow-ups: folder tag chips on chat rows.
-    DemoSpec::chats("ready-folders-tags", "screenshot demo — folder tag chips on chat rows (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::Tags, window, cx)),
+    DemoSpec::chats(
+        "ready-folders-tags",
+        "screenshot demo — folder tag chips on chat rows (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::Tags, window, cx)),
     // Folder follow-ups: folder editor with the tag colour picker.
-    DemoSpec::chats("ready-folders-tag-color", "screenshot demo — folder editor with the tag colour picker (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::TagColor, window, cx)),
+    DemoSpec::chats(
+        "ready-folders-tag-color",
+        "screenshot demo — folder editor with the tag colour picker (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::TagColor, window, cx)),
     // Folder follow-ups: right-click menu of a folder tab.
-    DemoSpec::chats("ready-folders-menu", "screenshot demo — right-click menu of a folder tab (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::Menu, window, cx)),
+    DemoSpec::chats(
+        "ready-folders-menu",
+        "screenshot demo — right-click menu of a folder tab (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::Menu, window, cx)),
     // Folder follow-ups: shared folder with the new chats bar.
-    DemoSpec::chats("ready-folders-new-chats", "screenshot demo — shared folder with the new chats bar (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::NewChats, window, cx)),
+    DemoSpec::chats(
+        "ready-folders-new-chats",
+        "screenshot demo — shared folder with the new chats bar (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::NewChats, window, cx)),
     // Folder follow-ups: join dialog of a shared folder's new chats.
-    DemoSpec::chats("ready-folders-new-chats-join", "screenshot demo — join dialog of a shared folder's new chats (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::NewChatsJoin, window, cx)),
+    DemoSpec::chats(
+        "ready-folders-new-chats-join",
+        NOTE_READY_FOLDERS_NEW_CHATS_JOIN
+    )
+    .setup(|app, window, cx| app.demo_setup_folder_followups(
+        FolderDemo::NewChatsJoin,
+        window,
+        cx
+    )),
     // Folder follow-ups: folder limit box with the Premium upsell.
-    DemoSpec::chats("ready-folders-limit", "screenshot demo — folder limit box with the Premium upsell (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::Limit, window, cx)),
+    DemoSpec::chats(
+        "ready-folders-limit",
+        "screenshot demo — folder limit box with the Premium upsell (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::Limit, window, cx)),
     // Folder follow-ups: remove a shared folder and choose chats to leave.
-    DemoSpec::chats("ready-folders-delete", "screenshot demo — remove a shared folder and choose chats to leave (injected, no live Telegram)").setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::Delete, window, cx)),
+    DemoSpec::chats("ready-folders-delete", NOTE_READY_FOLDERS_DELETE)
+        .setup(|app, window, cx| app.demo_setup_folder_followups(FolderDemo::Delete, window, cx)),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]

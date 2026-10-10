@@ -105,6 +105,7 @@ mod capture_access;
 mod capture_block;
 mod chat;
 mod chat_bars;
+mod chat_export_ui;
 mod chat_header_demo;
 mod chat_list;
 mod chat_look_demo;

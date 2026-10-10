@@ -1,7 +1,7 @@
 //! Local passcode UI (tdesktop `Settings::LocalPasscode`, `AutoLockBox`,
 //! `Window::PasscodeLockWidget`): the Settings › Privacy dialog (turn on,
 //! change, turn off, auto-lock, Touch ID), the full-window lock screen, the
-//! chat-list lock button, auto-lock by idle time, and Cmd/Ctrl+Shift+L.
+//! chat-list lock button, auto-lock by idle time, and Cmd/Ctrl+L.
 //! The crypto lives in `quill::passcode`; see
 //! docs/decisions/codex-local-passcode.md.
 
@@ -474,7 +474,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Lock now (lock button, Cmd/Ctrl+Shift+L, tray, auto-lock).
+    /// Lock now (lock button, Cmd/Ctrl+L, tray, auto-lock).
     pub(crate) fn lock_by_passcode(&mut self, cx: &mut Context<Self>) {
         if !self.passcode_ui.enabled || self.passcode_ui.locked {
             return;

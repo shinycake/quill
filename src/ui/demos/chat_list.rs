@@ -20,84 +20,195 @@ use quill::ids::ChatId;
 use quill::state::SearchStatus;
 use std::sync::atomic::Ordering;
 
+const NOTE_READY_NOTIFICATION_SOUND: &str = "screenshot demo — notification sounds + settings (injected saved sounds + chat/scope settings)";
+
 register_demos![
     // Same, with `archiveCollapsed`: the slim bar.
-    DemoSpec::chats("ready-archive-bar", "screenshot demo — chat list: archive row · story rings · pinned drag").setup(|app, window, cx| app.demo_archive_row(ArchiveRowDemo::ArchiveBar, window, cx)),
+    DemoSpec::chats(
+        "ready-archive-bar",
+        "screenshot demo — chat list: archive row · story rings · pinned drag"
+    )
+    .setup(|app, window, cx| app.demo_archive_row(ArchiveRowDemo::ArchiveBar, window, cx)),
     // Same, with the archive row's context menu open.
-    DemoSpec::chats("ready-archive-menu", "screenshot demo — chat list: archive row · story rings · pinned drag").setup(|app, window, cx| app.demo_archive_row(ArchiveRowDemo::ArchiveMenu, window, cx)),
+    DemoSpec::chats(
+        "ready-archive-menu",
+        "screenshot demo — chat list: archive row · story rings · pinned drag"
+    )
+    .setup(|app, window, cx| app.demo_archive_row(ArchiveRowDemo::ArchiveMenu, window, cx)),
     // Archived-chats row on top of the chat list (names + muted unread
     // badge) with story rings on avatars and three pinned chats.
-    DemoSpec::chats("ready-archive-row", "screenshot demo — chat list: archive row · story rings · pinned drag").setup(|app, window, cx| app.demo_archive_row(ArchiveRowDemo::ArchiveRow, window, cx)),
+    DemoSpec::chats(
+        "ready-archive-row",
+        "screenshot demo — chat list: archive row · story rings · pinned drag"
+    )
+    .setup(|app, window, cx| app.demo_archive_row(ArchiveRowDemo::ArchiveRow, window, cx)),
     // Chat header badges and the bars that replace the composer
     // (`QUILL_DEMO_HEADER=<variant>`; see `chat_header_demo`).
-    DemoSpec::chats("ready-chat-header", "screenshot demo — join bar · search and chat-row previews").setup(QuillApp::demo_ready_chat_header),
+    DemoSpec::chats(
+        "ready-chat-header",
+        "screenshot demo — join bar · search and chat-row previews"
+    )
+    .setup(QuillApp::demo_ready_chat_header),
     // Slice CL1: chat list with a pinned chat, archived section,
     // marked-as-unread row, and the row context menu open (injected,
     // no live Telegram).
-    DemoSpec::chats("ready-chat-list", "screenshot demo — chat list: pinned, archived, marked unread, row menu").setup(QuillApp::demo_ready_chat_list_menu),
+    DemoSpec::chats(
+        "ready-chat-list",
+        "screenshot demo — chat list: pinned, archived, marked unread, row menu"
+    )
+    .setup(QuillApp::demo_ready_chat_list_menu),
     // Slice CL2: chat list with folder tabs, All/Unread/Archived
     // category chips, pinned + unread chats, an expanded archive
     // section, and the Saved Messages entry (injected, no live
     // Telegram).
-    DemoSpec::chats("ready-chat-list-2", "screenshot demo — chat list: folders, category filters, pinned drag, archive").setup(QuillApp::demo_ready_chat_list),
+    DemoSpec::chats(
+        "ready-chat-list-2",
+        "screenshot demo — chat list: folders, category filters, pinned drag, archive"
+    )
+    .setup(QuillApp::demo_ready_chat_list),
     // Slice CL3: chat list with the @ mention badge, the ♥ reaction
     // badge, multi-select mode (two chats checked + the select bar),
     // and the row menu open showing Report / Block user (injected,
     // no live Telegram).
-    DemoSpec::chats("ready-chat-list-3", "screenshot demo — chat list: mentions · reactions · multi-select").setup(QuillApp::demo_ready_chat_list3),
+    DemoSpec::chats(
+        "ready-chat-list-3",
+        "screenshot demo — chat list: mentions · reactions · multi-select"
+    )
+    .setup(QuillApp::demo_ready_chat_list3),
     // Slice CL2: the archive auto-settings dialog over the
     // `ReadyChatList` fixture (injected settings, no live Telegram).
-    DemoSpec::chats("ready-chat-list-archive", "screenshot demo — chat list: archive settings dialog").setup(QuillApp::demo_ready_chat_list_archive),
+    DemoSpec::chats(
+        "ready-chat-list-archive",
+        "screenshot demo — chat list: archive settings dialog"
+    )
+    .setup(QuillApp::demo_ready_chat_list_archive),
     // Slice CL2: sidebar search with an empty result (injected, no
     // live Telegram).
-    DemoSpec::chats("ready-chat-list-search", "screenshot demo — chat list: search empty state").setup(QuillApp::demo_ready_chat_list_search),
+    DemoSpec::chats(
+        "ready-chat-list-search",
+        "screenshot demo — chat list: search empty state"
+    )
+    .setup(QuillApp::demo_ready_chat_list_search),
     // Slice CL: the floating peek preview open on "Demo chat B" with
     // recent messages (injected, no live Telegram).
-    DemoSpec::chats("ready-chat-preview", "screenshot demo — chat list peek preview (injected updates, no live Telegram)").setup(QuillApp::demo_ready_chat_preview),
+    DemoSpec::chats(
+        "ready-chat-preview",
+        "screenshot demo — chat list peek preview (injected updates, no live Telegram)"
+    )
+    .setup(QuillApp::demo_ready_chat_preview),
     // Chat-row polish: Draft prefix, sending / failed marks, verified /
     // Premium / SCAM / FAKE title badges, online dot (injected, no live
     // Telegram).
-    DemoSpec::chats("ready-chat-rows", "screenshot demo — chat rows: drafts · send state · title badges").setup(QuillApp::demo_ready_chat_rows),
+    DemoSpec::chats(
+        "ready-chat-rows",
+        "screenshot demo — chat rows: drafts · send state · title badges"
+    )
+    .setup(QuillApp::demo_ready_chat_rows),
     // Non-member public channel opened from search: the bottom bar must
     // resolve to "Join channel" (injected, no live Telegram).
-    DemoSpec::chats("ready-join-bar", "screenshot demo — join bar · search and chat-row previews").setup(QuillApp::demo_ready_join_bar),
+    DemoSpec::chats(
+        "ready-join-bar",
+        "screenshot demo — join bar · search and chat-row previews"
+    )
+    .setup(QuillApp::demo_ready_join_bar),
     // Chat-list rows whose last message has hard newlines / a leading
     // custom emoji (injected, no live Telegram).
-    DemoSpec::chats("ready-multiline-rows", "screenshot demo — join bar · search and chat-row previews").setup(QuillApp::demo_ready_multiline_rows),
+    DemoSpec::chats(
+        "ready-multiline-rows",
+        "screenshot demo — join bar · search and chat-row previews"
+    )
+    .setup(QuillApp::demo_ready_multiline_rows),
     // Notification settings demo (injected, no live Telegram): the open
     // chat has a custom notification sound (`getSavedNotificationSounds`
     // fixture) and the per-chat notifications panel is open with the sound
     // picker expanded (parity slice: notification sounds).
-    DemoSpec::chats("ready-notification-sound", "screenshot demo — notification sounds + settings (injected saved sounds + chat/scope settings)").setup(QuillApp::demo_ready_notification_sound),
+    DemoSpec::chats("ready-notification-sound", NOTE_READY_NOTIFICATION_SOUND)
+        .setup(QuillApp::demo_ready_notification_sound),
     // Same, mid pinned-drag: the dragged row follows the pointer while
     // the displaced one slides home.
-    DemoSpec::chats("ready-pin-drag", "screenshot demo — chat list: archive row · story rings · pinned drag").setup(|app, window, cx| app.demo_archive_row(ArchiveRowDemo::PinDrag, window, cx)),
+    DemoSpec::chats(
+        "ready-pin-drag",
+        "screenshot demo — chat list: archive row · story rings · pinned drag"
+    )
+    .setup(|app, window, cx| app.demo_archive_row(ArchiveRowDemo::PinDrag, window, cx)),
     // Chat-list search with a custom-emoji, multi-line public-chat preview
     // and a multi-line chat preview (injected, no live Telegram).
-    DemoSpec::chats("ready-search-previews", "screenshot demo — join bar · search and chat-row previews").setup(QuillApp::demo_ready_search_previews),
+    DemoSpec::chats(
+        "ready-search-previews",
+        "screenshot demo — join bar · search and chat-row previews"
+    )
+    .setup(QuillApp::demo_ready_search_previews),
     // Slice media-shared-gallery: per-chat shared-media gallery open on
     // chat 11 — the Media tab shows its empty state, the Files tab two
     // injected documents (injected `foundChatMessages` through the real
     // reducer, no live Telegram).
-    DemoSpec::chats("ready-shared-media", "screenshot demo — shared media gallery: per-tab empty states").setup(QuillApp::demo_ready_shared_media),
+    DemoSpec::chats(
+        "ready-shared-media",
+        "screenshot demo — shared media gallery: per-tab empty states"
+    )
+    .setup(QuillApp::demo_ready_shared_media),
     // The list scrolled past the strip: collapsed to the small stack.
-    DemoSpec::chats("ready-stories-collapsed", "screenshot demo — chat list: swipe actions · stories strip").setup(|app, window, cx| app.demo_swipe_stories(SwipeStoriesDemo::StoriesCollapsed, window, cx)),
+    DemoSpec::chats(
+        "ready-stories-collapsed",
+        "screenshot demo — chat list: swipe actions · stories strip"
+    )
+    .setup(|app, window, cx| app.demo_swipe_stories(
+        SwipeStoriesDemo::StoriesCollapsed,
+        window,
+        cx
+    )),
     // The list scrolled half the strip's height: the compact stack is
     // fading in beside the search field.
-    DemoSpec::chats("ready-stories-collapsing", "screenshot demo — chat list: swipe actions · stories strip").setup(|app, window, cx| app.demo_swipe_stories(SwipeStoriesDemo::StoriesCollapsing, window, cx)),
+    DemoSpec::chats(
+        "ready-stories-collapsing",
+        "screenshot demo — chat list: swipe actions · stories strip"
+    )
+    .setup(|app, window, cx| app.demo_swipe_stories(
+        SwipeStoriesDemo::StoriesCollapsing,
+        window,
+        cx
+    )),
     // Stories strip expanded at the top of a long chat list, swipe action
     // Mute configured, nothing held (scripted gestures start here).
-    DemoSpec::chats("ready-stories-expanded", "screenshot demo — chat list: swipe actions · stories strip").setup(|app, window, cx| app.demo_swipe_stories(SwipeStoriesDemo::StoriesExpanded, window, cx)),
+    DemoSpec::chats(
+        "ready-stories-expanded",
+        "screenshot demo — chat list: swipe actions · stories strip"
+    )
+    .setup(|app, window, cx| app.demo_swipe_stories(
+        SwipeStoriesDemo::StoriesExpanded,
+        window,
+        cx
+    )),
     // Chat-row swipe: "Mira Cohen" held mid-swipe (ratio 0.6) with the
     // Mute action revealed; the list is long enough to scroll.
-    DemoSpec::chats("ready-swipe-mute", "screenshot demo — chat list: swipe actions · stories strip").setup(|app, window, cx| app.demo_swipe_stories(SwipeStoriesDemo::SwipeMute, window, cx)),
+    DemoSpec::chats(
+        "ready-swipe-mute",
+        "screenshot demo — chat list: swipe actions · stories strip"
+    )
+    .setup(|app, window, cx| app.demo_swipe_stories(SwipeStoriesDemo::SwipeMute, window, cx)),
     // "Noam Katz" with action Delete, held past the threshold (ratio 1.25) with the
     // reach circle fully grown.
-    DemoSpec::chats("ready-swipe-reached", "screenshot demo — chat list: swipe actions · stories strip").setup(|app, window, cx| app.demo_swipe_stories(SwipeStoriesDemo::SwipeReached, window, cx)),
+    DemoSpec::chats(
+        "ready-swipe-reached",
+        "screenshot demo — chat list: swipe actions · stories strip"
+    )
+    .setup(|app, window, cx| app.demo_swipe_stories(
+        SwipeStoriesDemo::SwipeReached,
+        window,
+        cx
+    )),
     // Batch 8: chat top bars; `QUILL_DEMO_BAR` picks the variant.
-    DemoSpec::chats("ready-top-bars", "screenshot demo — join bar · search and chat-row previews").setup(QuillApp::demo_ready_top_bars),
+    DemoSpec::chats(
+        "ready-top-bars",
+        "screenshot demo — join bar · search and chat-row previews"
+    )
+    .setup(QuillApp::demo_ready_top_bars),
     // Peer `chatActionTyping` in the open-chat header and sidebar row.
-    DemoSpec::chats("ready-typing", "screenshot demo — peer typing (injected updateChatAction)").setup(QuillApp::demo_ready_typing),
+    DemoSpec::chats(
+        "ready-typing",
+        "screenshot demo — peer typing (injected updateChatAction)"
+    )
+    .setup(QuillApp::demo_ready_typing),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -17,76 +17,135 @@ use quill::state::InfoPanelTarget;
 use quill::subsection_tabs::SubsectionTabsMode;
 use std::sync::atomic::Ordering;
 
+const NOTE_READY_FOLDERS_SHARE: &str = "screenshot demo — Share Folder dialog: invite links over the folder fixture (injected, no live Telegram)";
+const NOTE_READY_FOLDERS_SIDEBAR: &str = "screenshot demo — folders in the left column (Tabs on the left) with icons (injected, no live Telegram)";
+
 register_demos![
     // Slice A6: the block-user confirm dialog open for Ada ("Are you
     // sure you want to block Ada Lovelace?", red Block button — TGX
     // `BlockUserConfirm`) over the contacts fixture (injected, no live
     // Telegram).
-    DemoSpec::chats("ready-block-user", "screenshot demo — block user confirm").setup(QuillApp::demo_ready_block_user),
+    DemoSpec::chats("ready-block-user", "screenshot demo — block user confirm")
+        .setup(QuillApp::demo_ready_block_user),
     // Parity slice: chat-list avatars (injected, no live Telegram) — the
     // chat list mixes photo avatars (private chat A, the demo channel)
     // and colored-initial fallbacks (private chat B, a basic group, the
     // discussion supergroup); the demo channel (id 13) is open with its
     // header photo, @username, subscriber count, description snippet, and
     // a "Discuss" link to the injected discussion group (id 16).
-    DemoSpec::chats("ready-chat-avatars", "screenshot demo — chat avatars & channel header (injected, no live Telegram)").setup(QuillApp::demo_ready_chat_avatars),
+    DemoSpec::chats(
+        "ready-chat-avatars",
+        "screenshot demo — chat avatars & channel header (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_ready_chat_avatars),
     // Contacts demo (injected, no live Telegram): the sidebar shows the
     // **Contacts** tab (three injected contacts: Ada online, Zed last
     // seen within a week, Noor recently) and the user info panel is open
     // for Zed (bio from an injected `userFullInfo`) with the **Add
     // contact** affordance (Phase 6).
-    DemoSpec::chats("ready-contacts", "screenshot demo — contacts & profile").setup(QuillApp::demo_ready_contacts),
+    DemoSpec::chats("ready-contacts", "screenshot demo — contacts & profile")
+        .setup(QuillApp::demo_ready_contacts),
     // Slice A6: contacts management — the **Contacts** tab with the
     // settings section (sync toggle on, Import contacts…, Delete
     // synced contacts…, notice) and the user info panel open for Ada
     // (a contact) showing **Delete contact** + **Block user**
     // (injected, no live Telegram).
-    DemoSpec::chats("ready-contacts-manage", "screenshot demo — contacts management").setup(QuillApp::demo_ready_contacts_manage),
+    DemoSpec::chats(
+        "ready-contacts-manage",
+        "screenshot demo — contacts management"
+    )
+    .setup(QuillApp::demo_ready_contacts_manage),
     // Folder tabs with unread-chat counters, one of them muted-only
     // (parity cluster notify-os, "Include muted chats in folder counters").
-    DemoSpec::chats("ready-folder-badges", "screenshot demo — notification settings and folder counters (injected, no live Telegram)").setup(|app, window, cx| app.demo_notify_settings(NotifySettingsDemo::FolderBadges, window, cx)),
+    DemoSpec::chats(
+        "ready-folder-badges",
+        "screenshot demo — notification settings and folder counters (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_notify_settings(
+        NotifySettingsDemo::FolderBadges,
+        window,
+        cx
+    )),
     // Phase 7.1: folder tabs (injected `updateChatFolders` + folder
     // positions) with the non-default "News" folder selected, so the chat
     // list shows only that folder's chats.
-    DemoSpec::chats("ready-folders", "screenshot demo — chat folder tabs (injected, no live Telegram)").setup(QuillApp::demo_ready_folders),
+    DemoSpec::chats(
+        "ready-folders",
+        "screenshot demo — chat folder tabs (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_ready_folders),
     // Shareable folders slice: "Add folder" for an addlist link.
-    DemoSpec::chats("ready-folders-add-link", "screenshot demo — Add folder for an addlist link (injected, no live Telegram)").setup(QuillApp::demo_ready_folders_add_link),
+    DemoSpec::chats(
+        "ready-folders-add-link",
+        "screenshot demo — Add folder for an addlist link (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_ready_folders_add_link),
     // Shareable folders slice: folder editor with the icon picker.
-    DemoSpec::chats("ready-folders-icons", "screenshot demo — folder editor with the icon picker (injected, no live Telegram)").setup(QuillApp::demo_ready_folders_icons),
+    DemoSpec::chats(
+        "ready-folders-icons",
+        "screenshot demo — folder editor with the icon picker (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_ready_folders_icons),
     // Parity slice: folder manage dialog over the ReadyFolders fixture
     // (injected, no live Telegram).
-    DemoSpec::chats("ready-folders-manage", "screenshot demo — folder management (injected, no live Telegram)").setup(QuillApp::demo_ready_folders_manage),
+    DemoSpec::chats(
+        "ready-folders-manage",
+        "screenshot demo — folder management (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_ready_folders_manage),
     // Shareable folders slice: Share Folder dialog: invite links over the folder fixture.
-    DemoSpec::chats("ready-folders-share", "screenshot demo — Share Folder dialog: invite links over the folder fixture (injected, no live Telegram)").setup(QuillApp::demo_ready_folders_share),
+    DemoSpec::chats("ready-folders-share", NOTE_READY_FOLDERS_SHARE)
+        .setup(QuillApp::demo_ready_folders_share),
     // Shareable folders slice: folders in the left column ("Tabs on the left") with icons.
-    DemoSpec::chats("ready-folders-sidebar", "screenshot demo — folders in the left column (Tabs on the left) with icons (injected, no live Telegram)").setup(QuillApp::demo_ready_folders_sidebar),
+    DemoSpec::chats("ready-folders-sidebar", NOTE_READY_FOLDERS_SIDEBAR)
+        .setup(QuillApp::demo_ready_folders_sidebar),
     // Forum-topics demo (injected, no live Telegram): a forum supergroup
     // whose `updateSupergroup` marks it a forum and whose `getForumTopics`
     // response seeds three topics (General pinned + unread, Announcements
     // with a last-message preview, Random closed), shown as the topic
     // list (Phase 5.1).
-    DemoSpec::chats("ready-forum-topics", "screenshot demo — forum topics").setup(QuillApp::demo_ready_forum_topics),
+    DemoSpec::chats("ready-forum-topics", "screenshot demo — forum topics")
+        .setup(QuillApp::demo_ready_forum_topics),
     // Notification settings (parity cluster notify-os): the defaults
     // dialog with the flash/bounce switch, the Events section and the
     // folder-counter switch (injected, English fixtures).
-    DemoSpec::chats("ready-notify-os", "screenshot demo — notification settings and folder counters (injected, no live Telegram)").setup(|app, window, cx| app.demo_notify_settings(NotifySettingsDemo::NotifyOs, window, cx)),
+    DemoSpec::chats(
+        "ready-notify-os",
+        "screenshot demo — notification settings and folder counters (injected, no live Telegram)"
+    )
+    .setup(|app, window, cx| app.demo_notify_settings(
+        NotifySettingsDemo::NotifyOs,
+        window,
+        cx
+    )),
     // Phase A1: slow-mode enforcement (injected, no live Telegram) — a
     // dedicated supergroup (id 17) with `slow_mode_delay: 30` and
     // `slow_mode_delay_expires_in: 25.0`, the viewer a plain member (no
     // bypass), opened with two messages. The composer shows the
     // "Slow mode · wait Ns" countdown and blocks sends until expiry.
-    DemoSpec::chats("ready-slow-mode", "screenshot demo — slow-mode enforcement (injected, no live Telegram)").setup(QuillApp::demo_ready_slow_mode),
+    DemoSpec::chats(
+        "ready-slow-mode",
+        "screenshot demo — slow-mode enforcement (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_ready_slow_mode),
     // Topic-posting demo (injected, no live Telegram): the forum's General
     // topic is open with an injected two-message history and the composer
     // enabled — posting routes `sendMessage` with
     // `topic_id = messageTopicForum` (parity slice 4).
-    DemoSpec::chats("ready-topic-post", "screenshot demo — posting to a forum topic").setup(QuillApp::demo_ready_topic_post),
+    DemoSpec::chats(
+        "ready-topic-post",
+        "screenshot demo — posting to a forum topic"
+    )
+    .setup(QuillApp::demo_ready_topic_post),
     // Subsection-tabs demos (injected): a bot with topics
     // (`userTypeBot.has_topics`) with the tabs on Top / Bottom / Left.
     DemoSpec::chats("ready-bot-topics", "screenshot demo — bot topic tabs")
         .setup(|app, _, _| app.demo_bot_topics(SubsectionTabsMode::Top)),
-    DemoSpec::chats("ready-bot-topics-bottom", "screenshot demo — bot topic tabs")
-        .setup(|app, _, _| app.demo_bot_topics(SubsectionTabsMode::Bottom)),
+    DemoSpec::chats(
+        "ready-bot-topics-bottom",
+        "screenshot demo — bot topic tabs"
+    )
+    .setup(|app, _, _| app.demo_bot_topics(SubsectionTabsMode::Bottom)),
     DemoSpec::chats("ready-bot-topics-left", "screenshot demo — bot topic tabs")
         .setup(|app, _, _| app.demo_bot_topics(SubsectionTabsMode::Left)),
 ];

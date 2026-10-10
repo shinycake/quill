@@ -73,6 +73,10 @@ impl Session {
             && pending.purpose == RequestPurpose::ExportChatHistory
             && let Some(chat_id) = pending.chat_id
         {
+            let senders: Vec<Option<String>> = messages
+                .iter()
+                .map(|message| message.sender.map(|sender| self.sender_label(sender)))
+                .collect();
             if let Some(export) = self.chat_export.as_mut()
                 && export.chat_id == chat_id
             {
@@ -84,15 +88,16 @@ impl Session {
                 // message exports exactly once.
                 let boundary_id = export.messages.last().map(|m| m.id);
                 let before = export.messages.len();
-                for message in messages {
-                    let exported = crate::chat_export::project_message(&message);
+                for (message, sender) in messages.into_iter().zip(senders) {
+                    let mut exported = crate::chat_export::project_message(&message);
                     if boundary_id.is_some_and(|boundary| exported.id >= boundary) {
                         continue;
                     }
+                    exported.sender = sender;
                     export.messages.push(exported);
                 }
                 export.in_flight = false;
-                if export.messages.len() == before {
+                if export.messages.len() == before || export.past_range_start() {
                     export.done_paging = true;
                 }
             }
