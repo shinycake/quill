@@ -522,3 +522,11 @@ impl QuillApp {
         })
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    EmojiSets => DialogSpec::new(
+        5100,
+        |app| app.session().is_some_and(|s| s.emoji.open),
+        QuillApp::build_emoji_sets_dialog,
+    ),
+}

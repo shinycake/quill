@@ -913,3 +913,19 @@ impl QuillApp {
         section.into_any_element()
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    ArchiveSettings => DialogSpec::new(
+        500,
+        |app| app.session().is_some_and(|s| s.archive_settings_open),
+        QuillApp::build_archive_settings_dialog,
+    ),
+
+    /// Built in notification_settings.rs; registered here until that file's
+    /// split lands, then the entry can move next to its builder.
+    NotificationDefaults => DialogSpec::new(
+        1000,
+        |app| app.notification_defaults_open,
+        QuillApp::build_notification_defaults_dialog,
+    ),
+}

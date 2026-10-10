@@ -280,6 +280,15 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    /// `msg` / `msg_url` share link: the chat chooser.
+    DeepLinkShare => DialogSpec::new(
+        2900,
+        |app| app.share_link_text.is_some(),
+        QuillApp::build_deep_link_share_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod routes_tests {
     use super::settings_action;

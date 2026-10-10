@@ -833,3 +833,19 @@ impl QuillApp {
         )
     }
 }
+
+crate::ui::shell::register_dialogs! {
+    /// A folder limit box / the folder tag Premium notice.
+    FolderLimit => DialogSpec::new(
+        1300,
+        |app| app.folder_limit_box.is_some(),
+        QuillApp::build_folder_limit_dialog,
+    ),
+
+    /// The shared folder's "N new chats" join dialog.
+    FolderNewChats => DialogSpec::new(
+        2200,
+        |app| app.folder_new_chats_dialog.is_some(),
+        QuillApp::build_folder_new_chats_dialog,
+    ),
+}

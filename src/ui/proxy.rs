@@ -1203,6 +1203,29 @@ impl QuillApp {
     }
 }
 
+crate::ui::shell::register_dialogs! {
+    ProxyEdit => DialogSpec::new(
+        // The edit / link boxes open over the list, so they rank first.
+        3000,
+        |app| app.proxy_ui.editor.is_some(),
+        QuillApp::build_proxy_edit_dialog,
+    ),
+
+    ProxyLink => DialogSpec::new(
+        3100,
+        |app| app.proxy_ui.link.is_some(),
+        QuillApp::build_proxy_link_dialog,
+    ),
+
+    /// `parity:proxy-settings`: proxy list, add / edit box, and the
+    /// `tg://proxy` link confirmation.
+    ProxyList => DialogSpec::new(
+        3200,
+        |app| app.proxy_ui.list_open,
+        QuillApp::build_proxy_list_dialog,
+    ),
+}
+
 #[cfg(test)]
 mod tests {
     use super::{editor_issue_message, row_subtitle, row_title};
