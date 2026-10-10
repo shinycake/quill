@@ -1,5 +1,0 @@
-# parity: settings-account
-parity:settings-version-footer
-parity:settings-support-links
-parity:settings-archive-folder-chats
-parity:settings-privacy-call-exceptions

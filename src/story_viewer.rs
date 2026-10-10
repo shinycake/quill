@@ -255,6 +255,18 @@ pub fn collect_story_items(
         .collect()
 }
 
+/// Viewer items for stories from different posters (public story search
+/// hits), in the order of `keys`. Stories not cached yet are skipped.
+pub fn collect_found_story_items(
+    keys: &[(i64, i32)],
+    stories: &std::collections::HashMap<(i64, i32), ParsedStory>,
+) -> Vec<StoryViewerItem> {
+    keys.iter()
+        .filter_map(|key| stories.get(key))
+        .filter_map(|story| story_viewer_item(ChatId(story.poster_chat_id), story))
+        .collect()
+}
+
 fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewerItem> {
     let item = match &story.content {
         StoryContentView::Photo { sizes } => {

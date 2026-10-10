@@ -13,6 +13,7 @@ pub mod requests_payments;
 pub mod requests_premium;
 pub mod requests_privacy;
 pub mod requests_story;
+pub mod requests_story_insights;
 pub mod story_areas;
 
 pub use client::{BridgeCommand, LiveTdJson, OwnedEnvelope, ReceiveBridge, ordered_receive_loop};

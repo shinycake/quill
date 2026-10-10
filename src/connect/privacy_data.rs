@@ -8,8 +8,9 @@ use crate::state::RequestPurpose;
 use crate::telegram::requests::set_option_boolean;
 use crate::telegram::requests_privacy::{
     get_network_statistics, get_new_chat_privacy_settings, get_recovery_email_address,
-    hide_check_password_suggestion, reset_network_statistics, set_gift_settings,
-    set_inactive_session_ttl, set_new_chat_privacy_settings,
+    hide_check_password_suggestion, hide_contact_close_birthdays, hide_suggested_action,
+    reset_network_statistics, set_gift_settings, set_inactive_session_ttl,
+    set_new_chat_privacy_settings,
 };
 
 /// TDLib accepts 1-366 days (`setInactiveSessionTtl`, schema 1.8.67).
@@ -212,6 +213,44 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(())
+    }
+
+    /// Dismiss the chat-list suggestion. The block goes at once; a refusal
+    /// brings it back.
+    pub fn hide_suggestion(
+        &mut self,
+        suggestion: &crate::chatlist_suggestions::Suggestion,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        match crate::chatlist_suggestions::dismiss_action(suggestion) {
+            Some(action) => {
+                let extra = self
+                    .session
+                    .request(RequestPurpose::HideSuggestedAction { action }, None);
+                if let Err(err) = self.sender.send_json(&hide_suggested_action(extra, action)) {
+                    self.session.requests.take(extra);
+                    return Err(err);
+                }
+                self.session.suggestions.actions.remove(action);
+                if action == crate::chatlist_suggestions::ACTION_PASSWORD {
+                    self.session.privacy_data.check_password_suggested = false;
+                }
+                Ok(extra)
+            }
+            None => {
+                let extra = self
+                    .session
+                    .request(RequestPurpose::HideContactCloseBirthdays, None);
+                if let Err(err) = self.sender.send_json(&hide_contact_close_birthdays(extra)) {
+                    self.session.requests.take(extra);
+                    return Err(err);
+                }
+                self.session.suggestions.birthdays_hidden = true;
+                Ok(extra)
+            }
+        }
     }
 
     /// Dismiss the password check (`hideSuggestedAction`).
