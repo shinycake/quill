@@ -472,6 +472,12 @@ pub enum DeepLinkAction {
     UserPhone { phone: String, draft: String },
     /// Result of [`Self::UserPhone`]: `createPrivateChat`, prefill `draft`.
     OpenUserDraft { user_id: i64, draft: String },
+    /// `internalLinkTypeChatBoost`: `getChatBoostLinkInfo(url)` finds the
+    /// channel.
+    BoostLink { url: String },
+    /// Result of [`Self::BoostLink`]: `getChat`, then the channel's info
+    /// panel with its boost status and the Boost button.
+    OpenChannelBoost { chat_id: i64 },
     /// Chosen share target: prefill the composer with `text`.
     ShareDraft { text: String },
 }

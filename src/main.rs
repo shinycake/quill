@@ -133,7 +133,8 @@ gpui_kit::assets::icon_assets!(
         Briefcase,
         BellPlus,
         Tag,
-        TagX
+        TagX,
+        FaceSlightlySmilingPlus
     ]
 );
 
@@ -706,6 +707,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ),
         ("ready-chats", ReadyChats),
         ("ready-chats-composer", ReadyChatsComposer),
+        ("ready-code-language", ReadyCodeLanguage),
         ("ready-community-create", ReadyCommunityCreate),
         ("ready-community-hub", ReadyCommunityHub),
         ("ready-community-info", ReadyCommunityInfo),
@@ -719,6 +721,8 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-dice", ReadyDice),
         ("ready-downloads", ReadyDownloads),
         ("ready-drafts", ReadyDrafts),
+        ("ready-drop-folder", ReadyDropFolder),
+        ("ready-drop-zones", ReadyDropZones),
         ("ready-edit-delete", ReadyEditDelete),
         ("ready-edit-media", ReadyEditMedia),
         ("ready-emoji-packs", ReadyEmojiPacks),
@@ -891,6 +895,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-video-pip", ReadyVideoPip),
         ("ready-video-playback", ReadyVideoPlayback),
         ("ready-video-send", ReadyVideoSend),
+        ("ready-viewer-extras", ReadyViewerExtras),
         ("ready-viewer-gif", ReadyViewerGif),
         ("ready-viewer-shared", ReadyViewerShared),
         ("ready-voice", ReadyVoice),
@@ -1118,6 +1123,9 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyGameCard => ".quill-ready-ready-game-card",
         ScreenshotDemo::ReadyLinkPreview => ".quill-ready-ready-link-preview",
         ScreenshotDemo::ReadyComposerPreview => ".quill-ready-ready-composer-preview",
+        ScreenshotDemo::ReadyCodeLanguage => ".quill-ready-ready-code-language",
+        ScreenshotDemo::ReadyDropFolder => ".quill-ready-ready-drop-folder",
+        ScreenshotDemo::ReadyDropZones => ".quill-ready-ready-drop-zones",
         ScreenshotDemo::ReadyPreviewCards => ".quill-ready-ready-preview-cards",
         ScreenshotDemo::ReadyCaptionPosition => ".quill-ready-ready-caption-position",
         ScreenshotDemo::ReadyGifs => ".quill-ready-ready-gifs",
@@ -1173,6 +1181,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyDice => ".quill-ready-ready-dice",
         ScreenshotDemo::ReadyMediaViewer => ".quill-ready-ready-media-viewer",
         ScreenshotDemo::ReadyVideoPlayback => ".quill-ready-ready-video-playback",
+        ScreenshotDemo::ReadyViewerExtras => ".quill-ready-ready-viewer-extras",
         ScreenshotDemo::ReadyViewerGif => ".quill-ready-ready-viewer-gif",
         ScreenshotDemo::ReadyViewerShared => ".quill-ready-ready-viewer-shared",
         ScreenshotDemo::ReadyVideoPip => ".quill-ready-ready-video-pip",

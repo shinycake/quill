@@ -191,6 +191,13 @@ pub enum ScreenshotDemo {
     /// MED4: composer with a typed URL → detected-URL chip + preview
     /// toggle (injected, no live Telegram).
     ReadyComposerPreview,
+    /// Composer core: files dragged over the chat show two drop zones
+    /// (photos: quick versus without compression).
+    ReadyDropZones,
+    /// Composer core: the "Code Language" box over a fenced block.
+    ReadyCodeLanguage,
+    /// Composer core: a dragged folder offers its files or one archive.
+    ReadyDropFolder,
     /// MED4: embedded-player + album `linkPreview` cards in bubbles
     /// (injected, no live Telegram).
     ReadyPreviewCards,
@@ -419,6 +426,9 @@ pub enum ScreenshotDemo {
     /// (Parity slice 5.)
     ReadyVideoPlayback,
     ReadyVideoPip,
+    /// A playing video in the viewer with a formatted caption, the saved
+    /// toast and the open speed dial.
+    ReadyViewerExtras,
     /// A GIF looping in the viewer, with a custom emoji in its caption.
     ReadyViewerGif,
     /// The viewer paging over the Shared Media panel's photos.

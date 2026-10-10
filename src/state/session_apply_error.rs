@@ -694,10 +694,15 @@ impl Session {
             Some(
                 RequestPurpose::SetBirthdate
                 | RequestPurpose::SetPersonalChat
-                | RequestPurpose::SetUserNote,
+                | RequestPurpose::SetUserNote
+                | RequestPurpose::SetUserPersonalPhoto,
             ) => {
                 self.chat_action_error =
                     Some(format!("could not save the change (error {})", err.code));
+            }
+            Some(RequestPurpose::ReportChatPhoto) => {
+                self.chat_action_error =
+                    Some(format!("could not send the report (error {})", err.code));
             }
             // B7: refused group admin changes were rolled back above; say
             // so instead of showing the old value as if nothing happened.
@@ -1933,6 +1938,10 @@ pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> S
             action: DeepLinkAction::MessageLink { .. },
             ..
         }) if not_found => "This message link is broken or the chat is not available.".to_string(),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::BoostLink { .. },
+            ..
+        }) if not_found => "This boost link is broken.".to_string(),
         Some(DeepLinkState::ResolvingChat {
             action: DeepLinkAction::JoinInvite { .. },
             ..

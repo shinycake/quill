@@ -308,6 +308,12 @@ pub enum RequestPurpose {
     ViewStickerSet {
         set_id: i64,
     },
+    /// A tapped custom emoji: `getStickerSet` for the pack's title,
+    /// answered into `Session::custom_emoji_preview`.
+    CustomEmojiPack {
+        emoji_id: i64,
+        set_id: i64,
+    },
     /// "Save to... Profile" on a song: `addProfileAudio`.
     AddProfileAudio,
     /// "Cancel Upload": `deleteMessages` on a message still being sent.
@@ -1126,6 +1132,11 @@ pub enum RequestPurpose {
     SetPersonalChat,
     /// B10: `setUserNote` (line 14553). Response is `ok`.
     SetUserNote,
+    /// `setUserPersonalProfilePhoto` / `suggestUserProfilePhoto`
+    /// (lines 14942, 14952). Response is `ok`; pending `user_id`.
+    SetUserPersonalPhoto,
+    /// `reportChatPhoto` (line 16107). Response is `ok`.
+    ReportChatPhoto,
     /// B10: `getUserProfilePhotos` (line 14591) for the profile photo
     /// gallery; pending `user_id`. Response is `chatPhotos`.
     GetUserProfilePhotos,

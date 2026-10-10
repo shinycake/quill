@@ -12,7 +12,8 @@ use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::deep_link_types::{DeepLinkUi, SettingsTarget};
 use quill::ids::{ChatId, MessageId};
-use quill::state::DeepLinkAction;
+use quill::state::{DeepLinkAction, InfoPanelTarget};
+use quill::telegram::envelope::ChatKind;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -37,6 +38,7 @@ fn settings_action(target: SettingsTarget) -> Option<NavigationAction> {
         SettingsTarget::NewGroup => Some(NavigationAction::Group),
         SettingsTarget::NewChannel => Some(NavigationAction::Channel),
         SettingsTarget::SavedMessages => Some(NavigationAction::Saved),
+        SettingsTarget::Premium => Some(NavigationAction::Premium),
         SettingsTarget::Root | SettingsTarget::Unsupported => None,
     }
 }
@@ -73,6 +75,28 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    /// A boost link opens the channel and its info panel, where the boost
+    /// level and the Boost button are (`boost_section`). Nothing is boosted
+    /// until the user presses the button.
+    fn open_boost_panel(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
+        let supergroup = self.session().and_then(|session| {
+            session
+                .chats
+                .get(&chat_id.0)
+                .and_then(|chat| match chat.kind {
+                    ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
+                    _ => None,
+                })
+        });
+        match supergroup {
+            Some(id) => {
+                self.open_info_panel_target(InfoPanelTarget::Supergroup(id), window, cx);
+                self.refresh_boost_status(chat_id, cx);
+            }
+            None => self.status_note = "this chat can't be boosted".into(),
+        }
     }
 
     /// Chat picked in the share chooser: open it with the text in the
@@ -146,6 +170,7 @@ impl QuillApp {
                 self.prefill_link_draft(draft, window, cx);
             }
             DeepLinkAction::ShareDraft { text } => self.prefill_link_draft(text, window, cx),
+            DeepLinkAction::OpenChannelBoost { .. } => self.open_boost_panel(chat_id, window, cx),
             DeepLinkAction::OpenChatById {
                 message_id,
                 media_timestamp,

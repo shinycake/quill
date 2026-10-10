@@ -296,6 +296,14 @@ pub struct MediaPrefs {
     pub big_emoji: bool,
     #[serde(default = "default_true")]
     pub loop_animated_stickers: bool,
+    /// Telegram Desktop's "Reply button on messages" (`cornerReply`,
+    /// default on): a reply button beside the hovered bubble.
+    #[serde(default = "default_true")]
+    pub corner_reply: bool,
+    /// Telegram Desktop's "Reaction button on messages" (`cornerReaction`,
+    /// default on): a reaction button beside the hovered bubble.
+    #[serde(default = "default_true")]
+    pub corner_reaction: bool,
     #[serde(default)]
     pub recent_emoji: Vec<String>,
     pub remember_media_grouping: bool,
@@ -357,6 +365,8 @@ impl Default for MediaPrefs {
             recent_custom_emoji_ids: Vec::new(),
             big_emoji: true,
             loop_animated_stickers: true,
+            corner_reply: true,
+            corner_reaction: true,
             recent_emoji: Vec::new(),
             remember_media_grouping: false,
             group_media: false,
@@ -684,6 +694,10 @@ pub struct ChatPrefs {
     /// default on): `:name` in the composer offers matching emoji.
     #[serde(default = "default_true")]
     pub suggest_emoji: bool,
+    /// Telegram Desktop's "Replace emoji automatically" (`replaceEmoji`,
+    /// default on): `:-)`, `<3` and `:name:` become emoji as you type.
+    #[serde(default = "default_true")]
+    pub replace_emoji: bool,
 }
 
 impl Default for ChatPrefs {
@@ -693,6 +707,7 @@ impl Default for ChatPrefs {
             // Telegram Desktop ships spellcheck on; match that.
             spellcheck_enabled: true,
             suggest_emoji: true,
+            replace_emoji: true,
         }
     }
 }

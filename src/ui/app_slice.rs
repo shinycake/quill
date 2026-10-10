@@ -278,9 +278,30 @@ impl QuillApp {
     /// with its layer painting the history's animations just above it,
     /// and the composer slice below (painted after the layer, so its
     /// popups cover the history's animations).
-    pub(super) fn conversation_slot(&self) -> AnyElement {
+    pub(super) fn conversation_slot(&mut self, cx: &mut Context<Self>) -> AnyElement {
         self.slices.conversation_shown.set(true);
-        let slot = div().relative().flex().flex_1().min_w_0().min_h_0();
+        let drop_state = self.visible_drop_state(cx);
+        let drop_overlay = drop_state.map(|state| self.drop_zone_overlay(state, cx));
+        let slot = div()
+            .id("conversation-slot")
+            .relative()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            // Files dragged over the chat: classify them so the zones can
+            // say what each one does (`drop_zones`).
+            .on_drag_move(
+                cx.listener(|this, event: &DragMoveEvent<ExternalPaths>, _, cx| {
+                    let paths = event.drag(cx).paths().to_vec();
+                    this.note_file_drag(&paths, cx);
+                }),
+            )
+            // A drop outside any zone, or while the zones are off, attaches
+            // the files the usual way.
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                this.drop_files_plain(paths.paths(), cx);
+            }));
         let (Some(parts), Some(composer)) = (&self.slices.conversation, &self.slices.composer)
         else {
             return slot.into_any_element();
@@ -304,6 +325,7 @@ impl QuillApp {
                     .clone()
                     .cached(StyleRefinement::default().w_full().h(height).flex_none()),
             )
+            .children(drop_overlay)
             .into_any_element()
     }
 

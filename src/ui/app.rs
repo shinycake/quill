@@ -286,6 +286,9 @@ pub struct QuillApp {
     /// keystroke bumps it so only the latest quiet window fires (schema:
     /// "Do not call this function too often"; TGX rate-limits 400ms).
     pub(super) composer_preview_token: u64,
+    /// The composer text before the last keystroke, for "Replace emoji
+    /// automatically" (it only reacts to one typed character).
+    pub(super) composer_prev_text: String,
     /// M1: scheduling choice (`messageSchedulingState*`, schema 1.8.67
     /// lines 5902/5905). Reset to `None` after each successful send.
     pub(super) composer_scheduling: ComposerScheduling,
@@ -416,6 +419,8 @@ pub struct QuillApp {
     pub(super) motion: super::motion::MotionState,
     /// The composer's link dialog (Cmd/Ctrl+K on a selection).
     pub(super) composer_link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
+    /// The "Code Language" box for the fenced block under the caret.
+    pub(super) composer_code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
     /// Cross-fade timeline of the round Send / Record / Save button.
     pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
     /// Cached child views (chat list, conversation) the frame clock can
@@ -632,6 +637,12 @@ pub struct QuillApp {
     pub(super) record_locked: bool,
     /// MED2: the record bar is showing the discard-confirmation row.
     pub(super) record_discard_confirm: bool,
+    /// Files being dragged over the conversation, and what they hold
+    /// (`drop_zones`).
+    pub(super) drop_paths: Vec<std::path::PathBuf>,
+    pub(super) drop_state: Option<quill::drop_modes::DragState>,
+    /// A demo's fixed drop-zone state (no real drag in a screenshot).
+    pub(super) drop_preview: Option<quill::drop_modes::DragState>,
     pub(super) voice_tick: bool,
     /// A video message reached its time limit: send it next frame.
     pub(super) recording_auto_send: bool,
@@ -774,6 +785,8 @@ pub struct QuillApp {
     pub(super) pending_deep_link_ui: Option<quill::deep_link_types::DeepLinkUi>,
     /// Text of a share link while its chat chooser is open.
     pub(super) share_link_text: Option<String>,
+    /// The custom emoji card already on screen (it times itself out).
+    pub(super) custom_emoji_card_seen: Option<quill::state::CustomEmojiPreview>,
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, polls waited).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, u32)>,

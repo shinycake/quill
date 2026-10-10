@@ -654,6 +654,7 @@ pub(super) fn message_chrome(
         footer_rebuild: None,
         media_led: false,
         actions: None,
+        actions_span: px(34.),
         bottom_bar: None,
         media_width: None,
     }
@@ -801,6 +802,19 @@ fn paint_text_run(
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.queue_link(link.clone(), msg_key, cx);
+                }))
+                .child(image)
+                .into_any_element();
+        }
+        // A tap shows which pack the emoji comes from.
+        if let Some(emoji_id) = run.custom_emoji_id {
+            return div()
+                .id(format!("{run_id}-tap"))
+                .role(Role::Button)
+                .aria_label("Custom emoji")
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.tap_custom_emoji(emoji_id, cx);
                 }))
                 .child(image)
                 .into_any_element();

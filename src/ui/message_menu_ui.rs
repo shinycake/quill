@@ -12,6 +12,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -21,6 +22,9 @@ use quill::message_menu::{
     reacted_label, read_date_label, read_status_label, seen_kind, seen_label,
 };
 use quill::state::{Audience, MessageReportStage, Session, StickerSetViewStage};
+use quill::sticker_set_box::{
+    ARCHIVED_NOTE, SetKind, can_archive, copied_note, set_link, share_label,
+};
 use quill::telegram::envelope::{
     ChannelMemberStatus, MessageActions, MessageContent, MessageSender, ReactionType, ReportOption,
 };
@@ -521,6 +525,58 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The box menu's "Share Stickers": the link goes to the chat
+    /// chooser and lands in that chat's composer, unsent (tdesktop
+    /// `FastShareLink`).
+    pub(super) fn share_sticker_set_link(
+        &mut self,
+        link: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_sticker_set_dialog(cx);
+        self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
+        self.share_link_text = Some(link);
+        self.status_note = "choose a chat to share to".into();
+        cx.notify();
+    }
+
+    /// The box menu's "Copy Link".
+    pub(super) fn copy_sticker_set_link(
+        &mut self,
+        link: String,
+        kind: SetKind,
+        cx: &mut Context<Self>,
+    ) {
+        cx.write_to_clipboard(ClipboardItem::new_string(link));
+        self.status_note = copied_note(kind).into();
+        cx.notify();
+    }
+
+    /// The box menu's "Archive Stickers": the set leaves the installed
+    /// list and the box closes (tdesktop `archiveStickers`).
+    pub(super) fn archive_viewed_sticker_set(
+        &mut self,
+        set_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.manage_sticker_set(set_id, false, true) {
+                Ok(_) => {
+                    live.driver.session.sticker_set_view = None;
+                    self.message_menu_ui.sticker_set_open = false;
+                    self.status_note = ARCHIVED_NOTE.into();
+                    self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
+                }
+                Err(_) => self.status_note = "could not archive the sticker set".into(),
+            }
+        } else {
+            self.status_note = "demo: sticker sets archive with live TDLib".into();
+        }
+        cx.notify();
+    }
+
     pub(super) fn close_sticker_set_dialog(&mut self, cx: &mut Context<Self>) {
         self.message_menu_ui.sticker_set_open = false;
         if let Some(live) = self.live.as_mut() {
@@ -573,7 +629,9 @@ impl QuillApp {
                 ),
                 StickerSetViewStage::Ready {
                     title,
+                    name,
                     installed,
+                    is_emoji,
                     stickers,
                 } => {
                     let count = stickers.len();
@@ -602,10 +660,56 @@ impl QuillApp {
                         );
                     }
                     let set_id = view.set_id;
+                    let kind = SetKind::of(is_emoji);
+                    let more = set_link(&name, kind).map(|link| {
+                        let owner = cx.entity().downgrade();
+                        let archivable = can_archive(installed, kind);
+                        Button::new("sticker-set-more")
+                            .icon(IconName::Ellipsis)
+                            .ghost()
+                            .tooltip("More")
+                            .accessibility_label("More")
+                            .dropdown_menu(move |menu, _, _| {
+                                let share = owner.clone();
+                                let copy = owner.clone();
+                                let archive = owner.clone();
+                                let (share_link, copy_link) = (link.clone(), link.clone());
+                                let menu = menu
+                                    .item(PopupMenuItem::new(share_label(kind)).on_click(
+                                        move |_, window, cx| {
+                                            let link = share_link.clone();
+                                            let _ = share.update(cx, |this, cx| {
+                                                this.share_sticker_set_link(link, window, cx);
+                                            });
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("Copy Link").on_click(
+                                        move |_, _, cx| {
+                                            let link = copy_link.clone();
+                                            let _ = copy.update(cx, |this, cx| {
+                                                this.copy_sticker_set_link(link, kind, cx);
+                                            });
+                                        },
+                                    ));
+                                if archivable {
+                                    menu.item(PopupMenuItem::new("Archive Stickers").on_click(
+                                        move |_, window, cx| {
+                                            let _ = archive.update(cx, |this, cx| {
+                                                this.archive_viewed_sticker_set(set_id, window, cx);
+                                            });
+                                        },
+                                    ))
+                                } else {
+                                    menu
+                                }
+                            })
+                    });
                     let footer = div()
                         .flex()
-                        .justify_end()
+                        .items_center()
                         .gap_2()
+                        .children(more)
+                        .child(div().flex_1())
                         .child(
                             Button::new("sticker-set-close")
                                 .label("Close")
@@ -937,6 +1041,30 @@ impl QuillApp {
             }
         }
         rows
+    }
+
+    /// Right-click on a reaction chip: the menu opens on the reactor list
+    /// of that reaction (tdesktop `ShowWhoReactedMenu`).
+    pub(super) fn open_reactors_menu(
+        &mut self,
+        menu: super::menu_states::MessageMenuState,
+        reaction: ReactionType,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_message_menu(menu, window, cx);
+        let several = self
+            .session()
+            .and_then(|s| s.histories.get(&menu.chat_id.0))
+            .and_then(|h| h.messages.get(&menu.message_id.0))
+            .is_some_and(|m| m.reaction_chips().len() > 1);
+        self.message_menu_ui.page = MessageMenuPage::Audience;
+        self.message_menu_ui.audience_tab = several.then(|| reaction.clone());
+        if several && let Some(live) = self.live.as_mut() {
+            live.driver.session.wanted_reactor_tab =
+                Some((menu.chat_id, menu.message_id, reaction));
+        }
+        cx.notify();
     }
 
     /// Switch the "who reacted" tab; a tab loads its first page once.

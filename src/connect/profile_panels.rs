@@ -6,8 +6,9 @@ use crate::ids::{ChatId, RequestId};
 use crate::state::{ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose};
 use crate::telegram::requests::{
     get_chat_similar_chats, get_groups_in_common, get_suitable_discussion_chats,
-    get_suitable_personal_chats, get_user_profile_photos, send_contact, set_birthdate,
-    set_personal_chat, set_profile_photo_previous, set_user_note,
+    get_suitable_personal_chats, get_user_profile_photos, report_chat_photo, send_contact,
+    set_birthdate, set_personal_chat, set_profile_photo_previous, set_user_note,
+    set_user_personal_profile_photo, suggest_user_profile_photo,
 };
 
 /// Groups in common are listed in one page (tdesktop pages by 50 as you
@@ -175,6 +176,67 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(RequestPurpose::SetProfilePhoto, None);
         self.send_json_request(extra, &set_profile_photo_previous(extra, chat_photo_id))
+    }
+
+    /// "Set Profile Photo" for a contact (`setUserPersonalProfilePhoto`,
+    /// line 14942); `None` removes the photo you set. Only contacts can
+    /// get a personal photo.
+    pub fn set_user_personal_photo(
+        &mut self,
+        user_id: i64,
+        photo_path: Option<&str>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.user(user_id).is_some_and(|u| u.is_contact) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_user(RequestPurpose::SetUserPersonalPhoto, user_id);
+        self.send_json_request(
+            extra,
+            &set_user_personal_profile_photo(extra, user_id, photo_path),
+        )
+    }
+
+    /// "Suggest Profile Photo" (`suggestUserProfilePhoto`, line 14952):
+    /// regular users other than yourself.
+    pub fn suggest_user_photo(
+        &mut self,
+        user_id: i64,
+        photo_path: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        let allowed = self
+            .session
+            .user(user_id)
+            .is_some_and(|u| !u.is_bot && self.session.my_user_id != Some(user_id));
+        if !self.chats_path_active() || !allowed {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_user(RequestPurpose::SetUserPersonalPhoto, user_id);
+        self.send_json_request(
+            extra,
+            &suggest_user_profile_photo(extra, user_id, photo_path),
+        )
+    }
+
+    /// Report a profile photo (`reportChatPhoto`, line 16107). The private
+    /// chat with a user has the user's id as its chat id.
+    pub fn report_profile_photo(
+        &mut self,
+        user_id: i64,
+        file_id: i32,
+        reason_type: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.my_user_id == Some(user_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::ReportChatPhoto, None);
+        self.send_json_request(
+            extra,
+            &report_chat_photo(extra, user_id, file_id, reason_type, ""),
+        )
     }
 
     /// "Share contact": send `user_id`'s card into `chat_id` as

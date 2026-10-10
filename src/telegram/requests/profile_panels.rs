@@ -148,3 +148,60 @@ pub fn send_contact(
     })
     .to_string()
 }
+
+/// `setUserPersonalProfilePhoto user_id:int53 photo:InputChatPhoto = Ok;`
+/// (line 14942) with `inputChatPhotoStatic`; `None` removes the photo
+/// you set for the contact.
+pub fn set_user_personal_profile_photo(
+    extra: RequestId,
+    user_id: i64,
+    photo_path: Option<&str>,
+) -> String {
+    json!({
+        "@type": "setUserPersonalProfilePhoto",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+        "photo": photo_path.map_or(Value::Null, input_static_photo),
+    })
+    .to_string()
+}
+
+/// `suggestUserProfilePhoto user_id:int53 photo:InputChatPhoto = Ok;`
+/// (line 14952).
+pub fn suggest_user_profile_photo(extra: RequestId, user_id: i64, photo_path: &str) -> String {
+    json!({
+        "@type": "suggestUserProfilePhoto",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+        "photo": input_static_photo(photo_path),
+    })
+    .to_string()
+}
+
+fn input_static_photo(path: &str) -> Value {
+    json!({
+        "@type": "inputChatPhotoStatic",
+        "photo": { "@type": "inputFileLocal", "path": path },
+    })
+}
+
+/// `reportChatPhoto chat_id:int53 file_id:int32 reason:ReportReason
+/// text:string = Ok;` (line 16107). `reason_type` is a `reportReason*`
+/// constructor name.
+pub fn report_chat_photo(
+    extra: RequestId,
+    chat_id: i64,
+    file_id: i32,
+    reason_type: &str,
+    text: &str,
+) -> String {
+    json!({
+        "@type": "reportChatPhoto",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "file_id": file_id,
+        "reason": { "@type": reason_type },
+        "text": text,
+    })
+    .to_string()
+}
