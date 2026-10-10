@@ -122,6 +122,7 @@ mod drafts;
 mod emoji_sets;
 mod entity_links;
 mod event_log;
+mod fact_check;
 mod find_demo;
 mod folder_demo;
 mod folder_demo_followups;

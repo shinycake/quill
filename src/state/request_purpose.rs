@@ -551,6 +551,14 @@ pub enum RequestPurpose {
     GetGifSearchResults {
         first_page: bool,
     },
+    /// The message menu's "Add Fact Check" / "Edit Fact Check"
+    /// (`setMessageFactCheck`). Response is `ok`; `updateMessageFactCheck`
+    /// carries the new text.
+    SetMessageFactCheck,
+    /// The message menu's "Save for Notifications"
+    /// (`addSavedNotificationSound`). Response is `notificationSound`; the
+    /// saved list refetches.
+    AddSavedNotificationSound,
     /// Slice S9: `addSavedAnimation` (schema 1.8.67, line 14769).
     /// Response is `ok`; the saved-GIF cache is cleared so it refetches.
     AddSavedAnimation,

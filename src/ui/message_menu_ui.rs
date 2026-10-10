@@ -235,6 +235,13 @@ impl QuillApp {
                     .any(|item| item.file_id == target.file_id)
             }),
             in_saved_messages: session.is_saved_messages(chat_id),
+            tone_ok: message.self_destruct.is_none()
+                && quill::message_menu::tone_offered(
+                    target,
+                    file.map_or(0, |f| f.display_size()),
+                    session.saved_notification_sounds.len(),
+                    session.tone_limits,
+                ),
         }
     }
 
@@ -293,6 +300,9 @@ impl QuillApp {
                                 .map(|(id, _)| id)
                                 .unwrap_or(target.file_id);
                             this.reveal_downloaded_file(file_id, cx)
+                        }
+                        MediaAction::SaveForNotifications => {
+                            this.save_message_tone(target.file_id, cx)
                         }
                         MediaAction::SaveTo => {
                             this.message_menu_ui.page = MessageMenuPage::SaveTo;
@@ -441,6 +451,19 @@ impl QuillApp {
             };
         } else {
             self.status_note = "demo — GIFs save with live TDLib".into();
+        }
+        cx.notify();
+    }
+
+    /// "Save for Notifications" (`addSavedNotificationSound`).
+    fn save_message_tone(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.save_notification_tone(file_id) {
+                Ok(_) => "saving sound…".into(),
+                Err(_) => "could not save the sound".into(),
+            };
+        } else {
+            self.status_note = "Sound added!".into();
         }
         cx.notify();
     }
@@ -1607,6 +1630,7 @@ fn media_action_icon(action: MediaAction) -> IconName {
         MediaAction::ToggleFavorite { remove: false } => IconName::Star,
         MediaAction::ToggleFavorite { remove: true } => IconName::StarOff,
         MediaAction::ShowInFolder => IconName::FolderOpen,
+        MediaAction::SaveForNotifications => IconName::BellPlus,
         MediaAction::SaveTo | MediaAction::SaveAs => IconName::Download,
         MediaAction::CopyImage | MediaAction::CopyFilename => IconName::Copy,
     }

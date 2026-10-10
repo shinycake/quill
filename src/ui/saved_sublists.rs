@@ -43,6 +43,65 @@ pub(super) struct SavedTagDialog {
     pub(super) input: Entity<TextareaState>,
 }
 
+/// What a tag chip on a message needs for its menu.
+pub(super) struct TagChipMenu {
+    pub(super) owner: WeakEntity<QuillApp>,
+    pub(super) tag: ReactionType,
+    pub(super) choice: Option<quill::state::ReactionChoice>,
+    pub(super) chat_id: ChatId,
+    pub(super) message_id: quill::ids::MessageId,
+    pub(super) named: bool,
+    pub(super) premium: bool,
+}
+
+/// Telegram Desktop's `ShowTagMenu`: right-click a tag on a message for
+/// Filter by Tag, Add or Edit Name, and Remove Tag.
+pub(super) fn tag_chip_menu(chip: Stateful<Div>, menu: TagChipMenu) -> AnyElement {
+    chip.context_menu(move |popup, _, _| {
+        let filter_owner = menu.owner.clone();
+        let name_owner = menu.owner.clone();
+        let remove_owner = menu.owner.clone();
+        let filter_tag = menu.tag.clone();
+        let name_tag = menu.tag.clone();
+        let choice = menu.choice.clone();
+        let (chat_id, message_id) = (menu.chat_id, menu.message_id);
+        popup
+            .item(
+                PopupMenuItem::new("Filter by Tag")
+                    .icon(IconName::Tag)
+                    .on_click(move |_, _, cx| {
+                        let _ = filter_owner.update(cx, |this, cx| {
+                            this.filter_saved_tag_ui(Some(filter_tag.clone()), cx);
+                        });
+                    }),
+            )
+            .item(
+                PopupMenuItem::new(if menu.named { "Edit Name" } else { "Add Name" })
+                    .icon(IconName::Pencil)
+                    .disabled(!menu.premium)
+                    .on_click(move |_, window, cx| {
+                        let _ = name_owner.update(cx, |this, cx| {
+                            this.open_saved_tag_name(name_tag.clone(), window, cx);
+                        });
+                    }),
+            )
+            .item(
+                PopupMenuItem::new("Remove Tag")
+                    .icon(IconName::TagX)
+                    .disabled(choice.is_none())
+                    .on_click(move |_, _, cx| {
+                        let Some(choice) = choice.clone() else {
+                            return;
+                        };
+                        let _ = remove_owner.update(cx, |this, cx| {
+                            this.toggle_reaction(chat_id, message_id, choice, cx);
+                        });
+                    }),
+            )
+    })
+    .into_any_element()
+}
+
 /// The label a tag chip shows: the emoji, or a tag glyph for custom emoji.
 fn tag_glyph(tag: &ReactionType) -> Option<String> {
     tag.emoji_text().map(str::to_owned)
