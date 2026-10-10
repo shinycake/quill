@@ -686,7 +686,11 @@ fn qr_recovery_accepts_supported_states_and_waits_for_pending_auth() {
     let seq = AtomicU64::new(0);
     for state in [
         AuthorizationState::WaitPhoneNumber,
-        AuthorizationState::WaitPremiumPurchase,
+        AuthorizationState::WaitPremiumPurchase {
+            premium_day_count: 0,
+            support_email_address: String::new(),
+            support_email_subject: String::new(),
+        },
         AuthorizationState::WaitEmailAddress,
         AuthorizationState::WaitEmailCode {
             email_pattern: "u***@example.com".into(),

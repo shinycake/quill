@@ -19,8 +19,12 @@ impl QuillApp {
             AuthorizationState::WaitCode { .. } => AuthorizationState::WaitPassword {
                 has_recovery_email: true,
             },
-            AuthorizationState::WaitPassword { .. } => AuthorizationState::WaitPremiumPurchase,
-            AuthorizationState::WaitPremiumPurchase => AuthorizationState::Ready,
+            AuthorizationState::WaitPassword { .. } => AuthorizationState::WaitPremiumPurchase {
+                premium_day_count: 0,
+                support_email_address: String::new(),
+                support_email_subject: String::new(),
+            },
+            AuthorizationState::WaitPremiumPurchase { .. } => AuthorizationState::Ready,
             AuthorizationState::Ready => AuthorizationState::WaitPhoneNumber,
             other => other.clone(),
         };

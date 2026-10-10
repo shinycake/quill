@@ -12,6 +12,14 @@ pub enum ScreenshotDemo {
     WaitPhoneFormatted,
     /// Sign-in polish: code step with the resend countdown and "Wrong number?".
     WaitCodeResend,
+    /// Code step for `authenticationCodeTypeFirebase*` (official apps only).
+    WaitCodeFirebase,
+    /// Code step for `authenticationCodeTypeFlashCall`.
+    WaitCodeFlash,
+    /// Code step for `authenticationCodeTypeFragment` with "Open Fragment".
+    WaitCodeFragment,
+    /// Code step for `authenticationCodeTypeMissedCall`.
+    WaitCodeMissed,
     /// Sign-in polish: tdesktop's banned-number box (with Help).
     WaitPhoneBanned,
     WaitPassword,
