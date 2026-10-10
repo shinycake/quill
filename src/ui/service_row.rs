@@ -20,7 +20,10 @@ use std::path::PathBuf;
 /// Side of the round photo shown under a photo-change row.
 const PHOTO_SIDE: f32 = 96.0;
 /// Widest a service pill grows before its text wraps.
-const PILL_MAX_WIDTH: f32 = 440.0;
+/// Telegram Desktop `Service::performCountCurrentSize` in wide mode:
+/// the bubble column (`msgMaxWidth` plus the avatar skips and margins)
+/// minus the service margins.
+const PILL_MAX_WIDTH: f32 = 522.0;
 
 /// The photo a service action carries, if any.
 fn action_photo(content: &MessageContent) -> Option<&PhotoContent> {

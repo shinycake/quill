@@ -382,10 +382,11 @@ fn tray_switches_hide_without_a_tray() {
 #[test]
 fn closing_runs_in_the_background_only_with_a_tray() {
     use CloseOutcome::*;
-    assert_eq!(close_outcome(false, true, true), Quit);
-    assert_eq!(close_outcome(true, false, true), Quit);
-    assert_eq!(close_outcome(true, false, false), Quit);
-    assert_eq!(close_outcome(true, true, true), HideApp);
+    assert_eq!(close_outcome(false, true, true, true), Quit);
+    assert_eq!(close_outcome(true, false, true, true), Quit);
+    assert_eq!(close_outcome(true, false, false, true), Quit);
+    assert_eq!(close_outcome(true, true, true, true), HideApp);
+    assert_eq!(close_outcome(true, true, false, true), Hide);
     // Linux and Windows cannot hide a GPUI window: minimize it.
-    assert_eq!(close_outcome(true, true, false), Minimize);
+    assert_eq!(close_outcome(true, true, false, false), Minimize);
 }

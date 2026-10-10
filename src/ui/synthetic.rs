@@ -474,9 +474,9 @@ fn message_bubble_with_quote(
         })
         .when_some(extra, |this, el| this.child(el))
         .relative()
-        // Long lines stay readable on wide windows; the bubble's own 80%
-        // cap still applies on narrow panes.
-        .max_w(px(560.))
+        // Telegram Desktop `msgMaxWidth`: the widest a bubble gets; the
+        // bubble's own 80% cap still applies on narrow panes.
+        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
         .line_height(relative(1.4))
         .when(media_led && !look.plain, |this| this.p_0())
         .when_some(media_width, |this, width| {

@@ -192,7 +192,8 @@ pub(in crate::ui) fn voice_note_row(
         .flex()
         .flex_col()
         .gap_1()
-        .min_w(px(220.))
+        .min_w(px(quill::bubble_layout::FILE_MIN_WIDTH as f32))
+        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
         .child(
             div()
                 .flex()
@@ -358,7 +359,8 @@ pub(in crate::ui) fn audio_row(
         .flex()
         .flex_col()
         .gap_1()
-        .min_w(px(220.))
+        .min_w(px(quill::bubble_layout::FILE_MIN_WIDTH as f32))
+        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
         .child(
             div().flex().items_center().gap_3().child(disc).child(
                 div()

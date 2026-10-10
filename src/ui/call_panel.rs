@@ -369,6 +369,7 @@ impl QuillApp {
                     let view = cx.new(|cx| CallPanel {
                         owner: render_owner.downgrade(),
                         _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
+                        pinned_on_top: false,
                     });
                     cx.new(|cx| Root::new(view, window, cx))
                 },
@@ -526,6 +527,8 @@ fn connecting_arc(turn: f32) -> impl IntoElement {
 struct CallPanel {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
+    /// The window stays above the others (tdesktop "pin on top").
+    pinned_on_top: bool,
 }
 
 /// One round control: a 44 pt disc and an 11 pt label (tdesktop
@@ -939,6 +942,20 @@ impl Render for CallPanel {
             .child(body)
             .children(fingerprint)
             .children(preview)
+            // tdesktop's pin-on-top control, in the corner under the title.
+            .child(
+                super::window_control::pin_on_top_button(
+                    "call-pin-on-top",
+                    self.pinned_on_top,
+                    cx,
+                    |this, pinned, _, cx| {
+                        this.pinned_on_top = pinned;
+                        cx.notify();
+                    },
+                )
+                .text_color(rgb(NAME_FG))
+                .top(px(10.)),
+            )
             .child(
                 div()
                     .absolute()

@@ -137,6 +137,8 @@ impl QuillApp {
                 move |window, cx| {
                     #[cfg(target_os = "macos")]
                     configure_pip_window(window);
+                    // tdesktop's PiP carries `Qt::WindowStaysOnTopHint`.
+                    super::window_control::set_always_on_top(window, true);
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
                             app.viewer.pip_window = None;

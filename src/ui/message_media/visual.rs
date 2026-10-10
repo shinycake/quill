@@ -20,8 +20,8 @@ pub(in crate::ui) fn photo_attachment(
     let (frame_w, frame_h) = photo
         .largest_size()
         .or_else(|| photo.thumb_size())
-        .map(|size| media_frame(size.width, size.height))
-        .unwrap_or_else(|| media_frame(0, 0));
+        .map(|size| media_frame(MediaFrameKind::Photo, size.width, size.height))
+        .unwrap_or_else(|| media_frame(MediaFrameKind::Photo, 0, 0));
     if !photo.is_secret
         && !photo.has_spoiler
         && let Some(path) = photo_display_path(photo, files, media_roots)
@@ -200,7 +200,7 @@ pub(in crate::ui) fn animation_attachment(
                 .map(|path| {
                     crate::ui::image_budget::sized_media(
                         &path,
-                        media_frame(animation.width, animation.height),
+                        media_frame(MediaFrameKind::Gif, animation.width, animation.height),
                         Some((animation.width, animation.height)),
                         crate::ui::image_budget::Fit::Cover,
                     )
@@ -210,7 +210,7 @@ pub(in crate::ui) fn animation_attachment(
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = animation.is_secret || animation.has_spoiler;
-    let (frame_w, frame_h) = media_frame(animation.width, animation.height);
+    let (frame_w, frame_h) = media_frame(MediaFrameKind::Gif, animation.width, animation.height);
     let live = inline.is_some();
     let picture = if let Some(inline) = inline {
         // The badge rides with the clip: an animation layer redraws both.
@@ -372,7 +372,7 @@ pub(in crate::ui) fn video_attachment(
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = video.is_secret || video.has_spoiler;
-    let (frame_w, frame_h) = media_frame(video.width, video.height);
+    let (frame_w, frame_h) = media_frame(MediaFrameKind::Video, video.width, video.height);
     let live = inline.is_some();
     let total = video.duration;
     let picture = if let Some(inline) = inline {

@@ -618,6 +618,28 @@ impl QuillApp {
         if tray.run_in_background {
             body.push(this.appearance_close_behavior_section(cx));
         }
+        // tdesktop keeps "Show taskbar icon" behind the tray icon: with
+        // neither, nothing could bring the window back.
+        if tray.run_in_background
+            && this.appearance.show_tray_icon
+            && cfg!(not(target_os = "macos"))
+        {
+            body.push(
+                this.appearance_section(
+                    cx,
+                    "Show taskbar icon",
+                    "Off keeps Quill out of the taskbar; the tray icon opens it.",
+                    Switch::new("general-show-taskbar-icon")
+                        .checked(this.appearance.show_taskbar_icon)
+                        .accessibility_label("Show Quill in the taskbar")
+                        .on_click(cx.listener(|this, &on, window, cx| {
+                            this.set_appearance(cx, |a| a.show_taskbar_icon = on);
+                            this.apply_taskbar_icon(window);
+                        }))
+                        .into_any_element(),
+                ),
+            );
+        }
         #[cfg(target_os = "macos")]
         {
             body.push(
@@ -638,6 +660,16 @@ impl QuillApp {
         body
     }
 
+    /// The main window's taskbar entry follows "Show taskbar icon"
+    /// (Windows, X11; the tray icon must stay on, see the switch).
+    pub(crate) fn apply_taskbar_icon(&self, window: &Window) {
+        if !super::window_control::taskbar_toggle_supported(window) {
+            return;
+        }
+        let skip = !self.appearance.show_taskbar_icon && self.appearance.show_tray_icon;
+        super::window_control::set_skip_taskbar(window, skip);
+    }
+
     /// tdesktop "When the window is closed": run in the background or quit.
     fn appearance_close_behavior_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let control = RadioGroup::vertical("appearance-close-behavior")
@@ -649,11 +681,7 @@ impl QuillApp {
             .on_click(cx.listener(|this, &ix, _, cx| {
                 this.set_appearance(cx, |a| a.minimize_to_tray = ix == 0);
             }));
-        let hint = if cfg!(target_os = "macos") {
-            "Quill keeps running and reopens from the tray icon."
-        } else {
-            "The window minimizes and reopens from the tray icon."
-        };
+        let hint = "Quill keeps running and reopens from the tray icon.";
         self.appearance_section(
             cx,
             "When the window is closed",
