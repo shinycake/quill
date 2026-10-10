@@ -1,6 +1,7 @@
 use super::super::app::QuillApp;
-use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
+use quill::folder_picker::PickerMode;
 use quill::folders::FolderEditor;
 use quill::telegram::envelope::ChatFolderSpec;
 use std::collections::HashSet;
@@ -15,6 +16,9 @@ pub struct FolderEditorDialog {
     /// Edit flow: waiting on `getChatFolder` before the editor prefills.
     pub(crate) fetch_pending: bool,
     pub(crate) error: Option<String>,
+    /// The chat picker is showing for this list (`None` = the form).
+    pub(crate) picker: Option<PickerMode>,
+    pub(crate) picker_search: Entity<TextareaState>,
 }
 
 impl FolderEditorDialog {
@@ -29,12 +33,27 @@ impl FolderEditorDialog {
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
+        let picker_search = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        // The picker rows follow the query on the next render.
+        cx.subscribe(&picker_search, |_this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
         Self {
             folder_id,
             editor: FolderEditor::new(),
             name_input,
             fetch_pending: folder_id.is_some(),
             error: None,
+            picker: None,
+            picker_search,
         }
     }
 

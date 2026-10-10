@@ -116,6 +116,16 @@ pub enum ScreenshotDemo {
     /// Archived-chats row on top of the chat list (names + muted unread
     /// badge) with story rings on avatars and three pinned chats.
     ReadyArchiveRow,
+    /// Chat-list rows: the Archive's "How does it work?" box.
+    ReadyArchiveHint,
+    /// Chat-list rows: video chat badge and emoji status on rows.
+    ReadyChatBadges,
+    /// Chat-list rows: the folder editor's chat sections.
+    ReadyFoldersChats,
+    /// Chat-list rows: the folder editor's chat picker with search.
+    ReadyFoldersChatPicker,
+    /// Chat-list rows: toast after adding a chat to a folder.
+    ReadyFoldersToast,
     /// Same, with `archiveCollapsed`: the slim bar.
     ReadyArchiveBar,
     /// Same, with the archive row's context menu open.

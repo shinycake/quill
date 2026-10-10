@@ -690,6 +690,7 @@ pub(super) fn session_chat_row(
                 // avatar while multi-select is active.
                 .when(selecting, |this| this.child(select_check(id, checked)))
                 .child(with_presence_dot_scaled(
+                    with_call_badge(
                     match story_ring {
                         Some(ring) => super::story_ring::with_story_ring(
                             |size| {
@@ -706,6 +707,9 @@ pub(super) fn session_chat_row(
                         None if saved => saved_messages_avatar(CHAT_ROW_AVATAR),
                         None => chat_avatar(&title, photo_path, CHAT_ROW_AVATAR).into_any_element(),
                     },
+                    quill::peer_badge::shows_call_badge(chat.video_chat.as_ref()),
+                    cx,
+                    ),
                     fx.online,
                     13.,
                     cx,
@@ -1042,6 +1046,48 @@ pub(super) fn with_presence_dot_scaled(
                     ),
             )
         })
+}
+
+/// The active-video-chat badge on a group or channel avatar, bottom-right
+/// and ringed in the sidebar color like the online dot (tdesktop paints a
+/// speaking indicator there, `dialogs_row.cpp` `paintCornerBadge`).
+pub(super) fn with_call_badge(avatar: AnyElement, active: bool, cx: &App) -> AnyElement {
+    if !active {
+        return avatar;
+    }
+    const BADGE: f32 = 18.;
+    const RING: f32 = 2.;
+    div()
+        .relative()
+        .flex_none()
+        .child(avatar)
+        .child(
+            div()
+                .absolute()
+                .right(px(-1.))
+                .bottom(px(-1.))
+                .size(px(BADGE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(cx.theme().sidebar)
+                .child(
+                    div()
+                        .size(px(BADGE - 2. * RING))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(cx.theme().success)
+                        .child(
+                            Icon::new(IconName::Mic)
+                                .size(px(BADGE - 2. * RING - 3.))
+                                .text_color(gpui_kit::white()),
+                        ),
+                ),
+        )
+        .into_any_element()
 }
 
 /// Chat-row avatar edge (px). Row heights in `chatlist_style` leave room
