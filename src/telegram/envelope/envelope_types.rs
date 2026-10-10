@@ -1022,6 +1022,18 @@ pub enum EnvelopePayload {
     StoryInteractions {
         interactions: StoryInteractionsView,
     },
+    /// `storyStatistics` — the `getStoryStatistics` answer.
+    StoryStatistics {
+        statistics: StoryStatisticsView,
+    },
+    /// `publicForwards` — a page of `getStoryPublicForwards`.
+    PublicForwards {
+        forwards: PublicForwardsView,
+    },
+    /// `foundStories` — a page of the `searchPublicStoriesBy*` family.
+    FoundStories {
+        found: FoundStoriesView,
+    },
     /// Phase 9.5: `updateStoryStealthMode` — stealth-mode state changed.
     UpdateStoryStealthMode {
         active_until_date: i32,
@@ -1149,6 +1161,11 @@ pub enum EnvelopePayload {
     UpdateSuggestedActions {
         added: Vec<String>,
         removed: Vec<String>,
+    },
+    /// `updateContactCloseBirthdays` (schema 1.8.67): contacts whose
+    /// birthday is yesterday, today or tomorrow.
+    UpdateContactCloseBirthdays {
+        users: Vec<crate::chatlist_suggestions::CloseBirthday>,
     },
     /// `parity:proxy-settings`: `addedProxies` — `getProxies` answer.
     AddedProxies {

@@ -49,7 +49,7 @@ pub(super) fn seed_forum_chat_16(session: &mut Session, sink: &Arc<MemorySink>, 
             None => r#""last_message":null"#.to_string(),
         };
         format!(
-            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":{id},"name":"{name}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":6}},"is_general":{general},"is_outgoing":false,"is_closed":{closed},"is_hidden":false,"is_name_implicit":false}},{last_message},"order":"{order}","is_pinned":{pinned},"unread_count":{unread},"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}"#,
+            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":{id},"name":"{name}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1760000000,"creator_id":{{"@type":"messageSenderUser","user_id":6}},"is_general":{general},"is_outgoing":false,"is_closed":{closed},"is_hidden":false,"is_name_implicit":false}},{last_message},"order":"{order}","is_pinned":{pinned},"unread_count":{unread},"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}"#,
             id = id,
             name = name,
             general = general,
@@ -732,6 +732,17 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.deselect_topic_ui(cx);
+                    })),
+            )
+            .child(
+                Button::new("forum-topic-info-toggle")
+                    .icon(gpui_kit::assets::IconName::Info)
+                    .ghost()
+                    .tooltip("Topic info")
+                    .accessibility_label("Topic info")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.topic_info_open = !this.topic_info_open;
+                        cx.notify();
                     })),
             )
             .child({

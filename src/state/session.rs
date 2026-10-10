@@ -513,6 +513,10 @@ pub struct Session {
     pub recent_calls_loading: bool,
     /// The last `searchCallMessages` request failed.
     pub recent_calls_error: bool,
+    /// A `deleteAllCallMessages` request is in flight.
+    pub recent_calls_clearing: bool,
+    /// What the chat-list suggestions block shows from.
+    pub suggestions: crate::chatlist_suggestions::SuggestionFacts,
     /// Phase C2i: "who can call me"
     /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
     pub call_privacy_allow_calls: Option<PrivacyWho>,
@@ -1171,6 +1175,10 @@ pub struct Session {
     /// accumulates them). `None` when the panel is closed or the viewer
     /// moved to a different story.
     pub story_viewers: Option<StoryViewersState>,
+    /// Statistics and public forwards of the story open in the viewer.
+    pub story_insights: Option<StoryInsightsState>,
+    /// The public story search (hashtag, location or venue) and its pages.
+    pub story_search: Option<StorySearchState>,
     /// Phase 9.5: the in-progress `reportStory` flow for the story open in
     /// the viewer — the reason picker and the optional details step.
     /// `None` when no report is in flight.
@@ -1405,6 +1413,8 @@ impl Session {
             recent_calls_offset: String::new(),
             recent_calls_loading: false,
             recent_calls_error: false,
+            recent_calls_clearing: false,
+            suggestions: Default::default(),
             call_privacy_allow_calls: None,
             support_user_ready: None,
             call_privacy_p2p: None,
@@ -1619,6 +1629,8 @@ impl Session {
             story_tray_refresh: HashSet::new(),
             story_post: StoryPostState::default(),
             story_viewers: None,
+            story_insights: None,
+            story_search: None,
             story_report: None,
             story_stealth: StoryStealthMode::default(),
             story_stealth_error: None,

@@ -295,6 +295,17 @@ pub(super) fn demo_seed_for(
             "screenshot demo — chat list: archive settings dialog".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyChatlistContactsIndex
+        | ScreenshotDemo::ReadyChatlistCallsClear
+        | ScreenshotDemo::ReadyChatlistStoriesMenu
+        | ScreenshotDemo::ReadyChatlistBirthdays
+        | ScreenshotDemo::ReadyChatlistSuggestions
+        | ScreenshotDemo::ReadyChatlistSuggestionsPhone => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat-list contacts index and Clear calls (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyArchiveHint
         | ScreenshotDemo::ReadyChatBadges
         | ScreenshotDemo::ReadyFoldersChats
@@ -363,6 +374,7 @@ pub(super) fn demo_seed_for(
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyJoinBar
+        | ScreenshotDemo::ReadyChatHeader
         | ScreenshotDemo::ReadyTopBars
         | ScreenshotDemo::ReadySearchPreviews
         | ScreenshotDemo::ReadyMultilineRows => (
@@ -771,6 +783,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — comments and threads".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyForumThreadStories => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — topic info, story statistics and search".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyForumsSaved => (
@@ -1304,6 +1322,12 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyGroupCallStage => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — full-screen pinned stream (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyGroupCallJoinAs => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1628,6 +1652,7 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
+        let global = super::chatlist_global::ChatlistGlobal::new(window, cx);
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search")
@@ -2063,6 +2088,9 @@ impl QuillApp {
             share_comment_input,
             story_reply_input,
             story_viewers_open: false,
+            story_stats_open: false,
+            topic_info_open: false,
+            thread_info_open: false,
             story_report_open: false,
             story_report_text_input,
             story_page: None,
@@ -2134,6 +2162,8 @@ impl QuillApp {
             demo_sink,
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notify_inflight: Arc::new(AtomicUsize::new(0)),
+            call_notify_clicks: Arc::new(Mutex::new(Vec::new())),
+            call_notified: None,
             pending_attachments,
             composer_self_destruct: None,
             composer_caption_above: false,
@@ -2158,6 +2188,7 @@ impl QuillApp {
             message_menu: None,
             chat_menu: None,
             archive_menu: None,
+            global,
             pin_reorder: None,
             pin_reorder_archived: false,
             pin_drag_anchor: None,
@@ -2247,6 +2278,8 @@ impl QuillApp {
             animation_sound: Default::default(),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             window_active: std::cell::Cell::new(true),
+            window_title_shown: Default::default(),
+            autoscroll: Default::default(),
             presence: Default::default(),
             login_prevented: None,
             terms_step: Default::default(),
@@ -2294,6 +2327,7 @@ impl QuillApp {
             global_ptt: Default::default(),
             global_ptt_polling: false,
             group_call_pin: quill::calls::tile_pin::TilePin::default(),
+            demo_group_stage: false,
             call_window_opening: false,
             call_window_raised: false,
             call_window_closed_by_user: None,
@@ -2671,6 +2705,32 @@ impl QuillApp {
         .detach();
         let notification_app = cx.weak_entity();
         cx.on_system_notification_response(move |response, cx| {
+            if let Some((account, call_id)) =
+                quill::notify_call::parse_call_notification_tag(&response.tag)
+            {
+                let _ = notification_app.update(cx, |this, cx| {
+                    if this
+                        .session()
+                        .is_none_or(|s| account != format!("account:{}", s.account.0))
+                    {
+                        return;
+                    }
+                    let action = quill::notify_call::CallNotificationAction::from_id(
+                        response.action_id.as_ref().map(|id| id.as_ref()),
+                    );
+                    if let Ok(mut clicks) = this.call_notify_clicks.lock() {
+                        clicks.push((call_id, action));
+                    }
+                    cx.notify();
+                });
+                // Same as a chat click: a hidden window may never render on
+                // its own, and the pick runs from `flush_notifications`.
+                cx.activate(true);
+                for window in cx.windows() {
+                    let _ = window.update(cx, |_, window, _| window.activate_window());
+                }
+                return;
+            }
             let Some((account, chat_id)) = quill::notify::parse_notification_tag(&response.tag)
             else {
                 return;

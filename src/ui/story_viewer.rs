@@ -194,11 +194,24 @@ impl QuillApp {
         let Some(index) = items.iter().position(|item| item.story_id == story_id) else {
             return false;
         };
+        self.begin_story_viewer(items, index, cx);
+        true
+    }
+
+    /// Open the viewer on `items[index]` and start playback.
+    pub(super) fn begin_story_viewer(
+        &mut self,
+        items: Vec<StoryViewerItem>,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let current = items.get(index).map(|item| (item.chat_id, item.story_id));
         self.story_viewer = StoryViewer::open(items, index);
         // Phase 9.5: viewers list and report flow are per-story.
         self.story_viewers_open = false;
         self.story_report_open = false;
-        if let Some(live) = self.live.as_mut() {
+        self.story_stats_open = false;
+        if let (Some(live), Some((chat_id, story_id))) = (self.live.as_mut(), current) {
             let _ = live.driver.open_story(chat_id, story_id);
         }
         // Phase 9.6: (re)start the playback clock + tick whenever the
@@ -212,7 +225,6 @@ impl QuillApp {
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         self.ensure_story_custom_emoji_downloads();
-        true
     }
 
     /// Phase 9.2: the viewer story's freshest `ParsedStory` (reaction
@@ -402,7 +414,9 @@ impl QuillApp {
     /// DECISIONS.md Phase 9.8).
     pub(super) fn story_area_click(&mut self, kind: &StoryAreaKind, cx: &mut Context<Self>) {
         match kind {
-            StoryAreaKind::Location { location, address } => {
+            StoryAreaKind::Location {
+                location, address, ..
+            } => {
                 let url = location.open_street_map_url();
                 let label = Self::story_area_pin_label(&[address, &location.coords_label()]);
                 self.status_note = if quill::platform::open_external_url(&url) {
@@ -416,6 +430,7 @@ impl QuillApp {
                 title,
                 address,
                 location,
+                ..
             } => {
                 let url = location.open_street_map_url();
                 let mut label = Self::story_area_pin_label(&[title, "Venue"]);
@@ -810,6 +825,7 @@ impl QuillApp {
         self.story_reply_open = false;
         self.story_viewers_open = false;
         self.story_report_open = false;
+        self.story_stats_open = false;
         self.clear_terminal_story_report();
         // Phase 9.5: drop the cover / privacy editors with the viewer.
         self.story_cover_target = None;
@@ -848,6 +864,7 @@ impl QuillApp {
         }
         self.story_reaction_picker_open = false;
         self.story_reply_open = false;
+        self.story_stats_open = false;
         // B14: a new story starts playing (a Space pause is per story).
         self.story_pause.reset();
         self.story_share_open = false;
@@ -1318,6 +1335,28 @@ impl QuillApp {
                     })),
             );
         }
+        if story.as_ref().is_some_and(|story| story.can_get_statistics) {
+            row = row.child(
+                Button::new("story-statistics")
+                    .label("Statistics")
+                    .ghost()
+                    .text_color(text_bright())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_story_stats(cx);
+                    })),
+            );
+        }
+        if let Some(query) = self.viewer_story_search_query() {
+            row = row.child(
+                Button::new("story-search-here")
+                    .label("Stories here")
+                    .ghost()
+                    .text_color(text_bright())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.search_stories_from_viewer(query.clone(), window, cx);
+                    })),
+            );
+        }
         if !can_delete {
             row = row.child(
                 Button::new("story-report")
@@ -1430,6 +1469,9 @@ impl QuillApp {
         }
         if self.story_viewers_open {
             column = column.child(self.story_viewers_panel(cx));
+        }
+        if self.story_stats_open {
+            column = column.child(self.story_stats_panel(cx));
         }
         if self.story_report_open {
             column = column.child(self.story_report_ui(cx));

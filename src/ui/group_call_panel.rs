@@ -1103,15 +1103,31 @@ impl Render for GroupCallPanel {
         if self.focus.is_focused(window) || window.focused(cx).is_none() {
             self.focus.focus(window, cx);
         }
-        let body = owner.update(cx, |app, cx| app.group_call_panel_body(cx));
+        let fullscreen = window.is_fullscreen();
+        let body = owner.update(cx, |app, cx| {
+            let wants_stage = fullscreen || app.demo_group_stage;
+            let call = app.session().and_then(|s| s.active_group_call.clone());
+            let stage = call
+                .filter(|_| wants_stage)
+                .and_then(|call| app.group_call_stage(&call, cx));
+            match stage {
+                Some(stage) => stage,
+                None => app.group_call_panel_body(cx),
+            }
+        });
         div()
             .size_full()
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let Some(owner) = this.owner.upgrade() else {
                     return;
                 };
                 let key = event.keystroke.key.clone();
+                if quill::calls::tile_pin::exits_fullscreen(&key) && window.is_fullscreen() {
+                    owner.update(cx, |app, cx| app.leave_group_call_stage(window, cx));
+                    cx.stop_propagation();
+                    return;
+                }
                 if owner.update(cx, |app, cx| app.group_call_key_down(&key, cx)) {
                     cx.stop_propagation();
                 }

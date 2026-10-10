@@ -246,6 +246,11 @@ pub struct QuillApp {
     /// Phase 8.1: in-flight OS notification workers; capped so a message
     /// burst cannot stack threads.
     pub(super) notify_inflight: Arc<AtomicUsize>,
+    /// Accept / Decline / body picks on incoming-call notifications.
+    pub(super) call_notify_clicks:
+        Arc<Mutex<Vec<(i32, quill::notify_call::CallNotificationAction)>>>,
+    /// The incoming call last announced with a system notification.
+    pub(super) call_notified: Option<i32>,
     /// Local files the user explicitly attached (canonical paths via `pick`).
     /// One item sends with `sendMessage`. Two or more photos/videos send with
     /// `sendMessageAlbum`.
@@ -337,6 +342,8 @@ pub struct QuillApp {
     pub(super) chat_menu: Option<ChatMenuState>,
     /// Right-click menu of the "Archived chats" row (window position).
     pub(super) archive_menu: Option<Point<Pixels>>,
+    /// Contacts tab, stories menu, suggestions and search tabs.
+    pub(super) global: super::chatlist_global::ChatlistGlobal,
     /// Pinned-chat drag in progress (or its release slide), see
     /// `quill::pin_reorder`; `pin_reorder_archived` says which pinned list.
     pub(super) pin_reorder: Option<quill::pin_reorder::PinReorder>,
@@ -409,6 +416,10 @@ pub struct QuillApp {
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.
     pub(super) window_active: std::cell::Cell<bool>,
+    /// The title last handed to the platform window (`window_chrome`).
+    pub(super) window_title_shown: std::cell::RefCell<String>,
+    /// Middle-click autoscroll over the history (`autoscroll_ui`).
+    pub(super) autoscroll: super::autoscroll_ui::AutoscrollUi,
     /// Batch 4: the last `online` value sent to TDLib.
     pub(super) presence: quill::presence::PresenceSync,
     /// Batch 4: the attempts the user just terminated from the new-login
@@ -686,6 +697,8 @@ pub struct QuillApp {
     pub(super) global_ptt_polling: bool,
     /// Locally pinned video tile of the group call (tdesktop viewport pin).
     pub(super) group_call_pin: quill::calls::tile_pin::TilePin,
+    /// Demo captures can't go full screen: show the stage anyway.
+    pub(super) demo_group_stage: bool,
     pub(super) call_window_opening: bool,
     pub(super) call_window_raised: bool,
     pub(super) call_window_closed_by_user: Option<i32>,
@@ -989,6 +1002,12 @@ pub struct QuillApp {
     /// Phase 9.5: viewers panel open in the viewer overlay
     /// (`getStoryInteractions`).
     pub(super) story_viewers_open: bool,
+    /// The statistics panel of the story open in the viewer.
+    pub(super) story_stats_open: bool,
+    /// The info card under the open forum topic's strip.
+    pub(super) topic_info_open: bool,
+    /// The info card under the open reply thread's root bar.
+    pub(super) thread_info_open: bool,
     /// Phase 9.5: report flow UI open in the viewer overlay
     /// (`reportStory`).
     pub(super) story_report_open: bool,

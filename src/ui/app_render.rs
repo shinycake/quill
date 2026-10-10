@@ -42,6 +42,7 @@ impl Render for QuillApp {
         self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
         self.sync_speech_trial_hint(cx);
+        self.sync_window_title(window);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(window.is_window_active() && !self.passcode_ui.locked, cx);
@@ -75,6 +76,7 @@ impl Render for QuillApp {
         let menu_open = self.message_menu.is_some()
             || self.chat_menu.is_some()
             || self.archive_menu.is_some()
+            || self.global.story_menu.is_some()
             || self.folder_tab_menu.is_some();
         if menu_open && !self.context_menu_was_open {
             self.context_menu_previous_focus = window.focused(cx);
@@ -979,6 +981,9 @@ impl Render for QuillApp {
             .when_some(self.chat_menu, |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
+            .when_some(self.global.story_menu, |this, (chat_id, position)| {
+                this.child(self.story_menu_overlay(chat_id, position, cx))
+            })
             .when_some(self.archive_menu, |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })
@@ -995,6 +1000,19 @@ impl Render for QuillApp {
             // MED4: Instant View reader overlay (above the menu).
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
                 this.child(overlay)
+            })
+            // Middle-click autoscroll: the anchor mark, and any other press
+            // ends the mode (`ListWidget::mousePressEvent`).
+            .when_some(self.autoscroll_mark(cx), |this, mark| this.child(mark))
+            .when(self.autoscroll_active(), |this| {
+                this.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.autoscroll_stop(cx)),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _, _, cx| this.autoscroll_stop(cx)),
+                )
             });
         // The lock screen covers the whole window, above every overlay.
         let root = root.when(self.passcode_ui.locked, |this| {

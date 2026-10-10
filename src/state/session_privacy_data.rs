@@ -85,6 +85,12 @@ impl Session {
                 true
             }
             EnvelopePayload::UpdateSuggestedActions { added, removed } => {
+                for name in added {
+                    self.suggestions.actions.insert(name.clone());
+                }
+                for name in removed {
+                    self.suggestions.actions.remove(name);
+                }
                 const CHECK: &str = "suggestedActionCheckPassword";
                 if added.iter().any(|name| name == CHECK) {
                     self.privacy_data.check_password_suggested = true;
@@ -116,6 +122,25 @@ impl Session {
 
     /// Failure of this block's purposes.
     pub(crate) fn apply_privacy_data_error(&mut self, purpose: RequestPurpose, err: &TdError) {
+        match purpose {
+            RequestPurpose::HideSuggestedAction { action } => {
+                self.suggestions.actions.insert(action.to_string());
+                self.chat_action_error = Some(format!(
+                    "could not hide the suggestion (error {})",
+                    err.code
+                ));
+                return;
+            }
+            RequestPurpose::HideContactCloseBirthdays => {
+                self.suggestions.birthdays_hidden = false;
+                self.chat_action_error = Some(format!(
+                    "could not hide the suggestion (error {})",
+                    err.code
+                ));
+                return;
+            }
+            _ => {}
+        }
         let data = &mut self.privacy_data;
         match purpose {
             RequestPurpose::GetNewChatPrivacy => {

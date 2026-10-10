@@ -118,6 +118,18 @@ pub enum ScreenshotDemo {
     ReadyArchiveRow,
     /// Chat-list rows: the Archive's "How does it work?" box.
     ReadyArchiveHint,
+    /// Contacts by name with section headers and the index bar.
+    ReadyChatlistContactsIndex,
+    /// Calls list with the Clear calls confirm box.
+    ReadyChatlistCallsClear,
+    /// Stories strip with a tile's right-click menu.
+    ReadyChatlistStoriesMenu,
+    /// Settings > Contacts with the birthday list.
+    ReadyChatlistBirthdays,
+    /// Suggestions block: a contact's birthday.
+    ReadyChatlistSuggestions,
+    /// Suggestions block: "Is {phone} still your number?".
+    ReadyChatlistSuggestionsPhone,
     /// Chat-list rows: video chat badge and emoji status on rows.
     ReadyChatBadges,
     /// Chat-list rows: the folder editor's chat sections.
@@ -158,6 +170,9 @@ pub enum ScreenshotDemo {
     /// Premium / SCAM / FAKE title badges, online dot (injected, no live
     /// Telegram).
     ReadyChatRows,
+    /// Chat header badges and the bars that replace the composer
+    /// (`QUILL_DEMO_HEADER=<variant>`; see `chat_header_demo`).
+    ReadyChatHeader,
     /// Non-member public channel opened from search: the bottom bar must
     /// resolve to "Join channel" (injected, no live Telegram).
     ReadyJoinBar,
@@ -350,6 +365,10 @@ pub enum ScreenshotDemo {
     /// bars, `thread` a post's comment thread in its discussion group,
     /// `group` a group message with replies.
     ReadyThreads,
+    /// Topic and thread info cards, story statistics with public shares,
+    /// and public story search (injected, no live Telegram):
+    /// `QUILL_DEMO_FTS_VIEW=topic|thread|stats|search` (default `topic`).
+    ReadyForumThreadStories,
     /// Forums and Saved Messages sublists (injected, no live Telegram):
     /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
     /// sublist list, one sublist, a tag filter, or the forum topic editor
@@ -736,6 +755,10 @@ pub enum ScreenshotDemo {
     /// Calls polish: a pinned video tile plus paused camera and screen
     /// streams in a joined voice chat (injected, no live Telegram).
     ReadyGroupCallPolish,
+    /// Calls live: the pinned stream across the whole window, as the
+    /// voice chat window shows it in full screen (injected, no live
+    /// Telegram).
+    ReadyGroupCallStage,
     /// Calls polish: the "Join as" picker on an unjoined voice chat
     /// (injected, no live Telegram).
     ReadyGroupCallJoinAs,
