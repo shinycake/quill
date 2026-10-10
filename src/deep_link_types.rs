@@ -8,7 +8,10 @@
 //! [`route`] decides what the app does with it. Everything in this module is
 //! pure so every platform tests it without a network.
 
+use crate::bot_invite::{Invite, Scope};
 use crate::state::DeepLinkAction;
+use crate::telegram::envelope::ChatAdminRights;
+use crate::telegram::parse_chat_admin_rights;
 use serde_json::Value;
 
 /// One `InternalLinkType` answer, reduced to the fields Quill acts on.
@@ -25,9 +28,16 @@ pub enum InternalLink {
     },
     BotStartInGroup {
         username: String,
+        start_parameter: String,
+        administrator_rights: Option<ChatAdminRights>,
     },
     BotAddToChannel {
         username: String,
+        administrator_rights: Option<ChatAdminRights>,
+    },
+    Game {
+        username: String,
+        game_short_name: String,
     },
     ChatInvite {
         invite_link: String,
@@ -188,9 +198,18 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
         },
         "BotStartInGroup" => InternalLink::BotStartInGroup {
             username: text(value, "bot_username"),
+            start_parameter: text(value, "start_parameter"),
+            administrator_rights: parse_chat_admin_rights(value.get("administrator_rights"))
+                .filter(|rights| *rights != ChatAdminRights::default()),
         },
         "BotAddToChannel" => InternalLink::BotAddToChannel {
             username: text(value, "bot_username"),
+            administrator_rights: parse_chat_admin_rights(value.get("administrator_rights"))
+                .filter(|rights| *rights != ChatAdminRights::default()),
+        },
+        "Game" => InternalLink::Game {
+            username: text(value, "bot_username"),
+            game_short_name: text(value, "game_short_name"),
         },
         "ChatInvite" => InternalLink::ChatInvite {
             invite_link: text(value, "invite_link"),
@@ -349,13 +368,47 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
             post: None,
             story_id: None,
         }),
+        InternalLink::BotStartInGroup {
+            username,
+            start_parameter,
+            administrator_rights,
+        } if !username.is_empty() => LinkRoute::Resolve(A::AddBot {
+            domain: username.clone(),
+            invite: Invite {
+                // tdesktop: a link with rights asks for admin groups only.
+                scope: if administrator_rights.is_some() {
+                    Scope::GroupAdmin
+                } else {
+                    Scope::All
+                },
+                requested_rights: *administrator_rights,
+                start_parameter: start_parameter.clone(),
+            },
+        }),
+        InternalLink::BotAddToChannel {
+            username,
+            administrator_rights,
+        } if !username.is_empty() => LinkRoute::Resolve(A::AddBot {
+            domain: username.clone(),
+            invite: Invite {
+                scope: Scope::ChannelAdmin,
+                requested_rights: *administrator_rights,
+                start_parameter: String::new(),
+            },
+        }),
         InternalLink::BotStartInGroup { .. } | InternalLink::BotAddToChannel { .. } => {
-            LinkRoute::Message(
-                "Adding a bot to a group or channel from a link isn't supported by Quill yet. \
-                 Add the bot from the group's member list."
-                    .into(),
-            )
+            LinkRoute::Message("This bot link is broken.".into())
         }
+        InternalLink::Game {
+            username,
+            game_short_name,
+        } if !username.is_empty() && !game_short_name.is_empty() => {
+            LinkRoute::Resolve(A::ShareGame {
+                domain: username.clone(),
+                game_short_name: game_short_name.clone(),
+            })
+        }
+        InternalLink::Game { .. } => LinkRoute::Message("This game link is broken.".into()),
         InternalLink::ChatInvite { invite_link } => match invite_hash(invite_link) {
             Some(hash) => LinkRoute::Resolve(A::JoinInvite { hash }),
             None => LinkRoute::Message("This invite link is broken or has expired.".into()),
@@ -587,6 +640,8 @@ mod tests {
         assert_eq!(invite_hash("https://t.me/+"), None);
     }
 
+    use crate::bot_invite::{Invite, Scope};
+
     fn route_of(value: Value) -> LinkRoute {
         route(&parsed(value), "https://t.me/orig")
     }
@@ -785,8 +840,6 @@ mod tests {
             "internalLinkTypeVideoChat",
             "internalLinkTypeGroupCall",
             "internalLinkTypeTheme",
-            "internalLinkTypeBotStartInGroup",
-            "internalLinkTypeBotAddToChannel",
             "internalLinkTypeAuthenticationCode",
             "internalLinkTypeQrCodeAuthentication",
         ] {
@@ -795,6 +848,72 @@ mod tests {
                 "{ty}"
             );
         }
+    }
+
+    fn admin_rights_json() -> Value {
+        json!({"@type":"chatAdministratorRights","can_manage_chat":true,"can_delete_messages":true})
+    }
+
+    #[test]
+    fn startgroup_links_pick_the_scope_from_the_requested_rights() {
+        let plain = route_of(json!({
+            "@type":"internalLinkTypeBotStartInGroup","bot_username":"helper",
+            "start_parameter":"x","administrator_rights":null
+        }));
+        assert_eq!(
+            plain,
+            LinkRoute::Resolve(DeepLinkAction::AddBot {
+                domain: "helper".into(),
+                invite: Invite {
+                    scope: Scope::All,
+                    requested_rights: None,
+                    start_parameter: "x".into(),
+                },
+            })
+        );
+        let admin = route_of(json!({
+            "@type":"internalLinkTypeBotStartInGroup","bot_username":"helper",
+            "start_parameter":"","administrator_rights":admin_rights_json()
+        }));
+        let LinkRoute::Resolve(DeepLinkAction::AddBot { invite, .. }) = admin else {
+            panic!("expected an add-bot route");
+        };
+        assert_eq!(invite.scope, Scope::GroupAdmin);
+        let rights = invite.requested_rights.expect("rights");
+        assert!(rights.can_manage_chat && rights.can_delete_messages && !rights.can_pin_messages);
+    }
+
+    #[test]
+    fn startchannel_links_ask_for_channels() {
+        let route = route_of(json!({
+            "@type":"internalLinkTypeBotAddToChannel","bot_username":"helper",
+            "administrator_rights":admin_rights_json()
+        }));
+        let LinkRoute::Resolve(DeepLinkAction::AddBot { domain, invite }) = route else {
+            panic!("expected an add-bot route");
+        };
+        assert_eq!(domain, "helper");
+        assert_eq!(invite.scope, Scope::ChannelAdmin);
+        assert!(invite.requested_rights.is_some());
+    }
+
+    #[test]
+    fn game_links_open_the_share_picker() {
+        assert_eq!(
+            route_of(json!({
+                "@type":"internalLinkTypeGame","bot_username":"chessbot","game_short_name":"chess"
+            })),
+            LinkRoute::Resolve(DeepLinkAction::ShareGame {
+                domain: "chessbot".into(),
+                game_short_name: "chess".into(),
+            })
+        );
+        assert!(matches!(
+            route_of(
+                json!({"@type":"internalLinkTypeGame","bot_username":"chessbot","game_short_name":""})
+            ),
+            LinkRoute::Message(_)
+        ));
     }
 
     #[test]
