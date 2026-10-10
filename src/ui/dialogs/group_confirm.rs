@@ -9,6 +9,10 @@ pub enum GroupConfirmAction {
     },
     DeleteChat,
     LeaveChat,
+    /// First step of the broadcast group conversion: what it offers
+    /// (tdesktop `lng_gigagroup_convert_*`). Confirming opens the warning.
+    BroadcastIntro,
+    /// Second step: the permanent consequence, then the conversion runs.
     BroadcastUpgrade,
     /// Slice CL1: `deleteChatHistory` (schema 1.8.67, line 11845);
     /// `revoke` clears for everyone (`chat.can_be_deleted_for_all_users`).

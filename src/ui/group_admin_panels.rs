@@ -473,10 +473,16 @@ impl QuillApp {
                         |this, _window, cx| {
                             this.open_group_confirm(
                                 chat_id,
-                                GroupConfirmAction::BroadcastUpgrade,
+                                GroupConfirmAction::BroadcastIntro,
                                 cx,
                             );
                         }
+                    );
+                    section = section.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(quill::admin_extras::BROADCAST_ABOUT),
                     );
                 }
             }

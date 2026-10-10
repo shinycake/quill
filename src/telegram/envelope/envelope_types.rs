@@ -1896,6 +1896,12 @@ pub struct UserProfileExtras {
     pub need_phone_exception: bool,
     /// B13: `gift_settings` — only the own user's is ever shown.
     pub gift_settings: Option<crate::privacy::GiftSettings>,
+    /// `uses_unofficial_app` — the user runs an unofficial client that
+    /// poses a security risk (tdesktop `unofficialSecurityRisk`).
+    pub uses_unofficial_app: bool,
+    /// `personal_photo` — the photo the current user set for this contact
+    /// (shown first in the gallery as "Photo set by you").
+    pub personal_photo: Option<ParsedProfilePhoto>,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -1961,6 +1967,14 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
         gift_settings: crate::privacy::GiftSettings::from_value(info.get("gift_settings")),
+        uses_unofficial_app: info
+            .get("uses_unofficial_app")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        personal_photo: info
+            .get("personal_photo")
+            .filter(|value| !value.is_null())
+            .and_then(super::users::parse_profile_photo),
     }
 }
 

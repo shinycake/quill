@@ -16,7 +16,7 @@ use quill::ids::ChatId;
 use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use quill::state::{ContactRow, Session};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::requests::{CallPrivacySetting, PrivacyWho};
+use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -27,8 +27,6 @@ use std::sync::atomic::AtomicU64;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PrivacyEditorTarget {
     Rule(PrivacySettingKey),
-    CallAllow,
-    CallP2P,
     /// B13: "Who can message me" (`newChatPrivacySettings`).
     NewChat,
     /// B13: "File open confirmations" (extension whitelist + IP warning).
@@ -39,8 +37,6 @@ impl PrivacyEditorTarget {
     fn label(self) -> &'static str {
         match self {
             PrivacyEditorTarget::Rule(key) => key.label(),
-            PrivacyEditorTarget::CallAllow => "Who can call me",
-            PrivacyEditorTarget::CallP2P => "Peer-to-peer calls",
             PrivacyEditorTarget::NewChat => "Who can message me",
             PrivacyEditorTarget::FileOpen => "File open confirmations",
         }
@@ -82,6 +78,7 @@ impl QuillApp {
             let _ = live.driver.fetch_read_date_privacy();
             let _ = live.driver.fetch_blocked_senders();
             let _ = live.driver.fetch_new_chat_privacy();
+            let _ = live.driver.fetch_archive_chat_list_settings();
             if let Some(me) = live.driver.session.my_user_id {
                 let _ = live.driver.fetch_user_full_info(me);
             }
@@ -204,24 +201,14 @@ impl QuillApp {
                 .px_1()
                 .child("Who can contact me"),
         );
-        contact = contact.child(self.privacy_call_row(
-            cx,
-            "allow",
-            "Who can call me",
-            None,
-            PrivacyEditorTarget::CallAllow,
-        ));
-        contact = contact.child(self.privacy_call_row(
-            cx,
-            "p2p",
-            "Peer-to-peer calls",
-            Some("Use peer-to-peer for voice and video calls when possible"),
-            PrivacyEditorTarget::CallP2P,
-        ));
+        contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowCalls));
+        contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::PeerToPeer));
         contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowVoiceMessages));
         contact = contact.child(self.new_chat_privacy_row(cx));
         contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowChatInvites));
         body = body.child(contact);
+
+        body = body.child(self.archive_privacy_section(cx));
 
         body = body.child(self.privacy_frequent_contacts_section(cx));
 
@@ -331,79 +318,6 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(value),
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.privacy_editor = Some(target);
-                this.exception_picker_open = false;
-                cx.notify();
-            }))
-            .into_any_element()
-    }
-
-    /// Slice S3: one call-privacy row (reuses the Phase C2i state the
-    /// Calls tab edits).
-    fn privacy_call_row(
-        &self,
-        cx: &mut Context<Self>,
-        id: &str,
-        label: &'static str,
-        subtitle: Option<&'static str>,
-        target: PrivacyEditorTarget,
-    ) -> AnyElement {
-        let session = self.session();
-        let (who, loading, error) = match target {
-            PrivacyEditorTarget::CallAllow => (
-                session.and_then(|s| s.call_privacy_allow_calls),
-                session.is_some_and(|s| s.call_privacy_loading),
-                session.is_some_and(|s| s.call_privacy_error),
-            ),
-            PrivacyEditorTarget::CallP2P => (
-                session.and_then(|s| s.call_privacy_p2p),
-                session.is_some_and(|s| s.call_privacy_loading),
-                session.is_some_and(|s| s.call_privacy_error),
-            ),
-            PrivacyEditorTarget::Rule(_)
-            | PrivacyEditorTarget::NewChat
-            | PrivacyEditorTarget::FileOpen => (None, false, false),
-        };
-        let value = if loading {
-            "Loading…".to_string()
-        } else if error {
-            "Couldn't load".to_string()
-        } else {
-            who.map(|w| w.label().to_string())
-                .unwrap_or_else(|| "Custom".to_string())
-        };
-        let mut text = div().flex().flex_col().flex_1().child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(div().text_sm().child(label))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(value),
-                ),
-        );
-        if let Some(subtitle) = subtitle {
-            text = text.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(subtitle),
-            );
-        }
-        div()
-            .id(format!("privacy-calls-{id}"))
-            .role(gpui_kit::Role::Button)
-            .aria_label(label)
-            .tab_index(0)
-            .cursor_pointer()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .child(text)
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.privacy_editor = Some(target);
                 this.exception_picker_open = false;
@@ -678,8 +592,6 @@ impl QuillApp {
                         PrivacyKeyState::Ready(d) => d.who,
                         _ => None,
                     }),
-                PrivacyEditorTarget::CallAllow => session.and_then(|s| s.call_privacy_allow_calls),
-                PrivacyEditorTarget::CallP2P => session.and_then(|s| s.call_privacy_p2p),
                 PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => None,
             };
         let mut body = div().flex().flex_col().gap_1();
@@ -844,12 +756,6 @@ impl QuillApp {
                         };
                         live.driver.set_privacy_rules(key, detail)
                     }
-                    PrivacyEditorTarget::CallAllow => live
-                        .driver
-                        .set_call_privacy(CallPrivacySetting::AllowCalls, who),
-                    PrivacyEditorTarget::CallP2P => live
-                        .driver
-                        .set_call_privacy(CallPrivacySetting::PeerToPeer, who),
                     PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => return,
                 }
             };
@@ -867,8 +773,6 @@ impl QuillApp {
                     };
                     demo.privacy.insert(key, PrivacyKeyState::Ready(detail));
                 }
-                PrivacyEditorTarget::CallAllow => demo.call_privacy_allow_calls = Some(who),
-                PrivacyEditorTarget::CallP2P => demo.call_privacy_p2p = Some(who),
                 PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => return,
             }
         }
@@ -1493,6 +1397,18 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
         &[62],
     );
     ready(
+        PrivacySettingKey::AllowCalls,
+        PrivacyWho::Contacts,
+        &[61],
+        &[63],
+    );
+    ready(
+        PrivacySettingKey::PeerToPeer,
+        PrivacyWho::Everybody,
+        &[],
+        &[],
+    );
+    ready(
         PrivacySettingKey::ShowPhoneNumber,
         PrivacyWho::Nobody,
         &[],
@@ -1588,6 +1504,11 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     session.privacy_data.check_password_suggested = true;
     session.privacy_data.inactive_session_ttl_days = Some(180);
     session.read_date_show = Some(true);
+    session.archive_chat_list_settings = Some(quill::telegram::requests::ArchiveChatListSettings {
+        archive_and_mute_new_chats_from_unknown_users: true,
+        keep_unmuted_chats_archived: false,
+        keep_chats_from_folders_archived: true,
+    });
     session.call_privacy_allow_calls = Some(PrivacyWho::Contacts);
     session.call_privacy_p2p = Some(PrivacyWho::Everybody);
     session.blocked_senders = Some(vec![63]);

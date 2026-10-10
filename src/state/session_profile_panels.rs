@@ -79,11 +79,107 @@ impl Session {
         );
     }
 
+    /// The photos the profile gallery shows for `user_id`, plus the id of
+    /// the one the current user set for this contact. tdesktop shows that
+    /// personal photo first ("Photo set by you"); a photo that is already
+    /// in the loaded list moves to the front instead of repeating.
+    pub fn profile_gallery(&self, user_id: i64) -> Option<(Vec<ProfilePhoto>, Option<i64>)> {
+        let Some(ProfilePhotosFetch::Loaded { photos, .. }) =
+            self.user_profile_photos.get(&user_id)
+        else {
+            return None;
+        };
+        let personal = self
+            .user_full_info(user_id)
+            .and_then(|info| info.extras.personal_photo.as_ref());
+        Some(merge_personal_photo(photos, personal))
+    }
+
     /// The chat ids of a loaded profile list; empty while loading.
     pub fn profile_chat_list(&self, kind: ProfileChatsKind, id: i64) -> &[i64] {
         match self.profile_chat_lists.get(&(kind, id)) {
             Some(ProfileChatsFetch::Loaded(ids)) => ids,
             _ => &[],
         }
+    }
+}
+
+/// Put the personal photo first in a gallery list (see
+/// [`Session::profile_gallery`]). Returns the list and the personal
+/// photo's id.
+pub(crate) fn merge_personal_photo(
+    photos: &[ProfilePhoto],
+    personal: Option<&ParsedProfilePhoto>,
+) -> (Vec<ProfilePhoto>, Option<i64>) {
+    let Some(personal) = personal else {
+        return (photos.to_vec(), None);
+    };
+    let first = ProfilePhoto {
+        id: personal.id,
+        added_date: personal.added_date,
+        thumb_file_id: personal.thumb_file_id.0,
+        full_file_id: personal.full_file_id.0,
+        width: personal.width,
+        height: personal.height,
+    };
+    let mut merged = Vec::with_capacity(photos.len() + 1);
+    merged.push(first);
+    merged.extend(
+        photos
+            .iter()
+            .filter(|photo| photo.id != personal.id)
+            .cloned(),
+    );
+    (merged, Some(personal.id))
+}
+
+#[cfg(test)]
+mod gallery_tests {
+    use crate::state::ProfilePhoto;
+    use crate::telegram::envelope::ParsedProfilePhoto;
+
+    fn photo(id: i64) -> ProfilePhoto {
+        ProfilePhoto {
+            id,
+            added_date: 0,
+            thumb_file_id: id as i32,
+            full_file_id: id as i32 + 1,
+            width: 10,
+            height: 10,
+        }
+    }
+
+    fn parsed(id: i64) -> ParsedProfilePhoto {
+        ParsedProfilePhoto {
+            id,
+            added_date: 5,
+            files: Vec::new(),
+            thumb_file_id: crate::ids::FileId(900),
+            full_file_id: crate::ids::FileId(901),
+            width: 20,
+            height: 20,
+        }
+    }
+
+    #[test]
+    fn personal_photo_goes_first() {
+        let (list, id) = super::merge_personal_photo(&[photo(1), photo(2)], Some(&parsed(9)));
+        assert_eq!(id, Some(9));
+        assert_eq!(list.iter().map(|p| p.id).collect::<Vec<_>>(), vec![9, 1, 2]);
+        assert_eq!(list[0].full_file_id, 901);
+    }
+
+    #[test]
+    fn personal_photo_is_not_repeated() {
+        let (list, id) = super::merge_personal_photo(&[photo(1), photo(9)], Some(&parsed(9)));
+        assert_eq!(id, Some(9));
+        assert_eq!(list.iter().map(|p| p.id).collect::<Vec<_>>(), vec![9, 1]);
+    }
+
+    #[test]
+    fn no_personal_photo_keeps_the_list() {
+        let (list, id) = super::merge_personal_photo(&[photo(1)], None);
+        assert_eq!(id, None);
+        assert_eq!(list.len(), 1);
     }
 }

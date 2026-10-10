@@ -599,6 +599,10 @@ pub enum RequestPurpose {
     GetMapThumbnailFile,
     /// `getMe`. Response is `user`; only the id is kept.
     GetMe,
+    /// `getSupportUser` (Settings > Ask a Question). Response is `user`;
+    /// the id is parked in `Session::support_user_ready` and the driver
+    /// opens the chat.
+    GetSupportUser,
     /// `getChatMember` for the current user in a channel. Response is
     /// `chatMember`; drives the composer gate and join/leave affordance.
     GetChatMember,
@@ -1132,6 +1136,11 @@ pub enum RequestPurpose {
     SetPersonalChat,
     /// B10: `setUserNote` (line 14553). Response is `ok`.
     SetUserNote,
+    /// `setUserPersonalProfilePhoto` / `suggestUserProfilePhoto`
+    /// (lines 14942, 14952). Response is `ok`; pending `user_id`.
+    SetUserPersonalPhoto,
+    /// `reportChatPhoto` (line 16107). Response is `ok`.
+    ReportChatPhoto,
     /// B10: `getUserProfilePhotos` (line 14591) for the profile photo
     /// gallery; pending `user_id`. Response is `chatPhotos`.
     GetUserProfilePhotos,

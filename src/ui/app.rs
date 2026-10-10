@@ -842,10 +842,6 @@ pub struct QuillApp {
     /// Slice G2: event-log search input for the info panel's
     /// "Recent actions" section (created lazily when the panel opens).
     pub(super) event_log_search: Option<Entity<TextareaState>>,
-    /// Slice G2: per-admin filter for the event log (client-side — TDLib's
-    /// `chatEventLogFilters` has no user field, schema 1.8.67 line 7956).
-    /// `None` shows all admins.
-    pub(super) event_log_admin_filter: Option<i64>,
     /// Message text selected when the message menu opened, if the
     /// selection lies in that message (Quote & Reply, Copy Selected Text).
     pub(super) message_menu_selection: Option<String>,
