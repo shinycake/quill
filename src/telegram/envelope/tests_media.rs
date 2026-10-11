@@ -152,6 +152,31 @@ fn media_schema_matches_1_8_67() {
     assert!(schema.lines().any(|l| l.starts_with("photoSize ")));
 }
 
+/// A mask sticker in a message (`stickerFullTypeMask`) is an ordinary
+/// sticker picture: it parses as `MessageContent::Sticker` with its file,
+/// not as an unsupported message.
+#[test]
+fn mask_sticker_message_parses_as_a_sticker() {
+    let sticker_file = local_file_json(51, "/tmp/mask.webp", true, true);
+    let json = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":8,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"9101","set_id":"12","width":512,"height":512,"emoji":"🎩","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeMask","mask_position":{{"@type":"maskPosition","point":{{"@type":"maskPointForehead"}},"x_shift":0.0,"y_shift":-0.5,"scale":1.0}}}},"thumbnail":null,"sticker":{sticker_file}}}}}}}}}"#
+    );
+    let env = parse_envelope(&json).unwrap();
+    match env.payload {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+            let MessageContent::Sticker(sticker) = &message.content else {
+                panic!("{:?}", message.content);
+            };
+            assert_eq!(sticker.emoji, "🎩");
+            assert_eq!(sticker.set_id, 12);
+            assert_eq!(sticker.display_file_id(), Some(FileId(51)));
+            assert!(!sticker.requires_premium);
+            assert_eq!(message.content.preview(), "🎩");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
 fn message_sticker_keeps_webp_thumb_and_file() {
     let sticker_file = local_file_json(41, "", false, true);

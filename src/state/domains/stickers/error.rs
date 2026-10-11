@@ -51,6 +51,7 @@ impl Session {
         {
             self.finish_sticker_batch_item(set_id, false);
         }
+        self.fail_mask_request(pending.map(|p| p.purpose));
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {
             self.stickers.emoji.mutation_failed = true;
             self.stickers.emoji.mutating_set = None;

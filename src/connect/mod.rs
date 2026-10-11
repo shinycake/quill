@@ -28,6 +28,7 @@ mod link_info;
 mod links_boosts;
 mod live;
 mod marketplace;
+mod masks;
 mod media;
 mod media_library;
 pub use media_library::REACTION_STRIP_SIZE;

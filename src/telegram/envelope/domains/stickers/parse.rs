@@ -99,6 +99,11 @@ pub(crate) fn parse_stickers_payload(
                     .and_then(|t| t.get("@type"))
                     .and_then(Value::as_str)
                     == Some("stickerTypeRegular"),
+                is_mask: value
+                    .get("sticker_type")
+                    .and_then(|t| t.get("@type"))
+                    .and_then(Value::as_str)
+                    == Some("stickerTypeMask"),
             },
         )),
         "updateRecentStickers" => Ok(EnvelopePayload::Stickers(
