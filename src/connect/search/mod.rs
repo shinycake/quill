@@ -19,6 +19,7 @@ use crate::telegram::requests::{
 };
 
 mod chat_search;
+mod shared_media_calendar;
 mod sponsored;
 
 impl<S: JsonSender> ConnectDriver<S> {

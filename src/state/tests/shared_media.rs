@@ -293,3 +293,63 @@ fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
             .is_empty()
     );
 }
+
+#[test]
+fn the_calendar_opens_for_the_active_tab() {
+    let (mut session, _sink) = session();
+    session.media.shared_media.open_for(ChatId(7));
+    let calendar = session
+        .open_shared_media_calendar(1_791_460_800)
+        .cloned()
+        .expect("media tab has a calendar");
+    assert_eq!(calendar.chat_id, ChatId(7));
+    assert_eq!(
+        calendar.media,
+        crate::search_filters::SearchMediaKind::Media
+    );
+    assert_eq!(calendar.shared_tab, Some(SharedMediaTab::Media));
+    session.media.shared_media.select_tab(SharedMediaTab::Gifs);
+    assert!(session.open_shared_media_calendar(1_791_460_800).is_none());
+}
+
+#[test]
+fn a_date_jump_page_starts_at_the_picked_day() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    session.media.shared_media.open_for(chat);
+    let day = crate::search_filters::day_number(2026, 10, 9);
+    let generation = session
+        .media
+        .shared_media
+        .begin_fetch_at_day(SharedMediaTab::Media, day);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia {
+            tab: SharedMediaTab::Media,
+            generation,
+        },
+        Some(chat),
+    );
+    let noon = |d: i64| (day + d) * 86_400 + 43_200;
+    let message = |id: i64, date: i64| {
+        format!(
+            r#"{{"id":{id},"chat_id":11,"date":{date},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}"#
+        )
+    };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":3,"next_from_message_id":0,"messages":[{},{},{}]}}"#,
+            extra.0,
+            message(30, noon(1)),
+            message(20, noon(0)),
+            message(10, noon(-1)),
+        ),
+    );
+    let tab = &session.media.shared_media.tabs[SharedMediaTab::Media.index()];
+    let ids: Vec<i64> = tab.items.iter().map(|i| i.message_id.0).collect();
+    assert_eq!(ids, vec![20, 10]);
+    assert_eq!(tab.anchor_day, Some(day));
+}
