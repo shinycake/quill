@@ -1,4 +1,0 @@
-# Full account export: settings box, folder layout and index.
-# OtherData is omitted, not stubbed: TDLib cannot fetch that takeout file.
-parity:data-export-full
-parity:platform-data-export
