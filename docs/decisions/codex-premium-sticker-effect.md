@@ -27,4 +27,12 @@ A temporary `ready-chats` capture with `QUILL_DEMO_HISTORY_ANIM=stickers` and a 
 
 ## What was not checked live
 
-No live Telegram session: a real `premium_animation` download, the effect around a sticker in an open chat, a click replay, or the hint. The sticker bitmap itself is not flipped; only the effect is, the same way emoji effects are.
+No live Telegram session: a real `premium_animation` download, the effect around a sticker in an open chat, a click replay, or the hint. 
+
+## Sticker flip (codex/premium-sticker-flip)
+
+tdesktop's `Sticker::mirrorHorizontal()` is true when the sticker has a Premium effect and its message is not right-aligned (`hasRightLayout`: outgoing and not wide chat mode). The paint path then flips the sticker bitmap, so the sticker faces the same way as the mirrored effect.
+
+Quill now does the same in `src/ui/sticker_mirror.rs`: `mirrors(has_premium_effect, right_aligned)` is the condition (Quill's right-aligned is `is_outgoing`, as the effect placement already uses; Quill has no wide chat mode). `render_history_row_body` passes the decoded sticker visual through `mirrored` for such messages. The decoded frames are flipped once with `emoji_effect::flip_frames` (the same row flip the effect uses) and cached by the identity of the decoded frame set (16 sets, least recently used out, evicted frames retired to the atlas sweeper), so a re-decode flips again and nothing is done per frame afterwards. The non-layered single-image path is cached per image the same way.
+
+Verified: unit tests for the condition, the flip, and reuse of the flipped image; `gate.sh` GATE OK, hotspots and file size checks OK. Not verified: a visual capture (the only local TGS is a trivial circle) and a live Premium sticker.
