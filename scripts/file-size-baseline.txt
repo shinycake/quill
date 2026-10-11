@@ -12,7 +12,6 @@
 1087 src/ui/keybindings.rs
 1805 src/ui/message_menu_ui.rs
 1968 src/ui/message_text.rs
-1017 src/ui/polls.rs
 1017 src/ui/premium_ui.rs
 1567 src/ui/privacy.rs
 1660 src/ui/profile_panels.rs
