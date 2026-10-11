@@ -149,7 +149,8 @@ fn every_media_tab_sends_its_filter() {
         fx.open_tab(tab);
         let sent = fx.requests("searchMessages").pop().unwrap();
         assert_eq!(sent["filter"]["@type"], constructor, "{tab:?}");
-        assert_eq!(sent["query"], "x");
+        // Photos, Videos and Voice list everything, whatever was typed.
+        assert_eq!(sent["query"], if tab.takes_query() { "x" } else { "" });
     }
 }
 
@@ -333,4 +334,138 @@ fn a_failed_page_keeps_the_cursor_for_a_retry() {
     let tabs = &fx.driver.session.search.search.tabs;
     assert!(tabs.more_failed && !tabs.loading_more);
     assert!(fx.driver.load_more_search_results().unwrap().is_some());
+}
+
+#[test]
+fn photos_videos_and_voice_ignore_what_is_typed() {
+    for tab in [SearchTab::Photos, SearchTab::Videos, SearchTab::Voice] {
+        let mut fx = Fixture::new();
+        fx.driver.open_search().unwrap();
+        fx.open_tab(tab);
+        let before = fx.recorder.snapshot().len();
+        let outcome = fx.driver.set_search_query("sunset").unwrap();
+        assert!(matches!(outcome, SearchQueryOutcome::Unchanged), "{tab:?}");
+        assert_eq!(fx.recorder.snapshot().len(), before, "nothing is sent");
+        // The text is remembered for the tabs that use it.
+        assert_eq!(fx.driver.session.search.search.query, "sunset");
+        fx.open_tab(SearchTab::Links);
+        let sent = fx.requests("searchMessages").pop().unwrap();
+        assert_eq!(sent["query"], "sunset");
+        assert_eq!(sent["filter"]["@type"], "searchMessagesFilterUrl");
+    }
+}
+
+#[test]
+fn links_files_and_music_take_the_typed_query() {
+    for tab in [SearchTab::Links, SearchTab::Files, SearchTab::Music] {
+        let mut fx = Fixture::new();
+        fx.driver.open_search().unwrap();
+        fx.open_tab(tab);
+        commit_typed_search(&mut fx.driver, "report");
+        let sent = fx.requests("searchMessages").pop().unwrap();
+        assert_eq!(sent["query"], "report", "{tab:?}");
+    }
+}
+
+#[test]
+fn the_downloads_tab_sends_nothing() {
+    let mut fx = Fixture::new();
+    fx.driver.open_search().unwrap();
+    let before = fx.recorder.snapshot().len();
+    fx.open_tab(SearchTab::Downloads);
+    let SearchQueryOutcome::Debounced { token } = fx.driver.set_search_query("invoice").unwrap()
+    else {
+        panic!("expected a debounced query");
+    };
+    assert!(fx.driver.commit_debounced_search(token).unwrap().is_none());
+    let sent = fx.recorder.snapshot();
+    assert!(
+        sent.iter().skip(before).all(|json| {
+            !json.contains("searchMessages")
+                && !json.contains("searchChats")
+                && !json.contains("searchPublicPosts")
+        }),
+        "{:?}",
+        &sent[before..]
+    );
+}
+
+fn exceeded_posts_search(fx: &mut Fixture) {
+    fx.driver.open_search().unwrap();
+    commit_typed_search(&mut fx.driver, "dune");
+    fx.open_tab(SearchTab::Posts);
+    fx.answer(
+        "getPublicPostSearchLimits",
+        "publicPostSearchLimits",
+        r#""daily_free_query_count":5,"remaining_free_query_count":0,"next_free_query_in":3600,"star_count":25,"is_current_query_free":false"#,
+    );
+}
+
+#[test]
+fn a_paid_search_is_refused_while_free_ones_remain() {
+    let mut fx = Fixture::new();
+    fx.driver.open_search().unwrap();
+    commit_typed_search(&mut fx.driver, "dune");
+    fx.open_tab(SearchTab::Posts);
+    fx.answer(
+        "getPublicPostSearchLimits",
+        "publicPostSearchLimits",
+        r#""daily_free_query_count":5,"remaining_free_query_count":3,"next_free_query_in":0,"star_count":25,"is_current_query_free":true"#,
+    );
+    assert!(fx.driver.search_public_posts_paid().unwrap().is_none());
+    assert!(
+        fx.requests("searchPublicPosts")
+            .iter()
+            .all(|request| request["star_count"] == 0)
+    );
+}
+
+#[test]
+fn the_paid_search_sends_the_reported_price_only_when_called() {
+    let mut fx = Fixture::new();
+    exceeded_posts_search(&mut fx);
+    // The free attempt was refused: the quota is flagged exceeded.
+    fx.answer(
+        "searchPublicPosts",
+        "foundPublicPosts",
+        r#""next_offset":"","are_limits_exceeded":true,"messages":[]"#,
+    );
+    assert!(fx.driver.session.search.search.public_limits_exceeded);
+    // Nothing paid went out on its own.
+    assert!(
+        fx.requests("searchPublicPosts")
+            .iter()
+            .all(|request| request["star_count"] == 0)
+    );
+    // The explicit paid search carries the price and the same query.
+    let flight = fx.driver.search_public_posts_paid().unwrap();
+    assert!(matches!(flight, Some(SearchFlight::PublicPosts(_))));
+    let paid = fx.requests("searchPublicPosts").pop().unwrap();
+    assert_eq!(paid["star_count"], 25);
+    assert_eq!(paid["query"], "dune");
+    assert_eq!(paid["offset"], "");
+}
+
+#[test]
+fn a_paid_search_needs_a_plain_query_and_a_price() {
+    let mut fx = Fixture::new();
+    fx.driver.open_search().unwrap();
+    fx.driver
+        .search_hashtag("#dune", crate::search_filters::SearchScope::PublicPosts)
+        .unwrap();
+    fx.driver.session.search.search.public_limits_exceeded = true;
+    fx.driver.session.search.search.tabs.limits = Some(crate::state::PublicPostLimits {
+        daily_free: 5,
+        remaining_free: 0,
+        next_free_in: 60,
+        star_count: 25,
+        current_query_free: false,
+    });
+    // A tag search is never paid.
+    assert!(fx.driver.search_public_posts_paid().unwrap().is_none());
+    assert!(
+        fx.requests("searchPublicPosts")
+            .iter()
+            .all(|request| request["star_count"] == 0)
+    );
 }

@@ -1,44 +1,61 @@
 //! The strip of tabs under the global search field (tdesktop
-//! `Suggestions::setupTabs`): Chats, Channels, Apps, Posts and the media
-//! tabs. Picking one moves the search filters onto it
-//! ([`SearchTab::apply`]) and the driver reruns the query.
+//! `Suggestions::setupTabs`): Chats, Channels, Apps, Posts, the media tabs
+//! and, while the download list has entries, Downloads. One row that
+//! scrolls sideways (the vertical wheel too, as tdesktop's
+//! `setCustomWheelProcess` does). Picking a tab moves the search filters
+//! onto it ([`SearchTab::apply`]) and the driver reruns the query.
 
 use super::*;
 
 impl QuillApp {
-    /// The strip as wrapping chips: all ten tabs stay in view in the narrow
-    /// sidebar, with the active one marked (a scrolling bar hid the active
-    /// tab behind its overflow menu).
     pub(in crate::ui) fn search_tab_strip(
         &self,
         active: SearchTab,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let chips: Vec<AnyElement> = SearchTab::ALL
+        let handle = self.search_ui.tabs_scroll.clone();
+        let chips: Vec<AnyElement> = SearchTab::strip(self.has_downloads())
             .into_iter()
             .map(|tab| {
-                Self::filter_chip(
-                    ("search-tab", tab as u64),
-                    tab.label(),
-                    tab == active,
-                    move |this, _, cx| this.pick_search_tab(tab, cx),
-                    cx,
-                )
-                .into_any_element()
+                div()
+                    .flex_none()
+                    .child(Self::filter_chip(
+                        ("search-tab", tab as u64),
+                        tab.label(),
+                        tab == active,
+                        move |this, _, cx| this.pick_search_tab(tab, cx),
+                        cx,
+                    ))
+                    .into_any_element()
             })
             .collect();
+        let wheel_handle = handle.clone();
         div()
             .id("search-tabs")
+            .w_full()
             .flex()
-            .flex_wrap()
             .items_center()
             .gap_1()
+            .overflow_x_scroll()
+            .track_scroll(&handle)
+            .on_scroll_wheel(move |event, window, cx| {
+                // A vertical wheel moves the strip sideways.
+                let delta = event.delta.pixel_delta(window.line_height());
+                if delta.y.abs() > delta.x.abs() {
+                    let offset = wheel_handle.offset();
+                    let max = wheel_handle.max_offset().x;
+                    let x = (offset.x + delta.y).clamp(-max, px(0.));
+                    wheel_handle.set_offset(point(x, offset.y));
+                    window.refresh();
+                    cx.stop_propagation();
+                }
+            })
             .children(chips)
             .into_any_element()
     }
 
     /// Move the global search onto `tab`, keeping the query, the date
-    /// window and the archive toggle.
+    /// window and the archive toggle, and bring its chip into view.
     pub(in crate::ui) fn pick_search_tab(&mut self, tab: SearchTab, cx: &mut Context<Self>) {
         let current = self
             .session()
@@ -46,6 +63,12 @@ impl QuillApp {
             .unwrap_or_default();
         if SearchTab::of(&current) == tab {
             return;
+        }
+        if let Some(index) = SearchTab::strip(self.has_downloads())
+            .iter()
+            .position(|shown| *shown == tab)
+        {
+            self.search_ui.tabs_scroll.scroll_to_item(index);
         }
         self.set_search_filters(tab.apply(current), cx);
     }

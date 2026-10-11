@@ -66,8 +66,6 @@ mod tests_polls;
 #[cfg(test)]
 mod tests_profile_panels;
 #[cfg(test)]
-mod tests_search_tabs;
-#[cfg(test)]
 mod tests_send_as;
 #[cfg(test)]
 mod tests_stickers;

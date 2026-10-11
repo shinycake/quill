@@ -40,6 +40,23 @@ impl PublicPostLimits {
     }
 }
 
+impl PublicPostLimits {
+    /// "A free search unlocks in 2 h 5 min", `None` when one is available.
+    pub fn unlock_line(&self) -> Option<String> {
+        if self.next_free_in <= 0 {
+            return None;
+        }
+        let minutes = (self.next_free_in + 59) / 60;
+        let (hours, minutes) = (minutes / 60, minutes % 60);
+        let span = match (hours, minutes) {
+            (0, m) => format!("{m} min"),
+            (h, 0) => format!("{h} h"),
+            (h, m) => format!("{h} h {m} min"),
+        };
+        Some(format!("A free search unlocks in {span}"))
+    }
+}
+
 /// Tab-specific state of [`SearchState`].
 #[derive(Debug, Clone, Default)]
 pub struct SearchTabsState {
@@ -248,6 +265,28 @@ mod tests {
         assert_eq!(starts.len(), 2);
         assert_eq!(starts[0].0, 0);
         assert_eq!(starts[1].0, 1);
+    }
+
+    #[test]
+    fn unlock_line_counts_down() {
+        let mut limits = PublicPostLimits {
+            daily_free: 3,
+            remaining_free: 0,
+            next_free_in: 0,
+            star_count: 10,
+            current_query_free: false,
+        };
+        assert_eq!(limits.unlock_line(), None);
+        limits.next_free_in = 3_000;
+        assert_eq!(
+            limits.unlock_line().as_deref(),
+            Some("A free search unlocks in 50 min")
+        );
+        limits.next_free_in = 7_500;
+        assert_eq!(
+            limits.unlock_line().as_deref(),
+            Some("A free search unlocks in 2 h 5 min")
+        );
     }
 
     #[test]

@@ -35,8 +35,10 @@ Photos and Videos, and no quota line for posts.
   is the channel chat type (`searchMessagesChatTypeFilterChannel`), so a typed
   query lists channel posts and channel chats.
 - The tab strip replaces the scope chips, the Content row and the Apps entry
-  chip. It wraps instead of scrolling: a kit tab bar with an overflow menu hid
-  the active tab in the narrow sidebar. Chat type (without Channels, which has
+  chip. It is one row that scrolls sideways (a plain scroll container of tab
+  buttons, the vertical wheel too, and a picked tab scrolls into view). The kit
+  `TabBar` was not used: its overflow menu hid the active tab in the narrow
+  sidebar. Chat type (without Channels, which has
   its own tab), archive and date still narrow a typed query on the tabs that
   run `searchMessages`.
 - Media tabs list their kind of message from every chat, also on an empty
@@ -59,14 +61,31 @@ Photos and Videos, and no quota line for posts.
   `src/ui/search_ui/tab_strip.rs` / `tab_results.rs`; the search UI only gained
   small hooks.
 
+- Downloads tab: listed between Videos and Links only while the download list
+  has entries, like tdesktop. It shows the same Active / Failed / Recent
+  sections as the downloads panel (`download_sections`, shared), narrowed by the
+  typed text. No request is sent.
+- Photos, Videos and Voice ignore the typed text, as `consumeSearchQuery` does
+  (it only feeds Posts, Downloads, Links, Files and Music). The text is kept
+  for the other tabs.
+- Paging is infinite scroll: the results scroll under the fixed strip, and the
+  next page is requested when the end is within 240 px, or when a page left the
+  list shorter than the viewport. A "Loading…" row shows while it runs; only a
+  failed page shows a retry button.
+- Paid public-post search: after the free searches are gone, the Posts tab shows
+  `Search for ★N` (N from `getPublicPostSearchLimits`) and when a free search
+  unlocks. The button only opens an inline confirmation; the Stars are spent
+  when the user accepts it (`search_public_posts_paid`, the only request with a
+  non-zero `star_count`). The driver refuses unless the open query is a plain
+  one whose free search was refused. Without Telegram Premium the tab says the
+  search needs it instead of offering the button. Quill has no Stars balance
+  check: a low balance comes back as a failed search.
+
 ## Left out
 
-- Downloads tab: Quill has its own downloads list.
-- Paid public-post searches with Stars. Nothing in Quill spends Stars on a
-  search; when the quota is gone the Posts tab says so.
+- tdesktop's small-balance top-up flow before a paid search.
 - Apps tab: kept as it was (apps you use and grossing apps); tdesktop's
   popular-apps list has no TDLib method in 1.8.68.
-- Infinite scroll: paging uses a "Load more" button like the shared-media list.
 
 ## How it was checked
 
@@ -80,4 +99,10 @@ Photos and Videos, and no quota line for posts.
   posts, quota parse, every `searchPublicPosts` free.
 - Visual check with a temporary demo capture (not committed): Channels, a media
   tab with month headers and "Load more", and Posts with the quota line.
+- Driver tests for the new parts: Photos, Videos and Voice send nothing for typed
+  text and keep it, Links, Files and Music take it, Downloads sends nothing,
+  the paid search is refused while free ones remain or for a tag, and carries the
+  reported price only when called.
+- A temporary demo capture showed the single-row strip, scrolling results and the
+  paid confirmation.
 - No paid search and no live Telegram request was made.

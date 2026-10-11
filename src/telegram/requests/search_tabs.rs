@@ -65,3 +65,28 @@ pub fn get_public_post_search_limits(extra: RequestId, query: &str) -> String {
     })
     .to_string()
 }
+
+/// `searchPublicPosts` that pays `star_count` Stars (`star_count:int53`,
+/// schema line 12310: "the Telegram Star amount the user agreed to pay for
+/// the search"). Only the confirmed paid search uses it; every other
+/// public-posts request is [`super::search_public_posts`] with 0.
+pub fn search_public_posts_paid(
+    extra: RequestId,
+    query: &str,
+    limit: i32,
+    star_count: i64,
+) -> String {
+    json!({
+        "@type": "searchPublicPosts",
+        "@extra": extra.as_extra(),
+        "query": query,
+        "offset": "",
+        "limit": limit,
+        "star_count": star_count,
+    })
+    .to_string()
+}
+
+#[cfg(test)]
+#[path = "tests_search_tabs.rs"]
+mod tests;

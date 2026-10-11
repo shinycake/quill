@@ -4,10 +4,12 @@
 //! and the "Load more" row of a paged list.
 
 use super::*;
-use quill::state::{SearchMediaRow, SharedMediaTab, media_month_starts};
+use quill::state::{SearchConfirm, SearchMediaRow, SharedMediaTab, media_month_starts};
 
 /// tdesktop `kCollapsedChannelsCount`.
 const COLLAPSED_CHANNELS: usize = 5;
+/// Pixels left below the viewport at which the next page is requested.
+const SCROLL_PREFETCH: f32 = 240.;
 
 impl QuillApp {
     /// Channels tab on an empty field: the channels you joined (five, then
@@ -242,36 +244,44 @@ impl QuillApp {
         )
     }
 
-    /// "Load more" under a paged list (media rows, messages, posts); says
-    /// so when the last page failed.
+    /// The foot of a paged list. Pages load as the list scrolls to its end
+    /// ([`Self::maybe_load_more_search`]); this row only says a page is on
+    /// its way, or offers a retry after a failed one.
     pub(super) fn search_load_more_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let tabs = &self.session()?.search.search.tabs;
         if !tabs.has_more() {
             return None;
         }
-        let label = if tabs.loading_more {
-            "Loading…"
-        } else if tabs.more_failed {
-            "Could not load more. Try again"
-        } else {
-            "Load more"
-        };
-        let busy = tabs.loading_more;
-        Some(
-            div()
-                .flex()
-                .justify_center()
-                .py_1()
-                .child(
-                    Button::new("search-load-more")
-                        .label(label)
-                        .ghost()
-                        .disabled(busy)
-                        .accessibility_label("Load more search results")
-                        .on_click(cx.listener(|this, _, _, cx| this.load_more_search_ui(cx))),
-                )
-                .into_any_element(),
-        )
+        if tabs.more_failed {
+            return Some(
+                div()
+                    .flex()
+                    .justify_center()
+                    .py_1()
+                    .child(
+                        Button::new("search-load-more")
+                            .label("Could not load more. Try again")
+                            .ghost()
+                            .accessibility_label("Try loading more search results again")
+                            .on_click(cx.listener(|this, _, _, cx| this.load_more_search_ui(cx))),
+                    )
+                    .into_any_element(),
+            );
+        }
+        if tabs.loading_more {
+            return Some(
+                div()
+                    .id("search-loading-more")
+                    .flex()
+                    .justify_center()
+                    .py_1()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Loading…")
+                    .into_any_element(),
+            );
+        }
+        None
     }
 
     pub(super) fn load_more_search_ui(&mut self, cx: &mut Context<Self>) {
@@ -279,6 +289,106 @@ impl QuillApp {
             && live.driver.load_more_search_results().is_err()
         {
             self.connection.status_note = "could not load more results".into();
+        }
+        cx.notify();
+    }
+
+    /// Infinite scroll (tdesktop `updatePostsSearchVisibleRange` and the
+    /// media lists): ask for the next page when the end of the results is
+    /// within a screenful, or when a page left the list short of the
+    /// viewport.
+    pub(super) fn maybe_load_more_search(&mut self, cx: &mut Context<Self>) {
+        let Some(tabs) = self.session().map(|s| &s.search.search.tabs) else {
+            return;
+        };
+        if !tabs.has_more() || tabs.loading_more || tabs.more_failed {
+            return;
+        }
+        let handle = &self.search_ui.results_scroll;
+        // Not laid out yet: nothing to measure.
+        if handle.bounds().size.height <= px(0.) {
+            return;
+        }
+        let left = handle.max_offset().y + handle.offset().y;
+        if left <= px(SCROLL_PREFETCH) {
+            self.load_more_search_ui(cx);
+        }
+    }
+
+    /// The Downloads tab: the download list (shared with the downloads
+    /// panel), rows narrowed by the typed text.
+    pub(super) fn search_downloads_block(&self, query: &str, cx: &mut Context<Self>) -> AnyElement {
+        let rows = self.download_sections(query, cx);
+        let block = div().id("search-downloads").flex().flex_col();
+        if rows.is_empty() {
+            let text = if query.trim().is_empty() {
+                "No downloads yet.".to_string()
+            } else {
+                format!("No downloads match “{}”.", query.trim())
+            };
+            return block
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(text),
+                )
+                .into_any_element();
+        }
+        block.children(rows).into_any_element()
+    }
+
+    /// Posts tab after the free searches: tdesktop's "Search for N Stars"
+    /// button. It only opens the confirmation; Stars are spent when the
+    /// user accepts it.
+    pub(super) fn posts_paid_block(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        let search = &session.search.search;
+        if !search.public_limits_exceeded || search.query.trim().is_empty() {
+            return None;
+        }
+        let muted = cx.theme().muted_foreground;
+        if !session.my_is_premium() {
+            return Some(
+                div()
+                    .id("search-posts-premium")
+                    .text_xs()
+                    .text_color(muted)
+                    .child("Searching public posts past the free limit needs Telegram Premium.")
+                    .into_any_element(),
+            );
+        }
+        let limits = search.tabs.limits?;
+        if limits.star_count <= 0 {
+            return None;
+        }
+        let unlock = limits.unlock_line();
+        Some(
+            div()
+                .id("search-posts-paid")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    Button::new("search-posts-paid-button")
+                        .label(format!("Search for \u{2605}{}", limits.star_count))
+                        .small()
+                        .accessibility_label("Search public posts with Stars")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.set_search_prompt(Some(SearchConfirm::PaidPostSearch), None, cx);
+                        })),
+                )
+                .children(unlock.map(|line| div().text_xs().text_color(muted).child(line)))
+                .into_any_element(),
+        )
+    }
+
+    /// The confirmed paid search: the only request that spends Stars.
+    pub(super) fn search_public_posts_paid_ui(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.search_public_posts_paid().is_err()
+        {
+            self.connection.status_note = "could not search public posts".into();
         }
         cx.notify();
     }

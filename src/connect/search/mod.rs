@@ -59,6 +59,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let trimmed = query.trim();
+        let tab = self.search_tab();
+        if tab.is_media() && !tab.takes_query() {
+            // tdesktop lists Photos, Videos and Voice whatever is typed;
+            // the text is only kept for the tabs that use it.
+            self.clear_typed_debounce();
+            self.session.search.search.query = trimmed.to_string();
+            return Ok(SearchQueryOutcome::Unchanged);
+        }
         if trimmed.is_empty() {
             self.clear_typed_debounce();
             if self.on_media_tab() {
@@ -170,6 +178,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let tab = crate::search_tabs::SearchTab::of(&filters);
         if tab == crate::search_tabs::SearchTab::Channels {
             let _ = self.fetch_recommended_chats();
+        }
+        if tab.is_media() && !tab.takes_query() {
+            return self.browse_media();
         }
         let query = self.session.search.search.query.clone();
         let trimmed = query.trim();

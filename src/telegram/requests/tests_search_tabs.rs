@@ -61,3 +61,16 @@ fn tab_requests_match_the_schema() {
     assert_eq!(v["@type"], "getPublicPostSearchLimits");
     assert_eq!(v["query"], "rust");
 }
+
+#[test]
+fn only_the_paid_request_carries_stars() {
+    let free = parse(&search_public_posts(RequestId(1), "rust", "", 20));
+    assert_eq!(free["star_count"], 0);
+    let paid = parse(&search_public_posts_paid(RequestId(2), "rust", 20, 25));
+    assert_eq!(paid["@type"], "searchPublicPosts");
+    assert_eq!(paid["star_count"], 25);
+    assert_eq!(paid["offset"], "");
+    let schema = include_str!("../../../schema/td_api.tl");
+    assert!(schema.lines().any(|l| l
+        == "searchPublicPosts query:string offset:string limit:int32 star_count:int53 = FoundPublicPosts;"));
+}

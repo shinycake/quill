@@ -6,7 +6,7 @@ use crate::search_filters::SearchScope;
 use crate::search_tabs::SearchTab;
 use crate::telegram::requests::{
     SearchMessagesFilters, get_public_post_search_limits, get_recommended_chats,
-    search_messages_page,
+    search_messages_page, search_public_posts_paid,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -61,7 +61,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let search_gen = self.session.search.search.begin_query("");
+        let search_gen = if self.search_tab().takes_query() {
+            self.session.search.search.begin_query("")
+        } else {
+            self.session.search.search.begin_browse()
+        };
         self.session.search.search.begin_public_scope();
         let extra = self
             .session
@@ -118,6 +122,45 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.search.search.fail_page();
+                Err(err)
+            }
+        }
+    }
+
+    /// The one place Quill spends Stars: a public-posts search for the
+    /// price TDLib reported, once the free searches are gone. Only the
+    /// user's explicit confirmation reaches it, and it refuses unless the
+    /// open query is a plain one whose free search was refused.
+    pub fn search_public_posts_paid(&mut self) -> Result<Option<SearchFlight>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let search = &self.session.search.search;
+        let query = search.query.trim().to_string();
+        let price = search.tabs.limits.map_or(0, |limits| limits.star_count);
+        if search.filters.scope != SearchScope::PublicPosts
+            || !search.public_limits_exceeded
+            || price <= 0
+            || query.is_empty()
+            || crate::search_filters::tag_query(&query).is_some()
+        {
+            return Ok(None);
+        }
+        let search_gen = self.session.search.search.begin_query(&query);
+        self.session.search.search.begin_public_scope();
+        let extra = self
+            .session
+            .request_search(RequestPurpose::SearchPublicPosts, search_gen);
+        match self.sender.send_json(&search_public_posts_paid(
+            extra,
+            &query,
+            SEARCH_LIMIT,
+            price,
+        )) {
+            Ok(()) => Ok(Some(SearchFlight::PublicPosts(extra))),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.search.search.accept_messages(Vec::new(), true);
                 Err(err)
             }
         }

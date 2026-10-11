@@ -8,6 +8,9 @@ pub enum SearchConfirm {
     ClearRecents,
     /// `lng_recent_hide_sure`: clear and disable the frequent contacts.
     DisableTopChats,
+    /// Spend Stars on one public-posts search once the free ones are gone
+    /// (the price is `SearchTabsState::limits`).
+    PaidPostSearch,
 }
 
 /// Global search (official sidebar field): recents, then `searchChats` + `searchMessages`.
@@ -224,6 +227,17 @@ impl SearchState {
         self.recents = true;
         self.messages_done = true;
         self.public_done = true;
+        self.generation
+    }
+
+    /// A media tab that ignores the typed text (Photos, Videos, Voice):
+    /// the query stays in the field's mirror, the list restarts.
+    pub fn begin_browse(&mut self) -> u64 {
+        self.open = true;
+        self.generation = self.generation.saturating_add(1);
+        self.status = SearchStatus::Searching;
+        self.clear_results();
+        self.recents = false;
         self.generation
     }
 

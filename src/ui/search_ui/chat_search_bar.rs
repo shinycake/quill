@@ -771,13 +771,24 @@ impl QuillApp {
         confirm: SearchConfirm,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (text, action) = match confirm {
-            SearchConfirm::ClearRecents => {
-                ("Do you want to clear your search history?", "Clear all")
-            }
+        let paid_price = self
+            .session()
+            .and_then(|s| s.search.search.tabs.limits)
+            .map_or(0, |limits| limits.star_count);
+        let (text, action): (String, String) = match confirm {
+            SearchConfirm::PaidPostSearch => (
+                format!(
+                    "Search public posts for \u{2605}{paid_price}? The Stars are spent on this one search."
+                ),
+                format!("Search for \u{2605}{paid_price}"),
+            ),
+            SearchConfirm::ClearRecents => (
+                "Do you want to clear your search history?".into(),
+                "Clear all".into(),
+            ),
             SearchConfirm::DisableTopChats => (
-                "Clear and disable the frequent contacts list? You can turn it back on in Settings > Privacy > Suggest frequent contacts.",
-                "Hide",
+                "Clear and disable the frequent contacts list? You can turn it back on in Settings > Privacy > Suggest frequent contacts.".into(),
+                "Hide".into(),
             ),
         };
         div()

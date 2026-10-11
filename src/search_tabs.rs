@@ -20,6 +20,7 @@ pub enum SearchTab {
     Posts,
     Photos,
     Videos,
+    Downloads,
     Links,
     Files,
     Music,
@@ -28,18 +29,28 @@ pub enum SearchTab {
 
 impl SearchTab {
     /// The order tdesktop shows them in.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Chats,
         Self::Channels,
         Self::Apps,
         Self::Posts,
         Self::Photos,
         Self::Videos,
+        Self::Downloads,
         Self::Links,
         Self::Files,
         Self::Music,
         Self::Voice,
     ];
+
+    /// The tabs the strip shows: Downloads only while the download list has
+    /// entries (tdesktop erases it when the download manager is empty).
+    pub fn strip(has_downloads: bool) -> Vec<Self> {
+        Self::ALL
+            .into_iter()
+            .filter(|tab| has_downloads || *tab != Self::Downloads)
+            .collect()
+    }
 
     /// `lng_recent_chats` / `lng_recent_channels` / `lng_recent_apps` /
     /// `lng_recent_posts` and the `lng_all_*` media labels.
@@ -51,6 +62,7 @@ impl SearchTab {
             Self::Posts => "Posts",
             Self::Photos => "Photos",
             Self::Videos => "Videos",
+            Self::Downloads => "Downloads",
             Self::Links => "Links",
             Self::Files => "Files",
             Self::Music => "Music",
@@ -63,6 +75,7 @@ impl SearchTab {
         match filters.scope {
             SearchScope::PublicPosts => return Self::Posts,
             SearchScope::Apps => return Self::Apps,
+            SearchScope::Downloads => return Self::Downloads,
             SearchScope::MyMessages => {}
         }
         match filters.media {
@@ -90,6 +103,7 @@ impl SearchTab {
         filters.scope = match self {
             Self::Posts => SearchScope::PublicPosts,
             Self::Apps => SearchScope::Apps,
+            Self::Downloads => SearchScope::Downloads,
             _ => SearchScope::MyMessages,
         };
         filters.media = match self {
@@ -134,7 +148,14 @@ impl SearchTab {
     /// Whether a typed query runs `searchMessages` (and so honours the
     /// date window).
     pub fn searches_messages(self) -> bool {
-        !matches!(self, Self::Apps | Self::Posts)
+        !matches!(self, Self::Apps | Self::Posts | Self::Downloads)
+    }
+
+    /// Whether the typed query narrows the tab. tdesktop's
+    /// `consumeSearchQuery` feeds it to Posts, Downloads, Links, Files and
+    /// Music; Photos, Videos and Voice list everything whatever is typed.
+    pub fn takes_query(self) -> bool {
+        !matches!(self, Self::Photos | Self::Videos | Self::Voice)
     }
 
     /// Whether the chat-type chips make sense on the tab.
@@ -151,6 +172,7 @@ impl SearchTab {
             Self::Posts => "Type to search posts of public channels.",
             Self::Photos => "No photos to show.",
             Self::Videos => "No videos to show.",
+            Self::Downloads => "No downloads yet.",
             Self::Links => "No links to show.",
             Self::Files => "No files to show.",
             Self::Music => "No music to show.",
@@ -172,10 +194,44 @@ mod tests {
         assert_eq!(
             labels,
             [
-                "Chats", "Channels", "Apps", "Posts", "Photos", "Videos", "Links", "Files",
-                "Music", "Voice"
+                "Chats",
+                "Channels",
+                "Apps",
+                "Posts",
+                "Photos",
+                "Videos",
+                "Downloads",
+                "Links",
+                "Files",
+                "Music",
+                "Voice"
             ]
         );
+    }
+
+    #[test]
+    fn downloads_show_only_while_the_list_has_entries() {
+        assert!(!SearchTab::strip(false).contains(&SearchTab::Downloads));
+        assert_eq!(SearchTab::strip(true), SearchTab::ALL.to_vec());
+        assert_eq!(SearchTab::strip(false).len(), 10);
+        let filters = SearchTab::Downloads.apply(GlobalSearchFilters::default());
+        assert_eq!(filters.scope, SearchScope::Downloads);
+        assert!(!SearchTab::Downloads.searches_messages());
+    }
+
+    #[test]
+    fn photos_videos_and_voice_ignore_the_query() {
+        let ignoring: Vec<_> = SearchTab::ALL
+            .into_iter()
+            .filter(|tab| !tab.takes_query())
+            .collect();
+        assert_eq!(
+            ignoring,
+            [SearchTab::Photos, SearchTab::Videos, SearchTab::Voice]
+        );
+        assert!(SearchTab::Links.takes_query());
+        assert!(SearchTab::Posts.takes_query());
+        assert!(SearchTab::Downloads.takes_query());
     }
 
     #[test]
