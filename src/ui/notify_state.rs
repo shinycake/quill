@@ -50,6 +50,9 @@ pub(crate) struct NotifyUi {
     /// notification customization with no undo, so it gates behind an
     /// explicit confirm).
     pub(super) notifications_confirm: Option<NotificationsConfirm>,
+    /// Notification sound volume slider (`notification_settings/volume.rs`),
+    /// created when the defaults dialog first renders.
+    pub(super) volume_slider: Option<gpui_kit::Entity<gpui_kit::component::slider::SliderState>>,
 }
 
 impl NotifyUi {
@@ -71,6 +74,7 @@ impl NotifyUi {
             defaults_sound_picker: None,
             defaults_exceptions_scope: None,
             notifications_confirm: None,
+            volume_slider: None,
         }
     }
 }

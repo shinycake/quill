@@ -30,6 +30,7 @@ mod reactions;
 mod scope;
 mod sounds;
 mod ttl_picker;
+mod volume;
 
 /// Phase 8.1: cap on concurrent OS-notification worker threads (`notify-send
 /// --wait` blocks until dismissal). Excess bursts are dropped, not stacked.

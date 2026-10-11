@@ -72,6 +72,7 @@ pub mod network_usage;
 pub mod notify;
 pub mod notify_call;
 pub mod notify_focus;
+pub mod notify_prefs;
 pub mod passcode;
 pub mod peer_badge;
 pub mod phone;
