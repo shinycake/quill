@@ -26,6 +26,8 @@ pub(crate) struct DialogUi {
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,
     /// "Your color": name color, reply icon, profile color and icon.
     pub(super) peer_color_dialog: Option<super::peer_color_dialog::PeerColorDialog>,
+    /// "Appearance" of a channel or group: colors and emoji status.
+    pub(super) chat_appearance_dialog: Option<super::chat_appearance_dialog::ChatAppearanceDialog>,
     /// B10: a profile photo gallery whose list was requested; the viewer
     /// opens when it lands (checked by the poll loop).
     pub(super) pending_profile_gallery: Option<i64>,
@@ -88,6 +90,7 @@ impl DialogUi {
             business_dialog: None,
             edit_profile_dialog: None,
             peer_color_dialog: None,
+            chat_appearance_dialog: None,
             pending_profile_gallery: None,
             add_contact_dialog: None,
             import_contacts_dialog: None,

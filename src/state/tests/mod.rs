@@ -5,6 +5,7 @@ mod boosts;
 mod bots;
 mod bubble_headers;
 mod calls;
+mod chat_appearance;
 mod chat_list;
 mod chat_list_more;
 mod chat_row;

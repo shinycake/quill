@@ -305,6 +305,13 @@ pub(crate) fn parse_chats_payload(
             ChatsPayload::UpdateChatAccentColors {
                 chat_id: int53(value.get("chat_id"))?,
                 accent: ChatAccent::parse(value),
+                profile_look: ChatProfileLook::parse(value),
+            },
+        )),
+        "updateChatEmojiStatus" => Ok(EnvelopePayload::Chats(
+            ChatsPayload::UpdateChatEmojiStatus {
+                chat_id: int53(value.get("chat_id"))?,
+                emoji_status_id: parse_chat_emoji_status(value.get("emoji_status")),
             },
         )),
         "chatBoostLinkInfo" => Ok(EnvelopePayload::Chats(ChatsPayload::ChatBoostLinkInfo {

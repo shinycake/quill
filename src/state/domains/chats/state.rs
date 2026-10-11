@@ -39,6 +39,8 @@ pub struct ChatsState {
     /// `deleteChatHistory`). The UI drains it into the status note so a
     /// refused action never looks like it worked.
     pub chat_action_error: Option<String>,
+    /// Why the last channel or group appearance change was refused.
+    pub appearance_error: Option<String>,
     /// Slice CL3: one-shot `reportChat` outcome (`reportChatResultOk`
     /// vs option/text/messages required). The UI drains it into the
     /// status note next to `chat_action_error`.
@@ -61,6 +63,9 @@ pub struct ChatsState {
     /// Name color and reply emoji of chats that have one
     /// (`chat.accent_color_id`, `updateChatAccentColors`).
     pub chat_accents: HashMap<i64, ChatAccent>,
+    /// Profile color, profile icon and emoji status of channels and groups
+    /// (`chat.profile_accent_color_id`, `chat.emoji_status`).
+    pub chat_looks: HashMap<i64, crate::telegram::envelope::ChatProfileLook>,
     /// Slice A12: accent palette from `updateProfileAccentColors`
     /// (schema 1.8.67, line 10964) — full `profileAccentColor` entries
     /// for swatch rendering.
@@ -104,6 +109,7 @@ impl ChatsState {
             chat_look_oks: 0,
             chat_online_counts: HashMap::new(),
             chat_action_error: None,
+            appearance_error: None,
             report_chat_outcome: None,
             chat_message_sender: HashMap::new(),
             send_as_options: HashMap::new(),
@@ -111,6 +117,7 @@ impl ChatsState {
             protected_chats: HashSet::new(),
             scheduled_chats: HashSet::new(),
             chat_accents: HashMap::new(),
+            chat_looks: HashMap::new(),
             profile_accent_colors: Vec::new(),
             name_accent_colors: Vec::new(),
             available_name_accent_ids: Vec::new(),

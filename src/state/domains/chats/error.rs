@@ -12,6 +12,14 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            // A refused appearance change shows in the Appearance box.
+            Some(
+                RequestPurpose::SetChatAccentColor
+                | RequestPurpose::SetChatProfileAccentColor
+                | RequestPurpose::SetChatEmojiStatus,
+            ) => {
+                self.chats_state.appearance_error = Some(error_reason(err));
+            }
             Some(
                 RequestPurpose::GetInstalledBackgrounds
                 | RequestPurpose::SetDefaultBackground

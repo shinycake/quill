@@ -25,6 +25,8 @@ mod bot_about;
 mod bottom_action;
 mod bubble_theme;
 mod calls_state;
+mod chat_appearance_dialog;
+mod chat_appearance_extras;
 mod chat_list_state;
 mod chat_palette;
 mod chat_theme;

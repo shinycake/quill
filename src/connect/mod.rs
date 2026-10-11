@@ -12,6 +12,7 @@ mod owned_bots;
 mod quick_replies;
 pub use call_audio::{CallAudio, LevelSource, tap_wanted};
 mod calls;
+mod chat_appearance;
 mod chat_list;
 mod chat_window;
 mod composer;

@@ -62,6 +62,15 @@ pub enum ChatsPurpose {
     /// `getBackgroundUrl` for the wallpaper preview's Share. Response is
     /// `httpUrl` (`Session::chats_state.background_url`).
     GetBackgroundUrl,
+    /// `setChatAccentColor`: a channel's name color and reply icon.
+    /// Response is `ok`; `updateChatAccentColors` carries the result.
+    SetChatAccentColor,
+    /// `setChatProfileAccentColor`: profile color and icon of a channel or
+    /// supergroup. Response is `ok`; `updateChatAccentColors` follows.
+    SetChatProfileAccentColor,
+    /// `setChatEmojiStatus`. Response is `ok`; `updateChatEmojiStatus`
+    /// follows.
+    SetChatEmojiStatus,
 }
 
 flat_purposes!(Chats(ChatsPurpose) {
@@ -78,4 +87,7 @@ flat_purposes!(Chats(ChatsPurpose) {
     DeleteChatBackground,
     SetChatTheme,
     GetBackgroundUrl,
+    SetChatAccentColor,
+    SetChatProfileAccentColor,
+    SetChatEmojiStatus,
 });

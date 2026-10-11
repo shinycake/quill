@@ -71,7 +71,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn set_group_settings_view(&mut self, view: GroupSettingsView, cx: &mut Context<Self>) {
+    pub(super) fn set_group_settings_view(
+        &mut self,
+        view: GroupSettingsView,
+        cx: &mut Context<Self>,
+    ) {
         let Some(dialog) = self.admin.group_settings_dialog.as_mut() else {
             return;
         };
@@ -501,6 +505,9 @@ impl QuillApp {
                 GroupSettingsView::Boosts,
                 cx,
             ));
+        }
+        if let Some(row) = self.chat_appearance_row(chat_id, cx) {
+            body = body.child(row);
         }
         if controls.upgrade {
             body = body.child(

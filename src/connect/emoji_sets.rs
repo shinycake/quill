@@ -105,8 +105,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub(crate) fn maybe_resolve_emoji_status_choices(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
-            || !self.session.stickers.emoji.open
-            || !self.session.stickers.emoji.status_open
+            || !((self.session.stickers.emoji.open && self.session.stickers.emoji.status_open)
+                || self.session.stickers.emoji.chat_status_open)
             || self
                 .session
                 .requests
@@ -134,6 +134,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .emoji
                     .default_status_ids
+                    .iter()
+                    .copied(),
+            )
+            .chain(
+                self.session
+                    .stickers
+                    .emoji
+                    .chat_default_status_ids
                     .iter()
                     .copied(),
             )
@@ -248,6 +256,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     | RequestPurpose::GetRecentEmojiStatuses
                     | RequestPurpose::GetThemedEmojiStatuses
                     | RequestPurpose::GetDefaultEmojiStatuses
+                    | RequestPurpose::GetDefaultChatEmojiStatuses
                     | RequestPurpose::GetCustomEmojiStickers
             ) {
                 self.session.stickers.emoji.status_note =
