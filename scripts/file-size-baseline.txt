@@ -8,7 +8,6 @@
 1903 src/ui/appearance.rs
 1386 src/ui/chat_row.rs
 1681 src/ui/demo.rs
-1086 src/ui/folder_share.rs
 1255 src/ui/folders.rs
 1328 src/ui/group_admin_panels.rs
 1116 src/ui/group_moderation.rs
