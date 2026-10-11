@@ -39,6 +39,8 @@ pub(crate) struct DialogUi {
     pub(super) rating_comment_input: Entity<TextareaState>,
     /// Business hours row of a profile: expanded schedule and time zone.
     pub(super) business_hours: super::profile_business::BusinessHoursUi,
+    /// A channel just left whose similar channels are offered in a box.
+    pub(super) similar_after_leave: Option<super::similar_after_leave::SimilarAfterLeave>,
 }
 
 impl DialogUi {
@@ -64,6 +66,7 @@ impl DialogUi {
             rating_detail: None,
             rating_comment_input,
             business_hours: Default::default(),
+            similar_after_leave: None,
         }
     }
 }

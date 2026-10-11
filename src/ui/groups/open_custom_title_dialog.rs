@@ -473,7 +473,12 @@ impl QuillApp {
                         .map(|id| sent_note(id, "removing member…")),
                 };
                 match result {
-                    Ok(note) => note,
+                    Ok(note) => {
+                        if matches!(dialog.action, GroupConfirmAction::LeaveChat) {
+                            self.note_left_channel(dialog.chat_id, cx);
+                        }
+                        note
+                    }
                     Err(_) => {
                         self.admin.group_confirm_dialog = Some(dialog);
                         "action failed".to_string()

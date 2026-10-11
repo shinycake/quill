@@ -458,15 +458,21 @@ impl QuillApp {
     /// `leaveChat` for the open channel. Demo sessions flip the status locally.
     pub(in crate::ui) fn leave_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.leave_channel(chat_id) {
-                Ok(()) => "leaving channel…".into(),
-                Err(_) => "could not leave channel".into(),
+            let left = live.driver.leave_channel(chat_id).is_ok();
+            self.connection.status_note = if left {
+                "leaving channel…".into()
+            } else {
+                "could not leave channel".into()
             };
+            if left {
+                self.note_left_channel(chat_id, cx);
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.set_member_status(ChannelMemberStatus::Left, None);
             }
             self.connection.status_note = "left channel (demo)".into();
+            self.note_left_channel(chat_id, cx);
         }
         cx.notify();
     }

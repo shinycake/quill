@@ -250,6 +250,7 @@ mod shell;
 mod shortcuts;
 mod showcase_demo;
 mod signin_ui;
+mod similar_after_leave;
 mod spell_dictionaries;
 #[cfg(target_os = "macos")]
 mod spellcheck_mac;
