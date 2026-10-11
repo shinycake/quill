@@ -887,7 +887,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Gift auctions, crafting and resale filters (deferred: low impact) <!-- parity:premium-gift-auctions -->
 - [ ] Create and view giveaways <!-- parity:premium-giveaways -->
 - [ ] Check and apply Premium gift codes <!-- parity:premium-gift-codes -->
-- [ ] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
+- [x] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
 - [ ] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
 - [ ] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
 - [x] Hide ads (Premium) <!-- parity:premium-disable-sponsored -->
