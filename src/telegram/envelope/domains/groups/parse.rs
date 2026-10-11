@@ -416,18 +416,12 @@ pub(crate) fn parse_groups_payload(
                     .unwrap_or(false),
             },
         )),
-        "chatBoostStatus" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostStatus {
-            level: value
-                .get("level")
-                .and_then(Value::as_i64)
-                .unwrap_or(0)
-                .sat_i32(),
-            boost_count: value
-                .get("boost_count")
-                .and_then(Value::as_i64)
-                .unwrap_or(0)
-                .sat_i32(),
-        })),
+        "chatBoostStatus" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostStatus(
+            parse_boost_status(value),
+        ))),
+        "chatBoostFeatures" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostFeatures(
+            parse_boost_features(value),
+        ))),
         "chatBoostSlots" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots {
             slots: value
                 .get("slots")

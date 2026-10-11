@@ -93,6 +93,7 @@ impl QuillApp {
             let _ = live.driver.fetch_chat_boost_link(chat_id);
             let _ = live.driver.fetch_chat_boost_status(chat_id);
         }
+        self.open_boost_extras(chat_id);
     }
 
     fn switch_boosts_tab(&mut self, chat_id: ChatId, only_gifts: bool, cx: &mut Context<Self>) {
@@ -273,7 +274,10 @@ impl QuillApp {
         let only_gifts = list.as_ref().is_some_and(|l| l.only_gifts);
         let level = session.and_then(|s| s.groups.chat_boost_status.get(&chat_id.0).copied());
         let mut body = div().flex().flex_col().gap_1().px_2();
-        if let Some((level, count)) = level {
+        body = body.child(self.boosts_overview(chat_id, cx));
+        if let Some((level, count)) = level.filter(|_| {
+            session.is_some_and(|s| !s.groups.chat_boost_details.contains_key(&chat_id.0))
+        }) {
             body = body.child(
                 div()
                     .text_sm()

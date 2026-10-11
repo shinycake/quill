@@ -247,9 +247,9 @@ fn g2_welcome_and_boost_payloads_parse() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::Groups(GroupsPayload::ChatBoostStatus { level, boost_count }) => {
-            assert_eq!(level, 3);
-            assert_eq!(boost_count, 42);
+        EnvelopePayload::Groups(GroupsPayload::ChatBoostStatus(status)) => {
+            assert_eq!(status.level, 3);
+            assert_eq!(status.boost_count, 42);
         }
         other => panic!("{other:?}"),
     }

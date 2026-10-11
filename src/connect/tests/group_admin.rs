@@ -602,3 +602,69 @@ fn channel_owner_switches_ads_off_and_a_refusal_rolls_back() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn unrestrict_boost_count_is_sent_and_applied_on_ok() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let sg = megagroup(
+        &mut driver,
+        &seq,
+        &sink,
+        13,
+        CREATOR,
+        r#","unrestrict_boost_count":1"#,
+    );
+    // Out of TDLib's 0-8 range: refused, nothing sent.
+    assert!(
+        driver
+            .set_unrestrict_boost_count(ChatId(13), 9)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(count(&recorder, "setSupergroupUnrestrictBoostCount"), 0);
+    let extra = driver
+        .set_unrestrict_boost_count(ChatId(13), 3)
+        .unwrap()
+        .expect("sent");
+    let sent = recorder
+        .snapshot()
+        .into_iter()
+        .find(|j| j.contains("setSupergroupUnrestrictBoostCount"))
+        .unwrap();
+    assert!(sent.contains(&format!(r#""supergroup_id":{sg}"#)));
+    assert!(sent.contains(r#""unrestrict_boost_count":3"#));
+    assert_eq!(driver.session.chat_unrestrict_boost_count(ChatId(13)), 3);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        &seq,
+        &sink,
+    );
+    assert_eq!(
+        driver.session.groups.supergroup_full_infos[&sg].unrestrict_boost_count,
+        3
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unrestrict_boost_count_needs_the_right_to_restrict() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    megagroup(&mut driver, &seq, &sink, 13, MEMBER, "");
+    assert!(
+        driver
+            .set_unrestrict_boost_count(ChatId(13), 2)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(count(&recorder, "setSupergroupUnrestrictBoostCount"), 0);
+    let _ = std::fs::remove_dir_all(dir);
+}

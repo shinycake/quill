@@ -264,9 +264,11 @@ pub enum GroupsPayload {
         has_welcome_messages: bool,
     },
     /// Slice G2: `chatBoostStatus` (schema 1.8.67, line 6943) — the
-    /// `getChatBoostStatus` response. Only `level` and `boost_count`
-    /// drive the channel profile row.
-    ChatBoostStatus { level: i32, boost_count: i32 },
+    /// `getChatBoostStatus` response: level, counts and the progress to
+    /// the next level.
+    ChatBoostStatus(ParsedBoostStatus),
+    /// `chatBoostFeatures` — the `getChatBoostFeatures` answer.
+    ChatBoostFeatures(ParsedBoostFeatures),
     /// Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
     /// `getAvailableChatBoostSlots` / `boostChat` response; only the slot
     /// ids are kept.

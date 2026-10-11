@@ -1,5 +1,6 @@
 //! Connect driver: chat boosts.
 use super::*;
+use crate::telegram::requests::{get_chat_boost_features, set_supergroup_unrestrict_boost_count};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Slice G2: `getChatBoostStatus` (schema 1.8.67, line 13917) —
@@ -103,5 +104,89 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(())
+    }
+
+    /// `getChatBoostFeatures`: the level table for this kind of chat,
+    /// cached per chat.
+    pub fn fetch_chat_boost_features(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(ChatKind::Supergroup { is_channel, .. }) = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .map(|chat| chat.kind.clone())
+        else {
+            return Ok(None);
+        };
+        if self
+            .session
+            .groups
+            .chat_boost_features
+            .contains_key(&chat_id.0)
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetChatBoostFeatures, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatBoostFeatures, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_boost_features(extra, is_channel))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// `setSupergroupUnrestrictBoostCount` (0 turns the setting off).
+    /// Refused as `Ok(None)` without the right to restrict members or
+    /// for a value TDLib would reject.
+    pub fn set_unrestrict_boost_count(
+        &mut self,
+        chat_id: ChatId,
+        count: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !(0..=crate::state::UNRESTRICT_BOOST_MAX).contains(&count)
+            || !self.session.chat_can_edit_unrestrict_boosts(chat_id)
+        {
+            return Ok(None);
+        }
+        let Some(supergroup_id) = self.session.chat_supergroup(chat_id) else {
+            return Ok(None);
+        };
+        let purpose = RequestPurpose::SetSupergroupUnrestrictBoostCount;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&set_supergroup_unrestrict_boost_count(
+                extra,
+                supergroup_id,
+                count,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session
+            .groups
+            .unrestrict_boost_pending
+            .insert(chat_id.0, count);
+        Ok(Some(extra))
     }
 }

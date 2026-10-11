@@ -212,6 +212,13 @@ pub enum GroupsPurpose {
     /// Response is `chatBoostStatus`; correlated via
     /// `PendingRequest::chat_id`.
     GetChatBoostStatus,
+    /// `getChatBoostFeatures` (schema 1.8.68, line 14305): the level table;
+    /// the pending `chat_id` is the chat it was asked for.
+    GetChatBoostFeatures,
+    /// `setSupergroupUnrestrictBoostCount` (schema 1.8.68, line 15571).
+    /// Response `ok`; the value is applied then, see
+    /// `GroupsState::unrestrict_boost_pending`.
+    SetSupergroupUnrestrictBoostCount,
     /// Slice G2: `getAvailableChatBoostSlots` as the first half of the
     /// boost action (schema 1.8.67, line 13914). Response is
     /// `chatBoostSlots`; the driver chains `boostChat` with the first
@@ -325,6 +332,8 @@ flat_purposes!(Groups(GroupsPurpose) {
     ToggleSupergroupSignMessages,
     ToggleSupergroupAggressiveAntiSpam,
     GetChatBoostStatus,
+    GetChatBoostFeatures,
+    SetSupergroupUnrestrictBoostCount,
     GetBoostSlotsForBoost,
     BoostChat,
     LoadChatWelcomeMessages,

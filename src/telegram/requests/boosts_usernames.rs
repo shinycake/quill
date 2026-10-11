@@ -113,3 +113,55 @@ mod tests {
         assert_eq!(r["usernames"], serde_json::json!(["b", "a"]));
     }
 }
+
+/// `getChatBoostFeatures` (schema/td_api.tl:14305): the level table for
+/// channels or groups.
+pub fn get_chat_boost_features(extra: RequestId, is_channel: bool) -> String {
+    json!({
+        "@type": "getChatBoostFeatures",
+        "@extra": extra.as_extra(),
+        "is_channel": is_channel,
+    })
+    .to_string()
+}
+
+/// `setSupergroupUnrestrictBoostCount` (schema/td_api.tl:15571): boosts a
+/// user needs to ignore slow mode and permission restrictions; 0-8, 0
+/// removes the setting.
+pub fn set_supergroup_unrestrict_boost_count(
+    extra: RequestId,
+    supergroup_id: i64,
+    unrestrict_boost_count: i32,
+) -> String {
+    json!({
+        "@type": "setSupergroupUnrestrictBoostCount",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+        "unrestrict_boost_count": unrestrict_boost_count,
+    })
+    .to_string()
+}
+
+#[cfg(test)]
+mod boost_settings_tests {
+    use super::{get_chat_boost_features, set_supergroup_unrestrict_boost_count};
+    use crate::ids::RequestId;
+    use serde_json::Value;
+
+    #[test]
+    fn boost_features_request() {
+        let v: Value = serde_json::from_str(&get_chat_boost_features(RequestId(4), true)).unwrap();
+        assert_eq!(v["@type"], "getChatBoostFeatures");
+        assert_eq!(v["is_channel"], true);
+    }
+
+    #[test]
+    fn unrestrict_boost_count_request() {
+        let v: Value =
+            serde_json::from_str(&set_supergroup_unrestrict_boost_count(RequestId(5), 77, 3))
+                .unwrap();
+        assert_eq!(v["@type"], "setSupergroupUnrestrictBoostCount");
+        assert_eq!(v["supergroup_id"], 77);
+        assert_eq!(v["unrestrict_boost_count"], 3);
+    }
+}
