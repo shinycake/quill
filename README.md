@@ -962,7 +962,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 ### Business
 
-- [ ] Quick replies (/shortcut messages) <!-- parity:business-quick-replies -->
+- [x] Quick replies (/shortcut messages) <!-- parity:business-quick-replies -->
 - [ ] Greeting and away messages, opening hours, location, start page, chat links, connected bots and chat automation <!-- parity:business-away-greeting -->
 
 ### Settings
