@@ -403,7 +403,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Personal channel on a profile <!-- parity:profile-personal-channel -->
 - [x] Business hours and location rows <!-- parity:profile-business-hours -->
 - [ ] Shared media tabs: separate Photos and Videos, round videos, Polls, Stories, Gifts, Saved Music <!-- parity:profile-media-tabs -->
-- [ ] Shared media calendar and jump by month <!-- parity:profile-media-calendar -->
+- [x] Shared media calendar and jump by month <!-- parity:profile-media-calendar -->
 - [ ] Members list inline in the group info panel with online first and admin badges <!-- parity:profile-members-inline -->
 - [x] Member context menu: Mention, Search messages, Promote, Restrict, Ban, Remove <!-- parity:profile-member-menu -->
 - [x] Remove from group (kick) as distinct from ban <!-- parity:profile-remove-member -->
