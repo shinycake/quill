@@ -75,6 +75,7 @@ pub(super) fn sponsored_message_row(
     let row_id = message.message_id as u64;
     let can_report = message.can_be_reported;
     let owner = cx.entity().downgrade();
+    let about_message = message.clone();
     let menu_id = message.message_id;
     let header = div()
         .id(("sponsored-row-header", row_id))
@@ -109,11 +110,14 @@ pub(super) fn sponsored_message_row(
                 .accessibility_label("Ad options")
                 .dropdown_menu(move |menu, _, _| {
                     let about = owner.clone();
+                    let about_message = about_message.clone();
                     let report = owner.clone();
                     let hide = owner.clone();
                     let mut menu = menu.item(PopupMenuItem::new("About this ad").on_click(
                         move |_, _, cx| {
-                            let _ = about.update(cx, |this, cx| this.toggle_sponsored_about(cx));
+                            let _ = about.update(cx, |this, cx| {
+                                this.open_sponsored_about(&about_message, cx)
+                            });
                         },
                     ));
                     if can_report {
@@ -369,9 +373,6 @@ impl QuillApp {
                 .rendered_sponsored
                 .borrow_mut()
                 .push(ad.message_id);
-            if self.message_ui.sponsored_about_open {
-                list = list.child(self.sponsored_about_panel(cx));
-            }
             list = list.child(sponsored_message_row(
                 chat_id,
                 &ad,
@@ -385,59 +386,6 @@ impl QuillApp {
             ));
         }
         Some(list.into_any_element())
-    }
-
-    /// tdesktop's "About These Ads" sheet (`lng_sponsored_revenued_*`).
-    fn sponsored_about_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
-        let point = |title: &'static str, text: &'static str| {
-            div()
-                .flex()
-                .flex_col()
-                .child(div().text_sm().font_semibold().child(title))
-                .child(div().text_xs().text_color(muted).child(text))
-        };
-        div()
-            .id("sponsored-about")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(div().font_semibold().child("About These Ads"))
-            .child(div().text_xs().text_color(muted).child(
-                "Telegram Ads are very different from ads on other platforms. \
-                 Ads such as this one:",
-            ))
-            .child(point(
-                "Respect Your Privacy",
-                "Ads on Telegram do not use your personal information and are based \
-                 on the channel in which you see them.",
-            ))
-            .child(point(
-                "Help the Channel Creator",
-                "50% of the revenue from Telegram Ads goes to the owner of the \
-                 channel where they are displayed.",
-            ))
-            .child(point(
-                "Can Be Removed",
-                "You can turn off ads by subscribing to Telegram Premium.",
-            ))
-            .child(
-                Button::new("sponsored-about-close")
-                    .label("Close")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_sponsored_about(cx))),
-            )
-    }
-
-    pub(super) fn toggle_sponsored_about(&mut self, cx: &mut Context<Self>) {
-        self.message_ui.sponsored_about_open = !self.message_ui.sponsored_about_open;
-        cx.notify();
     }
 
     /// Frame-start hook (next to `report_visible_history`): the ad cards the

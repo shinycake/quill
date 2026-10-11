@@ -59,8 +59,8 @@ pub(crate) struct MessageUi {
     pub(super) collapsed_keyboards: std::collections::HashSet<(i64, i64)>,
     /// A bot request button's share dialog (`DialogKind::RequestShare`).
     pub(super) request_share: Option<super::request_share::RequestShare>,
-    /// "About this ad" sheet is open in the sponsored footer.
-    pub(super) sponsored_about_open: bool,
+    /// "About These Ads" box (`DialogKind::SponsoredAbout`) is open.
+    pub(super) sponsored_about: Option<super::sponsored_about::SponsoredAbout>,
     /// Sponsored message ids the footer painted last frame; reported to
     /// TDLib as viewed at the next frame start (`report_visible_sponsored`).
     pub(super) rendered_sponsored: std::cell::RefCell<Vec<i64>>,
@@ -98,7 +98,7 @@ impl MessageUi {
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),
             request_share: None,
-            sponsored_about_open: false,
+            sponsored_about: None,
             rendered_sponsored: std::cell::RefCell::new(Vec::new()),
             custom_emoji_card_seen: None,
             poll_voters_dialog: None,
