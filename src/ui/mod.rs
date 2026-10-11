@@ -303,6 +303,7 @@ mod suggestions_block;
 mod system_unlock;
 mod threads;
 mod translate_ui;
+mod tray_settings;
 mod video_pip;
 mod wallpaper;
 mod wallpaper_pattern;

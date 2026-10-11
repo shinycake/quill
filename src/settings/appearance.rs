@@ -156,6 +156,10 @@ pub struct AppearancePrefs {
     /// main window out of the taskbar (Windows, X11); the tray reopens it.
     #[serde(default = "default_true")]
     pub show_taskbar_icon: bool,
+    /// tdesktop `trayIconMonochrome` ("Use monochrome icon", on by default):
+    /// the Windows tray shows a one-color glyph that matches the taskbar.
+    #[serde(default = "default_true")]
+    pub tray_icon_monochrome: bool,
     /// tdesktop `macWarnBeforeQuit`: hold Cmd+Q to quit (macOS only).
     #[serde(default = "default_true")]
     pub mac_warn_before_quit: bool,
@@ -211,6 +215,7 @@ impl Default for AppearancePrefs {
             minimize_to_tray: false,
             show_tray_icon: true,
             show_taskbar_icon: true,
+            tray_icon_monochrome: true,
             mac_warn_before_quit: true,
             check_updates_on_launch: true,
         }
@@ -322,12 +327,24 @@ mod tests {
             minimize_to_tray: true,
             show_tray_icon: false,
             show_taskbar_icon: false,
+            tray_icon_monochrome: false,
             mac_warn_before_quit: false,
             check_updates_on_launch: false,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_appearance_prefs(&paths), prefs);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Prefs written before "Use monochrome icon" existed keep it on, as
+    /// tdesktop's default, and an explicit off survives.
+    #[test]
+    fn monochrome_tray_icon_defaults_on() {
+        let old: AppearancePrefs = serde_json::from_str("{}").unwrap();
+        assert!(old.tray_icon_monochrome);
+        let off: AppearancePrefs =
+            serde_json::from_str(r#"{"tray_icon_monochrome":false}"#).unwrap();
+        assert!(!off.tray_icon_monochrome);
     }
 
     /// Settings → Appearance: a corrupt prefs file falls back to

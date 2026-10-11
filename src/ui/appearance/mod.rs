@@ -109,7 +109,9 @@ impl QuillApp {
 
     /// Load persisted prefs (defaults when the file is missing/corrupt).
     pub(crate) fn load_appearance() -> AppearancePrefs {
-        load_appearance_prefs(&Self::appearance_paths())
+        let prefs = load_appearance_prefs(&Self::appearance_paths());
+        quill::tray::monochrome::set_monochrome(prefs.tray_icon_monochrome);
+        prefs
     }
 
     /// Recompute the effective theme from the prefs (manual choice,
@@ -220,6 +222,7 @@ impl QuillApp {
     ) {
         f(&mut self.appearance);
         quill::tray::set_tray_enabled(self.appearance.show_tray_icon);
+        quill::tray::monochrome::set_monochrome(self.appearance.tray_icon_monochrome);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
         if let Err(err) = save_appearance_prefs(&Self::appearance_paths(), &self.appearance) {
             self.connection.status_note = format!("Couldn't save appearance settings: {err}");
@@ -584,22 +587,7 @@ impl QuillApp {
         // strand the user (Linux without a StatusNotifier host).
         let tray =
             quill::tray::tray_setting_switches(tray_available, this.appearance.show_tray_icon);
-        if tray.show_tray_icon {
-            body.push(
-                this.appearance_section(
-                    cx,
-                    "Show tray icon",
-                    "Keep Quill in the system tray with the unread count.",
-                    Switch::new("general-show-tray-icon")
-                        .checked(this.appearance.show_tray_icon)
-                        .accessibility_label("Show the Quill tray icon")
-                        .on_click(cx.listener(|this, &on, _, cx| {
-                            this.set_appearance(cx, |a| a.show_tray_icon = on)
-                        }))
-                        .into_any_element(),
-                ),
-            );
-        }
+        body.extend(this.tray_icon_sections(tray_available, cx));
         if tray.start_in_tray {
             body.push(
                 this.appearance_section(
@@ -619,28 +607,6 @@ impl QuillApp {
         if tray.run_in_background {
             body.push(this.appearance_close_behavior_section(cx));
         }
-        // tdesktop keeps "Show taskbar icon" behind the tray icon: with
-        // neither, nothing could bring the window back.
-        if tray.run_in_background
-            && this.appearance.show_tray_icon
-            && cfg!(not(target_os = "macos"))
-        {
-            body.push(
-                this.appearance_section(
-                    cx,
-                    "Show taskbar icon",
-                    "Off keeps Quill out of the taskbar; the tray icon opens it.",
-                    Switch::new("general-show-taskbar-icon")
-                        .checked(this.appearance.show_taskbar_icon)
-                        .accessibility_label("Show Quill in the taskbar")
-                        .on_click(cx.listener(|this, &on, window, cx| {
-                            this.set_appearance(cx, |a| a.show_taskbar_icon = on);
-                            this.apply_taskbar_icon(window);
-                        }))
-                        .into_any_element(),
-                ),
-            );
-        }
         #[cfg(target_os = "macos")]
         {
             body.push(
@@ -659,16 +625,6 @@ impl QuillApp {
             );
         }
         body
-    }
-
-    /// The main window's taskbar entry follows "Show taskbar icon"
-    /// (Windows, X11; the tray icon must stay on, see the switch).
-    pub(crate) fn apply_taskbar_icon(&self, window: &Window) {
-        if !super::window_control::taskbar_toggle_supported(window) {
-            return;
-        }
-        let skip = !self.appearance.show_taskbar_icon && self.appearance.show_tray_icon;
-        super::window_control::set_skip_taskbar(window, skip);
     }
 
     /// tdesktop "When the window is closed": run in the background or quit.

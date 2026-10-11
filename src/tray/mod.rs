@@ -28,6 +28,9 @@
 use crate::settings::BadgePrefs;
 use crate::state::Session;
 
+pub mod monochrome;
+pub mod work_mode;
+
 /// Icon edge length in pixels.
 pub const ICON_SIZE: u32 = 64;
 
@@ -511,7 +514,7 @@ pub struct Tray {
     /// Last labels set: (notifications on, sounds on).
     toggles_shown: Option<(bool, bool)>,
     /// Last drawn (unread, all-muted, dark menu bar) — redraw on change.
-    last_shown: Option<(u32, bool, bool)>,
+    last_shown: Option<(u32, bool, Option<bool>)>,
 }
 
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
@@ -545,7 +548,13 @@ impl Tray {
             &MenuItem::with_id("quill-tray-quit", "Quit Quill", true, None),
         ])
         .ok()?;
-        let (rgba, w, h, _) = render_platform_icon(0, false, true);
+        #[cfg(target_os = "macos")]
+        let dark = Some(true);
+        #[cfg(not(target_os = "macos"))]
+        let dark = monochrome::monochrome()
+            .then(monochrome::dark_taskbar)
+            .flatten();
+        let (rgba, w, h, _) = render_platform_icon(0, false, dark);
         let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
         let builder = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu))
@@ -576,13 +585,18 @@ impl Tray {
     }
 
     fn set_unread(&mut self, unread: u32, muted: bool) {
+        // macOS: whether the menu bar is dark. Windows: whether the taskbar
+        // is, when the one-color icon is on (`None` keeps the color logo).
         #[cfg(target_os = "macos")]
-        let dark = self
-            .icon
-            .ns_status_item()
-            .is_none_or(|item| crate::tray_mac::menu_bar_is_dark(&item));
+        let dark = Some(
+            self.icon
+                .ns_status_item()
+                .is_none_or(|item| crate::tray_mac::menu_bar_is_dark(&item)),
+        );
         #[cfg(not(target_os = "macos"))]
-        let dark = false;
+        let dark = monochrome::monochrome()
+            .then(monochrome::dark_taskbar)
+            .flatten();
         let key = (unread, muted, dark);
         if self.last_shown == Some(key) {
             return;
@@ -608,22 +622,28 @@ impl Tray {
 
 /// macOS: the monochrome template while nothing is unread, and tdesktop's
 /// tinted glyph + red counter otherwise ([`crate::tray_mac`]). Windows trays
-/// show the full-color app icon. Returns the RGBA, size and whether AppKit
+/// show the full-color app icon, or the [`monochrome`] glyph when `dark` says
+/// the taskbar theme and "Use monochrome icon" are both known. Returns the RGBA, size and whether AppKit
 /// should treat it as a template.
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
-fn render_platform_icon(unread: u32, muted: bool, dark: bool) -> (Vec<u8>, u32, u32, bool) {
+fn render_platform_icon(unread: u32, muted: bool, dark: Option<bool>) -> (Vec<u8>, u32, u32, bool) {
     #[cfg(target_os = "macos")]
     {
         if unread == 0 {
             let (rgba, w, h) = render_tray_template(0);
             return (rgba, w, h, true);
         }
-        let (rgba, w, h) = crate::tray_mac::render(TEMPLATE_MASK, unread, muted, dark);
+        let (rgba, w, h) =
+            crate::tray_mac::render(TEMPLATE_MASK, unread, muted, dark.unwrap_or(true));
         (rgba, w, h, false)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (muted, dark);
+        // Windows with "Use monochrome icon" on: the one-color glyph.
+        if let Some(dark) = dark {
+            let (rgba, w, h) = monochrome::render_monochrome(unread, muted, dark);
+            return (rgba, w, h, false);
+        }
         let (rgba, w, h) = render_tray_icon(unread);
         (rgba, w, h, false)
     }
