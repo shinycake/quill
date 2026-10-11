@@ -134,6 +134,8 @@ mod business;
 mod call_audio_ui;
 mod call_device_prefs_ui;
 mod call_panel;
+mod call_panel_backdrop;
+mod call_panel_devices;
 mod call_sounds;
 mod call_tones;
 mod call_ui;

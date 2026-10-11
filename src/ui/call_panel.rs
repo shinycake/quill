@@ -13,6 +13,8 @@
 //! brings it back.
 
 use super::app::QuillApp;
+use super::call_panel_backdrop::{backdrop, connecting_arc};
+use super::call_panel_devices::{self as devices, DeviceMenuTarget};
 use super::chat_row::chat_avatar;
 use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
@@ -113,50 +115,6 @@ pub(super) fn call_status(
         CallState::HangingUp => ("hanging up...".into(), false),
         _ => ("call ended".into(), false),
     }
-}
-
-/// A radial backdrop from the peer's profile colors (tdesktop
-/// `PanelBackground`): the first color around the photo, the last at the
-/// edges. Cached per palette.
-fn backdrop(colors: &[u32]) -> Option<Arc<RenderImage>> {
-    use super::lru::Lru;
-    use std::cell::RefCell;
-    thread_local! {
-        static CACHE: RefCell<Lru<Vec<u32>, Arc<RenderImage>>> = RefCell::new(Lru::new(8));
-    }
-    if colors.len() < 2 {
-        return None;
-    }
-    let key = colors.to_vec();
-    if let Some(hit) = CACHE.with(|cache| cache.borrow_mut().get(&key)) {
-        return Some(hit);
-    }
-    let (w, h) = (360u32, 270u32);
-    // The photo's center: tdesktop puts it a third of the way down.
-    let (cx, cy) = (w as f32 / 2., h as f32 * 0.36);
-    let radius = (cx.hypot(cy)).max((w as f32 - cx).hypot(h as f32 - cy));
-    let channel = |color: u32, shift: u32| ((color >> shift) & 0xff) as f32;
-    let mut image = image::RgbaImage::new(w, h);
-    for (x, y, pixel) in image.enumerate_pixels_mut() {
-        let t = ((x as f32 - cx).hypot(y as f32 - cy) / radius).clamp(0., 1.);
-        let scaled = t * (colors.len() - 1) as f32;
-        let index = (scaled.floor() as usize).min(colors.len() - 2);
-        let local = scaled - index as f32;
-        let (a, b) = (colors[index], colors[index + 1]);
-        let mix = |shift| channel(a, shift) + (channel(b, shift) - channel(a, shift)) * local;
-        // BGRA for GPUI.
-        *pixel = image::Rgba([mix(0) as u8, mix(8) as u8, mix(16) as u8, 255]);
-    }
-    let render = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-        image::Frame::new(image),
-    ])));
-    CACHE.with(|cache| {
-        // One per peer palette; a few calls' worth is plenty.
-        if let Some(old) = cache.borrow_mut().insert(key, render.clone()) {
-            super::image_budget::retire_all([old]);
-        }
-    });
-    Some(render)
 }
 
 impl QuillApp {
@@ -380,6 +338,7 @@ impl QuillApp {
                         owner: render_owner.downgrade(),
                         _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
                         pinned_on_top: false,
+                        devices_menu: None,
                     });
                     cx.new(|cx| Root::new(view, window, cx))
                 },
@@ -505,40 +464,14 @@ impl QuillApp {
     }
 }
 
-/// A quarter-ish arc turning around the photo, `turn` of the way round.
-fn connecting_arc(turn: f32) -> impl IntoElement {
-    canvas(
-        |_, _, _| {},
-        move |bounds, _, window, _| {
-            let center = bounds.center();
-            let radius = bounds.size.width / px(1.) / 2. - 2.;
-            let start = turn * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
-            let sweep = std::f32::consts::FRAC_PI_2 * 1.2;
-            let points: Vec<_> = (0..=40)
-                .map(|step| {
-                    let angle = start + sweep * step as f32 / 40.;
-                    point(
-                        center.x + px(radius * angle.cos()),
-                        center.y + px(radius * angle.sin()),
-                    )
-                })
-                .collect();
-            let mut path = PathBuilder::stroke(px(4.));
-            path.add_polygon(&points, false);
-            if let Ok(path) = path.build() {
-                window.paint_path(path, hsla(0., 0., 1., 0.85));
-            }
-        },
-    )
-    .size_full()
-}
-
 /// The call window's view.
 struct CallPanel {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
     /// The window stays above the others (tdesktop "pin on top").
     pinned_on_top: bool,
+    /// The open device menu (`call_panel_devices`).
+    devices_menu: Option<DeviceMenuTarget>,
 }
 
 /// One round control: a 44 pt disc and an 11 pt label (tdesktop
@@ -650,6 +583,23 @@ impl Render for CallPanel {
             160.
         };
 
+        let menu_open = self.devices_menu;
+        let corner = |button: AnyElement,
+                      id: &'static str,
+                      target: DeviceMenuTarget,
+                      cx: &mut Context<Self>| {
+            devices::with_corner(
+                button,
+                id,
+                target,
+                menu_open == Some(target),
+                cx,
+                |this, target, _, cx| {
+                    this.devices_menu = devices::toggled(this.devices_menu, target);
+                    cx.notify();
+                },
+            )
+        };
         // The buttons for this moment of the call.
         let buttons: Vec<AnyElement> = match snap.phase {
             CallPhase::Incoming => vec![
@@ -713,6 +663,12 @@ impl Render for CallPanel {
                     )
                     .into_any_element(),
                 ];
+                row[0] = corner(
+                    row.remove(0),
+                    "call-video-devices",
+                    DeviceMenuTarget::Camera,
+                    cx,
+                );
                 if snap.can_share_screen {
                     row.push(
                         call_button(
@@ -747,6 +703,13 @@ impl Render for CallPanel {
                     )
                     .into_any_element(),
                 );
+                let mute = row.pop().unwrap_or_else(|| div().into_any_element());
+                row.push(corner(
+                    mute,
+                    "call-mute-devices",
+                    DeviceMenuTarget::Audio,
+                    cx,
+                ));
                 row.push(
                     call_button(
                         "call-end",
@@ -927,6 +890,28 @@ impl Render for CallPanel {
                 .into_any_element()
         };
 
+        // The device menu closes with the call's active phase.
+        let device_menu = self
+            .devices_menu
+            .filter(|_| snap.phase == CallPhase::Active)
+            .map(|target| {
+                let sections = owner.update(cx, |app, _| app.call_device_sections(target));
+                let app = self.owner.clone();
+                devices::menu_overlay(
+                    sections,
+                    cx,
+                    move |this, kind, id, _, cx| {
+                        this.devices_menu = None;
+                        let _ = app.update(cx, |app, cx| app.select_call_device(kind, &id, cx));
+                        cx.notify();
+                    },
+                    |this, _, cx| {
+                        this.devices_menu = None;
+                        cx.notify();
+                    },
+                )
+            });
+
         let _ = cx.theme();
         div()
             .id("call-panel")
@@ -987,6 +972,7 @@ impl Render for CallPanel {
                     .gap(px(8.))
                     .children(buttons),
             )
+            .children(device_menu)
             .into_any_element()
     }
 }
