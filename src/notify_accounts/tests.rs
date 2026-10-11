@@ -323,3 +323,48 @@ fn a_click_routes_by_the_account_in_the_tag() {
         ClickPlan::Ignore
     );
 }
+
+#[test]
+fn the_title_names_the_account_only_with_two_signed_in() {
+    assert!(!account_name_in_title(0));
+    assert!(!account_name_in_title(1));
+    assert!(account_name_in_title(2));
+}
+
+#[test]
+fn one_call_at_a_time_across_accounts() {
+    assert_eq!(plan_background_call(false, false), BackgroundCallPlan::Ring);
+    assert_eq!(
+        plan_background_call(true, false),
+        BackgroundCallPlan::DeclineBusy
+    );
+    assert_eq!(
+        plan_background_call(false, true),
+        BackgroundCallPlan::DeclineBusy
+    );
+}
+
+#[test]
+fn only_an_incoming_pending_call_rings() {
+    let mut account = Background::new("ringing");
+    account.ready_with_chat(7, false);
+    assert_eq!(ringing_incoming_call(&account.driver.session), None);
+    account.ingest(
+        r#"{"@type":"updateCall","call":{"@type":"call","id":5,"unique_id":"9","user_id":7,"is_outgoing":true,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#,
+    );
+    assert_eq!(
+        ringing_incoming_call(&account.driver.session),
+        None,
+        "outgoing"
+    );
+    account.ingest(
+        r#"{"@type":"updateCall","call":{"@type":"call","id":5,"unique_id":"9","user_id":7,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
+    );
+    account.ingest(
+        r#"{"@type":"updateCall","call":{"@type":"call","id":6,"unique_id":"10","user_id":7,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":true}}}"#,
+    );
+    assert_eq!(
+        ringing_incoming_call(&account.driver.session),
+        Some((6, 7, true))
+    );
+}

@@ -517,3 +517,18 @@ fn the_passcode_box_covers_a_chat_window_too(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn switching_accounts_closes_the_chat_windows(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.open_in_new_window(OTHER, cx);
+    assert_eq!(h.window_chats(cx), vec![OTHER]);
+    h.app
+        .update(cx, |app, cx| app.close_chat_windows_for_switch(cx));
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty(), "the window is gone");
+    assert!(h.window_chats(cx).is_empty(), "its chat is closed");
+    assert!(h.app.read_with(cx, |app, _| !app.windows.has(OTHER)));
+    // The main window keeps its chat.
+    assert_eq!(h.open_chat(cx), Some(OPEN));
+}

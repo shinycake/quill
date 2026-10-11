@@ -373,6 +373,13 @@ impl QuillApp {
     /// The window showing `chat_id` is gone (closed by the user, or by the
     /// app because the chat or the session went away).
     pub(super) fn chat_window_closed(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.forget_chat_window(chat_id);
+        self.schedule_chat_windows_save(cx);
+        cx.notify();
+    }
+
+    /// Drop the window's bookkeeping and close its chat in TDLib.
+    fn forget_chat_window(&mut self, chat_id: ChatId) {
         // Its state must not stay in the app's place.
         if self.windows.scope == Some(chat_id) {
             self.set_window_scope(None);
@@ -388,8 +395,6 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_window_chat(chat_id);
         }
-        self.schedule_chat_windows_save(cx);
-        cx.notify();
     }
 
     /// Whether `chat_id`'s window is the active one, for the session's
@@ -467,6 +472,6 @@ impl QuillApp {
             name: &chat.title,
             unread: chat.unread_count.max(0) as u32,
         });
-        window_title(chat, total, None)
+        window_title(chat, total, self.title_account_name().as_deref())
     }
 }

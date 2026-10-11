@@ -167,6 +167,7 @@ impl LiveConnect {
         match crate::calls::engine::NtgcallsEngine::load() {
             Ok(engine) => {
                 self.driver.set_call_engine(Box::new(engine));
+                self.driver.start_engine_for_tracked_call();
                 diagnostics.record(Diagnostic {
                     category: "call",
                     type_name: None,

@@ -9,11 +9,23 @@ impl QuillApp {
         notification: quill::notify_call::CallNotification,
         cx: &mut Context<Self>,
     ) {
+        let account = self
+            .session()
+            .map(|s| s.account.clone())
+            .unwrap_or_else(AccountKey::primary);
+        self.spawn_call_notification_as(&account, notification, cx);
+    }
+
+    /// The incoming-call notification of `account` (the one on screen, or
+    /// one in the background whose call rings).
+    pub(in crate::ui) fn spawn_call_notification_as(
+        &mut self,
+        account: &AccountKey,
+        notification: quill::notify_call::CallNotification,
+        cx: &mut Context<Self>,
+    ) {
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
-            let account = self
-                .session()
-                .map(|s| s.account.0.as_str())
-                .unwrap_or("primary");
+            let account = account.0.as_str();
             cx.show_system_notification(SystemNotification {
                 tag: quill::notify_call::call_notification_tag(account, notification.call_id)
                     .into(),

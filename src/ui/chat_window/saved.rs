@@ -61,6 +61,25 @@ impl QuillApp {
             .map(|live| live.driver.session.account.0.clone())
     }
 
+    /// Account switch. A chat window draws the account on screen, so the
+    /// outgoing account's windows close: their places are saved under that
+    /// account first, and the incoming account's saved windows come back
+    /// once it is ready (switching back reopens these). Telegram Desktop
+    /// keeps each window on its own account instead; Quill's windows have
+    /// no session of their own.
+    pub(in crate::ui) fn close_chat_windows_for_switch(&mut self, cx: &mut Context<Self>) {
+        let windows: Vec<(ChatId, AnyWindowHandle)> = self.windows.open_windows().collect();
+        if !windows.is_empty() {
+            self.save_chat_windows_now(cx);
+        }
+        for (chat_id, handle) in windows {
+            self.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
+            self.forget_chat_window(chat_id);
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+        self.windows.restore = Restore::Pending;
+    }
+
     /// Write the open chat windows after a short quiet period (a window
     /// opened, closed, moved or resized).
     pub(super) fn schedule_chat_windows_save(&mut self, cx: &mut Context<Self>) {

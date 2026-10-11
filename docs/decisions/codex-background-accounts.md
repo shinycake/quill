@@ -167,3 +167,5 @@ macOS arm64, debug build, clients before `setTdlibParameters`):
   screen.
 - Chat windows that show a chat of the outgoing account are not closed on a
   switch. This was already the case before this change.
+
+`codex-background-accounts-2.md` covers these five.

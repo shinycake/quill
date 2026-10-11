@@ -24,6 +24,30 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// worker-thread signaling/transport emissions into the driver
     /// queues. Devices are fetched on demand (`refresh_call_devices`),
     /// never here.
+    /// An engine installed while a call is already tracked (it rang on an
+    /// account that was in the background, which loads its engine on
+    /// demand): start that call in the engine, as `pump_call_engine` does
+    /// when a call first appears.
+    pub fn start_engine_for_tracked_call(&mut self) {
+        let Some((call_id, user_id, is_outgoing)) = self
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .map(|call| (call.id, call.user_id, call.is_outgoing))
+        else {
+            return;
+        };
+        let Some(engine) = self.call_engine.as_deref_mut() else {
+            return;
+        };
+        if let Err(err) = engine.start_call(call_id, user_id, is_outgoing)
+            && let Some(call) = self.session.calls.active_call.as_mut()
+        {
+            call.transport_error = Some(err.to_string());
+        }
+    }
+
     pub fn set_call_engine(&mut self, mut engine: Box<dyn CallEngine>) {
         let outbox = self.signaling_outbox.clone();
         engine.set_signaling_emitted_callback(Arc::new(move |call_id, data| {
