@@ -55,8 +55,34 @@ pub struct MessageExtras {
     pub via_bot_user_id: i64,
     /// `message.import_info`.
     pub import_info: Option<MessageImportInfo>,
-    /// `message.fact_check.text` as plain text ("" when none).
-    pub fact_check: String,
+    /// `message.fact_check` (`factCheck`, TDLib 1.8.68 schema line 3418);
+    /// `None` when the message has none.
+    pub fact_check: Option<FactCheck>,
+}
+
+/// `factCheck text:formattedText country_code:string` (TDLib 1.8.68, schema
+/// line 3418): the clarification an assigned fact-checking agency attached
+/// to a message, and the ISO 3166-1 alpha-2 country it was assigned for.
+/// Rendered as the "Fact Check" block under the message (Telegram Desktop
+/// `WebPageType::Factcheck`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FactCheck {
+    pub text: String,
+    /// Bold, italic and `t.me` links (the entities TDLib allows here).
+    pub entities: Vec<crate::text::TextEntity>,
+    pub country_code: String,
+}
+
+impl FactCheck {
+    /// A fact check with text only (an optimistic local edit before the
+    /// `updateMessageFactCheck` echo).
+    pub fn plain(text: impl Into<String>, country_code: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            entities: Vec::new(),
+            country_code: country_code.into(),
+        }
+    }
 }
 
 /// Typed `messageForwardInfo`. `source` (Saved Messages / Replies) stays out.
@@ -518,12 +544,23 @@ pub(crate) fn parse_message_topic(value: Option<&Value>) -> Option<i32> {
     }
 }
 
-/// The text of a `factCheck` (null or absent: none).
-pub(crate) fn parse_fact_check_text(value: Option<&Value>) -> String {
-    value
-        .filter(|check| !check.is_null())
-        .map(|check| super::message_content::parse_formatted_text(check.get("text")))
-        .unwrap_or_default()
+/// A `factCheck` (null or absent: none). An empty text is no fact check.
+pub(crate) fn parse_fact_check(value: Option<&Value>) -> Option<FactCheck> {
+    let check = value.filter(|check| !check.is_null())?;
+    let text = super::message_content::parse_formatted_text(check.get("text"));
+    if text.is_empty() {
+        return None;
+    }
+    let entities = super::message_content::parse_text_entities(&text, check.get("text"));
+    Some(FactCheck {
+        text,
+        entities,
+        country_code: check
+            .get("country_code")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    })
 }
 
 pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
@@ -534,7 +571,7 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
             .unwrap_or(0)
             .sat_i32(),
         via_bot_user_id: int53_or_zero(value.get("via_bot_user_id")),
-        fact_check: parse_fact_check_text(value.get("fact_check")),
+        fact_check: parse_fact_check(value.get("fact_check")),
         import_info: value
             .get("import_info")
             .filter(|info| info.get("@type").and_then(Value::as_str) == Some("messageImportInfo"))

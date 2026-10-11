@@ -87,6 +87,19 @@ pub fn get_chat_similar_chats(extra: RequestId, chat_id: ChatId) -> String {
     .to_string()
 }
 
+/// `openChatSimilarChat chat_id:int53 opened_chat_id:int53 = Ok;` (TDLib
+/// 1.8.68, schema line 12016): tells TDLib a channel was opened from the
+/// list of chats similar to `chat_id`.
+pub fn open_chat_similar_chat(extra: RequestId, chat_id: ChatId, opened_chat_id: ChatId) -> String {
+    json!({
+        "@type": "openChatSimilarChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "opened_chat_id": opened_chat_id.0,
+    })
+    .to_string()
+}
+
 /// `getUserProfilePhotos user_id:int53 offset:int32 limit:int32 =
 /// ChatPhotos;` (line 14591); `limit` is at most 100.
 pub fn get_user_profile_photos(extra: RequestId, user_id: i64, offset: i32, limit: i32) -> String {

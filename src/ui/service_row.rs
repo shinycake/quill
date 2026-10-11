@@ -311,6 +311,17 @@ pub(super) fn service_message_row(
         },
         _ => None,
     };
+    // "You joined this channel" hosts the similar-channels strip; the
+    // notice itself collapses and expands it (tdesktop toggles
+    // `SimilarExpanded` from the service text).
+    let joined_channel = matches!(
+        &message.content,
+        MessageContent::Action(action) if **action == ServiceAction::YouJoinedChannel
+    );
+    let chat_id = message.chat_id;
+    let similar_strip = joined_channel
+        .then(|| super::similar_strip::similar_channels_strip(session, chat_id, media_roots, cx))
+        .flatten();
     let card = super::premium_ui::gift_card_of(&message.content).map(|(inner, card)| {
         let roots = media_roots;
         super::premium_ui::gift_card_element(row_id, inner, card, session, files, roots, cx)
@@ -322,7 +333,22 @@ pub(super) fn service_message_row(
         .items_center()
         .gap_1p5()
         .py_1()
-        .child(pill(("service-pill", row_id), &text, cx))
+        .child(if joined_channel {
+            div()
+                .id(("joined-notice", row_id))
+                .cursor_pointer()
+                .role(Role::Button)
+                .aria_label("Show or hide similar channels")
+                .tab_index(0)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.toggle_similar_strip(chat_id, cx);
+                }))
+                .child(pill(("service-pill", row_id), &text, cx))
+                .into_any_element()
+        } else {
+            pill(("service-pill", row_id), &text, cx)
+        })
+        .when_some(similar_strip, |this, strip| this.child(strip))
         .when_some(photo, |this, photo| this.child(photo))
         .when_some(birthday, |this, birthday| this.child(birthday))
         .when_some(card, |this, card| this.child(card))

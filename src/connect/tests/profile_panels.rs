@@ -139,3 +139,23 @@ fn birthdate_is_validated_before_sending() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn opening_a_similar_channel_tells_tdlib_which_strip_it_came_from() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver
+        .open_similar_chat(ChatId(13), ChatId(101))
+        .expect("sent");
+    let sent = recorder.snapshot();
+    let request = sent
+        .iter()
+        .find(|j| j.contains(r#""@type":"openChatSimilarChat""#))
+        .expect("openChatSimilarChat in outbox");
+    assert!(request.contains(r#""chat_id":13"#));
+    assert!(request.contains(r#""opened_chat_id":101"#));
+    let _ = std::fs::remove_dir_all(dir);
+}

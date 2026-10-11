@@ -27,6 +27,71 @@ fn b1_message_game_parsed() {
 }
 
 #[test]
+fn a_fact_check_keeps_its_entities_and_country() {
+    // `factCheck text:formattedText country_code:string` (TDLib 1.8.68,
+    // schema line 3418) on `message.fact_check` (line 3475).
+    let env = parse_envelope(
+        r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":7,"is_outgoing":false,"fact_check":{"@type":"factCheck","text":{"@type":"formattedText","text":"Checked by experts","entities":[{"@type":"textEntity","offset":0,"length":7,"type":{"@type":"textEntityTypeBold"}}]},"country_code":"US"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Claim","entities":[]}}}}"#,
+    )
+    .unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
+        panic!("{:?}", env.payload)
+    };
+    let check = message.extras.fact_check.expect("fact check");
+    assert_eq!(check.text, "Checked by experts");
+    assert_eq!(check.country_code, "US");
+    assert_eq!(check.entities.len(), 1);
+    assert_eq!(check.entities[0].utf8_end, 7);
+    assert_eq!(check.entities[0].kind, crate::text::TextEntityKind::Bold);
+    // Absent, null and empty fact checks are none.
+    for json in [
+        r#"{"@type":"updateNewMessage","message":{"id":6,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        r#"{"@type":"updateNewMessage","message":{"id":6,"chat_id":7,"is_outgoing":false,"fact_check":null,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+        r#"{"@type":"updateNewMessage","message":{"id":6,"chat_id":7,"is_outgoing":false,"fact_check":{"@type":"factCheck","text":{"@type":"formattedText","text":"","entities":[]},"country_code":"US"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+    ] {
+        let env = parse_envelope(json).unwrap();
+        let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload
+        else {
+            panic!("{:?}", env.payload)
+        };
+        assert_eq!(message.extras.fact_check, None);
+    }
+}
+
+#[test]
+fn update_message_fact_check_carries_the_new_check_or_none() {
+    // `updateMessageFactCheck chat_id message_id fact_check` (TDLib 1.8.68,
+    // schema line 10826).
+    let env = parse_envelope(
+        r#"{"@type":"updateMessageFactCheck","chat_id":7,"message_id":5,"fact_check":{"@type":"factCheck","text":{"@type":"formattedText","text":"Context","entities":[]},"country_code":"DE"}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageFactCheck {
+            chat_id,
+            message_id,
+            fact_check,
+        }) => {
+            assert_eq!(chat_id, ChatId(7));
+            assert_eq!(message_id.0, 5);
+            assert_eq!(fact_check, Some(FactCheck::plain("Context", "DE")));
+        }
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(
+        r#"{"@type":"updateMessageFactCheck","chat_id":7,"message_id":5,"fact_check":null}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        env.payload,
+        EnvelopePayload::Messages(MessagesPayload::UpdateMessageFactCheck {
+            fact_check: None,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn view_messages_schema_matches_1_8_67() {
     let schema = include_str!("../../../schema/td_api.tl");
     let view = schema

@@ -261,10 +261,10 @@ impl Session {
             MessagesPayload::UpdateMessageFactCheck {
                 chat_id,
                 message_id,
-                text,
+                fact_check,
             } => {
                 self.edit_loaded_message(chat_id, message_id, |message| {
-                    message.extras.fact_check = text.clone();
+                    message.extras.fact_check = fact_check.clone();
                 });
             }
             MessagesPayload::UpdateMessageInteractionInfo {

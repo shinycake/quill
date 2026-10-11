@@ -286,6 +286,10 @@ impl QuillApp {
                                 && !row_unread_divider,
                             day_label: row_day_label,
                             unread_divider: row_unread_divider,
+                            fact_check_expanded: self
+                                .message_ui
+                                .fact_check_expanded
+                                .contains(&(message.chat_id.0, message.id.0)),
                             reply_header: session.and_then(|s| s.reply_header(&message)),
                             forward_header: session.and_then(|s| s.forward_header(&message)),
                             via_bot: session.and_then(|s| s.via_bot_label(&message)),
@@ -314,6 +318,7 @@ impl QuillApp {
                     joined_above: !run_start,
                     day_label: None,
                     unread_divider: false,
+                    fact_check_expanded: false,
                     reply_header: None,
                     forward_header: None,
                     via_bot: None,

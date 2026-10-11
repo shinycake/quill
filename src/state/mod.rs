@@ -114,6 +114,8 @@ mod session_saved;
 mod session_search;
 mod session_service;
 mod session_share;
+mod session_similar;
+pub use session_similar::*;
 mod session_sponsored;
 mod session_stickers;
 mod session_stories;

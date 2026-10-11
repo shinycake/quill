@@ -34,6 +34,8 @@ pub(in crate::ui) fn session_history_row(
     // Phase B4: whether the row's chat is a secret chat — selects the
     // "Self-destruct" vs "Auto-delete" service-row wording.
     _is_secret: bool,
+    // The fact-check block under the message is expanded (`message_ui`).
+    fact_check_expanded: bool,
     // Phase C2i: session for `messageCall` peer resolution ("Call
     // again" only for 1:1 chats).
     session: Option<&Session>,
@@ -623,7 +625,16 @@ pub(in crate::ui) fn session_history_row(
     });
     // A time footer exists and nothing renders after the body/caption: the
     // footer can share its last line instead of taking a row of its own.
+    let fact_check = super::fact_check_block::fact_check_block(
+        message,
+        fact_check_expanded,
+        revealed,
+        look.font,
+        session,
+        cx,
+    );
     let tail_empty = keyboard.is_none()
+        && fact_check.is_none()
         && self_destruct_badge.is_none()
         && auto_delete_chip.is_none()
         && views.is_none()
@@ -842,6 +853,7 @@ pub(in crate::ui) fn session_history_row(
             .when_some(extra_media, |this, media| this.child(media))
             // MED4: caption below the media.
             .when_some(caption_below_el, |this, el| this.child(el))
+            .when_some(fact_check, |this, block| this.child(block))
             .when_some(self_destruct_badge, |this, badge| {
                 this.child(badge.when(media_led, |badge| badge.px_2()))
             })

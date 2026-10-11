@@ -180,11 +180,12 @@ pub enum MessagesPayload {
     /// `reportSponsoredChat` response.
     ReportSponsoredResult(ReportSponsoredResult),
     /// `updateMessageInteractionInfo` — views / forwards / `messageReactions`.
-    /// `updateMessageFactCheck`: the fact check of a message changed.
+    /// `updateMessageFactCheck` (TDLib 1.8.68, schema line 10826): the
+    /// fact check of a message changed; `None` removes it.
     UpdateMessageFactCheck {
         chat_id: ChatId,
         message_id: MessageId,
-        text: String,
+        fact_check: Option<FactCheck>,
     },
     UpdateMessageInteractionInfo {
         chat_id: ChatId,
