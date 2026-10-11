@@ -224,13 +224,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
 - [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
 - [ ] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
-- [ ] Similar channels carousel after joining a channel <!-- parity:render-similar-channels -->
+- [x] Similar channels carousel after joining a channel <!-- parity:render-similar-channels -->
 - [x] Link-preview "View channel / bot / message" buttons <!-- parity:render-preview-view-button -->
 - [x] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
 - [x] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
 - [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
 - [x] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
-- [ ] Fact-check block under messages <!-- parity:render-fact-check -->
+- [x] Fact-check block under messages <!-- parity:render-fact-check -->
 - [x] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
 
 ### Message menu & selection
