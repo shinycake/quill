@@ -8,7 +8,12 @@ impl QuillApp {
     /// photo (video shows its thumbnail; live/unsupported show a
     /// placeholder), the caption, and Prev / Next / Close controls. The
     /// backdrop click and Escape (see `cancel_search`) close it.
-    pub(in crate::ui) fn story_viewer_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(in crate::ui) fn story_viewer_overlay(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        // The shared emoji / sticker / GIF panel while the reply row has it.
+        let reply_panel = self.story_reply_panel_layer(cx);
         let item = self
             .stories
             .viewer
@@ -357,6 +362,7 @@ impl QuillApp {
                             ),
                     ),
             )
+            .children(reply_panel)
     }
 
     /// Phase 9.6: segmented progress bar — one segment per story in the

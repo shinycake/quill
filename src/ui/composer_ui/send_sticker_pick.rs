@@ -12,6 +12,9 @@ impl QuillApp {
         thumb: Option<(FileId, i32, i32)>,
         cx: &mut Context<Self>,
     ) {
+        if self.route_story_reply_sticker(file_id, &emoji, (width, height), thumb, cx) {
+            return;
+        }
         if self.session().is_some_and(|session| {
             session.sticker_requires_premium(file_id) && !session.my_is_premium()
         }) {

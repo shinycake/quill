@@ -24,6 +24,10 @@ pub(crate) struct StoryUi {
     pub(super) reply_open: bool,
     /// Phase 9.2: reply-to-story draft (the viewer overlay's reply row).
     pub(super) reply_input: Entity<TextareaState>,
+    /// The shared emoji / sticker / GIF panel was opened from the reply row.
+    pub(super) reply_panel: bool,
+    /// A voice message for the reply is being recorded.
+    pub(super) reply_recording: bool,
     /// Phase 9.5: viewers panel open in the viewer overlay
     /// (`getStoryInteractions`).
     pub(super) viewers_open: bool,
@@ -189,6 +193,8 @@ impl StoryUi {
             tick_active: false,
             reaction_picker_open: false,
             reply_open: false,
+            reply_panel: false,
+            reply_recording: false,
         }
     }
 }

@@ -33,6 +33,7 @@ mod send_as;
 mod share_content;
 mod stickers;
 mod stories;
+mod story_reply_media;
 #[cfg(test)]
 mod tests_auth;
 #[cfg(test)]
@@ -106,6 +107,7 @@ pub use send_as::*;
 pub use share_content::*;
 pub use stickers::*;
 pub use stories::*;
+pub use story_reply_media::*;
 pub use translate::*;
 pub use users::*;
 pub use web_apps::*;

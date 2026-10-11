@@ -30,6 +30,7 @@ use crate::telegram::requests_story::{
 
 mod albums;
 mod posting;
+mod reply_media;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 9.1: `loadActiveStories(storyListMain)` once per Ready. The

@@ -115,6 +115,28 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.stories.composer.open,
         |app, _, cx| app.close_story_composer(cx)
     ),
+    // The story reply row's voice recording and emoji / sticker / GIF
+    // panel close before the viewer does.
+    layer!(
+        "story-reply-recording",
+        |app| app.story_reply_recording_active(),
+        |app, _, cx| {
+            if app.recording.locked {
+                app.connection.status_note = "recording is locked — unlock it or use Cancel".into();
+                cx.notify();
+            } else {
+                app.request_discard_recording(cx);
+            }
+        }
+    ),
+    layer!(
+        "story-reply-panel",
+        |app| app.story_reply_panel_active(),
+        |app, _, cx| {
+            app.stories.reply_panel = false;
+            app.close_media_panel(cx);
+        }
+    ),
     // Phase 9.1: the story viewer is above the media viewer.
     layer!(
         "story-viewer",

@@ -368,6 +368,9 @@ impl QuillApp {
     }
 
     pub(super) fn send_voice_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.send_story_reply_voice_recording(cx) {
+            return;
+        }
         // Phase A1: slow-mode gate applies to voice notes too — checked
         // before consuming the capture so a blocked recording survives
         // until the timer expires.

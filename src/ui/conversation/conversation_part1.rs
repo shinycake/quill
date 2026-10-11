@@ -154,7 +154,9 @@ impl QuillApp {
                         // The emoji / sticker / GIF popover floats above the
                         // composer, anchored to its left edge.
                         .when(
-                            self.media_panel_open() && self.pickers.media_panel.reaction.is_none(),
+                            self.media_panel_open()
+                                && self.pickers.media_panel.reaction.is_none()
+                                && !self.story_reply_panel_active(),
                             |this| {
                                 let panel = self.media_panel(cx);
                                 // Over the history: animations under it are

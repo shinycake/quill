@@ -483,26 +483,7 @@ impl QuillApp {
             column = column.child(self.story_reaction_picker(cx));
         }
         if self.stories.reply_open {
-            column =
-                column.child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .items_center()
-                        .w(px(360.))
-                        .child(
-                            div().flex_1().child(
-                                Textarea::new(&self.stories.reply_input)
-                                    .aria_label("Reply to story")
-                                    .h(px(40.)),
-                            ),
-                        )
-                        .child(Button::new("story-reply-send").label("Send").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.send_story_reply(window, cx);
-                            }),
-                        )),
-                );
+            column = column.child(self.story_reply_row(cx));
         }
         if self.stories.viewers_open {
             column = column.child(self.story_viewers_panel(cx));
