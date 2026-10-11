@@ -935,7 +935,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Login code links fill in the code <!-- parity:deeplink-login-code -->
 - [ ] Invoice links open the payment checkout <!-- parity:deeplink-invoice -->
 - [ ] Boost links open the boost dialog <!-- parity:deeplink-boost -->
-- [ ] Premium gift code links offer to apply the code <!-- parity:deeplink-giftcode -->
+- [x] Premium gift code links offer to apply the code <!-- parity:deeplink-giftcode -->
 - [ ] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
 - [x] addlist links add a shared folder <!-- parity:deeplink-addlist -->
 - [ ] Background and theme links preview and apply them <!-- parity:deeplink-bg-theme -->
@@ -944,7 +944,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Message links with ?thread, ?comment, ?single and topic ids open the right thread <!-- parity:deeplink-thread-comment -->
 - [x] Story and story album links open the story viewer <!-- parity:deeplink-story -->
 - [x] ?t= timestamp links seek the media to that time <!-- parity:deeplink-timestamp -->
-- [ ] Premium offer, privacy policy and language pack links <!-- parity:deeplink-premium-language -->
+- [x] Premium offer, privacy policy and language pack links <!-- parity:deeplink-premium-language -->
 - [x] Register the tg:// scheme on Linux and Windows <!-- parity:deeplink-scheme-registration -->
 
 ### Data freshness (TDLib updates)
