@@ -9,7 +9,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::quick_action::{QuickAction, QuickEffect};
 
 impl QuillApp {
-    /// Settings: "Double-click a message to" Reply / React / Nothing.
+    /// Settings: "Double-click a message to" Reply / React.
     pub(super) fn quick_action_radios(&self, cx: &mut Context<Self>) -> AnyElement {
         let current = self.session().map_or_else(QuickAction::default, |s| {
             s.settings.media_prefs.quick_action

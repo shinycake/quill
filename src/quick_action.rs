@@ -27,12 +27,11 @@ pub enum QuickEffect {
 }
 
 impl QuickAction {
-    /// Radio order in settings. tdesktop shows Reply and React; `None` is a
-    /// stored value there that has no radio, Quill lists it too.
-    pub const ALL: [(QuickAction, &'static str); 3] = [
+    /// Radio order in settings. tdesktop shows Reply and React only; `None`
+    /// is a stored value there with no radio, and Quill matches that.
+    pub const ALL: [(QuickAction, &'static str); 2] = [
         (QuickAction::Reply, "Reply"),
         (QuickAction::React, "React with the quick reaction"),
-        (QuickAction::None, "Do nothing"),
     ];
 
     /// Index of `self` in [`Self::ALL`].
@@ -82,7 +81,7 @@ mod tests {
 
     #[test]
     fn serde_round_trip() {
-        for (action, _) in QuickAction::ALL {
+        for action in [QuickAction::Reply, QuickAction::React, QuickAction::None] {
             let json = serde_json::to_string(&action).unwrap();
             assert_eq!(serde_json::from_str::<QuickAction>(&json).unwrap(), action);
         }

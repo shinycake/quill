@@ -8,9 +8,9 @@
 ## What changed
 - `src/quick_action.rs`: `QuickAction` enum (Reply default, React, None) with pure `effect(sent)` dispatch and unit tests.
 - `MediaPrefs.quick_action` persists it in `media_prefs.json` (serde default, older files load as Reply).
-- `src/ui/quick_action_ui.rs`: settings radio group (Reply, React with the quick reaction, Do nothing) and `double_click_action`.
+- `src/ui/quick_action_ui.rs`: settings radio group (Reply, React with the quick reaction) and `double_click_action`.
 - Message row double-click now calls `double_click_action` instead of always reacting. Quill previously always reacted; the default now matches tdesktop (Reply).
-- Quill adds a "Do nothing" radio; tdesktop stores None but shows no radio for it.
+- Like tdesktop, None is a stored value with no radio.
 
 ## Verification
 - gate.sh: GATE OK. Unit tests cover the default, dispatch, index mapping and serde round trip, plus the prefs file round trip with the new field.
