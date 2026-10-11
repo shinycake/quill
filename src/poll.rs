@@ -173,7 +173,7 @@ pub fn can_stop_poll(is_outgoing: bool, poll: &Poll) -> bool {
     is_outgoing && !poll.is_closed
 }
 
-/// Whether the "View voters" affordance may be offered. `getPollVoters`
+/// Whether the "View Votes" button may be offered. `getPollVoters`
 /// is only valid when `poll.can_get_voters` (schema line 12941).
 pub fn can_view_poll_voters(poll: &Poll) -> bool {
     poll.can_get_voters
