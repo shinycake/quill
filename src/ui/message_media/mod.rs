@@ -44,7 +44,7 @@ pub(super) use layout::{
     media_frame_for, single_media_frame, single_media_width,
 };
 pub(super) use location::{location_row, venue_row};
-pub(super) use sticker::sticker_attachment;
+pub(super) use sticker::{sticker_attachment, sticker_box};
 pub(super) use surfaces::spoiler_cover;
 pub(super) use video_note::{VIDEO_NOTE_DIAMETER, video_note_attachment};
 pub(super) use visual::{animation_attachment, photo_attachment, video_attachment};

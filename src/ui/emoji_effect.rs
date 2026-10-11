@@ -20,6 +20,7 @@
 
 use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
+use super::premium_sticker_effect;
 use super::sticker_playback::PlaybackSize;
 use gpui_kit::*;
 use quill::bubble_layout::LARGE_EMOJI_SIZE;
@@ -66,6 +67,37 @@ struct Active {
     /// The decoded sticker and when it began.
     clip: Option<LayeredClip>,
     seed: u64,
+    /// A Premium sticker's effect (`premium_sticker_effect`): placed around
+    /// the sticker, not an emoji.
+    premium: bool,
+}
+
+/// Whether the Premium sticker effect of message `key` is playing or waiting.
+pub(super) fn premium_playing(key: Key) -> bool {
+    ACTIVE.with(|active| {
+        active
+            .borrow()
+            .iter()
+            .any(|a| a.premium && (a.effect.chat_id.0, a.effect.message_id.0) == key)
+    })
+}
+
+/// Queue the effect of a Premium sticker. Dropped when too many wait.
+pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool) {
+    ACTIVE.with(|active| {
+        let mut active = active.borrow_mut();
+        if active.len() >= MAX_QUEUED {
+            return;
+        }
+        active.push(Active {
+            seed: 0,
+            outgoing,
+            effect,
+            queued: Instant::now(),
+            clip: None,
+            premium: true,
+        });
+    });
 }
 
 /// The history list is being rebuilt: forget where the emoji were.
@@ -271,6 +303,7 @@ impl QuillApp {
     /// the conversation. `None` when nothing plays.
     pub(super) fn emoji_effect_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.viewed_chat();
+        self.premium_autoplay(cx);
         let queued = self
             .live
             .as_mut()
@@ -303,12 +336,13 @@ impl QuillApp {
                         effect,
                         queued: started,
                         clip: None,
+                        premium: false,
                     });
                 }
             });
         }
         self.advance_effects(open, cx);
-        let drawn: Vec<(Key, bool, u64, LayeredClip)> = ACTIVE.with(|active| {
+        let drawn: Vec<(Key, bool, u64, bool, LayeredClip)> = ACTIVE.with(|active| {
             active
                 .borrow()
                 .iter()
@@ -317,6 +351,7 @@ impl QuillApp {
                         (a.effect.chat_id.0, a.effect.message_id.0),
                         a.outgoing,
                         a.seed,
+                        a.premium,
                         a.clip.clone()?,
                     ))
                 })
@@ -330,23 +365,31 @@ impl QuillApp {
             canvas(
                 |_, _, _| {},
                 move |_, _, window, _| {
-                    for (key, outgoing, seed, clip) in &drawn {
-                        let Some(anchor) = anchor(*key) else {
-                            continue;
+                    for (key, outgoing, seed, premium, clip) in &drawn {
+                        let (side, (x, y)) = if *premium {
+                            let Some(sticker) = premium_sticker_effect::anchor(*key) else {
+                                continue;
+                            };
+                            premium_sticker_effect::effect_rect(sticker, *outgoing)
+                        } else {
+                            let Some(anchor) = anchor(*key) else {
+                                continue;
+                            };
+                            let height = f32::from(anchor.size.height);
+                            let side = effect_side(height);
+                            let origin = effect_origin(
+                                (
+                                    f32::from(anchor.left()),
+                                    f32::from(anchor.top()),
+                                    f32::from(anchor.right()),
+                                    f32::from(anchor.bottom()),
+                                ),
+                                side,
+                                *outgoing,
+                                shift_for(*seed, height),
+                            );
+                            (side, origin)
                         };
-                        let height = f32::from(anchor.size.height);
-                        let side = effect_side(height);
-                        let (x, y) = effect_origin(
-                            (
-                                f32::from(anchor.left()),
-                                f32::from(anchor.top()),
-                                f32::from(anchor.right()),
-                                f32::from(anchor.bottom()),
-                            ),
-                            side,
-                            *outgoing,
-                            shift_for(*seed, height),
-                        );
                         let bounds = Bounds::new(point(px(x), px(y)), size(px(side), px(side)));
                         if let Some(shown) = &clip.shown {
                             shown.set(Instant::now());

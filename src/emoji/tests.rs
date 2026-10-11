@@ -22,6 +22,7 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
         thumb_width: 0,
         thumb_height: 0,
         requires_premium: false,
+        premium_animation: None,
     };
     let pack = |id| StickerSetInfo {
         id,
@@ -197,6 +198,7 @@ fn open_chat_custom_emoji_files_cover_text_and_reactions() {
             thumb_width: 0,
             thumb_height: 0,
             requires_premium: false,
+            premium_animation: None,
         });
     assert_eq!(
         session.open_chat_custom_emoji_files(),

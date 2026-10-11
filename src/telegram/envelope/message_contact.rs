@@ -230,6 +230,7 @@ fn dice_sticker(value: Option<&Value>) -> (Option<StickerContent>, Vec<ParsedFil
         thumb_height: item.thumb_height,
         is_premium: false,
         requires_premium: false,
+        premium_animation: None,
         set_id: item.set_id,
     });
     (sticker, files)
