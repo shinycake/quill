@@ -108,6 +108,7 @@ impl QuillApp {
                     inline,
                     &self.message_ui.spoiler_revealed,
                     inputs.is_secret,
+                    inputs.fact_check_expanded,
                     self.session(),
                     // Settings → Appearance: font size + bubble/plain style;
                     // grouping from the neighbouring rows.

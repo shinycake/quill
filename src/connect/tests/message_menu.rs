@@ -510,7 +510,7 @@ fn a_fact_check_update_lands_on_the_loaded_message() {
     );
     assert_eq!(
         driver.session.histories[&7].messages[&5].extras.fact_check,
-        ""
+        None
     );
     feed(
         &mut driver,
@@ -519,8 +519,12 @@ fn a_fact_check_update_lands_on_the_loaded_message() {
         r#"{"@type":"updateMessageFactCheck","chat_id":7,"message_id":5,"fact_check":{"@type":"factCheck","text":{"@type":"formattedText","text":"Context","entities":[]},"country_code":"US"}}"#,
     );
     assert_eq!(
-        driver.session.histories[&7].messages[&5].extras.fact_check,
-        "Context"
+        driver.session.histories[&7].messages[&5]
+            .extras
+            .fact_check
+            .as_ref()
+            .map(|check| (check.text.as_str(), check.country_code.as_str())),
+        Some(("Context", "US"))
     );
 }
 

@@ -422,7 +422,12 @@ impl QuillApp {
         }
         // Channel admins (and anyone TDLib allows) add or edit a fact check.
         if allows(false, |a| a.can_set_fact_check) && message.id.0 > 0 && !message.pending {
-            let existing = message.extras.fact_check.clone();
+            let existing = message
+                .extras
+                .fact_check
+                .as_ref()
+                .map(|check| check.text.clone())
+                .unwrap_or_default();
             let label = quill::message_menu::fact_check_label(!existing.is_empty());
             item!(
                 order::FACT_CHECK,

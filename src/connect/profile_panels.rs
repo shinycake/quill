@@ -3,12 +3,14 @@
 //! photo gallery, "Share contact".
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::state::{ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose};
+use crate::state::{
+    ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose, UsersPurpose,
+};
 use crate::telegram::requests::{
     get_chat_similar_chats, get_groups_in_common, get_suitable_discussion_chats,
-    get_suitable_personal_chats, get_user_profile_photos, report_chat_photo, send_contact,
-    set_birthdate, set_personal_chat, set_profile_photo_previous, set_user_note,
-    set_user_personal_profile_photo, suggest_user_profile_photo,
+    get_suitable_personal_chats, get_user_profile_photos, open_chat_similar_chat,
+    report_chat_photo, send_contact, set_birthdate, set_personal_chat, set_profile_photo_previous,
+    set_user_note, set_user_personal_profile_photo, suggest_user_profile_photo,
 };
 
 /// Groups in common are listed in one page (tdesktop pages by 50 as you
@@ -83,6 +85,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.fetch_profile_chats(ProfileChatsKind::SimilarChats, chat_id.0)
+    }
+
+    /// `openChatSimilarChat` (TDLib 1.8.68, schema line 12016): a channel
+    /// (`opened`) was opened from the strip of channels similar to
+    /// `chat_id`, as tdesktop reports from `SimilarChannels::textState`
+    /// clicks. Fire-and-forget: the answer is `ok`.
+    pub fn open_similar_chat(
+        &mut self,
+        chat_id: ChatId,
+        opened: ChatId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Users(UsersPurpose::OpenChatSimilarChat),
+            Some(chat_id),
+        );
+        self.send_json_request(extra, &open_chat_similar_chat(extra, chat_id, opened))
     }
 
     /// `getSuitablePersonalChats` for the personal channel picker (line

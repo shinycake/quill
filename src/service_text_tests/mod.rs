@@ -95,6 +95,49 @@ fn say(json: &str, opts: Opts) -> String {
     run(json, opts).plain()
 }
 
+/// Wording of a Quill-local action (one TDLib never sends).
+fn say_action(action: ServiceAction, opts: Opts) -> String {
+    let ctx = ServiceCtx {
+        actor: opts.actor,
+        is_outgoing: opts.outgoing,
+        my_id: Some(ME),
+        is_channel: opts.channel,
+        is_secret: false,
+        chat_id: CHAT,
+        now: 1_800_000_000,
+        names: &Names,
+    };
+    render(&MessageContent::Action(Box::new(action)), &ctx)
+        .expect("a service action")
+        .plain()
+}
+
+#[test]
+fn local_joined_notice_and_thread_divider_use_tdesktop_wording() {
+    assert_eq!(
+        say_action(ServiceAction::YouJoinedChannel, IN_CHANNEL),
+        "You joined this channel"
+    );
+    assert_eq!(
+        say_action(
+            ServiceAction::ThreadDivider {
+                with_comments: true
+            },
+            BY_DANA
+        ),
+        "Discussion started"
+    );
+    assert_eq!(
+        say_action(
+            ServiceAction::ThreadDivider {
+                with_comments: false
+            },
+            BY_DANA
+        ),
+        "No comments here yet..."
+    );
+}
+
 macro_rules! wording {
     ($name:ident, $opts:expr, $json:expr, $expected:expr) => {
         #[test]

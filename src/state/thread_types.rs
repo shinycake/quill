@@ -1,5 +1,6 @@
 //! Channel comments and group reply threads (tdesktop `RepliesWidget`).
 use super::*;
+use crate::telegram::envelope::ServiceAction;
 
 /// Where the open thread view is in its load sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +113,32 @@ impl ThreadView {
             .values()
             .filter(|message| complete || !self.root_ids.contains(&message.id.0))
             .collect()
+    }
+
+    /// The list rows: `ordered()` plus, once the root is in, tdesktop's
+    /// divider right after it (`RepliesList::injectRootDivider`): "Discussion
+    /// started" when replies follow, "No comments here yet..." otherwise.
+    /// The divider takes the root's date so no day label separates them.
+    pub fn rows(&self) -> Vec<HistoryMessage> {
+        let ordered = self.ordered();
+        let mut rows: Vec<HistoryMessage> = Vec::with_capacity(ordered.len() + 1);
+        let last_root = ordered
+            .iter()
+            .rposition(|message| self.root_ids.contains(&message.id.0));
+        for (ix, message) in ordered.iter().enumerate() {
+            rows.push((*message).clone());
+            if Some(ix) == last_root {
+                rows.push(synthetic_service_row(
+                    self.chat_id,
+                    THREAD_DIVIDER_ROW_ID,
+                    message.date,
+                    ServiceAction::ThreadDivider {
+                        with_comments: ix + 1 < ordered.len(),
+                    },
+                ));
+            }
+        }
+        rows
     }
 
     /// The root post, when it is loaded.

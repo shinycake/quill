@@ -33,6 +33,84 @@ fn resolved() -> (Session, Arc<MemorySink>, AtomicU64) {
 }
 
 #[test]
+fn the_root_is_followed_by_the_discussion_divider_once_loaded() {
+    let (mut session, sink, seq) = resolved();
+    // Nothing loaded down to the root yet: no root row, no divider.
+    assert!(
+        session
+            .thread_for_chat(ChatId(14))
+            .unwrap()
+            .rows()
+            .is_empty()
+    );
+    let page = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
+        Some(ChatId(13)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{},{}]}}"#,
+            page.0,
+            msg(503, 14, 501, "b"),
+            msg(502, 14, 501, "a")
+        ),
+    );
+    let page = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
+        Some(ChatId(13)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[]}}"#,
+            page.0
+        ),
+    );
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    assert!(thread.history.loaded_complete);
+    let rows = thread.rows();
+    let ids: Vec<i64> = rows.iter().map(|m| m.id.0).collect();
+    assert_eq!(ids, vec![501, THREAD_DIVIDER_ROW_ID, 502, 503]);
+    let divider = &rows[1];
+    assert_eq!(divider.chat_id, ChatId(14));
+    assert_eq!(divider.date, rows[0].date, "same day as the root");
+    assert_eq!(
+        session.service_text(divider).map(|text| text.plain()),
+        Some("Discussion started".to_string())
+    );
+}
+
+#[test]
+fn a_thread_without_replies_says_no_comments_yet() {
+    let (mut session, sink, seq) = resolved();
+    let page = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 101 },
+        Some(ChatId(13)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":0,"messages":[]}}"#,
+            page.0
+        ),
+    );
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    let rows = thread.rows();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        session.service_text(&rows[1]).map(|text| text.plain()),
+        Some("No comments here yet...".to_string())
+    );
+}
+
+#[test]
 fn thread_info_fills_the_view_and_hides_the_root_until_complete() {
     let (mut session, sink, seq) = resolved();
     {

@@ -1,0 +1,3 @@
+# codex/history-bundle: similar channels strip and the fact-check block
+parity:render-similar-channels
+parity:render-fact-check

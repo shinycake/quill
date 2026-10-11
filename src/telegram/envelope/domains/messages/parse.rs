@@ -326,7 +326,7 @@ pub(crate) fn parse_messages_payload(
             MessagesPayload::UpdateMessageFactCheck {
                 chat_id: ChatId(int53(value.get("chat_id"))?),
                 message_id: MessageId(int53(value.get("message_id"))?),
-                text: crate::telegram::envelope::message::parse_fact_check_text(
+                fact_check: crate::telegram::envelope::message::parse_fact_check(
                     value.get("fact_check"),
                 ),
             },

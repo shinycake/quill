@@ -11,6 +11,7 @@ impl Session {
                 if let Some(chat) = self.chats.get_mut(&chat_id.0) {
                     chat.set_member_status(ChannelMemberStatus::Member, None);
                 }
+                self.note_channel_joined(chat_id);
             }
             other => {
                 self.diagnostics.record(Diagnostic {

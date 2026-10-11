@@ -9,6 +9,11 @@ pub struct UsersState {
     /// the suitable personal channels. Chat objects themselves arrive via
     /// `updateNewChat` before the `chats` answer.
     pub profile_chat_lists: HashMap<(ProfileChatsKind, i64), ProfileChatsFetch>,
+    /// `chats.total_count` of a `getChatSimilarChats` answer, by channel
+    /// chat id: more similar channels exist than the list shows (the
+    /// non-Premium list is capped), which the strip's "More Channels" tile
+    /// counts.
+    pub similar_chat_totals: HashMap<i64, i32>,
     /// B10: profile photo galleries (`getUserProfilePhotos`) by user id.
     pub user_profile_photos: HashMap<i64, ProfilePhotosFetch>,
     /// Phase 6: `getContacts` result — user ids, in server order. `None`
@@ -60,6 +65,7 @@ impl UsersState {
     pub(crate) fn new() -> Self {
         Self {
             profile_chat_lists: HashMap::new(),
+            similar_chat_totals: HashMap::new(),
             user_profile_photos: HashMap::new(),
             contacts: None,
             contacts_error: false,

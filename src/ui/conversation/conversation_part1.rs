@@ -519,8 +519,10 @@ impl QuillApp {
         let thread_open = open
             .and_then(|id| session.and_then(|s| s.thread_for_chat(id)))
             .filter(|thread| !matches!(thread.status, quill::state::ThreadStatus::Failed(_)));
+        // The rows carry tdesktop's "Discussion started" divider after the
+        // root (`ThreadView::rows`).
         let thread_messages: Option<Vec<HistoryMessage>> =
-            thread_open.map(|thread| thread.ordered().into_iter().cloned().collect());
+            thread_open.map(quill::state::ThreadView::rows);
         let thread_pending = session.is_some_and(Session::thread_unavailable);
         // Saved Messages: the sublist list, one sublist or a tag filter.
         let saved_mode = self.saved_mode();
@@ -551,6 +553,12 @@ impl QuillApp {
                 // A translated chat shows the translations in place.
                 if let Some(chat_id) = open {
                     self.apply_chat_translation(chat_id, &mut messages);
+                    // A channel joined in this session ends with "You
+                    // joined this channel" and the similar-channels strip
+                    // (tdesktop `insertJoinedMessage`).
+                    if let Some(notice) = session.and_then(|s| s.joined_notice_row(chat_id)) {
+                        messages.push(notice);
+                    }
                 }
                 messages
             });
@@ -838,6 +846,15 @@ impl QuillApp {
         self.playback.error.hash(&mut hasher);
         // A bot's streaming reply grows the last row every frame.
         self.stream_rows_hash().hash(&mut hasher);
+        // Expanding a fact check changes that row's height.
+        let mut fact_checks: Vec<(i64, i64)> = self
+            .message_ui
+            .fact_check_expanded
+            .iter()
+            .copied()
+            .collect();
+        fact_checks.sort_unstable();
+        fact_checks.hash(&mut hasher);
         self.vanish_rows_hash().hash(&mut hasher);
         Some(hasher.finish())
     }

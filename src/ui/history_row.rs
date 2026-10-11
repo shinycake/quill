@@ -32,6 +32,9 @@ pub(crate) struct HistoryRowInputs {
     /// First unread incoming message: the "Unread messages" divider sits
     /// above it.
     pub(crate) unread_divider: bool,
+    /// The message's fact-check block is expanded (`message_ui`): the
+    /// row's height depends on it.
+    pub(crate) fact_check_expanded: bool,
     pub(crate) reply_header: Option<quill::state::ReplyHeader>,
     pub(crate) forward_header: Option<quill::state::ForwardHeader>,
     pub(crate) via_bot: Option<String>,
@@ -104,6 +107,7 @@ impl HistoryRow {
                     && a.via_bot == b.via_bot
                     && a.day_label == b.day_label
                     && a.unread_divider == b.unread_divider
+                    && a.fact_check_expanded == b.fact_check_expanded
                     && a.run_start == b.run_start
                     && a.joined_above == b.joined_above
                     && a.sender_avatar == b.sender_avatar

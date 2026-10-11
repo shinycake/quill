@@ -188,7 +188,11 @@ impl Session {
                     self.chat_list.chat_lists_for_add.insert(chat_id.0, lists);
                 }
             }
-            ChatListPayload::Chats { chat_ids, .. } => {
+            ChatListPayload::Chats {
+                chat_ids,
+                total_count,
+            } => {
+                self.note_similar_chat_total(total_count, pending);
                 self.apply_chats(chat_ids, pending);
             }
             ChatListPayload::ArchiveChatListSettings { settings } => {

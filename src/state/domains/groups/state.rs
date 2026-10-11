@@ -54,6 +54,10 @@ pub struct GroupsState {
     pub chat_boost_lists: HashMap<i64, BoostsListState>,
     /// `getChatBoostLink` answer `(link, is_public)`, by chat id.
     pub chat_boost_links: HashMap<i64, (String, bool)>,
+    /// Channels joined in this session, by chat id: the "You joined this
+    /// channel" row with the similar-channels strip under it (tdesktop sets
+    /// `SimilarExpanded` on `joinChannel`).
+    pub similar_strips: HashMap<i64, SimilarStrip>,
     /// `supergroup.usernames`, by supergroup id.
     pub supergroup_username_lists: HashMap<i64, crate::telegram::envelope::SupergroupUsernames>,
     /// B8: `getChatInviteLinkCounts` (owner only), keyed by chat id.
@@ -230,6 +234,7 @@ impl GroupsState {
             link_join_requests: HashMap::new(),
             chat_boost_lists: HashMap::new(),
             chat_boost_links: HashMap::new(),
+            similar_strips: HashMap::new(),
             supergroup_username_lists: HashMap::new(),
             invite_link_counts: HashMap::new(),
             invite_link_members: HashMap::new(),

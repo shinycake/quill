@@ -99,6 +99,14 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
             }
         }
         A::JoinByLink => from().t(" joined the group via invite link").done(),
+        // tdesktop `lng_action_you_joined`.
+        A::YouJoinedChannel => text("You joined this channel"),
+        // tdesktop `lng_replies_discussion_started` / `lng_replies_no_comments`.
+        A::ThreadDivider { with_comments } => text(if *with_comments {
+            "Discussion started"
+        } else {
+            "No comments here yet..."
+        }),
         A::JoinByRequest => {
             if ctx.actor_is_me() {
                 text(if ctx.is_channel {

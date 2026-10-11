@@ -83,17 +83,19 @@ impl QuillApp {
             self.session()
                 .and_then(|s| s.info_panel_target_for_chat(chat_id))
         });
-        // A comment / reply thread titles the header with its channel (or
-        // group) and the reply count; the info panel does not apply.
+        // A comment / reply thread titles the header "Discussion" with the
+        // reply count as its status line (tdesktop `TopBarWidget` in
+        // `Section::Replies`: `lng_manage_discussion_group` plus the custom
+        // title); the info panel does not apply.
         let thread_header: Option<(String, String, bool)> =
             actions.and_then(|(chat_id, _, _, _)| {
                 let session = self.session()?;
                 let thread = session.thread_for_chat(chat_id)?;
-                let origin = session
-                    .chats
-                    .get(&thread.origin_chat_id.0)
-                    .map_or_else(|| title.to_string(), |chat| chat.title.clone());
-                Some((origin, thread.subtitle(), thread.is_comments()))
+                Some((
+                    "Discussion".to_string(),
+                    thread.subtitle(),
+                    thread.is_comments(),
+                ))
             });
         let info_target = info_target.filter(|_| thread_header.is_none());
         // Parity slice: channel/supergroup header extras — photo,

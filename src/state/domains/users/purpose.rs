@@ -10,6 +10,9 @@ pub enum UsersPurpose {
     GetChatMessageCount { filter: u8 },
     /// "Save to... Profile" on a song: `addProfileAudio`.
     AddProfileAudio,
+    /// `openChatSimilarChat` (TDLib 1.8.68, schema line 12016): a channel
+    /// was opened from the similar-channels strip. Response is `ok`.
+    OpenChatSimilarChat,
     /// `getMe`. Response is `user`; only the id is kept.
     GetMe,
     /// `getUserFullInfo` for a bot user. Response is `userFullInfo`; the
@@ -104,6 +107,7 @@ pub enum UsersPurpose {
 
 flat_purposes!(Users(UsersPurpose) {
     AddProfileAudio,
+    OpenChatSimilarChat,
     GetMe,
     GetUserFullInfo,
     GetContacts,

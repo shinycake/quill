@@ -93,7 +93,15 @@ impl QuillApp {
                     .and_then(|session| session.histories.get_mut(&dialog.chat_id.0))
                     .and_then(|history| history.messages.get_mut(&dialog.message_id.0))
                 {
-                    message.extras.fact_check = text.clone();
+                    let country = message
+                        .extras
+                        .fact_check
+                        .as_ref()
+                        .map(|check| check.country_code.clone())
+                        .unwrap_or_default();
+                    message.extras.fact_check = (!text.is_empty()).then(|| {
+                        quill::telegram::envelope::FactCheck::plain(text.clone(), country)
+                    });
                 }
                 self.connection.status_note = "fact check saved (demo)".into();
             }
