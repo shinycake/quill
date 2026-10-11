@@ -173,6 +173,7 @@ pub mod voice;
 pub mod voice_input;
 #[cfg(feature = "ui")]
 pub mod voice_opus;
+pub mod wallpaper_raster;
 pub mod web_app;
 pub mod window_title;
 #[cfg(windows)]

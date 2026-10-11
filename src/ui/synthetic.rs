@@ -139,23 +139,22 @@ pub(crate) struct BubbleLook {
     /// (Telegram Desktop's grouping): its top corner on the avatar side is
     /// small.
     pub joined_above: bool,
-    /// The chat's emoji theme: fill of outgoing bubbles (0xRRGGBB).
-    pub out_fill: Option<u32>,
+    /// The chat's emoji theme: fill of outgoing bubbles.
+    pub out_fill: Option<super::bubble_theme::OutgoingFill>,
 }
 
 impl BubbleLook {
-    /// Fill of an outgoing bubble: the chat theme's, else the accent.
+    /// Fill of an outgoing bubble: the chat theme's (its mean when it is
+    /// a gradient), else the accent.
     pub(crate) fn outgoing_fill(&self) -> Rgba {
-        self.out_fill.map_or_else(accent_strong, rgb)
+        super::bubble_theme::outgoing_bubble_color(self.out_fill)
     }
 
     /// Text on an outgoing bubble: white, unless a light theme fill needs
     /// dark text.
     pub(crate) fn outgoing_text(&self) -> Hsla {
-        match self.out_fill {
-            Some(fill) if fill_is_light(fill) => Hsla::from(rgb(0x1a1a1a)),
-            _ => Hsla::from(text_on_fill()),
-        }
+        self.out_fill
+            .map_or_else(|| Hsla::from(text_on_fill()), |fill| fill.text())
     }
 }
 
@@ -406,8 +405,15 @@ fn message_bubble_with_quote(
     // Settings → Appearance: font size + bubble/plain style ride on top —
     // `look.text` overrides the text color; plain mode renders the kit
     // `Ghost` variant (no surface, padding, or border).
+    // A theme with several outgoing colors: the bubble shows its slice of
+    // the gradient laid over the message area.
+    let gradient = look
+        .out_fill
+        .filter(|_| row.outgoing && !look.plain)
+        .and_then(|fill| super::bubble_theme::gradient_layer(fill, look.joined_above));
     let bubble_content = component::bubble::BubbleContent::new()
         .relative()
+        .children(gradient)
         // Where a delete's dust starts.
         .child(super::vanish::bubble_tracker(row.id as i64))
         .when(!look.plain, |this| {

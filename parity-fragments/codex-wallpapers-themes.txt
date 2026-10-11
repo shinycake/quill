@@ -1,0 +1,5 @@
+# Gallery with preview, patterns (soft light, inverted), freeform gradients,
+# from file with preview, Blur, Tile, remove with confirmation. Motion: tdesktop
+# draws none on desktop; is_moving is kept and sent back
+# (docs/decisions/codex-wallpapers-themes.md).
+parity:appearance-wallpapers

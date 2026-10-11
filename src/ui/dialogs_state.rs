@@ -37,8 +37,12 @@ pub(crate) struct DialogUi {
     pub(super) import_contacts_dialog: Option<ImportContactsDialog>,
     /// Batch 8: "Block {name}" box opened from the chat action bar.
     pub(super) block_bar_dialog: Option<super::chat_bars::BlockBarDialog>,
-    /// Theme and wallpaper picker for a chat, or a `bg/` link preview.
+    /// Theme and wallpaper picker for a chat.
     pub(super) chat_look_dialog: Option<super::chat_look_ui::ChatLookDialog>,
+    /// The account wallpaper preview (gallery, `bg/` link, file).
+    pub(super) wallpaper_preview: Option<super::wallpaper_preview::WallpaperPreview>,
+    /// An installed wallpaper waiting for "Delete" to be confirmed.
+    pub(super) wallpaper_remove: Option<i64>,
     /// The "Export chat history" box.
     pub(super) chat_export_dialog: Option<super::export_box::ChatExportDraft>,
     /// The running export's progress is not on screen; its result shows as a
@@ -89,6 +93,8 @@ impl DialogUi {
             import_contacts_dialog: None,
             block_bar_dialog: None,
             chat_look_dialog: None,
+            wallpaper_preview: None,
+            wallpaper_remove: None,
             chat_export_dialog: None,
             chat_export_progress_hidden: false,
             chat_export_seen: None,

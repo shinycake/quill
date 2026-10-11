@@ -21,6 +21,9 @@ pub struct ChatsState {
     pub emoji_chat_themes: Vec<EmojiChatTheme>,
     /// `searchBackground` answer for a `bg/` link; `None` until it arrives.
     pub searched_background: Option<Background>,
+    /// One-shot `getBackgroundUrl` answer: the link the wallpaper preview
+    /// copies.
+    pub background_url: Option<String>,
     /// One-shot: a wallpaper request failed; shown in Appearance.
     pub background_error: Option<String>,
     /// Acknowledged (`ok`) chat-look requests (`setChatTheme`,
@@ -93,6 +96,7 @@ impl ChatsState {
             chat_theme_names: HashMap::new(),
             emoji_chat_themes: Vec::new(),
             searched_background: None,
+            background_url: None,
             background_error: None,
             chat_look_oks: 0,
             chat_online_counts: HashMap::new(),

@@ -59,6 +59,9 @@ pub enum ChatsPurpose {
     DeleteChatBackground,
     /// `setChatTheme`. Response is `ok`; `updateChatTheme` carries it.
     SetChatTheme,
+    /// `getBackgroundUrl` for the wallpaper preview's Share. Response is
+    /// `httpUrl` (`Session::chats_state.background_url`).
+    GetBackgroundUrl,
 }
 
 flat_purposes!(Chats(ChatsPurpose) {
@@ -74,4 +77,5 @@ flat_purposes!(Chats(ChatsPurpose) {
     SetChatBackground,
     DeleteChatBackground,
     SetChatTheme,
+    GetBackgroundUrl,
 });

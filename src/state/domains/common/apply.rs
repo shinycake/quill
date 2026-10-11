@@ -185,6 +185,8 @@ impl Session {
                 // line 7458) — the authorized URL after consent.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {
                     self.bots.last_login_url_info = Some(LoginUrlInfo::Open { url });
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBackgroundUrl) {
+                    self.chats_state.background_url = Some(url);
                 }
             }
             // Slice msg-richtext-ai-tools: `fixedText` / `formattedText`

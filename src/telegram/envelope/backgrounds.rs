@@ -6,7 +6,7 @@ use super::message_media::{ParsedFile, parse_file};
 use serde_json::Value;
 
 /// `BackgroundFill`. Colors are 0xRRGGBB.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BackgroundFill {
     Solid(u32),
     /// Two colors blended along `angle` degrees (0-359).
@@ -20,7 +20,7 @@ pub enum BackgroundFill {
 }
 
 /// `BackgroundType`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BackgroundType {
     /// A photo (`is_blurred`: Telegram's "Blur" option).
     Wallpaper {

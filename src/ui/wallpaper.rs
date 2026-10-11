@@ -1,113 +1,103 @@
-//! The chat wallpaper: a preset color, or the account's Telegram wallpaper
-//! (tdesktop `boxes/background_box.cpp`, `window/section_widget.cpp`'s
-//! `ChatBackground`, `ui/chat/chat_theme.cpp`). Patterns are drawn
-//! (`wallpaper_pattern`); blur and motion are not: a blurred photo shows
-//! sharp.
+//! The chat wallpaper: a preset color, the account's Telegram wallpaper or
+//! a chat's own (tdesktop `boxes/background_box.cpp`,
+//! `window/section_widget.cpp`'s `PaintBackground`, `ui/chat/chat_theme.cpp`).
+//!
+//! Solid colors paint as a plain fill. Everything else (gradients,
+//! freeform gradients, patterns, photos with Blur or Tile) is rendered once
+//! per area size on the wallpaper thread (`wallpaper_cache`) and painted
+//! as one image.
 
 use super::app::QuillApp;
-use super::wallpaper_pattern::{PatternInk, pattern_ink, pattern_layer};
+use super::bubble_theme::{OutgoingFill, note_history_area};
+use super::wallpaper_cache::{Slot, wallpaper_layer};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::telegram::envelope::{Background, BackgroundFill, BackgroundType};
 use std::path::PathBuf;
 
 /// What paints behind the message list.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum Wallpaper {
     Solid(u32),
-    /// `angle` is a CSS-style angle (180 = top to bottom).
-    Gradient {
-        top: u32,
-        bottom: u32,
-        angle: i32,
-    },
-    /// A downloaded photo, with the color to show around it.
+    /// A two-colour or freeform gradient.
+    Fill(BackgroundFill),
+    /// A downloaded photo; `blurred` is Telegram's Blur, `tiled` the local
+    /// "Tile background" choice.
     Image {
         path: PathBuf,
-        backdrop: u32,
+        blurred: bool,
+        tiled: bool,
     },
-    /// A pattern file drawn over `base` (a fill).
+    /// A PNG / TGV pattern mixed into a fill.
     Pattern {
-        base: Box<Wallpaper>,
+        fill: BackgroundFill,
         path: PathBuf,
-        ink: PatternInk,
+        /// 0-100; negative also means inverted.
+        intensity: i32,
+        inverted: bool,
     },
 }
 
 impl Wallpaper {
-    /// One color standing for the whole wallpaper (video masks blend into
-    /// it).
+    /// One color standing for the whole wallpaper (shown while the image
+    /// renders; video masks blend into it).
     pub(super) fn backdrop(&self) -> u32 {
         match self {
             Wallpaper::Solid(c) => *c,
-            Wallpaper::Gradient { top, bottom, .. } => BackgroundFill::Gradient {
-                top: *top,
-                bottom: *bottom,
-                angle: 0,
-            }
-            .average(),
-            Wallpaper::Image { backdrop, .. } => *backdrop,
-            Wallpaper::Pattern { base, .. } => base.backdrop(),
+            Wallpaper::Fill(fill) | Wallpaper::Pattern { fill, .. } => fill.average(),
+            Wallpaper::Image { .. } => 0x202020,
         }
     }
-}
 
-/// Telegram's `rotation_angle` (0 = top to bottom, clockwise) as a CSS-style
-/// angle for `linear_gradient`.
-fn gradient_angle(rotation: i32) -> i32 {
-    (180 + rotation).rem_euclid(360)
+    /// The same wallpaper with Blur on or off (photos only).
+    pub(super) fn with_blur(self, blur: bool) -> Self {
+        match self {
+            Wallpaper::Image { path, tiled, .. } => Wallpaper::Image {
+                path,
+                blurred: blur,
+                tiled,
+            },
+            other => other,
+        }
+    }
 }
 
 fn fill_wallpaper(fill: &BackgroundFill) -> Wallpaper {
     match fill {
         BackgroundFill::Solid(color) => Wallpaper::Solid(*color),
-        BackgroundFill::Gradient { top, bottom, angle } => Wallpaper::Gradient {
-            top: *top,
-            bottom: *bottom,
-            angle: gradient_angle(*angle),
-        },
-        // Freeform gradients blend up to four colors; two stops are the
-        // closest this paints.
-        BackgroundFill::Freeform(colors) => match (colors.first(), colors.last()) {
-            (Some(first), Some(last)) if first != last => Wallpaper::Gradient {
-                top: *first,
-                bottom: *last,
-                angle: 180,
-            },
-            (Some(first), _) => Wallpaper::Solid(*first),
-            _ => Wallpaper::Solid(0),
-        },
+        BackgroundFill::Freeform(colors) if colors.len() == 1 => Wallpaper::Solid(colors[0]),
+        other => Wallpaper::Fill(other.clone()),
     }
 }
 
-/// What a Telegram background paints, given the local path of its photo
-/// (`None` while it downloads — the wallpaper is skipped until then).
+/// What a Telegram background paints, given the local path of its photo or
+/// pattern (`None` while it downloads: a photo is skipped until then, a
+/// pattern shows its fill).
 pub(super) fn background_wallpaper(
     background: &Background,
     image_path: Option<&str>,
 ) -> Option<Wallpaper> {
     match &background.kind {
         BackgroundType::Fill(fill) => Some(fill_wallpaper(fill)),
-        // Until the pattern file is on disk the fill shows alone.
         BackgroundType::Pattern {
             fill,
             intensity,
             inverted,
             ..
-        } => {
-            let base = fill_wallpaper(fill);
-            Some(match image_path {
-                Some(path) => Wallpaper::Pattern {
-                    ink: pattern_ink(&fill.colors(), *intensity, *inverted),
-                    base: Box::new(base),
-                    path: PathBuf::from(path),
-                },
-                None => base,
-            })
-        }
-        BackgroundType::Wallpaper { .. } => image_path.map(|path| Wallpaper::Image {
+        } => Some(match image_path {
+            Some(path) => Wallpaper::Pattern {
+                fill: fill.clone(),
+                path: PathBuf::from(path),
+                intensity: *intensity,
+                inverted: *inverted,
+            },
+            None => fill_wallpaper(fill),
+        }),
+        // `is_moving` is not drawn: tdesktop has no motion on desktop.
+        BackgroundType::Wallpaper { blurred, .. } => image_path.map(|path| Wallpaper::Image {
             path: PathBuf::from(path),
-            backdrop: 0x202020,
+            blurred: *blurred,
+            tiled: false,
         }),
         BackgroundType::ChatTheme { .. } => None,
     }
@@ -127,14 +117,14 @@ pub(super) fn resolve_wallpaper(
 }
 
 /// What one chat shows: its wallpaper (with the dark-mode dimming) and the
-/// theme's outgoing bubble color.
+/// theme's outgoing bubble colors.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct ChatLook {
     pub wallpaper: Option<Wallpaper>,
-    /// 0-100, applied only in dark mode.
+    /// 0-100, applied only in dark mode and only to photos.
     pub dimming: u8,
-    /// 0xRRGGBB behind outgoing bubbles, from the chat's emoji theme.
-    pub outgoing_fill: Option<u32>,
+    /// The chat's emoji theme: fill and accent of outgoing bubbles.
+    pub outgoing: Option<OutgoingFill>,
 }
 
 /// The wallpaper of a Telegram background, reading the photo / pattern file
@@ -151,45 +141,42 @@ pub(super) fn session_wallpaper(
     background_wallpaper(background, path)
 }
 
-/// Paint `wallpaper` (and the dark-mode dimming) behind `this`'s children.
+/// Paint `wallpaper` (and, for photos, the dark-mode dimming) behind
+/// `this`'s children. `slot` names the area for the render cache.
 pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
     this: T,
     wallpaper: Option<&Wallpaper>,
     dimming: u8,
+    slot: Slot,
 ) -> T {
-    fn fill<T: Styled>(this: T, wallpaper: &Wallpaper) -> T {
-        match wallpaper {
-            Wallpaper::Solid(color) => this.bg(rgb(*color)),
-            Wallpaper::Gradient { top, bottom, angle } => this.bg(linear_gradient(
-                *angle as f32,
-                linear_color_stop(rgb(*top), 0.),
-                linear_color_stop(rgb(*bottom), 1.),
-            )),
-            Wallpaper::Image { backdrop, .. } => this.bg(rgb(*backdrop)),
-            Wallpaper::Pattern { base, .. } => fill(this, base),
-        }
-    }
-    let Some(wallpaper) = wallpaper else {
-        return this;
+    let history = slot == Slot::History;
+    // The history reports its area every frame: gradient bubbles take
+    // their colors from where they sit in it.
+    let area_probe = || {
+        canvas(|bounds, _, _| note_history_area(bounds), |_, _, _, _| {})
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
     };
-    let mut this = fill(this, wallpaper);
-    match wallpaper {
-        Wallpaper::Image { path, .. } => {
-            this = this.child(
-                img(path.clone())
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                    .object_fit(ObjectFit::Cover),
-            );
-        }
-        Wallpaper::Pattern { path, ink, .. } => {
-            this = this.child(pattern_layer(path.clone(), *ink));
-        }
-        _ => {}
-    }
-    if dimming > 0 {
+    let Some(wallpaper) = wallpaper else {
+        return if history {
+            this.child(area_probe())
+        } else {
+            this
+        };
+    };
+    let mut this = this.bg(rgb(wallpaper.backdrop()));
+    this = match wallpaper {
+        Wallpaper::Solid(_) if history => this.child(area_probe()),
+        Wallpaper::Solid(_) => this,
+        _ => this.child(wallpaper_layer(
+            wallpaper.clone(),
+            slot,
+            history.then_some(note_history_area as fn(Bounds<Pixels>)),
+        )),
+    };
+    if dimming > 0 && matches!(wallpaper, Wallpaper::Image { .. }) {
         this = this.child(
             div()
                 .absolute()
@@ -235,7 +222,7 @@ impl QuillApp {
             .cursor_pointer()
             .bg(cx.theme().muted);
         match paint {
-            Some(paint) => paint_wallpaper(tile, Some(&paint), 0),
+            Some(paint) => paint_wallpaper(tile, Some(&paint), 0, Slot::Thumb),
             None => tile.child(
                 div()
                     .size_full()
@@ -251,18 +238,31 @@ impl QuillApp {
         }
     }
 
+    /// The account's Telegram wallpaper for the current theme, with the
+    /// local Tile choice applied to photos.
+    pub(super) fn account_telegram_wallpaper(&self, dark: bool) -> Option<Wallpaper> {
+        let wallpaper = self.session().and_then(|s| {
+            let background = s.chats_state.default_backgrounds.get(&dark)?;
+            session_wallpaper(s, background)
+        })?;
+        Some(match wallpaper {
+            Wallpaper::Image { path, blurred, .. } => Wallpaper::Image {
+                path,
+                blurred,
+                tiled: self.appearance.wallpaper_tile(dark),
+            },
+            other => other,
+        })
+    }
+
     /// The account-wide wallpaper to paint now.
     pub(super) fn current_wallpaper(&self, cx: &App) -> Option<Wallpaper> {
         use gpui_kit::component::theme::ActiveTheme;
         let dark = cx.theme().is_dark();
-        let telegram = self.session().and_then(|s| {
-            let background = s.chats_state.default_backgrounds.get(&dark)?;
-            session_wallpaper(s, background)
-        });
         resolve_wallpaper(
             self.appearance.wallpaper_rgb,
             self.appearance.telegram_wallpaper,
-            telegram,
+            self.account_telegram_wallpaper(dark),
         )
     }
 
@@ -277,23 +277,21 @@ impl QuillApp {
             let wallpaper = session_wallpaper(session, background)?;
             Some((wallpaper, dimming.clamp(0, 100) as u8))
         });
-        let outgoing_fill = chat_id.and_then(|id| {
-            Some(
-                self.session()?
-                    .chat_theme_settings(id, dark)?
-                    .outgoing_bubble_color(),
-            )
+        let outgoing = chat_id.and_then(|id| {
+            Some(OutgoingFill::from_theme(
+                self.session()?.chat_theme_settings(id, dark)?,
+            ))
         });
         match own {
             Some((wallpaper, dimming)) => ChatLook {
                 wallpaper: Some(wallpaper),
                 dimming: if dark { dimming } else { 0 },
-                outgoing_fill,
+                outgoing,
             },
             None => ChatLook {
                 wallpaper: self.current_wallpaper(cx),
                 dimming: 0,
-                outgoing_fill,
+                outgoing,
             },
         }
     }
@@ -310,7 +308,7 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Wallpaper, background_wallpaper, gradient_angle, resolve_wallpaper};
+    use super::{Wallpaper, background_wallpaper, resolve_wallpaper};
     use quill::telegram::envelope::{Background, BackgroundFill, BackgroundType};
 
     fn bg(kind: BackgroundType) -> Background {
@@ -330,28 +328,21 @@ mod tests {
             background_wallpaper(&bg(BackgroundType::Fill(BackgroundFill::Solid(5))), None),
             Some(Wallpaper::Solid(5))
         );
-        let gradient = BackgroundType::Fill(BackgroundFill::Gradient {
+        let gradient = BackgroundFill::Gradient {
             top: 1,
             bottom: 2,
-            angle: 0,
-        });
+            angle: 45,
+        };
         assert_eq!(
-            background_wallpaper(&bg(gradient), None),
-            Some(Wallpaper::Gradient {
-                top: 1,
-                bottom: 2,
-                angle: 180
-            })
+            background_wallpaper(&bg(BackgroundType::Fill(gradient.clone())), None),
+            Some(Wallpaper::Fill(gradient))
         );
-        let freeform = BackgroundType::Fill(BackgroundFill::Freeform(vec![1, 2, 3, 4]));
-        assert!(matches!(
-            background_wallpaper(&bg(freeform), None),
-            Some(Wallpaper::Gradient {
-                top: 1,
-                bottom: 4,
-                ..
-            })
-        ));
+        let freeform = BackgroundFill::Freeform(vec![1, 2, 3, 4]);
+        assert_eq!(
+            background_wallpaper(&bg(BackgroundType::Fill(freeform.clone())), None),
+            Some(Wallpaper::Fill(freeform)),
+            "all four colours reach the renderer"
+        );
     }
 
     #[test]
@@ -368,16 +359,24 @@ mod tests {
         );
         let drawn = background_wallpaper(&bg(pattern), Some("/tmp/p.tgv")).unwrap();
         assert_eq!(drawn.backdrop(), 9);
-        assert!(matches!(drawn, Wallpaper::Pattern { .. }));
+        assert!(matches!(drawn, Wallpaper::Pattern { intensity: 50, .. }));
         let photo = bg(BackgroundType::Wallpaper {
-            blurred: false,
-            moving: false,
+            blurred: true,
+            moving: true,
         });
         assert_eq!(background_wallpaper(&photo, None), None);
-        assert!(matches!(
+        assert_eq!(
             background_wallpaper(&photo, Some("/tmp/a.jpg")),
-            Some(Wallpaper::Image { .. })
-        ));
+            Some(Wallpaper::Image {
+                path: "/tmp/a.jpg".into(),
+                blurred: true,
+                tiled: false,
+            })
+        );
+        let sharp = background_wallpaper(&photo, Some("/tmp/a.jpg"))
+            .unwrap()
+            .with_blur(false);
+        assert!(matches!(sharp, Wallpaper::Image { blurred: false, .. }));
     }
 
     #[test]
@@ -397,12 +396,5 @@ mod tests {
             Some(Wallpaper::Solid(1))
         );
         assert_eq!(resolve_wallpaper(None, true, None), None);
-    }
-
-    #[test]
-    fn gradient_angles_wrap() {
-        assert_eq!(gradient_angle(0), 180);
-        assert_eq!(gradient_angle(180), 0);
-        assert_eq!(gradient_angle(225), 45);
     }
 }

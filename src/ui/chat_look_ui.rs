@@ -1,7 +1,7 @@
 //! A chat's own look: the emoji chat theme and the chat wallpaper, picked in
 //! one dialog with a live preview (tdesktop `ui/chat/choose_theme_controller`
-//! and `boxes/background_preview_box`). The same dialog previews a `bg/`
-//! link and the "wallpaper from a file" picker lives here too.
+//! and `boxes/background_preview_box`). Account-wide previews (gallery,
+//! `bg/` links, files) are in `wallpaper_preview`.
 //!
 //! tdesktop offers a chat theme or wallpaper in private chats (`addThemeEdit`
 //! in `window_peer_menu.cpp`); groups and channels need boosts there and are
@@ -10,10 +10,11 @@
 //! (`setChatBackground.only_for_self`).
 
 use super::app::QuillApp;
+use super::bubble_theme::{OutgoingFill, outgoing_bubble_color};
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
-use super::synthetic::fill_is_light;
 use super::wallpaper::{paint_wallpaper, session_wallpaper};
+use super::wallpaper_cache::Slot;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -30,8 +31,6 @@ use std::rc::Rc;
 pub(super) enum LookTarget {
     /// Theme and wallpaper of one chat.
     Chat(i64),
-    /// Preview of a `bg/` link (`searchBackground`), applied account-wide.
-    Link { name: String },
 }
 
 /// The dialog's pending choices; nothing is sent until Apply.
@@ -150,33 +149,12 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// `bg/<name>` links: search the background and preview it.
-    pub(super) fn open_background_link(&mut self, name: String, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.chats_state.background_error = None;
-            if live.driver.search_background(&name).is_err() {
-                self.connection.status_note = "could not open the wallpaper link".into();
-                return;
-            }
-        }
-        self.dialogs.chat_look_dialog = Some(ChatLookDialog {
-            target: LookTarget::Link { name },
-            theme: None,
-            background: None,
-            remove_wallpaper: false,
-            both: false,
-            awaiting: None,
-        });
-        cx.notify();
-    }
-
     pub(super) fn close_chat_look_dialog(&mut self, cx: &mut Context<Self>) {
         self.dialogs.chat_look_dialog = None;
         if let Some(session) = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_mut(),
         } {
-            session.chats_state.searched_background = None;
             session.chats_state.background_error = None;
         }
         cx.notify();
@@ -187,9 +165,7 @@ impl QuillApp {
         let Some(dialog) = self.dialogs.chat_look_dialog.clone() else {
             return;
         };
-        let LookTarget::Chat(chat_id) = dialog.target else {
-            return;
-        };
+        let LookTarget::Chat(chat_id) = dialog.target;
         let Some(session) = self.session() else {
             return;
         };
@@ -312,97 +288,26 @@ impl QuillApp {
         }
     }
 
-    /// Apply the previewed `bg/` link as the account wallpaper for the
-    /// current theme.
-    fn apply_background_link(&mut self, cx: &mut Context<Self>) {
-        let Some(background) = self
-            .session()
-            .and_then(|s| s.chats_state.searched_background.clone())
-        else {
-            return;
-        };
-        let dark = cx.theme().is_dark();
-        match self.live.as_mut() {
-            Some(live) => {
-                if let Err(err) = live.driver.set_default_background(background.id, dark) {
-                    self.connection.status_note = format!("could not set the wallpaper: {err:?}");
-                    return;
-                }
-            }
-            None => {
-                if let Some(session) = self.demo_session.as_mut() {
-                    session
-                        .chats_state
-                        .default_backgrounds
-                        .insert(dark, background);
-                }
-            }
-        }
-        self.set_appearance(cx, |a| {
-            a.telegram_wallpaper = true;
-            a.wallpaper_rgb = None;
-        });
-        self.close_chat_look_dialog(cx);
-    }
-
-    /// "From file…": pick an image and make it the account wallpaper for
-    /// the current theme (`inputBackgroundLocal`).
-    pub(super) fn choose_wallpaper_file(&mut self, cx: &mut Context<Self>) {
-        let picker = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Choose Wallpaper".into()),
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = picker.await
-                && let Some(path) = paths.into_iter().next()
-            {
-                let _ = this.update(cx, |this, cx| this.set_wallpaper_from_file(&path, cx));
-            }
-        })
-        .detach();
-    }
-
-    pub(super) fn set_wallpaper_from_file(&mut self, path: &Path, cx: &mut Context<Self>) {
-        if !is_wallpaper_image(path) {
-            self.connection.status_note =
-                "choose a JPEG, PNG or WebP image for the wallpaper".into();
-            cx.notify();
-            return;
-        }
-        let dark = cx.theme().is_dark();
-        let Some(live) = self.live.as_mut() else {
-            return;
-        };
-        if let Err(err) = live
-            .driver
-            .set_default_background_local(&path.to_string_lossy(), dark)
-        {
-            self.connection.status_note = format!("could not set the wallpaper: {err:?}");
-            cx.notify();
-            return;
-        }
-        self.set_appearance(cx, |a| {
-            a.telegram_wallpaper = true;
-            a.wallpaper_rgb = None;
-        });
-    }
-
     /// A miniature conversation showing the look being picked.
-    fn chat_look_preview(
+    pub(super) fn chat_look_preview(
         &self,
         wallpaper: Option<&super::wallpaper::Wallpaper>,
         dimming: u8,
-        outgoing_fill: Option<u32>,
+        outgoing: Option<OutgoingFill>,
         cx: &App,
     ) -> AnyElement {
-        use super::chat_theme::{accent_strong, bg_bubble_incoming, text_bright, text_on_fill};
-        let outgoing_bg = outgoing_fill.map_or_else(accent_strong, rgb);
-        let outgoing_text = match outgoing_fill {
-            Some(fill) if fill_is_light(fill) => Hsla::from(rgb(0x1a1a1a)),
-            _ => Hsla::from(text_on_fill()),
+        use super::chat_theme::{bg_bubble_incoming, text_bright, text_on_fill};
+        // The outgoing bubble sits low in the preview: its slice of a
+        // gradient fill runs from about 60% to 85% down.
+        let outgoing_bg: Background = match outgoing {
+            Some(fill) if fill.is_gradient() => linear_gradient(
+                180.,
+                linear_color_stop(rgb(fill.color_at(0.6)), 0.),
+                linear_color_stop(rgb(fill.color_at(0.85)), 1.),
+            ),
+            other => outgoing_bubble_color(other).into(),
         };
+        let outgoing_text = outgoing.map_or_else(|| Hsla::from(text_on_fill()), |f| f.text());
         let bubble = |text: &'static str| div().px_3().py_1p5().rounded_xl().text_sm().child(text);
         paint_wallpaper(
             div()
@@ -418,6 +323,7 @@ impl QuillApp {
                 .aria_label("Chat preview"),
             wallpaper,
             dimming,
+            Slot::Preview,
         )
         .child(
             div()
@@ -512,7 +418,7 @@ impl QuillApp {
                     } else {
                         cx.theme().border
                     })
-                    .bg(rgb(settings.outgoing_bubble_color()).opacity(0.22))
+                    .bg(rgb(OutgoingFill::from_theme(settings).solid()).opacity(0.22))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -534,7 +440,7 @@ impl QuillApp {
                             .w(px(18.))
                             .h(px(4.))
                             .rounded_full()
-                            .bg(rgb(settings.outgoing_bubble_color())),
+                            .bg(rgb(OutgoingFill::from_theme(settings).solid())),
                     ),
             );
         }
@@ -622,7 +528,7 @@ impl QuillApp {
                             s.chats_state.emoji_chat_themes.iter().find(|t| &t.name == n)
                         })
                     });
-                    let outgoing_fill = pending_theme.map(|t| t.settings(dark).outgoing_bubble_color());
+                    let outgoing_fill = pending_theme.map(|t| OutgoingFill::from_theme(t.settings(dark)));
                     let mut wallpaper = None;
                     let mut dimming = 0;
                     if let Some(id) = state.background {
@@ -749,71 +655,6 @@ impl QuillApp {
                         )
                         .into_any_element();
                     ("Chat colors and wallpaper", body.child(wall).into_any_element(), footer)
-                }
-                LookTarget::Link { name } => {
-                    let session = this.session();
-                    let found = session.and_then(|s| s.chats_state.searched_background.clone());
-                    let error = session.and_then(|s| s.chats_state.background_error.clone());
-                    let wallpaper = found.as_ref().and_then(|bg| {
-                        session.and_then(|s| session_wallpaper(s, bg))
-                    });
-                    let mut body = div().flex().flex_col().gap_3();
-                    match (&found, error) {
-                        (Some(_), _) => {
-                            body = body.child(this.chat_look_preview(
-                                wallpaper.as_ref(),
-                                0,
-                                None,
-                                cx,
-                            ));
-                            body = body.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .child("Sets this wallpaper for your account in the current light or dark theme."),
-                            );
-                        }
-                        (None, Some(error)) => {
-                            body = body.child(
-                                div()
-                                    .id("chat-look-link-error")
-                                    .text_sm()
-                                    .text_color(super::danger_dark())
-                                    .child(format!("This wallpaper link is invalid or has expired ({error}).")),
-                            );
-                        }
-                        (None, None) => {
-                            body = body.child(
-                                div().text_xs().text_color(muted).child(format!("Looking up “{name}”…")),
-                            );
-                        }
-                    }
-                    let can_apply = found.is_some();
-                    let footer = div()
-                        .flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("chat-look-link-cancel")
-                                .label("Cancel")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.close_chat_look_dialog(cx);
-                                    this.close_kit_dialog_if_done(DialogKind::ChatLook, window, cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("chat-look-link-apply")
-                                .label("Set as wallpaper")
-                                .primary()
-                                .disabled(!can_apply)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.apply_background_link(cx);
-                                    this.close_kit_dialog_if_done(DialogKind::ChatLook, window, cx);
-                                })),
-                        )
-                        .into_any_element();
-                    ("Wallpaper", body.into_any_element(), footer)
                 }
             };
             let body = Rc::new(RefCell::new(Some(body)));

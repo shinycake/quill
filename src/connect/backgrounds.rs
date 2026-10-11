@@ -2,10 +2,11 @@
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
 use crate::state::RequestPurpose;
+use crate::telegram::envelope::BackgroundType;
 use crate::telegram::requests::{
-    delete_chat_background, delete_default_background, get_installed_backgrounds,
-    remove_installed_background, search_background, set_chat_background, set_chat_theme,
-    set_default_background, set_default_background_local,
+    delete_chat_background, delete_default_background, get_background_url,
+    get_installed_backgrounds, remove_installed_background, search_background, set_chat_background,
+    set_chat_theme, set_default_background, set_default_background_local,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -39,11 +40,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// `setDefaultBackground` with an installed background: the account's
-    /// wallpaper for the light or dark theme.
+    /// `setDefaultBackground` with an installed or searched background:
+    /// the account's wallpaper for the light or dark theme. `kind` is the
+    /// type the preview settled on (`None` keeps the background's own).
     pub fn set_default_background(
         &mut self,
         background_id: i64,
+        kind: Option<&BackgroundType>,
         for_dark_theme: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
@@ -56,6 +59,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.sender.send_json(&set_default_background(
             extra,
             background_id,
+            kind,
             for_dark_theme,
         )) {
             self.session.requests.take(extra);
@@ -114,10 +118,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// `setDefaultBackground` with an image file from disk.
+    /// `setDefaultBackground` with an image file from disk, blurred or not.
     pub fn set_default_background_local(
         &mut self,
         path: &str,
+        blurred: bool,
         for_dark_theme: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() || path.is_empty() {
@@ -127,10 +132,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SetDefaultBackgroundLocal, None);
-        if let Err(err) =
-            self.sender
-                .send_json(&set_default_background_local(extra, path, for_dark_theme))
-        {
+        if let Err(err) = self.sender.send_json(&set_default_background_local(
+            extra,
+            path,
+            blurred,
+            for_dark_theme,
+        )) {
             self.session.requests.take(extra);
             return Err(err);
         }
@@ -146,6 +153,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.chats_state.searched_background = None;
         let extra = self.session.request(RequestPurpose::SearchBackground, None);
         if let Err(err) = self.sender.send_json(&search_background(extra, name)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// `getBackgroundUrl`: the shareable link; the answer lands in
+    /// `Session::chats_state.background_url`.
+    pub fn get_background_url(
+        &mut self,
+        name: &str,
+        kind: &BackgroundType,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || name.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.chats_state.background_url = None;
+        let extra = self.session.request(RequestPurpose::GetBackgroundUrl, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_background_url(extra, name, kind))
+        {
             self.session.requests.take(extra);
             return Err(err);
         }

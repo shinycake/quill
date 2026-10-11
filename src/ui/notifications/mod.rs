@@ -619,6 +619,7 @@ impl QuillApp {
             | self.drive_folder_invite(cx)
             | self.drain_folder_limit(cx)
             | self.drain_chat_look(cx)
+            | self.drain_wallpaper_preview(cx)
         {
             progressed = true;
         }

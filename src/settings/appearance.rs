@@ -100,6 +100,13 @@ pub struct AppearancePrefs {
     /// behind the messages instead of the preset color.
     #[serde(default)]
     pub telegram_wallpaper: bool,
+    /// tdesktop "Tile background" for photo wallpapers, kept per theme
+    /// (`tileDay` / `tileNight`): the photo repeats at its own size
+    /// instead of covering the area.
+    #[serde(default)]
+    pub wallpaper_tile_day: bool,
+    #[serde(default)]
+    pub wallpaper_tile_night: bool,
     /// Interface scale in percent (tdesktop 100-300%). Scales the kit's
     /// rem size, so text and rem-based spacing grow together; widths drawn
     /// in fixed pixels do not.
@@ -196,6 +203,8 @@ impl Default for AppearancePrefs {
             power_saving: 0,
             wallpaper_rgb: None,
             telegram_wallpaper: false,
+            wallpaper_tile_day: false,
+            wallpaper_tile_night: false,
             interface_scale_pct: INTERFACE_SCALE_DEFAULT,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
@@ -222,6 +231,25 @@ impl Default for AppearancePrefs {
 /// Out-of-range values from hand-edited JSON are sanitized here, at
 /// the single load path: the font size clamps to 12–20 px and night
 /// times wrap into 0..1440.
+impl AppearancePrefs {
+    /// Whether photo wallpapers tile in the light or dark theme.
+    pub fn wallpaper_tile(&self, dark: bool) -> bool {
+        if dark {
+            self.wallpaper_tile_night
+        } else {
+            self.wallpaper_tile_day
+        }
+    }
+
+    pub fn set_wallpaper_tile(&mut self, dark: bool, tile: bool) {
+        if dark {
+            self.wallpaper_tile_night = tile;
+        } else {
+            self.wallpaper_tile_day = tile;
+        }
+    }
+}
+
 pub fn load_appearance_prefs(paths: &AccountPaths) -> AppearancePrefs {
     let mut prefs: AppearancePrefs = load_json_prefs(paths, "appearance_prefs.json");
     prefs.font_size_px = clamp_font_size(prefs.font_size_px);
@@ -307,6 +335,8 @@ mod tests {
             power_saving: crate::power_saving::Flag::StickersChat.bit(),
             wallpaper_rgb: Some(0x0e1621),
             telegram_wallpaper: true,
+            wallpaper_tile_day: true,
+            wallpaper_tile_night: false,
             interface_scale_pct: 150,
             font_size_px: 17,
             bubbles: false,
