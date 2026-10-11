@@ -14,5 +14,4 @@
 1968 src/ui/message_text.rs
 1660 src/ui/profile_panels.rs
 1940 src/ui/search_ui.rs
-1302 src/ui/translate_ui.rs
 1623 src/ui/web_app_ui.rs
