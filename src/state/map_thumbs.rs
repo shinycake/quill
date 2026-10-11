@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 pub const MAP_THUMB_ZOOM: i32 = 15;
 /// Logical size of the tile in a bubble; the request asks for 2x pixels.
 pub const MAP_THUMB_WIDTH: i32 = 320;
-pub const MAP_THUMB_HEIGHT: i32 = 180;
+pub const MAP_THUMB_HEIGHT: i32 = 240;
 /// `getMapThumbnailFile.scale` (1..=3): 2 keeps the tile sharp on Retina.
 pub const MAP_THUMB_SCALE: i32 = 2;
 

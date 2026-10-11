@@ -11,8 +11,8 @@ use super::message_media::{
     video_attachment, video_note_attachment, voice_note_row,
 };
 use super::message_media::{
-    MediaCorners, MediaFrameKind, file_is_downloading, media_content_width, media_frame,
-    photo_display_path, single_media_width, spoiler_cover,
+    MediaCorners, file_is_downloading, media_content_width, photo_display_path, single_media_frame,
+    single_media_width, spoiler_cover,
 };
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,
@@ -612,6 +612,7 @@ fn map_tile_path(
 
 impl QuillApp {}
 
+pub(in crate::ui) mod bubble_width;
 mod reaction_chip_row;
 use reaction_chip_row::reaction_chip_row;
 mod session_history_row;

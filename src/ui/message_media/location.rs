@@ -2,10 +2,11 @@
 
 use super::*;
 
-/// Size the static map tile draws at (the request asks for the same
-/// 16:9 box at 2x).
-const MAP_TILE_WIDTH: f32 = 256.0;
-const MAP_TILE_HEIGHT: f32 = 144.0;
+/// Size the static map tile draws at: Telegram Desktop's `locationSize`
+/// (320x240; `Location::countOptimalSize`). The request asks for the same
+/// box at 2x (`MAP_THUMB_WIDTH` / `MAP_THUMB_HEIGHT`).
+const MAP_TILE_WIDTH: f32 = quill::state::MAP_THUMB_WIDTH as f32;
+const MAP_TILE_HEIGHT: f32 = quill::state::MAP_THUMB_HEIGHT as f32;
 
 /// The downloaded `getMapThumbnailFile` tile with a pin at its centre;
 /// a click opens the place in the browser's map.

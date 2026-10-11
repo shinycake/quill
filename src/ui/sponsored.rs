@@ -162,6 +162,7 @@ pub(super) fn sponsored_message_row(
                     Some((chat_id, message.message_id)),
                     None,
                     MediaCorners::small(),
+                    0,
                     cx,
                 ))
                 .into_any_element(),
@@ -181,6 +182,7 @@ pub(super) fn sponsored_message_row(
                     Some((chat_id, message.message_id)),
                     None,
                     MediaCorners::small(),
+                    0,
                     cx,
                 ))
                 .into_any_element(),
@@ -200,6 +202,7 @@ pub(super) fn sponsored_message_row(
                     Some((chat_id, message.message_id)),
                     None,
                     MediaCorners::small(),
+                    0,
                     cx,
                 ))
                 .into_any_element(),

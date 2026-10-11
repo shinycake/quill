@@ -78,8 +78,47 @@ pub(in crate::ui) fn transcription_row(
     }
 }
 
-/// Voice waveform bars; the first `played` fraction is drawn solid, the
-/// rest faded, so the waveform doubles as the progress indicator.
+/// A voice note's waveform across the whole row, as Telegram Desktop
+/// paints it (`PaintWaveform`): `msgWaveformBar` bars `msgWaveformSkip`
+/// apart, `msgWaveformMin` to `msgWaveformMax` tall, laid out at paint
+/// time over the width the row gives (`bubble_width::waveform_bars`). The
+/// bars left of `progress` (0..=1) take the full color, the rest fade, so
+/// the waveform doubles as the progress indicator.
+pub(in crate::ui) fn waveform_canvas(
+    bars: Vec<u8>,
+    color: Hsla,
+    progress: f32,
+) -> impl IntoElement {
+    use crate::ui::history::bubble_width::{WAVEFORM_HEIGHT, waveform_bars};
+    use quill::bubble_layout::WAVEFORM_BAR;
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let available = f32::from(bounds.size.width).floor() as i32;
+            let active_width = (available as f32 * progress.clamp(0., 1.)).round();
+            let faded = color.opacity(0.35);
+            for bar in waveform_bars(&bars, available) {
+                let lit = (bar.left as f32) < active_width;
+                window.paint_quad(fill(
+                    Bounds::new(
+                        point(
+                            bounds.origin.x + px(bar.left as f32),
+                            bounds.origin.y + px(bar.top),
+                        ),
+                        size(px(WAVEFORM_BAR as f32), px(bar.height as f32)),
+                    ),
+                    if lit { color } else { faded },
+                ));
+            }
+        },
+    )
+    .w_full()
+    .h(px(WAVEFORM_HEIGHT as f32))
+}
+
+/// Voice waveform bars at a fixed pitch (the record bar); the first
+/// `played` fraction is drawn solid, the rest faded. Bubbles use
+/// [`waveform_canvas`], which fills its row.
 pub(in crate::ui) fn waveform_row(
     row_key: u64,
     bars: &[u8],
@@ -152,6 +191,10 @@ pub(in crate::ui) fn voice_note_row(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     seek: &SeekBarView,
+    // The bubble look (plain bubbles have no padding to take off the
+    // row's width) and the time footer's width, 0 when hidden.
+    plain: bool,
+    info_width: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = note.file_id;
@@ -163,6 +206,8 @@ pub(in crate::ui) fn voice_note_row(
     let accent = bubble_accent(outgoing, cx);
     // Phase 4.6: the active row shows elapsed / total (tdesktop-style).
     let total = format_voice_duration(note.duration);
+    // The widest the status line gets ("played / total").
+    let widest_status = format!("{total} / {total}");
     let meta = if downloading_now && !seek.is_playing {
         "Downloading…".to_string()
     } else if active {
@@ -186,14 +231,26 @@ pub(in crate::ui) fn voice_note_row(
         (gpui_kit::assets::IconName::Play, "Play voice message", None)
     };
     let row_key = message_id.0 as u64;
+    // Telegram Desktop: an unplayed incoming note shows its whole
+    // waveform in the active color; otherwise the played part does.
+    let progress = if unheard { 1. } else { seek.fraction() as f32 };
+    // The row is as wide as a full waveform (`Document::countOptimalSize`
+    // for a voice note); the status label is the widest it gets.
+    let status_width = crate::ui::history::bubble_width::longest_line_width(
+        cx,
+        &widest_status,
+        px(12.),
+        FontWeight::NORMAL,
+        0,
+    );
+    let width = crate::ui::history::bubble_width::voice_row_width(status_width, info_width, plain);
     div()
         .id(("voice-note", row_key))
         .mt_1()
         .flex()
         .flex_col()
         .gap_1()
-        .min_w(px(quill::bubble_layout::FILE_MIN_WIDTH as f32))
-        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
+        .w(width)
         .child(
             div()
                 .flex()
@@ -220,7 +277,7 @@ pub(in crate::ui) fn voice_note_row(
                         .flex()
                         .flex_col()
                         .gap_0p5()
-                        .child(waveform_row(row_key, &bars, accent, seek.fraction() as f32))
+                        .child(waveform_canvas(bars, accent, progress))
                         .child(
                             div()
                                 .flex()
@@ -353,14 +410,16 @@ pub(in crate::ui) fn audio_row(
             action_disc(("audio-play", row_key), outgoing, icon, ring, label, cx).on_click(play)
         }
     };
+    // `msgFileMinWidth` to `msgMaxWidth`; the title widens the row between.
+    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(false);
     div()
         .id(("audio", row_key))
         .mt_1()
         .flex()
         .flex_col()
         .gap_1()
-        .min_w(px(quill::bubble_layout::FILE_MIN_WIDTH as f32))
-        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
+        .min_w(min_width)
+        .max_w(max_width)
         .child(
             div().flex().items_center().gap_3().child(disc).child(
                 div()

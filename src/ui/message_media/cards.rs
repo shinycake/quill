@@ -122,12 +122,13 @@ pub(in crate::ui) fn contact_row(
                 }
             }))
     });
+    // Telegram Desktop `Contact::countOptimalSize`: as wide as the name,
+    // phone and buttons need, no floor; the bubble caps it at msgMaxWidth.
     div()
         .id(("contact-row", row_id))
         .flex()
         .flex_col()
-        .min_w(px(quill::bubble_layout::FILE_MIN_WIDTH as f32))
-        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
+        .max_w(crate::ui::history::bubble_width::file_row_bounds(false).1)
         .gap_2()
         .mt_2()
         .px_3()
