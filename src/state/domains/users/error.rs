@@ -37,6 +37,9 @@ impl Session {
                 self.users_state.profile_edit_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));
             }
+            Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
+                self.users_state.profile_photo_emoji_icons_failed = true;
+            }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
                 self.users_state.background_emoji_icons_failed = true;
             }

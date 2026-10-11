@@ -236,6 +236,7 @@ mod profile;
 mod profile_business;
 mod profile_modal;
 mod profile_panels;
+mod profile_photo_sources;
 mod proxy;
 mod proxy_qr;
 mod quick_action_ui;

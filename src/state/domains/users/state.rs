@@ -47,6 +47,11 @@ pub struct UsersState {
     pub background_emoji_icons: Vec<StickerItem>,
     /// The icon request failed; the editor shows a retry hint.
     pub background_emoji_icons_failed: bool,
+    /// `getDefaultProfilePhotoCustomEmojiStickers` answer: the emoji the
+    /// avatar builder offers.
+    pub profile_photo_emoji_icons: Vec<StickerItem>,
+    /// The builder request failed.
+    pub profile_photo_emoji_icons_failed: bool,
     /// Gifts with wearable colors (`getReceivedGifts` with
     /// `exclude_without_colors`), for the color editor.
     pub wearable_gifts: Vec<crate::premium_hub::ReceivedGift>,
@@ -86,6 +91,8 @@ impl UsersState {
             profile_edit_error: None,
             background_emoji_icons: Vec::new(),
             background_emoji_icons_failed: false,
+            profile_photo_emoji_icons: Vec::new(),
+            profile_photo_emoji_icons_failed: false,
             wearable_gifts: Vec::new(),
             wearable_gifts_loaded: false,
             secret_chat_states: HashMap::new(),

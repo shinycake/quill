@@ -14,6 +14,8 @@ pub struct EditProfileDialog {
     pub(crate) bio_input: Entity<TextareaState>,
     pub(crate) username_input: Entity<TextareaState>,
     pub(crate) photo_path_input: Entity<TextareaState>,
+    /// The camera, emoji and video avatar panels.
+    pub(crate) sources: crate::ui::profile_photo_sources::PhotoSources,
 }
 
 impl EditProfileDialog {
@@ -46,6 +48,7 @@ impl EditProfileDialog {
             bio_input: field(window, cx, "Bio", bio),
             username_input: field(window, cx, "username", username),
             photo_path_input: field(window, cx, "/path/to/photo.jpg", ""),
+            sources: Default::default(),
         }
     }
 

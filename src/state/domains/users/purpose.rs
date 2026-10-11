@@ -63,6 +63,9 @@ pub enum UsersPurpose {
     /// `getDefaultBackgroundCustomEmojiStickers` (schema 1.8.68, line
     /// 15154). Response is `stickers`: the reply and profile icon choices.
     GetBackgroundEmojiIcons,
+    /// `getDefaultProfilePhotoCustomEmojiStickers` (schema 1.8.68, line
+    /// 15151). Response is `stickers`: the emoji avatar builder's choices.
+    GetProfilePhotoEmojiIcons,
     /// Slice A6: `removeContacts`. Response is `ok`; the contacts list is
     /// invalidated for refetch (same as `AddContact`).
     RemoveContact,
@@ -133,6 +136,7 @@ flat_purposes!(Users(UsersPurpose) {
     SetAccentColor,
     SetUpgradedGiftColors,
     GetBackgroundEmojiIcons,
+    GetProfilePhotoEmojiIcons,
     RemoveContact,
     ImportContacts,
     ClearImportedContacts,

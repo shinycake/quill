@@ -137,6 +137,8 @@ impl Session {
                     self.accept_topic_default_icons(stickers);
                 } else if purpose == Some(RequestPurpose::GetBackgroundEmojiIcons) {
                     self.accept_background_emoji_icons(stickers);
+                } else if purpose == Some(RequestPurpose::GetProfilePhotoEmojiIcons) {
+                    self.accept_profile_photo_emoji_icons(stickers);
                 } else if purpose == Some(RequestPurpose::GetStoryCustomEmojiStickers) {
                     // Phase 9.2+: story reaction picker visuals — keyed by
                     // sticker id (= custom emoji id).
