@@ -142,6 +142,7 @@ impl QuillApp {
                     fx,
                     title_badge,
                     badge_emoji,
+                    self.bot_verify_icon_path(chat),
                     // Slice chatlist-list-style: Settings → Appearance.
                     ChatListRowStyle::new(
                         self.appearance.preview_lines,

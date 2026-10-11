@@ -261,6 +261,14 @@ impl QuillApp {
                 })
                 .unwrap_or_default()
         };
+        let verify_icon = if thread_header.is_some() || saved || saved_header.is_some() {
+            None
+        } else {
+            actions.and_then(|(chat_id, _, _, _)| {
+                let chat = self.session()?.chats.get(&chat_id.0)?;
+                self.bot_verify_icon_path(chat)
+            })
+        };
         let identity = div()
             .id("conversation-identity")
             .flex()
@@ -278,6 +286,9 @@ impl QuillApp {
                             .items_center()
                             .gap_1()
                             .min_w_0()
+                            .when_some(verify_icon, |this, path| {
+                                this.child(super::bot_verify_icon::bot_verify_icon(path))
+                            })
                             .child(
                                 div()
                                     .font_semibold()

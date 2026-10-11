@@ -61,6 +61,12 @@ pub(crate) fn parse_groups_payload(
                     is_verified: verification_flag("is_verified"),
                     is_scam: verification_flag("is_scam"),
                     is_fake: verification_flag("is_fake"),
+                    bot_icon: int64(
+                        supergroup
+                            .get("verification_status")
+                            .and_then(|v| v.get("bot_verification_icon_custom_emoji_id")),
+                    )
+                    .unwrap_or(0),
                 },
                 member_count: int53(supergroup.get("member_count")).unwrap_or(0).sat_i32(),
                 is_forum: supergroup

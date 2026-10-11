@@ -11,6 +11,8 @@ pub(crate) struct DialogUi {
     /// B10: edit-contact / birthday / personal-channel / share-contact
     /// dialog behind the profile panels.
     pub(super) profile_dialog: Option<ProfileDialog>,
+    /// "Verify accounts" for the owner of a verifying bot.
+    pub(super) bot_verify_dialog: Option<super::bot_verify_dialog::BotVerifyDialog>,
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,
@@ -53,6 +55,7 @@ impl DialogUi {
         Self {
             profile_modal: None,
             profile_dialog: None,
+            bot_verify_dialog: None,
             edit_profile_dialog: None,
             pending_profile_gallery: None,
             add_contact_dialog: None,

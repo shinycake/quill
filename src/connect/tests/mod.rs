@@ -4,6 +4,7 @@ mod admin_extras;
 mod ai_tools;
 mod auth_leftovers;
 mod bot_pending;
+mod bot_verification;
 mod bots;
 mod call_audio;
 mod calls;

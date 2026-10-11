@@ -70,6 +70,7 @@ impl QuillApp {
             avatar
         };
         let name_for_copy = name.clone();
+        let verify_icon = self.user_bot_verify_icon_path(user_id);
         let mut body = div()
             .flex()
             .flex_col()
@@ -85,20 +86,30 @@ impl QuillApp {
                     .gap_0p5()
                     .child(
                         div()
-                            .id(("info-panel-name", user_id as u64))
-                            .text_lg()
-                            .font_semibold()
-                            .cursor_pointer()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.copy_profile_text(
-                                    &name_for_copy,
-                                    "Name copied to clipboard",
-                                    cx,
-                                );
-                            }))
+                            .flex()
+                            .items_center()
+                            .gap_1()
                             .max_w_full()
-                            .truncate()
-                            .child(super::bidi_line::one_line_plain(name.clone())),
+                            .when_some(verify_icon, |this, path| {
+                                this.child(crate::ui::bot_verify_icon::bot_verify_icon(path))
+                            })
+                            .child(
+                                div()
+                                    .id(("info-panel-name", user_id as u64))
+                                    .text_lg()
+                                    .font_semibold()
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.copy_profile_text(
+                                            &name_for_copy,
+                                            "Name copied to clipboard",
+                                            cx,
+                                        );
+                                    }))
+                                    .max_w_full()
+                                    .truncate()
+                                    .child(super::bidi_line::one_line_plain(name.clone())),
+                            ),
                     )
                     .child(
                         div()
@@ -122,6 +133,16 @@ impl QuillApp {
         // Rows copy on tap and in the right-click menu (B10).
         if let Some(card) = self.profile_details_card(user_id, cx) {
             body = body.child(card);
+        }
+        // The verifying bot's description (tdesktop `addBotVerify`).
+        if let Some(verification) = session.and_then(|s| s.user_bot_verification(user_id))
+            && let Some(text) = quill::bot_verification::profile_description(
+                Some(verification),
+                user.as_ref().is_some_and(|u| u.has_main_web_app),
+            )
+        {
+            body =
+                body.child(self.bot_verification_row(text, verification.icon_custom_emoji_id, cx));
         }
         if let Some(actions) = self.profile_contact_actions(user_id, cx) {
             body = body.child(actions);
@@ -310,6 +331,9 @@ impl QuillApp {
             .and_then(|s| s.chat_photo_path(chat_id))
             .and_then(|path| sandboxed_display_path(path, &roots));
         let noun = if is_channel { "subscribers" } else { "members" };
+        let verify_icon = session
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .and_then(|chat| self.bot_verify_icon_path(chat));
         let mut body = div()
             .flex()
             .flex_col()
@@ -325,11 +349,21 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         div()
-                            .text_lg()
-                            .font_semibold()
+                            .flex()
+                            .items_center()
+                            .gap_1()
                             .max_w_full()
-                            .truncate()
-                            .child(super::bidi_line::one_line_plain(title.clone())),
+                            .when_some(verify_icon, |this, path| {
+                                this.child(crate::ui::bot_verify_icon::bot_verify_icon(path))
+                            })
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .text_lg()
+                                    .font_semibold()
+                                    .truncate()
+                                    .child(super::bidi_line::one_line_plain(title.clone())),
+                            ),
                     )
                     .child(
                         div()
@@ -387,6 +421,14 @@ impl QuillApp {
                     )
                     .child(div().text_sm().child(description)),
             );
+        }
+        if let Some(verification) =
+            session.and_then(|s| s.supergroup_bot_verification(supergroup_id))
+            && let Some(text) =
+                quill::bot_verification::profile_description(Some(verification), false)
+        {
+            body =
+                body.child(self.bot_verification_row(text, verification.icon_custom_emoji_id, cx));
         }
         // Phase A1: slow-mode admin control (`setChatSlowModeDelay`,
         // schema 1.8.67 line 13551 — allowed values 0/5/10/30/60/300/900/

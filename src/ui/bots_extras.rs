@@ -150,6 +150,11 @@ impl QuillApp {
                 column = column.child(div().px_2().text_xs().text_color(muted).child(about));
             }
         }
+        // The owner of a verifying bot: "Verify accounts" (tdesktop's
+        // bot edit screen, shown when `verifierSettings` is set).
+        if let Some(row) = self.bot_verify_accounts_row(user_id, cx) {
+            column = column.child(row);
+        }
         let on = quill::fast_buttons::is_enabled(user_id);
         column = column.child(
             div()

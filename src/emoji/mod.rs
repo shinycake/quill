@@ -484,6 +484,8 @@ impl Session {
             {
                 ids.push(id);
             }
+            // The verifying bot's icon before the title.
+            ids.extend(self.chat_bot_verification_icon(chat));
         }
         if let Some(options) = &self.stickers.message_reaction_options {
             ids.extend(options.all().into_iter().filter_map(|choice| match choice {

@@ -123,6 +123,10 @@ pub enum BotsPurpose {
     /// `sendWebAppCustomRequest`; the app's `req_id` waits in
     /// `Session::web_apps.custom_requests`.
     SendWebAppCustomRequest,
+    /// `setMessageSenderBotVerification` / `removeMessageSenderBotVerification`
+    /// from the owner's "Verify Accounts" list. Response is `ok`.
+    SetMessageSenderBotVerification,
+    RemoveMessageSenderBotVerification,
 }
 
 flat_purposes!(Bots(BotsPurpose) {
@@ -144,4 +148,6 @@ flat_purposes!(Bots(BotsPurpose) {
     SendWebAppData,
     GetGrossingWebAppBots,
     SendWebAppCustomRequest,
+    SetMessageSenderBotVerification,
+    RemoveMessageSenderBotVerification,
 });
