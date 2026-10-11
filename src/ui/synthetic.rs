@@ -291,6 +291,9 @@ pub(crate) struct MessageChrome {
     /// `Photo::countCurrentSize`): captions, reactions and the footer wrap
     /// to it instead of widening the bubble.
     pub media_width: Option<Pixels>,
+    /// The bubble's outer width limit when a monospace block needs more
+    /// than `msgMaxWidth` (`bubble_width::bubble_width_limit`).
+    pub max_width: Option<Pixels>,
 }
 
 /// Width the time/receipt footer needs inside a bubble (`21:44 ✓✓` at
@@ -387,6 +390,7 @@ fn message_bubble_with_quote(
         actions_span,
         bottom_bar,
         media_width,
+        max_width,
     } = chrome;
     let group: SharedString = format!("message-row-{}", row.id).into();
     let alignment = if row.outgoing {
@@ -475,8 +479,9 @@ fn message_bubble_with_quote(
         .when_some(extra, |this, el| this.child(el))
         .relative()
         // Telegram Desktop `msgMaxWidth`: the widest a bubble gets; the
-        // bubble's own 80% cap still applies on narrow panes.
-        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
+        // bubble's own 80% cap still applies on narrow panes. A wide
+        // monospace block lifts it (`monospaceMaxWidth`).
+        .max_w(max_width.unwrap_or(px(quill::bubble_layout::MSG_MAX_WIDTH as f32)))
         .line_height(relative(1.4))
         .when(media_led && !look.plain, |this| this.p_0())
         .when_some(media_width, |this, width| {

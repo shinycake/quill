@@ -10,7 +10,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::settings::CallPrefs;
-use quill::state::{ActiveCall, HistoryMessage, Session};
+use quill::state::{ActiveCall, Session};
 use quill::telegram::envelope::{
     CallDiscardReason, CallState, ChatKind, MessageContent, ParsedMessage, call_entry_label,
 };
@@ -778,49 +778,6 @@ impl QuillApp {
     /// single peer — `None` hides "Call again".
     pub(super) fn recent_call_peer(&self, chat_id: ChatId) -> Option<(i64, String)> {
         call_message_peer(self.session(), chat_id)
-    }
-
-    /// Phase C2i: `messageCall` service row — the reason-aware label
-    /// (Telegram X `TD.getCallName` style) with duration and a "Call
-    /// again" button for 1:1 chats.
-    pub(super) fn call_message_row(
-        message: &HistoryMessage,
-        is_video: bool,
-        discard_reason: &CallDiscardReason,
-        duration: i32,
-        session: Option<&Session>,
-        cx: &mut Context<QuillApp>,
-    ) -> impl IntoElement {
-        let label = call_entry_label(is_video, discard_reason, duration, message.is_outgoing);
-        let peer = call_message_peer(session, message.chat_id);
-        let missed = discard_reason == &CallDiscardReason::Missed;
-        div()
-            .id(("call-message-row", message.id.0 as u64))
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_3()
-            .py_1()
-            .child(div().text_sm().child(if is_video { "📹" } else { "📞" }))
-            .child(
-                div().flex().flex_col().min_w_0().flex_1().child(
-                    div()
-                        .text_sm()
-                        .when(missed, |this| this.text_color(danger_soft()))
-                        .child(label),
-                ),
-            )
-            .child(if let Some((user_id, _)) = peer {
-                Button::new(("call-message-again", message.id.0 as u64))
-                    .label("Call again")
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.call_again(user_id, is_video, cx);
-                    }))
-                    .into_any_element()
-            } else {
-                div().into_any_element()
-            })
     }
 
     /// Phase C2i: busy-decline banner for `call_busy_declined` — the

@@ -317,6 +317,8 @@ pub(in crate::ui) fn audio_row(
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     seek: &SeekBarView,
+    // The plain look: no bubble padding to leave out of the row's bounds.
+    plain: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = audio.file_id;
@@ -411,7 +413,7 @@ pub(in crate::ui) fn audio_row(
         }
     };
     // `msgFileMinWidth` to `msgMaxWidth`; the title widens the row between.
-    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(false);
+    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(plain);
     div()
         .id(("audio", row_key))
         .mt_1()

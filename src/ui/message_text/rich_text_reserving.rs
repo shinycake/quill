@@ -410,15 +410,10 @@ pub(in crate::ui) fn link_preview_card(
     } else {
         preview.display_url.clone()
     };
+    let small = font * (12.0 / 14.0);
     let thumb = preview.photo.as_ref().map(|photo| {
-        preview_thumb(
-            row_id,
-            photo,
-            preview.show_large_media,
-            files,
-            downloading,
-            media_roots,
-        )
+        let frame = preview_frame(preview, photo, font, small, cx);
+        preview_thumb(row_id, photo, frame, files, downloading, media_roots)
     });
     // MED4: embedded players get a play/duration badge over the
     // thumbnail (schema:4434/:4443/:4452). Tap opens the embed URL in
@@ -475,7 +470,7 @@ pub(in crate::ui) fn link_preview_card(
                 strip = strip.child(preview_thumb(
                     row_id * 100 + index as u64,
                     thumb_photo,
-                    false,
+                    ThumbFrame::Fixed(px(72.), px(72.)),
                     files,
                     downloading,
                     media_roots,
@@ -488,7 +483,6 @@ pub(in crate::ui) fn link_preview_card(
     // Settings → Appearance: the card copy scales with the message
     // font size — the title keeps body size, the meta lines stay one
     // step smaller (12px vs 14px at the default).
-    let small = font * (12.0 / 14.0);
     let mut copy = div()
         .id(("link-preview-copy", row_id))
         .flex()
@@ -597,6 +591,52 @@ pub(in crate::ui) fn link_preview_card(
             )
         })
         .into_any_element()
+}
+
+/// The box of a link preview's picture, as `WebPage::countCurrentSize`
+/// sizes it: the large photo across the card's inside
+/// (`bubble_width::preview_photo_frame`), the small thumbnail as tall as
+/// the copy beside it up to five lines and at most square
+/// (`bubble_width::article_thumb`).
+fn preview_frame(
+    preview: &quill::telegram::envelope::LinkPreview,
+    photo: &quill::telegram::envelope::PhotoContent,
+    font: Pixels,
+    small: Pixels,
+    cx: &App,
+) -> ThumbFrame {
+    use crate::ui::history::bubble_width::{
+        ArticleCopy, article_thumb, preview_inner_max, preview_photo_frame,
+    };
+    use crate::ui::history::text_measure::longest_line_width;
+    let dims = photo
+        .largest_size()
+        .or_else(|| photo.thumb_size())
+        .map_or((0, 0), |size| (size.width, size.height));
+    if preview.show_large_media {
+        let (w, h) = preview_photo_frame(dims);
+        return ThumbFrame::Fill {
+            min_width: px(w as f32),
+            ratio: w as f32 / h.max(1) as f32,
+        };
+    }
+    let measure =
+        |text: &str, size: Pixels| longest_line_width(cx, text, size, FontWeight::NORMAL, 0);
+    let copy = ArticleCopy {
+        site: measure(&preview.site_name, small),
+        title: measure(&preview.title, font),
+        description: preview
+            .description
+            .split('\n')
+            .filter(|_| !preview.description.is_empty())
+            .map(|line| measure(line, small))
+            .collect(),
+        // The bubble's line height (`relative(1.4)`).
+        title_line: f32::from(font) * 1.4,
+        small_line: f32::from(small) * 1.4,
+    };
+    let (w, h) = article_thumb(dims, &copy, preview_inner_max());
+    ThumbFrame::Fixed(px(w as f32), px(h as f32))
 }
 
 /// M2: render a `messageRichMessage` (schema 1.8.67, line 5143) as a stack

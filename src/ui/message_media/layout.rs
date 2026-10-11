@@ -12,16 +12,6 @@ pub(in crate::ui) enum MediaFrameKind {
     Gif,
 }
 
-/// Display frame for a photo, video or GIF in a bubble without a caption;
-/// see [`media_frame_for`].
-pub(in crate::ui) fn media_frame(
-    kind: MediaFrameKind,
-    width: i32,
-    height: i32,
-) -> (Pixels, Pixels) {
-    media_frame_for(kind, width, height, 0)
-}
-
 /// Display frame for a photo, video or GIF in a bubble, as Telegram
 /// Desktop sizes it (`quill::bubble_layout::photo_current` /
 /// `clip_current` at the bubble's widest): fitted into 430x430 (GIFs 320),

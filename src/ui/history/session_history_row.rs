@@ -148,24 +148,6 @@ pub(in crate::ui) fn session_history_row(
         )
         .into_any_element();
     }
-    // Phase C2i: `messageCall` service row (schema 1.8.67, line 5277)
-    // — reason-aware label + "Call again" for 1:1 chats.
-    if let MessageContent::Call {
-        is_video,
-        discard_reason,
-        duration,
-    } = &message.content
-    {
-        return QuillApp::call_message_row(
-            message,
-            *is_video,
-            discard_reason,
-            *duration,
-            session,
-            cx,
-        )
-        .into_any_element();
-    }
     let on_fill = message.is_outgoing && !look.plain;
     let quote = reply_header.map(|header| {
         let thumb = QuillApp::reply_thumb_path(&header, files, media_roots);
@@ -228,12 +210,6 @@ pub(in crate::ui) fn session_history_row(
     // Telegram Desktop widens a picture to its caption's longest line (the
     // time's skip block included when the caption ends the bubble).
     let info_width = footer_meta.reserve(footer_reserve(message.is_outgoing));
-    let caption_w = bubble_width::caption_width(
-        cx,
-        bubble_width::caption_of(&message.content),
-        look.font,
-        (!caption_above_media(&message.content)).then_some(info_width),
-    );
     let chips = message.reaction_chips();
     // Telegram Desktop shows who reacted (small avatars) instead of a
     // count when there are at most three known reactors, outside channels.
@@ -314,6 +290,13 @@ pub(in crate::ui) fn session_history_row(
             cx,
         )
     });
+    let tail = bubble_width::caption_tail(message, reply_bar_el.is_some(), unix_ms_now());
+    let caption_w = bubble_width::caption_width(
+        cx,
+        &message.content,
+        look.font,
+        bubble_width::caption_ends_bubble(tail).then_some(info_width),
+    );
     // A spoiler stays covered until clicked; once revealed, it renders as
     // the plain media it is.
     let media_revealed =
@@ -405,6 +388,7 @@ pub(in crate::ui) fn session_history_row(
                 .filter(|s| s.media.user_downloads.contains(&doc.file_id.0))
                 .map(|s| s.media.paused_downloads.contains(&doc.file_id.0)),
             None,
+            look.plain,
             cx,
         )),
         MessageContent::Sticker(sticker) => {
@@ -454,6 +438,7 @@ pub(in crate::ui) fn session_history_row(
             downloading,
             media_roots,
             seek_bar.as_ref().expect("audio row always has a seek view"),
+            look.plain,
             cx,
         )),
         MessageContent::Animation(animation) => Some(animation_attachment(
@@ -542,6 +527,7 @@ pub(in crate::ui) fn session_history_row(
             session
                 .and_then(|s| s.user_photo_path(contact.user_id))
                 .and_then(|path| sandboxed_display_path(path, media_roots)),
+            look.plain,
             cx,
         )),
         MessageContent::Dice(dice) => Some(dice_row(
@@ -692,6 +678,22 @@ pub(in crate::ui) fn session_history_row(
             look.font,
             cx,
         )),
+        // `HistoryView::Call`: a card in an ordinary bubble.
+        MessageContent::Call {
+            is_video,
+            discard_reason,
+            duration,
+        } => Some(call_card(
+            message.id,
+            message.is_outgoing,
+            *is_video,
+            discard_reason,
+            *duration,
+            message.date,
+            super::super::calls::call_message_peer(session, message.chat_id).map(|(id, _)| id),
+            look.plain,
+            cx,
+        )),
         _ => None,
     };
     // MED4: caption element + position (`show_caption_above_media`,
@@ -702,23 +704,8 @@ pub(in crate::ui) fn session_history_row(
     let caption_below_el: Option<AnyElement>;
     let caption_reserved: bool;
     {
-        let caption: Option<(&str, &[TextEntity])> = match &message.content {
-            MessageContent::Photo(photo) => (!photo.caption.is_empty())
-                .then_some((photo.caption.as_str(), photo.caption_entities.as_slice())),
-            MessageContent::Document(doc) => (!doc.caption.is_empty())
-                .then_some((doc.caption.as_str(), doc.caption_entities.as_slice())),
-            MessageContent::Animation(animation) => (!animation.caption.is_empty()).then_some((
-                animation.caption.as_str(),
-                animation.caption_entities.as_slice(),
-            )),
-            MessageContent::Video(video) => (!video.caption.is_empty())
-                .then_some((video.caption.as_str(), video.caption_entities.as_slice())),
-            MessageContent::VoiceNote(note) => (!note.caption.is_empty())
-                .then_some((note.caption.as_str(), note.caption_entities.as_slice())),
-            MessageContent::Audio(audio) => (!audio.caption.is_empty())
-                .then_some((audio.caption.as_str(), audio.caption_entities.as_slice())),
-            _ => None,
-        };
+        let caption = Some(bubble_width::caption_parts(&message.content))
+            .filter(|(caption, _)| !caption.is_empty());
         let below = !caption_above_media(&message.content);
         let el = caption.map(|(caption_text, caption_entities)| {
             rich_text_reserving(
@@ -729,8 +716,12 @@ pub(in crate::ui) fn session_history_row(
                 revealed,
                 // Settings → Appearance: caption follows the message font size.
                 look.font,
-                // Captions don't resolve custom emoji in this slice (text fallback).
-                &HashMap::new(),
+                &super::super::message_text::custom_emoji_paths(
+                    caption_entities,
+                    session.map_or(&[], |s| s.stickers.emoji.custom_emoji_stickers.as_slice()),
+                    files,
+                    media_roots,
+                ),
                 &HashMap::new(),
                 (below && reserve_footer)
                     .then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
@@ -885,6 +876,7 @@ pub(in crate::ui) fn session_history_row(
         })
         .flatten()
         .map(|width| media_content_width(width, info_width));
+    let max_width = bubble_width::message_width_limit(cx, content, look.font, look.plain);
     let mut more_btn = Some(more_btn);
     let mut avatar_link = avatar_link(&sender_avatar, message, cx);
     let mut chrome = |footer_inline: bool| {
@@ -914,6 +906,7 @@ pub(in crate::ui) fn session_history_row(
         }
         chrome.media_led = media_led;
         chrome.media_width = media_width;
+        chrome.max_width = max_width;
         chrome.actions = more_btn.take();
         chrome.actions_span = actions_span;
         chrome.bottom_bar = reply_bar_el.take();
@@ -949,7 +942,9 @@ pub(in crate::ui) fn session_history_row(
     if let Some(text_body) = text_body {
         return session_bubble_rich(
             message.id.0 as u64,
-            chrome(text_reserved && extra_is_empty),
+            chrome(
+                (text_reserved || matches!(content, MessageContent::Call { .. })) && extra_is_empty,
+            ),
             message.is_outgoing,
             text_body,
             extra,

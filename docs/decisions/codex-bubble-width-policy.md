@@ -83,23 +83,92 @@ Per media kind (`history/view/media/*.cpp`, `ui/chat/chat.style`,
 Unchanged because they already matched: text bubbles (flex shrink-wrap,
 430 cap), albums (`media_width` from the grid), stickers, round videos,
 reactions (wrap at the bubble, widen it up to 430), replies/forwards (widen
-only), link preview, game and invoice cards (widen the text bubble).
+only), game and invoice cards (widen the text bubble).
 
-## Not done
+## Follow-ups (`codex/bubble-layout-followups`)
 
-- Monospace blocks widening a text bubble past 430 (`monospaceMaxWidth`).
-- The link preview's large photo at the bubble's inner width
-  (`Photo` attached to a `WebPage`), and its small thumbnail's
-  `ArticleThumbWidth`.
-- Calls as a bubble card (`historyCallWidth`); Quill shows a service-like
-  row.
-- Documents and music in the plain look keep the padded bounds (the
-  renderers don't receive the look; 26 px).
-- Inline video decode size (`InlineTile::media`) uses the uncaptioned
-  frame; a caption-widened clip is drawn slightly upscaled from its
-  decoded frames.
-- Caption measuring ignores entity styling (bold runs are measured at the
-  normal weight) and custom emoji (measured as their text).
+The six items the first pass left open, each checked against Telegram
+Desktop again:
+
+- Monospace. `Message::_bubbleWidthLimit` is the widest of `msgMaxWidth`
+  and `monospaceMaxWidth()` (the text's `countMaxMonospaceWidth`: the
+  widest `pre` block, its quote padding included, plus `msgPadding`).
+  `text_measure::widest_pre_block` measures each `pre` run's longest line
+  in the monospace face, with the language label at the size
+  `pre_block` draws it and the block's own chrome (`px_2` twice and the
+  copy button's `pr_6`, 40 px, which happens to equal lib_ui's
+  `quoteMinWidth` of 40 for `historyTextStyle.pre`).
+  `bubble_width::bubble_width_limit` turns that into the bubble's outer
+  limit (`MessageChrome::max_width`, read by `synthetic.rs` in place of
+  the fixed 430). Inline `code` doesn't count, as in lib_ui. The kit
+  bubble's share of the pane still caps it, so on a narrow pane the code
+  wraps as before. Deviation: Quill's padded bubble is 26 px of chrome
+  where Telegram Desktop's `msgPadding` is 22, so the limit is 4 px wider
+  than Telegram Desktop's for the same code; it is what keeps the line
+  unwrapped in Quill's box.
+- Link preview pictures (`WebPage::countOptimalSize` /
+  `countCurrentSize`). The large photo is a `Photo` attach laid out at the
+  card's inner width: `preview_photo_frame` takes the photo's optimal
+  width (`photo_optimal`, at least 200, 430 for a landscape picture),
+  capped at the card's inside at the widest bubble (430 − 26 − 18 = 386),
+  and its frame there; the card draws it at least that wide and fills a
+  wider card at the same proportions (`ThumbFrame::Fill`, a box with the
+  ratio and the picture covering it). It was a fixed 240×140. The small
+  article thumbnail follows `ArticleThumbWidth` (proportional in its box,
+  never wider than tall) in a box that starts five lines tall and drops a
+  line at a time while the copy beside it has fewer lines
+  (`article_thumb`); the copy's lines are estimated by wrapping the
+  measured site name, title (two lines at most) and description at what
+  the thumbnail leaves of the widest card. Telegram Desktop's lines are
+  all `UnitedLineHeight`; Quill's site and description lines are smaller
+  than the title's, so the box is the real height of that many lines. It
+  was a fixed 72×72: the demo's three-line copy now gets a 53×53 thumb and
+  its description no longer wraps.
+- Calls (`HistoryView::Call`). `messageCall` now renders as an ordinary
+  bubble holding a card `historyCallWidth` (240) wide: the title in
+  semibold (`Data::MediaCall::Text`: Incoming / Outgoing / Missed /
+  Cancelled / Declined, "video" variants; a declined outgoing call reads
+  "Outgoing call", as there), an arrow and the status line (the time,
+  plus ", 6 min 12 s" / ", 45 seconds" when the call connected,
+  `lng_call_duration_info` with `FormatDurationWords`), and the phone or
+  camera icon in the corner, which calls back in a 1:1 chat. The arrow
+  is the bundled up / down arrow turned 45° (the Lucide diagonal arrows
+  aren't in the app's icon bundle, and `main.rs` is a no-change hotspot),
+  red for missed and declined calls, green otherwise (on an outgoing
+  bubble, the bubble's text color). The time footer sits inline at the
+  bottom right like a text bubble's. The bubble brings the usual reply,
+  react and menu actions with it. The service-like `call_message_row` is
+  gone (`message_media/call.rs` has the card).
+- The plain look. `document_chip`, `audio_row` and `contact_row` take the
+  look, so `file_row_bounds(plain)` drops the 26 px padding allowance a
+  bubble-less row doesn't have: 268..430 in the plain look, 242..404 in a
+  padded bubble. Before, plain rows got the padded bounds, 26 px short of
+  Telegram Desktop's widths.
+- Inline video decoding. `InlineTile::media` takes the caption width and
+  sizes the tile with `media_frame_for`, the frame the bubble draws, so a
+  caption-widened clip is decoded for its wider frame (a 320×180 clip
+  under a 380 px caption: 402 px at 1x instead of 320). `inline_frame`
+  measures the caption as if it ended the bubble (skip block included),
+  an upper bound of the drawn frame, so pictures are never decoded
+  smaller than drawn. The 800 px `INLINE_MAX_EDGE` cap still applies at
+  2x.
+- Caption measuring (`text_measure`). Captions are measured run by run
+  from `styled_runs`, each in the face it renders in: bold and italic in
+  those faces, `code` and `pre` in the monospace font, a custom emoji as
+  the em-space placeholder it occupies (`EMOJI_PLACEHOLDER`) rather than
+  its fallback text, blocks with their chrome and on lines of their own.
+  Captions now also resolve custom emoji stickers (they rendered the
+  fallback text before), so the measured placeholder is what is drawn.
+  The skip block joins the last line only when the caption ends the
+  bubble (`caption_tail` / `caption_ends_bubble`): not when the caption
+  is above the media, when reactions, an inline keyboard, a self-destruct
+  or auto-delete badge or the replies bar follow, when views or a
+  signature put the time on its own line, or when the last line is
+  right-to-left. Before, it was added to every caption below the media.
+  Measuring is cheap: glyph advances are cached per font, size and
+  character (bounded at 16k entries), captions are measured only when
+  present, and the monospace pass returns before parsing runs unless the
+  text has a `pre` entity.
 
 ## Verified
 
@@ -111,3 +180,18 @@ only), link preview, game and invoice cards (widen the text bubble).
   `ready-link-preview`, `ready-reactions`, `ready-downloads`, `ready-video`
   and `ready-showcase` before and after, in a scratch directory (not
   committed), compared side by side.
+- Follow-ups: `text_measure::tests` (bold and italic faces, a custom emoji
+  at its placeholder, newlines and the skip block, block chrome and the
+  time after a closing block, the widest `pre` block and its label),
+  `bubble_width::tests` (plain file bounds, the monospace limit, when the
+  skip block joins a caption, `ArticleThumbWidth`, the article box at
+  three and five lines and for a portrait thumbnail, the large photo at
+  386×259 and the 200 floor), `call::tests` (titles, duration words,
+  status line), `inline_video::tests` (a caption-widened clip decodes at
+  402). Captures before and after of `ready-text-entities` (with a
+  temporary, uncommitted fixture adding a long `preCode` line and three
+  call messages; at 1700 px wide the code line fits unwrapped),
+  `ready-link-preview`, `ready-showcase` (the large preview photo at
+  386×259), and `ready-video`, `ready-gifs`, `ready-audio`,
+  `ready-downloads` (pixel-identical before and after), plus
+  `ready-audio` and `ready-downloads` with the plain look forced locally.
