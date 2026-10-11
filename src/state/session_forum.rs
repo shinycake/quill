@@ -138,12 +138,12 @@ impl Session {
     /// the chat has no photo or the file is not local yet.
     pub fn chat_photo_path(&self, chat_id: ChatId) -> Option<&str> {
         let file_id = self.chats.get(&chat_id.0)?.photo_file_id?;
-        self.files.get(&file_id)?.usable_path()
+        self.media.files.get(&file_id)?.usable_path()
     }
 
     pub fn user_photo_path(&self, user_id: i64) -> Option<&str> {
         let file_id = self.users.get(&user_id)?.photo_small_file_id;
-        self.files.get(&file_id)?.usable_path()
+        self.media.files.get(&file_id)?.usable_path()
     }
 
     /// Parity slice: `chat.photo.small` file ids for every known chat that
@@ -171,16 +171,16 @@ impl Session {
     /// owner or download state changed since the last call (plus one full
     /// pass after a new session or an auth change). Drains the due set.
     pub fn take_due_chat_list_photos(&mut self) -> Vec<FileId> {
-        if std::mem::take(&mut self.avatar_rescan) {
-            self.avatar_downloads_due.clear();
+        if std::mem::take(&mut self.media.avatar_rescan) {
+            self.media.avatar_downloads_due.clear();
             let mut ids = self.chat_list_photo_file_ids();
             ids.sort_by_key(|id| id.0);
             ids.dedup();
             return ids;
         }
-        let due = std::mem::take(&mut self.avatar_downloads_due);
+        let due = std::mem::take(&mut self.media.avatar_downloads_due);
         due.into_iter()
-            .filter(|id| self.avatar_file_refs.contains_key(id))
+            .filter(|id| self.media.avatar_file_refs.contains_key(id))
             .map(FileId)
             .filter(|id| self.should_download(*id))
             .collect()
@@ -195,23 +195,23 @@ impl Session {
             return;
         }
         if let Some(old) = old
-            && let Some(refs) = self.avatar_file_refs.get_mut(&old)
+            && let Some(refs) = self.media.avatar_file_refs.get_mut(&old)
         {
             *refs -= 1;
             if *refs == 0 {
-                self.avatar_file_refs.remove(&old);
+                self.media.avatar_file_refs.remove(&old);
             }
         }
         if let Some(new) = new {
-            *self.avatar_file_refs.entry(new).or_default() += 1;
-            self.avatar_downloads_due.insert(new);
+            *self.media.avatar_file_refs.entry(new).or_default() += 1;
+            self.media.avatar_downloads_due.insert(new);
         }
     }
 
     /// A file's download state changed; queue it if it is an avatar.
     pub(crate) fn note_avatar_file_changed(&mut self, file_id: i32) {
-        if self.avatar_file_refs.contains_key(&file_id) {
-            self.avatar_downloads_due.insert(file_id);
+        if self.media.avatar_file_refs.contains_key(&file_id) {
+            self.media.avatar_downloads_due.insert(file_id);
         }
     }
 

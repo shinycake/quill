@@ -49,6 +49,7 @@ impl QuillApp {
         let file_id = item.video_file_id?;
         let roots = self.media_display_roots();
         self.session()?
+            .media
             .files
             .get(&file_id.0)
             .and_then(|file| file.usable_path())
@@ -139,7 +140,9 @@ impl QuillApp {
                     .viewer
                     .current()
                     .and_then(|item| item.video_file_id)
-                    .is_some_and(|id| file_is_downloading(id, &session.files, &session.downloading))
+                    .is_some_and(|id| {
+                        file_is_downloading(id, &session.media.files, &session.media.downloading)
+                    })
             });
             let waited = self
                 .stories
@@ -367,6 +370,7 @@ impl QuillApp {
             session.and_then(|session| {
                 ids.into_iter().find_map(|id| {
                     session
+                        .media
                         .files
                         .get(&id.0)
                         .and_then(|file| file.usable_path())

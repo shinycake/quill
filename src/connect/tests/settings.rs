@@ -57,9 +57,9 @@ fn user_download_send_failure_marks_failed_download() {
         .download_user_file(FileId(21), Some((ChatId(7), 99)))
         .unwrap_err();
     assert!(matches!(err, ConnectSendError::Native));
-    assert!(driver.session.failed_downloads.contains(&21));
-    assert!(!driver.session.downloading.contains(&21));
-    assert!(!driver.session.user_downloads.contains(&21));
+    assert!(driver.session.media.failed_downloads.contains(&21));
+    assert!(!driver.session.media.downloading.contains(&21));
+    assert!(!driver.session.media.user_downloads.contains(&21));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -107,8 +107,8 @@ fn user_downloads_use_list_api_pause_and_cancel() {
     assert_eq!(add["chat_id"], 7);
     assert_eq!(add["message_id"], 99);
     assert_eq!(add["priority"], 32);
-    assert!(driver.session.user_downloads.contains(&51));
-    assert!(driver.session.downloading.contains(&51));
+    assert!(driver.session.media.user_downloads.contains(&51));
+    assert!(driver.session.media.downloading.contains(&51));
 
     assert!(driver.pause_download(FileId(51)).expect("pause"));
     assert!(driver.resume_download(FileId(51)).expect("resume"));
@@ -135,15 +135,15 @@ fn user_downloads_use_list_api_pause_and_cancel() {
     assert_eq!(cancel["@type"], "removeFileFromDownloads");
     assert_eq!(cancel["file_id"], 51);
     assert_eq!(cancel["delete_from_cache"], false);
-    assert!(!driver.session.downloading.contains(&51));
-    assert!(!driver.session.user_downloads.contains(&51));
+    assert!(!driver.session.media.downloading.contains(&51));
+    assert!(!driver.session.media.user_downloads.contains(&51));
 
     // Automatic download: one-shot `downloadFile` + `cancelDownloadFile`.
     driver
         .download_file(FileId(53), 1)
         .expect("auto download")
         .expect("sent");
-    assert!(!driver.session.user_downloads.contains(&53));
+    assert!(!driver.session.media.user_downloads.contains(&53));
     assert!(driver.cancel_download(FileId(53)).expect("auto cancel"));
     let sent = recorder.snapshot();
     assert_eq!(sent.len(), base + 6);
@@ -683,7 +683,7 @@ fn media_download_resolves_message_origin_and_picker_files_use_direct_api() {
     assert_eq!(request["@type"], "addFileToDownloads");
     assert_eq!(request["chat_id"], 7);
     assert_eq!(request["message_id"], 99);
-    assert!(driver.session.user_downloads.contains(&51));
+    assert!(driver.session.media.user_downloads.contains(&51));
     driver
         .download_user_file(FileId(52), None)
         .unwrap()
@@ -692,7 +692,7 @@ fn media_download_resolves_message_origin_and_picker_files_use_direct_api() {
     let request: Value = serde_json::from_str(sent.last().unwrap()).unwrap();
     assert_eq!(request["@type"], "downloadFile");
     assert_eq!(request["file_id"], 52);
-    assert!(!driver.session.user_downloads.contains(&52));
+    assert!(!driver.session.media.user_downloads.contains(&52));
     assert!(driver.cancel_download(FileId(52)).unwrap());
     let sent = recorder.snapshot();
     let request: Value = serde_json::from_str(sent.last().unwrap()).unwrap();

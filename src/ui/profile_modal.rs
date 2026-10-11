@@ -63,7 +63,7 @@ impl QuillApp {
     pub(super) fn profile_modal_active(&self) -> bool {
         self.dialogs.profile_modal.as_ref().is_some_and(|modal| {
             self.session()
-                .is_some_and(|session| session.open_info_panel == Some(modal.target))
+                .is_some_and(|session| session.users_state.open_info_panel == Some(modal.target))
         })
     }
 

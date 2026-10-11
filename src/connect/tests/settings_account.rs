@@ -69,7 +69,7 @@ fn ask_a_question_resolves_the_support_user_then_opens_the_chat() {
     let open = last_request(&f);
     assert_eq!(open["@type"], "createPrivateChat");
     assert_eq!(open["user_id"], 424242);
-    assert!(f.1.session.support_user_ready.is_none());
+    assert!(f.1.session.users_state.support_user_ready.is_none());
     cleanup(f);
 }
 

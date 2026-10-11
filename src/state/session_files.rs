@@ -5,7 +5,7 @@ use crate::text::TextEntityKind;
 impl Session {
     pub(crate) fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
         if !from_file_update
-            && self.files.get(&file.id.0).is_some_and(|current| {
+            && self.media.files.get(&file.id.0).is_some_and(|current| {
                 (current.usable_path().is_some() && file.usable_path().is_none())
                     || (current.local.is_downloading_active && file.local.is_idle_incomplete())
             })
@@ -13,32 +13,32 @@ impl Session {
             return;
         }
         let idle_incomplete = file.local.is_idle_incomplete();
-        let paused = self.paused_downloads.contains(&file.id.0);
+        let paused = self.media.paused_downloads.contains(&file.id.0);
         if file.local.is_downloading_completed {
-            self.failed_downloads.remove(&file.id.0);
-            self.stalled_auto_downloads.remove(&file.id.0);
+            self.media.failed_downloads.remove(&file.id.0);
+            self.media.stalled_auto_downloads.remove(&file.id.0);
             self.record_completed_user_download(file.id.0);
         }
         if from_file_update
             && idle_incomplete
-            && self.downloading.contains(&file.id.0)
-            && !self.user_downloads.contains(&file.id.0)
+            && self.media.downloading.contains(&file.id.0)
+            && !self.media.user_downloads.contains(&file.id.0)
         {
             // An automatic download we started went idle without
             // completing (explicit cancels already left `downloading`).
-            self.stalled_auto_downloads.insert(file.id.0);
+            self.media.stalled_auto_downloads.insert(file.id.0);
         }
         if from_file_update
             && idle_incomplete
             && !paused
-            && self.user_downloads.contains(&file.id.0)
+            && self.media.user_downloads.contains(&file.id.0)
         {
             // MED3: a user-initiated download that went active → idle without
             // completing stalled (or errored without failing the request) —
             // surface it as failed so the row offers Retry. Explicit cancels
             // are excluded: `abort_download` already dropped them from
             // `user_downloads`.
-            self.failed_downloads.insert(file.id.0);
+            self.media.failed_downloads.insert(file.id.0);
         }
         if file.local.is_downloading_completed
             || !file.local.can_be_downloaded
@@ -64,42 +64,42 @@ impl Session {
             }
         }
         self.note_avatar_file_changed(file.id.0);
-        self.files.insert(file.id.0, file);
+        self.media.files.insert(file.id.0, file);
     }
 
     pub(crate) fn unstick_download(&mut self, file_id: i32) {
         self.note_avatar_file_changed(file_id);
-        self.downloading.remove(&file_id);
-        self.user_downloads.remove(&file_id);
-        self.paused_downloads.remove(&file_id);
-        self.download_extras.retain(|_, id| *id != file_id);
+        self.media.downloading.remove(&file_id);
+        self.media.user_downloads.remove(&file_id);
+        self.media.paused_downloads.remove(&file_id);
+        self.media.download_extras.retain(|_, id| *id != file_id);
     }
 
     /// Record a finished user-initiated download in the downloads manager's
     /// recent list (deduped, capped at 50). Shared by the `updateFile`
     /// completion path and the list-API `updateFileDownload` path.
     pub(crate) fn record_completed_user_download(&mut self, file_id: i32) {
-        if self.user_downloads.contains(&file_id) {
-            self.completed_downloads.retain(|id| *id != file_id);
-            self.completed_downloads.push_back(file_id);
-            while self.completed_downloads.len() > 50 {
-                self.completed_downloads.pop_front();
+        if self.media.user_downloads.contains(&file_id) {
+            self.media.completed_downloads.retain(|id| *id != file_id);
+            self.media.completed_downloads.push_back(file_id);
+            while self.media.completed_downloads.len() > 50 {
+                self.media.completed_downloads.pop_front();
             }
         }
     }
 
     pub fn file(&self, id: FileId) -> Option<&ParsedFile> {
-        self.files.get(&id.0)
+        self.media.files.get(&id.0)
     }
 
     pub fn should_download(&self, file_id: FileId) -> bool {
         if file_id.0 == 0 {
             return false;
         }
-        if self.downloading.contains(&file_id.0) || self.requests.has_download(file_id) {
+        if self.media.downloading.contains(&file_id.0) || self.requests.has_download(file_id) {
             return false;
         }
-        match self.files.get(&file_id.0) {
+        match self.media.files.get(&file_id.0) {
             Some(file) => file.needs_download(),
             None => true,
         }
@@ -107,9 +107,9 @@ impl Session {
 
     pub fn begin_download(&mut self, file_id: FileId) {
         if file_id.0 != 0 {
-            self.failed_downloads.remove(&file_id.0);
-            self.stalled_auto_downloads.remove(&file_id.0);
-            self.downloading.insert(file_id.0);
+            self.media.failed_downloads.remove(&file_id.0);
+            self.media.stalled_auto_downloads.remove(&file_id.0);
+            self.media.downloading.insert(file_id.0);
         }
     }
 
@@ -194,6 +194,7 @@ impl Session {
                             continue;
                         };
                         let resolved = self
+                            .stickers
                             .emoji
                             .custom_emoji_stickers
                             .iter()
@@ -280,8 +281,8 @@ impl Session {
                 }
             }
         }
-        if self.gifs.open {
-            for animation in self.gifs.visible_animations() {
+        if self.stickers.gifs.open {
+            for animation in self.stickers.gifs.visible_animations() {
                 let file_id = animation.thumb_file_id.filter(|id| id.0 != 0);
                 if let Some(file_id) = file_id
                     && self.should_download(file_id)
@@ -291,12 +292,15 @@ impl Session {
             }
         }
         {
-            let visible = if self.stickers.open {
-                self.stickers.visible_stickers()
+            let visible = if self.stickers.stickers.open {
+                self.stickers.stickers.visible_stickers()
             } else {
                 &[]
             };
-            for sticker in visible.iter().chain(self.stickers.suggestions.iter()) {
+            for sticker in visible
+                .iter()
+                .chain(self.stickers.stickers.suggestions.iter())
+            {
                 let file_id = sticker.display_file_id();
                 if let Some(file_id) = file_id
                     && self.should_download(file_id)
@@ -305,12 +309,13 @@ impl Session {
                 }
             }
         }
-        if self.emoji.open {
+        if self.stickers.emoji.open {
             for sticker in self
+                .stickers
                 .emoji
                 .preview
                 .iter()
-                .chain(&self.emoji.custom_emoji_stickers)
+                .chain(&self.stickers.emoji.custom_emoji_stickers)
             {
                 let file_id = sticker.display_file_id();
                 if let Some(file_id) = file_id
@@ -322,7 +327,7 @@ impl Session {
         }
         // Sponsored rows in the open chat: content + sponsor thumbs at priority 1.
         if let Some(chat_id) = self.open_chat
-            && let Some(entry) = self.sponsored.get(&chat_id.0)
+            && let Some(entry) = self.messages.sponsored.get(&chat_id.0)
         {
             for message in &entry.messages {
                 for file_id in message.thumb_file_ids() {
@@ -369,6 +374,7 @@ impl Session {
             // 50 MiB); an unknown size (`display_size() == 0`) is not a
             // reason to block.
             let oversized = self
+                .media
                 .files
                 .get(&file_id.0)
                 .is_some_and(|file| file.display_size() > AUTO_DOWNLOAD_MAX_BYTES);

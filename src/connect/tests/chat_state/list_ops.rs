@@ -265,8 +265,8 @@ fn cl2_clear_recently_found_chats_optimistic_clear() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
-    driver.session.search.recents = true;
-    driver.session.search.chat_ids = vec![ChatId(7)];
+    driver.session.search.search.recents = true;
+    driver.session.search.search.chat_ids = vec![ChatId(7)];
 
     let sent = driver.clear_recently_found_chats().expect("send");
     assert!(sent.is_some(), "recents were non-empty");
@@ -277,7 +277,7 @@ fn cl2_clear_recently_found_chats_optimistic_clear() {
             .any(|j| j.contains("\"clearRecentlyFoundChats\"")),
         "clearRecentlyFoundChats sent"
     );
-    assert!(driver.session.search.chat_ids.is_empty());
+    assert!(driver.session.search.search.chat_ids.is_empty());
     // A refusal surfaces — the next recents fetch restores truth.
     driver
         .ingest(

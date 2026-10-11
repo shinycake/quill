@@ -97,6 +97,7 @@ fn refused_list_fetch_is_kept_as_failed_for_retry() {
     );
     assert!(matches!(
         session
+            .users_state
             .profile_chat_lists
             .get(&(ProfileChatsKind::GroupsInCommon, 31)),
         Some(ProfileChatsFetch::Failed(_))
@@ -122,7 +123,7 @@ fn profile_photos_answer_caches_gallery_and_files() {
     let Some(ProfilePhotosFetch::Loaded {
         total_count,
         photos,
-    }) = session.user_profile_photos.get(&31)
+    }) = session.users_state.user_profile_photos.get(&31)
     else {
         panic!("gallery not loaded");
     };
@@ -132,8 +133,8 @@ fn profile_photos_answer_caches_gallery_and_files() {
     assert_eq!(photos[0].thumb_file_id, 11);
     assert_eq!(photos[0].full_file_id, 12);
     assert_eq!(photos[0].width, 800);
-    assert!(session.files.contains_key(&12));
-    assert!(session.files.contains_key(&13));
+    assert!(session.media.files.contains_key(&12));
+    assert!(session.media.files.contains_key(&13));
 }
 
 #[test]
@@ -142,7 +143,7 @@ fn set_main_photo_ok_drops_the_own_gallery() {
     let seq = AtomicU64::new(0);
     session.my_user_id = Some(777);
     for user in [777, 31] {
-        session.user_profile_photos.insert(
+        session.users_state.user_profile_photos.insert(
             user,
             ProfilePhotosFetch::Loaded {
                 total_count: 0,
@@ -157,8 +158,8 @@ fn set_main_photo_ok_drops_the_own_gallery() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.user_profile_photos.contains_key(&777));
-    assert!(session.user_profile_photos.contains_key(&31));
+    assert!(!session.users_state.user_profile_photos.contains_key(&777));
+    assert!(session.users_state.user_profile_photos.contains_key(&31));
 }
 
 #[test]
@@ -250,7 +251,7 @@ fn user_full_info_keeps_unofficial_flag_and_personal_photo_first_in_gallery() {
         [9500, 9001]
     );
     // The personal photo's files are cached for display.
-    assert!(session.files.contains_key(&952));
+    assert!(session.media.files.contains_key(&952));
 }
 
 #[test]

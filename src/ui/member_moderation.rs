@@ -228,7 +228,7 @@ impl QuillApp {
     /// sender filter (the same "From:" filter the search bar offers).
     fn search_messages_from(&mut self, user_id: i64, window: &mut Window, cx: &mut Context<Self>) {
         self.open_chat_search_ui(window, cx);
-        let open = self.session().is_some_and(|s| s.chat_search.open);
+        let open = self.session().is_some_and(|s| s.search.chat_search.open);
         if open {
             self.chat_search_pick_sender(Some(MessageSender::User { user_id }), window, cx);
         }

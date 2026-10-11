@@ -22,7 +22,7 @@ impl Session {
                     .chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id));
-                if !self.draft_dirty.contains(&chat_id.0) {
+                if !self.messages.draft_dirty.contains(&chat_id.0) {
                     chat.draft = draft;
                 }
                 self.replace_main_list_from_positions(chat_id, &positions);
@@ -68,7 +68,8 @@ impl Session {
                     message_id,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.poll_stats
+                    self.messages
+                        .poll_stats
                         .insert((chat_id.0, message_id.0), PollStatsFetch::Loaded(graph));
                 }
             }
@@ -142,11 +143,12 @@ impl Session {
                     )
                 {
                     let stopped = self
+                        .messages
                         .pending_bot_messages
                         .get(&(chat_id.0, forum_topic_id))
                         .is_some_and(|old| old.draft_id == draft_id && old.stopped);
                     self.remember_files(&files);
-                    self.pending_bot_messages.insert(
+                    self.messages.pending_bot_messages.insert(
                         (chat_id.0, forum_topic_id),
                         PendingBotMessage {
                             draft_id,
@@ -155,8 +157,9 @@ impl Session {
                             content,
                             stop_failed: false,
                             stopped,
-                            expires_at_ms: unix_ms_now()
-                                .saturating_add(self.pending_bot_period_secs.saturating_mul(1000)),
+                            expires_at_ms: unix_ms_now().saturating_add(
+                                self.messages.pending_bot_period_secs.saturating_mul(1000),
+                            ),
                         },
                     );
                 }
@@ -204,7 +207,7 @@ impl Session {
                 {
                     thread.history.replace_id(old_message_id, row);
                 }
-                self.draft_clears.push(chat_id);
+                self.messages.draft_clears.push(chat_id);
             }
             MessagesPayload::UpdateMessageSendFailed {
                 message,
@@ -212,12 +215,12 @@ impl Session {
                 error,
             } => {
                 if let Some(notice) = error.send_permission_notice() {
-                    self.send_permission_error = Some(notice.into());
+                    self.messages.send_permission_error = Some(notice.into());
                 } else if let Some(notice) = error.flood_notice() {
                     // Q1: the failed row keeps its retry affordance
                     // (`can_retry` comes from TDLib, which marks rate
                     // limits retryable); the text stays in the history.
-                    self.flood_notice = Some(notice);
+                    self.messages.flood_notice = Some(notice);
                 }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
@@ -290,7 +293,8 @@ impl Session {
                 });
                 // An unpin leaves the pinned list at once; a pin is added
                 // by the refetch the driver sends for the open chat.
-                if !is_pinned && let Some(list) = self.pinned_messages.get_mut(&chat_id.0) {
+                if !is_pinned && let Some(list) = self.messages.pinned_messages.get_mut(&chat_id.0)
+                {
                     list.retain(|message| message.id != message_id);
                 }
             }
@@ -355,7 +359,7 @@ impl Session {
                 } else {
                     message_ids
                 };
-                if let Some(list) = self.pinned_messages.get_mut(&chat_id.0) {
+                if let Some(list) = self.messages.pinned_messages.get_mut(&chat_id.0) {
                     list.retain(|message| !message_ids.contains(&message.id));
                 }
                 let history = self.histories.entry(chat_id.0).or_default();
@@ -365,13 +369,13 @@ impl Session {
                     history.remove(id, true);
                     if is_permanent
                         && matches!(
-                            self.chat_search.jump,
+                            self.search.chat_search.jump,
                             ChatSearchJump::Ready { message_id }
                                 | ChatSearchJump::Loading { message_id }
                                 if message_id == id
                         )
                     {
-                        self.chat_search.jump = ChatSearchJump::Missing { message_id: id };
+                        self.search.chat_search.jump = ChatSearchJump::Missing { message_id: id };
                     }
                 }
                 // Parity slice 4: the topic view reads only
@@ -420,13 +424,14 @@ impl Session {
                 {
                     self.remember_files(&message.files);
                     if let Some(slot) = self
+                        .messages
                         .scheduled_messages
                         .iter_mut()
                         .find(|m| m.id == message.id)
                     {
                         *slot = message;
                     } else {
-                        self.scheduled_messages.push(message);
+                        self.messages.scheduled_messages.push(message);
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
                     self.upsert_message(message, true);
@@ -496,7 +501,7 @@ impl Session {
                     message_id,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.message_menu_actions = Some((chat_id, message_id, actions));
+                    self.messages.message_menu_actions = Some((chat_id, message_id, actions));
                 }
             }
         }

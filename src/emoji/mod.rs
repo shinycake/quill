@@ -164,6 +164,7 @@ impl Session {
         // ponytail: 128 recents; stable vector scans, index the cache if this limit grows.
         for id in &self.settings.media_prefs.recent_custom_emoji_ids {
             if let Some(set_id) = self
+                .stickers
                 .emoji
                 .custom_emoji_stickers
                 .iter()
@@ -187,7 +188,7 @@ impl Session {
     }
 
     pub fn ordered_emoji_packs(&self) -> Vec<&StickerSetInfo> {
-        let mut sets: Vec<_> = self.emoji.installed_sets.iter().collect();
+        let mut sets: Vec<_> = self.stickers.emoji.installed_sets.iter().collect();
         if self.settings.media_prefs.dynamic_emoji_pack_order {
             sets.sort_by_key(|set| {
                 self.settings
@@ -202,7 +203,7 @@ impl Session {
     }
 
     pub fn emoji_pack_download_state(&self, id: i64) -> &'static str {
-        if let Some((set_id, installed)) = self.emoji.mutating_set
+        if let Some((set_id, installed)) = self.stickers.emoji.mutating_set
             && set_id == id
         {
             return if installed {
@@ -211,15 +212,16 @@ impl Session {
                 "Removing…"
             };
         }
-        if self.emoji.outdated_packs.contains(&id) {
+        if self.stickers.emoji.outdated_packs.contains(&id) {
             return "Update needed";
         }
-        let Some(ids) = self.emoji.pack_files.get(&id) else {
+        let Some(ids) = self.stickers.emoji.pack_files.get(&id) else {
             return "Not downloaded";
         };
         if !ids.is_empty()
             && ids.iter().all(|id| {
-                self.files
+                self.media
+                    .files
                     .get(&id.0)
                     .and_then(|file| file.usable_path())
                     .is_some()
@@ -228,8 +230,9 @@ impl Session {
             return "Downloaded";
         }
         if ids.iter().any(|id| {
-            self.downloading.contains(&id.0)
+            self.media.downloading.contains(&id.0)
                 || self
+                    .media
                     .files
                     .get(&id.0)
                     .is_some_and(|file| file.local.is_downloading_active)
@@ -242,55 +245,66 @@ impl Session {
     pub fn accept_installed_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
         let installed: std::collections::HashSet<_> = sets.iter().map(|set| set.id).collect();
         for set in self
+            .stickers
             .emoji
             .found_sets
             .iter_mut()
-            .chain(self.emoji.trending_sets.iter_mut())
+            .chain(self.stickers.emoji.trending_sets.iter_mut())
         {
             set.is_installed = installed.contains(&set.id);
         }
-        if self.emoji.tab == EmojiSetTab::Installed {
-            self.emoji.failed = false;
+        if self.stickers.emoji.tab == EmojiSetTab::Installed {
+            self.stickers.emoji.failed = false;
         }
-        self.emoji.installed_sets = sets;
+        self.stickers.emoji.installed_sets = sets;
     }
 
     /// Slice S10: store an archived-emoji-sets page. First page replaces,
     /// later pages append (the purpose carries `first_page`).
     pub fn accept_archived_emoji_sets(&mut self, sets: Vec<StickerSetInfo>, first_page: bool) {
         if first_page {
-            self.emoji.archived_sets = sets;
+            self.stickers.emoji.archived_sets = sets;
         } else {
-            self.emoji.archived_sets.extend(sets);
+            self.stickers.emoji.archived_sets.extend(sets);
         }
     }
 
     /// Slice S10: store the trending emoji sets (single-page replace, like S8).
     pub fn accept_trending_emoji_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
-        if self.emoji.tab == EmojiSetTab::Trending {
-            self.emoji.failed = false;
+        if self.stickers.emoji.tab == EmojiSetTab::Trending {
+            self.stickers.emoji.failed = false;
         }
         let raw_count = sets.len() as i32;
-        if self.emoji.trending_offset == 0 {
-            self.emoji.trending_sets.clear();
+        if self.stickers.emoji.trending_offset == 0 {
+            self.stickers.emoji.trending_sets.clear();
         }
         for set in sets {
-            if !self.emoji.trending_sets.iter().any(|old| old.id == set.id) {
-                self.emoji.trending_sets.push(set);
+            if !self
+                .stickers
+                .emoji
+                .trending_sets
+                .iter()
+                .any(|old| old.id == set.id)
+            {
+                self.stickers.emoji.trending_sets.push(set);
             }
         }
-        self.emoji.trending_next_offset = self.emoji.trending_offset.saturating_add(raw_count);
-        self.emoji.trending_has_more =
-            raw_count > 0 && self.emoji.trending_next_offset < self.emoji.trending_total;
-        self.emoji.trending_is_premium = is_premium;
+        self.stickers.emoji.trending_next_offset = self
+            .stickers
+            .emoji
+            .trending_offset
+            .saturating_add(raw_count);
+        self.stickers.emoji.trending_has_more = raw_count > 0
+            && self.stickers.emoji.trending_next_offset < self.stickers.emoji.trending_total;
+        self.stickers.emoji.trending_is_premium = is_premium;
     }
 
     /// Slice S10: store a `searchStickerSets` answer (emoji type).
     pub fn accept_found_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        if self.emoji.tab == EmojiSetTab::Search {
-            self.emoji.failed = false;
+        if self.stickers.emoji.tab == EmojiSetTab::Search {
+            self.stickers.emoji.failed = false;
         }
-        self.emoji.found_sets = sets;
+        self.stickers.emoji.found_sets = sets;
     }
 
     /// Slice S10: an emoji-set mutation (`changeStickerSet` /
@@ -298,7 +312,7 @@ impl Session {
     /// drop the installed-emoji-sets cache so the settings screen
     /// refetches the authoritative list.
     pub fn invalidate_installed_emoji_sets(&mut self) {
-        self.emoji.installed_sets.clear();
+        self.stickers.emoji.installed_sets.clear();
     }
 
     /// Slice S10: purpose-gated dispatch for the emoji payloads. Stray
@@ -325,7 +339,7 @@ impl Session {
             }
             EnvelopePayload::Stickers(StickersPayload::Emojis { emojis }) => {
                 if purpose == Some(RequestPurpose::GetKeywordEmojis) {
-                    self.emoji.keyword_emojis = emojis;
+                    self.stickers.emoji.keyword_emojis = emojis;
                 }
             }
             EnvelopePayload::Stickers(StickersPayload::EmojiCategories { categories, files }) => {
@@ -342,9 +356,9 @@ impl Session {
         statuses: Vec<EmojiStatusItem>,
     ) {
         if purpose == Some(RequestPurpose::GetRecentEmojiStatuses) {
-            self.emoji.recent_statuses = statuses;
+            self.stickers.emoji.recent_statuses = statuses;
         } else if purpose == Some(RequestPurpose::GetUpgradedGiftEmojiStatuses) {
-            self.emoji.upgraded_gift_statuses = statuses;
+            self.stickers.emoji.upgraded_gift_statuses = statuses;
         }
     }
 
@@ -355,9 +369,9 @@ impl Session {
         custom_emoji_ids: Vec<i64>,
     ) {
         if purpose == Some(RequestPurpose::GetThemedEmojiStatuses) {
-            self.emoji.themed_status_ids = custom_emoji_ids;
+            self.stickers.emoji.themed_status_ids = custom_emoji_ids;
         } else if purpose == Some(RequestPurpose::GetDefaultEmojiStatuses) {
-            self.emoji.default_status_ids = custom_emoji_ids;
+            self.stickers.emoji.default_status_ids = custom_emoji_ids;
         }
     }
 
@@ -370,7 +384,7 @@ impl Session {
     ) {
         if purpose == Some(RequestPurpose::GetAnimatedEmoji) {
             self.remember_files(&files);
-            self.emoji.animated_emoji = sticker;
+            self.stickers.emoji.animated_emoji = sticker;
         }
     }
 
@@ -381,7 +395,7 @@ impl Session {
         keywords: Vec<EmojiKeyword>,
     ) {
         if purpose == Some(RequestPurpose::SearchEmojis) {
-            self.emoji.keyword_results = keywords;
+            self.stickers.emoji.keyword_results = keywords;
         }
     }
 
@@ -394,7 +408,7 @@ impl Session {
     ) {
         if purpose == Some(RequestPurpose::GetEmojiCategories) {
             self.remember_files(&files);
-            self.emoji.categories = categories;
+            self.stickers.emoji.categories = categories;
         }
     }
 
@@ -402,11 +416,11 @@ impl Session {
     pub fn accept_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
         // ponytail: linear merge of batches capped at 200; index by custom emoji ID if cache size grows.
         for sticker in stickers {
-            self.emoji.custom_emoji_stickers.retain(|old| {
+            self.stickers.emoji.custom_emoji_stickers.retain(|old| {
                 old.custom_emoji_id != sticker.custom_emoji_id
                     || (old.custom_emoji_id.is_none() && old.file_id != sticker.file_id)
             });
-            self.emoji.custom_emoji_stickers.push(sticker);
+            self.stickers.emoji.custom_emoji_stickers.push(sticker);
         }
     }
 
@@ -446,6 +460,7 @@ impl Session {
         ids.extend(self.reply_background_emoji_ids());
         // Captions of the Shared Media lists the viewer pages over.
         for item in self
+            .media
             .shared_media
             .tabs
             .iter()
@@ -470,7 +485,7 @@ impl Session {
                 ids.push(id);
             }
         }
-        if let Some(options) = &self.message_reaction_options {
+        if let Some(options) = &self.stickers.message_reaction_options {
             ids.extend(options.all().into_iter().filter_map(|choice| match choice {
                 crate::state::ReactionChoice::CustomEmoji(id) => Some(id),
                 crate::state::ReactionChoice::Emoji(_) => None,
@@ -488,8 +503,9 @@ impl Session {
     pub fn message_custom_emoji_ids_to_resolve(&self) -> Vec<i64> {
         let mut ids = self.open_chat_custom_emoji_ids();
         ids.retain(|id| {
-            !self.emoji.status_resolution_attempted.contains(id)
+            !self.stickers.emoji.status_resolution_attempted.contains(id)
                 && !self
+                    .stickers
                     .emoji
                     .custom_emoji_stickers
                     .iter()
@@ -503,7 +519,8 @@ impl Session {
     /// a download (the renderer shows the fallback emoji until they land).
     pub fn open_chat_custom_emoji_files(&self) -> Vec<crate::ids::FileId> {
         let ids = self.open_chat_custom_emoji_ids();
-        self.emoji
+        self.stickers
+            .emoji
             .custom_emoji_stickers
             .iter()
             .filter(|s| {
@@ -519,24 +536,24 @@ impl Session {
     /// affected cache so the next fetch shows the server-confirmed state.
     pub fn invalidate_emoji_caches(&mut self, purpose: Option<RequestPurpose>) {
         if purpose == Some(RequestPurpose::ChangeEmojiSet) {
-            self.emoji.mutation_failed = false;
-            self.emoji.mutating_set = None;
+            self.stickers.emoji.mutation_failed = false;
+            self.stickers.emoji.mutating_set = None;
         }
         if matches!(
             purpose,
             Some(RequestPurpose::SetEmojiStatus | RequestPurpose::ClearRecentEmojiStatuses)
         ) {
             if purpose == Some(RequestPurpose::SetEmojiStatus)
-                && let Some(id) = self.emoji.pending_status_emoji.take()
+                && let Some(id) = self.stickers.emoji.pending_status_emoji.take()
             {
                 self.remember_emoji_pack_usage(&[id]);
             }
-            self.emoji.recent_statuses.clear();
+            self.stickers.emoji.recent_statuses.clear();
             drop(
                 self.requests
                     .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
             );
-            self.emoji.status_note = Some(
+            self.stickers.emoji.status_note = Some(
                 if purpose == Some(RequestPurpose::SetEmojiStatus) {
                     "Emoji status updated."
                 } else {

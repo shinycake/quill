@@ -56,7 +56,7 @@ impl Session {
             self.remember_files(std::slice::from_ref(file));
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
-            self.gifs.search_bot_user_id = match &kind {
+            self.stickers.gifs.search_bot_user_id = match &kind {
                 ChatKind::Private { user_id }
                     if user_id.0 > 0
                         && !self.users.get(&user_id.0).is_some_and(|user| !user.is_bot) =>
@@ -65,9 +65,9 @@ impl Session {
                 }
                 _ => None,
             };
-            if self.gifs.search_bot_user_id.is_none() {
-                self.gifs.search_failed = true;
-                self.gifs.search_loading = false;
+            if self.stickers.gifs.search_bot_user_id.is_none() {
+                self.stickers.gifs.search_failed = true;
+                self.stickers.gifs.search_loading = false;
             }
         }
         // Bots slice: `searchPublicChat` answer for `@botname`
@@ -84,7 +84,7 @@ impl Session {
             && let Some(InlineBotResolve::Resolving {
                 username,
                 generation: slot_generation,
-            }) = self.inline_bot_resolve.as_ref()
+            }) = self.bots.inline_bot_resolve.as_ref()
             && *slot_generation == generation
         {
             match &kind {
@@ -97,14 +97,14 @@ impl Session {
                     // the capability check).
                     match self.users.get(&user_id.0) {
                         Some(user) if !user.is_bot => {
-                            self.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                            self.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
                                 username: username.clone(),
                                 reason: format!("@{username} is not a bot"),
                             });
                         }
                         user => {
                             let is_inline = user.map(|u| u.is_inline);
-                            self.inline_bot_resolve = Some(InlineBotResolve::Resolved {
+                            self.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
                                 username: username.clone(),
                                 user_id: user_id.0,
                                 is_inline,
@@ -113,7 +113,7 @@ impl Session {
                     }
                 }
                 _ => {
-                    self.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                    self.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
                         username: username.clone(),
                         reason: format!("@{username} is not a bot"),
                     });
@@ -184,15 +184,21 @@ impl Session {
         // via `getSecretChat` (an offline method).
         if let ChatKind::Secret { secret_chat_id, .. } = &chat.kind {
             let secret_chat_id = *secret_chat_id;
-            match self.secret_chat_states.get(&secret_chat_id) {
+            match self.users_state.secret_chat_states.get(&secret_chat_id) {
                 Some(secret_chat) => chat.secret_state = Some(secret_chat.state.clone()),
-                None if !self.secret_chat_fetch_queue.contains(&secret_chat_id) => {
-                    self.secret_chat_fetch_queue.push(secret_chat_id);
+                None if !self
+                    .users_state
+                    .secret_chat_fetch_queue
+                    .contains(&secret_chat_id) =>
+                {
+                    self.users_state
+                        .secret_chat_fetch_queue
+                        .push(secret_chat_id);
                 }
                 None => {}
             }
         }
-        if !self.draft_dirty.contains(&chat_id.0) {
+        if !self.messages.draft_dirty.contains(&chat_id.0) {
             chat.draft = draft;
         }
         self.replace_avatar(old_photo_file_id, photo_file_id);
@@ -658,25 +664,25 @@ impl Session {
                 RequestPurpose::SearchShareChats | RequestPurpose::SearchShareChatsOnServer
             )
         {
-            self.share_search.accept(pending.id, &chat_ids);
+            self.messages.share_search.accept(pending.id, &chat_ids);
         }
         // `getTopChats`: not tied to a query generation, only to the strip.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopChats) {
-            if !self.search.top_chats_disabled {
-                self.search.top_chats = chat_ids;
+            if !self.search.search.top_chats_disabled {
+                self.search.search.top_chats = chat_ids;
             }
             return;
         }
-        if self.search.matches_generation(pending) {
+        if self.search.search.matches_generation(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
-                    self.search.accept_chats(chat_ids, false);
+                    self.search.search.accept_chats(chat_ids, false);
                 }
                 Some(RequestPurpose::SearchChatsOnServer) => {
-                    self.search.accept_server_chats(chat_ids);
+                    self.search.search.accept_server_chats(chat_ids);
                 }
                 Some(RequestPurpose::SearchPublicChats) => {
-                    self.search.accept_public_chats(chat_ids, false);
+                    self.search.search.accept_public_chats(chat_ids, false);
                 }
                 _ => {}
             }

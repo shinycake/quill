@@ -22,12 +22,12 @@ impl Session {
                     .map(|old| old.photo_small_file_id);
                 self.replace_avatar(old_photo_file_id, Some(user.photo_small_file_id));
                 if user.is_bot {
-                    self.bot_user_ids.insert(user_id.0);
+                    self.bots.bot_user_ids.insert(user_id.0);
                 } else {
                     // No longer a bot: drop any cached bot info so the panel
                     // cannot show stale description/commands (Phase 3.1).
-                    self.bot_user_ids.remove(&user_id.0);
-                    self.bot_info.remove(&user_id.0);
+                    self.bots.bot_user_ids.remove(&user_id.0);
+                    self.bots.bot_info.remove(&user_id.0);
                 }
             }
             UsersPayload::UpdateUserStatus { user_id, status } => {
@@ -43,14 +43,14 @@ impl Session {
                 if self.apply_web_app_users(&user_ids, pending) {
                     // Apps tab: `getGrossingWebAppBots`.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-                    self.contacts = Some(user_ids);
-                    self.contacts_error = false;
+                    self.users_state.contacts = Some(user_ids);
+                    self.users_state.contacts_error = false;
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
                     self.stories.close_friends = Some(user_ids);
                     self.clear_story_page_op(RequestPurpose::GetCloseFriends);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
-                    self.reply_keyboards.recent_inline_bots = Some(user_ids);
+                    self.bots.reply_keyboards.recent_inline_bots = Some(user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
                     && let Some(pending) = pending
                     && let Some(bot_user_id) = pending.user_id
@@ -59,7 +59,8 @@ impl Session {
                     // objects arrive via `updateUser`; ids alone drive the
                     // list (Telegram X `SharedChatsController` similarly
                     // resolves users from its cache).
-                    self.similar_bots
+                    self.bots
+                        .similar_bots
                         .insert(bot_user_id, SimilarBotsFetch::Loaded(user_ids));
                 }
             }
@@ -77,7 +78,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {
-                    self.support_user_ready = Some(user_id);
+                    self.users_state.support_user_ready = Some(user_id);
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -120,13 +121,13 @@ impl Session {
                 photo_id,
                 blocked,
             } => {
-                self.bot_info.insert(user_id.0, bot_info);
+                self.bots.bot_info.insert(user_id.0, bot_info);
                 let photo_file_id = photo.map(|file| {
                     let id = file.id.0;
                     self.upsert_file(file, false);
                     id
                 });
-                self.user_full_infos.insert(
+                self.users_state.user_full_infos.insert(
                     user_id.0,
                     UserFullInfoData {
                         bio,
@@ -148,9 +149,9 @@ impl Session {
             // authoritative list).
             UsersPayload::ImportedContacts { .. } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
-                    self.contacts = None;
-                    self.contacts_error = false;
-                    self.contacts_notice = Some("Contacts imported.".to_string());
+                    self.users_state.contacts = None;
+                    self.users_state.contacts_error = false;
+                    self.users_state.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }
         }

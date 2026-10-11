@@ -568,7 +568,10 @@ fn installed_backgrounds_and_default_updates_are_cached() {
         .as_ref()
         .expect("list");
     assert_eq!(list.len(), 2);
-    assert!(session.files.contains_key(&31), "photo file is tracked");
+    assert!(
+        session.media.files.contains_key(&31),
+        "photo file is tracked"
+    );
 
     // The account default for a theme arrives as an update.
     apply_json(

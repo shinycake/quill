@@ -326,7 +326,7 @@ impl QuillApp {
             .settings
             .pending_notifications
             .is_empty()
-            || live.driver.session.pending_force_reply.is_some()
+            || live.driver.session.bots.pending_force_reply.is_some()
             || !live.driver.session.settings.pending_sound_plays.is_empty();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
@@ -372,7 +372,7 @@ impl QuillApp {
         if let Some(result) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.last_forward.take())
+            .and_then(|live| live.driver.session.messages.last_forward.take())
         {
             self.present_forward_result(result, cx);
             progressed = true;
@@ -395,6 +395,7 @@ impl QuillApp {
             let note = live
                 .driver
                 .session
+                .messages
                 .chat_export
                 .as_ref()
                 .filter(|export| export.settled())
@@ -413,7 +414,7 @@ impl QuillApp {
                     }
                 });
             if let Some(note) = note {
-                live.driver.session.chat_export = None;
+                live.driver.session.messages.chat_export = None;
                 self.connection.status_note = note;
                 progressed = true;
             }
@@ -424,7 +425,7 @@ impl QuillApp {
         if let Some(link) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.message_link_result.take())
+            .and_then(|live| live.driver.session.messages.message_link_result.take())
         {
             cx.write_to_clipboard(ClipboardItem::new_string(link));
             // Telegram Desktop `CopyPostLink`: a public link says so; a
@@ -432,7 +433,7 @@ impl QuillApp {
             let public = self
                 .live
                 .as_ref()
-                .is_some_and(|live| live.driver.session.message_link_public);
+                .is_some_and(|live| live.driver.session.messages.message_link_public);
             self.connection.status_note = quill::message_menu::link_copied_note(public).into();
             progressed = true;
         }
@@ -451,7 +452,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.message_link_error.take())
+            .and_then(|live| live.driver.session.messages.message_link_error.take())
         {
             self.connection.status_note = err;
             progressed = true;
@@ -483,7 +484,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.recognize_speech_error.take())
+            .and_then(|live| live.driver.session.messages.recognize_speech_error.take())
         {
             self.connection.status_note = err;
             progressed = true;
@@ -494,7 +495,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.ai_error.take())
+            .and_then(|live| live.driver.session.messages.ai_error.take())
         {
             self.connection.status_note = err;
             progressed = true;
@@ -502,7 +503,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.resend_error.take())
+            .and_then(|live| live.driver.session.messages.resend_error.take())
         {
             self.connection.status_note = err;
             progressed = true;
@@ -533,7 +534,7 @@ impl QuillApp {
         if let Some(note) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.message_action_note.take())
+            .and_then(|live| live.driver.session.messages.message_action_note.take())
         {
             self.connection.status_note = note;
             progressed = true;
@@ -574,7 +575,7 @@ impl QuillApp {
         if let Some(answer) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.last_callback_answer.take())
+            .and_then(|live| live.driver.session.bots.last_callback_answer.take())
         {
             self.present_callback_answer(answer, cx);
             progressed = true;
@@ -584,8 +585,8 @@ impl QuillApp {
         // the request was in flight) backs the confirmation dialog and the
         // error degrade.
         let login_url = self.live.as_mut().and_then(|live| {
-            let info = live.driver.session.last_login_url_info.take()?;
-            let request = live.driver.session.login_url_request.take();
+            let info = live.driver.session.bots.last_login_url_info.take()?;
+            let request = live.driver.session.bots.login_url_request.take();
             Some((info, request))
         });
         if let Some((info, request)) = login_url {
@@ -617,7 +618,7 @@ impl QuillApp {
         if let Some(notice) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.send_permission_error.take())
+            .and_then(|live| live.driver.session.messages.send_permission_error.take())
         {
             self.connection.status_note = notice;
             progressed = true;
@@ -625,7 +626,7 @@ impl QuillApp {
         if let Some(notice) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.flood_notice.take())
+            .and_then(|live| live.driver.session.messages.flood_notice.take())
         {
             self.connection.status_note = notice;
             progressed = true;
@@ -718,11 +719,11 @@ impl QuillApp {
         let force_target = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.pending_force_reply.take())
+            .and_then(|live| live.driver.session.bots.pending_force_reply.take())
             .or_else(|| {
                 self.demo_session
                     .as_mut()
-                    .and_then(|session| session.pending_force_reply.take())
+                    .and_then(|session| session.bots.pending_force_reply.take())
             });
         if let Some(target) = force_target {
             self.drain_force_reply(target, window, cx);
@@ -1021,7 +1022,7 @@ impl QuillApp {
         let clears = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.draft_clears))
+            .map(|live| std::mem::take(&mut live.driver.session.messages.draft_clears))
             .unwrap_or_default();
         if clears.is_empty() {
             return;

@@ -132,6 +132,7 @@ fn b1_password_callback_error_surfaces_wrong_password() {
     );
     assert_eq!(
         session
+            .bots
             .last_callback_answer
             .as_ref()
             .map(|answer| answer.text.as_str()),
@@ -152,6 +153,7 @@ fn b1_password_callback_error_surfaces_wrong_password() {
     );
     assert_eq!(
         session
+            .bots
             .last_callback_answer
             .as_ref()
             .map(|answer| answer.text.as_str()),

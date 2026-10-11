@@ -32,7 +32,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
             return Ok(());
         };
-        if self.session.bot_info.contains_key(&user_id) {
+        if self.session.bots.bot_info.contains_key(&user_id) {
             return Ok(());
         }
         if self
@@ -71,7 +71,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
             return Ok(());
         };
-        if self.session.bot_commands.contains_key(&user_id) {
+        if self.session.bots.bot_commands.contains_key(&user_id) {
             return Ok(());
         }
         if self
@@ -147,7 +147,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.similar_bots.contains_key(&bot_user_id) {
+        if self.session.bots.similar_bots.contains_key(&bot_user_id) {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetBotSimilarBots;
@@ -340,7 +340,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetLoginUrlInfo)?;
-        self.session.login_url_request = Some(LoginUrlRequest {
+        self.session.bots.login_url_request = Some(LoginUrlRequest {
             chat_id,
             message_id,
             button_id,
@@ -364,7 +364,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             request.message_id,
             RequestPurpose::GetLoginUrl,
         )?;
-        self.session.login_url_request = Some(request.clone());
+        self.session.bots.login_url_request = Some(request.clone());
         let json = get_login_url(
             extra,
             request.chat_id,
@@ -417,7 +417,14 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getRecentInlineBots`, once per session, when the user types "@".
     pub fn maybe_fetch_recent_inline_bots(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() || self.session.reply_keyboards.recent_inline_bots.is_some() {
+        if !self.chats_path_active()
+            || self
+                .session
+                .bots
+                .reply_keyboards
+                .recent_inline_bots
+                .is_some()
+        {
             return Ok(());
         }
         if self
@@ -527,7 +534,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let first_page = offset.is_empty();
         if first_page {
-            self.session.inline_query = Some(InlineQuerySlot {
+            self.session.bots.inline_query = Some(InlineQuerySlot {
                 chat_id,
                 bot_user_id,
                 query: query.to_string(),
@@ -548,7 +555,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 if first_page {
-                    self.session.inline_query = None;
+                    self.session.bots.inline_query = None;
                 }
                 Err(err)
             }
@@ -568,9 +575,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.inline_bot_resolve_seq = self.session.inline_bot_resolve_seq.wrapping_add(1);
-        let generation = self.session.inline_bot_resolve_seq;
-        self.session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+        self.session.bots.inline_bot_resolve_seq =
+            self.session.bots.inline_bot_resolve_seq.wrapping_add(1);
+        let generation = self.session.bots.inline_bot_resolve_seq;
+        self.session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
             username: username.to_string(),
             generation,
         });
@@ -583,7 +591,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                self.session.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
                     username: username.to_string(),
                     reason: "could not look up the bot".to_string(),
                 });
@@ -636,6 +644,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .expire_pending_bot_messages(crate::state::unix_ms_now());
         let Some(draft) = self
             .session
+            .messages
             .pending_bot_messages
             .get(&(chat_id.0, topic_id))
         else {

@@ -224,7 +224,7 @@ fn match_ranges(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
 }
 
 pub(super) fn chat_search_jump_note(session: &Session) -> String {
-    match session.chat_search.jump {
+    match session.search.chat_search.jump {
         ChatSearchJump::None => String::new(),
         ChatSearchJump::Loading { .. } => "Loading message…".into(),
         ChatSearchJump::Ready { .. } => String::new(),
@@ -235,7 +235,7 @@ pub(super) fn chat_search_jump_note(session: &Session) -> String {
 pub(super) fn apply_ready_search(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     session.open_search();
-    let search_gen = session.search.begin_query("hello");
+    let search_gen = session.search.search.begin_query("hello");
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
     let jsons = [
@@ -262,7 +262,7 @@ pub(super) fn apply_ready_search_in_chat(
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     assert!(session.open_chat_search());
-    let search_gen = session.chat_search.begin_query("hello");
+    let search_gen = session.search.chat_search.begin_query("hello");
     let extra =
         session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), search_gen);
     let json = format!(
@@ -277,12 +277,13 @@ pub(super) fn apply_ready_search_in_chat(
 
 impl QuillApp {
     pub(super) fn search_is_open(&self) -> bool {
-        self.session().is_some_and(|session| session.search.open)
+        self.session()
+            .is_some_and(|session| session.search.search.open)
     }
 
     pub(super) fn chat_search_is_open(&self) -> bool {
         self.session()
-            .is_some_and(|session| session.chat_search.open)
+            .is_some_and(|session| session.search.chat_search.open)
     }
 
     pub(super) fn open_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -340,8 +341,8 @@ impl QuillApp {
                 self.connection.status_note = format!("clear recents failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.chat_ids.clear();
-            session.search.status = SearchStatus::Idle;
+            session.search.search.chat_ids.clear();
+            session.search.search.status = SearchStatus::Idle;
         }
         cx.notify();
     }
@@ -354,7 +355,7 @@ impl QuillApp {
                     format!("could not remove the recent search: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.remove_recent(chat_id);
+            session.search.search.remove_recent(chat_id);
         }
         cx.notify();
     }
@@ -366,7 +367,7 @@ impl QuillApp {
                 self.connection.status_note = format!("could not remove the contact: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.remove_top_chat(chat_id);
+            session.search.search.remove_top_chat(chat_id);
         }
         cx.notify();
     }
@@ -379,9 +380,9 @@ impl QuillApp {
                     format!("could not change frequent contacts: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.top_chats_disabled = disabled;
+            session.search.search.top_chats_disabled = disabled;
             if disabled {
-                session.search.top_chats.clear();
+                session.search.search.top_chats.clear();
             }
         }
         cx.notify();
@@ -395,9 +396,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let search = if let Some(live) = self.live.as_mut() {
-            Some(&mut live.driver.session.search)
+            Some(&mut live.driver.session.search.search)
         } else {
-            self.demo_session.as_mut().map(|s| &mut s.search)
+            self.demo_session.as_mut().map(|s| &mut s.search.search)
         };
         if let Some(search) = search {
             search.confirm = confirm;
@@ -408,7 +409,7 @@ impl QuillApp {
 
     /// The user accepted the pending confirmation.
     pub(super) fn accept_search_confirm(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.session().and_then(|s| s.search.confirm);
+        let confirm = self.session().and_then(|s| s.search.search.confirm);
         self.set_search_prompt(None, None, cx);
         match confirm {
             Some(SearchConfirm::ClearRecents) => self.clear_search_recents(cx),
@@ -440,7 +441,7 @@ impl QuillApp {
                 Err(_) => self.connection.status_note = "could not search".into(),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.filters.scope = scope;
+            session.search.search.filters.scope = scope;
             session.apply_local_search_filter(tag);
         }
         cx.notify();
@@ -476,7 +477,7 @@ impl QuillApp {
                 self.connection.status_note = format!("community filter failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.community_filter = community_id;
+            session.search.search.community_filter = community_id;
         }
         cx.notify();
     }
@@ -541,7 +542,7 @@ impl QuillApp {
         // While choosing a "From:" member the field filters the members.
         if self
             .session()
-            .is_some_and(|s| s.chat_search.from_picker.is_some())
+            .is_some_and(|s| s.search.chat_search.from_picker.is_some())
         {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.search_from_members(query.trim());
@@ -565,9 +566,9 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
-            if session.chat_search.open
-                && session.chat_search.query == trimmed
-                && !matches!(session.chat_search.status, SearchStatus::Closed)
+            if session.search.chat_search.open
+                && session.search.chat_search.query == trimmed
+                && !matches!(session.search.chat_search.status, SearchStatus::Closed)
             {
                 cx.notify();
                 return;
@@ -602,7 +603,12 @@ impl QuillApp {
                 Err(_) => "could not jump to message".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(id) = session.chat_search.selected_hit().map(|hit| hit.message_id) {
+            if let Some(id) = session
+                .search
+                .chat_search
+                .selected_hit()
+                .map(|hit| hit.message_id)
+            {
                 let _ = session.begin_chat_search_jump(id);
             }
             self.connection.status_note = chat_search_jump_note(session);
@@ -635,7 +641,7 @@ impl QuillApp {
                 Err(_) => "could not jump to message".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(id) = session.chat_search.select_newer() {
+            if let Some(id) = session.search.chat_search.select_newer() {
                 let _ = session.begin_chat_search_jump(id);
             }
             self.connection.status_note = chat_search_jump_note(session);
@@ -650,7 +656,7 @@ impl QuillApp {
                 Err(_) => "could not jump to message".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(id) = session.chat_search.select_older() {
+            if let Some(id) = session.search.chat_search.select_older() {
                 let _ = session.begin_chat_search_jump(id);
             }
             self.connection.status_note = chat_search_jump_note(session);
@@ -669,7 +675,7 @@ impl QuillApp {
                 self.connection.status_note = "could not search in chat".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.chat_search.sender = sender;
+            session.search.chat_search.sender = sender;
             session.close_from_picker();
         }
         // The field's text was the member filter while choosing: start the
@@ -693,7 +699,7 @@ impl QuillApp {
                 self.connection.status_note = "could not search in chat".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.chat_search.media = media;
+            session.search.chat_search.media = media;
         }
         cx.notify();
     }
@@ -705,7 +711,7 @@ impl QuillApp {
     ) {
         let open = self
             .session()
-            .is_some_and(|s| s.chat_search.from_picker.is_some());
+            .is_some_and(|s| s.search.chat_search.from_picker.is_some());
         if open {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.close_from_picker();
@@ -742,7 +748,7 @@ impl QuillApp {
                 let _ = live.driver.fetch_grossing_web_app_bots();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.filters = filters;
+            session.search.search.filters = filters;
         }
         cx.notify();
     }
@@ -848,23 +854,30 @@ impl QuillApp {
     pub(super) fn chat_search_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let status = session
-            .map(|s| s.chat_search.status)
+            .map(|s| s.search.chat_search.status)
             .unwrap_or(SearchStatus::Closed);
         let query = session
-            .map(|s| s.chat_search.query.clone())
+            .map(|s| s.search.chat_search.query.clone())
             .unwrap_or_default();
         let position = session
-            .map(|s| s.chat_search.position_label())
+            .map(|s| s.search.chat_search.position_label())
             .unwrap_or_default();
         let jump_note = session.map(chat_search_jump_note).unwrap_or_default();
         let can_pick = session.is_some_and(|s| s.chat_search_can_pick_sender());
-        let sender_label =
-            session.and_then(|s| s.chat_search.sender.map(|sender| s.sender_label(sender)));
-        let media = session.map(|s| s.chat_search.media).unwrap_or_default();
-        let picker = session.and_then(|s| s.chat_search.from_picker.clone());
+        let sender_label = session.and_then(|s| {
+            s.search
+                .chat_search
+                .sender
+                .map(|sender| s.sender_label(sender))
+        });
+        let media = session
+            .map(|s| s.search.chat_search.media)
+            .unwrap_or_default();
+        let picker = session.and_then(|s| s.search.chat_search.from_picker.clone());
         let hits: Vec<(MessageId, String, i32, bool)> = session
             .map(|s| {
-                s.chat_search
+                s.search
+                    .chat_search
                     .hits
                     .iter()
                     .enumerate()
@@ -873,7 +886,7 @@ impl QuillApp {
                             hit.message_id,
                             hit.preview.clone(),
                             hit.date,
-                            s.chat_search.selected == Some(i),
+                            s.search.chat_search.selected == Some(i),
                         )
                     })
                     .collect()
@@ -1038,7 +1051,7 @@ impl QuillApp {
                             |this, window, cx| {
                                 if this
                                     .session()
-                                    .is_some_and(|s| s.chat_search.sender.is_some())
+                                    .is_some_and(|s| s.search.chat_search.sender.is_some())
                                 {
                                     this.chat_search_pick_sender(None, window, cx);
                                 } else {
@@ -1091,9 +1104,9 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
-            if session.search.open
-                && session.search.query == trimmed
-                && !matches!(session.search.status, SearchStatus::Closed)
+            if session.search.search.open
+                && session.search.search.query == trimmed
+                && !matches!(session.search.search.status, SearchStatus::Closed)
             {
                 cx.notify();
                 return;
@@ -1128,9 +1141,10 @@ impl QuillApp {
     ) {
         let chat = self
             .session()
-            .and_then(|session| session.search.merged_chat_ids().first().copied());
+            .and_then(|session| session.search.search.merged_chat_ids().first().copied());
         let message = self.session().and_then(|session| {
             session
+                .search
                 .search
                 .messages
                 .first()
@@ -1278,7 +1292,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let session = self.session()?;
-        let selected = session.search.community_filter;
+        let selected = session.search.search.community_filter;
         let mut communities: Vec<(i64, String)> = session
             .groups
             .communities
@@ -1332,11 +1346,11 @@ impl QuillApp {
     /// (tdesktop `lng_search_filter_*`), content tab and date window.
     pub(super) fn search_filter_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let filters = session.search.filters;
-        if session.search.query.trim().is_empty() && filters.scope != SearchScope::Apps {
+        let filters = session.search.search.filters;
+        if session.search.search.query.trim().is_empty() && filters.scope != SearchScope::Apps {
             return None;
         }
-        let query = session.search.query.trim().to_string();
+        let query = session.search.search.query.trim().to_string();
         let has_chat = session.open_chat.is_some();
         // tdesktop's search tabs: This chat / My messages / Public posts.
         let mut scopes = Vec::new();
@@ -1360,7 +1374,10 @@ impl QuillApp {
                     scope.label(),
                     filters.scope == scope,
                     move |this, _, cx| {
-                        let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                        let mut next = this
+                            .session()
+                            .map(|s| s.search.search.filters)
+                            .unwrap_or_default();
                         next.scope = scope;
                         this.set_search_filters(next, cx);
                     },
@@ -1374,7 +1391,10 @@ impl QuillApp {
             "From archive",
             filters.archived,
             move |this, _, cx| {
-                let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                let mut next = this
+                    .session()
+                    .map(|s| s.search.search.filters)
+                    .unwrap_or_default();
                 next.archived = !next.archived;
                 this.set_search_filters(next, cx);
             },
@@ -1389,7 +1409,10 @@ impl QuillApp {
                     kind.label(),
                     filters.chat_type == kind,
                     move |this, _, cx| {
-                        let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                        let mut next = this
+                            .session()
+                            .map(|s| s.search.search.filters)
+                            .unwrap_or_default();
                         next.chat_type = kind;
                         this.set_search_filters(next, cx);
                     },
@@ -1406,7 +1429,10 @@ impl QuillApp {
                     kind.label(),
                     filters.media == kind,
                     move |this, _, cx| {
-                        let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                        let mut next = this
+                            .session()
+                            .map(|s| s.search.search.filters)
+                            .unwrap_or_default();
                         next.media = kind;
                         this.set_search_filters(next, cx);
                     },
@@ -1423,7 +1449,10 @@ impl QuillApp {
                     range.label(),
                     filters.date == range,
                     move |this, _, cx| {
-                        let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                        let mut next = this
+                            .session()
+                            .map(|s| s.search.search.filters)
+                            .unwrap_or_default();
                         next.date = range;
                         this.set_search_filters(next, cx);
                     },
@@ -1482,11 +1511,12 @@ impl QuillApp {
     /// "Remove all & Disable".
     fn frequent_contacts(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if session.search.top_chats_disabled || session.search.top_chats.is_empty() {
+        if session.search.search.top_chats_disabled || session.search.search.top_chats.is_empty() {
             return None;
         }
-        let menu = session.search.top_menu;
+        let menu = session.search.search.top_menu;
         let tiles: Vec<(ChatId, String)> = session
+            .search
             .search
             .top_chats
             .iter()
@@ -1656,20 +1686,24 @@ impl QuillApp {
     pub(super) fn search_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let status = session
-            .map(|s| s.search.status)
+            .map(|s| s.search.search.status)
             .unwrap_or(SearchStatus::Closed);
-        let recents = session.is_some_and(|s| s.search.recents);
-        let query = session.map(|s| s.search.query.clone()).unwrap_or_default();
-        let chat_ids: Vec<ChatId> = session
-            .map(|s| s.search.merged_chat_ids())
+        let recents = session.is_some_and(|s| s.search.search.recents);
+        let query = session
+            .map(|s| s.search.search.query.clone())
             .unwrap_or_default();
-        let public_scope =
-            session.is_some_and(|s| s.search.filters.scope == SearchScope::PublicPosts && !recents);
-        let apps_scope = session.is_some_and(|s| s.search.filters.scope == SearchScope::Apps);
-        let limits_exceeded = session.is_some_and(|s| s.search.public_limits_exceeded);
+        let chat_ids: Vec<ChatId> = session
+            .map(|s| s.search.search.merged_chat_ids())
+            .unwrap_or_default();
+        let public_scope = session
+            .is_some_and(|s| s.search.search.filters.scope == SearchScope::PublicPosts && !recents);
+        let apps_scope =
+            session.is_some_and(|s| s.search.search.filters.scope == SearchScope::Apps);
+        let limits_exceeded = session.is_some_and(|s| s.search.search.public_limits_exceeded);
         let messages: Vec<(ChatId, MessageId, String, String, i32)> = session
             .map(|s| {
                 s.search
+                    .search
                     .messages
                     .iter()
                     .map(|hit| {
@@ -1708,6 +1742,7 @@ impl QuillApp {
         let public_chats: Vec<(ChatId, String, String)> = session
             .map(|s| {
                 s.search
+                    .search
                     .public_only_chat_ids()
                     .iter()
                     .map(|id| {
@@ -1747,7 +1782,7 @@ impl QuillApp {
         } else {
             "Messages"
         };
-        let confirm = session.and_then(|s| s.search.confirm);
+        let confirm = session.and_then(|s| s.search.search.confirm);
         div()
             .id("search-results")
             .flex()

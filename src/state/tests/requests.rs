@@ -470,7 +470,7 @@ fn update_chat_photo_swaps_and_clears() {
         ),
     );
     assert_eq!(session.chats.get(&11).unwrap().photo_file_id, Some(91));
-    assert!(session.files.contains_key(&91));
+    assert!(session.media.files.contains_key(&91));
     apply_json(
         &mut session,
         &seq,
@@ -539,16 +539,19 @@ fn chat_permissions_gate_topic_composer() {
 #[test]
 fn info_panel_open_close() {
     let (mut session, _sink) = session();
-    assert!(session.open_info_panel.is_none());
-    session.open_info_panel = Some(InfoPanelTarget::User(31));
-    assert_eq!(session.open_info_panel, Some(InfoPanelTarget::User(31)));
-    session.open_info_panel = Some(InfoPanelTarget::Supergroup(77));
+    assert!(session.users_state.open_info_panel.is_none());
+    session.users_state.open_info_panel = Some(InfoPanelTarget::User(31));
     assert_eq!(
-        session.open_info_panel,
+        session.users_state.open_info_panel,
+        Some(InfoPanelTarget::User(31))
+    );
+    session.users_state.open_info_panel = Some(InfoPanelTarget::Supergroup(77));
+    assert_eq!(
+        session.users_state.open_info_panel,
         Some(InfoPanelTarget::Supergroup(77))
     );
-    session.open_info_panel = None;
-    assert!(session.open_info_panel.is_none());
+    session.users_state.open_info_panel = None;
+    assert!(session.users_state.open_info_panel.is_none());
 }
 
 #[test]

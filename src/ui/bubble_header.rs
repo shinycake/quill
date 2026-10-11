@@ -284,6 +284,7 @@ impl QuillApp {
     ) -> Option<PathBuf> {
         let id = header.background_emoji?;
         let file = session?
+            .stickers
             .emoji
             .custom_emoji_stickers
             .iter()

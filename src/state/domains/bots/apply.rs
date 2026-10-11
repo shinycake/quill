@@ -39,7 +39,7 @@ impl Session {
                 // `error` instead of `botCommands` (schema: "for bots
                 // only"), recorded as an empty set by the `Error` arm.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCommands) {
-                    self.bot_commands.insert(bot_user_id.0, commands);
+                    self.bots.bot_commands.insert(bot_user_id.0, commands);
                 }
             }
             BotsPayload::CallbackQueryAnswer(answer) => {
@@ -53,7 +53,7 @@ impl Session {
                             | RequestPurpose::GetCallbackQueryAnswerGame
                     )
                 ) {
-                    self.last_callback_answer = Some(answer);
+                    self.bots.last_callback_answer = Some(answer);
                 }
             }
             BotsPayload::GameHighScores(scores) => {
@@ -68,8 +68,13 @@ impl Session {
                 {
                     // Guard: a panel the user closed while the answer was in
                     // flight must stay closed — only fill the loading entry.
-                    if self.game_scores.contains_key(&(chat_id.0, message_id.0)) {
-                        self.game_scores
+                    if self
+                        .bots
+                        .game_scores
+                        .contains_key(&(chat_id.0, message_id.0))
+                    {
+                        self.bots
+                            .game_scores
                             .insert((chat_id.0, message_id.0), Some(scores));
                     }
                 }
@@ -88,7 +93,7 @@ impl Session {
                 // B1: `getLoginUrlInfo` response to our own login-button
                 // press (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrlInfo) {
-                    self.last_login_url_info = Some(info);
+                    self.bots.last_login_url_info = Some(info);
                 }
             }
         }

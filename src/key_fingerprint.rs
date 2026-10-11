@@ -20,7 +20,7 @@
 //! Security: this module never sees anything but the byte slice it is
 //! handed; it holds no state and implements no `Debug`/`serde` on any key
 //! record (there is nothing to derive on here at all). Raw `key_hash`
-//! bytes stay in `Session.secret_chat_states` — only the pixel indices
+//! bytes stay in `Session.users_state.secret_chat_states` — only the pixel indices
 //! cross into the UI for rendering.
 
 /// `secretChat.key_hash` is exactly 36 bytes (`schema/td_api.tl:2812`).

@@ -21,7 +21,7 @@ impl Session {
             )
         ) && let Some(notice) = err.send_permission_notice()
         {
-            self.send_permission_error = Some(notice.into());
+            self.messages.send_permission_error = Some(notice.into());
         }
         // Q1: a rate-limited user action says so (tdesktop's
         // `lng_flood_error`); background lookups were already retried by
@@ -29,7 +29,7 @@ impl Session {
         if let Some(notice) = err.flood_notice()
             && pending.is_some_and(|p| is_user_action(p.purpose))
         {
-            self.flood_notice = Some(notice);
+            self.messages.flood_notice = Some(notice);
         }
         // Slice G1: roll back optimistic mutations the server
         // rejected — the pre-request value rides on
@@ -235,16 +235,16 @@ impl Session {
         let download_id = pending
             .filter(|p| p.purpose == RequestPurpose::DownloadFile)
             .and_then(|p| p.file_id)
-            .or_else(|| extra.and_then(|id| self.download_extras.get(&id.0).copied()));
+            .or_else(|| extra.and_then(|id| self.media.download_extras.get(&id.0).copied()));
         if let Some(file_id) = download_id {
             // MED3 review: only user-initiated downloads enter the
             // Failed section; automatic downloads never started by
             // the user must not show rows here.
-            if self.user_downloads.contains(&file_id) {
-                self.failed_downloads.insert(file_id);
+            if self.media.user_downloads.contains(&file_id) {
+                self.media.failed_downloads.insert(file_id);
             } else {
                 // A refused automatic download is not retried per ingest.
-                self.stalled_auto_downloads.insert(file_id);
+                self.media.stalled_auto_downloads.insert(file_id);
             }
             self.unstick_download(file_id);
         }

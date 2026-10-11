@@ -19,7 +19,7 @@ pub struct ComposerEdit {
     pub message_id: MessageId,
     pub original_text: String,
     pub kind: ComposerEditKind,
-    /// M1: the target is a scheduled send (`session.scheduled_messages`),
+    /// M1: the target is a scheduled send (`session.messages.scheduled_messages`),
     /// not a history message. `edit_snapshot` validates against the
     /// scheduled list in that case.
     pub scheduled: bool,

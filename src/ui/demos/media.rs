@@ -131,9 +131,9 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_gifs(session, &self.demo_ui.sink, &self.demo_ui.seq);
-            session.gifs.open = false;
-            session.emoji.open = true;
-            session.emoji.installed_sets = [
+            session.stickers.gifs.open = false;
+            session.stickers.emoji.open = true;
+            session.stickers.emoji.installed_sets = [
                 "Downloaded pack",
                 "Downloading pack",
                 "Updated pack",
@@ -151,16 +151,18 @@ impl QuillApp {
             })
             .collect();
             session
+                .stickers
                 .emoji
                 .pack_files
                 .insert(1, vec![quill::ids::FileId(63)]);
             session
+                .stickers
                 .emoji
                 .pack_files
                 .insert(2, vec![quill::ids::FileId(62)]);
-            session.downloading.insert(62);
-            session.emoji.outdated_packs.insert(3);
-            session.emoji.mutating_set = Some((4, true));
+            session.media.downloading.insert(62);
+            session.stickers.emoji.outdated_packs.insert(3);
+            session.stickers.emoji.mutating_set = Some((4, true));
             session.settings.media_prefs.recent_emoji_packs = vec![2, 1];
         }
     }
@@ -199,18 +201,24 @@ impl QuillApp {
             apply_ready_voice(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // One Play request must survive the download and start the note.
-        let local = self.demo_session.as_ref().unwrap().files[&82].clone();
+        let local = self.demo_session.as_ref().unwrap().media.files[&82].clone();
         let mut waiting = local.clone();
         waiting.local.path.clear();
         waiting.local.is_downloading_completed = false;
         self.demo_session
             .as_mut()
             .unwrap()
+            .media
             .files
             .insert(82, waiting);
         self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
         assert!(self.playback.pending_voice_play.is_some());
-        self.demo_session.as_mut().unwrap().files.insert(82, local);
+        self.demo_session
+            .as_mut()
+            .unwrap()
+            .media
+            .files
+            .insert(82, local);
         self.resume_pending_voice(cx);
         assert!(
             self.playback.pending_voice_play.is_none()
@@ -244,7 +252,7 @@ impl QuillApp {
         }
         // The panel's library holds the demo set's contents.
         if let Some(session) = self.demo_session.as_mut() {
-            let mut stickers = session.stickers.stickers.clone();
+            let mut stickers = session.stickers.stickers.stickers.clone();
             // Performance fixture: `QUILL_DEMO_STICKERS=<n>` fills the
             // picker with `n` distinct animated stickers (more than the
             // playback cache holds).
@@ -284,7 +292,11 @@ impl QuillApp {
                     stickers.push(item);
                 }
             }
-            session.media_library.set_stickers.insert(77, stickers);
+            session
+                .media
+                .media_library
+                .set_stickers
+                .insert(77, stickers);
         }
         self.pickers.media_panel.open = true;
         self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
@@ -296,7 +308,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_gifs(session, &self.demo_ui.sink, &self.demo_ui.seq);
             if demo == GifsDemo::GifPlayback {
-                session.gifs.open = false;
+                session.stickers.gifs.open = false;
                 if let Some(history) = session.histories.get_mut(&11) {
                     history.messages.retain(|id, _| *id == 501);
                 }

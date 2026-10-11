@@ -16,7 +16,7 @@ impl Session {
             first_page,
         })) = pending.map(|p| p.purpose)
         {
-            let slot_ok = match (first_page, self.inline_query.as_ref()) {
+            let slot_ok = match (first_page, self.bots.inline_query.as_ref()) {
                 (true, Some(slot)) => {
                     slot.chat_id == chat_id
                         && slot.bot_user_id == bot_user_id
@@ -30,7 +30,7 @@ impl Session {
                 _ => false,
             };
             if slot_ok {
-                let fetch = match (first_page, &self.inline_query) {
+                let fetch = match (first_page, &self.bots.inline_query) {
                     (
                         false,
                         Some(InlineQuerySlot {
@@ -56,7 +56,7 @@ impl Session {
                         next_offset: page.next_offset,
                     },
                 };
-                if let Some(slot) = self.inline_query.as_mut() {
+                if let Some(slot) = self.bots.inline_query.as_mut() {
                     slot.fetch = fetch;
                 }
             }
@@ -95,7 +95,7 @@ impl Session {
             let merged = if offset == 0 {
                 voters
             } else {
-                match self.poll_voters.get(&key) {
+                match self.messages.poll_voters.get(&key) {
                     Some(PollVotersFetch::Loaded { voters: old, .. }) => {
                         let mut merged = old.clone();
                         for voter in voters {
@@ -118,7 +118,7 @@ impl Session {
             } else {
                 total_count
             };
-            self.poll_voters.insert(
+            self.messages.poll_voters.insert(
                 key,
                 PollVotersFetch::Loaded {
                     voters: merged,

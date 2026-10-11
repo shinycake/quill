@@ -1117,7 +1117,7 @@ impl QuillApp {
 
     /// The revision the history rows' cache must include.
     pub(super) fn translate_revision(&self) -> u64 {
-        self.session().map_or(0, |s| s.translate.revision)
+        self.session().map_or(0, |s| s.messages.translate.revision)
     }
 
     /// Per-tick work: keep the open chat's translation going (request what
@@ -1156,7 +1156,7 @@ impl QuillApp {
             let Some(history) = session.histories.get(&chat_id.0) else {
                 return false;
             };
-            let room = MAX_IN_FLIGHT.saturating_sub(session.translate.jobs.len());
+            let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.jobs.len());
             history
                 .ordered()
                 .into_iter()

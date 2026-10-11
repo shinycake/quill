@@ -31,12 +31,20 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
         is_installed: true,
         is_official: false,
     };
-    session.emoji.installed_sets = vec![pack(1), pack(2), pack(3)];
+    session.stickers.emoji.installed_sets = vec![pack(1), pack(2), pack(3)];
     session.remember_emoji_pack_usage(&[10]);
-    session.emoji.custom_emoji_stickers.push(sticker(20, 2));
+    session
+        .stickers
+        .emoji
+        .custom_emoji_stickers
+        .push(sticker(20, 2));
     session.remember_emoji_pack_usage(&[20]);
     assert_eq!(session.settings.media_prefs.recent_emoji_packs, vec![2]);
-    session.emoji.custom_emoji_stickers.push(sticker(10, 1));
+    session
+        .stickers
+        .emoji
+        .custom_emoji_stickers
+        .push(sticker(10, 1));
     session.remember_emoji_pack_usage(&[]);
     assert_eq!(
         session
@@ -91,7 +99,11 @@ fn message_custom_emoji_ids_to_resolve_scans_open_chat() {
     // Deduped even though the entity repeats.
     assert_eq!(session.message_custom_emoji_ids_to_resolve(), vec![12345]);
     // Attempted ids are excluded.
-    session.emoji.status_resolution_attempted.insert(12345);
+    session
+        .stickers
+        .emoji
+        .status_resolution_attempted
+        .insert(12345);
     assert!(session.message_custom_emoji_ids_to_resolve().is_empty());
 }
 
@@ -168,20 +180,24 @@ fn open_chat_custom_emoji_files_cover_text_and_reactions() {
     assert_eq!(message.reaction_chips().len(), 1);
     assert!(message.emoji_reaction_chips().is_empty());
     assert!(message.chosen_reaction(&crate::state::ReactionChoice::CustomEmoji(777)));
-    session.emoji.custom_emoji_stickers.push(StickerItem {
-        custom_emoji_id: Some(777),
-        id: 1,
-        set_id: 2,
-        emoji: "🔥".into(),
-        width: 100,
-        height: 100,
-        format: crate::telegram::envelope::StickerFormat::Webp,
-        file_id: crate::ids::FileId(55),
-        thumb_file_id: None,
-        thumb_width: 0,
-        thumb_height: 0,
-        requires_premium: false,
-    });
+    session
+        .stickers
+        .emoji
+        .custom_emoji_stickers
+        .push(StickerItem {
+            custom_emoji_id: Some(777),
+            id: 1,
+            set_id: 2,
+            emoji: "🔥".into(),
+            width: 100,
+            height: 100,
+            format: crate::telegram::envelope::StickerFormat::Webp,
+            file_id: crate::ids::FileId(55),
+            thumb_file_id: None,
+            thumb_width: 0,
+            thumb_height: 0,
+            requires_premium: false,
+        });
     assert_eq!(
         session.open_chat_custom_emoji_files(),
         vec![crate::ids::FileId(55)]
@@ -210,9 +226,15 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.recent_statuses.len(), 1);
-    assert_eq!(with_purpose.emoji.recent_statuses[0].custom_emoji_id, 12345);
-    assert_eq!(with_purpose.emoji.recent_statuses[0].expiration_date, 3600);
+    assert_eq!(with_purpose.stickers.emoji.recent_statuses.len(), 1);
+    assert_eq!(
+        with_purpose.stickers.emoji.recent_statuses[0].custom_emoji_id,
+        12345
+    );
+    assert_eq!(
+        with_purpose.stickers.emoji.recent_statuses[0].expiration_date,
+        3600
+    );
 
     // A stray emojiStatuses (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -223,7 +245,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"emojiStatuses","emoji_statuses":[]}"#,
     );
-    assert!(without_purpose.emoji.recent_statuses.is_empty());
+    assert!(without_purpose.stickers.emoji.recent_statuses.is_empty());
 
     // Themed/default ids land in their own slots.
     let extra = with_purpose.request(RequestPurpose::GetThemedEmojiStatuses, None);
@@ -236,7 +258,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.themed_status_ids, vec![11, 22]);
+    assert_eq!(with_purpose.stickers.emoji.themed_status_ids, vec![11, 22]);
     let extra = with_purpose.request(RequestPurpose::GetDefaultEmojiStatuses, None);
     apply_json(
         &mut with_purpose,
@@ -247,7 +269,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.default_status_ids, vec![33]);
+    assert_eq!(with_purpose.stickers.emoji.default_status_ids, vec![33]);
 
     // getAnimatedEmoji's animatedEmoji lands under GetAnimatedEmoji.
     let extra = with_purpose.request(RequestPurpose::GetAnimatedEmoji, None);
@@ -262,6 +284,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     );
     assert_eq!(
         with_purpose
+            .stickers
             .emoji
             .animated_emoji
             .as_ref()
@@ -283,8 +306,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.custom_emoji_stickers.len(), 1);
-    assert!(with_purpose.stickers.favorites.is_empty());
+    assert_eq!(with_purpose.stickers.emoji.custom_emoji_stickers.len(), 1);
+    assert!(with_purpose.stickers.stickers.favorites.is_empty());
 
     // searchEmojis answers land under SearchEmojis.
     let extra = with_purpose.request(RequestPurpose::SearchEmojis, None);
@@ -297,8 +320,11 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.keyword_results.len(), 1);
-    assert_eq!(with_purpose.emoji.keyword_results[0].keyword, "fire");
+    assert_eq!(with_purpose.stickers.emoji.keyword_results.len(), 1);
+    assert_eq!(
+        with_purpose.stickers.emoji.keyword_results[0].keyword,
+        "fire"
+    );
 
     // getEmojiCategories answers land under GetEmojiCategories.
     let extra = with_purpose.request(RequestPurpose::GetEmojiCategories, None);
@@ -311,8 +337,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.categories.len(), 1);
-    assert_eq!(with_purpose.emoji.categories[0].name, "Smileys");
+    assert_eq!(with_purpose.stickers.emoji.categories.len(), 1);
+    assert_eq!(with_purpose.stickers.emoji.categories[0].name, "Smileys");
 
     // Emoji-pack sets: installed / search / archived (first page
     // replaces, second appends) / trending — none touches the regular
@@ -333,9 +359,9 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.installed_sets.len(), 1);
-    assert_eq!(with_purpose.emoji.installed_sets[0].id, 77);
-    assert!(with_purpose.stickers.sets.is_empty());
+    assert_eq!(with_purpose.stickers.emoji.installed_sets.len(), 1);
+    assert_eq!(with_purpose.stickers.emoji.installed_sets[0].id, 77);
+    assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     let extra = with_purpose.request(RequestPurpose::SearchEmojiSets, None);
     apply_json(
@@ -348,8 +374,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.found_sets.len(), 1);
-    assert!(with_purpose.stickers.found_sets.is_empty());
+    assert_eq!(with_purpose.stickers.emoji.found_sets.len(), 1);
+    assert!(with_purpose.stickers.stickers.found_sets.is_empty());
 
     let extra = with_purpose.request(
         RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: true }),
@@ -379,7 +405,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.archived_sets.len(), 2);
+    assert_eq!(with_purpose.stickers.emoji.archived_sets.len(), 2);
 
     let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
     apply_json(
@@ -392,9 +418,9 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.emoji.trending_sets.len(), 1);
-    assert!(with_purpose.emoji.trending_is_premium);
-    assert!(with_purpose.stickers.trending.is_empty());
+    assert_eq!(with_purpose.stickers.emoji.trending_sets.len(), 1);
+    assert!(with_purpose.stickers.emoji.trending_is_premium);
+    assert!(with_purpose.stickers.stickers.trending.is_empty());
 
     // A clearRecentEmojiStatuses `ok` drops the recent statuses.
     let extra = with_purpose.request(RequestPurpose::ClearRecentEmojiStatuses, None);
@@ -404,10 +430,10 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.emoji.recent_statuses.is_empty());
+    assert!(with_purpose.stickers.emoji.recent_statuses.is_empty());
 
     // A setEmojiStatus `ok` likewise invalidates recent statuses.
-    with_purpose.emoji.recent_statuses = vec![EmojiStatusItem {
+    with_purpose.stickers.emoji.recent_statuses = vec![EmojiStatusItem {
         custom_emoji_id: 1,
         expiration_date: 0,
         gift: None,
@@ -419,7 +445,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.emoji.recent_statuses.is_empty());
+    assert!(with_purpose.stickers.emoji.recent_statuses.is_empty());
 
     // A changeStickerSet (emoji) `ok` drops the installed emoji sets.
     let extra = with_purpose.request(RequestPurpose::ChangeEmojiSet, None);
@@ -429,10 +455,11 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.emoji.installed_sets.is_empty());
+    assert!(with_purpose.stickers.emoji.installed_sets.is_empty());
 
     // A reorderInstalledStickerSets (emoji) `ok` does the same.
-    with_purpose.emoji.installed_sets = vec![with_purpose.emoji.found_sets[0].clone()];
+    with_purpose.stickers.emoji.installed_sets =
+        vec![with_purpose.stickers.emoji.found_sets[0].clone()];
     let extra = with_purpose.request(RequestPurpose::ReorderInstalledEmojiSets, None);
     apply_json(
         &mut with_purpose,
@@ -440,5 +467,5 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.emoji.installed_sets.is_empty());
+    assert!(with_purpose.stickers.emoji.installed_sets.is_empty());
 }

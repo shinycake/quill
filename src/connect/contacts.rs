@@ -18,7 +18,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.contacts.is_some()
+        if self.session.users_state.contacts.is_some()
             || self
                 .session
                 .requests
@@ -26,7 +26,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.contacts_error = false;
+        self.session.users_state.contacts_error = false;
         let extra = self.session.request(RequestPurpose::GetContacts, None);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
@@ -46,7 +46,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.user_full_infos.contains_key(&user_id)
+        if self
+            .session
+            .users_state
+            .user_full_infos
+            .contains_key(&user_id)
             || self
                 .session
                 .requests
@@ -71,10 +75,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: crate::ids::ChatId,
     ) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() || self.session.chat_media_counts.contains_key(&chat_id.0) {
+        if !self.chats_path_active()
+            || self
+                .session
+                .media
+                .chat_media_counts
+                .contains_key(&chat_id.0)
+        {
             return Ok(());
         }
         self.session
+            .media
             .chat_media_counts
             .insert(chat_id.0, Default::default());
         for (index, (filter, _, _)) in crate::telegram::requests::MEDIA_COUNT_FILTERS
@@ -92,7 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     ))
             {
                 self.session.requests.take(extra);
-                self.session.chat_media_counts.remove(&chat_id.0);
+                self.session.media.chat_media_counts.remove(&chat_id.0);
                 return Err(err);
             }
         }
@@ -240,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         sent += 1;
-        if let Some(ids) = self.session.contacts.clone()
+        if let Some(ids) = self.session.users_state.contacts.clone()
             && !ids.is_empty()
         {
             let extra = self.session.request(RequestPurpose::RemoveContact, None);

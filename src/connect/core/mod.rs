@@ -114,8 +114,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 owned.envelope.payload,
                 EnvelopePayload::Stickers(StickersPayload::TrendingStickerSets { .. })
             )
-            && self.session.emoji.open
-            && self.session.emoji.tab == crate::emoji::EmojiSetTab::Trending;
+            && self.session.stickers.emoji.open
+            && self.session.stickers.emoji.tab == crate::emoji::EmojiSetTab::Trending;
         let emoji_catalog_changed = (matches!(owned.envelope.payload, EnvelopePayload::Ok)
             && view_purpose == Some(RequestPurpose::ChangeEmojiSet))
             || matches!(
@@ -140,9 +140,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 match value {
                     crate::telegram::envelope::OptionValue::String(name) => {
-                        *name != self.session.gifs.search_bot_username
+                        *name != self.session.stickers.gifs.search_bot_username
                     }
-                    _ => !self.session.gifs.search_bot_username.is_empty(),
+                    _ => !self.session.stickers.gifs.search_bot_username.is_empty(),
                 }
             }
             _ => false,
@@ -293,6 +293,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .and_then(|id| self.session.requests.purpose(id))
                     .and_then(|purpose| {
                         self.session
+                            .users_state
                             .username_check_pending
                             .clone()
                             .filter(|_| purpose == RequestPurpose::CheckUsername)
@@ -316,6 +317,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     })
                     .and_then(|id| {
                         self.session
+                            .messages
                             .instant_view_urls
                             .remove(&id)
                             .map(|url| (url, rich.clone()))
@@ -329,7 +331,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             EnvelopePayload::Error(_) => owned.envelope.extra.and_then(|id| {
                 (self.session.requests.purpose(id) == Some(RequestPurpose::GetWebPageInstantView))
                     .then_some(id)
-                    .and_then(|id| self.session.instant_view_urls.remove(&id))
+                    .and_then(|id| self.session.messages.instant_view_urls.remove(&id))
             }),
             _ => None,
         };
@@ -347,6 +349,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 })
                 .and_then(|id| {
                     self.session
+                        .messages
                         .composer_preview_urls
                         .remove(&id)
                         .map(|url| ComposerLinkPreview {
@@ -363,7 +366,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             EnvelopePayload::Error(_) => owned.envelope.extra.and_then(|id| {
                 (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
                     .then_some(id)
-                    .and_then(|id| self.session.composer_preview_urls.remove(&id))
+                    .and_then(|id| self.session.messages.composer_preview_urls.remove(&id))
             }),
             _ => None,
         };
@@ -527,7 +530,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = self.refresh_password_state();
         }
         if let Some(chat_id) = unpinned_all {
-            self.session.pinned_messages.insert(chat_id.0, Vec::new());
+            self.session
+                .messages
+                .pinned_messages
+                .insert(chat_id.0, Vec::new());
         }
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.open_chat == Some(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
@@ -586,7 +592,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Settings > Ask a Question: the support account arrived; open
         // (or create) the private chat with it.
-        if let Some(user_id) = self.session.support_user_ready.take() {
+        if let Some(user_id) = self.session.users_state.support_user_ready.take() {
             let _ = self.create_private_chat_for(user_id);
         }
         // Slice (communities backend core): resolve a just-created
@@ -662,57 +668,58 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Corner "@" / heart buttons: jump to the oldest unread marker the
         // search found. A failed jump (closed chat) just drops it.
-        if let Some(message_id) = self.session.unread_jump.take() {
+        if let Some(message_id) = self.session.messages.unread_jump.take() {
             let _ = self.jump_to_chat_search_message(message_id);
         }
         // Jump to date: `getChatMessageByDate` resolved (or 404'd) a target.
-        if let Some((message_id, mode)) = self.session.date_jump.take() {
+        if let Some((message_id, mode)) = self.session.search.date_jump.take() {
             let _ = self.jump_to_message_with(message_id, mode);
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {
-            self.session.message_link_result = Some(link);
-            self.session.message_link_public = is_public;
+            self.session.messages.message_link_result = Some(link);
+            self.session.messages.message_link_public = is_public;
         }
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
         // dropped by the UI (chat-id check), never applied blindly.
         if let Some((chat_id, text)) = ai_text_answer {
-            self.session.ai_composer_text = Some((chat_id, text));
+            self.session.messages.ai_composer_text = Some((chat_id, text));
         }
         if let Some((chat_id, rich, note)) = ai_rich_answer {
-            self.session.ai_composer_blocks = Some((chat_id, rich, note));
+            self.session.messages.ai_composer_blocks = Some((chat_id, rich, note));
         }
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
         if let Some((username, result)) = username_check_answer {
-            self.session.username_check = Some((username, result));
+            self.session.users_state.username_check = Some((username, result));
         }
         // MED4: stash the `getWebPageInstantView` answer (success →
         // IV reader; error → browser fallback) for the UI drains.
         if let Some((url, rich)) = instant_view_answer {
-            self.session.instant_view = Some(InstantViewPage { url, rich });
+            self.session.messages.instant_view = Some(InstantViewPage { url, rich });
         }
         if let Some(url) = instant_view_fallback {
-            self.session.instant_view_fallback_url = Some(url);
+            self.session.messages.instant_view_fallback_url = Some(url);
         }
         // MED4b: stash the `getLinkPreview` answer for the composer
         // chip; a 404 becomes "no link info" (`Some(None)`); answers for
         // superseded URLs are dropped.
         if let Some(answer) = link_preview_answer {
-            let current = self.session.composer_preview.as_ref();
+            let current = self.session.messages.composer_preview.as_ref();
             if current.is_none_or(|p| p.url == answer.url) {
-                self.session.composer_preview = Some(answer);
+                self.session.messages.composer_preview = Some(answer);
             }
         }
         if let Some(url) = link_preview_failed
             && self
                 .session
+                .messages
                 .composer_preview
                 .as_ref()
                 .is_some_and(|p| p.url == url && p.preview.is_none())
         {
-            self.session.composer_preview = Some(ComposerLinkPreview {
+            self.session.messages.composer_preview = Some(ComposerLinkPreview {
                 url,
                 preview: Some(None),
             });
@@ -724,7 +731,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if can_get_link {
                 let _ = self.send_message_link_request(chat_id, message_id);
             } else {
-                self.session.message_link_error =
+                self.session.messages.message_link_error =
                     Some("message link not available for this message".into());
             }
         }
@@ -739,20 +746,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.maybe_resolve_emoji_status_choices()?;
         self.maybe_resolve_message_custom_emoji()?;
-        if !self.session.emoji.custom_emoji_stickers.is_empty() {
+        if !self.session.stickers.emoji.custom_emoji_stickers.is_empty() {
             let files = self.session.open_chat_custom_emoji_files();
             self.ensure_media_files(&files)?;
         }
         if gif_bot_changed {
             self.cancel_gif_search_requests();
-            self.session.gifs.search_results.clear();
-            self.session.gifs.search_next_offset.clear();
-            self.session.gifs.search_loading = self.session.gifs.search_mode;
+            self.session.stickers.gifs.search_results.clear();
+            self.session.stickers.gifs.search_next_offset.clear();
+            self.session.stickers.gifs.search_loading = self.session.stickers.gifs.search_mode;
         }
         if self.chats_path_active()
-            && self.session.gifs.open
-            && self.session.gifs.search_mode
-            && self.session.gifs.search_loading
+            && self.session.stickers.gifs.open
+            && self.session.stickers.gifs.search_mode
+            && self.session.stickers.gifs.search_loading
         {
             self.maybe_search_gifs(false)?;
         }
@@ -764,8 +771,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
         }
         if installed_stickers_answer
-            && self.session.stickers.suggest_waiting_for_sets
-            && let Some(emoji) = self.session.stickers.suggest_for.take()
+            && self.session.stickers.stickers.suggest_waiting_for_sets
+            && let Some(emoji) = self.session.stickers.stickers.suggest_for.take()
         {
             self.update_sticker_suggestions(&emoji)?;
         }
@@ -773,10 +780,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = self.maybe_fetch_replied_messages();
         }
         if thumbs_after
-            || self.session.stickers.open
-            || self.session.gifs.open
-            || self.session.emoji.open
-            || !self.session.stickers.suggestions.is_empty()
+            || self.session.stickers.stickers.open
+            || self.session.stickers.gifs.open
+            || self.session.stickers.emoji.open
+            || !self.session.stickers.stickers.suggestions.is_empty()
         {
             self.maybe_download_open_thumbs()?;
             self.maybe_download_open_chat_media()?;
@@ -811,15 +818,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetArchivedStickerSets),
             );
-            if self.session.stickers.open
-                && self.session.stickers.tab == crate::state::StickerTab::Archived
+            if self.session.stickers.stickers.open
+                && self.session.stickers.stickers.tab == crate::state::StickerTab::Archived
             {
                 drop(
                     self.session
                         .requests
                         .take_purpose(RequestPurpose::GetStickerSet),
                 );
-                self.session.stickers.loading_set = false;
+                self.session.stickers.stickers.loading_set = false;
                 self.fetch_archived_stickers(false)?;
             }
         }
@@ -829,7 +836,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetInstalledStickerSets),
             );
-            if self.session.stickers.open {
+            if self.session.stickers.stickers.open {
                 self.refresh_installed_sticker_sets()?;
             }
         }
@@ -840,7 +847,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetFavoriteStickers),
             );
-            if self.session.stickers.open {
+            if self.session.stickers.stickers.open {
                 self.sticker_request_favorites()?;
             }
         }

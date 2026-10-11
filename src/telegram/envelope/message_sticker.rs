@@ -39,7 +39,7 @@ impl StickerContent {
     }
 }
 
-/// One sticker inside `stickerSet.stickers` (picker). Same file ids as `sticker`.
+/// One sticker inside `stickerSet.stickers.stickers` (picker). Same file ids as `sticker`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StickerItem {
     pub custom_emoji_id: Option<i64>,
@@ -287,7 +287,7 @@ pub(crate) fn parse_trending_sticker_sets(value: &Value) -> EnvelopePayload {
 }
 
 /// Slice S8: `stickers` — bare `vector<sticker>` (search / favorites /
-/// recent). Same per-entry parse as `stickerSet.stickers`.
+/// recent). Same per-entry parse as `stickerSet.stickers.stickers`.
 pub(crate) fn parse_stickers(value: &Value) -> EnvelopePayload {
     let mut stickers = Vec::new();
     let mut files = Vec::new();

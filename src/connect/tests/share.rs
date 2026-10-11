@@ -79,15 +79,25 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
             .all(|v| v["options"]["disable_notification"] == true)
     );
     ingest(&mut driver, &forwarded_json(to_bob, 8, 80), &seq, &sink);
-    let first = driver.session.last_forward.take().expect("bob result");
+    let first = driver
+        .session
+        .messages
+        .last_forward
+        .take()
+        .expect("bob result");
     assert_eq!(first.dest_title, "Bob");
     assert_eq!(first.from_chat_id, ChatId(7));
     ingest(&mut driver, &forwarded_json(to_cy, 9, 90), &seq, &sink);
-    let second = driver.session.last_forward.take().expect("cy result");
+    let second = driver
+        .session
+        .messages
+        .last_forward
+        .take()
+        .expect("cy result");
     assert_eq!(second.dest_title, "Cy");
     assert_eq!(second.from_chat_id, ChatId(7));
-    assert!(driver.session.queued_forward_flights.is_empty());
-    assert!(driver.session.in_flight_forward.is_none());
+    assert!(driver.session.messages.queued_forward_flights.is_empty());
+    assert!(driver.session.messages.in_flight_forward.is_none());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -151,7 +161,7 @@ fn share_search_sends_both_searches_and_ignores_stale_answers() {
         &seq,
         &sink,
     );
-    assert!(driver.session.share_search.server.is_empty());
+    assert!(driver.session.messages.share_search.server.is_empty());
     assert!(
         driver
             .session

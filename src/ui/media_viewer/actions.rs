@@ -40,8 +40,10 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let files: HashMap<i32, ParsedFile> =
-            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let files: HashMap<i32, ParsedFile> = self
+            .session()
+            .map(|s| s.media.files.clone())
+            .unwrap_or_default();
         let roots = self.media_display_roots();
         let path = viewer_display_path(&item, &files, &roots);
         let orientation = self.viewer.orientation;
@@ -107,8 +109,10 @@ impl QuillApp {
         if self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
-        let files: HashMap<i32, ParsedFile> =
-            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let files: HashMap<i32, ParsedFile> = self
+            .session()
+            .map(|s| s.media.files.clone())
+            .unwrap_or_default();
         let path = match item.kind {
             MediaViewerKind::Photo => {
                 let roots = self.media_display_roots();
@@ -208,6 +212,7 @@ impl QuillApp {
             message.pending,
         )?;
         let actions = session
+            .messages
             .message_menu_actions
             .filter(|(c, m, _)| *c == chat_id && *m == item.message_id)
             .map(|(_, _, actions)| actions);
@@ -290,8 +295,10 @@ impl QuillApp {
         if self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
-        let files: HashMap<i32, ParsedFile> =
-            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let files: HashMap<i32, ParsedFile> = self
+            .session()
+            .map(|s| s.media.files.clone())
+            .unwrap_or_default();
         let roots = self.media_display_roots();
         let orientation = self.viewer.orientation;
         let png = viewer_display_path(&item, &files, &roots)

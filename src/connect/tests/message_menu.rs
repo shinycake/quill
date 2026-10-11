@@ -92,7 +92,12 @@ fn menu_properties_chain_the_viewer_and_reactor_lookups() {
             .iter()
             .any(|json| json.contains("getMessageReadDate"))
     );
-    let actions = driver.session.message_menu_actions.expect("properties").2;
+    let actions = driver
+        .session
+        .messages
+        .message_menu_actions
+        .expect("properties")
+        .2;
     assert!(actions.can_report_chat && actions.can_get_viewers);
 
     answer(
@@ -111,7 +116,12 @@ fn menu_properties_chain_the_viewer_and_reactor_lookups() {
         "getMessageAddedReactions",
         r#"{"@type":"addedReactions","total_count":2,"reactions":[{"@type":"addedReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"sender_id":{"@type":"messageSenderUser","user_id":9},"is_outgoing":false,"date":1700000300}],"next_offset":""}"#,
     );
-    let audience = driver.session.message_audience.as_ref().expect("audience");
+    let audience = driver
+        .session
+        .messages
+        .message_audience
+        .as_ref()
+        .expect("audience");
     assert_eq!(audience.viewers.ready().map(Vec::len), Some(2));
     let page = audience.reactions.ready().expect("reactions");
     assert_eq!(page.total_count, 2);
@@ -159,7 +169,7 @@ fn private_chat_asks_the_read_date_and_keeps_privacy_answers() {
         "getMessageReadDate",
         r#"{"@type":"messageReadDateUserPrivacyRestricted"}"#,
     );
-    let audience = driver.session.message_audience.as_ref().unwrap();
+    let audience = driver.session.messages.message_audience.as_ref().unwrap();
     assert_eq!(
         audience.read_date,
         Audience::Ready(MessageReadDate::UserPrivacyRestricted)
@@ -190,7 +200,7 @@ fn a_refused_lookup_is_failed_not_loading_forever() {
         "getMessageViewers",
         r#"{"@type":"error","code":400,"message":"MESSAGE_TOO_OLD"}"#,
     );
-    let audience = driver.session.message_audience.as_ref().unwrap();
+    let audience = driver.session.messages.message_audience.as_ref().unwrap();
     assert_eq!(audience.viewers, Audience::Failed);
 }
 
@@ -207,7 +217,13 @@ fn report_flow_walks_reason_details_and_done() {
     assert_eq!(first["option_id"], "");
     assert_eq!(first["message_ids"], serde_json::json!([50]));
     assert_eq!(
-        driver.session.message_report.as_ref().unwrap().stage,
+        driver
+            .session
+            .messages
+            .message_report
+            .as_ref()
+            .unwrap()
+            .stage,
         MessageReportStage::Checking
     );
 
@@ -219,7 +235,14 @@ fn report_flow_walks_reason_details_and_done() {
         "reportChat",
         r#"{"@type":"reportChatResultOptionRequired","title":"Why?","options":[{"@type":"reportOption","id":"c3BhbQ==","text":"Spam"},{"@type":"reportOption","id":"b3RoZXI=","text":"Other"}]}"#,
     );
-    let options = match &driver.session.message_report.as_ref().unwrap().stage {
+    let options = match &driver
+        .session
+        .messages
+        .message_report
+        .as_ref()
+        .unwrap()
+        .stage
+    {
         MessageReportStage::PickOption { title, options } => {
             assert_eq!(title, "Why?");
             options.clone()
@@ -241,7 +264,13 @@ fn report_flow_walks_reason_details_and_done() {
     let second = sent_request(&recorder, "reportChat");
     assert_eq!(second["option_id"], "b3RoZXI=");
     assert_eq!(
-        driver.session.message_report.as_ref().unwrap().stage,
+        driver
+            .session
+            .messages
+            .message_report
+            .as_ref()
+            .unwrap()
+            .stage,
         MessageReportStage::Sending
     );
     answer(
@@ -253,7 +282,13 @@ fn report_flow_walks_reason_details_and_done() {
         r#"{"@type":"reportChatResultTextRequired","option_id":"b3RoZXI=","is_optional":false}"#,
     );
     assert_eq!(
-        driver.session.message_report.as_ref().unwrap().stage,
+        driver
+            .session
+            .messages
+            .message_report
+            .as_ref()
+            .unwrap()
+            .stage,
         MessageReportStage::TextRequired {
             option_id: "b3RoZXI=".into(),
             is_optional: false
@@ -262,7 +297,13 @@ fn report_flow_walks_reason_details_and_done() {
     // Back returns to the reasons.
     assert!(driver.session.message_report_back());
     assert!(matches!(
-        driver.session.message_report.as_ref().unwrap().stage,
+        driver
+            .session
+            .messages
+            .message_report
+            .as_ref()
+            .unwrap()
+            .stage,
         MessageReportStage::PickOption { .. }
     ));
 
@@ -286,7 +327,13 @@ fn report_flow_walks_reason_details_and_done() {
         r#"{"@type":"reportChatResultOk"}"#,
     );
     assert_eq!(
-        driver.session.message_report.as_ref().unwrap().stage,
+        driver
+            .session
+            .messages
+            .message_report
+            .as_ref()
+            .unwrap()
+            .stage,
         MessageReportStage::Reported
     );
 }
@@ -307,7 +354,13 @@ fn report_error_ends_the_flow_instead_of_spinning() {
         r#"{"@type":"error","code":400,"message":"MESSAGE_ID_INVALID"}"#,
     );
     assert!(matches!(
-        driver.session.message_report.as_ref().unwrap().stage,
+        driver
+            .session
+            .messages
+            .message_report
+            .as_ref()
+            .unwrap()
+            .stage,
         MessageReportStage::Failed(_)
     ));
 }
@@ -352,7 +405,7 @@ fn admin_moderation_sends_each_checked_action() {
         r#"{"@type":"ok"}"#,
     );
     assert_eq!(
-        driver.session.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.as_deref(),
         Some("messages deleted")
     );
     answer(
@@ -366,6 +419,7 @@ fn admin_moderation_sends_each_checked_action() {
     assert!(
         driver
             .session
+            .messages
             .message_action_note
             .as_deref()
             .is_some_and(|note| note.starts_with("could not report the spam"))
@@ -506,7 +560,11 @@ fn message_properties_carry_the_new_rights() {
             extra.0
         ),
     );
-    let (_, _, actions) = driver.session.message_menu_actions.expect("properties");
+    let (_, _, actions) = driver
+        .session
+        .messages
+        .message_menu_actions
+        .expect("properties");
     assert!(actions.can_set_fact_check);
     assert!(actions.can_be_replied_in_another_chat);
     assert!(!actions.can_be_edited);

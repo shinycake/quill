@@ -203,13 +203,17 @@ impl Session {
     /// The own user's gift settings once `userFullInfo` was seen.
     pub fn my_gift_settings(&self) -> Option<crate::privacy::GiftSettings> {
         let me = self.my_user_id?;
-        self.user_full_infos.get(&me)?.extras.gift_settings
+        self.users_state
+            .user_full_infos
+            .get(&me)?
+            .extras
+            .gift_settings
     }
 
     /// Optimistic write of the own gift settings.
     pub fn set_my_gift_settings_local(&mut self, settings: crate::privacy::GiftSettings) {
         if let Some(me) = self.my_user_id
-            && let Some(info) = self.user_full_infos.get_mut(&me)
+            && let Some(info) = self.users_state.user_full_infos.get_mut(&me)
         {
             info.extras.gift_settings = Some(settings);
         }

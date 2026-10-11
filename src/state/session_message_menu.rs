@@ -144,6 +144,7 @@ impl Session {
                 continue;
             };
             let set_id = self
+                .stickers
                 .emoji
                 .custom_emoji_stickers
                 .iter()
@@ -167,7 +168,7 @@ impl Session {
         if title.is_empty() {
             return;
         }
-        self.custom_emoji_preview = Some(CustomEmojiPreview {
+        self.stickers.custom_emoji_preview = Some(CustomEmojiPreview {
             emoji_id,
             set_id,
             title,
@@ -184,7 +185,7 @@ impl Session {
         is_emoji: bool,
         stickers: Vec<StickerItem>,
     ) {
-        if let Some(view) = self.sticker_set_view.as_mut()
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
             view.stage = StickerSetViewStage::Ready {
@@ -198,7 +199,7 @@ impl Session {
     }
 
     pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64) {
-        if let Some(view) = self.sticker_set_view.as_mut()
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
             view.stage = StickerSetViewStage::Failed;
@@ -207,7 +208,7 @@ impl Session {
 
     /// Start reporting `message_ids` of `chat_id`.
     pub fn begin_message_report(&mut self, chat_id: ChatId, message_ids: Vec<MessageId>) {
-        self.message_report = Some(MessageReportFlow {
+        self.messages.message_report = Some(MessageReportFlow {
             chat_id,
             message_ids,
             stage: MessageReportStage::Checking,
@@ -217,12 +218,12 @@ impl Session {
     }
 
     pub fn clear_message_report(&mut self) {
-        self.message_report = None;
+        self.messages.message_report = None;
     }
 
     /// The follow-up `reportChat` (reason chosen or details sent) went out.
     pub fn message_report_sending(&mut self, chosen: Option<(String, String, Vec<ReportOption>)>) {
-        if let Some(flow) = self.message_report.as_mut() {
+        if let Some(flow) = self.messages.message_report.as_mut() {
             if let Some((text, title, options)) = chosen {
                 flow.trail.push(text);
                 flow.previous.push((title, options));
@@ -233,7 +234,7 @@ impl Session {
 
     /// Back from a sub-reason list to the previous one.
     pub fn message_report_back(&mut self) -> bool {
-        let Some(flow) = self.message_report.as_mut() else {
+        let Some(flow) = self.messages.message_report.as_mut() else {
             return false;
         };
         let Some((title, options)) = flow.previous.pop() else {
@@ -250,7 +251,7 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        let Some(flow) = self.message_report.as_mut() else {
+        let Some(flow) = self.messages.message_report.as_mut() else {
             return;
         };
         if flow.chat_id != chat_id {
@@ -280,7 +281,7 @@ impl Session {
 
     /// A raw TDLib error (or a send failure) ends the flow.
     pub fn fail_message_report(&mut self, chat_id: ChatId, message: String) {
-        if let Some(flow) = self.message_report.as_mut()
+        if let Some(flow) = self.messages.message_report.as_mut()
             && flow.chat_id == chat_id
         {
             flow.stage = MessageReportStage::Failed(message);
@@ -289,7 +290,7 @@ impl Session {
 
     /// Start a fresh audience record for the message the menu opened on.
     pub fn begin_message_audience(&mut self, chat_id: ChatId, message_id: MessageId) {
-        self.message_audience = Some(MessageAudience::new(chat_id, message_id));
+        self.messages.message_audience = Some(MessageAudience::new(chat_id, message_id));
     }
 
     fn audience_for(
@@ -297,7 +298,8 @@ impl Session {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Option<&mut MessageAudience> {
-        self.message_audience
+        self.messages
+            .message_audience
             .as_mut()
             .filter(|a| a.chat_id == chat_id && a.message_id == message_id)
     }

@@ -15,7 +15,7 @@ impl Session {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetMapThumbnailFile
         {
-            self.map_thumbs.failed(pending.id);
+            self.media.map_thumbs.failed(pending.id);
         }
         // Slice media-shared-gallery: failed gallery-tab fetch — the
         // tab shows the failed state with Retry, never the spinner
@@ -23,7 +23,7 @@ impl Session {
         if let Some(RequestPurpose::GetSharedMedia { tab, generation }) = pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.shared_media.fail(
+            self.media.shared_media.fail(
                 chat_id,
                 tab,
                 generation,
@@ -34,7 +34,7 @@ impl Session {
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.shared_media.fail_more(chat_id, tab, generation);
+            self.media.shared_media.fail_more(chat_id, tab, generation);
         }
     }
 }

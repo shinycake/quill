@@ -354,7 +354,7 @@ impl QuillApp {
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
         self.group_call.invite_open = true;
         if let Some(live) = self.live.as_mut()
-            && live.driver.session.contacts.is_none()
+            && live.driver.session.users_state.contacts.is_none()
         {
             let _ = live.driver.fetch_contacts();
         }

@@ -35,25 +35,25 @@ fn download_added_elsewhere_enters_the_list_and_removal_leaves_it() {
         )
     };
     apply(&mut session, &added(40, 0, false));
-    assert!(session.user_downloads.contains(&40));
-    assert!(!session.paused_downloads.contains(&40));
+    assert!(session.media.user_downloads.contains(&40));
+    assert!(!session.media.paused_downloads.contains(&40));
     apply(&mut session, &added(41, 0, true));
-    assert!(session.paused_downloads.contains(&41));
+    assert!(session.media.paused_downloads.contains(&41));
     apply(&mut session, &added(42, 1_700_000_200, false));
-    assert!(!session.user_downloads.contains(&42));
-    assert!(session.completed_downloads.contains(&42));
+    assert!(!session.media.user_downloads.contains(&42));
+    assert!(session.media.completed_downloads.contains(&42));
 
     apply(
         &mut session,
         r#"{"@type":"updateFileRemovedFromDownloads","file_id":41,"counts":{"@type":"downloadedFileCounts","active_count":1,"paused_count":0,"completed_count":1}}"#,
     );
-    assert!(!session.user_downloads.contains(&41));
-    assert!(!session.paused_downloads.contains(&41));
+    assert!(!session.media.user_downloads.contains(&41));
+    assert!(!session.media.paused_downloads.contains(&41));
     apply(
         &mut session,
         r#"{"@type":"updateFileRemovedFromDownloads","file_id":42,"counts":{"@type":"downloadedFileCounts","active_count":1,"paused_count":0,"completed_count":0}}"#,
     );
-    assert!(!session.completed_downloads.contains(&42));
+    assert!(!session.media.completed_downloads.contains(&42));
 }
 
 #[test]

@@ -60,6 +60,7 @@ fn s15_dynamic_set_order_applies_update() {
     assert_eq!(
         session
             .stickers
+            .stickers
             .sets
             .iter()
             .map(|s| s.id)
@@ -78,6 +79,7 @@ fn s15_dynamic_set_order_applies_update() {
     assert_eq!(
         session
             .stickers
+            .stickers
             .sets
             .iter()
             .map(|s| s.id)
@@ -86,7 +88,7 @@ fn s15_dynamic_set_order_applies_update() {
     );
 
     // Non-regular types route to the emoji panel's installed sets.
-    session.emoji.installed_sets = session.stickers.sets.clone();
+    session.stickers.emoji.installed_sets = session.stickers.stickers.sets.clone();
     apply(
         &mut session,
         &seq,
@@ -95,6 +97,7 @@ fn s15_dynamic_set_order_applies_update() {
     );
     assert_eq!(
         session
+            .stickers
             .emoji
             .installed_sets
             .iter()
@@ -106,6 +109,7 @@ fn s15_dynamic_set_order_applies_update() {
     assert_eq!(
         session
             .stickers
+            .stickers
             .sets
             .iter()
             .map(|s| s.id)
@@ -114,14 +118,14 @@ fn s15_dynamic_set_order_applies_update() {
     );
 
     // Empty cache: no-op, no panic.
-    session.stickers.sets.clear();
+    session.stickers.stickers.sets.clear();
     apply(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeRegular"},"sticker_set_ids":["79"]}"#,
     );
-    assert!(session.stickers.sets.is_empty());
+    assert!(session.stickers.stickers.sets.is_empty());
 }
 
 /// Panel-picked stickers ask TDLib to move the used set to the front of

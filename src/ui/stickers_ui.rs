@@ -52,7 +52,7 @@ impl QuillApp {
 
     pub(super) fn animated_emoji_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let sticker = session.emoji.animated_emoji.as_ref()?;
+        let sticker = session.stickers.emoji.animated_emoji.as_ref()?;
         let row = div()
             .id("animated-emoji-suggestion")
             .flex()
@@ -84,7 +84,7 @@ impl QuillApp {
 
     pub(super) fn sticker_suggestions_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if session.stickers.suggestions.is_empty() {
+        if session.stickers.stickers.suggestions.is_empty() {
             return None;
         }
         let row = div()
@@ -94,6 +94,7 @@ impl QuillApp {
             .overflow_x_scroll()
             .children(
                 session
+                    .stickers
                     .stickers
                     .suggestions
                     .iter()
@@ -121,7 +122,7 @@ impl QuillApp {
         let path = [display_id, sticker.thumb_file_id]
             .into_iter()
             .flatten()
-            .filter_map(|id| self.session()?.files.get(&id.0)?.usable_path())
+            .filter_map(|id| self.session()?.media.files.get(&id.0)?.usable_path())
             .find_map(|path| sandboxed_display_path(path, &roots));
         let label = if emoji.is_empty() {
             "Sticker".to_string()
@@ -219,7 +220,7 @@ impl QuillApp {
         if session.my_user_id == Some(user_id.0) || session.is_bot_user(user_id.0) {
             return None;
         }
-        if !session.stickers.greeting_loaded {
+        if !session.stickers.stickers.greeting_loaded {
             let weak = cx.weak_entity();
             cx.defer(move |cx| {
                 let _ = weak.update(cx, |this, cx| {
@@ -230,7 +231,7 @@ impl QuillApp {
                 });
             });
         }
-        let sticker = greeting_pick(&session.stickers.greeting, chat.id.0)?.clone();
+        let sticker = greeting_pick(&session.stickers.stickers.greeting, chat.id.0)?.clone();
         if let Some(file) = sticker.display_file_id()
             && let Some(live) = self.live.as_mut()
         {
@@ -275,9 +276,9 @@ impl QuillApp {
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
         self.settings.sticker_settings_open = true;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.stickers.open = true;
+            live.driver.session.stickers.stickers.open = true;
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.open = true;
+            session.stickers.stickers.open = true;
         }
         self.select_sticker_tab(StickerTab::Archived, cx);
     }
@@ -341,7 +342,7 @@ impl QuillApp {
                 Err(_) => "could not load sticker tab".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.tab = tab;
+            session.stickers.stickers.tab = tab;
         }
         cx.notify();
     }
@@ -462,10 +463,13 @@ impl QuillApp {
             button
                 .label(if pending {
                     "Installing…"
-                } else if self
-                    .session()
-                    .is_some_and(|s| s.stickers.archived.iter().any(|set| set.id == set_id))
-                {
+                } else if self.session().is_some_and(|s| {
+                    s.stickers
+                        .stickers
+                        .archived
+                        .iter()
+                        .any(|set| set.id == set_id)
+                }) {
                     "Restore"
                 } else {
                     "Install"
@@ -477,7 +481,7 @@ impl QuillApp {
     pub(super) fn sticker_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let panel = self
             .session()
-            .map(|session| session.stickers.clone())
+            .map(|session| session.stickers.stickers.clone())
             .unwrap_or_default();
         let mut sets = div()
             .id("sticker-set-row")

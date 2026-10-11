@@ -34,7 +34,7 @@ impl QuillApp {
             is_bot: bot.is_some(),
             can_send: chat.can_post(),
             bot_start_pending: bot.is_some()
-                && (session.bot_start_params.contains_key(&chat.id.0) || empty_history),
+                && (session.bots.bot_start_params.contains_key(&chat.id.0) || empty_history),
             channel: matches!(chat.kind, ChatKind::Supergroup { .. }).then(|| ChannelFacts {
                 broadcast: chat.is_channel(),
                 membership: chat.my_member_status,
@@ -130,6 +130,7 @@ impl QuillApp {
             Some((
                 session.bot_user_id_for_chat(chat_id)?,
                 session
+                    .bots
                     .bot_start_params
                     .get(&chat_id.0)
                     .cloned()

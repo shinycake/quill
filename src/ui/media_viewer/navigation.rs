@@ -52,7 +52,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let state = &session.shared_media;
+        let state = &session.media.shared_media;
         let Some(chat_id) = state.chat_id else {
             return false;
         };
@@ -93,7 +93,7 @@ impl QuillApp {
         let tab = self.viewer.extra.shared_tab;
         let seen = self.viewer.extra.shared_seen;
         let grown = self.session().and_then(|session| {
-            let state = &session.shared_media.tabs[tab.index()];
+            let state = &session.media.shared_media.tabs[tab.index()];
             (state.items.len() != seen).then(|| {
                 let messages: Vec<HistoryMessage> = state
                     .items
@@ -177,6 +177,7 @@ impl QuillApp {
         let local = self.session().is_some_and(|session| {
             item.display_file_ids.iter().any(|id| {
                 session
+                    .media
                     .files
                     .get(&id.0)
                     .and_then(|file| file.usable_path())
@@ -215,7 +216,7 @@ impl QuillApp {
     ) -> Option<PathBuf> {
         let roots = self.media_display_roots();
         let session = self.session()?;
-        let path = session.files.get(&play_id.0)?.usable_path()?;
+        let path = session.media.files.get(&play_id.0)?.usable_path()?;
         if let Some(path) = sandboxed_display_path(path, &roots) {
             return Some(path.to_path_buf());
         }

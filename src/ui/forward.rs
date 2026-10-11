@@ -19,7 +19,7 @@ pub(super) fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>,
         session.apply(owned);
     }
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
-    session.in_flight_forward = Some(quill::state::ForwardFlight {
+    session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
         extra,
         dest_chat_id: ChatId(12),
         from_chat_id: ChatId(11),

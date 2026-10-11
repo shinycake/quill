@@ -249,7 +249,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
     // Chat 7 is private: no one to mention.
     h.driver.select_chat(ChatId(7)).unwrap();
     h.driver.search_mentions(Some("al")).unwrap();
-    assert!(h.driver.session.mention_search.is_none());
+    assert!(h.driver.session.messages.mention_search.is_none());
 
     h.ingest(r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":100},"unread_count":0}}"#);
     h.ingest(r#"{"@type":"updateChatPosition","chat_id":-100,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}}"#);
@@ -258,6 +258,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
     let stale = h
         .driver
         .session
+        .messages
         .mention_search
         .as_ref()
         .unwrap()
@@ -267,6 +268,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
     let current = h
         .driver
         .session
+        .messages
         .mention_search
         .as_ref()
         .unwrap()
@@ -283,7 +285,13 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
     // Same query again: no new request.
     h.driver.search_mentions(Some("al")).unwrap();
     assert_eq!(
-        h.driver.session.mention_search.as_ref().unwrap().request,
+        h.driver
+            .session
+            .messages
+            .mention_search
+            .as_ref()
+            .unwrap()
+            .request,
         Some(current)
     );
 
@@ -303,6 +311,7 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
     assert!(
         h.driver
             .session
+            .messages
             .mention_search
             .as_ref()
             .unwrap()
@@ -311,11 +320,17 @@ fn mention_search_targets_group_members_and_drops_stale_answers() {
     );
     h.ingest(&members(current, &[5, 6]));
     assert_eq!(
-        h.driver.session.mention_search.as_ref().unwrap().user_ids,
+        h.driver
+            .session
+            .messages
+            .mention_search
+            .as_ref()
+            .unwrap()
+            .user_ids,
         vec![5, 6]
     );
     h.driver.search_mentions(None).unwrap();
-    assert!(h.driver.session.mention_search.is_none());
+    assert!(h.driver.session.messages.mention_search.is_none());
 }
 
 #[test]
@@ -385,7 +400,7 @@ fn mention_button_jumps_to_the_oldest_unread_mention() {
     let around = h.last_history_request();
     assert_eq!(around["from_message_id"], 5);
     assert_eq!(
-        h.driver.session.chat_search.jump,
+        h.driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Loading {
             message_id: MessageId(5)
         }

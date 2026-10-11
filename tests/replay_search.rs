@@ -19,7 +19,7 @@ fn replay_global_search_happy_empty_and_error() {
             r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":false}}"#,
         ],
     );
-    let recents_gen = session.search.begin_recents();
+    let recents_gen = session.search.search.begin_recents();
     let recents_extra =
         session.request_search(RequestPurpose::SearchRecentlyFoundChats, recents_gen);
     apply_all_seq(
@@ -31,11 +31,14 @@ fn replay_global_search_happy_empty_and_error() {
             recents_extra.0
         )],
     );
-    assert_eq!(session.search.status, quill::state::SearchStatus::Ready);
-    assert!(session.search.recents);
-    assert_eq!(session.search.chat_ids[0].0, 7);
+    assert_eq!(
+        session.search.search.status,
+        quill::state::SearchStatus::Ready
+    );
+    assert!(session.search.search.recents);
+    assert_eq!(session.search.search.chat_ids[0].0, 7);
 
-    let search_gen = session.search.begin_query("hello");
+    let search_gen = session.search.search.begin_query("hello");
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
     let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
@@ -60,9 +63,12 @@ fn replay_global_search_happy_empty_and_error() {
             ),
         ],
     );
-    assert_eq!(session.search.status, quill::state::SearchStatus::Ready);
-    assert_eq!(session.search.chat_ids[0].0, 7);
-    assert_eq!(session.search.public_chat_ids[0].0, 4242);
+    assert_eq!(
+        session.search.search.status,
+        quill::state::SearchStatus::Ready
+    );
+    assert_eq!(session.search.search.chat_ids[0].0, 7);
+    assert_eq!(session.search.search.public_chat_ids[0].0, 4242);
     session.promote_search_message(quill::ids::ChatId(7), quill::ids::MessageId(50));
     session.open_chat(quill::ids::ChatId(7));
     assert!(
@@ -74,7 +80,7 @@ fn replay_global_search_happy_empty_and_error() {
             .contains_key(&50)
     );
 
-    let search_gen = session.search.begin_query("zzz");
+    let search_gen = session.search.search.begin_query("zzz");
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
     let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
@@ -97,9 +103,12 @@ fn replay_global_search_happy_empty_and_error() {
             ),
         ],
     );
-    assert_eq!(session.search.status, quill::state::SearchStatus::Empty);
+    assert_eq!(
+        session.search.search.status,
+        quill::state::SearchStatus::Empty
+    );
 
-    let search_gen = session.search.begin_query("nope");
+    let search_gen = session.search.search.begin_query("nope");
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
     let public_extra = session.request_search(RequestPurpose::SearchPublicChats, search_gen);
@@ -122,9 +131,15 @@ fn replay_global_search_happy_empty_and_error() {
             ),
         ],
     );
-    assert_eq!(session.search.status, quill::state::SearchStatus::Failed);
+    assert_eq!(
+        session.search.search.status,
+        quill::state::SearchStatus::Failed
+    );
     session.close_search();
-    assert_eq!(session.search.status, quill::state::SearchStatus::Closed);
+    assert_eq!(
+        session.search.search.status,
+        quill::state::SearchStatus::Closed
+    );
     assert!(!sink.rendered().contains("CANARY_REPLAY"));
 }
 
@@ -147,7 +162,7 @@ fn replay_chat_search_generation_jump_and_empty() {
     );
     session.open_chat(quill::ids::ChatId(7));
     assert!(session.open_chat_search());
-    let search_gen = session.chat_search.begin_query("hello");
+    let search_gen = session.search.chat_search.begin_query("hello");
     let extra = session.request_chat_search(
         RequestPurpose::SearchChatMessages,
         quill::ids::ChatId(7),
@@ -163,10 +178,10 @@ fn replay_chat_search_generation_jump_and_empty() {
         )],
     );
     assert_eq!(
-        session.chat_search.status,
+        session.search.chat_search.status,
         quill::state::SearchStatus::Ready
     );
-    assert_eq!(session.chat_search.hits.len(), 2);
+    assert_eq!(session.search.chat_search.hits.len(), 2);
     assert_eq!(
         session.begin_chat_search_jump(quill::ids::MessageId(50)),
         quill::state::ChatSearchJumpNeed::AlreadyReady
@@ -186,7 +201,7 @@ fn replay_chat_search_generation_jump_and_empty() {
         )],
     );
     assert_eq!(
-        session.chat_search.jump,
+        session.search.chat_search.jump,
         quill::state::ChatSearchJump::Ready {
             message_id: quill::ids::MessageId(40)
         }
@@ -199,13 +214,13 @@ fn replay_chat_search_generation_jump_and_empty() {
             .contains(quill::ids::MessageId(39))
     );
 
-    let stale = session.chat_search.begin_query("old");
+    let stale = session.search.chat_search.begin_query("old");
     let stale_extra = session.request_chat_search(
         RequestPurpose::SearchChatMessages,
         quill::ids::ChatId(7),
         stale,
     );
-    let fresh = session.chat_search.begin_query("new");
+    let fresh = session.search.chat_search.begin_query("new");
     let _fresh_extra = session.request_chat_search(
         RequestPurpose::SearchChatMessages,
         quill::ids::ChatId(7),
@@ -221,12 +236,12 @@ fn replay_chat_search_generation_jump_and_empty() {
         )],
     );
     assert_eq!(
-        session.chat_search.status,
+        session.search.chat_search.status,
         quill::state::SearchStatus::Searching
     );
-    assert!(session.chat_search.hits.is_empty());
+    assert!(session.search.chat_search.hits.is_empty());
 
-    let empty_gen = session.chat_search.begin_query("zzz");
+    let empty_gen = session.search.chat_search.begin_query("zzz");
     let empty_extra = session.request_chat_search(
         RequestPurpose::SearchChatMessages,
         quill::ids::ChatId(7),
@@ -242,14 +257,14 @@ fn replay_chat_search_generation_jump_and_empty() {
         )],
     );
     assert_eq!(
-        session.chat_search.status,
+        session.search.chat_search.status,
         quill::state::SearchStatus::Empty
     );
 
     let open_chat = session.open_chat;
     session.close_chat_search();
     assert_eq!(
-        session.chat_search.status,
+        session.search.chat_search.status,
         quill::state::SearchStatus::Closed
     );
     assert_eq!(session.open_chat, open_chat);

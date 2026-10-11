@@ -119,7 +119,14 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
         r#"{{"@type":"chatMembers","@extra":"{}","total_count":2,"members":[{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":5}},"status":{{"@type":"chatMemberStatusMember"}}}},{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":6}},"status":{{"@type":"chatMemberStatusMember"}}}}]}}"#,
         extra_of(&members)
     ));
-    let picker = fx.driver.session.chat_search.from_picker.clone().unwrap();
+    let picker = fx
+        .driver
+        .session
+        .search
+        .chat_search
+        .from_picker
+        .clone()
+        .unwrap();
     assert_eq!(
         picker.members,
         vec![
@@ -137,6 +144,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
     assert_eq!(
         fx.driver
             .session
+            .search
             .chat_search
             .from_picker
             .as_ref()
@@ -150,7 +158,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
     fx.driver
         .set_chat_search_sender(Some(MessageSender::User { user_id: 5 }))
         .unwrap();
-    assert!(fx.driver.session.chat_search.from_picker.is_none());
+    assert!(fx.driver.session.search.chat_search.from_picker.is_none());
     let search = fx.last_request("searchChatMessages");
     assert_eq!(
         search["sender_id"],
@@ -165,7 +173,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
         text_message(50 << 20, 5, "newest from five"),
         text_message(40 << 20, 5, "older from five"),
     ));
-    let state = &fx.driver.session.chat_search;
+    let state = &fx.driver.session.search.chat_search;
     assert_eq!(state.hits.len(), 2);
     assert_eq!(state.position_label(), "1 of 120");
 
@@ -175,14 +183,14 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
     let more = fx.last_request("searchChatMessages");
     assert_eq!(more["from_message_id"], 40i64 << 20);
     assert_eq!(more["sender_id"]["user_id"], 5);
-    assert!(fx.driver.session.chat_search.loading_more);
+    assert!(fx.driver.session.search.chat_search.loading_more);
     fx.feed(&format!(
         r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":120,"next_from_message_id":{},"messages":[{}]}}"#,
         extra_of(&more),
         30i64 << 20,
         text_message(30 << 20, 5, "third from five"),
     ));
-    let state = &fx.driver.session.chat_search;
+    let state = &fx.driver.session.search.chat_search;
     assert_eq!(state.hits.len(), 3);
     assert!(!state.loading_more);
     // Appending must not steal the selection or restart the jump.
@@ -191,8 +199,8 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
 
     // Clearing the member (no text, no media tab) ends the search.
     fx.driver.set_chat_search_sender(None).unwrap();
-    assert!(fx.driver.session.chat_search.hits.is_empty());
-    assert!(!fx.driver.session.chat_search.has_criteria());
+    assert!(fx.driver.session.search.chat_search.hits.is_empty());
+    assert!(!fx.driver.session.search.chat_search.has_criteria());
 }
 
 #[test]
@@ -226,7 +234,7 @@ fn media_tab_filters_in_chat_search() {
     fx.driver
         .set_chat_search_media(SearchMediaKind::All)
         .unwrap();
-    assert!(!fx.driver.session.chat_search.has_criteria());
+    assert!(!fx.driver.session.search.chat_search.has_criteria());
 }
 
 #[test]
@@ -256,7 +264,7 @@ fn calendar_highlights_media_days_and_jumps_to_their_first_message() {
         day(300 << 20, 1_790_000_000, 3),
         day(200 << 20, 1_789_000_000, 2),
     ));
-    let cal = fx.driver.session.history_calendar.as_ref().unwrap();
+    let cal = fx.driver.session.search.history_calendar.as_ref().unwrap();
     assert_eq!(cal.days.len(), 2);
     assert!(!cal.loading);
     let picked = crate::search_filters::local_day_number(1_789_000_000);
@@ -269,7 +277,7 @@ fn calendar_highlights_media_days_and_jumps_to_their_first_message() {
 
     // A highlighted day jumps straight to its first message.
     fx.driver.jump_to_date(picked).unwrap();
-    assert!(fx.driver.session.history_calendar.is_none());
+    assert!(fx.driver.session.search.history_calendar.is_none());
     assert_eq!(fx.count("getChatMessageByDate"), 0);
     let around = fx.last_request("getChatHistory");
     assert_eq!(around["from_message_id"], 200i64 << 20);
@@ -284,6 +292,7 @@ fn unfiltered_calendar_sends_no_calendar_request() {
     assert!(
         fx.driver
             .session
+            .search
             .history_calendar
             .as_ref()
             .unwrap()
@@ -324,7 +333,7 @@ fn jump_to_date_lands_on_the_first_message_of_the_day() {
     ));
     // ...and the jump settles on the next one: the day's first message.
     assert_eq!(
-        fx.driver.session.chat_search.jump,
+        fx.driver.session.search.chat_search.jump,
         ChatSearchJump::Ready {
             message_id: MessageId(61 << 20)
         }
@@ -353,7 +362,7 @@ fn jump_to_a_date_before_the_chat_starts_goes_to_the_oldest_message() {
         extra_of(&around)
     ));
     assert_eq!(
-        fx.driver.session.chat_search.jump,
+        fx.driver.session.search.chat_search.jump,
         ChatSearchJump::Ready {
             message_id: MessageId(70 << 20)
         }
@@ -386,5 +395,5 @@ fn global_search_filters_reach_search_messages() {
     assert_eq!(search["max_date"], 0);
     // Closing the search drops the filters.
     fx.driver.close_search();
-    assert!(fx.driver.session.search.filters.is_default());
+    assert!(fx.driver.session.search.search.filters.is_default());
 }

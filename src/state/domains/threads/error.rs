@@ -23,7 +23,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetForumTopicLink) => {
-                self.message_link_error =
+                self.messages.message_link_error =
                     Some(call_request_error_line(err, "Could not get the topic link"));
             }
             Some(

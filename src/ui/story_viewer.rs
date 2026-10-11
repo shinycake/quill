@@ -245,7 +245,7 @@ impl QuillApp {
             .custom_emoji_stickers
             .get(&custom_emoji_id)?;
         let file_id = sticker.display_file_id()?;
-        let path = session.files.get(&file_id.0)?.usable_path()?;
+        let path = session.media.files.get(&file_id.0)?.usable_path()?;
         sandboxed_display_path(path, &self.media_display_roots())
     }
 
@@ -889,6 +889,7 @@ impl QuillApp {
         let local = self.session().is_some_and(|session| {
             item.display_file_ids.iter().any(|id| {
                 session
+                    .media
                     .files
                     .get(&id.0)
                     .and_then(|file| file.usable_path())
@@ -906,6 +907,7 @@ impl QuillApp {
             let roots = self.media_display_roots();
             let clip_local = self.session().is_some_and(|session| {
                 session
+                    .media
                     .files
                     .get(&video_id.0)
                     .and_then(|file| file.usable_path())
@@ -936,7 +938,7 @@ impl QuillApp {
                     if file_id.0 == 0 {
                         return None;
                     }
-                    match session.files.get(&file_id.0) {
+                    match session.media.files.get(&file_id.0) {
                         Some(file)
                             if file.usable_path().is_some() || file.local.is_downloading_active =>
                         {
@@ -1646,11 +1648,13 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&item.chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_else(|| format!("Chat {}", item.chat_id.0));
-        let files: HashMap<i32, ParsedFile> =
-            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let files: HashMap<i32, ParsedFile> = self
+            .session()
+            .map(|s| s.media.files.clone())
+            .unwrap_or_default();
         let downloading: HashSet<i32> = self
             .session()
-            .map(|s| s.downloading.clone())
+            .map(|s| s.media.downloading.clone())
             .unwrap_or_default();
         let roots = self.media_display_roots();
         let path = story_viewer_display_path(&item, &files, &roots);

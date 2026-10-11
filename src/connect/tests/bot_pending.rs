@@ -36,8 +36,11 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
         "value":{"@type":"optionValueInteger", "value":"2"}}),
     );
     ingest(&mut driver, draft(i64::MAX, 42, false));
-    assert_eq!(driver.session.pending_bot_period_secs, 2);
-    assert!(driver.session.pending_bot_messages[&(7, 42)].expires_at_ms <= unix_ms_now() + 2000);
+    assert_eq!(driver.session.messages.pending_bot_period_secs, 2);
+    assert!(
+        driver.session.messages.pending_bot_messages[&(7, 42)].expires_at_ms
+            <= unix_ms_now() + 2000
+    );
     let request = driver
         .stop_pending_bot_message(ChatId(7), 42, i64::MAX)
         .unwrap()
@@ -52,12 +55,18 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
             .unwrap()
             .is_none()
     );
-    assert!(driver.session.pending_bot_messages.contains_key(&(7, 42))); // No optimistic deletion.
+    assert!(
+        driver
+            .session
+            .messages
+            .pending_bot_messages
+            .contains_key(&(7, 42))
+    ); // No optimistic deletion.
     ingest(
         &mut driver,
         json!({"@type":"error", "@extra":request.as_extra(), "code":500, "message":"test"}),
     );
-    assert!(driver.session.pending_bot_messages[&(7, 42)].stop_failed);
+    assert!(driver.session.messages.pending_bot_messages[&(7, 42)].stop_failed);
     let old_stop = driver
         .stop_pending_bot_message(ChatId(7), 42, i64::MAX)
         .unwrap()
@@ -67,16 +76,16 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
         &mut driver,
         json!({"@type":"ok", "@extra":old_stop.as_extra()}),
     );
-    assert!(driver.session.pending_bot_messages[&(7, 42)].can_stop); // Older draft ACK cannot stop this one.
+    assert!(driver.session.messages.pending_bot_messages[&(7, 42)].can_stop); // Older draft ACK cannot stop this one.
     let stop = driver
         .stop_pending_bot_message(ChatId(7), 42, 12)
         .unwrap()
         .unwrap();
     ingest(&mut driver, json!({"@type":"ok", "@extra":stop.as_extra()}));
-    assert!(!driver.session.pending_bot_messages[&(7, 42)].can_stop);
-    assert!(driver.session.pending_bot_messages[&(7, 42)].stopped);
+    assert!(!driver.session.messages.pending_bot_messages[&(7, 42)].can_stop);
+    assert!(driver.session.messages.pending_bot_messages[&(7, 42)].stopped);
     ingest(&mut driver, draft(12, 42, true));
-    assert!(!driver.session.pending_bot_messages[&(7, 42)].can_stop);
+    assert!(!driver.session.messages.pending_bot_messages[&(7, 42)].can_stop);
     assert!(
         driver
             .stop_pending_bot_message(ChatId(7), 42, 12)
@@ -90,8 +99,20 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
         .unwrap();
     assert!(sent_request(&recorder, "stopPendingMessage")["topic_id"].is_null());
     ingest(&mut driver, json!({"@type":"ok", "@extra":stop.as_extra()}));
-    assert!(!driver.session.pending_bot_messages.contains_key(&(7, 0)));
-    assert!(driver.session.pending_bot_messages.contains_key(&(7, 42)));
+    assert!(
+        !driver
+            .session
+            .messages
+            .pending_bot_messages
+            .contains_key(&(7, 0))
+    );
+    assert!(
+        driver
+            .session
+            .messages
+            .pending_bot_messages
+            .contains_key(&(7, 42))
+    );
     // A final incoming message clears only the matching thread's ephemeral draft.
     ingest(
         &mut driver,
@@ -99,25 +120,43 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
         "topic_id":{"@type":"messageTopicForum","forum_topic_id":42}, "is_outgoing":false,
         "content":{"@type":"messageText", "text":{"text":"Done", "entities":[]}}}}),
     );
-    assert!(!driver.session.pending_bot_messages.contains_key(&(7, 42)));
+    assert!(
+        !driver
+            .session
+            .messages
+            .pending_bot_messages
+            .contains_key(&(7, 42))
+    );
     ingest(&mut driver, draft(14, 42, false));
     ingest(
         &mut driver,
         json!({"@type":"updateStopMessageDraft", "chat_id":7, "forum_topic_id":42, "draft_id":"13"}),
     );
-    assert!(driver.session.pending_bot_messages.contains_key(&(7, 42)));
+    assert!(
+        driver
+            .session
+            .messages
+            .pending_bot_messages
+            .contains_key(&(7, 42))
+    );
     ingest(
         &mut driver,
         json!({"@type":"updateStopMessageDraft", "chat_id":7, "forum_topic_id":42, "draft_id":"14"}),
     );
-    assert!(!driver.session.pending_bot_messages.contains_key(&(7, 42)));
+    assert!(
+        !driver
+            .session
+            .messages
+            .pending_bot_messages
+            .contains_key(&(7, 42))
+    );
     ingest(&mut driver, draft(15, 0, true));
     assert!(
         driver
             .session
             .expire_pending_bot_messages(unix_ms_now() + 2001)
     );
-    assert!(driver.session.pending_bot_messages.is_empty());
+    assert!(driver.session.messages.pending_bot_messages.is_empty());
     assert!(
         driver
             .stop_pending_bot_message(ChatId(7), 0, 15)
@@ -127,7 +166,7 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
     let mut no_stop = draft(16, 0, false);
     no_stop["can_stop"] = json!(false);
     ingest(&mut driver, no_stop);
-    assert!(!driver.session.pending_bot_messages[&(7, 0)].stopped);
+    assert!(!driver.session.messages.pending_bot_messages[&(7, 0)].stopped);
     assert!(
         driver
             .stop_pending_bot_message(ChatId(7), 0, 16)

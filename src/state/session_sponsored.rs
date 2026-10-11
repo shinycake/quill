@@ -41,7 +41,11 @@ impl Session {
         self.remember_files(files);
         // A refetch keeps what the user already did with an ad that is
         // still in the list (viewed once, reported/hidden).
-        let previous = self.sponsored.remove(&chat_id.0).unwrap_or_default();
+        let previous = self
+            .messages
+            .sponsored
+            .remove(&chat_id.0)
+            .unwrap_or_default();
         let keep = |ids: &std::collections::HashSet<i64>| -> std::collections::HashSet<i64> {
             ids.iter()
                 .copied()
@@ -49,7 +53,7 @@ impl Session {
                 .collect()
         };
         let (viewed, dismissed) = (keep(&previous.viewed), keep(&previous.dismissed));
-        self.sponsored.insert(
+        self.messages.sponsored.insert(
             chat_id.0,
             ChatSponsoredMessages {
                 messages,
@@ -65,10 +69,11 @@ impl Session {
     /// after the user hid ads, and not again within five minutes of the last
     /// response (tdesktop `TooEarlyForRequest`).
     pub fn sponsored_fetch_due(&self, chat_id: ChatId, now: std::time::Instant) -> bool {
-        if self.sponsored_hidden {
+        if self.messages.sponsored_hidden {
             return false;
         }
         match self
+            .messages
             .sponsored
             .get(&chat_id.0)
             .and_then(|entry| entry.fetched_at)
@@ -85,7 +90,7 @@ impl Session {
     /// the latest message, in topic views, and after ads were hidden. The
     /// caller adds the "scrolled to the bottom" condition (a UI fact).
     pub fn open_sponsored_tail(&self) -> Option<&SponsoredMessage> {
-        if self.sponsored_hidden || self.open_topic.is_some() {
+        if self.messages.sponsored_hidden || self.open_topic.is_some() {
             return None;
         }
         let chat_id = self.open_chat?;
@@ -96,14 +101,15 @@ impl Session {
         {
             return None;
         }
-        let entry = self.sponsored.get(&chat_id.0)?;
+        let entry = self.messages.sponsored.get(&chat_id.0)?;
         entry
             .messages
             .iter()
             .find(|message| !entry.dismissed.contains(&message.message_id))
             .filter(|message| {
                 message.content_file_ids().iter().all(|id| {
-                    self.files
+                    self.media
+                        .files
                         .get(&id.0)
                         .is_some_and(|file| file.usable_path().is_some())
                 })
@@ -118,7 +124,7 @@ impl Session {
         if self.open_chat != Some(chat_id) {
             return Vec::new();
         }
-        let Some(entry) = self.sponsored.get_mut(&chat_id.0) else {
+        let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) else {
             return Vec::new();
         };
         let mut due = Vec::new();
@@ -132,7 +138,7 @@ impl Session {
 
     /// A `viewMessages` send failed: let the next frame retry these ids.
     pub fn untake_sponsored_views(&mut self, chat_id: ChatId, ids: &[i64]) {
-        if let Some(entry) = self.sponsored.get_mut(&chat_id.0) {
+        if let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) {
             for id in ids {
                 entry.viewed.remove(id);
             }
@@ -146,13 +152,13 @@ impl Session {
     /// the "needs Telegram Premium" notice is recorded and nothing is sent.
     pub fn begin_sponsored_hide(&mut self, chat_id: ChatId, message_id: i64) -> Option<bool> {
         self.sponsored_message(chat_id, message_id)?;
-        self.sponsored_report = None;
-        self.sponsored_report_target = None;
+        self.messages.sponsored_report = None;
+        self.messages.sponsored_report_target = None;
         if self.my_is_premium() {
-            self.last_sponsored_report = None;
+            self.messages.last_sponsored_report = None;
             return Some(true);
         }
-        self.last_sponsored_report = Some(SponsoredReportOutcome {
+        self.messages.last_sponsored_report = Some(SponsoredReportOutcome {
             chat_id,
             message_id,
             result: ReportSponsoredResult::PremiumRequired,
@@ -163,8 +169,8 @@ impl Session {
     /// `toggleHasSponsoredMessagesEnabled(false)` answered `ok`: no ads are
     /// shown or fetched for the rest of the session.
     pub fn accept_sponsored_hidden(&mut self, chat_id: ChatId) {
-        self.sponsored_hidden = true;
-        self.last_sponsored_report = Some(SponsoredReportOutcome {
+        self.messages.sponsored_hidden = true;
+        self.messages.last_sponsored_report = Some(SponsoredReportOutcome {
             chat_id,
             message_id: 0,
             result: ReportSponsoredResult::AdsHidden,
@@ -177,14 +183,16 @@ impl Session {
         let Some(chat_id) = self.open_chat else {
             return Vec::new();
         };
-        self.sponsored
+        self.messages
+            .sponsored
             .get(&chat_id.0)
             .map(ChatSponsoredMessages::ordered)
             .unwrap_or_default()
     }
 
     pub fn sponsored_message(&self, chat_id: ChatId, message_id: i64) -> Option<&SponsoredMessage> {
-        self.sponsored
+        self.messages
+            .sponsored
             .get(&chat_id.0)
             .and_then(|entry| entry.messages.iter().find(|m| m.message_id == message_id))
     }
@@ -202,9 +210,9 @@ impl Session {
         if !reportable {
             return None;
         }
-        self.sponsored_report = None;
-        self.sponsored_report_target = Some((chat_id, message_id));
-        self.last_sponsored_report = None;
+        self.messages.sponsored_report = None;
+        self.messages.sponsored_report_target = Some((chat_id, message_id));
+        self.messages.last_sponsored_report = None;
         Some((chat_id, message_id))
     }
 
@@ -220,6 +228,7 @@ impl Session {
             return;
         };
         let message_id = self
+            .messages
             .sponsored_report
             .as_ref()
             .map(|flight| flight.message_id)
@@ -228,11 +237,11 @@ impl Session {
             // starts a second report before the first responds, the first
             // response is attributed to the second row — acceptable: reports
             // are fire-and-forget and the outcome banner is per-chat.
-            .or_else(|| self.sponsored_report_target.map(|(_, id)| id))
+            .or_else(|| self.messages.sponsored_report_target.map(|(_, id)| id))
             .unwrap_or(0);
         match result {
             ReportSponsoredResult::OptionRequired { title, options } => {
-                self.sponsored_report = Some(SponsoredReportFlight {
+                self.messages.sponsored_report = Some(SponsoredReportFlight {
                     extra: pending.id,
                     chat_id,
                     message_id,
@@ -241,19 +250,19 @@ impl Session {
                 });
             }
             result => {
-                self.sponsored_report = None;
-                self.sponsored_report_target = None;
+                self.messages.sponsored_report = None;
+                self.messages.sponsored_report_target = None;
                 match &result {
                     // The reported ad leaves the history (tdesktop removes it).
                     ReportSponsoredResult::Ok => {
-                        if let Some(entry) = self.sponsored.get_mut(&chat_id.0) {
+                        if let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) {
                             entry.dismissed.insert(message_id);
                         }
                     }
-                    ReportSponsoredResult::AdsHidden => self.sponsored_hidden = true,
+                    ReportSponsoredResult::AdsHidden => self.messages.sponsored_hidden = true,
                     _ => {}
                 }
-                self.last_sponsored_report = Some(SponsoredReportOutcome {
+                self.messages.last_sponsored_report = Some(SponsoredReportOutcome {
                     chat_id,
                     message_id,
                     result,
@@ -266,11 +275,11 @@ impl Session {
     /// cancels, when a send fails, or when a result is applied elsewhere —
     /// a dismissed report must not attribute a late response to a stale row.
     pub fn dismiss_sponsored_report(&mut self) {
-        self.sponsored_report = None;
-        self.sponsored_report_target = None;
+        self.messages.sponsored_report = None;
+        self.messages.sponsored_report_target = None;
     }
 
     pub fn clear_sponsored_report_outcome(&mut self) {
-        self.last_sponsored_report = None;
+        self.messages.last_sponsored_report = None;
     }
 }

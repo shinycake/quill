@@ -77,30 +77,33 @@ impl MessageReactionOptions {
 
 impl Session {
     pub(crate) fn accept_library_set(&mut self, set_id: i64, stickers: Vec<StickerItem>) {
-        self.media_library.loading.remove(&set_id);
-        self.media_library.failed.remove(&set_id);
-        self.media_library.set_stickers.insert(set_id, stickers);
+        self.media.media_library.loading.remove(&set_id);
+        self.media.media_library.failed.remove(&set_id);
+        self.media
+            .media_library
+            .set_stickers
+            .insert(set_id, stickers);
     }
 
     pub(crate) fn fail_library_set(&mut self, set_id: i64) {
-        self.media_library.loading.remove(&set_id);
-        self.media_library.failed.insert(set_id);
+        self.media.media_library.loading.remove(&set_id);
+        self.media.media_library.failed.insert(set_id);
     }
 
     /// Installed sets (regular, then custom emoji) whose contents aren't
     /// loaded, loading or failed, among `wanted`, capped by the free
     /// in-flight slots.
     pub fn library_sets_to_load(&self, wanted: &[i64]) -> Vec<i64> {
-        let free = MAX_LIBRARY_LOADS.saturating_sub(self.media_library.loading.len());
+        let free = MAX_LIBRARY_LOADS.saturating_sub(self.media.media_library.loading.len());
         let mut out = Vec::new();
         for id in wanted {
             if out.len() >= free {
                 break;
             }
             if *id != 0
-                && !self.media_library.set_stickers.contains_key(id)
-                && !self.media_library.loading.contains(id)
-                && !self.media_library.failed.contains(id)
+                && !self.media.media_library.set_stickers.contains_key(id)
+                && !self.media.media_library.loading.contains(id)
+                && !self.media.media_library.failed.contains(id)
                 && !out.contains(id)
             {
                 out.push(*id);
@@ -125,7 +128,7 @@ impl Session {
                 .filter_map(ReactionChoice::from_view)
                 .collect()
         };
-        self.message_reaction_options = Some(MessageReactionOptions {
+        self.stickers.message_reaction_options = Some(MessageReactionOptions {
             chat_id,
             message_id,
             top: convert(top),

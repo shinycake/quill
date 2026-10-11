@@ -706,7 +706,7 @@ fn gift_tile(
         .child(sticker_tile(
             ("gift-tile-sticker", ix as u64),
             gift.gift.sticker.as_ref(),
-            &session.files,
+            &session.media.files,
             roots,
             84.,
             "\u{1F381}",
@@ -752,7 +752,7 @@ fn gift_details(
                 .child(sticker_tile(
                     ("gift-detail-sticker", 0),
                     gift.gift.sticker.as_ref(),
-                    &session.files,
+                    &session.media.files,
                     roots,
                     128.,
                     "\u{1F381}",

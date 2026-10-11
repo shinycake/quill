@@ -877,6 +877,7 @@ impl QuillApp {
             Ok(_) => {
                 live.driver
                     .session
+                    .messages
                     .scheduled_messages
                     .retain(|m| m.id != message_id);
                 self.connection.status_note = "scheduled message deleted".into();
@@ -1448,7 +1449,7 @@ impl QuillApp {
 
     /// M1: copy a public share link for a message (`getMessageLink`,
     /// TDLib 1.8.67, `schema/td_api.tl:12064`). The parsed
-    /// `messageLink.link` lands in `session.message_link_result`; the
+    /// `messageLink.link` lands in `session.messages.message_link_result`; the
     /// per-frame pump copies it to the clipboard.
     pub(super) fn share_message_link(
         &mut self,
@@ -1876,7 +1877,7 @@ impl QuillApp {
     pub(super) fn text_length_limit(&self) -> i32 {
         self.live
             .as_ref()
-            .map(|live| live.driver.session.message_text_length_max)
+            .map(|live| live.driver.session.messages.message_text_length_max)
             .unwrap_or(4096)
     }
 
@@ -1958,6 +1959,7 @@ impl QuillApp {
             );
         }
         if let Some(search) = session
+            .messages
             .mention_search
             .as_ref()
             .filter(|search| Some(search.chat_id) == session.open_chat)
@@ -1983,6 +1985,7 @@ impl QuillApp {
         let before = live
             .driver
             .session
+            .messages
             .mention_search
             .as_ref()
             .map(|s| s.query.clone());
@@ -2000,7 +2003,7 @@ impl QuillApp {
     pub(super) fn close_mention_menu(&mut self, cx: &mut Context<Self>) -> bool {
         let showing = !self.mention_menu_items(cx).is_empty();
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.mention_search = None;
+            live.driver.session.messages.mention_search = None;
         }
         if showing {
             cx.notify();
@@ -2057,7 +2060,7 @@ impl QuillApp {
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.mention_search = None;
+            live.driver.session.messages.mention_search = None;
         }
         let completed = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&completed);

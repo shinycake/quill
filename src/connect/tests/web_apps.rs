@@ -92,6 +92,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
     assert_eq!(
         h.driver
             .session
+            .bots
             .web_apps
             .pending
             .as_ref()
@@ -104,7 +105,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.web_apps.open_result,
+        h.driver.session.bots.web_apps.open_result,
         Some(WebAppOpenResult::Opened {
             bot_user_id: 42,
             chat_id: Some(5),
@@ -113,7 +114,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             url: "https://bot.example/app?tgWebAppData=x".into(),
         })
     );
-    assert!(h.driver.session.web_apps.pending.is_none());
+    assert!(h.driver.session.bots.web_apps.pending.is_none());
 }
 
 #[test]
@@ -130,13 +131,13 @@ fn a_refused_open_reports_a_failure_and_clears_the_context() {
         extra.as_extra()
     ));
     assert!(matches!(
-        h.driver.session.web_apps.open_result,
+        h.driver.session.bots.web_apps.open_result,
         Some(WebAppOpenResult::Failed {
             bot_user_id: 42,
             ..
         })
     ));
-    assert!(h.driver.session.web_apps.pending.is_none());
+    assert!(h.driver.session.bots.web_apps.pending.is_none());
 }
 
 #[test]
@@ -155,7 +156,7 @@ fn keyboard_button_apps_use_get_web_app_url_and_may_send_data() {
     ));
     let Some(WebAppOpenResult::Opened {
         source, launch_id, ..
-    }) = h.driver.session.web_apps.open_result.clone()
+    }) = h.driver.session.bots.web_apps.open_result.clone()
     else {
         panic!("not opened");
     };
@@ -170,7 +171,7 @@ fn keyboard_button_apps_use_get_web_app_url_and_may_send_data() {
         r#"{{"@type":"ok","@extra":"{}"}}"#,
         extra.as_extra()
     ));
-    assert_eq!(h.driver.session.web_apps.data_sent, Some(Ok(())));
+    assert_eq!(h.driver.session.bots.web_apps.data_sent, Some(Ok(())));
 }
 
 #[test]
@@ -182,13 +183,13 @@ fn write_access_goes_through_consent_on_404() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.web_apps.write_access,
+        h.driver.session.bots.web_apps.write_access,
         Some((42, WriteAccessResult::NeedsConsent))
     );
     let extra = h.driver.allow_bot_to_send_messages(42).expect("sent");
     assert_eq!(h.last("allowBotToSendMessages")["bot_user_id"], 42);
     assert!(
-        h.driver.session.web_apps.write_access.is_none(),
+        h.driver.session.bots.web_apps.write_access.is_none(),
         "taken while in flight"
     );
     h.ingest(&format!(
@@ -196,7 +197,7 @@ fn write_access_goes_through_consent_on_404() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.web_apps.write_access,
+        h.driver.session.bots.web_apps.write_access,
         Some((42, WriteAccessResult::Granted))
     );
     let extra = h.driver.can_bot_send_messages(42).expect("sent");
@@ -205,7 +206,7 @@ fn write_access_goes_through_consent_on_404() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.web_apps.write_access,
+        h.driver.session.bots.web_apps.write_access,
         Some((42, WriteAccessResult::Allowed))
     );
 }
@@ -218,7 +219,7 @@ fn grossing_apps_load_once_and_land_in_the_session() {
         .fetch_grossing_web_app_bots()
         .expect("sent")
         .expect("request");
-    assert!(h.driver.session.web_apps.grossing_loading);
+    assert!(h.driver.session.bots.web_apps.grossing_loading);
     assert_eq!(
         h.driver.fetch_grossing_web_app_bots().unwrap(),
         None,
@@ -228,8 +229,11 @@ fn grossing_apps_load_once_and_land_in_the_session() {
         r#"{{"@type":"foundUsers","@extra":"{}","user_ids":[42,43],"next_offset":""}}"#,
         extra.as_extra()
     ));
-    assert_eq!(h.driver.session.web_apps.grossing_bots, Some(vec![42, 43]));
-    assert!(!h.driver.session.web_apps.grossing_loading);
+    assert_eq!(
+        h.driver.session.bots.web_apps.grossing_bots,
+        Some(vec![42, 43])
+    );
+    assert!(!h.driver.session.bots.web_apps.grossing_loading);
     assert_eq!(
         h.driver.fetch_grossing_web_app_bots().unwrap(),
         None,
@@ -243,9 +247,9 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     h.ingest(
         r#"{"@type":"updateAttachmentMenuBots","bots":[{"@type":"attachmentMenuBot","bot_user_id":42,"name":"Shop","supports_user_chats":true,"request_write_access":true,"is_added":true,"show_in_attachment_menu":true,"show_in_side_menu":false}]}"#,
     );
-    assert_eq!(h.driver.session.web_apps.attachment_menu_bots.len(), 1);
+    assert_eq!(h.driver.session.bots.web_apps.attachment_menu_bots.len(), 1);
     assert_eq!(
-        h.driver.session.web_apps.attachment_menu_bots[0].name,
+        h.driver.session.bots.web_apps.attachment_menu_bots[0].name,
         "Shop"
     );
 
@@ -257,6 +261,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     let bot = h
         .driver
         .session
+        .bots
         .web_apps
         .attachment_menu_bot
         .clone()
@@ -276,7 +281,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.web_apps.attachment_menu_toggled,
+        h.driver.session.bots.web_apps.attachment_menu_toggled,
         Some(Ok((43, true)))
     );
 
@@ -292,11 +297,11 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
         r#"{{"@type":"customRequestResult","@extra":"{}","result":"{{\"ok\":true}}"}}"#,
         extra.as_extra()
     ));
-    let replies = std::mem::take(&mut h.driver.session.web_apps.custom_replies);
+    let replies = std::mem::take(&mut h.driver.session.bots.web_apps.custom_replies);
     assert_eq!(replies.len(), 1);
     assert_eq!(replies[0].req_id, "r9");
     assert_eq!(replies[0].result, Ok("{\"ok\":true}".into()));
-    assert!(h.driver.session.web_apps.custom_requests.is_empty());
+    assert!(h.driver.session.bots.web_apps.custom_requests.is_empty());
 }
 
 #[test]
@@ -308,7 +313,15 @@ fn named_app_links_search_first() {
         r#"{{"@type":"foundWebApp","@extra":"{}","web_app":{{"@type":"webApp","short_name":"shop","title":"Shop","description":""}},"request_write_access":true,"skip_confirmation":false}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.web_apps.found.clone().unwrap().unwrap();
+    let (bot_id, app) = h
+        .driver
+        .session
+        .bots
+        .web_apps
+        .found
+        .clone()
+        .unwrap()
+        .unwrap();
     assert_eq!(bot_id, 42);
     assert_eq!(app.title, "Shop");
     assert!(app.request_write_access);
@@ -322,6 +335,7 @@ fn named_app_links_search_first() {
     assert_eq!(
         h.driver
             .session
+            .bots
             .web_apps
             .pending
             .as_ref()

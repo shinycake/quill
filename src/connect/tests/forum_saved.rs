@@ -134,10 +134,10 @@ fn topic_link_answer_reaches_the_clipboard_slot() {
         r#"{"@type":"messageLink","@extra":"EXTRA","link":"https://t.me/forum/7","is_public":true}"#,
     );
     assert_eq!(
-        f.driver.session.message_link_result.as_deref(),
+        f.driver.session.messages.message_link_result.as_deref(),
         Some("https://t.me/forum/7")
     );
-    assert!(f.driver.session.message_link_public);
+    assert!(f.driver.session.messages.message_link_public);
 }
 
 #[test]

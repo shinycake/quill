@@ -49,7 +49,7 @@ fn b2_similar_bots_users_response_lands_by_pending_user() {
         ),
     );
     assert!(matches!(
-        session.similar_bots.get(&21),
+        session.bots.similar_bots.get(&21),
         Some(SimilarBotsFetch::Loaded(ids)) if ids == &[31, 32]
     ));
 }
@@ -104,7 +104,7 @@ fn b1_login_url_info_error_degrades_to_url() {
         raw_url: "https://example.com/login".to_string(),
     };
     for purpose in [RequestPurpose::GetLoginUrlInfo, RequestPurpose::GetLoginUrl] {
-        session.login_url_request = Some(login_request.clone());
+        session.bots.login_url_request = Some(login_request.clone());
         let extra = session.request(purpose, Some(ChatId(21)));
         apply_json(
             &mut session,
@@ -116,7 +116,7 @@ fn b1_login_url_info_error_degrades_to_url() {
             ),
         );
         assert_eq!(
-            session.last_login_url_info,
+            session.bots.last_login_url_info,
             Some(LoginUrlInfo::Failed {
                 fallback_url: "https://example.com/login".to_string()
             })
@@ -142,7 +142,7 @@ fn b1_get_login_url_http_url_opens() {
         ),
     );
     assert_eq!(
-        session.last_login_url_info,
+        session.bots.last_login_url_info,
         Some(LoginUrlInfo::Open {
             url: "https://example.com/authed".to_string()
         })
@@ -204,7 +204,7 @@ fn resolve_inline_bot_private_chat_resolves_with_cached_inline_flag() {
         RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 1 }),
         None,
     );
-    session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+    session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
         username: "gif".into(),
         generation: 1,
     });
@@ -218,7 +218,7 @@ fn resolve_inline_bot_private_chat_resolves_with_cached_inline_flag() {
         ),
     );
     assert_eq!(
-        session.inline_bot_resolve,
+        session.bots.inline_bot_resolve,
         Some(InlineBotResolve::Resolved {
             username: "gif".into(),
             user_id: 77,
@@ -247,7 +247,7 @@ fn resolve_inline_bot_non_bot_username_fails() {
         RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 1 }),
         None,
     );
-    session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+    session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
         username: "alice".into(),
         generation: 1,
     });
@@ -262,11 +262,11 @@ fn resolve_inline_bot_non_bot_username_fails() {
     );
     assert!(
         matches!(
-            &session.inline_bot_resolve,
+            &session.bots.inline_bot_resolve,
             Some(InlineBotResolve::Failed { reason, .. }) if reason.contains("not a bot")
         ),
         "{:?}",
-        session.inline_bot_resolve
+        session.bots.inline_bot_resolve
     );
 }
 
@@ -282,7 +282,7 @@ fn resolve_inline_bot_stale_answer_ignored() {
         None,
     );
     // A newer resolve already replaced the slot.
-    session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+    session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
         username: "gifs".into(),
         generation: 2,
     });
@@ -296,7 +296,7 @@ fn resolve_inline_bot_stale_answer_ignored() {
         ),
     );
     assert_eq!(
-        session.inline_bot_resolve,
+        session.bots.inline_bot_resolve,
         Some(InlineBotResolve::Resolving {
             username: "gifs".into(),
             generation: 2,
@@ -314,7 +314,7 @@ fn resolve_inline_bot_error_fails_slot() {
         RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation: 3 }),
         None,
     );
-    session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+    session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
         username: "nosuchbot".into(),
         generation: 3,
     });
@@ -329,11 +329,11 @@ fn resolve_inline_bot_error_fails_slot() {
     );
     assert!(
         matches!(
-            &session.inline_bot_resolve,
+            &session.bots.inline_bot_resolve,
             Some(InlineBotResolve::Failed { username, .. }) if username == "nosuchbot"
         ),
         "{:?}",
-        session.inline_bot_resolve
+        session.bots.inline_bot_resolve
     );
 }
 
@@ -344,7 +344,7 @@ fn bots_games_message_game_cached_for_bot_chat() {
     // private chat caches nothing.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.bot_user_ids.insert(21);
+    session.bots.bot_user_ids.insert(21);
     let mut chat = placeholder_chat(ChatId(7));
     chat.kind = ChatKind::Private {
         user_id: crate::ids::UserId(21),
@@ -363,11 +363,11 @@ fn bots_games_message_game_cached_for_bot_chat() {
     apply_json(&mut session, &seq, &sink, &game(7));
     apply_json(&mut session, &seq, &sink, &game(7));
     apply_json(&mut session, &seq, &sink, &game(8));
-    let games = session.bot_games.get(&21).expect("game cached");
+    let games = session.bots.bot_games.get(&21).expect("game cached");
     assert_eq!(games.len(), 1);
     assert_eq!(games[0].short_name, "chess");
     assert_eq!(games[0].title, "Chess");
-    assert!(!session.bot_games.contains_key(&22));
+    assert!(!session.bots.bot_games.contains_key(&22));
 }
 
 #[test]
@@ -378,7 +378,7 @@ fn bots_games_high_scores_answer_lands_in_panel() {
     let seq = AtomicU64::new(0);
     let extra =
         session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
-    session.game_scores.insert((7, 301), None);
+    session.bots.game_scores.insert((7, 301), None);
     apply_json(
         &mut session,
         &seq,
@@ -389,6 +389,7 @@ fn bots_games_high_scores_answer_lands_in_panel() {
         ),
     );
     let rows = session
+        .bots
         .game_scores
         .get(&(7, 301))
         .and_then(|panel| panel.as_ref())

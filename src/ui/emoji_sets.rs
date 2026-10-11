@@ -22,15 +22,15 @@ impl QuillApp {
                 self.connection.status_note = "could not load emoji packs".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.emoji.open = true;
+            session.stickers.emoji.open = true;
         }
         cx.notify();
     }
     fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.emoji.open = false;
+            live.driver.session.stickers.emoji.open = false;
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.emoji.open = false;
+            session.stickers.emoji.open = false;
         }
         cx.notify();
     }
@@ -40,7 +40,7 @@ impl QuillApp {
                 self.connection.status_note = "could not load emoji packs".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.emoji.tab = tab;
+            session.stickers.emoji.tab = tab;
         }
         cx.notify();
     }
@@ -78,7 +78,7 @@ impl QuillApp {
     }
     fn change_emoji_status(&mut self, id: Option<i64>, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let duration = live.driver.session.emoji.status_duration_secs;
+            let duration = live.driver.session.stickers.emoji.status_duration_secs;
             self.connection.status_note = match live.driver.change_emoji_status(id, duration) {
                 Ok(Some(_)) => "Updating emoji status…".into(),
                 Ok(None) => "An emoji status is already updating.".into(),
@@ -90,7 +90,9 @@ impl QuillApp {
 
     fn emoji_status_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let panel = session.map(|s| s.emoji.clone()).unwrap_or_default();
+        let panel = session
+            .map(|s| s.stickers.emoji.clone())
+            .unwrap_or_default();
         let premium = session.is_some_and(|s| {
             s.my_user_id
                 .and_then(|id| s.user(id))
@@ -144,7 +146,7 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            live.driver.session.emoji.status_duration_secs = secs;
+                            live.driver.session.stickers.emoji.status_duration_secs = secs;
                         }
                         cx.notify();
                     })),
@@ -177,7 +179,7 @@ impl QuillApp {
                             });
                         if let Some(secs) = secs {
                             if let Some(live) = this.live.as_mut() {
-                                live.driver.session.emoji.status_duration_secs = secs;
+                                live.driver.session.stickers.emoji.status_duration_secs = secs;
                             }
                         } else {
                             this.connection.status_note =
@@ -227,7 +229,7 @@ impl QuillApp {
                 let path = display
                     .and_then(|id| {
                         session
-                            .and_then(|s| s.files.get(&id.0))
+                            .and_then(|s| s.media.files.get(&id.0))
                             .and_then(|f| f.usable_path())
                     })
                     .and_then(|p| sandboxed_display_path(p, &self.media_display_roots()));
@@ -306,7 +308,10 @@ impl QuillApp {
     }
 
     fn emoji_sets_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let panel = self.session().map(|s| s.emoji.clone()).unwrap_or_default();
+        let panel = self
+            .session()
+            .map(|s| s.stickers.emoji.clone())
+            .unwrap_or_default();
         let session = self.session();
         let mutating =
             session.is_some_and(|s| s.requests.has_purpose(RequestPurpose::ChangeEmojiSet));
@@ -414,7 +419,7 @@ impl QuillApp {
                 let path = display
                     .and_then(|id| {
                         session
-                            .and_then(|s| s.files.get(&id.0))
+                            .and_then(|s| s.media.files.get(&id.0))
                             .and_then(|f| f.usable_path())
                     })
                     .and_then(|p| sandboxed_display_path(p, &roots));
@@ -541,7 +546,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     EmojiSets => DialogSpec::new(
         5100,
-        |app| app.session().is_some_and(|s| s.emoji.open),
+        |app| app.session().is_some_and(|s| s.stickers.emoji.open),
         QuillApp::build_emoji_sets_dialog,
     ),
 }

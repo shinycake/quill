@@ -17,7 +17,7 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.stickers.open = true;
+    driver.session.stickers.stickers.open = true;
     let recent = driver
         .select_sticker_tab(StickerTab::Recent)
         .unwrap()
@@ -38,14 +38,14 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.failed);
+    assert!(driver.session.stickers.stickers.failed);
     assert!(
         driver
             .select_sticker_tab(StickerTab::Recent)
             .unwrap()
             .is_some()
     );
-    assert!(!driver.session.stickers.failed);
+    assert!(!driver.session.stickers.stickers.failed);
 
     driver.select_sticker_tab(StickerTab::Favorites).unwrap();
     let add = driver
@@ -89,7 +89,7 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
             .requests
             .has_purpose(RequestPurpose::GetFavoriteStickers)
     );
-    assert_eq!(driver.session.stickers.tab, StickerTab::Favorites);
+    assert_eq!(driver.session.stickers.stickers.tab, StickerTab::Favorites);
     assert!(driver.set_favorite_sticker(FileId(0), true).is_err());
     let clear = driver.clear_recent_stickers().unwrap().unwrap();
     driver
@@ -108,7 +108,7 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
             .requests
             .has_purpose(RequestPurpose::GetRecentStickers)
     );
-    assert!(driver.session.stickers.recent.is_empty());
+    assert!(driver.session.stickers.stickers.recent.is_empty());
     assert_eq!(
         sent_request(&recorder, "clearRecentStickers")["is_attached"],
         false
@@ -126,7 +126,7 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
     driver
         .ingest(copy_and_parse(&sets.to_string(), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.trending.len(), 1);
+    assert_eq!(driver.session.stickers.stickers.trending.len(), 1);
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
         json!([77])
@@ -140,15 +140,15 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
     driver
         .ingest(copy_and_parse(&sets.to_string(), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.trending.len(), 2);
-    assert_eq!(driver.session.stickers.trending_next_offset, 3);
+    assert_eq!(driver.session.stickers.stickers.trending.len(), 2);
+    assert_eq!(driver.session.stickers.stickers.trending_next_offset, 3);
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
         json!([77, 88])
     );
     driver.select_sticker_set(77).unwrap();
     assert_eq!(sent_request(&recorder, "getStickerSet")["set_id"], "77");
-    driver.session.stickers.close();
+    driver.session.stickers.stickers.close();
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.select_sticker_tab(StickerTab::Recent).is_err());
     let _ = std::fs::remove_dir_all(dir);
@@ -161,7 +161,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.stickers.open = true;
+    driver.session.stickers.stickers.open = true;
     driver.select_sticker_tab(StickerTab::Search).unwrap();
     driver.search_sticker_picker(" old ").unwrap();
     let old = sent_request(&recorder, "searchStickerSets")["@extra"].clone();
@@ -175,11 +175,11 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     driver
         .ingest(copy_and_parse(&result(old, "66"), &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.stickers.found_sets.is_empty());
+    assert!(driver.session.stickers.stickers.found_sets.is_empty());
     driver
         .ingest(copy_and_parse(&result(latest, "77"), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.found_sets[0].id, 77);
+    assert_eq!(driver.session.stickers.stickers.found_sets[0].id, 77);
     let first = sent_request(&recorder, "searchStickers")["@extra"].clone();
     let sticker = |id| json!({"@type":"sticker","id":id,"set_id":"77","emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":false},"remote":{"@type":"remoteFile"}}});
     let stickers: Vec<_> = (1..=100).map(sticker).collect();
@@ -193,8 +193,8 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.found_stickers.len(), 100);
-    assert!(driver.session.stickers.search_has_more);
+    assert_eq!(driver.session.stickers.stickers.found_stickers.len(), 100);
+    assert!(driver.session.stickers.stickers.search_has_more);
     let more = driver.more_sticker_search_results().unwrap().unwrap();
     assert_eq!(sent_request(&recorder, "searchStickers")["offset"], 100);
     driver
@@ -208,13 +208,13 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.found_stickers.len(), 100);
-    assert_eq!(driver.session.stickers.search_offset, 101);
-    assert!(!driver.session.stickers.search_has_more);
+    assert_eq!(driver.session.stickers.stickers.found_stickers.len(), 100);
+    assert_eq!(driver.session.stickers.stickers.search_offset, 101);
+    assert!(!driver.session.stickers.stickers.search_has_more);
     driver.select_sticker_set(77).unwrap();
     assert_eq!(sent_request(&recorder, "getStickerSet")["set_id"], "77");
     driver.select_sticker_tab(StickerTab::Search).unwrap();
-    assert_eq!(driver.session.stickers.selected_set_id, None);
+    assert_eq!(driver.session.stickers.stickers.selected_set_id, None);
     assert!(
         !driver
             .session
@@ -223,7 +223,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     );
     assert!(driver.manage_sticker_set(77, true, true).is_err());
     let install = driver.manage_sticker_set(77, true, false).unwrap().unwrap();
-    assert!(!driver.session.stickers.found_sets[0].is_installed);
+    assert!(!driver.session.stickers.stickers.found_sets[0].is_installed);
     assert_eq!(driver.manage_sticker_set(77, false, false).unwrap(), None);
     assert_eq!(sent_request(&recorder, "changeStickerSet")["set_id"], "77");
     driver
@@ -236,7 +236,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.found_sets[0].is_installed);
+    assert!(driver.session.stickers.stickers.found_sets[0].is_installed);
     assert!(
         driver
             .session
@@ -258,8 +258,8 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.failed);
-    assert!(driver.session.stickers.found_sets[0].is_installed);
+    assert!(driver.session.stickers.stickers.failed);
+    assert!(driver.session.stickers.stickers.found_sets[0].is_installed);
     driver.close_sticker_panel();
     let remove = driver
         .manage_sticker_set(77, false, false)
@@ -281,10 +281,10 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .requests
             .has_purpose(RequestPurpose::GetInstalledStickerSets)
     );
-    assert!(!driver.session.stickers.found_sets[0].is_installed);
+    assert!(!driver.session.stickers.stickers.found_sets[0].is_installed);
     driver.search_sticker_picker("").unwrap();
-    assert!(!driver.session.stickers.failed);
-    assert!(driver.session.stickers.found_sets.is_empty());
+    assert!(!driver.session.stickers.stickers.failed);
+    assert!(driver.session.stickers.stickers.found_sets.is_empty());
     assert!(
         !driver
             .session
@@ -301,7 +301,7 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.stickers.open = true;
+    driver.session.stickers.stickers.open = true;
     let fetch = driver
         .session
         .request(RequestPurpose::GetInstalledStickerSets, None);
@@ -311,7 +311,7 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
     driver
         .ingest(copy_and_parse(&sets(json!(fetch.as_extra()), &[11, 22, 33]), &seq, &sink).unwrap())
         .unwrap();
-    let current = driver.session.stickers.sets.clone();
+    let current = driver.session.stickers.stickers.sets.clone();
     assert!(driver.reorder_sticker_set(99, 11).is_err());
     assert_eq!(driver.reorder_sticker_set(11, 11).unwrap(), None);
     let move_last = driver.reorder_sticker_set(11, 33).unwrap().unwrap();
@@ -319,7 +319,7 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
         sent_request(&recorder, "reorderInstalledStickerSets")["sticker_set_ids"],
         json!([22, 33, 11])
     );
-    assert_eq!(driver.session.stickers.sets, current);
+    assert_eq!(driver.session.stickers.stickers.sets, current);
     assert_eq!(driver.reorder_sticker_set(33, 11).unwrap(), None);
     assert_eq!(driver.manage_sticker_set(11, false, true).unwrap(), None);
     driver
@@ -333,8 +333,8 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.sets, current);
-    assert!(driver.session.stickers.failed);
+    assert_eq!(driver.session.stickers.stickers.sets, current);
+    assert!(driver.session.stickers.stickers.failed);
     let move_first = driver.reorder_sticker_set(33, 11).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "reorderInstalledStickerSets")["sticker_set_ids"],
@@ -358,6 +358,7 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
         driver
             .session
             .stickers
+            .stickers
             .sets
             .iter()
             .map(|set| set.id)
@@ -367,8 +368,9 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
     driver
         .session
         .stickers
+        .stickers
         .sets
-        .push(driver.session.stickers.sets[0].clone());
+        .push(driver.session.stickers.stickers.sets[0].clone());
     assert!(driver.reorder_sticker_set(11, 33).is_err());
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.reorder_sticker_set(11, 33).is_err());
@@ -383,7 +385,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.stickers.open = true;
+    driver.session.stickers.stickers.open = true;
     let first = driver
         .select_sticker_tab(StickerTab::Archived)
         .unwrap()
@@ -406,7 +408,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.archived_has_more);
+    assert!(driver.session.stickers.stickers.archived_has_more);
     assert!(driver.session.open_chat.is_none());
     let preview = driver.select_sticker_set(1).unwrap().unwrap();
     driver.ingest(copy_and_parse(&json!({"@type":"stickerSet","@extra":preview.as_extra(),"id":"1","stickers":[{"@type":"sticker","id":"900","set_id":"1","emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{"@type":"file","id":901,"local":{"@type":"localFile","can_be_downloaded":true},"remote":{"@type":"remoteFile"}}}]}).to_string(),&seq,&sink).unwrap()).unwrap();
@@ -420,10 +422,10 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
     driver
         .ingest(copy_and_parse(&sets(json!(more.as_extra()), vec![100, 101]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.archived.len(), 101);
-    assert!(!driver.session.stickers.archived_has_more);
+    assert_eq!(driver.session.stickers.stickers.archived.len(), 101);
+    assert!(!driver.session.stickers.stickers.archived_has_more);
     assert_eq!(driver.fetch_archived_stickers(true).unwrap(), None);
-    let before = driver.session.stickers.archived.clone();
+    let before = driver.session.stickers.stickers.archived.clone();
     let restore = driver.manage_sticker_set(1, true, false).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "changeStickerSet")["is_archived"],
@@ -440,7 +442,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.archived, before);
+    assert_eq!(driver.session.stickers.stickers.archived, before);
     let old = driver.fetch_archived_stickers(false).unwrap().unwrap();
     driver.select_sticker_set(2).unwrap();
     assert!(
@@ -460,8 +462,8 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.archived.is_empty());
-    assert_eq!(driver.session.stickers.selected_set_id, None);
+    assert!(driver.session.stickers.stickers.archived.is_empty());
+    assert_eq!(driver.session.stickers.stickers.selected_set_id, None);
     assert!(
         !driver
             .session
@@ -473,11 +475,11 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
     driver
         .ingest(copy_and_parse(&sets(json!(old.as_extra()), vec![1]), &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.stickers.archived.is_empty());
+    assert!(driver.session.stickers.stickers.archived.is_empty());
     driver
         .ingest(copy_and_parse(&sets(fresh, vec![2]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.archived[0].id, 2);
+    assert_eq!(driver.session.stickers.stickers.archived[0].id, 2);
     let archive = driver.manage_sticker_set(2, false, true).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "changeStickerSet")["is_installed"],
@@ -487,7 +489,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
         sent_request(&recorder, "changeStickerSet")["is_archived"],
         true
     );
-    driver.session.stickers.close();
+    driver.session.stickers.stickers.close();
     driver
         .ingest(
             copy_and_parse(
@@ -498,7 +500,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.archived.is_empty());
+    assert!(driver.session.stickers.stickers.archived.is_empty());
     drop(driver);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -513,10 +515,10 @@ fn composer_suggestions_wait_for_installed_sets_and_keep_the_latest_emoji() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.session.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
     let fetch = driver.update_sticker_suggestions("😀").unwrap().unwrap();
-    assert!(driver.session.stickers.suggest_waiting_for_sets);
+    assert!(driver.session.stickers.stickers.suggest_waiting_for_sets);
     assert_eq!(driver.update_sticker_suggestions("🔥").unwrap(), None);
     driver.ingest(copy_and_parse(&json!({"@type":"stickerSets","@extra":fetch.as_extra(),"sets":[{"@type":"stickerSetInfo","id":"77","size":1,"is_installed":true}]}).to_string(),&seq,&sink).unwrap()).unwrap();
-    assert!(driver.session.stickers.installed_loaded);
+    assert!(driver.session.stickers.stickers.installed_loaded);
     assert_eq!(sent_request(&recorder, "searchStickers")["emojis"], "🔥");
     assert_eq!(driver.update_sticker_suggestions("🔥").unwrap(), None);
     let old = sent_request(&recorder, "searchStickers")["@extra"].clone();
@@ -532,21 +534,24 @@ fn composer_suggestions_wait_for_installed_sets_and_keep_the_latest_emoji() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.suggestions.is_empty());
+    assert!(driver.session.stickers.stickers.suggestions.is_empty());
     driver.ingest(copy_and_parse(&json!({"@type":"stickers","@extra":fresh.as_extra(),"stickers":[sticker(9,"77"),sticker(10,"88")]}).to_string(),&seq,&sink).unwrap()).unwrap();
-    assert_eq!(driver.session.stickers.suggestions.len(), 1);
-    assert_eq!(driver.session.stickers.suggestions[0].file_id, FileId(9));
-    assert!(driver.session.stickers.found_stickers.is_empty());
-    assert!(!driver.session.stickers.open);
+    assert_eq!(driver.session.stickers.stickers.suggestions.len(), 1);
+    assert_eq!(
+        driver.session.stickers.stickers.suggestions[0].file_id,
+        FileId(9)
+    );
+    assert!(driver.session.stickers.stickers.found_stickers.is_empty());
+    assert!(!driver.session.stickers.stickers.open);
     assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 9);
     driver.update_sticker_suggestions("plain text").unwrap();
-    assert!(driver.session.stickers.suggestions.is_empty());
+    assert!(driver.session.stickers.stickers.suggestions.is_empty());
     let pending = driver.update_sticker_suggestions("😀").unwrap().unwrap();
     driver.session.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
     driver.update_sticker_suggestions("😀").unwrap();
     driver.ingest(copy_and_parse(&json!({"@type":"stickers","@extra":pending.as_extra(),"stickers":[sticker(9,"77")]}).to_string(),&seq,&sink).unwrap()).unwrap();
-    assert!(driver.session.stickers.suggestions.is_empty());
-    assert!(!driver.session.stickers.suggest_waiting_for_sets);
+    assert!(driver.session.stickers.stickers.suggestions.is_empty());
+    assert!(!driver.session.stickers.stickers.suggest_waiting_for_sets);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -558,11 +563,11 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     assert!(driver.manage_sticker_sets(&[77, -1], true).is_err());
-    assert_eq!(driver.session.stickers.batch_total, 0);
+    assert_eq!(driver.session.stickers.stickers.batch_total, 0);
     assert_eq!(driver.manage_sticker_sets(&[77, 88, 77], true).unwrap(), 2);
-    assert_eq!(driver.session.stickers.batch_total, 2);
-    assert_eq!(driver.session.stickers.batch_completed, 0);
-    assert_eq!(driver.session.stickers.batch_pending, vec![77, 88]);
+    assert_eq!(driver.session.stickers.stickers.batch_total, 2);
+    assert_eq!(driver.session.stickers.stickers.batch_completed, 0);
+    assert_eq!(driver.session.stickers.stickers.batch_pending, vec![77, 88]);
     assert!(driver.manage_sticker_sets(&[99], false).is_err());
     let ok = driver
         .session
@@ -590,8 +595,8 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.batch_completed, 1);
-    assert_eq!(driver.session.stickers.batch_pending, vec![88]);
+    assert_eq!(driver.session.stickers.stickers.batch_completed, 1);
+    assert_eq!(driver.session.stickers.stickers.batch_pending, vec![88]);
     driver
         .ingest(
             copy_and_parse(
@@ -602,8 +607,8 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.batch_failed, 1);
-    assert!(driver.session.stickers.batch_pending.is_empty());
+    assert_eq!(driver.session.stickers.stickers.batch_failed, 1);
+    assert!(driver.session.stickers.stickers.batch_pending.is_empty());
     driver
         .ingest(
             copy_and_parse(
@@ -614,11 +619,11 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.batch_completed, 1);
+    assert_eq!(driver.session.stickers.stickers.batch_completed, 1);
     assert_eq!(driver.manage_sticker_sets(&[88], false).unwrap(), 1);
-    assert_eq!(driver.session.stickers.batch_failed, 0);
-    assert_eq!(driver.session.stickers.batch_completed, 0);
-    assert_eq!(driver.session.stickers.batch_total, 1);
+    assert_eq!(driver.session.stickers.stickers.batch_failed, 0);
+    assert_eq!(driver.session.stickers.stickers.batch_completed, 0);
+    assert_eq!(driver.session.stickers.stickers.batch_total, 1);
     assert_eq!(
         sent_request(&recorder, "changeStickerSet")["is_installed"],
         false
@@ -657,7 +662,7 @@ fn premium_sticker_send_uses_full_type_and_current_account_entitlement() {
     assert!(driver.send_sticker(ChatId(7), send(9)).is_ok());
     // History metadata remains sufficient after picker/search caches have changed.
     driver.ingest(copy_and_parse(&json!({"@type":"updateNewMessage","message":{"id":1,"chat_id":7,"content":{"@type":"messageSticker","is_premium":false,"sticker":sticker(9,json!({"@type":"file","id":90}))}}}).to_string(),&seq,&sink).unwrap()).unwrap();
-    driver.session.stickers.stickers.clear();
+    driver.session.stickers.stickers.stickers.clear();
     driver.session.users.get_mut(&7).unwrap().is_premium = false;
     assert!(driver.session.sticker_requires_premium(FileId(9)));
     assert!(driver.send_sticker(ChatId(7), send(9)).is_err());
@@ -673,7 +678,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let saved = driver.open_gif_panel().unwrap().unwrap();
     driver.search_gifs("before bot option").unwrap();
-    assert!(driver.session.gifs.search_failed);
+    assert!(driver.session.stickers.gifs.search_failed);
     driver
         .ingest(
             copy_and_parse(
@@ -685,8 +690,8 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.gifs.loaded);
-    assert!(driver.session.gifs.search_failed); // Saved loading must not hide a search failure.
+    assert!(driver.session.stickers.gifs.loaded);
+    assert!(driver.session.stickers.gifs.search_failed); // Saved loading must not hide a search failure.
     driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"gif"}}).to_string(),&seq,&sink).unwrap()).unwrap();
     let count_saved = || {
         recorder
@@ -710,7 +715,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     driver
         .ingest(copy_and_parse(&resolved(old_bot), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.gifs.search_bot_user_id, None);
+    assert_eq!(driver.session.stickers.gifs.search_bot_user_id, None);
     driver
         .ingest(copy_and_parse(&resolved(bot), &seq, &sink).unwrap())
         .unwrap();
@@ -727,11 +732,11 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     driver
         .ingest(copy_and_parse(&page(old, vec![8], ""), &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.gifs.search_results.is_empty());
+    assert!(driver.session.stickers.gifs.search_results.is_empty());
     driver
         .ingest(copy_and_parse(&page(json!(fresh.as_extra()), vec![9], "p2"), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.gifs.search_results.len(), 1);
+    assert_eq!(driver.session.stickers.gifs.search_results.len(), 1);
     assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 109);
     let more = driver.more_gif_search_results().unwrap().unwrap();
     assert_eq!(
@@ -748,8 +753,8 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.gifs.search_results.len(), 2);
-    assert!(driver.session.gifs.search_next_offset.is_empty());
+    assert_eq!(driver.session.stickers.gifs.search_results.len(), 2);
+    assert!(driver.session.stickers.gifs.search_next_offset.is_empty());
     assert_eq!(driver.more_gif_search_results().unwrap(), None);
     let old_saved = driver.show_saved_gifs().unwrap().unwrap();
     let add = driver.set_gif_saved(FileId(9), true).unwrap().unwrap();
@@ -781,7 +786,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.gifs.loaded);
+    assert!(!driver.session.stickers.gifs.loaded);
     driver
         .ingest(
             copy_and_parse(
@@ -805,8 +810,8 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.gifs.animations.len(), 1);
-    assert!(driver.session.gifs.failed);
+    assert_eq!(driver.session.stickers.gifs.animations.len(), 1);
+    assert!(driver.session.stickers.gifs.failed);
     let remove = driver.set_gif_saved(FileId(9), false).unwrap().unwrap();
     driver
         .ingest(
@@ -832,7 +837,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     let count = count_saved();
     driver.ingest(copy_and_parse(&json!({"@type":"updateAnimationSearchParameters","provider":"Tenor","emojis":["🔥"]}).to_string(),&seq,&sink).unwrap()).unwrap();
     assert_eq!(count_saved(), count);
-    assert_eq!(driver.session.gifs.provider_emojis, vec!["🔥"]);
+    assert_eq!(driver.session.stickers.gifs.provider_emojis, vec!["🔥"]);
     driver.close_gif_panel();
     driver
         .ingest(
@@ -844,7 +849,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.gifs.stale);
+    assert!(driver.session.stickers.gifs.stale);
     assert!(driver.open_gif_panel().unwrap().is_some());
     let failed_fetch = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
     driver
@@ -858,7 +863,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.gifs.failed);
+    assert!(driver.session.stickers.gifs.failed);
     let count = count_saved();
     driver
         .ingest(
@@ -897,7 +902,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.gifs.animations.is_empty());
+    assert!(driver.session.stickers.gifs.animations.is_empty());
     driver.search_gifs("").unwrap();
     let old_page = sent_request(&recorder, "getInlineQueryResults")["@extra"].clone();
     driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"othergif"}}).to_string(),&seq,&sink).unwrap()).unwrap();
@@ -905,11 +910,11 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
         sent_request(&recorder, "searchPublicChat")["username"],
         "othergif"
     );
-    assert_eq!(driver.session.gifs.search_bot_user_id, None);
+    assert_eq!(driver.session.stickers.gifs.search_bot_user_id, None);
     driver
         .ingest(copy_and_parse(&page(old_page, vec![99], ""), &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.gifs.search_results.is_empty());
+    assert!(driver.session.stickers.gifs.search_results.is_empty());
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.set_gif_saved(FileId(9), true).is_err());
     let _ = std::fs::remove_dir_all(dir);

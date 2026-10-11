@@ -71,7 +71,7 @@ fn update_message_content_refreshes_scheduled_entry() {
 
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.scheduled_messages.push(ParsedMessage {
+    session.messages.scheduled_messages.push(ParsedMessage {
         sender: None,
         id: MessageId(70),
         chat_id: ChatId(7),
@@ -103,7 +103,7 @@ fn update_message_content_refreshes_scheduled_entry() {
         r#"{"@type":"updateMessageContent","chat_id":7,"message_id":70,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"new caption","entities":[]}}}"#,
     );
     assert_eq!(
-        session.scheduled_messages[0].content.preview(),
+        session.messages.scheduled_messages[0].content.preview(),
         "new caption"
     );
 }
@@ -157,7 +157,10 @@ fn resend_error_surfaces_instead_of_silence() {
             extra.0,
         ),
     );
-    let err = session.resend_error.expect("resend error surfaced");
+    let err = session
+        .messages
+        .resend_error
+        .expect("resend error surfaced");
     assert!(err.contains("Could not retry the send"), "{err}");
 }
 
@@ -176,6 +179,7 @@ fn message_link_error_surfaces_instead_of_silence() {
         ),
     );
     let err = session
+        .messages
         .message_link_error
         .expect("message link error surfaced");
     assert!(err.contains("Could not get message link"), "{err}");
@@ -196,6 +200,7 @@ fn recognize_speech_error_surfaces_instead_of_silence() {
         ),
     );
     let err = session
+        .messages
         .recognize_speech_error
         .expect("recognize speech error surfaced");
     assert!(err.contains("Could not transcribe this message"), "{err}");
@@ -591,7 +596,7 @@ fn nested_idle_message_file_does_not_unstick_in_flight_download() {
             r#"{{"@type":"updateNewMessage","message":{{"id":13,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
         ),
     );
-    assert!(session.downloading.contains(&6));
+    assert!(session.media.downloading.contains(&6));
     assert!(!session.should_download(FileId(6)));
 }
 
@@ -644,7 +649,7 @@ fn reply_to_message_preview_and_jump() {
         ChatSearchJumpNeed::AlreadyReady
     );
     assert_eq!(
-        session.chat_search.jump,
+        session.search.chat_search.jump,
         ChatSearchJump::Ready {
             message_id: MessageId(101)
         }
@@ -682,7 +687,7 @@ fn reply_to_message_preview_and_jump() {
         ),
     );
     assert_eq!(
-        session.chat_search.jump,
+        session.search.chat_search.jump,
         ChatSearchJump::Ready {
             message_id: MessageId(90)
         }

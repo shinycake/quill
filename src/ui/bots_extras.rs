@@ -92,7 +92,7 @@ impl QuillApp {
     fn bot_invite_facts(&self, bot_id: i64) -> Option<BotFacts> {
         let session = self.session()?;
         let user = session.user(bot_id).filter(|user| user.is_bot)?;
-        let info = session.bot_info.get(&bot_id)?.as_ref();
+        let info = session.bots.bot_info.get(&bot_id)?.as_ref();
         Some(BotFacts {
             can_join_groups: user.can_join_groups,
             group_rights: info.and_then(|info| info.group_admin_rights),

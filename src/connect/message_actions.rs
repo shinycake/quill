@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
-            self.session.reply_targets.insert(
+            self.session.messages.reply_targets.insert(
                 (chat_id.0, message_id.0),
                 crate::state::ReplyTarget::Loading,
             );
@@ -423,7 +423,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// actual `getMessageLink` only when the gate passes, and otherwise
     /// stashes `Session::message_link_error` for the UI status note.
     /// The parsed `messageLink.link` lands in
-    /// `session.message_link_result` for the UI to copy to the clipboard.
+    /// `session.messages.message_link_result` for the UI to copy to the clipboard.
     pub fn get_message_link(
         &mut self,
         chat_id: ChatId,
@@ -501,6 +501,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&json) {
             Ok(()) => {
                 self.session
+                    .messages
                     .instant_view_urls
                     .insert(extra, url.to_string());
                 InstantViewOutcome::Requested
@@ -523,11 +524,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&json) {
             Ok(()) => {
                 self.session
+                    .messages
                     .composer_preview_urls
                     .insert(extra, url.to_string());
                 // Loading state — the chip shows "Getting link info…"
                 // (TGX `LinkPreview.isLoading`).
-                self.session.composer_preview = Some(ComposerLinkPreview {
+                self.session.messages.composer_preview = Some(ComposerLinkPreview {
                     url: url.to_string(),
                     preview: None,
                 });

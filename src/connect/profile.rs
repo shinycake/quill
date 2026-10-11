@@ -60,13 +60,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         let extra = self.session.request(RequestPurpose::CheckUsername, None);
-        self.session.username_check_pending = Some(username.to_string());
+        self.session.users_state.username_check_pending = Some(username.to_string());
         let json = check_chat_username(extra, ChatId(me), username);
         let sent = self.send_json_request(extra, &json);
         if sent.is_err() {
             // Don't leave the dialog showing "Checking…" for a request
             // that never went out.
-            self.session.username_check_pending = None;
+            self.session.users_state.username_check_pending = None;
         }
         sent
     }

@@ -72,7 +72,12 @@ fn chat_export_pages_history_until_a_page_adds_nothing() {
             .unwrap(),
         )
         .unwrap();
-    let export = driver.session.chat_export.as_ref().expect("export active");
+    let export = driver
+        .session
+        .messages
+        .chat_export
+        .as_ref()
+        .expect("export active");
     assert_eq!(export.messages.len(), 100);
     assert_eq!(export.messages[0].text.as_deref(), Some("m1000"));
     assert!(!export.done_paging);
@@ -117,7 +122,12 @@ fn chat_export_pages_history_until_a_page_adds_nothing() {
             .unwrap(),
         )
         .unwrap();
-    let export = driver.session.chat_export.as_ref().expect("export active");
+    let export = driver
+        .session
+        .messages
+        .chat_export
+        .as_ref()
+        .expect("export active");
     // 100 from page 1 + 1 new (901 was already there — no duplicate).
     assert_eq!(export.messages.len(), 101);
     assert_eq!(export.messages.iter().filter(|m| m.id == 901).count(), 1);
@@ -153,7 +163,12 @@ fn chat_export_pages_history_until_a_page_adds_nothing() {
             .unwrap(),
         )
         .unwrap();
-    let export = driver.session.chat_export.as_ref().expect("export active");
+    let export = driver
+        .session
+        .messages
+        .chat_export
+        .as_ref()
+        .expect("export active");
     assert_eq!(export.messages.len(), 101);
     assert!(export.done_paging);
     let _ = std::fs::remove_dir_all(&dir);
@@ -185,7 +200,7 @@ fn chat_export_refuses_protected_chats() {
             .start_chat_export(ChatId(16), "Protected".into(), Default::default())
             .is_err()
     );
-    assert!(driver.session.chat_export.is_none());
+    assert!(driver.session.messages.chat_export.is_none());
     assert!(
         !recorder
             .snapshot()

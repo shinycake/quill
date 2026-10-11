@@ -85,6 +85,7 @@ fn profile_lists_are_deduped_and_failures_retry() {
     assert!(matches!(
         driver
             .session
+            .users_state
             .profile_chat_lists
             .get(&(ProfileChatsKind::GroupsInCommon, 31)),
         Some(ProfileChatsFetch::Failed(_))

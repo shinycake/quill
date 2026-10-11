@@ -78,10 +78,12 @@ pub(super) fn open_chat_draft(
     let chat_id = session.open_chat?;
     match session.open_topic {
         Some(topic) => session
+            .messages
             .pending_bot_messages
             .get(&(chat_id.0, topic))
             .map(|draft| (topic, draft)),
         None => session
+            .messages
             .pending_bot_messages
             .iter()
             .filter(|((chat, _), _)| *chat == chat_id.0)

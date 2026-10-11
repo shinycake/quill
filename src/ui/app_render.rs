@@ -127,11 +127,11 @@ impl Render for QuillApp {
         let ai_text = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.ai_composer_text.take());
+            .and_then(|live| live.driver.session.messages.ai_composer_text.take());
         let ai_blocks = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.ai_composer_blocks.take());
+            .and_then(|live| live.driver.session.messages.ai_composer_blocks.take());
         let open_chat = self
             .live
             .as_ref()

@@ -255,7 +255,9 @@ impl QuillApp {
             .session()
             .map(|s| s.settings.contact_prefs.sync_enabled)
             .unwrap_or(true);
-        let notice: Option<String> = self.session().and_then(|s| s.contacts_notice.clone());
+        let notice: Option<String> = self
+            .session()
+            .and_then(|s| s.users_state.contacts_notice.clone());
         let mut section = div()
             .flex()
             .flex_col()

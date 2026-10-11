@@ -219,6 +219,7 @@ impl QuillApp {
             return;
         };
         let path = session
+            .media
             .files
             .get(&id.0)
             .and_then(|f| f.usable_path())
@@ -484,6 +485,7 @@ impl QuillApp {
             })
             .filter_map(|id| {
                 session
+                    .stickers
                     .emoji
                     .custom_emoji_stickers
                     .iter()
@@ -535,6 +537,7 @@ impl QuillApp {
                 continue;
             };
             let Some(item) = session
+                .stickers
                 .emoji
                 .custom_emoji_stickers
                 .iter()
@@ -550,7 +553,7 @@ impl QuillApp {
             }
             let still = item
                 .display_file_id()
-                .and_then(|file| session.files.get(&file.0))
+                .and_then(|file| session.media.files.get(&file.0))
                 .and_then(|file| file.usable_path())
                 .and_then(|path| sandboxed_display_path(path, &roots))
                 .map(ImageSource::from);
@@ -614,6 +617,7 @@ impl QuillApp {
                 continue;
             };
             let Some(item) = session
+                .stickers
                 .emoji
                 .custom_emoji_stickers
                 .iter()
@@ -627,7 +631,7 @@ impl QuillApp {
                 .map(ImageSource::from)
                 .or_else(|| {
                     item.display_file_id()
-                        .and_then(|file| session.files.get(&file.0))
+                        .and_then(|file| session.media.files.get(&file.0))
                         .and_then(|file| file.usable_path())
                         .and_then(|path| sandboxed_display_path(path, &roots))
                         .map(ImageSource::from)

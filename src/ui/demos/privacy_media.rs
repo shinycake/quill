@@ -128,7 +128,7 @@ impl QuillApp {
                 if let Some(session) = self.demo_session.as_mut() {
                     use quill::state::{MessageReactionOptions, ReactionChoice};
                     let emoji = |e: &str| ReactionChoice::Emoji(e.to_string());
-                    session.message_reaction_options = Some(MessageReactionOptions {
+                    session.stickers.message_reaction_options = Some(MessageReactionOptions {
                         chat_id: ChatId(sc::HIKERS),
                         message_id: MessageId(sc::HIKERS_FIRST_MESSAGE),
                         top: ["❤", "👍", "🔥", "😂", "😮", "😢", "🎉"]

@@ -53,7 +53,7 @@ fn fix_text_with_ai_applies_fixed_text() {
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse fixedText");
     driver.ingest(owned).expect("ingest fixedText");
     assert_eq!(
-        driver.session.ai_composer_text,
+        driver.session.messages.ai_composer_text,
         Some((ChatId(7), "the draft".to_string()))
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -77,7 +77,11 @@ fn create_rich_message_with_ai_round_trips_blocks() {
     );
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse richMessage");
     driver.ingest(owned).expect("ingest richMessage");
-    let (chat_id, rich, note) = driver.session.ai_composer_blocks.expect("blocks stored");
+    let (chat_id, rich, note) = driver
+        .session
+        .messages
+        .ai_composer_blocks
+        .expect("blocks stored");
     assert_eq!(chat_id, ChatId(7));
     assert_eq!(note, "AI created the draft");
     assert!(rich.is_full);
@@ -124,6 +128,7 @@ fn rich_ai_draft_notes_match_the_method() {
     assert_eq!(
         driver
             .session
+            .messages
             .ai_composer_blocks
             .as_ref()
             .map(|(_, _, note)| *note),
@@ -137,6 +142,7 @@ fn rich_ai_draft_notes_match_the_method() {
     assert_eq!(
         driver
             .session
+            .messages
             .ai_composer_blocks
             .as_ref()
             .map(|(_, _, note)| *note),
@@ -215,9 +221,9 @@ fn ai_flood_premium_error_surfaces_premium_line() {
     );
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse error");
     driver.ingest(owned).expect("ingest error");
-    let err = driver.session.ai_error.expect("AI error stored");
+    let err = driver.session.messages.ai_error.expect("AI error stored");
     assert!(err.contains("Premium"), "premium line surfaced, got: {err}");
     // Never applied as a success.
-    assert!(driver.session.ai_composer_text.is_none());
+    assert!(driver.session.messages.ai_composer_text.is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -250,6 +250,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|f| {
                 !self
                     .session
+                    .media
                     .files
                     .get(&f.id.0)
                     .unwrap_or(f)
@@ -278,6 +279,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|f| {
                 !self
                     .session
+                    .media
                     .files
                     .get(&f.id.0)
                     .unwrap_or(f)

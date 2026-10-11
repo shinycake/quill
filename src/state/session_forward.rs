@@ -16,7 +16,7 @@ impl Session {
     /// marks) in the main history and any loaded topic history. Returns the
     /// number of main-history rows updated.
     pub fn apply_update_poll(&mut self, poll: Poll) -> usize {
-        let Some(rows) = self.poll_messages.remove(&poll.id) else {
+        let Some(rows) = self.messages.poll_messages.remove(&poll.id) else {
             return 0;
         };
         let mut updated = 0;
@@ -56,13 +56,14 @@ impl Session {
             }
         }
         if !live.is_empty() {
-            self.poll_messages.insert(poll.id, live);
+            self.messages.poll_messages.insert(poll.id, live);
         }
         // N2: an open voter dialog goes stale when the poll updates
         // (counts/options change) — drop cached pages for touched
         // messages so the next open refetches.
         if !touched.is_empty() {
-            self.poll_voters
+            self.messages
+                .poll_voters
                 .retain(|(chat_id, message_id, _), _| !touched.contains(&(*chat_id, *message_id)));
         }
         updated
@@ -155,14 +156,15 @@ impl Session {
             self.remember_files(&message.files);
             self.upsert_message(message.clone(), message.id.0 < 0);
         }
-        let flight = match self.in_flight_forward.take() {
+        let flight = match self.messages.in_flight_forward.take() {
             Some(flight) if flight.extra == pending.id => Some(flight),
             other => {
-                self.in_flight_forward = other;
-                self.queued_forward_flights
+                self.messages.in_flight_forward = other;
+                self.messages
+                    .queued_forward_flights
                     .iter()
                     .position(|flight| flight.extra == pending.id)
-                    .map(|index| self.queued_forward_flights.remove(index))
+                    .map(|index| self.messages.queued_forward_flights.remove(index))
             }
         };
         let dest_chat_id = flight
@@ -175,7 +177,7 @@ impl Session {
             .get(&dest_chat_id.0)
             .map(|chat| chat.title.clone())
             .unwrap_or_else(|| format!("chat {}", dest_chat_id.0));
-        self.last_forward = Some(ForwardResult {
+        self.messages.last_forward = Some(ForwardResult {
             dest_chat_id,
             dest_title,
             from_chat_id: flight.as_ref().map(|f| f.from_chat_id).unwrap_or(ChatId(0)),

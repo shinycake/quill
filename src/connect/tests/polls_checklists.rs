@@ -74,7 +74,7 @@ fn add_poll_option_error_surfaces_a_note() {
         ),
     );
     assert_eq!(
-        driver.session.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.as_deref(),
         Some("Could not add the option. Please try again.")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -130,7 +130,7 @@ fn poll_vote_statistics_land_in_the_session() {
     assert_eq!(v["@type"], "getPollVoteStatistics");
     assert_eq!(v["is_dark"], true);
     assert!(matches!(
-        driver.session.poll_stats.get(&(7, 106)),
+        driver.session.messages.poll_stats.get(&(7, 106)),
         Some(PollStatsFetch::Loading)
     ));
     // A second call while loading sends nothing.
@@ -150,11 +150,11 @@ fn poll_vote_statistics_land_in_the_session() {
         ),
     );
     assert!(matches!(
-        driver.session.poll_stats.get(&(7, 106)),
+        driver.session.messages.poll_stats.get(&(7, 106)),
         Some(PollStatsFetch::Loaded(_))
     ));
     // A failed refetch lands in `Failed`.
-    driver.session.poll_stats.remove(&(7, 106));
+    driver.session.messages.poll_stats.remove(&(7, 106));
     let extra = driver
         .fetch_poll_vote_statistics(ChatId(7), MessageId(106), false)
         .unwrap()
@@ -169,7 +169,7 @@ fn poll_vote_statistics_land_in_the_session() {
         ),
     );
     assert!(matches!(
-        driver.session.poll_stats.get(&(7, 106)),
+        driver.session.messages.poll_stats.get(&(7, 106)),
         Some(PollStatsFetch::Failed(_))
     ));
     let _ = std::fs::remove_dir_all(&dir);
@@ -311,7 +311,7 @@ fn checklist_mutation_errors_surface_a_note() {
         ),
     );
     assert_eq!(
-        driver.session.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.as_deref(),
         Some("Could not update the checklist (error 400)")
     );
     let _ = std::fs::remove_dir_all(&dir);

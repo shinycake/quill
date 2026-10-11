@@ -21,10 +21,10 @@ impl QuillApp {
     /// never shows while a fetch is in flight.
     pub(super) fn shared_media_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.shared_media.open {
+        if !session.media.shared_media.open {
             return None;
         }
-        let chat_id = session.shared_media.chat_id?;
+        let chat_id = session.media.shared_media.chat_id?;
         let chat = session.chats.get(&chat_id.0);
         let title = chat
             .map(|c| c.title.clone())
@@ -38,8 +38,8 @@ impl QuillApp {
                 }
             )
         });
-        let active_tab = session.shared_media.active_tab;
-        let tab = &session.shared_media.tabs[active_tab.index()];
+        let active_tab = session.media.shared_media.active_tab;
+        let tab = &session.media.shared_media.tabs[active_tab.index()];
         let status = tab.status;
         let total_count = tab.total_count;
         // `error` stays an owned clone: the panel tree is boxed into
@@ -299,7 +299,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             match session.open_chat {
                 Some(chat_id) => {
-                    session.shared_media.open_for(chat_id);
+                    session.media.shared_media.open_for(chat_id);
                     self.connection.status_note = "shared media".into();
                     true
                 }
@@ -320,7 +320,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_shared_media();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.shared_media.close();
+            session.media.shared_media.close();
         }
         self.connection.status_note = "shared media closed".into();
         cx.notify();
@@ -338,14 +338,14 @@ impl QuillApp {
                 self.connection.status_note = "could not load that tab".into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.shared_media.select_tab(tab);
+            session.media.shared_media.select_tab(tab);
         }
         cx.notify();
     }
 
     pub(super) fn retry_shared_media_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let tab = live.driver.session.shared_media.active_tab;
+            let tab = live.driver.session.media.shared_media.active_tab;
             if live.driver.fetch_shared_media(tab).is_err() {
                 self.connection.status_note = "could not retry loading shared media".into();
             }

@@ -262,6 +262,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session
+            .users_state
             .profile_chat_lists
             .remove(&(ProfileChatsKind::SuitableDiscussionChats, 0));
         self.fetch_profile_chats(ProfileChatsKind::SuitableDiscussionChats, 0)

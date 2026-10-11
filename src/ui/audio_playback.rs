@@ -467,6 +467,7 @@ impl QuillApp {
         }
         let path = self.session().and_then(|session| {
             session
+                .media
                 .files
                 .get(&file_id.0)
                 .and_then(|file| file.usable_path())
@@ -543,6 +544,7 @@ impl QuillApp {
         }
         let path = self.session().and_then(|session| {
             session
+                .media
                 .files
                 .get(&file_id.0)
                 .and_then(|file| file.usable_path())
@@ -610,6 +612,7 @@ impl QuillApp {
         };
         let ready = self.session().is_some_and(|session| {
             session
+                .media
                 .files
                 .get(&file_id.0)
                 .and_then(|file| file.usable_path())
