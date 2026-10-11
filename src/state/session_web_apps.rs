@@ -44,6 +44,7 @@ impl Session {
                 }
             }
             BotsPayload::AttachmentMenuBot(bot) => {
+                self.keep_attach_bot_icons(std::slice::from_ref(&bot));
                 if let Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. })) =
                     purpose
                 {
@@ -51,6 +52,7 @@ impl Session {
                 }
             }
             BotsPayload::UpdateAttachmentMenuBots(bots) => {
+                self.keep_attach_bot_icons(&bots);
                 self.bots.web_apps.attachment_menu_bots = bots;
             }
             BotsPayload::UpdateWebAppMessageSent { .. } => {}

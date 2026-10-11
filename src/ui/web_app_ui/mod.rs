@@ -15,6 +15,7 @@
 //! app. Payments (`web_app_open_invoice`) are out of scope and refused.
 
 use super::app::QuillApp;
+use super::attach_bots::AttachMenuEntry;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -104,6 +105,9 @@ pub(super) enum WebAppConfirm {
         allow_write: bool,
         then: PendingOpen,
     },
+    /// "Remove from menu" in the app's menu (tdesktop
+    /// `lng_bot_remove_from_menu_sure`).
+    RemoveFromMenu { bot_id: i64, name: String },
 }
 
 /// What a shell popup was for, so its answer can be acted on.
@@ -435,7 +439,7 @@ impl QuillApp {
     }
 
     /// The attachment menu bots that can open in the current chat.
-    pub(super) fn attachment_menu_bots_for_open_chat(&self) -> Vec<(i64, String)> {
+    pub(super) fn attachment_menu_bots_for_open_chat(&self) -> Vec<AttachMenuEntry> {
         let Some(session) = self.session() else {
             return Vec::new();
         };
@@ -459,24 +463,21 @@ impl QuillApp {
             ChatKind::Secret { .. } => return Vec::new(),
             _ => AttachChatKind::Group,
         };
-        session
-            .bots
-            .web_apps
-            .attachment_menu_bots
-            .iter()
-            .filter(|bot| bot.is_added && bot.show_in_attachment_menu)
-            .filter(|bot| {
-                // In the bot's own chat the bot's own flag decides.
-                if kind == AttachChatKind::Bot
-                    && session.bot_user_id_for_chat(chat_id) == Some(bot.bot_user_id)
-                {
-                    bot.supports_self_chat
-                } else {
-                    bot.supports_chat(kind)
-                }
-            })
-            .map(|bot| (bot.bot_user_id, bot.name.clone()))
-            .collect()
+        let own_bot_chat = session.bot_user_id_for_chat(chat_id);
+        super::attach_bots::bots_for_chat(
+            &session.bots.web_apps.attachment_menu_bots,
+            kind,
+            own_bot_chat,
+        )
+        .into_iter()
+        .map(|bot| AttachMenuEntry {
+            bot_id: bot.bot_user_id,
+            name: bot.name.clone(),
+            icon_svg: session
+                .attach_bot_icon_path(bot.bot_user_id)
+                .and_then(super::attach_bots::icon_svg),
+        })
+        .collect()
     }
 
     /// A resolved `t.me/bot/app`, `t.me/bot?startapp` or `?startattach`
@@ -669,11 +670,25 @@ impl QuillApp {
                 trust::mark_trusted(then.bot_id());
                 self.request_web_app(then, request_write && allow_write, cx);
             }
+            WebAppConfirm::RemoveFromMenu { bot_id, .. } => {
+                let sent = self.live.as_mut().map(|live| {
+                    live.driver
+                        .toggle_bot_in_attachment_menu(bot_id, false, false)
+                });
+                if matches!(sent, Some(Ok(_))) {
+                    self.close_mini_app_window(cx);
+                } else {
+                    self.set_status_note("Couldn't remove the bot from the menu.", cx);
+                }
+            }
             WebAppConfirm::AddToMenu {
                 bot,
                 allow_write,
                 then,
             } => {
+                // The terms shown with the box count as agreed (tdesktop
+                // `_disclaimerAccepted`).
+                trust::mark_trusted(bot.bot_user_id);
                 let sent = self.live.as_mut().map(|live| {
                     live.driver.toggle_bot_in_attachment_menu(
                         bot.bot_user_id,
@@ -701,7 +716,7 @@ impl QuillApp {
         match &mut self.mini_apps.confirm {
             Some(WebAppConfirm::OpenTerms { allow_write, .. })
             | Some(WebAppConfirm::AddToMenu { allow_write, .. }) => *allow_write = on,
-            None => {}
+            Some(WebAppConfirm::RemoveFromMenu { .. }) | None => {}
         }
         cx.notify();
     }
@@ -754,22 +769,38 @@ impl QuillApp {
                         } else {
                             bot.name.clone()
                         };
+                        let mut lines = Vec::new();
+                        if !trust::is_trusted(bot.bot_user_id) {
+                            lines.push(
+                                "You are about to use a mini app operated by an independent party not affiliated with Telegram. By adding it, you agree to the Terms of Use for mini apps.".to_string(),
+                            );
+                        }
+                        lines.push(format!(
+                            "{name} asks your permission to be added as an option to your attachment menu so you can access it from any chat."
+                        ));
                         (
                             format!("Add {name} to the attachment menu?"),
-                            vec![format!(
-                                "{name} asks to be added as an option to your attachment menu, so you can open it from any chat."
-                            )],
+                            lines,
                             bot.request_write_access
                                 .then(|| (*allow_write, format!("Allow {name} to send me messages"))),
                             "Add",
                         )
                     }
+                    WebAppConfirm::RemoveFromMenu { name, .. } => (
+                        "Remove from menu".to_string(),
+                        vec![format!("Remove {name} from the attachment menu?")],
+                        None,
+                        "Remove",
+                    ),
                 };
             let mut body = div().flex().flex_col().gap_3();
             for line in lines {
                 body = body.child(div().text_sm().text_color(muted).child(line));
             }
-            if matches!(confirm, WebAppConfirm::OpenTerms { .. }) {
+            if matches!(
+                confirm,
+                WebAppConfirm::OpenTerms { .. } | WebAppConfirm::AddToMenu { .. }
+            ) {
                 body = body.child(
                     Button::new("web-app-terms")
                         .label("Terms of Service for Mini Apps")

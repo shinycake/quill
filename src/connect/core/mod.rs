@@ -796,6 +796,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Parity slice: chat-list avatars download on every ingest; each
         // photo is requested at most once (in-flight / completed dedupe).
         self.maybe_download_chat_list_photos()?;
+        let _ = self.maybe_download_attach_bot_icons();
         // Phase B1: secret chats whose state never arrived via
         // `updateSecretChat` (e.g. loaded from the local DB) resolve it
         // through the offline `getSecretChat`.

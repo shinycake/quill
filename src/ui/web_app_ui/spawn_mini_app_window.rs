@@ -639,13 +639,14 @@ impl QuillApp {
                     }
                 }
                 "remove_from_menu" => {
-                    let sent = self.live.as_mut().map(|live| {
-                        live.driver
-                            .toggle_bot_in_attachment_menu(bot_id, false, false)
-                    });
-                    if matches!(sent, Some(Ok(_))) {
-                        self.close_mini_app_window(cx);
-                    }
+                    let name = self
+                        .mini_apps
+                        .window
+                        .as_ref()
+                        .map(|window| window.launch.bot_name.clone())
+                        .unwrap_or_default();
+                    self.mini_apps.confirm = Some(WebAppConfirm::RemoveFromMenu { bot_id, name });
+                    cx.notify();
                 }
                 _ => {}
             },

@@ -1,0 +1,2 @@
+# attachment menu bots: icons, terms on add, confirm on remove
+parity:composer-attach-bots
