@@ -729,7 +729,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls <!-- parity:calls-conference -->
 - [x] Detect when you speak in a group call and show it to others <!-- parity:calls-speaking-detection -->
 - [x] Call window options: stay on top, device settings inside the call <!-- parity:calls-window-options -->
-- [ ] Battery-low and microphone-off indicators for the other person <!-- parity:calls-peer-indicators -->
+- [ ] Battery-low and microphone-off indicators for the other person (partial: microphone-off shipped; battery-low blocked: ntgcalls keeps the battery flag inside its own signaling) <!-- parity:calls-peer-indicators -->
 - [ ] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
 - [ ] Watch channel live streams (RTMP) (deferred: low impact) <!-- parity:calls-rtmp-viewing -->
 - [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
