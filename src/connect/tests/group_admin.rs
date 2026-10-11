@@ -536,3 +536,69 @@ fn unlinking_works_from_the_channel_and_from_the_group() {
     assert!(sent[1].contains(r#""chat_id":0"#) && sent[1].contains(r#""discussion_chat_id":13"#));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn channel_owner_switches_ads_off_and_a_refusal_rolls_back() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let sg = 113;
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"C","type":{"@type":"chatTypeSupergroup","supergroup_id":113,"is_channel":true},"unread_count":0}}"#,
+        &seq,
+        &sink,
+    );
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{sg},"is_channel":true,"status":{CREATOR}}}}}"#
+        ),
+        &seq,
+        &sink,
+    );
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":113,"supergroup_full_info":{"description":"d","can_have_sponsored_messages":true}}"#,
+        &seq,
+        &sink,
+    );
+    let extra = driver
+        .set_channel_sponsored_messages(ChatId(13), false)
+        .unwrap()
+        .expect("toggle sent");
+    assert_eq!(
+        count(&recorder, "toggleSupergroupCanHaveSponsoredMessages"),
+        1
+    );
+    assert!(
+        !driver.session.groups.supergroup_full_infos[&sg]
+            .admin
+            .can_have_sponsored_messages
+    );
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOOSTS_REQUIRED"}}"#,
+            extra.0
+        ),
+        &seq,
+        &sink,
+    );
+    assert!(
+        driver.session.groups.supergroup_full_infos[&sg]
+            .admin
+            .can_have_sponsored_messages
+    );
+    assert!(
+        driver
+            .session
+            .chats_state
+            .chat_action_error
+            .as_deref()
+            .is_some_and(|line| line.contains("boost level"))
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
