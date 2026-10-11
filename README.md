@@ -865,7 +865,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Share a game to a chat <!-- parity:bots-share-game -->
 - [x] Allow-messages consent for web apps (write access) <!-- parity:bots-allow-write -->
 - [x] Keys 1 to 9 press inline buttons <!-- parity:bots-fast-buttons -->
-- [ ] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
+- [x] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
 - [ ] Bot earnings and affiliate programs (deferred: low impact) <!-- parity:bots-earn-affiliate -->
 - [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
