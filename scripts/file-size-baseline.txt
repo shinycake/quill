@@ -5,7 +5,6 @@
 1162 src/telegram/requests/groups.rs
 1185 src/telegram/requests/messages.rs
 1199 src/ui/app_render.rs
-1903 src/ui/appearance.rs
 1386 src/ui/chat_row.rs
 1681 src/ui/demo.rs
 1863 src/ui/history.rs
