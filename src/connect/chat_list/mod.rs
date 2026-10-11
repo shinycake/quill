@@ -29,21 +29,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             if self.session.threads.thread.is_some() {
                 self.session.close_thread();
             }
-            self.maybe_probe_channel_membership()?;
-            self.maybe_fetch_bot_info()?;
-            self.maybe_fetch_bot_commands()?;
-            self.maybe_fetch_reply_markup()?;
-            self.maybe_view_open_messages()?;
-            self.maybe_download_open_thumbs()?;
+            self.fetch_open_chat_extras(chat_id)?;
             self.maybe_download_open_chat_media()?;
-            self.fetch_sponsored_messages(chat_id)?;
-            // Phase 5.1: re-selecting an open forum chat also resolves /
-            // loads topics (the first select may have raced `is_forum`).
-            self.maybe_fetch_supergroup_forum(chat_id)?;
-            // Parity slice: channel/supergroup header extras.
-            self.maybe_fetch_supergroup_profile(chat_id)?;
-            self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
-            self.maybe_fetch_forum_topics(chat_id)?;
             return self.fetch_history();
         }
         self.cancel_outgoing_typing()?;
@@ -58,6 +45,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.window_chats.contains(&chat_id) {
             self.send_open_chat(chat_id)?;
         }
+        self.fetch_open_chat_extras(chat_id)?;
+        self.fetch_pinned_messages(chat_id)?;
+        self.fetch_history()
+    }
+
+    /// What an opened chat needs besides its history: membership, bot
+    /// info and commands, the reply keyboard, viewed rows, thumbnails,
+    /// sponsored rows, the forum flag and topics, the header extras. Reads
+    /// the session's open chat, so a chat shown in its own window runs it
+    /// under `Session::with_open_chat`.
+    pub(crate) fn fetch_open_chat_extras(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<(), ConnectSendError> {
         self.maybe_probe_channel_membership()?;
         self.maybe_fetch_bot_info()?;
         self.maybe_fetch_bot_commands()?;
@@ -73,8 +74,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_fetch_supergroup_profile(chat_id)?;
         self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
         self.maybe_fetch_forum_topics(chat_id)?;
-        self.fetch_pinned_messages(chat_id)?;
-        self.fetch_history()
+        Ok(())
     }
 
     /// Phase 6: open/close the contacts info panel. Live and demo sessions

@@ -233,6 +233,9 @@ impl QuillApp {
     /// anything arrived, so the poll loop can stay fast during bursts and
     /// back off while idle.
     pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) -> bool {
+        // Updates apply to the main window's view; a chat window's input
+        // may have left its own state in place.
+        self.set_window_scope(None);
         // What this poll may change outside the session (the status line,
         // the login-review box, the folder tab): any change redraws at once.
         let shown_before = self.polled_chrome();

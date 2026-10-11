@@ -247,3 +247,28 @@ fn a_chat_that_is_not_shown_cannot_page() {
     assert!(h.driver.fetch_history_newer_for(BOB).is_err());
     assert!(h.sent("getChatHistory", BOB).is_empty());
 }
+
+#[test]
+fn a_window_chat_runs_the_open_chat_follow_ups_without_moving_the_main_view() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.session.open_topic = Some(5);
+    h.driver.open_chat_window(BOB).unwrap();
+    // The follow-ups ran for Bob (its pinned message was asked for) with
+    // the main window's view untouched.
+    assert_eq!(
+        h.sent("searchChatMessages", BOB).len(),
+        1,
+        "pinned messages asked for"
+    );
+    assert_eq!(h.driver.session.open_chat, Some(ALICE));
+    assert_eq!(h.driver.session.open_topic, Some(5));
+    // Inside `with_window_chat` the window's chat is the open one, with a
+    // plain view (no topic); outside, the main window's view is back.
+    let seen = h.driver.with_window_chat(BOB, |driver| {
+        (driver.session.open_chat, driver.session.open_topic)
+    });
+    assert_eq!(seen, (Some(BOB), None));
+    assert_eq!(h.driver.session.open_chat, Some(ALICE));
+    assert_eq!(h.driver.session.open_topic, Some(5));
+}

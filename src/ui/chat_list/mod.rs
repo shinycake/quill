@@ -136,8 +136,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // A chat with a window of its own shows there (Telegram Desktop
-        // `showHistoryInDifferentWindow`); the main window stays put.
+        // `showHistoryInDifferentWindow`); the main window stays put. A
+        // chat chosen from inside a chat window shows in the main window.
         if !thread_switch && self.routed_to_chat_window(chat_id, cx) {
+            return;
+        }
+        if self.routed_to_main_window(chat_id, thread_switch, cx) {
             return;
         }
         self.flush_leaving_draft(cx);

@@ -25,6 +25,7 @@ mod chat_list_state;
 mod chat_theme;
 mod chat_window;
 mod clipboard_files;
+mod composer_events;
 mod composer_rtl;
 mod composer_state;
 mod composer_thumb;

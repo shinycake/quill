@@ -129,10 +129,6 @@ impl QuillApp {
 
     /// Title and subtitle the header shows for a sublist or tag filter.
     pub(super) fn saved_header(&self) -> Option<(String, String)> {
-        // Saved Messages views belong to the main window.
-        if self.windows.in_window() {
-            return None;
-        }
         let session = self.session()?;
         match self.saved_mode()? {
             SavedMode::Sublists => None,

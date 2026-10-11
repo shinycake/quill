@@ -30,6 +30,13 @@ use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, connection_indicator};
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The main window draws with its own view state in place; what was
+        // there (a chat window's, when this draw interrupts its input) is
+        // restored once the root is built, and around its layout and paint
+        // (`WindowScope`).
+        let outer_scope = self.windows.scope;
+        self.set_window_scope(None);
+        self.windows.main = Some(window.window_handle());
         // Bounded image memory: retired images and path images nothing can
         // show any more leave the atlas (`image_budget`).
         super::image_budget::begin_frame();
@@ -59,7 +66,11 @@ impl Render for QuillApp {
             .inline_videos
             .borrow_mut()
             .frame_start(history_drawn, window.scale_factor());
-        let active = window.is_window_active() || super::frame_clock::assume_active();
+        // Animations run while any Quill window is in front, a chat
+        // window's included.
+        let active = window.is_window_active()
+            || self.windows.any_active()
+            || super::frame_clock::assume_active();
         // The forum's topic list is a column of its own (tdesktop shows it
         // where the chat list was).
         let forum_column = self.forum_column_layout(window);
@@ -125,6 +136,8 @@ impl Render for QuillApp {
             // Window-wide text selection: message text can be selected and
             // copied within a message (Telegram Desktop).
             .child(gpui_kit::base::TextSelectionLayer)
+            // Input in the main window puts its own state in place.
+            .child(super::chat_window::scope_probe(cx.weak_entity(), None))
             // Batch 4: input clock for the online/idle presence.
             .child(super::presence::input_probe())
             // Capture phase: with message text selected, ⌘C copies it even
@@ -895,10 +908,14 @@ impl Render for QuillApp {
         let root = root.when(self.account.passcode.locked, |this| {
             this.child(self.lock_overlay(cx))
         });
-        match image_cache {
+        let root = match image_cache {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),
-        }
+        };
+        // Back to the scope this draw interrupted; the layout and paint of
+        // the root run as the main window's again.
+        self.set_window_scope(outer_scope);
+        super::chat_window::WindowScope::new(cx.weak_entity(), None, root)
     }
 }
 

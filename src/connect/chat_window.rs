@@ -29,9 +29,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.open_window_chat(chat_id) && !in_main {
             self.send_open_chat(chat_id)?;
         }
-        self.maybe_view_messages_for(chat_id)?;
+        if in_main {
+            return self.fetch_history_for(chat_id);
+        }
+        // The same follow-ups `select_chat` runs, with the window's chat as
+        // the open one for their duration.
+        self.with_window_chat(chat_id, |driver| driver.fetch_open_chat_extras(chat_id))?;
         self.fetch_pinned_messages(chat_id)?;
         self.fetch_history_for(chat_id)
+    }
+
+    /// Run `f` with `chat_id` as the session's open chat (the driver's
+    /// open-chat methods then address the window's chat), restoring the
+    /// main window's view afterwards.
+    pub fn with_window_chat<R>(&mut self, chat_id: ChatId, f: impl FnOnce(&mut Self) -> R) -> R {
+        let mut view = crate::state::SessionView::of_chat(chat_id);
+        self.session.swap_view(&mut view);
+        let result = f(self);
+        self.session.swap_view(&mut view);
+        result
     }
 
     /// The window showing `chat_id` closed: `closeChat` pairs the

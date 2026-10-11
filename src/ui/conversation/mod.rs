@@ -97,9 +97,8 @@ impl QuillApp {
                     thread.is_comments(),
                 ))
             });
-        // A chat window has no info column, search bar or chat menu of its
-        // own yet; those act on the main window, so the window's header
-        // leaves them out.
+        // The info column is the main window's; a chat window's header
+        // leaves its toggle out.
         let in_window = self.windows.in_window();
         let info_target = info_target.filter(|_| thread_header.is_none() && !in_window);
         // Parity slice: channel/supergroup header extras — photo,
@@ -425,8 +424,8 @@ impl QuillApp {
                                     })),
                             )
                         })
-                        .when(!in_window, |this| {
-                            this.child(
+                        .child({
+                            {
                                 Button::new("chat-find")
                                     .icon(if chat_search_open {
                                         gpui_kit::assets::IconName::X
@@ -446,8 +445,8 @@ impl QuillApp {
                                         } else {
                                             this.open_chat_search_ui(window, cx);
                                         }
-                                    })),
-                            )
+                                    }))
+                            }
                         })
                         .when(voice_ok, |this| {
                             this.child(
@@ -492,7 +491,7 @@ impl QuillApp {
                                     })),
                             )
                         })
-                        .when(!in_window, |this| this.child(self.chat_navigation_menu(cx))),
+                        .child(self.chat_navigation_menu(cx)),
                 )
             });
         // Selecting messages swaps the bar for Forward N / Delete N / Cancel.
