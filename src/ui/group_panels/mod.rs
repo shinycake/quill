@@ -19,7 +19,6 @@ use quill::local_path::sandboxed_display_path;
 use quill::state::ProfileChatsKind;
 use quill::state::{ContactRow, InfoPanelTarget, SupergroupMembersFetch};
 use quill::telegram::envelope::ChatKind;
-use quill::telegram::envelope::MUTE_FOREVER;
 use std::path::PathBuf;
 /// Parity slice: data for the channel/supergroup conversation header —
 /// primary @username, subscriber/member count, and the linked discussion
@@ -536,7 +535,7 @@ impl QuillApp {
 }
 
 /// Labeled icon tile for an info panel's primary actions.
-fn info_tile(
+pub(in crate::ui) fn info_tile(
     id: &'static str,
     icon: gpui_kit::assets::IconName,
     label: &'static str,

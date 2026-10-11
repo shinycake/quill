@@ -28,7 +28,6 @@ impl QuillApp {
                 }
             })
             .unwrap_or_default();
-        let show_add = user.as_ref().is_some_and(|u| !u.is_contact && !u.is_bot);
         let roots = self.media_display_roots();
         let photo_path: Option<PathBuf> = session
             .and_then(|s| {
@@ -53,11 +52,6 @@ impl QuillApp {
         let is_self = session
             .and_then(|s| s.my_user_id)
             .is_some_and(|me| me == user_id);
-        // Phase B1 / C1: secret chat and calls share the eligibility rule
-        // (non-bot users, not yourself).
-        let can_reach = session
-            .as_ref()
-            .is_some_and(|s| Self::can_start_secret_chat_with(s, user_id));
         // B10: a profile with a photo opens the photo gallery in the media
         // viewer.
         let has_photo = info.as_ref().is_some_and(|i| i.photo_id.is_some())
@@ -113,101 +107,12 @@ impl QuillApp {
                             .child(status),
                     ),
             );
-        // Primary actions as a row of labeled icon tiles.
-        let mut tiles = div().flex().justify_center().gap_2().w_full();
-        let mut any_tile = false;
-        // The open chat is this very user's private chat (header panel):
-        // Message and Mute then act on it; from a group member's profile
-        // (avatar click) Message opens the private chat and Mute is left
-        // out (it would mute the group).
+        // Primary actions as a row of labeled icon tiles
+        // (`profile_panels::action_row`).
         let in_own_chat = session
             .and_then(|s| s.open_chat.map(|chat| (s, chat)))
             .is_some_and(|(s, chat)| s.private_chat_user_id(chat) == Some(user_id));
-        if !is_self && !in_own_chat {
-            any_tile = true;
-            tiles = tiles.child(info_tile(
-                "info-panel-message",
-                gpui_kit::assets::IconName::MessageSquare,
-                "Message",
-                cx.listener(move |this, _, window, cx| {
-                    this.dismiss_profile_modal();
-                    this.open_user_chat(user_id, window, cx);
-                }),
-                cx,
-            ));
-        }
-        if can_reach {
-            any_tile = true;
-            tiles = tiles
-                .child(info_tile(
-                    "info-panel-call",
-                    gpui_kit::assets::IconName::Phone,
-                    "Call",
-                    cx.listener(move |this, _, _, cx| this.start_call_for_user(user_id, false, cx)),
-                    cx,
-                ))
-                .child(info_tile(
-                    "info-panel-video-call",
-                    gpui_kit::assets::IconName::Video,
-                    "Video",
-                    cx.listener(move |this, _, _, cx| this.start_call_for_user(user_id, true, cx)),
-                    cx,
-                ))
-                .child(info_tile(
-                    "info-panel-start-secret",
-                    gpui_kit::assets::IconName::Lock,
-                    "Secret chat",
-                    cx.listener(move |this, _, _, cx| this.start_secret_chat_for_user(user_id, cx)),
-                    cx,
-                ));
-        }
-        if show_add {
-            any_tile = true;
-            tiles = tiles.child(info_tile(
-                "info-panel-add-contact",
-                gpui_kit::assets::IconName::UserPlus,
-                "Add contact",
-                cx.listener(move |this, _, window, cx| {
-                    this.open_add_contact_dialog(user_id, window, cx)
-                }),
-                cx,
-            ));
-        }
-        // A5: profile editing only on your own panel.
-        if is_self {
-            any_tile = true;
-            tiles = tiles.child(info_tile(
-                "info-panel-edit-profile",
-                gpui_kit::assets::IconName::Pencil,
-                "Edit profile",
-                cx.listener(|this, _, window, cx| this.open_edit_profile_dialog(window, cx)),
-                cx,
-            ));
-        }
-        // Telegram Desktop's Mute button, for the chat with this user.
-        if !is_self
-            && in_own_chat
-            && let Some(chat) = session.and_then(|s| s.open_chat)
-        {
-            let muted = session
-                .and_then(|s| s.chats.get(&chat.0))
-                .is_some_and(|c| c.is_muted());
-            any_tile = true;
-            tiles = tiles.child(info_tile(
-                "info-panel-mute",
-                if muted {
-                    gpui_kit::assets::IconName::Bell
-                } else {
-                    gpui_kit::assets::IconName::BellOff
-                },
-                if muted { "Unmute" } else { "Mute" },
-                cx.listener(move |this, _, _, cx| {
-                    this.apply_chat_mute(chat, if muted { 0 } else { MUTE_FOREVER }, cx);
-                }),
-                cx,
-            ));
-        }
-        if any_tile {
+        if let Some(tiles) = self.user_profile_action_row(user_id, cx) {
             body = body.child(tiles);
         }
         if let Some(warning) = self.unofficial_client_warning(user_id, cx) {
