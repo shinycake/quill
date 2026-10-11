@@ -13,7 +13,6 @@
 1805 src/ui/message_menu_ui.rs
 1968 src/ui/message_text.rs
 1660 src/ui/profile_panels.rs
-1154 src/ui/proxy.rs
 1940 src/ui/search_ui.rs
 1685 src/ui/security.rs
 1236 src/ui/story_albums.rs
