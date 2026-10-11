@@ -322,6 +322,16 @@ impl QuillApp {
 
     /// Apply what every background client received, then show its
     /// notifications. Returns whether anything arrived.
+    /// The app's proxy list and IPv6 choice: the account on screen's, once
+    /// it is loaded and no change of it is in flight.
+    fn app_proxy_list(&self) -> Option<(Vec<quill::proxy::ProxyEntry>, bool)> {
+        let proxy = &self.live.as_ref()?.driver.session.settings.proxy;
+        if proxy.stale || proxy.mutating || proxy.loading {
+            return None;
+        }
+        Some((proxy.list.clone()?, proxy.prefer_ipv6))
+    }
+
     fn poll_background(&mut self, cx: &mut Context<Self>) -> bool {
         let notify_from_all = self.background.notify_from_all;
         let app_active = self.frame.window_active.get();
@@ -329,6 +339,7 @@ impl QuillApp {
         let mut busy = false;
         let mut changed = false;
         let mut drained: Vec<(AccountKey, BackgroundDrain)> = Vec::new();
+        let proxy_target = self.app_proxy_list();
         for client in &mut self.background.clients {
             let Some(live) = client.live.as_mut() else {
                 continue;
@@ -344,10 +355,12 @@ impl QuillApp {
                 }
             }
             ingested |= live.driver.request_tick(now);
-            // TDLib keeps proxies per account: each one runs its own
-            // auto-switch (tdesktop `ProxyRotationManager`) with its own
-            // `proxy_prefs.json`, like the account on screen.
-            ingested |= live.driver.proxy_tick(quill::state::unix_ms_now());
+            // One proxy list for the app (`quill::proxy_sync`; tdesktop keeps
+            // proxies app-wide): follow the account on screen, whose
+            // auto-switch picks the proxy for everyone.
+            if let Some((list, prefer_ipv6)) = &proxy_target {
+                ingested |= live.driver.sync_proxies_to(list, *prefer_ipv6);
+            }
             busy |= ingested;
             let mut status = background_status(&live.driver.session.auth);
             if live.bridge.stopped_unexpectedly() {

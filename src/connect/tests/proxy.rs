@@ -218,3 +218,59 @@ fn auto_switch_probes_then_enables_a_working_proxy() {
     assert!(!rig.driver.proxy_tick(30_000));
     assert_eq!(rig.count("pingProxy"), 1);
 }
+
+/// A background account converges on the app's list (the on-screen
+/// account's) one change at a time: fetch, remove the extra, add the
+/// missing one enabled, and mirror "prefer IPv6".
+#[test]
+fn a_background_account_takes_the_apps_proxy_list() {
+    // The app's list: p2 enabled (TDLib id 20 on the account on screen).
+    let mut screen = Rig::new();
+    screen.load_list(&[(2, true)]);
+    let mut target = screen.driver.session.settings.proxy.entries().to_vec();
+    target[0].id = 20;
+
+    let mut rig = Rig::new();
+    assert!(
+        rig.driver.sync_proxies_to(&target, true),
+        "first: getProxies"
+    );
+    assert_eq!(rig.count("getProxies"), 1);
+    assert!(
+        !rig.driver.sync_proxies_to(&target, true),
+        "waits for the list"
+    );
+    rig.answer("getProxies", proxies_json(&[(1, false)]));
+
+    assert!(rig.driver.sync_proxies_to(&target, true));
+    assert_eq!(
+        sent_request(&rig.recorder, "setOption")["name"],
+        "prefer_ipv6"
+    );
+    assert_eq!(rig.count("removeProxy"), 1);
+    assert_eq!(sent_request(&rig.recorder, "removeProxy")["proxy_id"], 1);
+    // One change at a time.
+    assert!(!rig.driver.sync_proxies_to(&target, true));
+    rig.answer("removeProxy", json!({"@type": "ok"}));
+    assert_eq!(rig.count("getProxies"), 2, "the change refetched the list");
+    rig.answer("getProxies", proxies_json(&[]));
+
+    assert!(rig.driver.sync_proxies_to(&target, true));
+    let add = sent_request(&rig.recorder, "addProxy");
+    assert_eq!(add["proxy"]["server"], "p2.example");
+    assert_eq!(add["enable"], true);
+    rig.answer(
+        "addProxy",
+        json!({"@type": "addedProxy", "id": 3, "last_used_date": 0, "is_enabled": true,
+            "comment": "",
+            "proxy": {"@type": "proxy", "server": "p2.example", "port": 1080,
+                "type": {"@type": "proxyTypeSocks5", "username": "", "password": ""}}}),
+    );
+    rig.answer("getProxies", proxies_json(&[(2, true)]));
+    rig.answer("setOption", json!({"@type": "ok"}));
+    assert!(
+        !rig.driver.sync_proxies_to(&target, true),
+        "in step: nothing more to send"
+    );
+    assert_eq!(rig.count("addProxy"), 1);
+}

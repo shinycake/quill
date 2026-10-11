@@ -21,7 +21,6 @@
 
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Rgba, Window};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 const fn hex(hex: u32) -> Rgba {
     Rgba {
         r: ((hex >> 16) & 0xff) as f32 / 255.0,
@@ -40,19 +39,70 @@ const fn hex_a(hex: u32) -> Rgba {
     }
 }
 
-/// 1 = dark (the boot mode), 0 = light. Written only by [`set_theme_mode`].
-static MODE_DARK: AtomicU8 = AtomicU8::new(1);
+/// The palette mode: dark or light (dark is the boot mode; written only by
+/// [`set_theme_mode`]), and the high-contrast flag, orthogonal to it. While
+/// high contrast is on, every token resolves to its high-contrast value
+/// (pure-black surfaces, white text/borders, dark semantic fills); semantic
+/// hues keep their dark values, which were designed for black backgrounds.
+/// Written only by [`set_high_contrast`].
+///
+/// The app has one palette for the process. Tests get one per thread: every
+/// GPUI test builds a `QuillApp` on its own thread, and applying its
+/// appearance (System mode is light on the test platform) used to switch
+/// the palette under the unit tests running beside it.
+#[cfg(not(test))]
+mod palette_state {
+    use std::sync::atomic::{AtomicBool, Ordering};
 
-/// stories-high-contrast: orthogonal to [`MODE_DARK`]. While set, every
-/// token resolves to its high-contrast value (pure-black surfaces, white
-/// text/borders, dark semantic fills); semantic hues keep their dark
-/// values, which were designed for black backgrounds. Written only by
-/// [`set_high_contrast`].
-static HIGH_CONTRAST: AtomicBool = AtomicBool::new(false);
+    static DARK: AtomicBool = AtomicBool::new(true);
+    static HIGH_CONTRAST: AtomicBool = AtomicBool::new(false);
+
+    pub(super) fn dark() -> bool {
+        DARK.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn set_dark(on: bool) {
+        DARK.store(on, Ordering::Relaxed);
+    }
+
+    pub(super) fn high_contrast() -> bool {
+        HIGH_CONTRAST.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn set_high_contrast(on: bool) {
+        HIGH_CONTRAST.store(on, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod palette_state {
+    use std::cell::Cell;
+
+    thread_local! {
+        static DARK: Cell<bool> = const { Cell::new(true) };
+        static HIGH_CONTRAST: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) fn dark() -> bool {
+        DARK.with(Cell::get)
+    }
+
+    pub(super) fn set_dark(on: bool) {
+        DARK.with(|dark| dark.set(on));
+    }
+
+    pub(super) fn high_contrast() -> bool {
+        HIGH_CONTRAST.with(Cell::get)
+    }
+
+    pub(super) fn set_high_contrast(on: bool) {
+        HIGH_CONTRAST.with(|hc| hc.set(on));
+    }
+}
 
 #[inline]
 fn dark() -> bool {
-    MODE_DARK.load(Ordering::Relaxed) == 1
+    palette_state::dark()
 }
 
 /// Whether surfaces are dark (dark mode or high contrast).
@@ -63,7 +113,7 @@ pub fn is_dark_palette() -> bool {
 /// stories-high-contrast: whether the high-contrast palette is active.
 #[inline]
 pub fn high_contrast() -> bool {
-    HIGH_CONTRAST.load(Ordering::Relaxed)
+    palette_state::high_contrast()
 }
 
 /// stories-high-contrast: flip the high-contrast palette. Independent of
@@ -71,14 +121,14 @@ pub fn high_contrast() -> bool {
 /// variant); callers pair it with the dark kit theme so kit components
 /// stay coherent with the black Quill surfaces.
 pub fn set_high_contrast(on: bool) {
-    HIGH_CONTRAST.store(on, Ordering::Relaxed);
+    palette_state::set_high_contrast(on);
 }
 
 /// kit Phase 8: switch the whole app between light and dark. Drives the kit
 /// theme (`Theme::change`, so kit components re-theme) and the Quill token
 /// palette in one call — callers never touch one without the other.
 pub fn set_theme_mode(mode: ThemeMode, window: Option<&mut Window>, cx: &mut App) {
-    MODE_DARK.store(u8::from(mode.is_dark()), Ordering::Relaxed);
+    palette_state::set_dark(mode.is_dark());
     Theme::change(mode, window, cx);
 }
 
@@ -307,9 +357,9 @@ mod tests {
     /// stories-high-contrast: the palette contract — surfaces go pure
     /// black, text/borders go white, semantic hues keep their dark
     /// values (designed for black backgrounds), and flipping the flag
-    /// back restores the dark/light tokens. `MODE_DARK` boots dark and
-    /// nothing in the test binary flips it, so the restore check is
-    /// deterministic.
+    /// back restores the dark/light tokens. A test thread's palette boots
+    /// dark and nothing else on this thread changes it, so the restore
+    /// check is deterministic.
     #[test]
     fn high_contrast_roots_palette() {
         set_high_contrast(true);

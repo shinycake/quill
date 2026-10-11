@@ -114,6 +114,7 @@ pub mod profile_photo_video;
 pub mod profile_tab;
 pub mod proxy;
 pub mod proxy_extras;
+pub mod proxy_sync;
 pub mod quick_action;
 pub mod quick_replies;
 pub mod quit_guard;

@@ -3,7 +3,8 @@
 //! the gate is "not shutting down", not "auth Ready".
 use super::*;
 use crate::ids::RequestId;
-use crate::proxy::{PingStatus, ProxyDraft, RotationAction};
+use crate::proxy::{PingStatus, ProxyDraft, ProxyEntry, RotationAction};
+use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
 use crate::state::SettingsPurpose;
 use crate::state::{LINK_PING_ID, RequestPurpose, ShutdownPhase};
@@ -196,6 +197,59 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Persist the auto-switch preferences (`proxy_prefs.json`).
     pub fn save_proxy_prefs(&mut self) -> std::io::Result<()> {
         save_proxy_prefs(&self.paths, &self.session.settings.proxy.prefs)
+    }
+
+    /// Re-read the app-wide auto-switch settings: another account may have
+    /// changed them while this one was in the background.
+    pub fn reload_proxy_prefs(&mut self) {
+        self.session.settings.proxy.prefs = crate::settings::load_proxy_prefs(&self.paths);
+    }
+
+    /// A background account's proxy work (`crate::proxy_sync`): its first
+    /// `getProxies`, then one step toward the app's list (`target`, the
+    /// list of the account on screen) and IPv6 choice. Each change marks
+    /// the list stale and `ingest` refetches it, so the next call plans on
+    /// the fresh list. No auto-switch here: the account on screen runs it
+    /// and its pick is mirrored. Returns whether a request went out.
+    pub fn sync_proxies_to(&mut self, target: &[ProxyEntry], prefer_ipv6: bool) -> bool {
+        if !self.proxy_path_active() {
+            return false;
+        }
+        if self.maybe_fetch_proxies().ok().flatten().is_some() {
+            return true;
+        }
+        let proxy = &self.session.settings.proxy;
+        if proxy.mutating
+            || proxy.stale
+            || proxy.loading
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetProxies)
+        {
+            return false;
+        }
+        let Some(current) = proxy.list.as_deref() else {
+            return false;
+        };
+        let step = plan_proxy_sync(target, current).into_iter().next();
+        let ipv6_differs = proxy.prefer_ipv6 != prefer_ipv6
+            && !self.session.requests.has_purpose(RequestPurpose::Settings(
+                SettingsPurpose::SetPreferIpv6 { on: prefer_ipv6 },
+            ));
+        let mut sent = ipv6_differs && self.set_prefer_ipv6(prefer_ipv6).is_ok();
+        sent |= match step {
+            None => false,
+            Some(ProxySyncStep::Add {
+                proxy,
+                comment,
+                enable,
+            }) => self.add_proxy(&proxy, enable, &comment).is_ok(),
+            Some(ProxySyncStep::Remove { id }) => self.remove_proxy(id).is_ok(),
+            Some(ProxySyncStep::Enable { id }) => self.enable_proxy(id).is_ok(),
+            Some(ProxySyncStep::Disable) => self.disable_proxy().is_ok(),
+        };
+        sent
     }
 
     /// Per-poll proxy work: the first `getProxies`, then the auto-switch

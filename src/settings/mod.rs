@@ -241,15 +241,31 @@ pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Resu
 
 /// `parity:proxy-settings`: client-side auto-switch preferences
 /// (`proxy_prefs.json`); the proxy list itself lives in TDLib.
+const PROXY_PREFS: &str = "proxy_prefs.json";
+
+/// The app root an account folder (`<root>/accounts/<key>`) lives in.
+fn app_root_of(paths: &AccountPaths) -> Option<&Path> {
+    paths.root.parent()?.parent()
+}
+
+/// The proxy auto-switch settings. tdesktop keeps proxy settings app-wide
+/// (`crate::proxy_sync`), so the file sits at the app root; a file in the
+/// account folder, from before, is read while there is none there yet.
 pub fn load_proxy_prefs(paths: &AccountPaths) -> crate::proxy::ProxyPrefs {
-    load_json_prefs(paths, "proxy_prefs.json")
+    app_root_of(paths)
+        .and_then(|root| std::fs::read(root.join(PROXY_PREFS)).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_else(|| load_json_prefs(paths, PROXY_PREFS))
 }
 
 pub fn save_proxy_prefs(
     paths: &AccountPaths,
     prefs: &crate::proxy::ProxyPrefs,
 ) -> std::io::Result<()> {
-    save_json_prefs(paths, "proxy_prefs.json", prefs)
+    match app_root_of(paths) {
+        Some(root) => write_json_atomic(&root.join(PROXY_PREFS), prefs),
+        None => save_json_prefs(paths, PROXY_PREFS, prefs),
+    }
 }
 
 fn default_true() -> bool {
@@ -327,6 +343,37 @@ mod tests {
         // Corrupt file → defaults, never a panic.
         std::fs::write(dir.join("accounts/primary/call_prefs.json"), b"not json").unwrap();
         assert_eq!(load_call_prefs(&paths), CallPrefs::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn proxy_prefs_are_app_wide_and_read_an_old_account_file() {
+        let dir = std::env::temp_dir().join(format!("quill-proxy-prefs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let primary = AccountPaths::for_root(&dir, &AccountKey::primary());
+        let other = AccountPaths::for_root(&dir, &AccountKey::new("account-1").unwrap());
+        std::fs::create_dir_all(&primary.root).unwrap();
+        // Before: the file sat in the account folder.
+        let old = crate::proxy::ProxyPrefs {
+            auto_switch: true,
+            auto_switch_secs: 30,
+        };
+        std::fs::write(
+            primary.root.join(PROXY_PREFS),
+            serde_json::to_vec(&old).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_proxy_prefs(&primary), old);
+        assert_eq!(load_proxy_prefs(&other), Default::default());
+        // Saved once, every account reads the app's file.
+        let new = crate::proxy::ProxyPrefs {
+            auto_switch: false,
+            auto_switch_secs: 15,
+        };
+        save_proxy_prefs(&other, &new).unwrap();
+        assert!(dir.join(PROXY_PREFS).exists());
+        assert_eq!(load_proxy_prefs(&primary), new);
+        assert_eq!(load_proxy_prefs(&other), new);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
