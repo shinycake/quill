@@ -14,6 +14,12 @@ impl QuillApp {
     /// Poll-loop step: keep the box fresh while the export advances, and when
     /// it ended with the box hidden, say how it went and clear it.
     pub(super) fn poll_chat_export_progress(&mut self) -> bool {
+        // The poll loop calls this one hook for both exports.
+        let account = self.poll_account_export_progress();
+        self.poll_one_chat_export() || account
+    }
+
+    fn poll_one_chat_export(&mut self) -> bool {
         let Some(live) = self.live.as_mut() else {
             return false;
         };

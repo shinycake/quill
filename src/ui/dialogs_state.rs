@@ -46,6 +46,13 @@ pub(crate) struct DialogUi {
     pub(super) chat_export_progress_hidden: bool,
     /// Last progress drawn, to redraw only when it changes.
     pub(super) chat_export_seen: Option<quill::export::Progress>,
+    /// The "Export Telegram data" box (full account export).
+    pub(super) account_export_dialog: Option<super::account_export_box::AccountExportDraft>,
+    /// The running account export's progress is not on screen; its result
+    /// shows as a note instead.
+    pub(super) account_export_progress_hidden: bool,
+    /// Last account export progress drawn.
+    pub(super) account_export_seen: Option<quill::export::account::AccountProgress>,
     /// Saved Messages: "Add Name" / "Edit Name" for a tag.
     pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
     /// Phase C2i: rating detail draft for the call-end card — the star
@@ -85,6 +92,9 @@ impl DialogUi {
             chat_export_dialog: None,
             chat_export_progress_hidden: false,
             chat_export_seen: None,
+            account_export_dialog: None,
+            account_export_progress_hidden: false,
+            account_export_seen: None,
             saved_tag_dialog: None,
             rating_detail: None,
             rating_comment_input,

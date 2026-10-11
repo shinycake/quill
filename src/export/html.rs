@@ -1,11 +1,16 @@
-//! HTML pages for a chat export: `messages.html`, `messages2.html`, ... with
-//! at most [`MESSAGES_PER_FILE`] messages each (tdesktop's `kMessagesInFile`),
-//! plus Quill's own `css/style.css`. The pages use plain anchors only, no
-//! script.
-use super::model::{Body, ExportMessage, MediaRef, Origin};
-use super::settings::{MediaKind, Skip};
-use super::text::{escape, render};
+//! HTML pages for a chat: `messages.html`, `messages2.html`, ... with at
+//! most [`MESSAGES_PER_FILE`] messages each (tdesktop's `kMessagesInFile`).
+//! Each page links `css/style.css` and `js/script.js` from the export root
+//! (see `assets.rs`); in a full account export the chat lives in
+//! `chats/chat_NN/` and its header leads back to the chats list.
+use super::html_media::body_html;
+use super::model::{Body, ExportMessage, Origin};
+use super::settings::Skip;
+use super::text::escape;
+use super::userpic::{self, Userpic};
 use crate::local_time::{civil_at, month_name};
+
+pub use super::html_media::{human_size, noun_skip_note, skip_note, url_path};
 
 /// Messages per HTML file, as in tdesktop.
 pub const MESSAGES_PER_FILE: usize = 1000;
@@ -15,8 +20,12 @@ const JOIN_WITHIN_SECS: i32 = 900;
 /// What happened to a message's file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    /// Copied to this path, relative to the export folder.
-    Saved(String),
+    /// Copied to `path`, relative to the chat's folder, with its preview
+    /// image next to it when there is one (`<path>_thumb.jpg`).
+    Saved {
+        path: String,
+        thumb: Option<String>,
+    },
     Skipped(Skip),
 }
 
@@ -36,186 +45,28 @@ pub fn messages_file(index: usize) -> String {
     }
 }
 
-/// Percent-encode a relative path for use in `href` / `src`.
-pub fn url_path(path: &str) -> String {
-    let mut out = String::with_capacity(path.len());
-    for byte in path.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~' | b'@') {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
-fn kind_noun(kind: MediaKind) -> &'static str {
-    match kind {
-        MediaKind::Photo => "Photo",
-        MediaKind::Video => "Video",
-        MediaKind::VoiceMessage => "Voice message",
-        MediaKind::VideoMessage => "Video message",
-        MediaKind::Sticker => "Sticker",
-        MediaKind::Gif => "GIF",
-        MediaKind::File => "File",
-    }
-}
-
-/// tdesktop's wording for a file left out of the export.
-pub fn skip_note(kind: MediaKind, skip: Skip) -> String {
-    let noun = kind_noun(kind);
-    match skip {
-        Skip::NotIncluded => {
-            format!("({noun} not included. Change data exporting settings to download.)")
-        }
-        Skip::TooLarge => {
-            format!("({noun} exceeds maximum size. Change data exporting settings to download.)")
-        }
-        Skip::Unavailable => format!("({noun} unavailable, please try again later)"),
-    }
-}
-
-fn human_size(bytes: i64) -> String {
-    const KB: f64 = 1024.0;
-    let b = bytes.max(0) as f64;
-    if b < KB {
-        format!("{bytes} B")
-    } else if b < KB * KB {
-        format!("{:.1} KB", b / KB)
-    } else if b < KB * KB * KB {
-        format!("{:.1} MB", b / KB / KB)
-    } else {
-        format!("{:.2} GB", b / KB / KB / KB)
-    }
-}
-
-fn extension(path: &str) -> String {
-    path.rsplit('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-}
-
-fn saved_media(media: &MediaRef, path: &str) -> String {
-    let src = escape(&url_path(path));
-    let ext = extension(path);
-    let is_image = matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "gif");
-    let is_video = matches!(ext.as_str(), "mp4" | "mov" | "webm" | "m4v");
-    let is_audio = matches!(ext.as_str(), "ogg" | "oga" | "mp3" | "m4a" | "opus" | "wav");
-    let label = if media.label.is_empty() {
-        String::new()
-    } else {
-        format!("<div class=\"details\">{}</div>\n", escape(&media.label))
-    };
-    let body = match media.kind {
-        MediaKind::Photo | MediaKind::Sticker if is_image => format!(
-            "<a class=\"media image\" href=\"{src}\"><img src=\"{src}\" loading=\"lazy\" alt=\"\"></a>"
-        ),
-        MediaKind::Gif if is_video => {
-            format!("<video class=\"media\" src=\"{src}\" autoplay loop muted playsinline></video>")
-        }
-        MediaKind::Gif | MediaKind::Sticker if is_image => format!(
-            "<a class=\"media image\" href=\"{src}\"><img src=\"{src}\" loading=\"lazy\" alt=\"\"></a>"
-        ),
-        _ if is_video => {
-            format!("<video class=\"media\" src=\"{src}\" controls preload=\"none\"></video>")
-        }
-        _ if is_audio => {
-            format!("<audio class=\"media\" src=\"{src}\" controls preload=\"none\"></audio>")
-        }
-        _ => format!(
-            "<a class=\"media file\" href=\"{src}\">{}</a>",
-            escape(path)
-        ),
-    };
+/// The start of any export page, through the opening of `<main>`. `base`
+/// leads from the page to the export root (`""` or `"../"`, `"../../"`);
+/// `back` is the header's back link, relative to the root.
+pub fn page_start(title: &str, base: &str, back: Option<&str>) -> String {
+    let title = escape(title);
+    let back = back.map_or(String::new(), |target| {
+        format!(
+            "<a class=\"back\" href=\"{}\" onclick=\"return GoBack(this)\" aria-label=\"Back\">&#8249;</a>\n",
+            escape(&format!("{base}{target}"))
+        )
+    });
     format!(
-        "<div class=\"media_wrap\">\n{body}\n{label}<div class=\"details\">{}</div>\n</div>\n",
-        human_size(media.size)
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>{title}</title>\n<link rel=\"stylesheet\" href=\"{base}css/style.css\">\n\
+         <script src=\"{base}js/script.js\"></script>\n</head>\n\
+         <body onload=\"CheckLocation();\">\n<main class=\"page\">\n<header>{back}<h1>{title}</h1>\n"
     )
 }
 
-fn body_html(item: &Item<'_>) -> String {
-    let msg = item.message;
-    let mut out = String::new();
-    match &msg.body {
-        Body::Media(media) => match item.outcome {
-            Some(Outcome::Saved(path)) => out.push_str(&saved_media(media, path)),
-            Some(Outcome::Skipped(skip)) => out.push_str(&format!(
-                "<div class=\"media_wrap\"><div class=\"details\">{}</div></div>\n",
-                escape(&skip_note(media.kind, *skip))
-            )),
-            None => {}
-        },
-        Body::Location {
-            latitude,
-            longitude,
-        } => out.push_str(&map_link("Location", "", *latitude, *longitude)),
-        Body::Venue {
-            title,
-            address,
-            latitude,
-            longitude,
-        } => {
-            let detail = if address.is_empty() {
-                title.clone()
-            } else {
-                format!("{title}, {address}")
-            };
-            out.push_str(&map_link("Venue", &detail, *latitude, *longitude));
-        }
-        Body::Contact { name, phone } => out.push_str(&format!(
-            "<div class=\"media_wrap\"><div class=\"title\">{}</div><div class=\"details\">{}</div></div>\n",
-            escape(name),
-            escape(phone)
-        )),
-        Body::Poll {
-            question,
-            options,
-            total_voters,
-        } => {
-            out.push_str(&format!(
-                "<div class=\"media_wrap\"><div class=\"title\">Poll: {}</div>\n",
-                escape(question)
-            ));
-            for (text, votes) in options {
-                out.push_str(&format!(
-                    "<div class=\"details\">- {} ({votes})</div>\n",
-                    escape(text)
-                ));
-            }
-            out.push_str(&format!(
-                "<div class=\"details\">Total votes: {total_voters}</div></div>\n"
-            ));
-        }
-        Body::Dice { emoji, value } => out.push_str(&format!(
-            "<div class=\"media_wrap\"><div class=\"title\">{} {value}</div></div>\n",
-            escape(emoji)
-        )),
-        Body::Other => out.push_str(
-            "<div class=\"media_wrap\"><div class=\"details\">(This message type is not exported)</div></div>\n",
-        ),
-        Body::Text | Body::Service { .. } => {}
-    }
-    if !msg.text.is_empty() {
-        out.push_str(&format!(
-            "<div class=\"text\">{}</div>\n",
-            render(&msg.text, &msg.entities)
-        ));
-    }
-    out
-}
-
-fn map_link(label: &str, detail: &str, lat: f64, lon: f64) -> String {
-    let detail = if detail.is_empty() {
-        String::new()
-    } else {
-        format!("<div class=\"details\">{}</div>", escape(detail))
-    };
-    format!(
-        "<div class=\"media_wrap\"><div class=\"title\">{label}</div>{detail}\
-         <a href=\"https://www.openstreetmap.org/?mlat={lat}&amp;mlon={lon}\">{lat:.5}, {lon:.5}</a></div>\n"
-    )
-}
+/// The end of any export page.
+pub const PAGE_END: &str = "</main>\n</body>\n</html>\n";
 
 /// The service text with `{from}` and `{users}` filled in.
 pub fn service_text(msg: &ExportMessage) -> String {
@@ -232,7 +83,8 @@ fn day_label(date: i32, offset: i32) -> String {
     format!("{} {} {}", time.day, month_name(time.month), time.year)
 }
 
-fn full_stamp(date: i32, offset: i32) -> String {
+/// `14.11.2023 22:13:20`, tdesktop's `FormatDateTime`.
+pub fn full_stamp(date: i32, offset: i32) -> String {
     let unix = i64::from(date);
     let time = civil_at(unix, offset);
     let second = (unix + i64::from(offset)).rem_euclid(60);
@@ -268,6 +120,35 @@ fn forward_name(msg: &ExportMessage) -> Option<String> {
     }
 }
 
+/// The link to a replied-to message: `#go_to_message<id>` on the same page
+/// (the script scrolls to it and highlights it) or
+/// `messagesN.html#go_to_message<id>` on another page of the same chat.
+fn reply_link(id: i64, href: &str) -> String {
+    let onclick = if href.starts_with('#') {
+        format!(" onclick=\"return GoToMessage({id})\"")
+    } else {
+        String::new()
+    };
+    format!("<a href=\"{}\"{onclick}>this message</a>", escape(href))
+}
+
+/// The round picture next to a message: the sender's initials in their
+/// color (tdesktop's export never shows the real photo here).
+fn sender_userpic(msg: &ExportMessage) -> String {
+    let color = msg
+        .sender
+        .map_or(0, |who| userpic::color_index(userpic::bare_id(who)));
+    let picture = Userpic {
+        color,
+        size: userpic::HISTORY_SIZE,
+        name: msg.from.as_deref().unwrap_or_default(),
+        one_letter: matches!(msg.sender, Some(super::model::Who::Chat(_))),
+        ..Default::default()
+    }
+    .render();
+    format!("<div class=\"pull_left userpic_wrap\">{picture}</div>\n")
+}
+
 /// One message block. `reply_href` maps a replied-to message id to the
 /// link that reaches it, when that message is part of the export.
 fn message_html(
@@ -291,14 +172,16 @@ fn message_html(
         (false, false) => "message default clearfix",
     };
     let time = civil_at(i64::from(msg.date), offset);
-    let mut out = format!(
-        "<div class=\"{class}\" id=\"message{}\">\n<div class=\"body\">\n\
-         <div class=\"pull_right date details\" title=\"{}\">{:02}:{:02}</div>\n",
-        msg.id,
+    let mut out = format!("<div class=\"{class}\" id=\"message{}\">\n", msg.id);
+    if !joined {
+        out.push_str(&sender_userpic(msg));
+    }
+    out.push_str(&format!(
+        "<div class=\"body\">\n<div class=\"pull_right date details\" title=\"{}\">{:02}:{:02}</div>\n",
         full_stamp(msg.date, offset),
         time.hour,
         time.minute
-    );
+    ));
     if !joined && let Some(from) = &msg.from {
         out.push_str(&format!(
             "<div class=\"from_name\">{}</div>\n",
@@ -307,7 +190,7 @@ fn message_html(
     }
     if let Some(reply) = msg.reply_to {
         let link = match reply_href(reply) {
-            Some(href) => format!("<a href=\"{}\">this message</a>", escape(&href)),
+            Some(href) => reply_link(reply, &href),
             None => "a message outside this export".into(),
         };
         out.push_str(&format!(
@@ -330,16 +213,27 @@ fn message_html(
     out
 }
 
-/// A whole HTML file. `page` is 0-based, `pages` the number of files.
+/// One HTML file of a chat and how it links to the rest of the export.
+#[derive(Debug, Clone, Copy)]
+pub struct PageSpec<'a> {
+    pub title: &'a str,
+    /// 0-based index of this file, and the number of files.
+    pub page: usize,
+    pub pages: usize,
+    /// From the chat's folder to the export root: `""` for a chat export,
+    /// `"../../"` for `chats/chat_NN/` in an account export.
+    pub base: &'a str,
+    /// The header's back link, relative to the export root.
+    pub back: Option<&'a str>,
+}
+
+/// A whole HTML file.
 pub fn render_page(
-    title: &str,
-    page: usize,
-    pages: usize,
+    spec: &PageSpec<'_>,
     items: &[Item<'_>],
     offset_at: &dyn Fn(i64) -> i32,
     reply_href: &dyn Fn(i64) -> Option<String>,
 ) -> String {
-    let title = escape(title);
     let nav = |label: &str, target: Option<usize>| {
         target.map_or(String::new(), |index| {
             format!(
@@ -348,14 +242,18 @@ pub fn render_page(
             )
         })
     };
-    let previous = nav("Previous messages", page.checked_sub(1));
-    let next = nav("Next messages", (page + 1 < pages).then_some(page + 1));
-    let mut out = format!(
-        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{title}</title>\n<link rel=\"stylesheet\" href=\"css/style.css\">\n</head>\n\
-         <body>\n<main class=\"page\">\n<header><h1>{title}</h1>\n{previous}</header>\n<div class=\"history\">\n"
+    let previous = nav("Previous messages", spec.page.checked_sub(1));
+    let next = nav(
+        "Next messages",
+        (spec.page + 1 < spec.pages).then_some(spec.page + 1),
     );
+    let mut out = page_start(spec.title, spec.base, spec.back);
+    out.push_str(&format!("{previous}</header>\n<div class=\"history\">\n"));
+    if items.is_empty() {
+        out.push_str(
+            "<div class=\"message service\"><div class=\"body details\">No exported messages</div></div>\n",
+        );
+    }
     let mut last: Option<&ExportMessage> = None;
     for item in items {
         let msg = item.message;
@@ -371,50 +269,19 @@ pub fn render_page(
                 day_label(msg.date, offset)
             ));
         }
-        let joined = last.is_some_and(|prev| joins(prev, msg, offset_at));
+        let joined = !new_day && last.is_some_and(|prev| joins(prev, msg, offset_at));
         out.push_str(&message_html(item, joined, offset, reply_href));
         last = Some(msg);
     }
-    out.push_str(&format!(
-        "</div>\n<footer>{next}</footer>\n</main>\n</body>\n</html>\n"
-    ));
+    out.push_str(&format!("</div>\n<footer>{next}</footer>\n{PAGE_END}"));
     out
 }
-
-/// Quill's own stylesheet, written to `css/style.css`.
-pub const STYLE: &str = "\
-:root{color-scheme:light dark;--bg:#f4f5f7;--card:#fff;--out:#e3f0ff;--text:#1c1e21;--muted:#65676b;--accent:#2f6fed}\n\
-@media (prefers-color-scheme:dark){:root{--bg:#17212b;--card:#182533;--out:#2b5278;--text:#e8eaed;--muted:#8fa0b3;--accent:#6ab3f3}}\n\
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,sans-serif}\n\
-.page{max-width:760px;margin:0 auto;padding:24px 16px}\n\
-h1{font-size:20px;margin:0 0 8px}\n\
-a{color:var(--accent)}\n\
-.pagination{display:block;text-align:center;padding:12px 0}\n\
-.message{margin:6px 0}\n\
-.message.service{text-align:center}\n\
-.details{color:var(--muted);font-size:13px}\n\
-.message.default>.body{background:var(--card);border-radius:10px;padding:8px 12px;max-width:85%;overflow-wrap:anywhere}\n\
-.message.default.out>.body{background:var(--out);margin-left:auto}\n\
-.message.joined{margin-top:2px}\n\
-.pull_right{float:right;margin-left:12px}\n\
-.from_name{font-weight:600;font-size:13px;color:var(--accent)}\n\
-.forwarded{border-left:2px solid var(--accent);padding-left:8px;margin:4px 0}\n\
-.reply_to{margin-bottom:4px}\n\
-.media_wrap{margin:4px 0}\n\
-.media_wrap .title{font-weight:600}\n\
-.media_wrap img,.media_wrap video{max-width:100%;max-height:420px;border-radius:6px;display:block}\n\
-.media_wrap audio{width:100%}\n\
-.text blockquote{margin:4px 0;padding-left:8px;border-left:2px solid var(--muted)}\n\
-.text pre,.text code{font-family:ui-monospace,monospace;background:rgba(127,127,127,.15);border-radius:4px}\n\
-.text pre{padding:6px 8px;white-space:pre-wrap}\n\
-.spoiler{background:rgba(127,127,127,.35);color:transparent;border-radius:3px}\n\
-.spoiler:hover{color:inherit}\n\
-.clearfix::after{content:'';display:block;clear:both}\n";
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::export::model::{Entity, EntityKind, Who};
+    use crate::export::model::{Entity, EntityKind, MediaRef, Who};
+    use crate::export::settings::MediaKind;
 
     fn msg(id: i64, date: i32, sender: i64, text: &str) -> ExportMessage {
         ExportMessage {
@@ -443,12 +310,25 @@ mod tests {
             mime: String::new(),
             duration: 0,
             label: String::new(),
+            width: 0,
+            height: 0,
+            thumb: None,
         });
         m
     }
 
+    fn spec(title: &str, page: usize, pages: usize) -> PageSpec<'_> {
+        PageSpec {
+            title,
+            page,
+            pages,
+            base: "",
+            back: None,
+        }
+    }
+
     fn page(items: &[Item<'_>]) -> String {
-        render_page("Chat", 0, 1, items, &|_| 0, &|_| None)
+        render_page(&spec("Chat", 0, 1), items, &|_| 0, &|_| None)
     }
 
     fn plain(messages: &[ExportMessage]) -> String {
@@ -462,14 +342,19 @@ mod tests {
         page(&items)
     }
 
+    fn saved(path: &str) -> Outcome {
+        Outcome::Saved {
+            path: path.into(),
+            thumb: None,
+        }
+    }
+
     #[test]
     fn page_escapes_title_names_and_text() {
         let mut m = msg(1, 1_700_000_000, 1, "<script>alert(1)</script> & \"q\"");
         m.from = Some("Ann <b>".into());
         let html = render_page(
-            "Team & <Co>",
-            0,
-            1,
+            &spec("Team & <Co>", 0, 1),
             &[Item {
                 message: &m,
                 outcome: None,
@@ -480,8 +365,36 @@ mod tests {
         assert!(html.contains("<title>Team &amp; &lt;Co&gt;</title>"));
         assert!(html.contains("Ann &lt;b&gt;"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;q&quot;"));
-        assert!(!html.contains("<script>"));
+        assert!(!html.contains("<script>alert"));
         assert!(html.contains("<link rel=\"stylesheet\" href=\"css/style.css\">"));
+        assert!(html.contains("<script src=\"js/script.js\"></script>"));
+        assert!(html.contains("<body onload=\"CheckLocation();\">"));
+    }
+
+    #[test]
+    fn pages_inside_an_account_export_reach_the_root_and_go_back() {
+        let m = msg(1, 1_700_000_000, 1, "x");
+        let items = [Item {
+            message: &m,
+            outcome: None,
+        }];
+        let html = render_page(
+            &PageSpec {
+                title: "Ann",
+                page: 0,
+                pages: 1,
+                base: "../../",
+                back: Some("lists/chats.html"),
+            },
+            &items,
+            &|_| 0,
+            &|_| None,
+        );
+        assert!(html.contains("href=\"../../css/style.css\""));
+        assert!(html.contains("src=\"../../js/script.js\""));
+        assert!(html.contains(
+            "<a class=\"back\" href=\"../../lists/chats.html\" onclick=\"return GoBack(this)\""
+        ));
     }
 
     #[test]
@@ -508,6 +421,21 @@ mod tests {
     }
 
     #[test]
+    fn senders_get_a_round_picture_with_initials_once_per_group() {
+        let mut a = msg(1, 1_700_000_000, 7, "one");
+        a.from = Some("Ann Lee".into());
+        let mut b = msg(2, 1_700_000_060, 7, "two");
+        b.from = Some("Ann Lee".into());
+        let html = plain(&[a, b]);
+        // User 7: bare id 7 -> color 0 -> class userpic1.
+        assert_eq!(html.matches("class=\"userpic userpic1\"").count(), 1);
+        assert!(html.contains(">AL</div>"));
+        assert!(html.contains(
+            "id=\"message1\">\n<div class=\"pull_left userpic_wrap\"><div class=\"userpic"
+        ));
+    }
+
+    #[test]
     fn far_apart_messages_are_not_joined() {
         let a = msg(1, 1_700_000_000, 1, "one");
         let b = msg(2, 1_700_000_000 + 901, 1, "two");
@@ -521,10 +449,11 @@ mod tests {
         let photo = media_msg(1, MediaKind::Photo, "");
         let big = media_msg(2, MediaKind::Video, "");
         let off = media_msg(3, MediaKind::File, "a b.pdf");
+        let saved_photo = saved("photos/photo_1.jpg");
         let items = [
             Item {
                 message: &photo,
-                outcome: Some(&Outcome::Saved("photos/photo_1.jpg".into())),
+                outcome: Some(&saved_photo),
             },
             Item {
                 message: &big,
@@ -553,28 +482,22 @@ mod tests {
         let doc = media_msg(3, MediaKind::File, "");
         let gif = media_msg(4, MediaKind::Gif, "");
         let sticker = media_msg(5, MediaKind::Sticker, "");
-        let items = [
-            Item {
-                message: &video,
-                outcome: Some(&Outcome::Saved("video_files/video_1.mp4".into())),
-            },
-            Item {
-                message: &voice,
-                outcome: Some(&Outcome::Saved("voice_messages/audio_1.ogg".into())),
-            },
-            Item {
-                message: &doc,
-                outcome: Some(&Outcome::Saved("files/my report #1.pdf".into())),
-            },
-            Item {
-                message: &gif,
-                outcome: Some(&Outcome::Saved("animations/a.mp4".into())),
-            },
-            Item {
-                message: &sticker,
-                outcome: Some(&Outcome::Saved("stickers/s.webp".into())),
-            },
+        let outcomes = [
+            saved("video_files/video_1.mp4"),
+            saved("voice_messages/audio_1.ogg"),
+            saved("files/my report #1.pdf"),
+            saved("animations/a.mp4"),
+            saved("stickers/s.webp"),
         ];
+        let messages = [&video, &voice, &doc, &gif, &sticker];
+        let items: Vec<Item<'_>> = messages
+            .iter()
+            .zip(&outcomes)
+            .map(|(message, outcome)| Item {
+                message,
+                outcome: Some(outcome),
+            })
+            .collect();
         let html = page(&items);
         assert!(html.contains("<video class=\"media\" src=\"video_files/video_1.mp4\" controls"));
         assert!(html.contains("<audio class=\"media\" src=\"voice_messages/audio_1.ogg\""));
@@ -584,26 +507,35 @@ mod tests {
     }
 
     #[test]
-    fn replies_forwards_and_edits() {
+    fn replies_jump_on_the_page_or_open_the_right_file() {
         let mut m = msg(10, 1_700_000_000, 1, "answer");
         m.reply_to = Some(9);
         m.edited = 1_700_000_100;
+        let mut near = msg(13, 1_700_000_200, 1, "near");
+        near.reply_to = Some(10);
         let mut f = msg(11, 1_700_000_500, 1, "fwd");
         f.forward = Some(Origin::Who(Who::Chat(-5)));
         f.forwarded_from = Some("News <Daily>".into());
         let mut orphan = msg(12, 1_700_000_900, 1, "x");
         orphan.reply_to = Some(1);
-        let items: Vec<Item<'_>> = [&m, &f, &orphan]
+        let items: Vec<Item<'_>> = [&m, &near, &f, &orphan]
             .iter()
             .map(|message| Item {
                 message,
                 outcome: None,
             })
             .collect();
-        let html = render_page("C", 0, 1, &items, &|_| 0, &|id| {
-            (id == 9).then(|| "messages2.html#message9".to_string())
+        let html = render_page(&spec("C", 0, 1), &items, &|_| 0, &|id| match id {
+            9 => Some("messages2.html#go_to_message9".to_string()),
+            10 => Some("#go_to_message10".to_string()),
+            _ => None,
         });
-        assert!(html.contains("In reply to <a href=\"messages2.html#message9\">this message</a>"));
+        assert!(
+            html.contains("In reply to <a href=\"messages2.html#go_to_message9\">this message</a>")
+        );
+        assert!(html.contains(
+            "In reply to <a href=\"#go_to_message10\" onclick=\"return GoToMessage(10)\">this message</a>"
+        ));
         assert!(html.contains("In reply to a message outside this export"));
         assert!(html.contains("News &lt;Daily&gt; <span class=\"details\">forwarded</span>"));
         assert!(html.contains("<div class=\"details\">edited</div>"));
@@ -639,7 +571,7 @@ mod tests {
         ];
         let html = plain(&[m]);
         assert!(html.contains("<strong>bold</strong> link"));
-        assert!(!html.contains("javascript"));
+        assert!(!html.contains("javascript:alert"));
     }
 
     #[test]
@@ -665,19 +597,24 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_page_says_so() {
+        assert!(plain(&[]).contains("No exported messages"));
+    }
+
+    #[test]
     fn pagination_links_connect_the_files() {
         let m = msg(1, 1_700_000_000, 1, "x");
         let items = [Item {
             message: &m,
             outcome: None,
         }];
-        let first = render_page("C", 0, 3, &items, &|_| 0, &|_| None);
+        let first = render_page(&spec("C", 0, 3), &items, &|_| 0, &|_| None);
         assert!(first.contains("href=\"messages2.html\">Next messages"));
         assert!(!first.contains("Previous messages"));
-        let middle = render_page("C", 1, 3, &items, &|_| 0, &|_| None);
+        let middle = render_page(&spec("C", 1, 3), &items, &|_| 0, &|_| None);
         assert!(middle.contains("href=\"messages.html\">Previous messages"));
         assert!(middle.contains("href=\"messages3.html\">Next messages"));
-        let last = render_page("C", 2, 3, &items, &|_| 0, &|_| None);
+        let last = render_page(&spec("C", 2, 3), &items, &|_| 0, &|_| None);
         assert!(!last.contains("Next messages"));
         assert_eq!(messages_file(0), "messages.html");
         assert_eq!(messages_file(4), "messages5.html");

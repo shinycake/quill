@@ -38,6 +38,15 @@ pub struct Entity {
     pub kind: EntityKind,
 }
 
+/// A small preview image TDLib keeps next to a video, GIF, video message or
+/// document (tdesktop's `Document::thumb`). Only still images are kept:
+/// JPEG, PNG and WebP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThumbRef {
+    pub file_id: i32,
+    pub size: i64,
+}
+
 /// A file attached to a message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaRef {
@@ -49,6 +58,13 @@ pub struct MediaRef {
     pub duration: i32,
     /// Sticker emoji or audio "performer - title".
     pub label: String,
+    /// Pixel size of a photo, video or GIF, when TDLib reports it.
+    #[serde(default)]
+    pub width: i32,
+    #[serde(default)]
+    pub height: i32,
+    #[serde(default)]
+    pub thumb: Option<ThumbRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -172,7 +188,7 @@ fn entity_kind(entity: &Value) -> Option<EntityKind> {
 }
 
 /// (text, entities) of a TDLib `formattedText`.
-fn formatted(value: &Value) -> (String, Vec<Entity>) {
+pub(crate) fn formatted(value: &Value) -> (String, Vec<Entity>) {
     let text = value["text"].as_str().unwrap_or_default().to_string();
     let entities = value["entities"]
         .as_array()
@@ -193,7 +209,7 @@ fn formatted(value: &Value) -> (String, Vec<Entity>) {
 
 /// (id, size) of a TDLib `file`. The size falls back to the expected one
 /// while the real size is still unknown.
-fn file_of(file: &Value) -> (i32, i64) {
+pub(crate) fn file_of(file: &Value) -> (i32, i64) {
     let id = file["id"]
         .as_i64()
         .and_then(|id| i32::try_from(id).ok())
@@ -206,8 +222,34 @@ fn file_of(file: &Value) -> (i32, i64) {
     (id, size)
 }
 
+pub(crate) fn int(value: &Value) -> i32 {
+    value
+        .as_i64()
+        .and_then(|v| i32::try_from(v).ok())
+        .unwrap_or(0)
+}
+
+/// The still-image thumbnail of a document, video or GIF, if it has one.
+pub fn thumb_of(thumbnail: &Value) -> Option<ThumbRef> {
+    let still = matches!(
+        thumbnail["format"]["@type"].as_str(),
+        Some("thumbnailFormatJpeg" | "thumbnailFormatPng" | "thumbnailFormatWebp")
+    );
+    let (file_id, size) = file_of(&thumbnail["file"]);
+    (still && file_id != 0).then_some(ThumbRef { file_id, size })
+}
+
 fn media(kind: MediaKind, holder: &Value, file_key: &str) -> Body {
     let (file_id, size) = file_of(&holder[file_key]);
+    // Stickers keep none: their own file is the picture. Audio files keep
+    // their album cover.
+    let thumb = match kind {
+        MediaKind::Sticker => None,
+        _ if holder["thumbnail"].is_object() => thumb_of(&holder["thumbnail"]),
+        _ => thumb_of(&holder["album_cover_thumbnail"]),
+    };
+    // Video messages are square: TDLib gives one `length`.
+    let side = int(&holder["length"]);
     let text = |key: &str| holder[key].as_str().unwrap_or_default().to_string();
     let label = if holder["performer"].is_string() || holder["title"].is_string() {
         [text("performer"), text("title")]
@@ -225,11 +267,11 @@ fn media(kind: MediaKind, holder: &Value, file_key: &str) -> Body {
         size,
         file_name: text("file_name"),
         mime: text("mime_type"),
-        duration: holder["duration"]
-            .as_i64()
-            .and_then(|d| i32::try_from(d).ok())
-            .unwrap_or(0),
+        duration: int(&holder["duration"]),
         label,
+        width: int(&holder["width"]).max(side),
+        height: int(&holder["height"]).max(side),
+        thumb,
     })
 }
 
@@ -248,6 +290,9 @@ fn largest_photo(photo: &Value) -> Body {
         mime: "image/jpeg".into(),
         duration: 0,
         label: String::new(),
+        width: best.map_or(0, |s| int(&s["width"])),
+        height: best.map_or(0, |s| int(&s["height"])),
+        thumb: None,
     })
 }
 
@@ -651,6 +696,43 @@ mod tests {
         })
         .unwrap();
         assert_eq!(hidden.forward, Some(Origin::Name("Ann".into())));
+    }
+
+    #[test]
+    fn still_thumbnails_and_sizes_are_kept() {
+        let thumb = |format: &str| {
+            json!({"format": {"@type": format}, "width": 90, "height": 60,
+                "file": {"id": 77, "size": 900}})
+        };
+        let media_of = |content: Value| match parse_message(&base(content)).unwrap().body {
+            Body::Media(m) => m,
+            other => panic!("media expected, got {other:?}"),
+        };
+        let video = media_of(json!({"@type": "messageVideo", "video": {
+            "width": 1280, "height": 720, "thumbnail": thumb("thumbnailFormatJpeg"),
+            "video": {"id": 1, "size": 3}}}));
+        assert_eq!(
+            video.thumb,
+            Some(ThumbRef {
+                file_id: 77,
+                size: 900
+            })
+        );
+        assert_eq!((video.width, video.height), (1280, 720));
+        // An MPEG4 preview is a video, not a picture: no thumbnail.
+        let gif = media_of(json!({"@type": "messageAnimation", "animation": {
+            "thumbnail": thumb("thumbnailFormatMpeg4"), "animation": {"id": 1, "size": 3}}}));
+        assert_eq!(gif.thumb, None);
+        let round = media_of(json!({"@type": "messageVideoNote", "video_note": {
+            "length": 384, "thumbnail": thumb("thumbnailFormatJpeg"), "video": {"id": 1}}}));
+        assert_eq!((round.width, round.height), (384, 384));
+        assert!(round.thumb.is_some());
+        let song = media_of(json!({"@type": "messageAudio", "audio": {
+            "album_cover_thumbnail": thumb("thumbnailFormatPng"), "audio": {"id": 1}}}));
+        assert!(song.thumb.is_some());
+        let sticker = media_of(json!({"@type": "messageSticker", "sticker": {
+            "thumbnail": thumb("thumbnailFormatWebp"), "sticker": {"id": 1}}}));
+        assert_eq!(sticker.thumb, None);
     }
 
     #[test]

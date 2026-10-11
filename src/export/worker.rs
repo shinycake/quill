@@ -2,26 +2,29 @@
 //! [`Tdlib`] trait. It runs on its own thread (see `handle.rs`), so paging,
 //! downloading and writing never touch the UI thread.
 //!
-//! Two passes, because TDLib pages newest first and the files read oldest
-//! first. Pass one pages history, applies the date range and sender
-//! choices, resolves names and spools each page to a small file. Pass two
-//! reads the spool backwards, copies media within the limits and writes the
-//! HTML pages and `result.json` in order.
-use super::html::{self, Item, MESSAGES_PER_FILE, Outcome};
-use super::json::{self, JsonWriter};
-use super::model::{Body, ExportMessage, MediaRef, Origin, Who, parse_message};
+//! One chat is exported in two passes, because TDLib pages newest first and
+//! the files read oldest first. Pass one (`collect.rs`) pages history,
+//! applies the date range and sender choices, resolves names and spools
+//! each page to a small file. Pass two reads the spool backwards, copies
+//! media and thumbnails within the limits, and writes the HTML pages and
+//! the JSON messages in order. A full account export (`account/`) runs the
+//! same [`export_chat`] once per chat.
+use super::assets;
+use super::collect::{collect, read_chunk};
+use super::html::{self, Item, MESSAGES_PER_FILE, Outcome, PageSpec};
+use super::json::{self, JsonWriter, MessageSink};
+use super::model::{Body, ExportMessage, MediaRef};
 use super::names::Namer;
 use super::settings::{ExportSettings, Skip};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// `getChatHistory` page size (TDLib's maximum).
-pub const PAGE_LIMIT: i64 = 100;
-const QUERY_TIMEOUT: Duration = Duration::from_secs(300);
+pub use super::collect::PAGE_LIMIT;
+
+pub(crate) const QUERY_TIMEOUT: Duration = Duration::from_secs(300);
 /// A synchronous `downloadFile` can legitimately take a long time.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(6 * 3600);
 
@@ -135,16 +138,20 @@ impl Progress {
     }
 }
 
-/// Everything the routine needs besides TDLib.
+/// Everything one chat's export needs besides TDLib.
 pub struct Job<'a> {
     pub settings: &'a ExportSettings,
     /// TDLib's files directory; only files under it are copied.
     pub files_root: &'a Path,
     pub offset_at: &'a dyn Fn(i64) -> i32,
     pub report: &'a dyn Fn(Progress),
+    /// The viewer's user id, when known: "only my messages" then searches
+    /// by sender instead of paging the whole history.
+    pub me: Option<i64>,
 }
 
-fn query<T: Tdlib>(tdlib: &mut T, request: Value) -> Result<Value, ExportError> {
+/// A TDLib answer, or its error as an [`ExportError`].
+pub(crate) fn query<T: Tdlib>(tdlib: &mut T, request: Value) -> Result<Value, ExportError> {
     let answer = tdlib.call(request, QUERY_TIMEOUT)?;
     if answer["@type"] == "error" {
         return Err(ExportError::Tdlib(
@@ -154,151 +161,58 @@ fn query<T: Tdlib>(tdlib: &mut T, request: Value) -> Result<Value, ExportError> 
     Ok(answer)
 }
 
-/// Display names, fetched once per user or chat.
-#[derive(Default)]
-struct Names {
-    known: HashMap<Who, String>,
-}
-
-impl Names {
-    fn name<T: Tdlib>(&mut self, tdlib: &mut T, who: Who) -> Result<String, ExportError> {
-        if let Some(name) = self.known.get(&who) {
-            return Ok(name.clone());
-        }
-        let request = match who {
-            Who::User(id) => json!({"@type": "getUser", "user_id": id}),
-            Who::Chat(id) => json!({"@type": "getChat", "chat_id": id}),
-        };
-        let name = match tdlib.call(request, QUERY_TIMEOUT)? {
-            answer if answer["@type"] == "error" => "Unknown".to_string(),
-            answer if matches!(who, Who::Chat(_)) => {
-                answer["title"].as_str().unwrap_or("Unknown").to_string()
-            }
-            answer => {
-                let first = answer["first_name"].as_str().unwrap_or_default();
-                let last = answer["last_name"].as_str().unwrap_or_default();
-                let full = format!("{first} {last}").trim().to_string();
-                if full.is_empty() {
-                    "Deleted Account".to_string()
-                } else {
-                    full
-                }
-            }
-        };
-        self.known.insert(who, name.clone());
-        Ok(name)
-    }
-
-    fn fill<T: Tdlib>(
-        &mut self,
-        tdlib: &mut T,
-        msg: &mut ExportMessage,
-    ) -> Result<(), ExportError> {
-        if let Some(who) = msg.sender {
-            msg.from = Some(self.name(tdlib, who)?);
-        }
-        if let Some(Origin::Who(who)) = msg.forward {
-            msg.forwarded_from = Some(self.name(tdlib, who)?);
-        }
-        if let Body::Service { users, names, .. } = &mut msg.body {
-            let list = users.clone();
-            for id in list {
-                names.push(self.name(tdlib, Who::User(id))?);
-            }
-        }
-        Ok(())
-    }
-}
-
-fn spool_name(index: usize) -> String {
-    format!("{index:08}.json")
-}
-
-/// Pass one. Returns the ids of the kept messages, newest first, and the
-/// number of spool chunks.
-fn collect<T: Tdlib>(
-    job: &Job<'_>,
+/// Download a file through TDLib and return its local path, or why it is
+/// left out. Only TDLib's own files are ever returned: a path outside its
+/// directory is refused. `limit` applies to the real size once known.
+pub(crate) fn fetch_file<T: Tdlib>(
     tdlib: &mut T,
-    spool: &Path,
-    progress: &mut Progress,
-) -> Result<(Vec<i64>, usize), ExportError> {
-    let settings = job.settings;
-    let mut names = Names::default();
-    // Start at the last message before the range's end date.
-    let mut from = 0;
-    if settings.till > 0 {
-        let date = (settings.till - 1).clamp(0, i64::from(i32::MAX));
-        match tdlib.call(
-            json!({"@type": "getChatMessageByDate", "chat_id": settings.chat_id, "date": date}),
-            QUERY_TIMEOUT,
-        )? {
-            answer if answer["@type"] == "error" => {
-                // Nothing at or before that date.
-                return Ok((Vec::new(), 0));
-            }
-            answer => from = answer["id"].as_i64().unwrap_or(0),
-        }
+    files_root: &Path,
+    file_id: i32,
+    limit: Option<i64>,
+) -> Result<Result<PathBuf, Skip>, ExportError> {
+    if file_id == 0 {
+        return Ok(Err(Skip::Unavailable));
     }
-    let mut oldest = 0i64;
-    let mut ids = Vec::new();
-    let mut chunks = 0;
-    loop {
-        let page = query(
-            tdlib,
-            json!({"@type": "getChatHistory", "chat_id": settings.chat_id, "from_message_id": from,
-                "offset": 0, "limit": PAGE_LIMIT, "only_local": false}),
-        )?;
-        let raw = page["messages"].as_array().cloned().unwrap_or_default();
-        // TDLib may answer with fewer messages than asked; only an empty
-        // page (or one with nothing new) ends the history.
-        let mut kept = Vec::new();
-        let mut progressed = false;
-        let mut past_range = false;
-        for value in &raw {
-            let Some(id) = value["id"].as_i64() else {
-                continue;
-            };
-            if oldest != 0 && id >= oldest {
-                continue;
-            }
-            oldest = id;
-            progressed = true;
-            let Some(mut msg) = parse_message(value) else {
-                continue;
-            };
-            if settings.before_range(msg.date) {
-                past_range = true;
-                continue;
-            }
-            if settings.skips_date(msg.date) || (settings.only_mine && !msg.outgoing) {
-                continue;
-            }
-            names.fill(tdlib, &mut msg)?;
-            kept.push(msg);
-        }
-        if !kept.is_empty() {
-            ids.extend(kept.iter().map(|m| m.id));
-            fs::write(spool.join(spool_name(chunks)), serde_json::to_vec(&kept)?)?;
-            chunks += 1;
-            progress.done = ids.len();
-            (job.report)(progress.clone());
-        }
-        if !progressed || past_range {
-            break;
-        }
-        from = oldest;
+    let answer = tdlib.call(
+        json!({"@type": "downloadFile", "file_id": file_id, "priority": 1,
+            "offset": 0, "limit": 0, "synchronous": true}),
+        DOWNLOAD_TIMEOUT,
+    )?;
+    let local = &answer["local"];
+    if answer["@type"] == "error" || local["is_downloading_completed"] != true {
+        return Ok(Err(Skip::Unavailable));
     }
-    Ok((ids, chunks))
+    if let Some(limit) = limit
+        && answer["size"].as_i64().unwrap_or(0) > limit
+    {
+        return Ok(Err(Skip::TooLarge));
+    }
+    let Some(source) = local["path"]
+        .as_str()
+        .and_then(|path| Path::new(path).canonicalize().ok())
+    else {
+        return Ok(Err(Skip::Unavailable));
+    };
+    let root = files_root.canonicalize()?;
+    if !source.starts_with(&root) || !source.is_file() {
+        return Ok(Err(Skip::Unavailable));
+    }
+    Ok(Ok(source))
 }
 
-fn read_chunk(spool: &Path, index: usize) -> Result<Vec<ExportMessage>, ExportError> {
-    let bytes = fs::read(spool.join(spool_name(index)))?;
-    let mut messages: Vec<ExportMessage> = serde_json::from_slice(&bytes)?;
-    messages.reverse();
-    Ok(messages)
+/// Copy `source` to `relative` under `out`, creating folders as needed.
+pub(crate) fn copy_into(out: &Path, relative: &str, source: &Path) -> io::Result<()> {
+    let target = out.join(relative);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source, &target)?;
+    Ok(())
 }
 
-/// Copy one message's file into the export, or say why not.
+/// Copy one message's file (and its thumbnail) into the chat's folder, or
+/// say why not. The thumbnail follows the file's own rules: it is fetched
+/// only once the file itself was saved.
 fn save_file<T: Tdlib>(
     job: &Job<'_>,
     tdlib: &mut T,
@@ -310,52 +224,65 @@ fn save_file<T: Tdlib>(
     if let Some(skip) = job.settings.skip_reason(media.kind, media.size) {
         return Ok(Outcome::Skipped(skip));
     }
-    if media.file_id == 0 {
-        return Ok(Outcome::Skipped(Skip::Unavailable));
-    }
-    let answer = tdlib.call(
-        json!({"@type": "downloadFile", "file_id": media.file_id, "priority": 1,
-            "offset": 0, "limit": 0, "synchronous": true}),
-        DOWNLOAD_TIMEOUT,
-    )?;
-    let local = &answer["local"];
-    // The file's real size is known once TDLib has it; honor the limit then
-    // too, in case the message reported none.
-    let real_size = answer["size"].as_i64().unwrap_or(0);
-    if answer["@type"] == "error" || local["is_downloading_completed"] != true {
-        return Ok(Outcome::Skipped(Skip::Unavailable));
-    }
-    if real_size > job.settings.size_limit {
-        return Ok(Outcome::Skipped(Skip::TooLarge));
-    }
-    let Some(source) = local["path"]
-        .as_str()
-        .and_then(|path| Path::new(path).canonicalize().ok())
-    else {
-        return Ok(Outcome::Skipped(Skip::Unavailable));
+    let source = match fetch_file(
+        tdlib,
+        job.files_root,
+        media.file_id,
+        Some(job.settings.size_limit),
+    )? {
+        Ok(source) => source,
+        Err(skip) => return Ok(Outcome::Skipped(skip)),
     };
-    // Only TDLib's own files: a path outside its directory is never copied.
-    let root = job.files_root.canonicalize()?;
-    if !source.starts_with(&root) || !source.is_file() {
-        return Ok(Outcome::Skipped(Skip::Unavailable));
-    }
-    let relative = namer.path(
+    let path = namer.path(
         media,
         date,
         (job.offset_at)(i64::from(date)),
         &source.to_string_lossy(),
     );
-    let target = out.join(&relative);
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
+    copy_into(out, &path, &source)?;
+    let mut thumb = None;
+    if let Some(preview) = media.thumb
+        && let Ok(source) = fetch_file(tdlib, job.files_root, preview.file_id, None)?
+    {
+        let relative = namer.thumb_path(&path);
+        copy_into(out, &relative, &source)?;
+        thumb = Some(relative);
     }
-    fs::copy(&source, &target)?;
-    Ok(Outcome::Saved(relative))
+    Ok(Outcome::Saved { path, thumb })
+}
+
+/// Where one chat's files go and how its pages link out.
+#[derive(Debug, Clone, Copy)]
+pub struct ChatOut<'a> {
+    /// The chat's folder: `messages.html` and media folders live here.
+    pub folder: &'a Path,
+    /// A scratch folder for the spool; emptied when the chat is done.
+    pub spool: &'a Path,
+    /// From `folder` to the export root (`""` or `"../../"`).
+    pub base: &'a str,
+    /// The page header's back link, relative to the export root.
+    pub back: Option<&'a str>,
+    /// Prefix for file paths in the JSON, which are relative to the export
+    /// root (`chats/chat_NN/` in an account export, `""` for a chat).
+    pub json_prefix: &'a str,
+    /// Write a page saying "No exported messages" for an empty chat
+    /// (tdesktop does for a chat export, and leaves empty chats of an
+    /// account export without pages).
+    pub page_when_empty: bool,
+}
+
+/// What one chat's export wrote.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ChatResult {
+    pub messages: usize,
+    pub files: usize,
+    pub skipped: usize,
+    pub pages: usize,
 }
 
 fn flush_page(
     job: &Job<'_>,
-    out: &Path,
+    out: &ChatOut<'_>,
     page: usize,
     pages: usize,
     buffer: &[(ExportMessage, Option<Outcome>)],
@@ -372,38 +299,130 @@ fn flush_page(
         let position = ids.binary_search(&id).ok()?;
         let target = position / MESSAGES_PER_FILE;
         Some(if target == page {
-            format!("#message{id}")
+            format!("#go_to_message{id}")
         } else {
-            format!("{}#message{id}", html::messages_file(target))
+            format!("{}#go_to_message{id}", html::messages_file(target))
         })
     };
-    let page_html = html::render_page(
-        &job.settings.title,
+    let spec = PageSpec {
+        title: &job.settings.title,
         page,
         pages,
-        &items,
-        job.offset_at,
-        &reply_href,
-    );
-    fs::write(out.join(html::messages_file(page)), page_html)?;
+        base: out.base,
+        back: out.back,
+    };
+    let page_html = html::render_page(&spec, &items, job.offset_at, &reply_href);
+    fs::create_dir_all(out.folder)?;
+    fs::write(out.folder.join(html::messages_file(page)), page_html)?;
     Ok(())
 }
 
-/// Create the export folder inside `parent`, like tdesktop's
-/// `ChatExport_2023-11-14`, adding ` (2)` when it exists.
-pub fn create_folder(parent: &Path, title: &str, stamp: &str) -> io::Result<PathBuf> {
-    let base = {
-        let clean = super::names::sanitize(title);
-        let clean: String = clean.chars().take(40).collect();
-        if clean.is_empty() {
-            format!("ChatExport_{stamp}")
-        } else {
-            format!("ChatExport_{clean}_{stamp}")
+/// The outcome with its paths made relative to the export root.
+fn rooted_outcome(outcome: Option<&Outcome>, prefix: &str) -> Option<Outcome> {
+    match outcome {
+        Some(Outcome::Saved { path, thumb }) if !prefix.is_empty() => Some(Outcome::Saved {
+            path: format!("{prefix}{path}"),
+            thumb: thumb.as_ref().map(|t| format!("{prefix}{t}")),
+        }),
+        other => other.cloned(),
+    }
+}
+
+/// Export one chat into `out.folder`: pages (when the format has HTML),
+/// media, and each message pushed to `json` in order.
+pub fn export_chat<T: Tdlib>(
+    job: &Job<'_>,
+    tdlib: &mut T,
+    out: &ChatOut<'_>,
+    mut json: Option<&mut dyn MessageSink>,
+    progress: &mut Progress,
+) -> Result<ChatResult, ExportError> {
+    fs::create_dir_all(out.spool)?;
+    let result = write_chat(job, tdlib, out, &mut json, progress);
+    let _ = fs::remove_dir_all(out.spool);
+    result
+}
+
+fn write_chat<T: Tdlib>(
+    job: &Job<'_>,
+    tdlib: &mut T,
+    out: &ChatOut<'_>,
+    json: &mut Option<&mut dyn MessageSink>,
+    progress: &mut Progress,
+) -> Result<ChatResult, ExportError> {
+    let wants_html = job.settings.format.wants_html();
+    progress.stage = Stage::Collecting;
+    progress.done = 0;
+    (job.report)(progress.clone());
+    let (mut ids, chunks) = collect(job, tdlib, out.spool, progress)?;
+    ids.reverse();
+    let total = ids.len();
+    let pages = total.div_ceil(MESSAGES_PER_FILE).max(1);
+    progress.stage = Stage::Writing;
+    progress.total = total;
+    progress.done = 0;
+    (job.report)(progress.clone());
+    let mut namer = Namer::default();
+    let mut buffer: Vec<(ExportMessage, Option<Outcome>)> = Vec::new();
+    let mut result = ChatResult::default();
+    let mut page = 0;
+    for chunk in (0..chunks).rev() {
+        for msg in read_chunk(out.spool, chunk)? {
+            let outcome = match &msg.body {
+                Body::Media(media) => {
+                    let outcome = save_file(job, tdlib, &mut namer, out.folder, media, msg.date)?;
+                    match outcome {
+                        Outcome::Saved { .. } => result.files += 1,
+                        Outcome::Skipped(_) => result.skipped += 1,
+                    }
+                    Some(outcome)
+                }
+                _ => None,
+            };
+            if let Some(sink) = json.as_mut() {
+                let offset = (job.offset_at)(i64::from(msg.date));
+                let rooted = rooted_outcome(outcome.as_ref(), out.json_prefix);
+                sink.push_message(&json::message_json(&msg, rooted.as_ref(), offset))?;
+            }
+            buffer.push((msg, outcome));
+            progress.done += 1;
+            progress.files += usize::from(matches!(
+                buffer.last(),
+                Some((_, Some(Outcome::Saved { .. })))
+            ));
+            progress.skipped += usize::from(matches!(
+                buffer.last(),
+                Some((_, Some(Outcome::Skipped(_))))
+            ));
+            (job.report)(progress.clone());
+            if buffer.len() == MESSAGES_PER_FILE {
+                if wants_html {
+                    flush_page(job, out, page, pages, &buffer, &ids)?;
+                }
+                buffer.clear();
+                page += 1;
+            }
         }
+    }
+    let write_last = !buffer.is_empty() || (total == 0 && out.page_when_empty);
+    if wants_html && write_last {
+        flush_page(job, out, page, pages, &buffer, &ids)?;
+    }
+    result.messages = total;
+    result.pages = if total == 0 && !out.page_when_empty {
+        0
+    } else {
+        pages
     };
+    Ok(result)
+}
+
+/// Create a fresh export folder inside `parent` named `base`, adding
+/// ` (2)`, ` (3)`, ... when it exists (tdesktop does the same).
+pub fn create_named_folder(parent: &Path, base: &str) -> io::Result<PathBuf> {
     for n in 1.. {
         let name = if n == 1 {
-            base.clone()
+            base.to_string()
         } else {
             format!("{base} ({n})")
         };
@@ -417,37 +436,25 @@ pub fn create_folder(parent: &Path, title: &str, stamp: &str) -> io::Result<Path
     unreachable!("the loop only exits by returning")
 }
 
-/// Run the whole export into a fresh folder under `settings.dir`.
-pub fn run<T: Tdlib>(job: &Job<'_>, tdlib: &mut T, folder: &Path) -> Result<Summary, ExportError> {
-    let spool = folder.join(".spool");
-    fs::create_dir_all(&spool)?;
-    let mut progress = Progress::starting();
-    progress.stage = Stage::Collecting;
-    (job.report)(progress.clone());
-    let result = write_all(job, tdlib, folder, &spool, &mut progress);
-    let _ = fs::remove_dir_all(&spool);
-    result
+/// Create the chat export folder inside `parent`, like tdesktop's
+/// `ChatExport_2023-11-14` with the chat's name added.
+pub fn create_folder(parent: &Path, title: &str, stamp: &str) -> io::Result<PathBuf> {
+    let clean = super::names::sanitize(title);
+    let clean: String = clean.chars().take(40).collect();
+    let base = if clean.is_empty() {
+        format!("ChatExport_{stamp}")
+    } else {
+        format!("ChatExport_{clean}_{stamp}")
+    };
+    create_named_folder(parent, &base)
 }
 
-fn write_all<T: Tdlib>(
-    job: &Job<'_>,
-    tdlib: &mut T,
-    folder: &Path,
-    spool: &Path,
-    progress: &mut Progress,
-) -> Result<Summary, ExportError> {
+/// Run a single chat's export into `folder` (made by [`create_folder`]).
+pub fn run<T: Tdlib>(job: &Job<'_>, tdlib: &mut T, folder: &Path) -> Result<Summary, ExportError> {
     let settings = job.settings;
-    let (mut ids, chunks) = collect(job, tdlib, spool, progress)?;
-    ids.reverse();
-    let total = ids.len();
-    let pages = total.div_ceil(MESSAGES_PER_FILE).max(1);
-    progress.stage = Stage::Writing;
-    progress.total = total;
-    progress.done = 0;
-    (job.report)(progress.clone());
+    let mut progress = Progress::starting();
     if settings.format.wants_html() {
-        fs::create_dir_all(folder.join("css"))?;
-        fs::write(folder.join("css/style.css"), html::STYLE)?;
+        assets::write(folder)?;
     }
     let mut json_writer = if settings.format.wants_json() {
         Some(JsonWriter::start(
@@ -458,53 +465,25 @@ fn write_all<T: Tdlib>(
     } else {
         None
     };
-    let mut namer = Namer::default();
-    let mut buffer: Vec<(ExportMessage, Option<Outcome>)> = Vec::new();
-    let mut page = 0;
-    let mut files = 0;
-    let mut skipped = 0;
-    for chunk in (0..chunks).rev() {
-        for msg in read_chunk(spool, chunk)? {
-            let outcome = match &msg.body {
-                Body::Media(media) => {
-                    let outcome = save_file(job, tdlib, &mut namer, folder, media, msg.date)?;
-                    match outcome {
-                        Outcome::Saved(_) => files += 1,
-                        Outcome::Skipped(_) => skipped += 1,
-                    }
-                    Some(outcome)
-                }
-                _ => None,
-            };
-            if let Some(writer) = json_writer.as_mut() {
-                let offset = (job.offset_at)(i64::from(msg.date));
-                writer.push(&json::message_json(&msg, outcome.as_ref(), offset))?;
-            }
-            buffer.push((msg, outcome));
-            progress.done += 1;
-            progress.files = files;
-            progress.skipped = skipped;
-            (job.report)(progress.clone());
-            if buffer.len() == MESSAGES_PER_FILE {
-                if settings.format.wants_html() {
-                    flush_page(job, folder, page, pages, &buffer, &ids)?;
-                }
-                buffer.clear();
-                page += 1;
-            }
-        }
-    }
-    if settings.format.wants_html() && (!buffer.is_empty() || total == 0) {
-        flush_page(job, folder, page, pages, &buffer, &ids)?;
-    }
+    let spool = folder.join(".spool");
+    let out = ChatOut {
+        folder,
+        spool: &spool,
+        base: "",
+        back: None,
+        json_prefix: "",
+        page_when_empty: true,
+    };
+    let sink = json_writer.as_mut().map(|w| w as &mut dyn MessageSink);
+    let chat = export_chat(job, tdlib, &out, sink, &mut progress)?;
     if let Some(writer) = json_writer {
         writer.finish()?;
     }
     Ok(Summary {
         folder: folder.to_path_buf(),
-        messages: total,
-        files,
-        skipped,
-        pages,
+        messages: chat.messages,
+        files: chat.files,
+        skipped: chat.skipped,
+        pages: chat.pages,
     })
 }

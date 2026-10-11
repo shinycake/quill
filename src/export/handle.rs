@@ -1,5 +1,7 @@
-//! The running export as the session sees it: a worker thread plus the two
+//! A running export as the session sees it: a worker thread plus the two
 //! channels the connect driver pumps (requests out to TDLib, answers back).
+//! [`WorkerLink`] is the session's end, shared by the chat export here and
+//! the account export (`account/handle.rs`).
 use super::settings::ExportSettings;
 use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
 use crate::ids::RequestId;
@@ -10,8 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-/// Blocks the worker on channels the driver services from the poll loop.
-struct ChannelTdlib {
+/// The worker's end: blocks on channels the driver services from the poll
+/// loop.
+pub(crate) struct ChannelTdlib {
     requests: mpsc::Sender<Value>,
     replies: mpsc::Receiver<Value>,
     cancelled: Arc<AtomicBool>,
@@ -49,67 +52,34 @@ impl Tdlib for ChannelTdlib {
     }
 }
 
-pub struct ChatExport {
+/// The session's end of a worker: its next request, the one the driver
+/// sent and awaits, and the cancel flag.
+pub struct WorkerLink {
     requests: mpsc::Receiver<Value>,
     replies: mpsc::Sender<Value>,
     /// The request the driver sent and awaits an answer for.
     pub pending: Option<RequestId>,
-    progress: Arc<Mutex<Progress>>,
     cancelled: Arc<AtomicBool>,
-    pub folder: PathBuf,
-    pub title: String,
 }
 
-impl ChatExport {
-    /// Create the output folder and start the worker thread.
-    pub fn start(settings: ExportSettings, files_root: PathBuf) -> io::Result<Self> {
-        let parent = settings.dir.canonicalize()?;
-        let now = crate::local_time::civil_local(crate::local_time::now_unix());
-        let stamp = format!("{:04}-{:02}-{:02}", now.year, now.month, now.day);
-        let folder = create_folder(&parent, &settings.title, &stamp)?;
+impl WorkerLink {
+    /// A connected pair: the session's end and the worker's.
+    pub(crate) fn pair() -> (Self, ChannelTdlib) {
         let (request_tx, requests) = mpsc::channel();
         let (replies, reply_rx) = mpsc::channel();
-        let progress = Arc::new(Mutex::new(Progress::starting()));
         let cancelled = Arc::new(AtomicBool::new(false));
-        let title = settings.title.clone();
-        let worker_progress = progress.clone();
-        let worker_cancelled = cancelled.clone();
-        let worker_folder = folder.clone();
-        std::thread::spawn(move || {
-            let mut tdlib = ChannelTdlib {
-                requests: request_tx,
-                replies: reply_rx,
-                cancelled: worker_cancelled,
-            };
-            let report = |progress: Progress| {
-                if let Ok(mut slot) = worker_progress.lock() {
-                    *slot = progress;
-                }
-            };
-            let job = Job {
-                settings: &settings,
-                files_root: &files_root,
-                offset_at: &crate::local_time::utc_offset_at,
-                report: &report,
-            };
-            let last = match run(&job, &mut tdlib, &worker_folder) {
-                Ok(summary) => Stage::Finished(summary),
-                Err(ExportError::Cancelled) => Stage::Cancelled,
-                Err(err) => Stage::Failed(err.to_string()),
-            };
-            if let Ok(mut slot) = worker_progress.lock() {
-                slot.stage = last;
-            }
-        });
-        Ok(Self {
+        let worker = ChannelTdlib {
+            requests: request_tx,
+            replies: reply_rx,
+            cancelled: cancelled.clone(),
+        };
+        let link = Self {
             requests,
             replies,
             pending: None,
-            progress,
             cancelled,
-            folder,
-            title,
-        })
+        };
+        (link, worker)
     }
 
     /// The next request for TDLib, if the worker has one waiting.
@@ -133,6 +103,67 @@ impl ChatExport {
         );
     }
 
+    /// Ask the worker to stop. It does so at its next step.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for WorkerLink {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
+pub struct ChatExport {
+    pub link: WorkerLink,
+    progress: Arc<Mutex<Progress>>,
+    pub folder: PathBuf,
+    pub title: String,
+}
+
+impl ChatExport {
+    /// Create the output folder and start the worker thread.
+    pub fn start(settings: ExportSettings, files_root: PathBuf) -> io::Result<Self> {
+        let parent = settings.dir.canonicalize()?;
+        let now = crate::local_time::civil_local(crate::local_time::now_unix());
+        let stamp = format!("{:04}-{:02}-{:02}", now.year, now.month, now.day);
+        let folder = create_folder(&parent, &settings.title, &stamp)?;
+        let (link, mut tdlib) = WorkerLink::pair();
+        let progress = Arc::new(Mutex::new(Progress::starting()));
+        let title = settings.title.clone();
+        let worker_progress = progress.clone();
+        let worker_folder = folder.clone();
+        std::thread::spawn(move || {
+            let report = |progress: Progress| {
+                if let Ok(mut slot) = worker_progress.lock() {
+                    *slot = progress;
+                }
+            };
+            let job = Job {
+                settings: &settings,
+                files_root: &files_root,
+                offset_at: &crate::local_time::utc_offset_at,
+                report: &report,
+                me: None,
+            };
+            let last = match run(&job, &mut tdlib, &worker_folder) {
+                Ok(summary) => Stage::Finished(summary),
+                Err(ExportError::Cancelled) => Stage::Cancelled,
+                Err(err) => Stage::Failed(err.to_string()),
+            };
+            if let Ok(mut slot) = worker_progress.lock() {
+                slot.stage = last;
+            }
+        });
+        Ok(Self {
+            link,
+            progress,
+            folder,
+            title,
+        })
+    }
+
     pub fn progress(&self) -> Progress {
         self.progress
             .lock()
@@ -142,12 +173,6 @@ impl ChatExport {
 
     /// Ask the worker to stop. It does so at its next step.
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-    }
-}
-
-impl Drop for ChatExport {
-    fn drop(&mut self) {
-        self.cancel();
+        self.link.cancel();
     }
 }

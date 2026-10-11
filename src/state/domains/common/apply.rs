@@ -18,12 +18,12 @@ impl Session {
                     && pending.purpose == RequestPurpose::ExportAccount
                     && let Some(export) = self.settings.account_export.as_mut()
                 {
-                    export.reply(pending.id, value);
+                    export.link.reply(pending.id, value);
                 } else if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::ExportChat
                     && let Some(export) = self.settings.chat_export.as_mut()
                 {
-                    export.reply(pending.id, value);
+                    export.link.reply(pending.id, value);
                 }
             }
             // MED4: `updateOption` (schema:10926). Only

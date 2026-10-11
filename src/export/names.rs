@@ -120,8 +120,16 @@ impl Namer {
         self.unique(media.kind.folder(), &name)
     }
 
+    /// Where the preview image of the file saved at `main` goes: next to
+    /// it, as tdesktop's `<path>_thumb.jpg`.
+    pub fn thumb_path(&mut self, main: &str) -> String {
+        let path = format!("{main}_thumb.jpg");
+        self.used.insert(path.to_lowercase());
+        path
+    }
+
     /// `folder/name`, or `folder/name (2)` style when taken.
-    fn unique(&mut self, folder: &str, name: &str) -> String {
+    pub fn unique(&mut self, folder: &str, name: &str) -> String {
         let (stem, ext) = match name.rfind('.') {
             Some(dot) if dot > 0 => name.split_at(dot),
             _ => (name, ""),
@@ -149,7 +157,24 @@ mod tests {
             mime: mime.into(),
             duration: 0,
             label: String::new(),
+            width: 0,
+            height: 0,
+            thumb: None,
         }
+    }
+
+    #[test]
+    fn thumbnails_sit_next_to_their_file() {
+        let mut namer = Namer::default();
+        let video = media(MediaKind::Video, "clip.mp4", "video/mp4");
+        let main = namer.path(&video, 0, 0, "");
+        assert_eq!(namer.thumb_path(&main), "video_files/clip.mp4_thumb.jpg");
+        // A file literally named like the thumbnail can't take its place.
+        let clash = media(MediaKind::Video, "clip.mp4_thumb.jpg", "");
+        assert_eq!(
+            namer.path(&clash, 0, 0, ""),
+            "video_files/clip.mp4_thumb (2).jpg"
+        );
     }
 
     #[test]
