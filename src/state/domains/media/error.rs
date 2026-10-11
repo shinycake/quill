@@ -30,6 +30,29 @@ impl Session {
                 call_request_error_line(err, "Could not load shared media"),
             );
         }
+        // The gallery's Stories / Gifts / Playlist tabs load from their
+        // own requests.
+        if let Some(purpose) = pending.map(|p| p.purpose)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            let tab = match purpose {
+                RequestPurpose::GetChatPostedToChatPageStories => Some(SharedMediaTab::Stories),
+                RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. }) => {
+                    Some(SharedMediaTab::Gifts)
+                }
+                RequestPurpose::Media(MediaPurpose::GetProfileAudios { .. }) => {
+                    Some(SharedMediaTab::SavedMusic)
+                }
+                _ => None,
+            };
+            if let Some(tab) = tab {
+                self.fail_profile_tab(
+                    chat_id,
+                    tab,
+                    call_request_error_line(err, "Could not load this tab"),
+                );
+            }
+        }
         if let Some(RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)

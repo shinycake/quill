@@ -286,6 +286,7 @@ mod share_box_ui;
 mod share_content_ui;
 mod shared_media;
 mod shared_media_list;
+mod shared_media_profile;
 mod shell;
 mod shortcuts;
 mod showcase_demo;

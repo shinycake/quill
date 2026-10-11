@@ -156,6 +156,13 @@ impl Session {
             }
             PaymentsPayload::ReceivedGifts(page) => {
                 if let Some(p) = pending
+                    && matches!(
+                        p.purpose,
+                        RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. })
+                    )
+                {
+                    self.apply_profile_gifts(page, p);
+                } else if let Some(p) = pending
                     && p.purpose == RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)
                 {
                     let files: Vec<ParsedFile> = page

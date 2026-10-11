@@ -37,6 +37,7 @@ mod send_permissions;
 mod service_preview;
 mod sessions;
 mod shared_media;
+mod shared_media_profile;
 mod similar_strip;
 mod stickers;
 mod stories;

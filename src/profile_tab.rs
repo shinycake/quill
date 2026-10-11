@@ -3,8 +3,7 @@
 //! tdesktop keeps this as `main_profile_tab` on the user and channel
 //! (`data_user.cpp`, `info_profile_tabs_host.cpp`): a profile opens on that
 //! tab when the peer chose one. Quill's profile shows the shared-media
-//! gallery for the media-like tabs; Posts and Gifts have no gallery tab here
-//! yet, so they fall back to the default tab.
+//! gallery for every tab: Posts opens the Stories tab, Gifts the Gifts tab.
 use crate::state::SharedMediaTab;
 use serde_json::Value;
 
@@ -72,11 +71,11 @@ impl ProfileTab {
         }
     }
 
-    /// The shared-media gallery tab that shows this profile tab, if Quill
-    /// has one.
+    /// The shared-media gallery tab that shows this profile tab.
     pub fn shared_media_tab(self) -> Option<SharedMediaTab> {
         match self {
-            ProfileTab::Posts | ProfileTab::Gifts => None,
+            ProfileTab::Posts => Some(SharedMediaTab::Stories),
+            ProfileTab::Gifts => Some(SharedMediaTab::Gifts),
             ProfileTab::Media => Some(SharedMediaTab::Media),
             ProfileTab::Files => Some(SharedMediaTab::Files),
             ProfileTab::Links => Some(SharedMediaTab::Links),
@@ -112,9 +111,18 @@ mod tests {
     }
 
     #[test]
-    fn gallery_mapping_skips_posts_and_gifts() {
-        assert_eq!(ProfileTab::Posts.shared_media_tab(), None);
-        assert_eq!(ProfileTab::Gifts.shared_media_tab(), None);
+    fn every_profile_tab_has_a_gallery_tab() {
+        for tab in ProfileTab::ALL {
+            assert!(tab.shared_media_tab().is_some(), "{tab:?}");
+        }
+        assert_eq!(
+            ProfileTab::Posts.shared_media_tab(),
+            Some(SharedMediaTab::Stories)
+        );
+        assert_eq!(
+            ProfileTab::Gifts.shared_media_tab(),
+            Some(SharedMediaTab::Gifts)
+        );
         assert_eq!(
             ProfileTab::Voice.shared_media_tab(),
             Some(SharedMediaTab::Voice)

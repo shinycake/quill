@@ -197,6 +197,9 @@ impl Session {
                         entry.pinned_story_ids = pinned_story_ids;
                     }
                     self.clear_story_page_op(RequestPurpose::GetChatPostedToChatPageStories);
+                    // The shared-media gallery's Stories tab lists the same
+                    // chat-page stories.
+                    self.apply_profile_stories(chat_id, total_count);
                 }
             }
             _ => {}

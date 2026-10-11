@@ -8,8 +8,9 @@ use super::pressable::PressableDiv;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::state::{SharedMediaTab, calendar_media, month_sections};
+use quill::state::{SharedMediaAction, SharedMediaTab, calendar_media, month_sections};
 
 impl QuillApp {
     /// The `Ready` body of a tab: items under their month headers.
@@ -48,50 +49,72 @@ impl QuillApp {
                 );
             }
             let message_id = item.message_id;
+            let action = item.action;
+            let is_message = action == SharedMediaAction::Message;
+            let clickable = action != SharedMediaAction::Audio;
+            let item_ix = if is_message {
+                message_id.0 as u64
+            } else {
+                index as u64
+            };
+            let row = div()
+                .id(("shared-media-item", item_ix))
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .role(gpui_kit::Role::Button)
+                .aria_label(if is_message {
+                    format!("Open shared media message {}", message_id.0)
+                } else {
+                    item.label.clone()
+                })
+                .tab_index(0)
+                .when(clickable, |row| row.cursor_pointer().pressable(cx.theme()))
+                .child(div().text_lg().child(item.glyph))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_sm()
+                        .text_color(cx.theme().foreground)
+                        .child(item.label.clone()),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.activate_shared_media_item(action, message_id, cx);
+                }));
+            // Telegram Desktop's "Go To Message" on a shared media item.
+            list = list.child(if is_message {
+                row.context_menu({
+                    let owner = cx.entity().downgrade();
+                    move |menu, _, _| {
+                        let owner = owner.clone();
+                        menu.item(
+                            PopupMenuItem::new("Go To Message").on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.jump_to_shared_media_item_ui(message_id, cx);
+                                });
+                            }),
+                        )
+                    }
+                })
+                .into_any_element()
+            } else {
+                row.into_any_element()
+            });
+        }
+        if state.can_load_more() {
             list = list.child(
-                div()
-                    .id(("shared-media-item", message_id.0 as u64))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_3()
-                    .py_2()
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Open shared media message {}", message_id.0))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .child(div().text_lg().child(item.glyph))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_sm()
-                            .text_color(cx.theme().foreground)
-                            .child(item.label.clone()),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        // Photos, videos and GIFs open the viewer over this
-                        // list; everything else jumps to the message.
-                        if !this.open_shared_media_viewer(message_id, cx) {
-                            this.jump_to_shared_media_item_ui(message_id, cx);
-                        }
-                    }))
-                    // Telegram Desktop's "Go To Message" on a shared media
-                    // item.
-                    .context_menu({
-                        let owner = cx.entity().downgrade();
-                        move |menu, _, _| {
-                            let owner = owner.clone();
-                            menu.item(PopupMenuItem::new("Go To Message").on_click(
-                                move |_, _, cx| {
-                                    let _ = owner.update(cx, |this, cx| {
-                                        this.jump_to_shared_media_item_ui(message_id, cx);
-                                    });
-                                },
-                            ))
-                        }
-                    }),
+                div().flex().justify_center().py_2().child(
+                    Button::new(("shared-media-load-more", tab.index() as u64))
+                        .ghost()
+                        .label("Load more")
+                        .accessibility_label("Load more shared media")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.load_more_shared_media_ui(tab, cx);
+                        })),
+                ),
             );
         }
         list.into_any_element()

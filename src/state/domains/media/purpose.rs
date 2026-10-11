@@ -18,6 +18,16 @@ pub enum MediaPurpose {
         tab: SharedMediaTab,
         generation: u64,
     },
+    /// The gallery's Gifts tab: `getReceivedGifts` for the open chat's
+    /// user or channel. Response is `receivedGifts`.
+    GetProfileGifts {
+        append: bool,
+    },
+    /// The gallery's Playlist tab: `getUserProfileAudios`. Response is
+    /// `audios`.
+    GetProfileAudios {
+        append: bool,
+    },
     /// "Cancel Upload": `deleteMessages` on a message still being sent.
     CancelUpload,
     /// `getMapThumbnailFile` for a location or venue message. Response is

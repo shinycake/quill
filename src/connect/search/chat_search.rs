@@ -38,6 +38,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .open_for_tab(chat_id, initial);
         if !reopening {
             self.fetch_shared_media(tab)?;
+            self.fetch_profile_tabs()?;
         }
         Ok(true)
     }
@@ -61,6 +62,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let Some(filter) = tab.filter_constructor() else {
+            return self.fetch_profile_tab(tab, false);
+        };
         let Some(chat_id) = self.session.media.shared_media.chat_id else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -69,7 +73,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetSharedMedia { tab, generation },
             Some(chat_id),
         );
-        let filter = search_messages_filter_json(tab.filter_constructor());
+        let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,
             chat_id,
@@ -102,6 +106,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let Some(filter) = tab.filter_constructor() else {
+            return self.fetch_profile_tab(tab, true);
+        };
         let Some(chat_id) = self.session.media.shared_media.chat_id else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -114,7 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation }),
             Some(chat_id),
         );
-        let filter = search_messages_filter_json(tab.filter_constructor());
+        let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,
             chat_id,

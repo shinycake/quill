@@ -55,6 +55,7 @@ mod privacy_data;
 mod profile;
 mod profile_panels;
 mod profile_photo_sources;
+mod profile_tabs;
 mod proxy;
 mod search;
 mod secret_chats;
