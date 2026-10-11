@@ -74,6 +74,8 @@ pub struct PaymentsState {
     pub bank_card: Option<BankCardLookup>,
     /// The gift code link whose box is open.
     pub gift_code: Option<GiftCodeLookup>,
+    /// Giveaway lookups, payment options and prepaid launches.
+    pub giveaway: GiveawayState,
 }
 
 /// A tapped bank card number and the lookup's progress.
@@ -113,6 +115,7 @@ impl PaymentsState {
             premium_option: None,
             bank_card: None,
             gift_code: None,
+            giveaway: GiveawayState::default(),
         }
     }
 }

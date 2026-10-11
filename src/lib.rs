@@ -51,6 +51,7 @@ pub mod folders;
 pub mod font_choice;
 pub mod force_reply;
 pub mod game_share;
+pub mod giveaway;
 pub mod icon_badge;
 pub mod ids;
 pub mod key_fingerprint;

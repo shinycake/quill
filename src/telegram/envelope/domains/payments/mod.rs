@@ -38,6 +38,12 @@ pub enum PaymentsPayload {
     BankCardInfo(BankCardInfoData),
     /// `premiumGiftCodeInfo` — the `checkPremiumGiftCode` answer.
     GiftCodeInfo(GiftCodeInfoData),
+    /// `giveawayInfoOngoing` / `giveawayInfoCompleted` — the `getGiveawayInfo` answer.
+    GiveawayInfo(GiveawayInfoData),
+    /// `premiumGiveawayPaymentOptions`.
+    PremiumGiveawayOptions(Vec<PremiumGiveawayOption>),
+    /// `starGiveawayPaymentOptions`.
+    StarGiveawayOptions(Vec<StarGiveawayOption>),
     /// `updateOwnedStarCount`: the signed-in user's Stars balance changed.
     UpdateOwnedStarCount(crate::premium_hub::StarAmount),
 }

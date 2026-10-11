@@ -34,6 +34,8 @@ pub struct GiftCard {
     pub facts: Vec<(String, String)>,
     /// `received_gift_id` of a received gift (empty otherwise).
     pub received_gift_id: String,
+    /// What the "Learn more" box of a giveaway card needs.
+    pub giveaway: Option<GiveawaySummary>,
 }
 
 fn str_of(value: &Value, key: &str) -> String {
@@ -102,6 +104,7 @@ pub(crate) fn build_gift_card(
         backdrop: None,
         facts: Vec::new(),
         received_gift_id: String::new(),
+        giveaway: None,
     };
     match kind {
         "messageGift" => {
@@ -215,6 +218,7 @@ pub(crate) fn build_gift_card(
                 .map(|p| str_of(p, "prize_description"))
                 .unwrap_or_default();
             card.sticker = sticker_of(value.get("sticker"), files);
+            card.giveaway = Some(GiveawaySummary::parse_start(value));
         }
         "messageGiveawayWinners" => {
             card.kind = GiftCardKind::GiveawayWinners;
@@ -225,6 +229,7 @@ pub(crate) fn build_gift_card(
             if unclaimed > 0 {
                 card.facts.push(("Unclaimed".into(), unclaimed.to_string()));
             }
+            card.giveaway = Some(GiveawaySummary::parse_results(value));
         }
         "messageGiveawayPrizeStars" => {
             card.kind = GiftCardKind::Stars;

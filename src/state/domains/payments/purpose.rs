@@ -70,6 +70,17 @@ pub enum PaymentsPurpose {
     CheckPremiumGiftCode,
     /// `applyPremiumGiftCode`, sent only on the Apply button. Response is `ok`.
     ApplyPremiumGiftCode,
+    /// `getGiveawayInfo` for the "About this giveaway" box. Response is
+    /// `giveawayInfoOngoing` or `giveawayInfoCompleted`.
+    GetGiveawayInfo,
+    /// `getPremiumGiveawayPaymentOptions`. Response is
+    /// `premiumGiveawayPaymentOptions`.
+    GetPremiumGiveawayOptions,
+    /// `getStarGiveawayPaymentOptions`. Response is
+    /// `starGiveawayPaymentOptions`.
+    GetStarGiveawayOptions,
+    /// `launchPrepaidGiveaway`, sent only after a confirmation. Response is `ok`.
+    LaunchPrepaidGiveaway,
 }
 
 flat_purposes!(Payments(PaymentsPurpose) {
@@ -90,4 +101,8 @@ flat_purposes!(Payments(PaymentsPurpose) {
     GetBankCardInfo,
     CheckPremiumGiftCode,
     ApplyPremiumGiftCode,
+    GetGiveawayInfo,
+    GetPremiumGiveawayOptions,
+    GetStarGiveawayOptions,
+    LaunchPrepaidGiveaway,
 });

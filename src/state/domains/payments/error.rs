@@ -47,6 +47,12 @@ impl Session {
             Some(RequestPurpose::CheckPremiumGiftCode | RequestPurpose::ApplyPremiumGiftCode) => {
                 self.apply_gift_code_error(err, pending);
             }
+            Some(
+                RequestPurpose::GetGiveawayInfo
+                | RequestPurpose::GetPremiumGiveawayOptions
+                | RequestPurpose::GetStarGiveawayOptions
+                | RequestPurpose::LaunchPrepaidGiveaway,
+            ) => self.apply_giveaway_error(err, pending),
             Some(RequestPurpose::GetGiftTextLimit) => {
                 self.payments.gift_text_length_max = None;
             }
