@@ -1009,7 +1009,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Large emoji: send a lone emoji as a big glyph, with a Chat settings toggle <!-- parity:settings-large-emoji -->
 - [ ] "Pull to next channel" chat setting <!-- parity:settings-pull-next-channel -->
 - [x] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
-- [ ] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
+- [x] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
 - [x] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
 - [ ] Profile photo from camera, emoji avatar builder and video avatar with frame choice <!-- parity:settings-photo-sources -->
 - [ ] Profile music (saved music) management <!-- parity:settings-profile-music -->
