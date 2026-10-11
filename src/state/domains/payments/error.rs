@@ -53,6 +53,11 @@ impl Session {
                 | RequestPurpose::GetStarGiveawayOptions
                 | RequestPurpose::LaunchPrepaidGiveaway,
             ) => self.apply_giveaway_error(err, pending),
+            Some(RequestPurpose::GetStarGiftOptions) => {
+                let gift = &mut self.payments.stars_gift;
+                gift.loading = false;
+                gift.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
+            }
             Some(RequestPurpose::GetStarPackOptions) => {
                 let packs = &mut self.payments.star_packs;
                 packs.loading = false;

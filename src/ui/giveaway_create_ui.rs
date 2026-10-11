@@ -9,22 +9,19 @@
 //! (`ui/invoice_checkout.rs`); the giveaway is created when it is paid.
 
 use super::app::QuillApp;
-use super::giveaway_info_ui::day_text;
-use super::giveaway_state::GiveawayForm;
+use super::giveaway_state::{GiveawayForm, GiveawayPage};
 use super::link_info_boxes::finish;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_base::{Disableable, StyledExt};
 use gpui_kit::component::button::*;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::switch::Switch;
+use gpui_kit::component::input::InputState;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::giveaway::{
-    ADDITIONAL_CHATS_MAX, GiveawayDraft, GiveawayKind, PERIOD_MAX_SECS, PRIZE_DESCRIPTION_MAX,
-    premium_options_for, premium_winner_counts, settle_premium, settle_stars,
+    GiveawayDraft, GiveawayKind, premium_options_for, premium_winner_counts,
+    settle_gift_code_months, settle_premium, settle_stars,
 };
 use quill::ids::ChatId;
 use quill::local_time::now_unix;
@@ -58,7 +55,7 @@ pub(super) fn prepaid_summary(prize: GiveawayPrize, winners: i32) -> String {
 }
 
 /// "12 boosts" / "1 boost".
-fn boosts_text(count: i32) -> String {
+pub(super) fn boosts_text(count: i32) -> String {
     if count == 1 {
         "1 boost".into()
     } else {
@@ -66,7 +63,7 @@ fn boosts_text(count: i32) -> String {
     }
 }
 
-fn choice(id: impl Into<ElementId>, label: String, selected: bool) -> Button {
+pub(super) fn choice(id: impl Into<ElementId>, label: String, selected: bool) -> Button {
     let button = Button::new(id).label(label).small();
     if selected {
         button.primary()
@@ -75,7 +72,7 @@ fn choice(id: impl Into<ElementId>, label: String, selected: bool) -> Button {
     }
 }
 
-fn section_title(text: &'static str) -> Div {
+pub(super) fn section_title(text: &'static str) -> Div {
     div()
         .pt_3()
         .text_xs()
@@ -84,7 +81,7 @@ fn section_title(text: &'static str) -> Div {
         .child(text)
 }
 
-fn about_line(text: impl Into<SharedString>) -> Div {
+pub(super) fn about_line(text: impl Into<SharedString>) -> Div {
     div().text_xs().text_color(text_muted()).child(text.into())
 }
 
@@ -115,6 +112,7 @@ impl QuillApp {
             prize_input,
             note: None,
             confirming: false,
+            page: GiveawayPage::Form,
         });
         cx.notify();
     }
@@ -146,12 +144,19 @@ impl QuillApp {
                 GiveawayKind::Premium => settle_premium(&mut draft, &options.premium),
                 GiveawayKind::Stars => settle_stars(&mut draft, &options.stars),
             }
+            if draft.is_specific_users() {
+                settle_gift_code_months(&mut draft, &options.premium);
+            }
         }
         Some(draft)
     }
 
     /// Change the draft through `edit`, then settle it again.
-    fn edit_giveaway(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut GiveawayDraft)) {
+    pub(super) fn edit_giveaway(
+        &mut self,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut GiveawayDraft),
+    ) {
         let Some(mut draft) = self.settled_draft() else {
             return;
         };
@@ -163,6 +168,9 @@ impl QuillApp {
                 GiveawayKind::Premium => settle_premium(&mut draft, &options.premium),
                 GiveawayKind::Stars => settle_stars(&mut draft, &options.stars),
             }
+            if draft.is_specific_users() {
+                settle_gift_code_months(&mut draft, &options.premium);
+            }
         }
         if let Some(form) = self.giveaway.form.as_mut() {
             form.draft = draft;
@@ -171,7 +179,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn toggle_giveaway_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+    pub(super) fn toggle_giveaway_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
         let mut refused = None;
         self.edit_giveaway(cx, |draft| {
             refused = draft.toggle_chat(chat_id).err();
@@ -225,7 +233,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn giveaway_group(session: &Session, chat_id: i64) -> bool {
+    pub(super) fn giveaway_group(session: &Session, chat_id: i64) -> bool {
         session.chats.get(&chat_id).is_some_and(|chat| {
             matches!(
                 chat.kind,
@@ -293,6 +301,9 @@ impl QuillApp {
                     "Premium giveaways are not available right now.".to_string()
                 });
                 return section.child(about_line(error));
+            }
+            if draft.is_specific_users() {
+                return self.giveaway_gift_code_months(section, draft, options, cx);
             }
             section = section.child(section_title("Quantity of prizes"));
             let mut counts = div().flex().flex_wrap().gap_1();
@@ -394,6 +405,9 @@ impl QuillApp {
         if draft.prepaid.is_some() {
             return None;
         }
+        if draft.is_specific_users() {
+            return Self::gift_code_price_line(draft, options);
+        }
         match draft.kind {
             GiveawayKind::Premium => options
                 .premium
@@ -420,7 +434,6 @@ impl QuillApp {
             .get(&draft.boosted_chat_id)
             .map(|c| c.title.clone())
             .unwrap_or_else(|| "this chat".into());
-        let now = now_unix() as i32;
         let boosts = draft.boost_count(&options.stars);
 
         if giveaway.launch == GiveawayLaunch::Launched {
@@ -445,6 +458,9 @@ impl QuillApp {
                 .into_any_element();
         }
 
+        if form.page != GiveawayPage::Form {
+            return self.giveaway_pick_page(form, &draft, cx);
+        }
         let mut body = div().flex().flex_col().gap_1();
         body = body.child(about_line(match (draft.kind, group) {
             (GiveawayKind::Stars, true) => {
@@ -459,149 +475,16 @@ impl QuillApp {
             }
         }));
         body = body.child(self.giveaway_prize_section(&draft, options, cx));
+        body = self.giveaway_award_row(body, &draft, options, cx);
 
-        // Channels.
-        body = body
-            .child(section_title("Channels included in the giveaway"))
-            .child(div().text_sm().child(format!(
+        if draft.is_specific_users() {
+            body = body.child(about_line(format!(
                 "{chat_name}: this {place} will receive {}",
                 boosts_text(boosts)
             )));
-        let mut others: Vec<(i64, String)> = session
-            .chats
-            .iter()
-            .filter(|(id, chat)| {
-                **id != draft.boosted_chat_id
-                    && matches!(chat.kind, ChatKind::Supergroup { .. })
-                    && !chat.title.is_empty()
-            })
-            .map(|(id, chat)| (*id, chat.title.clone()))
-            .collect();
-        others.sort_by_key(|(_, title)| title.to_lowercase());
-        for (id, title) in others.into_iter().take(30) {
-            let ticked = draft.additional_chat_ids.contains(&id);
-            body = body.child(
-                Checkbox::new(("giveaway-chat", id.unsigned_abs()))
-                    .checked(ticked)
-                    .label(title)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_giveaway_chat(id, cx);
-                    })),
-            );
+        } else {
+            body = self.giveaway_random_sections(body, form, &draft, session, cx);
         }
-        body = body.child(about_line(format!(
-            "Choose the groups and channels users need to join to take part in the giveaway. {}/{ADDITIONAL_CHATS_MAX} added.",
-            draft.additional_chat_ids.len()
-        )));
-
-        // Who may take part.
-        let who = if group { "members" } else { "subscribers" };
-        body = body
-            .child(section_title("Users eligible for the giveaway"))
-            .child(
-                div()
-                    .flex()
-                    .gap_1()
-                    .child(
-                        choice(
-                            "giveaway-eligible-all",
-                            format!("All {who}"),
-                            !draft.only_new_members,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.edit_giveaway(cx, |d| d.only_new_members = false);
-                        })),
-                    )
-                    .child(
-                        choice(
-                            "giveaway-eligible-new",
-                            format!("Only new {who}"),
-                            draft.only_new_members,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.edit_giveaway(cx, |d| d.only_new_members = true);
-                        })),
-                    ),
-            )
-            .child(about_line(format!(
-                "Choose if you want to limit the giveaway only to those who joined the {place} after the giveaway started."
-            )));
-
-        // Additional prize.
-        body = body
-            .child(section_title("Additional prizes"))
-            .child(Input::new(&form.prize_input).aria_label("Additional prize"))
-            .child(about_line(format!(
-                "Turn this on if you want to give the winners your own prizes in addition to {}. Up to {PRIZE_DESCRIPTION_MAX} characters.",
-                if draft.kind == GiveawayKind::Stars {
-                    "Stars"
-                } else {
-                    "Premium subscriptions"
-                }
-            )));
-
-        // End date.
-        let days = draft.days_ahead(now);
-        let max_days = PERIOD_MAX_SECS / 86_400;
-        body = body
-            .child(section_title("Date when giveaway ends"))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new("giveaway-days-less")
-                            .label("−")
-                            .small()
-                            .ghost()
-                            .disabled(days <= 1)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.edit_giveaway(cx, |d| d.set_days_ahead(now, days - 1));
-                            })),
-                    )
-                    .child(div().id("giveaway-date").text_sm().child(format!(
-                        "{} · in {} day{}",
-                        day_text(draft.selection_date),
-                        days,
-                        if days == 1 { "" } else { "s" }
-                    )))
-                    .child(
-                        Button::new("giveaway-days-more")
-                            .label("+")
-                            .small()
-                            .ghost()
-                            .disabled(days >= max_days)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.edit_giveaway(cx, |d| d.set_days_ahead(now, days + 1));
-                            })),
-                    ),
-            )
-            .child(about_line(format!(
-                "Choose when winners of your {place} will be randomly selected. Up to {max_days} days ahead."
-            )));
-
-        // Show winners.
-        body = body
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .pt_3()
-                    .child(div().text_sm().child("Show winners"))
-                    .child(
-                        Switch::new("giveaway-show-winners")
-                            .checked(draft.has_public_winners)
-                            .accessibility_label("Show winners")
-                            .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                this.edit_giveaway(cx, |d| d.has_public_winners = on);
-                            })),
-                    ),
-            )
-            .child(about_line(
-                "Choose whether to make the list of winners public when the giveaway ends.",
-            ));
 
         // Price and notes.
         if let Some(price) = Self::giveaway_price(&draft, options) {
@@ -666,7 +549,14 @@ impl QuillApp {
                     }))
             };
             let footer = div().flex().justify_end().gap_2();
-            let footer = if launched {
+            let page = form.page;
+            let footer = if page != GiveawayPage::Form {
+                footer.child(
+                    Button::new("giveaway-page-done")
+                        .label("Done")
+                        .on_click(cx.listener(|this, _, _, cx| this.close_giveaway_page(cx))),
+                )
+            } else if launched {
                 footer.child(close("Done"))
             } else if confirming {
                 footer

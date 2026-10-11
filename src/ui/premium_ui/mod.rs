@@ -229,11 +229,12 @@ impl QuillApp {
                     );
                 }
                 body = body.child(star_packs::star_packs_section(session, cx));
+                body = body.child(super::stars_gift_ui::gift_stars_button(cx));
                 body = body.child(
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Buying Stars and withdrawals happen in the Telegram app or @PremiumBot. Quill only shows your balance and history."),
+                        .child("Withdrawals happen in the Telegram app or @PremiumBot. You pay for Stars in the checkout."),
                 );
             }
             dialog

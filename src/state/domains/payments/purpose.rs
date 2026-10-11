@@ -85,6 +85,9 @@ pub enum PaymentsPurpose {
     /// `getStarPaymentOptions` for "Buy more Stars". Response is
     /// `starPaymentOptions`.
     GetStarPackOptions,
+    /// `getStarGiftPaymentOptions` for "Gift Stars". Response is
+    /// `starPaymentOptions`.
+    GetStarGiftOptions,
     /// `addPendingPaidMessageReaction` for a Star reaction tap; the Stars
     /// are rolled back if TDLib refuses.
     AddPendingPaidReaction {
@@ -178,6 +181,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     GetStarGiveawayOptions,
     LaunchPrepaidGiveaway,
     GetStarPackOptions,
+    GetStarGiftOptions,
     GetPaidReactionSenders,
     SetPinnedGifts,
     UpgradeGift,

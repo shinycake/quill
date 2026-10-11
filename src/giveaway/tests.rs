@@ -1,12 +1,14 @@
 use crate::giveaway::{
-    ADDITIONAL_CHATS_MAX, GiveawayDraft, GiveawayFormError, GiveawayKind, GiveawayTextContext,
-    PERIOD_MAX_SECS, PRIZE_DESCRIPTION_MAX, about_text, premium_options_for, premium_winner_counts,
+    ADDITIONAL_CHATS_MAX, COUNTRIES_MAX, GiveawayDraft, GiveawayFormError, GiveawayKind,
+    GiveawayTextContext, PERIOD_MAX_SECS, PRIZE_DESCRIPTION_MAX, about_text, gift_code_months,
+    gift_code_price, premium_options_for, premium_winner_counts, settle_gift_code_months,
     settle_premium, settle_stars,
 };
 use crate::telegram::envelope::{
     GiveawayInfoData, GiveawayParticipantStatus, GiveawayPrize, GiveawaySummary,
     ParsedPrepaidGiveaway, PremiumGiveawayOption, SecretCode, StarGiveawayOption,
 };
+use serde_json::json;
 
 const NOW: i32 = 1_000_000;
 
@@ -337,4 +339,74 @@ fn new_members_prizes_and_groups_change_the_wording() {
         "1 random user that joined News and other listed groups and channels after October 1 at 10:00"
     ));
     assert!(text.paragraphs[1].contains("join channel News and other listed groups"));
+}
+
+#[test]
+fn members_to_award_toggle_up_to_the_limit() {
+    let mut draft = GiveawayDraft::new(-100, None, NOW);
+    assert!(!draft.is_specific_users());
+    assert_eq!(draft.toggle_award_user(5), Ok(()));
+    assert!(draft.is_specific_users());
+    assert_eq!(draft.toggle_award_user(5), Ok(()));
+    assert!(!draft.is_specific_users());
+    for id in 0..ADDITIONAL_CHATS_MAX as i64 {
+        assert_eq!(draft.toggle_award_user(id), Ok(()));
+    }
+    assert_eq!(
+        draft.toggle_award_user(99),
+        Err(GiveawayFormError::TooManyUsers)
+    );
+    // Members only replace a Premium giveaway that is not prepaid.
+    draft.kind = GiveawayKind::Stars;
+    assert!(!draft.is_specific_users());
+}
+
+#[test]
+fn countries_toggle_up_to_the_limit_and_reach_the_parameters() {
+    let mut draft = GiveawayDraft::new(-100, None, NOW);
+    assert_eq!(draft.toggle_country("US"), Ok(()));
+    assert_eq!(draft.toggle_country("DE"), Ok(()));
+    assert_eq!(
+        draft.parameters_json()["country_codes"],
+        json!(["US", "DE"])
+    );
+    assert_eq!(draft.toggle_country("US"), Ok(()));
+    assert_eq!(draft.parameters_json()["country_codes"], json!(["DE"]));
+    for n in 0..COUNTRIES_MAX - 1 {
+        assert_eq!(draft.toggle_country(&format!("C{n}")), Ok(()));
+    }
+    assert_eq!(
+        draft.toggle_country("ZZ"),
+        Err(GiveawayFormError::TooManyCountries)
+    );
+    draft.country_codes.push("ZZ".into());
+    draft.premium_winners = 5;
+    draft.premium_months = 3;
+    assert_eq!(
+        draft.validate(NOW),
+        Err(GiveawayFormError::TooManyCountries)
+    );
+}
+
+#[test]
+fn gift_code_prices_scale_from_the_one_person_price() {
+    let option = |amount, winners, months| PremiumGiveawayOption {
+        currency: "USD".into(),
+        amount,
+        winner_count: winners,
+        month_count: months,
+    };
+    let options = vec![option(1500, 5, 3), option(400, 1, 3), option(700, 1, 6)];
+    assert_eq!(gift_code_months(&options), vec![3, 6]);
+    assert_eq!(gift_code_price(&options, 3, 4), Some(("USD".into(), 1600)));
+    assert_eq!(gift_code_price(&options, 6, 2), Some(("USD".into(), 1400)));
+    assert_eq!(gift_code_price(&options, 12, 2), None);
+    assert_eq!(gift_code_price(&options, 3, 0), None);
+    let mut draft = GiveawayDraft::new(-100, None, NOW);
+    draft.premium_months = 9;
+    settle_gift_code_months(&mut draft, &options);
+    assert_eq!(draft.premium_months, 3);
+    draft.premium_months = 6;
+    settle_gift_code_months(&mut draft, &options);
+    assert_eq!(draft.premium_months, 6);
 }

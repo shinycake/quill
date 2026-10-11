@@ -333,3 +333,81 @@ fn an_invoice_link_uses_its_slug_and_a_nameless_one_is_broken() {
     );
     assert_eq!(invoice_link_invoice("  "), None);
 }
+
+#[test]
+fn gifted_stars_name_the_user_and_the_pack() {
+    let invoice = crate::payment_invoice::gifted_stars_invoice(&pack(), 9).unwrap();
+    assert_eq!(
+        invoice.to_json()["purpose"],
+        json!({
+            "@type": "telegramPaymentPurposeGiftedStars",
+            "user_id": 9, "currency": "USD", "amount": 199, "star_count": 100,
+        })
+    );
+    assert_eq!(
+        crate::payment_invoice::gifted_stars_invoice(&pack(), 0),
+        None
+    );
+}
+
+#[test]
+fn a_premium_gift_paid_with_stars_uses_the_stars_currency() {
+    let user = recipient(MessageSender::User { user_id: 77 }, false);
+    let invoice =
+        crate::payment_invoice::premium_gift_stars_invoice(&gift_option(), &user, "Hi", 10)
+            .unwrap();
+    let purpose = invoice.to_json()["purpose"].clone();
+    assert_eq!(purpose["currency"], "XTR");
+    assert_eq!(purpose["amount"], 1000);
+    assert_eq!(purpose["month_count"], 6);
+    assert_eq!(purpose["user_id"], 77);
+    let mut no_stars = gift_option();
+    no_stars.star_count = 0;
+    assert_eq!(
+        crate::payment_invoice::premium_gift_stars_invoice(&no_stars, &user, "", 0),
+        None
+    );
+}
+
+#[test]
+fn chosen_members_get_gift_codes_priced_per_member() {
+    let mut opts = options();
+    opts.premium.push(PremiumGiveawayOption {
+        currency: "USD".into(),
+        amount: 400,
+        winner_count: 1,
+        month_count: 3,
+    });
+    let mut draft = GiveawayDraft::new(-1001, None, NOW);
+    draft.premium_months = 3;
+    draft.award_user_ids = vec![11, 12, 13];
+    let invoice = giveaway_invoice(&draft, &opts).unwrap();
+    assert_eq!(
+        invoice,
+        InputInvoice::Telegram(TelegramPaymentPurpose::PremiumGiftCodes {
+            boosted_chat_id: -1001,
+            currency: "USD".into(),
+            amount: 1200,
+            user_ids: vec![11, 12, 13],
+            month_count: 3,
+            text: String::new(),
+        })
+    );
+    // Without members it is a random giveaway again.
+    draft.award_user_ids.clear();
+    draft.premium_winners = 5;
+    assert!(matches!(
+        giveaway_invoice(&draft, &opts),
+        Some(InputInvoice::Telegram(
+            TelegramPaymentPurpose::PremiumGiveaway { .. }
+        ))
+    ));
+}
+
+#[test]
+fn a_gift_code_for_an_unoffered_duration_makes_no_invoice() {
+    let mut draft = GiveawayDraft::new(-1001, None, NOW);
+    draft.premium_months = 12;
+    draft.award_user_ids = vec![1];
+    assert_eq!(giveaway_invoice(&draft, &options()), None);
+}
