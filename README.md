@@ -936,7 +936,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Premium gift code links offer to apply the code <!-- parity:deeplink-giftcode -->
 - [ ] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
 - [x] addlist links add a shared folder <!-- parity:deeplink-addlist -->
-- [ ] Background and theme links preview and apply them <!-- parity:deeplink-bg-theme -->
+- [ ] Background and theme links preview and apply them (partial: bg/ links done; addtheme/ links blocked: TDLib has no cloud theme support) <!-- parity:deeplink-bg-theme -->
 - [x] +phone links open a chat with that number <!-- parity:deeplink-phone -->
 - [x] ?startgroup and ?startchannel links add a bot to a group or channel <!-- parity:deeplink-startgroup -->
 - [x] Message links with ?thread, ?comment, ?single and topic ids open the right thread <!-- parity:deeplink-thread-comment -->
