@@ -384,7 +384,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Suggestions block: birthdays, set a photo, check phone or password, Premium <!-- parity:chatlist-suggestions -->
 - [x] Story strip context menu: Hide stories, View profile, Mute <!-- parity:chatlist-stories-menu -->
 - [x] Contacts: sort by last seen, Invite friends, search <!-- parity:chatlist-contacts-extras -->
-- [ ] Alphabetical section index bar on long peer lists (contacts, add members) <!-- parity:chatlist-contacts-index -->
+- [x] Alphabetical section index bar on long peer lists (contacts, add members) <!-- parity:chatlist-contacts-index -->
 - [x] Clear all call history from the Calls list <!-- parity:chatlist-clear-calls -->
 - [x] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
 - [ ] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
