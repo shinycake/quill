@@ -76,6 +76,7 @@ pub mod notify_prefs;
 pub mod passcode;
 pub mod peer_badge;
 pub mod phone;
+pub mod phone_suggestion;
 pub mod pin_reorder;
 pub mod pins;
 pub mod platform;

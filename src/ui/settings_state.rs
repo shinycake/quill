@@ -73,6 +73,8 @@ pub(crate) struct SettingsUi {
     pub(super) translate: super::translate_ui::TranslateUi,
     pub(super) update_state: quill::updater::UpdateState,
     pub(super) update_banner_dismissed: bool,
+    /// The "No" answer of the phone-number prompt was chosen: show the note.
+    pub(super) phone_change_note: bool,
 }
 
 impl SettingsUi {
@@ -116,6 +118,7 @@ impl SettingsUi {
                 quill::updater::UpdateState::Idle
             },
             update_banner_dismissed: false,
+            phone_change_note: false,
         }
     }
 }

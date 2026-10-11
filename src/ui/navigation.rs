@@ -646,6 +646,7 @@ impl QuillApp {
                         );
                     }
                     content
+                        .children(app_c.update(cx, |this, cx| this.settings_phone_suggestion(cx)))
                         .child(list)
                         .child(app_c.update(cx, |this, cx| this.settings_help_footer(cx)))
                 },

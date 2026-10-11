@@ -366,3 +366,35 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
     assert!(!f.1.session.chat_list.suggestions.birthdays_hidden);
     cleanup(f);
 }
+
+#[test]
+fn phone_number_suggestion_is_hidden_with_the_phone_action() {
+    use crate::chatlist_suggestions::{ACTION_PHONE, Suggestion};
+    let mut f = fixture();
+    ingest(
+        &mut f,
+        r#"{"@type":"updateSuggestedActions","added_actions":[{"@type":"suggestedActionCheckPhoneNumber"}],"removed_actions":[]}"#,
+    );
+    assert!(
+        f.1.session
+            .chat_list
+            .suggestions
+            .actions
+            .contains(ACTION_PHONE)
+    );
+    f.1.hide_suggestion(&Suggestion::CheckPhone).unwrap();
+    let request = last_request(&f);
+    assert_eq!(request["@type"], "hideSuggestedAction");
+    assert_eq!(
+        request["action"]["@type"],
+        "suggestedActionCheckPhoneNumber"
+    );
+    assert!(
+        !f.1.session
+            .chat_list
+            .suggestions
+            .actions
+            .contains(ACTION_PHONE)
+    );
+    cleanup(f);
+}
