@@ -255,9 +255,12 @@ impl QuillApp {
                 extra_copy: None,
             });
         }
-        if rows.is_empty() {
+        let business_rows = self.business_rows(user_id, cx);
+        if rows.is_empty() && business_rows.is_empty() {
             return None;
         }
+        let fragment_phone =
+            !is_self && quill::business_info::is_fragment_number(&user.phone_number);
         let mut card = div()
             .flex()
             .flex_col()
@@ -308,17 +311,27 @@ impl QuillApp {
                 RowAction::EditNote(user_id) => this.open_edit_contact_dialog(*user_id, window, cx),
             }));
             let extra_copy = row.extra_copy.clone();
+            let fragment_note = fragment_phone && row.id == "info-phone";
             let element = match row.copy {
                 Some(copy) => {
                     let owner = cx.entity().downgrade();
                     tapped
                         .context_menu(move |menu, _, _| {
-                            copy_menu(menu, &owner, std::iter::once(&copy).chain(&extra_copy))
+                            let menu =
+                                copy_menu(menu, &owner, std::iter::once(&copy).chain(&extra_copy));
+                            if fragment_note {
+                                super::profile_business::fragment_note_menu(menu, muted)
+                            } else {
+                                menu
+                            }
                         })
                         .into_any_element()
                 }
                 None => tapped.into_any_element(),
             };
+            card = card.child(element);
+        }
+        for element in business_rows {
             card = card.child(element);
         }
         Some(card.into_any_element())

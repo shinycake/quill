@@ -37,6 +37,8 @@ pub(crate) struct DialogUi {
     pub(super) rating_detail: Option<RatingDetail>,
     /// Phase C2i: comment input for the rating detail card.
     pub(super) rating_comment_input: Entity<TextareaState>,
+    /// Business hours row of a profile: expanded schedule and time zone.
+    pub(super) business_hours: super::profile_business::BusinessHoursUi,
 }
 
 impl DialogUi {
@@ -61,6 +63,7 @@ impl DialogUi {
             saved_tag_dialog: None,
             rating_detail: None,
             rating_comment_input,
+            business_hours: Default::default(),
         }
     }
 }

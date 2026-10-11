@@ -12,6 +12,7 @@ pub mod autoscroll;
 pub mod autostart;
 pub mod bot_invite;
 pub mod bubble_layout;
+pub mod business_info;
 pub mod calls;
 pub mod chat_bottom_bar;
 pub mod chat_export;
