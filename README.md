@@ -657,7 +657,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Mute story audio, pause on hold, arrow keys and Space <!-- parity:stories-keyboard-mute -->
 - [x] Close friends list editor <!-- parity:stories-close-friends-editor -->
 - [x] Hide and unhide a contact's stories <!-- parity:stories-hide-peer -->
-- [ ] Story replies with stickers, emoji or voice <!-- parity:stories-reply-media -->
+- [x] Story replies with stickers, emoji or voice <!-- parity:stories-reply-media -->
 - [x] Search stories by hashtag, location or venue <!-- parity:stories-search -->
 - [x] Story statistics and public forwards <!-- parity:stories-statistics -->
 - [ ] Live story stream playback (deferred: low impact) <!-- parity:stories-live-stream-playback -->
