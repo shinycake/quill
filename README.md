@@ -687,7 +687,6 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Peer-to-peer call relay toggle (getUserPrivacySettingRules / setUserPrivacySettingRules) <!-- parity:calls-p2p -->
 - [x] Less data for calls setting (real TDLib setting `autoDownloadSettings.use_less_data_for_calls` pushed per network via `setAutoDownloadSettings`; one toggle in Call settings drives all three networks, refuses while prefs unseeded so the all-off defaults never silently disable auto-downloads; persisted server-side) <!-- parity:calls-less-data -->
 - [x] Use proxy for calls setting (persisted per-account call_prefs.json; client-side toggle — the TDLib schema has no such option; SOCKS5-only proxy selection for call media wired to the extent the ntgcalls C API allows) <!-- parity:calls-proxy -->
-- [ ] Echo cancellation / noise suppression toggles (partial: ntgcalls defaults only, no settings UI) <!-- parity:calls-audio-fx -->
 - [x] Start video call with working video (video negotiated when a camera exists via `video_wanted`; peer frames flow through the engine callbacks to the video stage — verified in code + screenshot; real camera/peer still unverified) <!-- parity:calls-start-video -->
 - [x] Camera preview (local video tile) in video call (renders latest driver frame as a 160x120 PiP; "Starting camera…" / "Camera off" states when no frame) <!-- parity:calls-camera-preview -->
 - [x] Remote video frames in video call (peer camera as the main tile; Connecting/paused/off state text from `RemoteVideoState`) <!-- parity:calls-remote-video -->
@@ -722,7 +721,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Video chat invite link (`getVideoChatInviteLink` with Copy, `revokeGroupCallInviteLink`; code + demo only, live unverified) <!-- parity:calls-invite-link -->
 - [x] In-call chat messages for group calls (`sendGroupCallMessage` + live `updateNewGroupCallMessage` feed with composer, gated on `can_send_messages`/`are_messages_allowed`; no history getter exists in the schema, so live feed only; code + demo only, live unverified) <!-- parity:calls-group-messages -->
 - [x] Push-to-talk with a shortcut and release delay <!-- parity:calls-push-to-talk -->
-- [ ] Noise suppression toggle in group calls <!-- parity:calls-noise-suppression -->
+- [ ] Noise suppression toggle in group calls (blocked: the prebuilt ntgcalls exposes no audio-processing switch; see docs/decisions/codex-call-audio-controls.md) <!-- parity:calls-noise-suppression -->
 - [x] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
 - [x] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
 - [ ] Screen source chooser with window and screen thumbnails <!-- parity:calls-screen-source-chooser -->
