@@ -21,6 +21,8 @@
 //! text can never inject shell syntax. The reducer never spawns processes;
 //! dispatch runs on UI-thread-spawned worker threads.
 
+pub mod avatar;
+
 use crate::ids::{ChatId, MessageId};
 use crate::telegram::envelope::{ParsedMessage, ReactionNotificationSource, effective_content};
 
@@ -465,32 +467,50 @@ pub struct NotificationCommand {
     pub report_click: bool,
 }
 
-fn linux_notify_send_command(notification: &OsNotification) -> NotificationCommand {
+fn linux_notify_send_command(
+    notification: &OsNotification,
+    icon: Option<&std::path::Path>,
+) -> NotificationCommand {
+    // `--wait` blocks until the notification is dismissed or an action
+    // fires; each `--action=name=Label` prints its name on stdout when the
+    // user picks it ("default" for a click on the body), which the caller
+    // maps to a [`NotificationAction`].
+    let mut args = vec![
+        "--app-name=Quill".to_string(),
+        "--wait".to_string(),
+        "--action=default=Open".to_string(),
+        "--action=reply=Reply".to_string(),
+        "--action=read=Mark as read".to_string(),
+    ];
+    // The sender's circular userpic replaces the app icon; without one the
+    // daemon keeps the app icon that goes with `--app-name=Quill`.
+    if let Some(icon) = icon {
+        args.push(format!("--icon={}", icon.display()));
+    }
+    // `--` ends option parsing so a title like `--action=x=Label` is
+    // treated as the title, not another action button.
+    args.push("--".to_string());
+    args.push(notification.title.clone());
+    args.push(notification.body.clone());
     NotificationCommand {
         program: "notify-send".to_string(),
-        // `--wait` blocks until the notification is dismissed or an action
-        // fires; each `--action=name=Label` prints its name on stdout when
-        // the user picks it ("default" for a click on the body), which the
-        // caller maps to a [`NotificationAction`].
-        args: vec![
-            "--app-name=Quill".to_string(),
-            "--wait".to_string(),
-            "--action=default=Open".to_string(),
-            "--action=reply=Reply".to_string(),
-            "--action=read=Mark as read".to_string(),
-            // `--` ends option parsing so a title like `--action=x=Label`
-            // is treated as the title, not another action button.
-            "--".to_string(),
-            notification.title.clone(),
-            notification.body.clone(),
-        ],
+        args,
         report_click: true,
     }
 }
 
 pub fn build_notification_command(notification: &OsNotification) -> Option<NotificationCommand> {
+    build_notification_command_with_icon(notification, None)
+}
+
+/// Like [`build_notification_command`], with the sender's avatar PNG as the
+/// notification icon (Linux `notify-send --icon`).
+pub fn build_notification_command_with_icon(
+    notification: &OsNotification,
+    icon: Option<&std::path::Path>,
+) -> Option<NotificationCommand> {
     match current_backend() {
-        NotifyBackend::NotifySend => Some(linux_notify_send_command(notification)),
+        NotifyBackend::NotifySend => Some(linux_notify_send_command(notification, icon)),
         NotifyBackend::Native | NotifyBackend::Unsupported => None,
     }
 }

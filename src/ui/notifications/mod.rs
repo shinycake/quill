@@ -859,6 +859,7 @@ fn bridge_lost(stopped: bool, budget_hit: bool, already_lost: bool) -> bool {
     stopped && !budget_hit && !already_lost
 }
 
+mod avatar_icon;
 mod spawn_call_notification;
 
 #[cfg(test)]
