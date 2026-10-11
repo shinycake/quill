@@ -1,0 +1,427 @@
+//! The recipients section of the greeting and away screens and its chat
+//! picker (tdesktop `settings_recipients_helper.cpp` and the business mode
+//! of `edit_filter_chats_list.cpp`: private chats with users, not
+//! yourself, up to 100, plus the chat types).
+
+use super::{MessageKind, PickerDraft, View};
+use crate::ui::app::QuillApp;
+use crate::ui::chat_row::chat_avatar;
+use gpui_kit::assets::IconName;
+use gpui_kit::component::button::*;
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::*;
+use gpui_kit::*;
+use quill::business_settings::{BusinessChats, BusinessRecipients, ChatType, RECIPIENT_CHATS_MAX};
+use quill::folder_picker::{filter_chats, picker_counter};
+use quill::local_path::sandboxed_display_path;
+use quill::telegram::envelope::ChatKind;
+
+const AVATAR: f32 = 28.;
+
+fn type_key(kind: ChatType) -> &'static str {
+    match kind {
+        ChatType::NewChats => "new",
+        ChatType::ExistingChats => "existing",
+        ChatType::Contacts => "contacts",
+        ChatType::NonContacts => "non-contacts",
+    }
+}
+
+impl QuillApp {
+    fn business_recipients(&self, kind: MessageKind) -> Option<&BusinessRecipients> {
+        let d = self.dialogs.business_dialog.as_ref()?;
+        match kind {
+            MessageKind::Greeting => d.greeting.as_ref().map(|g| &g.recipients),
+            MessageKind::Away => d.away.as_ref().map(|a| &a.recipients),
+        }
+    }
+
+    fn business_recipients_mut(&mut self, kind: MessageKind) -> Option<&mut BusinessRecipients> {
+        let d = self.business_mut()?;
+        match kind {
+            MessageKind::Greeting => d.greeting.as_mut().map(|g| &mut g.recipients),
+            MessageKind::Away => d.away.as_mut().map(|a| &mut a.recipients),
+        }
+    }
+
+    /// Private chats with other users, A to Z: what the picker offers.
+    pub(super) fn business_picker_chats(&self) -> Vec<(i64, String)> {
+        let Some(session) = self.session() else {
+            return Vec::new();
+        };
+        let me = session.my_user_id;
+        let mut chats: Vec<(i64, String)> = session
+            .chats
+            .values()
+            .filter(|c| matches!(c.kind, ChatKind::Private { user_id } if Some(user_id.0) != me))
+            .map(|c| (c.id.0, c.title.clone()))
+            .collect();
+        chats.sort_by_key(|c| c.1.to_lowercase());
+        chats
+    }
+
+    fn business_chat_title(&self, chat_id: i64) -> String {
+        self.session()
+            .and_then(|s| s.chats.get(&chat_id))
+            .map_or_else(|| format!("Chat {chat_id}"), |c| c.title.clone())
+    }
+
+    fn business_avatar(&self, chat_id: i64, title: &str) -> AnyElement {
+        let roots = self.media_display_roots();
+        let photo = self
+            .session()
+            .and_then(|s| s.chat_photo_path(quill::ids::ChatId(chat_id)))
+            .and_then(|path| sandboxed_display_path(path, &roots));
+        chat_avatar(title, photo.as_deref(), AVATAR).into_any_element()
+    }
+
+    /// Open the include or exclude picker on a copy of the current list.
+    pub(super) fn open_business_picker(
+        &mut self,
+        target: MessageKind,
+        include: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(current) = self.business_recipients(target) else {
+            return;
+        };
+        let chats = if include {
+            current.included.clone()
+        } else {
+            current.excluded.clone()
+        };
+        let search = super::live_input(window, cx, "Search");
+        if let Some(d) = self.business_mut() {
+            d.picker = Some(PickerDraft {
+                target,
+                include,
+                chats,
+                search,
+            });
+        }
+        self.business_go(View::Picker, window, cx);
+    }
+
+    /// Done in the picker: tdesktop's save rules, then back.
+    pub(super) fn finish_business_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(picker) = self.business_mut().and_then(|d| d.picker.take()) else {
+            return;
+        };
+        if let Some(recipients) = self.business_recipients_mut(picker.target) {
+            if picker.include {
+                recipients.set_included(picker.chats);
+            } else {
+                recipients.set_excluded(picker.chats);
+            }
+        }
+        let back = match picker.target {
+            MessageKind::Greeting => View::Greeting,
+            MessageKind::Away => View::Away,
+        };
+        self.business_go(back, window, cx);
+    }
+
+    pub(super) fn remove_business_entry(
+        &mut self,
+        target: MessageKind,
+        chat: Option<i64>,
+        chat_type: Option<ChatType>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(r) = self.business_recipients_mut(target) {
+            let list = if r.all_but_excluded {
+                &mut r.excluded
+            } else {
+                &mut r.included
+            };
+            if let Some(chat) = chat {
+                list.chat_ids.retain(|id| *id != chat);
+            }
+            if let Some(kind) = chat_type {
+                list.types.set(kind, false);
+            }
+            // tdesktop: an emptied inclusion falls back to "all except".
+            if !r.all_but_excluded && r.included.is_empty() {
+                r.all_but_excluded = true;
+            }
+        }
+        cx.notify();
+    }
+
+    /// "Recipients": the two radios and the chosen chats and types.
+    pub(super) fn business_recipients_section(
+        &self,
+        target: MessageKind,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        let Some(recipients) = self.business_recipients(target).cloned() else {
+            return div().into_any_element();
+        };
+        let key = match target {
+            MessageKind::Greeting => "greeting",
+            MessageKind::Away => "away",
+        };
+        let all = recipients.all_but_excluded;
+        let about = match target {
+            MessageKind::Greeting => {
+                "Select chats or entire chat categories for sending greeting messages."
+            }
+            MessageKind::Away => {
+                "Select chats or entire chat categories for sending an away message."
+            }
+        };
+        let mut section = div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(div().text_sm().font_semibold().child("Recipients"))
+            .child(
+                RadioGroup::vertical(SharedString::from(format!("business-{key}-recipients")))
+                    .selected_index(Some(if all { 0 } else { 1 }))
+                    .child(
+                        Radio::new(SharedString::from(format!("business-{key}-all")))
+                            .label("All 1-to-1 Chats Except..."),
+                    )
+                    .child(
+                        Radio::new(SharedString::from(format!("business-{key}-selected")))
+                            .label("Only Selected Chats"),
+                    )
+                    .on_click(cx.listener(move |this, &ix: &usize, window, cx| {
+                        let included_empty = this
+                            .business_recipients(target)
+                            .is_some_and(|r| r.included.is_empty());
+                        // tdesktop: "Only Selected" with nothing selected
+                        // opens the picker and stays on "all except".
+                        if ix == 1 && included_empty {
+                            this.open_business_picker(target, true, window, cx);
+                            return;
+                        }
+                        if let Some(r) = this.business_recipients_mut(target) {
+                            r.all_but_excluded = ix == 0;
+                        }
+                        cx.notify();
+                    })),
+            );
+        let (title, button, list) = if all {
+            ("Excluded chats", "Exclude Chats", recipients.excluded)
+        } else {
+            ("Included chats", "Select Chats", recipients.included)
+        };
+        section = section
+            .child(
+                div()
+                    .pt_2()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(muted)
+                    .child(title),
+            )
+            .child(
+                div().flex().child(
+                    Button::new(SharedString::from(format!("business-{key}-pick")))
+                        .label(button)
+                        .icon(if all { IconName::Minus } else { IconName::Plus })
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_business_picker(target, !all, window, cx);
+                        })),
+                ),
+            );
+        for kind in list.types.chosen() {
+            section = section.child(self.business_entry_row(
+                target,
+                format!("business-{key}-type-{}", type_key(kind)),
+                kind.label().to_string(),
+                None,
+                Some(kind),
+                cx,
+            ));
+        }
+        for chat_id in list.chat_ids {
+            let title = self.business_chat_title(chat_id);
+            section = section.child(self.business_entry_row(
+                target,
+                format!("business-{key}-chat-{chat_id}"),
+                title,
+                Some(chat_id),
+                None,
+                cx,
+            ));
+        }
+        section
+            .child(div().text_xs().text_color(muted).child(about))
+            .into_any_element()
+    }
+
+    fn business_entry_row(
+        &self,
+        target: MessageKind,
+        id: String,
+        title: String,
+        chat: Option<i64>,
+        chat_type: Option<ChatType>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let avatar = match chat {
+            Some(chat_id) => self.business_avatar(chat_id, &title),
+            None => div()
+                .size(px(AVATAR))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(cx.theme().secondary)
+                .child(Icon::new(IconName::Users).size(px(14.)))
+                .into_any_element(),
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .py_0p5()
+            .child(avatar)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .truncate()
+                    .child(crate::ui::bidi_line::one_line_plain(title.clone())),
+            )
+            .child(
+                Button::new(SharedString::from(id))
+                    .icon(IconName::X)
+                    .ghost()
+                    .small()
+                    .tooltip("Remove")
+                    .accessibility_label(format!("Remove {title}"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.remove_business_entry(target, chat, chat_type, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// The include / exclude picker: chat types, search and chats.
+    pub(super) fn business_picker_body(&self, cx: &mut Context<Self>) -> Div {
+        let muted = cx.theme().muted_foreground;
+        let Some(picker) = self
+            .dialogs
+            .business_dialog
+            .as_ref()
+            .and_then(|d| d.picker.as_ref())
+        else {
+            return div();
+        };
+        let chosen: BusinessChats = picker.chats.clone();
+        let query = picker.search.read(cx).value().to_string();
+        let mut types = div().flex().flex_col().gap_1().child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(muted)
+                .child("Chat types"),
+        );
+        for kind in ChatType::ALL {
+            types = types.child(
+                Checkbox::new(SharedString::from(format!(
+                    "business-pick-type-{}",
+                    type_key(kind)
+                )))
+                .checked(chosen.types.has(kind))
+                .label(kind.label())
+                .on_click(cx.listener(move |this, &on: &bool, _, cx| {
+                    if let Some(p) = this.business_mut().and_then(|d| d.picker.as_mut()) {
+                        p.chats.types.set(kind, on);
+                    }
+                    cx.notify();
+                })),
+            );
+        }
+        let rows = filter_chats(&self.business_picker_chats(), &query);
+        let mut list = div()
+            .id("business-picker-list")
+            .flex()
+            .flex_col()
+            .gap_0p5()
+            .overflow_y_scroll()
+            .max_h(px(280.));
+        if rows.is_empty() {
+            list = list.child(
+                div()
+                    .py_3()
+                    .text_sm()
+                    .text_color(muted)
+                    .child("No chats found."),
+            );
+        }
+        for (chat_id, title) in rows {
+            let ticked = chosen.chat_ids.contains(&chat_id);
+            list = list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .py_0p5()
+                    .child(self.business_avatar(chat_id, &title))
+                    .child(
+                        Checkbox::new(("business-pick-chat", chat_id as u64))
+                            .checked(ticked)
+                            .label(title)
+                            .on_click(cx.listener(move |this, &on: &bool, _, cx| {
+                                if on == ticked {
+                                    return;
+                                }
+                                let added = this
+                                    .business_mut()
+                                    .and_then(|d| d.picker.as_mut())
+                                    .is_some_and(|p| p.chats.toggle_chat(chat_id));
+                                if !added {
+                                    this.business_error(
+                                        format!(
+                                            "You can select up to {RECIPIENT_CHATS_MAX} chats."
+                                        ),
+                                        cx,
+                                    );
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(types)
+            .child(
+                div()
+                    .flex()
+                    .items_baseline()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(muted)
+                            .child("Chats"),
+                    )
+                    .child(
+                        div()
+                            .id("business-picker-counter")
+                            .text_xs()
+                            .text_color(muted)
+                            .child(picker_counter(
+                                chosen.chat_ids.len(),
+                                RECIPIENT_CHATS_MAX as i32,
+                            )),
+                    ),
+            )
+            .child(Input::new(&picker.search).aria_label("Search chats"))
+            .child(list)
+    }
+}

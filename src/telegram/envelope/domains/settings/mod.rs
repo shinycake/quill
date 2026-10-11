@@ -156,4 +156,6 @@ pub enum SettingsPayload {
     },
     /// Quick reply shortcuts and their messages changed.
     QuickReplies(crate::quick_replies::QuickRepliesUpdate),
+    /// `timeZones` — the `getTimeZones` answer, sorted for the picker.
+    TimeZones(Vec<crate::business_settings::TimeZone>),
 }

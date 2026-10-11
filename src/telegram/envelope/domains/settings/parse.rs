@@ -456,6 +456,9 @@ pub(crate) fn parse_settings_payload(
                 .map(|update| EnvelopePayload::Settings(SettingsPayload::QuickReplies(update)))
                 .ok_or(ParseError::MissingField)
         }
+        "timeZones" => Ok(EnvelopePayload::Settings(SettingsPayload::TimeZones(
+            crate::business_settings::parse_time_zones(value),
+        ))),
         _ => return Ok(None),
     };
     payload.map(Some)

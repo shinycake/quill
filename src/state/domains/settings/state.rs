@@ -204,12 +204,15 @@ pub struct SettingsState {
     pub language_link: Option<LanguageLinkLookup>,
     /// Quick reply shortcuts and their messages.
     pub quick_replies: QuickRepliesState,
+    /// Telegram Business settings: time zones and saves in flight.
+    pub business: BusinessSettingsState,
 }
 
 impl SettingsState {
     pub(crate) fn new() -> Self {
         Self {
             quick_replies: QuickRepliesState::default(),
+            business: BusinessSettingsState::default(),
             hide_notification_previews: true,
             inapp_sounds_enabled: true,
             desktop_notifications: true,

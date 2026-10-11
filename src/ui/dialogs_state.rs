@@ -19,6 +19,8 @@ pub(crate) struct DialogUi {
     pub(super) bot_create_dialog: Option<super::bot_create_dialog::BotCreateDialog>,
     /// Settings -> Quick Replies (Telegram Business shortcuts).
     pub(super) quick_replies_dialog: Option<super::quick_replies::QuickRepliesDialog>,
+    /// Settings -> Telegram Business.
+    pub(super) business_dialog: Option<super::business::BusinessDialog>,
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,
@@ -67,6 +69,7 @@ impl DialogUi {
             bot_edit_dialog: None,
             bot_create_dialog: None,
             quick_replies_dialog: None,
+            business_dialog: None,
             edit_profile_dialog: None,
             peer_color_dialog: None,
             pending_profile_gallery: None,

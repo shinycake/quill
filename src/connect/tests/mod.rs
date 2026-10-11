@@ -6,6 +6,7 @@ mod auth_leftovers;
 mod bot_pending;
 mod bot_verification;
 mod bots;
+mod business_settings;
 mod call_audio;
 mod calls;
 mod chat_list;
