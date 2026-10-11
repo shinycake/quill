@@ -572,7 +572,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Copy topic link, reorder pinned topics, read all mentions and reactions in a topic, unpin all in a topic <!-- parity:forum-topic-extras -->
 - [x] Saved Messages sublists by original chat, pinned sublists, delete a sublist <!-- parity:saved-sublists -->
 - [x] Saved tags: rename a tag, filter by tag, search by tag <!-- parity:saved-tags-manage -->
-- [ ] Reply threads as a full section with a composer <!-- parity:thread-section -->
+- [x] Reply threads as a full section with a composer <!-- parity:thread-section -->
 
 ### Secret chats
 
