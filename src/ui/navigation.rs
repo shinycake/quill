@@ -14,6 +14,10 @@ use quill::telegram::envelope::ChatKind;
 pub(super) enum NavigationAction {
     Saved,
     MyProfile,
+    MyStories,
+    EmojiStatus,
+    MyGroups,
+    MyChannels,
     Contacts,
     Calls,
     NightMode,
@@ -117,6 +121,10 @@ impl QuillApp {
                     self.open_user_panel(me, window, cx);
                 }
             }
+            NavigationAction::MyStories => self.open_my_stories(window, cx),
+            NavigationAction::EmojiStatus => self.open_emoji_status_picker(cx),
+            NavigationAction::MyGroups => self.open_my_chats(false, cx),
+            NavigationAction::MyChannels => self.open_my_chats(true, cx),
             NavigationAction::Contacts => self.open_contacts_tab(cx),
             NavigationAction::Calls => self.open_calls_tab(cx),
             NavigationAction::NightMode => {
@@ -484,6 +492,7 @@ impl QuillApp {
     pub(super) fn main_navigation_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.entity().downgrade();
         let night = self.night_mode_on();
+        let status_label = self.emoji_status_menu_label();
         // tdesktop `archiveInMainMenu`: the archive lives here instead of
         // on top of the chat list while there is something archived.
         let archive_in_menu = quill::chatlist_archive::show_in_main_menu(
@@ -507,6 +516,10 @@ impl QuillApp {
             .dropdown_menu(move |mut menu, _, _| {
                 for (label, action) in [
                     ("My Profile", NavigationAction::MyProfile),
+                    ("My Stories", NavigationAction::MyStories),
+                    (status_label, NavigationAction::EmojiStatus),
+                    ("My Groups", NavigationAction::MyGroups),
+                    ("My Channels", NavigationAction::MyChannels),
                     ("Contacts", NavigationAction::Contacts),
                     ("Calls", NavigationAction::Calls),
                     ("Saved Messages", NavigationAction::Saved),

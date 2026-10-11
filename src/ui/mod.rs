@@ -194,6 +194,7 @@ mod jump_buttons;
 mod jump_date;
 mod link_info_boxes;
 mod live_location_tick;
+mod main_menu_extras;
 mod marketplace;
 mod media_panel;
 mod media_viewer;
