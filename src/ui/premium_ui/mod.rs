@@ -894,5 +894,7 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
+mod limit_box;
 mod open_premium;
+mod promo;
 mod star_packs;

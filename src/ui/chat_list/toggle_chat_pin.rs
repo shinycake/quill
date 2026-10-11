@@ -45,18 +45,17 @@ impl QuillApp {
                 })
                 .count() as i32;
             if pinned_count >= limit.max(0) {
-                self.connection.status_note = if archived {
-                    format!(
-                        "Sorry, you can pin up to {limit} chats and {limit} secret chats at once"
-                    )
-                } else {
-                    format!(
-                        "Sorry, you can only pin {limit} chats in your main list. If you're \
-                         looking for more organization, try archiving some chats — the \
-                         Archived Chats folder allows unlimited pins"
-                    )
-                };
-                cx.notify();
+                // tdesktop `PinsLimitBox`: the limit box, with Premium's
+                // higher limit as the way out.
+                self.show_premium_limit(
+                    if archived {
+                        quill::premium_limits::PremiumLimitKind::PinsArchive
+                    } else {
+                        quill::premium_limits::PremiumLimitKind::Pins
+                    },
+                    0,
+                    cx,
+                );
                 return;
             }
         }

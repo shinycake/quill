@@ -454,10 +454,15 @@ impl QuillApp {
     /// "Add to GIFs" (`addSavedAnimation`).
     fn save_message_gif(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.set_gif_saved(file_id, true) {
+            let sent = live.driver.set_gif_saved(file_id, true);
+            self.connection.status_note = match sent {
                 Ok(_) => "saving GIF…".into(),
                 Err(_) => "could not save GIF".into(),
             };
+            if sent.is_ok() {
+                // A full list drops its oldest GIF; the limit box says so.
+                self.note_gif_replaced(cx);
+            }
         } else {
             self.connection.status_note = "demo — GIFs save with live TDLib".into();
         }

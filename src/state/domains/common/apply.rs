@@ -67,6 +67,11 @@ impl Session {
                         _ => Some(false),
                     };
                 }
+                if name == "is_premium_available"
+                    && let OptionValue::Boolean(on) = &value
+                {
+                    self.payments.premium_available = Some(*on);
+                }
                 if name == "paid_reaction_star_count_max"
                     && let OptionValue::Integer(limit) = &value
                     && *limit > 0

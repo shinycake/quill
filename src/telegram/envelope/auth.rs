@@ -16,6 +16,10 @@ pub struct TdError {
     /// `CHATLISTS_TOO_MUCH`, ...): which one the message named. Only this
     /// classification survives, never the text.
     pub limit_hint: Option<crate::folder_limits::LimitHint>,
+    /// The request ran into a Premium limit other than folders (pins,
+    /// caption length, joined communities, public links): which one the
+    /// message named. Only this classification survives, never the text.
+    pub premium_limit: Option<crate::premium_limits::PremiumLimitKind>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +80,7 @@ impl TdError {
             class,
             flood_wait_secs: None,
             limit_hint: None,
+            premium_limit: None,
         }
     }
 
@@ -458,6 +463,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             class,
             flood_wait_secs,
             limit_hint: None,
+            premium_limit: None,
         };
     }
     // Slice msg-richtext-ai-tools: the documented AI flood error
@@ -473,6 +479,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             class: ErrorClass::AiComposeFloodPremium,
             flood_wait_secs,
             limit_hint: None,
+            premium_limit: None,
         };
     }
     let permission = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
@@ -493,6 +500,10 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
         .and_then(crate::folder_limits::limit_hint);
+    err.premium_limit = value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .and_then(crate::premium_limits::kind_for_message);
     err
 }
 
@@ -516,6 +527,17 @@ mod tests {
             err.flood_line("too many requests — wait and try again"),
             "try again in 30 seconds"
         );
+    }
+
+    #[test]
+    fn parse_error_keeps_only_the_premium_limit() {
+        use crate::premium_limits::PremiumLimitKind;
+        let value: Value =
+            serde_json::from_str(r#"{"@type":"error","code":400,"message":"CHANNELS_TOO_MUCH"}"#)
+                .unwrap();
+        let err = parse_error(Some(&value));
+        assert_eq!(err.premium_limit, Some(PremiumLimitKind::Channels));
+        assert_eq!(err.limit_hint, None);
     }
 
     #[test]

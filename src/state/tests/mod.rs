@@ -28,6 +28,7 @@ mod notifications;
 mod notify_os;
 mod payments;
 mod premium_hub;
+mod premium_limit;
 mod profile_panels;
 mod redraw;
 mod requests;

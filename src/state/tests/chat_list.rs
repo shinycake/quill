@@ -522,9 +522,11 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
         ),
     );
     assert!(!session.chats.get(&11).expect("chat").is_pinned);
+    // A pin limit opens the Premium limit box instead of an error line.
+    assert_eq!(session.chats_state.chat_action_error, None);
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
-        Some("could not pin the chat (error 400)")
+        session.payments.hub.limit_box,
+        Some((crate::premium_limits::PremiumLimitKind::Pins, 0))
     );
 }
 

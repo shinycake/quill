@@ -3,6 +3,7 @@ mod apply;
 mod error;
 mod gift_code;
 mod giveaway;
+mod limit;
 mod paid;
 mod purpose;
 mod state;
