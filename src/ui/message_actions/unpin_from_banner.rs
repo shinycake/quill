@@ -218,7 +218,7 @@ impl QuillApp {
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
         let rows = list.iter().enumerate().map(|(index, message)| {
             let message_id = message.id;
-            div()
+            let row = div()
                 .id(("pinned-list-row", message_id.0 as u64))
                 .flex()
                 .flex_col()
@@ -246,26 +246,32 @@ impl QuillApp {
                     this.history.pinned_cursor.insert(chat_id.0, index);
                     this.history.pinned_list_open = false;
                     cx.notify();
-                }))
-                // Telegram Desktop's "Go To Message" on a pinned row.
-                .context_menu({
-                    let owner = cx.entity().downgrade();
-                    move |menu, _, _| {
-                        let owner = owner.clone();
-                        menu.item(
-                            gpui_kit::component::menu::PopupMenuItem::new("Go To Message")
-                                .icon(gpui_kit::assets::IconName::MessageSquare)
-                                .on_click(move |_, _, cx| {
-                                    let _ = owner.update(cx, |this, cx| {
-                                        this.jump_to_pinned_message(message_id, cx);
-                                        this.history.pinned_cursor.insert(chat_id.0, index);
-                                        this.history.pinned_list_open = false;
-                                        cx.notify();
-                                    });
-                                }),
-                        )
-                    }
-                })
+                }));
+            // Telegram Desktop's "Go To Message" on a pinned row.
+            if !quill::go_to_message::go_to_message_offered(
+                quill::go_to_message::MessageListContext::Pinned,
+                message_id,
+                message.pending,
+            ) {
+                return row.into_any_element();
+            }
+            let owner = cx.entity().downgrade();
+            row.context_menu(move |menu, _, _| {
+                let owner = owner.clone();
+                menu.item(
+                    gpui_kit::component::menu::PopupMenuItem::new("Go To Message")
+                        .icon(gpui_kit::assets::IconName::MessageSquare)
+                        .on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.jump_to_pinned_message(message_id, cx);
+                                this.history.pinned_cursor.insert(chat_id.0, index);
+                                this.history.pinned_list_open = false;
+                                cx.notify();
+                            });
+                        }),
+                )
+            })
+            .into_any_element()
         });
         let noun = if count == 1 { "message" } else { "messages" };
         let footer = if can_pin {

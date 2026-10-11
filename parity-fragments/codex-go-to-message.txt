@@ -1,0 +1,1 @@
+parity:menu-go-to-message

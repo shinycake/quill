@@ -60,6 +60,7 @@ pub mod force_reply;
 pub mod game_share;
 pub mod gift_colors;
 pub mod giveaway;
+pub mod go_to_message;
 pub mod icon_badge;
 pub mod ids;
 pub mod inline_grid;
