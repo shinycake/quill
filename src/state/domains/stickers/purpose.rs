@@ -7,6 +7,12 @@ use crate::state::request_purpose::flat_purposes;
 pub enum StickersPurpose {
     GetEmojiSet,
     ViewTrendingEmojiSets,
+    /// `clickAnimatedEmojiMessage`: the answer is the effect sticker to
+    /// play over the message; a 404 means the usual animation is enough.
+    ClickAnimatedEmoji {
+        chat_id: i64,
+        message_id: i64,
+    },
     /// `getStickerSet` for the composer's emoji/sticker panel library
     /// (`Session::media_library`), one per installed set as its section
     /// comes into view.

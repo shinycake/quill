@@ -168,6 +168,7 @@ mod demos;
 mod downloads;
 mod drafts;
 mod drop_zones;
+mod emoji_effect;
 mod emoji_sets;
 mod entity_links;
 mod event_log;

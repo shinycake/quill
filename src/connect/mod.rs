@@ -19,6 +19,7 @@ mod connect_flow;
 mod contacts;
 mod core;
 mod deep_links;
+mod emoji_interaction;
 mod emoji_sets;
 mod flood_retry;
 mod folder_links;

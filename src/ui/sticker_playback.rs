@@ -567,7 +567,7 @@ impl QuillApp {
     /// The decoded clip of an animated sticker or custom emoji, for an
     /// animation layer (which keeps it playing); starts decoding it when
     /// missing.
-    fn layered_clip(
+    pub(super) fn layered_clip(
         &self,
         id: FileId,
         format: StickerFormat,

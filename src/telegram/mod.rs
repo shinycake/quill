@@ -1,6 +1,7 @@
 pub mod client;
 pub mod envelope;
 pub mod envelope_emoji;
+pub mod envelope_interaction;
 pub mod envelope_story;
 pub mod ffi;
 pub mod name_accent;

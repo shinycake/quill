@@ -28,6 +28,8 @@ pub struct StickersState {
     pub gifs: GifPanel,
     /// B7: `updateActiveEmojiReactions` — the emoji usable as reactions.
     pub active_emoji_reactions: Vec<String>,
+    /// Animated emoji effects waiting for the window to play them.
+    pub interactions: crate::emoji_interaction::EmojiInteractions,
 }
 
 impl StickersState {
@@ -45,6 +47,7 @@ impl StickersState {
             masks: MasksPanel::default(),
             gifs: GifPanel::default(),
             active_emoji_reactions: Vec::new(),
+            interactions: Default::default(),
         }
     }
 }
