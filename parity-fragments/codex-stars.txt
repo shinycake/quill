@@ -1,2 +1,0 @@
-# paid (Star) reactions with toast and Undo
-parity:reactions-paid-send

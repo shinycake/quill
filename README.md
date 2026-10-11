@@ -794,7 +794,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Quick reaction on double-click and choose the default quick reaction <!-- parity:reactions-quick-double-click -->
 - [x] Double-click-to-reply setting and reply or reaction corner buttons <!-- parity:reactions-corner-settings -->
 - [x] Reaction animation when you send a reaction <!-- parity:reactions-fly-animation -->
-- [ ] Send paid (star) reactions with toast and undo <!-- parity:reactions-paid-send -->
+- [x] Send paid (star) reactions with toast and undo <!-- parity:reactions-paid-send -->
 - [x] Who reacted: hover tooltip and full list per emoji <!-- parity:reactions-who-reacted -->
 - [x] Reaction strip updates when available and default reactions change <!-- parity:reactions-live-updates -->
 - [ ] Sticker or emoji flies from the panel into the chat when sent <!-- parity:stickers-send-animation -->
