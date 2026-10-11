@@ -564,6 +564,7 @@ impl QuillApp {
             self.refresh_member_dialog(cx);
             progressed = true;
         }
+        self.inline_members_stale(&stale_chats, cx);
         // Phase 3.2: bot answers to inline keyboard callback presses.
         if let Some(answer) = self
             .live

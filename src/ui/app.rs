@@ -95,6 +95,8 @@ pub struct QuillApp {
     pub(super) recording: super::recording_state::RecordingUi,
     /// Group and channel management boxes: invite links, admins, members, permissions (`ui/admin_state.rs`).
     pub(super) admin: super::admin_state::AdminUi,
+    /// The members block of the group info panel (`ui/inline_members_state.rs`).
+    pub(super) inline_members: super::inline_members_state::InlineMembersUi,
     /// Deep links and bot link confirmations (`ui/links_state.rs`).
     pub(super) links: super::links_state::LinkUi,
     /// The giveaway form (`ui/giveaway_state.rs`).

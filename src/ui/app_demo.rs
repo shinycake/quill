@@ -306,6 +306,7 @@ impl QuillApp {
             message_ui: super::message_state::MessageUi::new(window, cx),
             dialogs: super::dialogs_state::DialogUi::new(window, cx),
             admin: super::admin_state::AdminUi::new(),
+            inline_members: super::inline_members_state::InlineMembersUi::new(),
             appearance: appearance_prefs,
             chat_prefs,
             spell: super::spell_state::SpellUi::new(spellchecker, spell_info, dict_filter_input),

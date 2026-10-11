@@ -27,6 +27,7 @@ use crate::telegram::requests::{
 mod admins;
 mod invites;
 mod members;
+mod members_more;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// `canTransferOwnership`: the 2-step-verification and session-age
