@@ -1,2 +1,0 @@
-# Background accounts stay connected: notifications from every account, per-account unread
-parity:notify-all-accounts
