@@ -100,13 +100,43 @@ impl VideoPicture {
     }
 }
 
+impl Turn {
+    fn turn_image(&mut self, image: Arc<RenderImage>) -> Arc<RenderImage> {
+        if self.turns == 0 {
+            return image;
+        }
+        let source = Arc::as_ptr(&image) as usize;
+        if let Some((cached, turns, turned)) = &self.image
+            && *cached == source
+            && *turns == self.turns
+        {
+            return turned.clone();
+        }
+        match super::native_video_rotate::turn_render_image(&image, self.turns) {
+            Some(turned) => {
+                self.image = Some((source, self.turns, turned.clone()));
+                turned
+            }
+            None => image,
+        }
+    }
+}
+
 enum Backend {
     #[cfg(target_os = "macos")]
     AvPlayer(avplayer::AvPlayerVideo),
     Ffmpeg(super::ffmpeg_video::FfmpegVideo),
 }
 
-pub(super) struct NativeVideo(Backend);
+pub(super) struct NativeVideo(Backend, Turn);
+
+/// The clockwise quarter turns the picture is shown at (the viewer's
+/// Rotate), and the last decoded image turned for them.
+#[derive(Default)]
+struct Turn {
+    turns: u8,
+    image: Option<(usize, u8, Arc<RenderImage>)>,
+}
 
 impl NativeVideo {
     /// Open a local file; playback starts paused. Must run on the main
@@ -115,9 +145,11 @@ impl NativeVideo {
         #[cfg(target_os = "macos")]
         if !ffmpeg_on_macos() {
             let _ = purpose;
-            return avplayer::AvPlayerVideo::open(path).map(|v| Self(Backend::AvPlayer(v)));
+            return avplayer::AvPlayerVideo::open(path)
+                .map(|v| Self(Backend::AvPlayer(v), Turn::default()));
         }
-        super::ffmpeg_video::FfmpegVideo::open(path, purpose).map(|v| Self(Backend::Ffmpeg(v)))
+        super::ffmpeg_video::FfmpegVideo::open(path, purpose)
+            .map(|v| Self(Backend::Ffmpeg(v), Turn::default()))
     }
 
     pub(super) fn play(&mut self) {
@@ -198,12 +230,24 @@ impl NativeVideo {
         }
     }
 
+    /// Show the picture turned by `turns` clockwise quarter turns.
+    pub(super) fn set_rotation(&mut self, turns: u8) {
+        self.1.turns = turns % 4;
+        #[cfg(target_os = "macos")]
+        if let Backend::AvPlayer(v) = &mut self.0 {
+            v.set_rotation(self.1.turns);
+        }
+    }
+
     /// The frame to show now: a new one when there is one, else the last.
     pub(super) fn frame(&mut self) -> Option<VideoPicture> {
         match &mut self.0 {
             #[cfg(target_os = "macos")]
             Backend::AvPlayer(v) => v.frame().map(VideoPicture::Surface),
-            Backend::Ffmpeg(v) => v.frame().map(VideoPicture::Image),
+            Backend::Ffmpeg(v) => {
+                let image = v.frame()?;
+                Some(VideoPicture::Image(self.1.turn_image(image)))
+            }
         }
     }
 }
@@ -236,6 +280,9 @@ mod avplayer {
         /// render still has a picture.
         frame: Option<GpuiPixelBuffer>,
         playing: bool,
+        /// Quarter turns to show the picture at, and the last frame turned.
+        turns: u8,
+        turned: Option<GpuiPixelBuffer>,
     }
 
     impl AvPlayerVideo {
@@ -267,6 +314,8 @@ mod avplayer {
                     output,
                     frame: None,
                     playing: false,
+                    turns: 0,
+                    turned: None,
                 })
             }
         }
@@ -345,6 +394,13 @@ mod avplayer {
             }
         }
 
+        pub(super) fn set_rotation(&mut self, turns: u8) {
+            if self.turns != turns {
+                self.turns = turns;
+                self.turned = None;
+            }
+        }
+
         pub(super) fn frame(&mut self) -> Option<GpuiPixelBuffer> {
             // SAFETY: the copy returns a +1 CVPixelBuffer that ownership moves
             // into the core-video wrapper GPUI draws (`wrap_under_create_rule`).
@@ -357,6 +413,17 @@ mod avplayer {
                 {
                     let raw = Retained::into_raw(buffer);
                     self.frame = Some(core_foundation_wrap(raw.cast()));
+                    self.turned = None;
+                }
+            }
+            if self.turns != 0 {
+                if self.turned.is_none() {
+                    self.turned = self.frame.as_ref().and_then(|frame| {
+                        super::super::native_video_rotate::turn_surface(frame, self.turns)
+                    });
+                }
+                if self.turned.is_some() {
+                    return self.turned.clone();
                 }
             }
             self.frame.clone()

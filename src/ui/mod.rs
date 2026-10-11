@@ -47,6 +47,7 @@ mod lru;
 mod message_state;
 mod motion;
 mod native_video;
+mod native_video_rotate;
 mod nested_click;
 mod notify_state;
 mod payments_state;
