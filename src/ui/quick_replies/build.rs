@@ -12,7 +12,7 @@ use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::quick_replies::{self as qr, MESSAGES_MAX, NAME_MAX, SHORTCUTS_MAX};
+use quill::quick_replies::{self as qr, NAME_MAX};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -34,7 +34,10 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        let full = rows.len() >= SHORTCUTS_MAX;
+        let limit = self.session().map_or(qr::SHORTCUTS_MAX, |s| {
+            s.settings.quick_replies.shortcut_limit()
+        });
+        let full = rows.len() >= limit;
         let mut body = div()
             .flex()
             .flex_col()
@@ -214,7 +217,10 @@ impl QuillApp {
             })
             .unwrap_or_default();
         let editing = state.editing;
-        let full = messages.len() >= MESSAGES_MAX && editing.is_none();
+        let message_limit = self.session().map_or(qr::MESSAGES_MAX, |s| {
+            s.settings.quick_replies.message_limit()
+        });
+        let full = messages.len() >= message_limit && editing.is_none();
         let mut body = div().flex().flex_col().gap_2();
         if messages.is_empty() {
             body = body.child(div().text_sm().text_color(muted).child(format!(
@@ -267,7 +273,7 @@ impl QuillApp {
             body = body.child(row);
         }
         let field_note = if full {
-            format!("A shortcut can have {MESSAGES_MAX} messages.")
+            format!("A shortcut can have {message_limit} messages.")
         } else if editing.is_some() {
             "Editing a message.".to_string()
         } else {

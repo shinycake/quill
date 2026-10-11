@@ -1,7 +1,8 @@
 //! Quick reply shortcuts and their messages (see `crate::quick_replies` for
 //! what Telegram Desktop does).
 use crate::quick_replies::{
-    QuickRepliesUpdate, QuickReplyMessage, QuickReplyShortcut, count_label,
+    MESSAGES_MAX, QuickRepliesUpdate, QuickReplyMessage, QuickReplyShortcut, SHORTCUTS_MAX,
+    count_label,
 };
 use crate::state::*;
 use std::collections::{HashMap, HashSet};
@@ -18,6 +19,10 @@ pub struct QuickRepliesState {
     pub messages_requested: HashSet<i32>,
     /// The last refusal, in words, for the open dialog.
     pub error: Option<String>,
+    /// TDLib options `quick_reply_shortcut_count_max` and
+    /// `quick_reply_shortcut_message_count_max`, once reported.
+    pub shortcut_count_max: Option<usize>,
+    pub message_count_max: Option<usize>,
     /// Counter for `sendQuickReplyShortcutMessages.sending_id`.
     pub next_sending_id: i32,
 }
@@ -39,6 +44,16 @@ impl QuickRepliesState {
         rest.sort_by_key(|s| s.id);
         out.extend(rest);
         out
+    }
+
+    /// How many shortcuts the account may have.
+    pub fn shortcut_limit(&self) -> usize {
+        self.shortcut_count_max.unwrap_or(SHORTCUTS_MAX)
+    }
+
+    /// How many messages one shortcut may have.
+    pub fn message_limit(&self) -> usize {
+        self.message_count_max.unwrap_or(MESSAGES_MAX)
     }
 
     /// The shortcut named `name`, compared without case.
@@ -68,8 +83,7 @@ impl QuickRepliesState {
 }
 
 impl Session {
-    /// `/` menu rows for a private chat with a person (not a bot, not
-    /// yourself): the quick reply shortcuts that have messages.
+    /// `/` menu rows for a private chat with a person (not a bot): the quick reply shortcuts that have messages.
     pub fn quick_reply_menu_items(&self, chat_id: ChatId) -> Vec<CommandMenuItem> {
         let Some(chat) = self.chats.get(&chat_id.0) else {
             return Vec::new();
@@ -77,7 +91,8 @@ impl Session {
         let ChatKind::Private { user_id } = chat.kind else {
             return Vec::new();
         };
-        if self.my_user_id == Some(user_id.0) || self.bots.bot_user_ids.contains(&user_id.0) {
+        // Saved Messages is included, as in tdesktop.
+        if self.bots.bot_user_ids.contains(&user_id.0) {
             return Vec::new();
         }
         self.settings
@@ -116,6 +131,23 @@ impl Session {
                 }
                 state.messages.insert(shortcut_id, messages);
             }
+        }
+    }
+
+    /// `updateOption`: the quick reply limits.
+    pub(crate) fn apply_quick_replies_option(&mut self, name: &str, value: &OptionValue) {
+        let OptionValue::Integer(limit) = value else {
+            return;
+        };
+        let limit = usize::try_from(*limit).ok().filter(|l| *l > 0);
+        match name {
+            "quick_reply_shortcut_count_max" => {
+                self.settings.quick_replies.shortcut_count_max = limit;
+            }
+            "quick_reply_shortcut_message_count_max" => {
+                self.settings.quick_replies.message_count_max = limit;
+            }
+            _ => {}
         }
     }
 

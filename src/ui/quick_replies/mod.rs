@@ -366,6 +366,7 @@ impl QuillApp {
         let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
             return;
         };
+        let edit = shortcut_id == qr::EDIT_ROW;
         // The `/token` leaves the composer, other text stays (tdesktop).
         let current = self.composer_markup(cx);
         let rest = quill::composer::strip_command_menu_trigger(&current)
@@ -376,7 +377,11 @@ impl QuillApp {
         self.set_composer_markup(&rest, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
-        self.send_quick_reply_to(chat_id, shortcut_id, cx);
+        if edit {
+            self.open_quick_replies(window, cx);
+        } else {
+            self.send_quick_reply_to(chat_id, shortcut_id, cx);
+        }
     }
 
     fn send_quick_reply_to(&mut self, chat_id: ChatId, shortcut_id: i32, cx: &mut Context<Self>) {

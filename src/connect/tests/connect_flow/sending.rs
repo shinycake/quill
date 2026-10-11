@@ -107,6 +107,8 @@ fn driver_loads_chats_after_ready_then_send_text() {
                 "getSavedNotificationSounds"
             } else if json.contains(r#""@type":"getScopeNotificationSettings""#) {
                 "getScopeNotificationSettings"
+            } else if json.contains(r#""@type":"loadQuickReplyShortcuts""#) {
+                "loadQuickReplyShortcuts"
             } else {
                 "other"
             }
@@ -121,6 +123,7 @@ fn driver_loads_chats_after_ready_then_send_text() {
             "getScopeNotificationSettings",
             "getScopeNotificationSettings",
             "getScopeNotificationSettings",
+            "loadQuickReplyShortcuts",
         ]
     );
     let load = &sent[0];

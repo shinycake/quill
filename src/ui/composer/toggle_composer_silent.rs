@@ -748,7 +748,15 @@ impl QuillApp {
             return;
         }
         self.composer_ui.command_menu_open = open;
-        self.composer_ui.command_menu_selected = 0;
+        // tdesktop starts below the "Edit Quick Replies" row.
+        self.composer_ui.command_menu_selected =
+            self.command_menu_state(cx).map_or(0, |(_, items)| {
+                usize::from(
+                    items
+                        .first()
+                        .is_some_and(|i| i.quick_reply == Some(quill::quick_replies::EDIT_ROW)),
+                )
+            });
         cx.notify();
     }
 
@@ -806,7 +814,10 @@ impl QuillApp {
         if filtered.is_empty() {
             return None;
         }
-        Some((prefix.to_string(), filtered))
+        Some((
+            prefix.to_string(),
+            quill::quick_replies::with_edit_row(filtered),
+        ))
     }
 
     /// Phase 3.3: Enter with the menu open picks the highlighted row.
@@ -848,6 +859,47 @@ impl QuillApp {
             self.send_quick_reply_row(shortcut_id, window, cx);
             return;
         }
+        self.insert_command_menu_index(index, window, cx);
+    }
+
+    /// Tab: put the highlighted command in the composer instead of sending
+    /// it (tdesktop `ByTab`). The "Edit Quick Replies" row still opens the
+    /// settings. Returns true when Tab was consumed.
+    pub(in crate::ui) fn insert_command_menu_selection(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let items = self
+            .command_menu_state(cx)
+            .map(|(_, items)| items)
+            .unwrap_or_default();
+        if !self.composer_ui.command_menu_open || items.is_empty() {
+            return false;
+        }
+        let index = self.composer_ui.command_menu_selected.min(items.len() - 1);
+        match items[index].quick_reply {
+            Some(quill::quick_replies::EDIT_ROW) => {
+                self.send_quick_reply_row(quill::quick_replies::EDIT_ROW, window, cx)
+            }
+            _ => self.insert_command_menu_index(index, window, cx),
+        }
+        true
+    }
+
+    fn insert_command_menu_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items = self
+            .command_menu_state(cx)
+            .map(|(_, items)| items)
+            .unwrap_or_default();
+        let Some(item) = items.get(index) else {
+            return;
+        };
         let command = item.command.clone();
         let current = self.composer_markup(cx);
         let base = strip_command_menu_trigger(&current).unwrap_or(current.as_str());

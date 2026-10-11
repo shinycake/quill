@@ -194,7 +194,7 @@ fn the_slash_menu_offers_shortcuts_in_a_private_chat_with_a_person() {
 }
 
 #[test]
-fn the_slash_menu_skips_bots_yourself_and_empty_shortcuts() {
+fn the_slash_menu_skips_bots_and_empty_shortcuts_but_not_saved_messages() {
     let (mut driver, _recorder, sink, seq) = driver_parts();
     seed_shortcuts(&mut driver, &seq, &sink);
     feed(
@@ -215,7 +215,8 @@ fn the_slash_menu_skips_bots_yourself_and_empty_shortcuts() {
             .iter()
             .all(|item| item.command != "empty")
     );
-    assert!(driver.session.command_menu_items(ChatId(32)).is_empty());
+    // Saved Messages (the chat with yourself) lists them, as in tdesktop.
+    assert_eq!(driver.session.command_menu_items(ChatId(32)).len(), 2);
     assert!(driver.session.command_menu_items(ChatId(33)).is_empty());
 }
 
@@ -262,4 +263,25 @@ fn a_refused_request_is_reported_and_a_late_answer_is_harmless() {
         ),
     );
     assert!(driver.session.settings.quick_replies.error.is_some());
+}
+
+#[test]
+fn the_shortcuts_are_requested_once_the_session_is_ready() {
+    let (_driver, recorder, _sink, _seq) = driver_parts();
+    assert_eq!(count_sent(&recorder, "loadQuickReplyShortcuts"), 1);
+}
+
+#[test]
+fn the_limits_follow_the_tdlib_options_and_default_to_tdesktops() {
+    let (mut driver, _recorder, sink, seq) = driver_parts();
+    let state = &driver.session.settings.quick_replies;
+    assert_eq!((state.shortcut_limit(), state.message_limit()), (100, 20));
+    for json in [
+        r#"{"@type":"updateOption","name":"quick_reply_shortcut_count_max","value":{"@type":"optionValueInteger","value":"5"}}"#,
+        r#"{"@type":"updateOption","name":"quick_reply_shortcut_message_count_max","value":{"@type":"optionValueInteger","value":"3"}}"#,
+    ] {
+        feed(&mut driver, &seq, &sink, json);
+    }
+    let state = &driver.session.settings.quick_replies;
+    assert_eq!((state.shortcut_limit(), state.message_limit()), (5, 3));
 }

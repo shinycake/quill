@@ -11,14 +11,18 @@
 - `src/connect/quick_replies.rs`: driver methods. The send uses `RequestPurpose::SendMessageAlbum`, so the `messages` answer is stored as sent messages and a refusal gets the usual send-permission notice.
 - `src/ui/quick_replies/`: a Quick Replies dialog (list, name field, shortcut editor with add / edit / delete of text messages, rename, delete with confirmation), registered with `register_dialogs!`. Settings gets a "Quick replies" row. The composer change is a `quick_reply: Option<i32>` field on `CommandMenuItem` and two early returns in the `/` menu pick and click handlers; the first `/` asks for the shortcuts.
 
+## Same as tdesktop
+- Saved Messages lists the shortcuts like any private chat with a user (only bots are excluded).
+- The `/` list starts with an "Edit Quick Replies" row that opens the dialog; the highlight starts on the first shortcut below it. Tab inserts `/name ` into the composer; Enter and click send the shortcut.
+- The shortcuts load once the session is ready (tdesktop preloads them with the dialogs), so the first `/` lists them.
+- Limits come from the TDLib options `quick_reply_shortcut_count_max` and `quick_reply_shortcut_message_count_max` (named in the 1.8.68 schema), falling back to tdesktop's 100 and 20 until TDLib reports them.
+
 ## Differences and gaps
 - The editor uses the kit text area with plain text. Media messages of a shortcut are listed with their caption and can be deleted, but not created or edited; formatting is not applied.
-- Limits (100 shortcuts, 20 messages) are the tdesktop defaults, not read from the account's options.
 - A name that is already used is caught locally. Quill drops TDLib's error text, so a race with another device shows a generic error.
 - Without Premium the dialog explains it and disables editing; there is no Premium preview.
-- No "Edit" row at the top of the `/` list, and Tab sends like Enter (tdesktop's Tab inserts the text).
-- The self chat is excluded; tdesktop does not exclude it but TDLib documents a regular user as the target. Unverified against a server.
-- The shortcuts load when the dialog opens or on the first `/` in a chat, so the very first `/` of a session shows the rows on the next keystroke.
+- Tab now also inserts the highlighted bot command (tdesktop's Tab does this for every row).
+- TDLib documents `sendQuickReplyShortcutMessages` as needing a Business subscription; not checked against a server.
 
 ## Verified
-Unit tests for names, parsing, update application, request JSON and the `/` rows (`quick_replies`, `connect::tests::quick_replies`); four GPUI UI tests (`--features ui,demo-capture`) for the dialog's screens, name checks and the no-live-session message. gate.sh. Not run against a live account: creating, editing or sending quick replies would change real data and message a person.
+Unit tests for names, parsing, update application, request JSON and the `/` rows (`quick_replies`, `connect::tests::quick_replies`); seven GPUI UI tests (name checks, edit row, Tab, prefix filter) (`--features ui,demo-capture`) for the dialog's screens, name checks and the no-live-session message. gate.sh. Not run against a live account: creating, editing or sending quick replies would change real data and message a person.

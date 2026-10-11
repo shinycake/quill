@@ -218,3 +218,72 @@ fn adding_a_message_without_a_live_session_says_so(cx: &mut TestAppContext) {
         Some("Quick replies need a live session.")
     );
 }
+
+/// Open a private chat with a person and type `/` in the composer.
+fn type_slash(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
+    cx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let session = app.demo_session.as_mut().expect("demo session");
+            let chat = session.open_chat.expect("open chat");
+            let user_id = quill::ids::UserId(chat.0);
+            session.chats.get_mut(&chat.0).unwrap().kind =
+                quill::telegram::envelope::ChatKind::Private { user_id };
+            app.composer.update(cx, |input, cx| {
+                input.set_value(text.to_string(), window, cx)
+            });
+            app.sync_command_menu(cx);
+        });
+    });
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn the_slash_list_starts_below_the_edit_row_and_tab_inserts(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    type_slash(&app, vcx, "/");
+    let (items, selected) = app.update(vcx, |app, cx| {
+        (
+            app.command_menu_state(cx).expect("menu is open").1,
+            app.composer_ui.command_menu_selected,
+        )
+    });
+    assert_eq!(items[0].quick_reply, Some(quill::quick_replies::EDIT_ROW));
+    assert_eq!(items[1].command, "hello");
+    assert_eq!(selected, 1);
+
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            assert!(app.insert_command_menu_selection(window, cx));
+        });
+    });
+    let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
+    assert_eq!(text, "/hello ");
+}
+
+#[gpui_kit::test]
+fn a_prefix_filters_the_shortcuts_and_the_edit_row_stays(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    type_slash(&app, vcx, "/ho");
+    let items = app.update(vcx, |app, cx| app.command_menu_state(cx).unwrap().1);
+    let names: Vec<_> = items.iter().map(|i| i.command.as_str()).collect();
+    assert_eq!(names, ["", "hours"]);
+}
+
+#[gpui_kit::test]
+fn the_edit_row_opens_the_dialog_and_clears_the_slash(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    type_slash(&app, vcx, "/");
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.send_command_menu_index(0, window, cx));
+    });
+    vcx.run_until_parked();
+    assert!(app.read_with(vcx, |app, _| app.dialogs.quick_replies_dialog.is_some()));
+    let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
+    assert!(text.is_empty());
+}

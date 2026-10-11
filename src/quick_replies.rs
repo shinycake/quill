@@ -22,6 +22,7 @@
 //! are listed (with their caption) and can be deleted, but not created or
 //! edited.
 
+use crate::composer::CommandMenuItem;
 use serde_json::{Value, json};
 
 /// tdesktop `kShortcutLimit`: the longest shortcut name.
@@ -30,6 +31,28 @@ pub const NAME_MAX: usize = 32;
 pub const SHORTCUTS_MAX: usize = 100;
 /// tdesktop `quick_reply_messages_limit` default.
 pub const MESSAGES_MAX: usize = 20;
+
+/// `CommandMenuItem::quick_reply` of the first `/` row, "Edit Quick Replies"
+/// (tdesktop's row with an empty command).
+pub const EDIT_ROW: i32 = 0;
+
+/// The filtered `/` rows with tdesktop's "Edit Quick Replies" row in front
+/// when any of them is a shortcut.
+pub fn with_edit_row(mut rows: Vec<CommandMenuItem>) -> Vec<CommandMenuItem> {
+    if rows.iter().any(|r| r.quick_reply.is_some()) {
+        rows.insert(
+            0,
+            CommandMenuItem {
+                command: String::new(),
+                description: "Edit Quick Replies".into(),
+                global: false,
+                is_ephemeral: false,
+                quick_reply: Some(EDIT_ROW),
+            },
+        );
+    }
+    rows
+}
 
 /// Why a shortcut name is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -371,6 +394,27 @@ mod tests {
         assert!(parse_shortcut(&json!({"name": "x"})).is_none());
         assert_eq!(count_label(1), "1 message");
         assert_eq!(count_label(4), "4 messages");
+    }
+
+    #[test]
+    fn the_edit_row_leads_only_when_shortcuts_are_listed() {
+        let shortcut = CommandMenuItem {
+            command: "hi".into(),
+            description: String::new(),
+            global: false,
+            is_ephemeral: false,
+            quick_reply: Some(4),
+        };
+        let rows = with_edit_row(vec![shortcut.clone()]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].quick_reply, Some(EDIT_ROW));
+        assert!(rows[0].command.is_empty());
+        let bot = CommandMenuItem {
+            quick_reply: None,
+            ..shortcut
+        };
+        assert_eq!(with_edit_row(vec![bot]).len(), 1);
+        assert!(with_edit_row(Vec::new()).is_empty());
     }
 
     #[test]
