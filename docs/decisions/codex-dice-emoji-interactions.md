@@ -13,7 +13,7 @@
 - Hooks: `message_text_block`, `history_message_list` (reset the visible-emoji map), `conversation_slot` (overlay child), `layered_clip` visibility.
 
 ## Differences from tdesktop
-The effect is anchored to the emoji glyph (the start of the text block, not the footer's reserved space) and mirrored for messages on the left: the decoded frames are flipped once when an effect starts and cached (two stickers at most). Effects past five wait and start by tdesktop's `checkDelayed` rule (200 ms apart, and with three playing one must be half played); a waiting effect is dropped after 3 s. Not done: autoplay when an unread emoji scrolls into view (TDLib has no equivalent) and the "watching animations" label in the top bar.
+The effect is anchored to the emoji glyph (the start of the text block, not the footer's reserved space) and mirrored for messages on the left: the decoded frames are flipped once when an effect starts and cached (two stickers at most). Effects past five wait and start by tdesktop's `checkDelayed` rule (200 ms apart, and with three playing one must be half played); a waiting effect is dropped after 2 s, as in tdesktop. Not done: autoplay when an unread emoji scrolls into view (TDLib has no equivalent) and the "watching animations" label in the top bar.
 
 ## How verified
 Unit tests: flip, start rule, request JSON, queue bound, seen throttle, parsing of the answer and update, reducer in open and other chats, driver tap/404/group/watching, server dice list routing, geometry. gate.sh OK. Visual: a temporary demo (not committed) drew the effect sticker beside a lone thumbs-up in the ready-chats capture. Not verified live: real `clickAnimatedEmojiMessage` answers, the partner update, clicking by hand.

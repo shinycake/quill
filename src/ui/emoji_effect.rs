@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 
 /// tdesktop `kMaxDelay`: an effect whose sticker has not arrived by then
 /// is not played any more.
-const START_WAIT: Duration = Duration::from_secs(3);
+const START_WAIT: Duration = Duration::from_secs(2);
 /// tdesktop `kSmallDelay`: a new effect starts this long after the last.
 const SMALL_DELAY: Duration = Duration::from_millis(200);
 /// Effects waiting or playing, at most.
