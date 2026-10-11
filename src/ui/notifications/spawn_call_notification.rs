@@ -156,7 +156,19 @@ impl QuillApp {
             });
             return;
         }
-        let Some(command) = quill::notify::build_notification_command(&notification) else {
+        // Sender avatar: only an already-downloaded small photo, and never
+        // while locked (the locked toast hides the sender).
+        let icon = if self.account.passcode.locked {
+            None
+        } else {
+            self.session()
+                .and_then(|s| s.chat_photo_path(notification.chat_id))
+                .map(std::path::PathBuf::from)
+                .and_then(|path| super::avatar_icon::circular_icon_for(&path))
+        };
+        let Some(command) =
+            quill::notify::build_notification_command_with_icon(&notification, icon.as_deref())
+        else {
             return;
         };
         if self.notify.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS

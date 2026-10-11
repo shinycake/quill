@@ -205,7 +205,7 @@ fn linux_command_shape() {
         title: "Ada".into(),
         body: "hello".into(),
     };
-    let cmd = linux_notify_send_command(&notification);
+    let cmd = linux_notify_send_command(&notification, None);
     assert_eq!(cmd.program, "notify-send");
     assert_eq!(
         cmd.args,
@@ -255,6 +255,26 @@ fn native_backend_spawns_no_command() {
     if native {
         assert!(build_notification_command(&notification).is_none());
     }
+}
+
+#[test]
+fn linux_command_passes_the_avatar_icon_before_the_separator() {
+    let notification = OsNotification {
+        chat_id: ChatId(7),
+        title: "Ann".to_string(),
+        body: "hi".to_string(),
+    };
+    let icon = std::path::Path::new("/cache/a.png");
+    let with = linux_notify_send_command(&notification, Some(icon));
+    let sep = with.args.iter().position(|a| a == "--").unwrap();
+    let at = with
+        .args
+        .iter()
+        .position(|a| a == "--icon=/cache/a.png")
+        .unwrap();
+    assert!(at < sep);
+    let without = linux_notify_send_command(&notification, None);
+    assert!(!without.args.iter().any(|a| a.starts_with("--icon")));
 }
 
 #[test]
