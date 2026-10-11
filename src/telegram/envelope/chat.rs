@@ -90,6 +90,7 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .to_string(),
         kind: parse_chat_kind(chat.get("type")),
         accent: ChatAccent::parse(chat),
+        profile_look: ChatProfileLook::parse(chat),
         unread_count: chat
             .get("unread_count")
             .and_then(Value::as_i64)

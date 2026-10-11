@@ -21,6 +21,7 @@ impl Session {
                 | RequestPurpose::GetRecentEmojiStatuses
                 | RequestPurpose::GetThemedEmojiStatuses
                 | RequestPurpose::GetDefaultEmojiStatuses
+                | RequestPurpose::GetDefaultChatEmojiStatuses
                 | RequestPurpose::GetCustomEmojiStickers,
             ) => {
                 self.stickers.emoji.status_note = Some(call_request_error_line(

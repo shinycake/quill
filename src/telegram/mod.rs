@@ -8,6 +8,7 @@ pub mod hub;
 pub mod name_accent;
 pub mod profile_accent;
 pub mod requests;
+pub mod requests_chat_appearance;
 pub mod requests_data_settings;
 pub mod requests_emoji;
 pub mod requests_gifts;

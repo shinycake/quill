@@ -31,6 +31,9 @@ pub struct NameAccentColor {
     pub built_in_id: i32,
     pub light_colors: Vec<u32>,
     pub dark_colors: Vec<u32>,
+    /// `min_channel_chat_boost_level`: the boost level a channel needs to
+    /// use this color (0 = none).
+    pub min_channel_level: i32,
 }
 
 fn rgb_list(value: Option<&Value>) -> Vec<u32> {
@@ -43,6 +46,15 @@ fn rgb_list(value: Option<&Value>) -> Vec<u32> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A `min_*_chat_boost_level` field: 0 when missing or negative.
+pub(crate) fn min_level(value: Option<&Value>) -> i32 {
+    value
+        .and_then(Value::as_i64)
+        .and_then(|n| i32::try_from(n).ok())
+        .unwrap_or(0)
+        .max(0)
 }
 
 /// Parse one `accentColor`; `None` for a malformed entry.
@@ -58,6 +70,7 @@ pub fn parse_name_accent_color(value: &Value) -> Option<NameAccentColor> {
         built_in_id,
         light_colors: rgb_list(value.get("light_theme_colors")),
         dark_colors: rgb_list(value.get("dark_theme_colors")),
+        min_channel_level: min_level(value.get("min_channel_chat_boost_level")),
     })
 }
 
@@ -125,6 +138,7 @@ mod tests {
             built_in_id,
             light_colors: light.to_vec(),
             dark_colors: dark.to_vec(),
+            min_channel_level: 0,
         }
     }
 

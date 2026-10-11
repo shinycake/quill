@@ -10,6 +10,7 @@ mod business_extra;
 mod business_settings;
 mod call_audio;
 mod calls;
+mod chat_appearance;
 mod chat_list;
 mod chat_state;
 mod chat_window;
