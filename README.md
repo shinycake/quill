@@ -884,7 +884,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Send gifts and gift Premium <!-- parity:premium-send-gift -->
 - [ ] Received gifts on a profile: show or hide, pin, convert, upgrade, transfer, sell, collections <!-- parity:premium-received-gifts -->
 - [ ] Gift auctions, crafting and resale filters (deferred: low impact) <!-- parity:premium-gift-auctions -->
-- [ ] Create and view giveaways <!-- parity:premium-giveaways -->
+- [ ] Create and view giveaways (partial: info box, form and prepaid launch shipped; paying for a new giveaway, specific-user gift codes and country picker left) <!-- parity:premium-giveaways -->
 - [ ] Check and apply Premium gift codes <!-- parity:premium-gift-codes -->
 - [x] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
 - [ ] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
