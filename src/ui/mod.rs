@@ -255,6 +255,7 @@ mod spellcheck_mac;
 mod spellcheck_ui;
 mod spoiler_fx;
 mod sponsored;
+mod sponsored_about;
 mod statistics;
 mod sticker_playback;
 mod stickers_ui;
