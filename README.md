@@ -468,7 +468,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Add a caption…" affordance when attaching media (caption bar above the composer with hint, above/below toggle, live n / max counter) <!-- parity:media-caption-prompt -->
 - [x] Remove captions when forwarding copies (TGX RemoveCaptions; checkbox gated on send-copy) <!-- parity:media-caption-remove-on-forward -->
 - [x] Caption-too-long validation on sends and caption edits (runtime `message_caption_length_max`, live counter, refusal names the limit) <!-- parity:media-caption-length-limit -->
-- [ ] Video viewer: Copy Frame, Share at current time, quality picker, rotate video <!-- parity:viewer-video-extras -->
+- [x] Video viewer: Copy Frame, Share at current time, quality picker, rotate video <!-- parity:viewer-video-extras -->
 - [x] Caption overlay in the viewer with formatted text and links <!-- parity:viewer-caption-entities -->
 - [x] Viewer header shows the sender (opens profile) and send time <!-- parity:viewer-sender-header -->
 - [ ] "Disappears in" countdown on timed photos and videos <!-- parity:viewer-ttl-countdown -->
