@@ -20,6 +20,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::local_time::now_unix;
 use quill::moderation::{RestrictUntil, UntilError, validate_restrict_until};
+use quill::moderation_exceptions::initial_until;
 use quill::state::{AdminListFetch, AdminRightsFetch, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChatAdminRights, ChatPermissions, MessageSender};
 use std::cell::RefCell;
@@ -210,13 +211,22 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let current = self
+        let defaults = self
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
             .and_then(|chat| chat.permissions)
             .unwrap_or_else(ChatPermissions::all);
+        // Editing an existing exception starts from its own rights and
+        // end date (tdesktop `EditRestrictedBox` with the old rights).
+        let existing = if ban {
+            None
+        } else {
+            self.restricted_member_entry(chat_id, user_id)
+        };
+        let current = existing.map_or(defaults, |r| r.permissions);
+        let until = existing.map(|r| initial_until(r.until_date, now_unix()));
         self.admin.restrict_dialog = Some(RestrictDialog::new(
-            window, cx, chat_id, user_id, ban, current,
+            window, cx, chat_id, user_id, ban, current, until,
         ));
         cx.notify();
     }

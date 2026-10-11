@@ -30,14 +30,20 @@ impl RestrictDialog {
         user_id: i64,
         ban: bool,
         current: ChatPermissions,
+        existing_until: Option<RestrictUntil>,
     ) -> Self {
-        // tdesktop opens the custom picker one day ahead.
-        let tomorrow = now_unix() + 86_400;
+        // tdesktop opens the custom picker one day ahead, or on the
+        // member's current end date when an exception is edited.
+        let until = existing_until.unwrap_or(RestrictUntil::Forever);
+        let tomorrow = match until {
+            RestrictUntil::Custom(unix) => unix,
+            _ => now_unix() + 86_400,
+        };
         Self {
             chat_id,
             user_id,
             ban,
-            until: RestrictUntil::Forever,
+            until,
             custom: new_date_time_picker(window, cx, tomorrow, 366 * 86_400),
             error: None,
             permissions: current,

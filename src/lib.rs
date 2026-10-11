@@ -67,6 +67,7 @@ pub mod media_tools;
 pub mod media_viewer;
 pub mod message_menu;
 pub mod moderation;
+pub mod moderation_exceptions;
 pub mod mute_menu;
 pub mod network_usage;
 pub mod notify;
