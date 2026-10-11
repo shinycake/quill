@@ -62,6 +62,9 @@ pub enum PaymentsPurpose {
     /// 15289). Response is `ok`; same no-local-state treatment as
     /// `DeleteSavedOrderInfo`.
     DeleteSavedCredentials,
+    /// `getBankCardInfo` for a tapped card number. Response is
+    /// `bankCardInfo`.
+    GetBankCardInfo,
 }
 
 flat_purposes!(Payments(PaymentsPurpose) {
@@ -79,4 +82,5 @@ flat_purposes!(Payments(PaymentsPurpose) {
     GetPremiumState,
     DeleteSavedOrderInfo,
     DeleteSavedCredentials,
+    GetBankCardInfo,
 });

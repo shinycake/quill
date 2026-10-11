@@ -281,3 +281,40 @@ fn star_subscriptions_error_surfaces() {
         .expect("error surfaces");
     assert_eq!(err, "Couldn't load subscriptions: invalid request");
 }
+
+#[test]
+fn bank_card_info_applies_only_to_own_request_and_clears_on_error() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let info_json = |extra: &str| {
+        format!(
+            r#"{{"@type":"bankCardInfo","@extra":"{extra}","title":"Example Bank","actions":[{{"@type":"bankCardActionOpenUrl","text":"Website","url":"https://bank.example"}}]}}"#
+        )
+    };
+    session.payments.bank_card = Some(BankCardLookup {
+        number: "4242424242424242".into(),
+        info: None,
+        loading: true,
+    });
+    apply_json(&mut session, &seq, &sink, &info_json("999"));
+    assert!(session.payments.bank_card.as_ref().unwrap().info.is_none());
+    let extra = session.request(RequestPurpose::GetBankCardInfo, None);
+    apply_json(&mut session, &seq, &sink, &info_json(&extra.0.to_string()));
+    let lookup = session.payments.bank_card.as_ref().unwrap();
+    assert!(!lookup.loading);
+    assert_eq!(lookup.info.as_ref().unwrap().title, "Example Bank");
+
+    let extra = session.request(RequestPurpose::GetBankCardInfo, None);
+    session.payments.bank_card.as_mut().unwrap().loading = true;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BANK_CARD_NUMBER_INVALID"}}"#,
+            extra.0
+        ),
+    );
+    let lookup = session.payments.bank_card.as_ref().unwrap();
+    assert!(!lookup.loading && lookup.info.is_none());
+}

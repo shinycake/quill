@@ -1,6 +1,7 @@
 //! Connect driver: payments.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::state::BankCardLookup;
 use crate::state::PaymentsPurpose;
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
@@ -126,6 +127,28 @@ impl<S: JsonSender> ConnectDriver<S> {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// Look up a tapped bank card number (`getBankCardInfo`). The lookup
+    /// lives in `payments.bank_card`; a failed send leaves it without info.
+    pub fn request_bank_card_info(&mut self, number: &str) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::GetBankCardInfo, None);
+        self.session.payments.bank_card = Some(BankCardLookup {
+            number: number.to_string(),
+            info: None,
+            loading: true,
+        });
+        let json = crate::telegram::requests::get_bank_card_info(extra, number);
+        if let Err(err) = self.send_json_request(extra, &json) {
+            if let Some(lookup) = self.session.payments.bank_card.as_mut() {
+                lookup.loading = false;
+            }
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
     /// Slice `parity:bots-payment-recurring`: fetch the `starSubscriptions`
     /// list (`getStarSubscriptions`, schema 1.8.67, line 16075). Guarded:
     /// once per session unless the list was marked stale by a mutation.

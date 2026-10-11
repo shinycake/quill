@@ -129,6 +129,14 @@ impl QuillApp {
                 };
             }
             LinkTarget::Phone(_) | LinkTarget::BankCard(_) | LinkTarget::DateTime { .. } => {
+                if let LinkTarget::BankCard(number) = &link {
+                    // Telegram Desktop asks `getBankCardInfo`; the menu
+                    // adds the issuer and its links once the answer lands.
+                    let number = number.clone();
+                    if let Some(live) = self.live.as_mut() {
+                        let _ = live.driver.request_bank_card_info(&number);
+                    }
+                }
                 self.message_ui.link_popup = Some(LinkPopup {
                     position: window.mouse_position(),
                     link,
@@ -411,6 +419,18 @@ impl QuillApp {
             _ => return None,
         };
         let row_hover = cx.theme().accent;
+        // Issuer title and the open-URL actions of a looked-up card.
+        let (card_title, card_actions) = match (&popup.link, self.session()) {
+            (LinkTarget::BankCard(number), Some(session)) => session
+                .payments
+                .bank_card
+                .as_ref()
+                .filter(|lookup| &lookup.number == number)
+                .and_then(|lookup| lookup.info.as_ref())
+                .map(|info| (info.title.clone(), info.actions.clone()))
+                .unwrap_or_default(),
+            _ => Default::default(),
+        };
         Some(
             div()
                 .id("link-popup-overlay")
@@ -442,6 +462,18 @@ impl QuillApp {
                                 .border_1()
                                 .border_color(accent())
                                 .bg(bg_canvas())
+                                .when(!card_title.is_empty(), |panel| {
+                                    panel.child(
+                                        div()
+                                            .id("link-popup-card-title")
+                                            .px_3()
+                                            .py_1p5()
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(text_menu())
+                                            .child(card_title.clone()),
+                                    )
+                                })
                                 .child(
                                     div()
                                         .id("link-popup-copy")
@@ -466,7 +498,32 @@ impl QuillApp {
                                             this.message_ui.link_popup = None;
                                             this.copy_entity_text(text.clone(), cx);
                                         })),
-                                ),
+                                )
+                                .children(card_actions.into_iter().enumerate().map(
+                                    |(index, action)| {
+                                        let url = action.url;
+                                        let label: SharedString = action.text.into();
+                                        div()
+                                            .id(("link-popup-card-action", index))
+                                            .flex()
+                                            .items_center()
+                                            .gap_3()
+                                            .px_3()
+                                            .py_1p5()
+                                            .rounded_md()
+                                            .cursor_pointer()
+                                            .text_sm()
+                                            .text_color(text_menu())
+                                            .hover(|style| style.bg(row_hover))
+                                            .role(gpui_kit::Role::MenuItem)
+                                            .aria_label(label.clone())
+                                            .child(label)
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.message_ui.link_popup = None;
+                                                this.open_message_url(&url, cx);
+                                            }))
+                                    },
+                                )),
                         ),
                 )
                 .into_any_element(),

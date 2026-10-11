@@ -73,6 +73,9 @@ pub(crate) fn parse_payments_payload(
         "premiumState" => Ok(EnvelopePayload::Payments(PaymentsPayload::PremiumState(
             crate::premium_hub::parse_premium_state(value),
         ))),
+        "bankCardInfo" => Ok(EnvelopePayload::Payments(PaymentsPayload::BankCardInfo(
+            BankCardInfoData::parse(value),
+        ))),
         "updateOwnedStarCount" => Ok(EnvelopePayload::Payments(
             PaymentsPayload::UpdateOwnedStarCount(crate::premium_hub::StarAmount::parse(
                 value.get("star_amount"),

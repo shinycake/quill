@@ -34,6 +34,8 @@ pub enum PaymentsPayload {
     PremiumFeatures(crate::premium_hub::PremiumInfo),
     /// `premiumState` — the `getPremiumState` answer.
     PremiumState(crate::premium_hub::PremiumStateInfo),
+    /// `bankCardInfo` — the `getBankCardInfo` answer.
+    BankCardInfo(BankCardInfoData),
     /// `updateOwnedStarCount`: the signed-in user's Stars balance changed.
     UpdateOwnedStarCount(crate::premium_hub::StarAmount),
 }
