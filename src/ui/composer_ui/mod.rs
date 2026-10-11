@@ -152,6 +152,39 @@ impl QuillApp {
                 );
             }
             let name = item.command.clone();
+            if item.quick_reply == Some(quill::quick_replies::EDIT_ROW) {
+                list = list.child(
+                    div()
+                        .id(("command-menu-item", index as u64))
+                        .w_full()
+                        .flex()
+                        .justify_center()
+                        .px_3()
+                        .py_2()
+                        .rounded_md()
+                        .role(gpui_kit::Role::Button)
+                        .aria_label(item.description.clone())
+                        .cursor_pointer()
+                        .pressable(cx.theme())
+                        .when(index == selected, |this| this.bg(cx.theme().selection))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                window.prevent_default();
+                                this.send_command_menu_index(index, window, cx);
+                            }),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .text_color(cx.theme().primary)
+                                .child(item.description.clone()),
+                        ),
+                );
+                continue;
+            }
             let label = if item.description.is_empty() {
                 format!("/{name}")
             } else {

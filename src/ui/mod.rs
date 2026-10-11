@@ -238,6 +238,7 @@ mod profile_panels;
 mod proxy;
 mod proxy_qr;
 mod quick_action_ui;
+mod quick_replies;
 mod reactions;
 mod recording;
 mod reply_options_ui;

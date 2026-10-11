@@ -735,6 +735,9 @@ impl QuillApp {
         let inline_active = quill::composer::inline_query_trigger(&text).is_some();
         let triggered = command_menu_trigger(&text).is_some() && !inline_active;
         let open_chat = self.session().and_then(|session| session.open_chat);
+        if triggered {
+            self.load_quick_replies_for_menu();
+        }
         let has_items = open_chat.is_some_and(|chat_id| {
             self.session()
                 .map(|session| !session.command_menu_items(chat_id).is_empty())
@@ -745,7 +748,15 @@ impl QuillApp {
             return;
         }
         self.composer_ui.command_menu_open = open;
-        self.composer_ui.command_menu_selected = 0;
+        // tdesktop starts below the "Edit Quick Replies" row.
+        self.composer_ui.command_menu_selected =
+            self.command_menu_state(cx).map_or(0, |(_, items)| {
+                usize::from(
+                    items
+                        .first()
+                        .is_some_and(|i| i.quick_reply == Some(quill::quick_replies::EDIT_ROW)),
+                )
+            });
         cx.notify();
     }
 
@@ -803,7 +814,10 @@ impl QuillApp {
         if filtered.is_empty() {
             return None;
         }
-        Some((prefix.to_string(), filtered))
+        Some((
+            prefix.to_string(),
+            quill::quick_replies::with_edit_row(filtered),
+        ))
     }
 
     /// Phase 3.3: Enter with the menu open picks the highlighted row.
@@ -829,6 +843,51 @@ impl QuillApp {
     /// the 3.1 insert helper, then the menu closes (the next `Change`
     /// reopens it if a trigger token remains).
     pub(in crate::ui) fn pick_command_menu_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items = self
+            .command_menu_state(cx)
+            .map(|(_, items)| items)
+            .unwrap_or_default();
+        let Some(item) = items.get(index) else {
+            return;
+        };
+        if let Some(shortcut_id) = item.quick_reply {
+            self.send_quick_reply_row(shortcut_id, window, cx);
+            return;
+        }
+        self.insert_command_menu_index(index, window, cx);
+    }
+
+    /// Tab: put the highlighted command in the composer instead of sending
+    /// it (tdesktop `ByTab`). The "Edit Quick Replies" row still opens the
+    /// settings. Returns true when Tab was consumed.
+    pub(in crate::ui) fn insert_command_menu_selection(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let items = self
+            .command_menu_state(cx)
+            .map(|(_, items)| items)
+            .unwrap_or_default();
+        if !self.composer_ui.command_menu_open || items.is_empty() {
+            return false;
+        }
+        let index = self.composer_ui.command_menu_selected.min(items.len() - 1);
+        match items[index].quick_reply {
+            Some(quill::quick_replies::EDIT_ROW) => {
+                self.send_quick_reply_row(quill::quick_replies::EDIT_ROW, window, cx)
+            }
+            _ => self.insert_command_menu_index(index, window, cx),
+        }
+        true
+    }
+
+    fn insert_command_menu_index(
         &mut self,
         index: usize,
         window: &mut Window,
@@ -874,6 +933,10 @@ impl QuillApp {
         let Some(item) = items.get(index) else {
             return;
         };
+        if let Some(shortcut_id) = item.quick_reply {
+            self.send_quick_reply_row(shortcut_id, window, cx);
+            return;
+        }
         let command = format!("/{}", item.command.trim_start_matches('/'));
         let current = self.composer_markup(cx);
         let rest = strip_command_menu_trigger(&current)

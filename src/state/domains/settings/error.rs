@@ -11,6 +11,9 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        if self.apply_quick_replies_error(err, pending.map(|p| p.purpose)) {
+            return;
+        }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetLanguagePackInfo) => self.apply_language_pack_error(pending),
             // Slice S4: Data & Storage request failures surface

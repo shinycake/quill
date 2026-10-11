@@ -60,6 +60,9 @@ pub struct CommandMenuItem {
     /// line 826) — the row shows the ephemeral icon; the result is only
     /// visible to the sender.
     pub is_ephemeral: bool,
+    /// A quick reply shortcut (Telegram Business): choosing the row sends
+    /// the shortcut's messages instead of inserting the command.
+    pub quick_reply: Option<i32>,
 }
 
 /// Phase 3.3: `/` command-menu trigger. Returns the filter prefix typed
@@ -125,6 +128,7 @@ pub fn merge_command_menu_items(
             description: command.description.clone(),
             global: false,
             is_ephemeral: command.is_ephemeral,
+            quick_reply: None,
         })
         .collect();
     for command in global {
@@ -136,6 +140,7 @@ pub fn merge_command_menu_items(
             description: command.description.clone(),
             global: true,
             is_ephemeral: command.is_ephemeral,
+            quick_reply: None,
         });
     }
     items
@@ -298,6 +303,7 @@ mod tests {
                 description: "Start the bot".into(),
                 global: false,
                 is_ephemeral: false,
+                quick_reply: None,
             }
         );
         assert_eq!(
@@ -307,6 +313,7 @@ mod tests {
                 description: "Tweak the bot".into(),
                 global: true,
                 is_ephemeral: false,
+                quick_reply: None,
             }
         );
     }
@@ -352,18 +359,21 @@ mod tests {
                 description: String::new(),
                 global: false,
                 is_ephemeral: false,
+                quick_reply: None,
             },
             CommandMenuItem {
                 command: "settings".into(),
                 description: String::new(),
                 global: true,
                 is_ephemeral: false,
+                quick_reply: None,
             },
             CommandMenuItem {
                 command: "help".into(),
                 description: String::new(),
                 global: false,
                 is_ephemeral: false,
+                quick_reply: None,
             },
         ];
         let all: Vec<&str> = filter_command_menu_items(&items, "")

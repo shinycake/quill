@@ -636,6 +636,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             // fallback), once per Ready.
             let _ = self.maybe_fetch_notification_sounds();
             let _ = self.maybe_fetch_scope_notification_settings();
+            // Quick reply shortcuts, so the first `/` already lists them
+            // (tdesktop preloads them with the dialogs).
+            let _ = self.ensure_quick_reply_shortcuts();
         }
         // Parity slice: `updateSavedNotificationSounds` may have marked the
         // list stale between ingests.

@@ -7,6 +7,7 @@ mod bot_verification;
 mod bots;
 mod call_audio;
 mod owned_bots;
+mod quick_replies;
 pub use call_audio::{CallAudio, LevelSource, tap_wanted};
 mod calls;
 mod chat_list;

@@ -100,6 +100,7 @@ pub mod profile_tab;
 pub mod proxy;
 pub mod proxy_extras;
 pub mod quick_action;
+pub mod quick_replies;
 pub mod quit_guard;
 pub mod reaction_who;
 pub mod reply_options;

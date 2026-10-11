@@ -154,4 +154,6 @@ pub enum SettingsPayload {
     UpdateReactionNotificationSettings {
         settings: ReactionNotificationSettings,
     },
+    /// Quick reply shortcuts and their messages changed.
+    QuickReplies(crate::quick_replies::QuickRepliesUpdate),
 }

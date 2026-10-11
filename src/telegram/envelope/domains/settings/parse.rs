@@ -448,6 +448,14 @@ pub(crate) fn parse_settings_payload(
         "languagePackInfo" => Ok(EnvelopePayload::Settings(
             SettingsPayload::LanguagePackInfo(LanguagePackInfoData::parse(value)),
         )),
+        "updateQuickReplyShortcut"
+        | "updateQuickReplyShortcutDeleted"
+        | "updateQuickReplyShortcuts"
+        | "updateQuickReplyShortcutMessages" => {
+            crate::quick_replies::parse_update(type_name, value)
+                .map(|update| EnvelopePayload::Settings(SettingsPayload::QuickReplies(update)))
+                .ok_or(ParseError::MissingField)
+        }
         _ => return Ok(None),
     };
     payload.map(Some)
