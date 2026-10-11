@@ -12,6 +12,7 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::GetLanguagePackInfo) => self.apply_language_pack_error(pending),
             // Slice S4: Data & Storage request failures surface
             // on the screen (the S3 pattern) — never as toasts.
             Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings { .. })) => {

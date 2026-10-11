@@ -1,0 +1,2 @@
+parity:deeplink-premium-language
+parity:deeplink-giftcode

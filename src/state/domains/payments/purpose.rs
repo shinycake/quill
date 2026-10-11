@@ -65,6 +65,11 @@ pub enum PaymentsPurpose {
     /// `getBankCardInfo` for a tapped card number. Response is
     /// `bankCardInfo`.
     GetBankCardInfo,
+    /// `checkPremiumGiftCode` for a gift code link. Response is
+    /// `premiumGiftCodeInfo`.
+    CheckPremiumGiftCode,
+    /// `applyPremiumGiftCode`, sent only on the Apply button. Response is `ok`.
+    ApplyPremiumGiftCode,
 }
 
 flat_purposes!(Payments(PaymentsPurpose) {
@@ -83,4 +88,6 @@ flat_purposes!(Payments(PaymentsPurpose) {
     DeleteSavedOrderInfo,
     DeleteSavedCredentials,
     GetBankCardInfo,
+    CheckPremiumGiftCode,
+    ApplyPremiumGiftCode,
 });

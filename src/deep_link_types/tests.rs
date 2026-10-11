@@ -190,7 +190,7 @@ fn ui_links_route_without_a_request() {
         route_of(
             json!({"@type":"internalLinkTypeSettings","section":{"@type":"settingsSectionPremium"}})
         ),
-        LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::Unsupported))
+        LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::Premium))
     );
     assert_eq!(
         route_of(json!({"@type":"internalLinkTypeContactsPage","section":""})),

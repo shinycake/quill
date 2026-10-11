@@ -445,6 +445,9 @@ pub(crate) fn parse_settings_payload(
                 settings: parse_reaction_notification_settings(value.get("notification_settings")),
             },
         )),
+        "languagePackInfo" => Ok(EnvelopePayload::Settings(
+            SettingsPayload::LanguagePackInfo(LanguagePackInfoData::parse(value)),
+        )),
         _ => return Ok(None),
     };
     payload.map(Some)

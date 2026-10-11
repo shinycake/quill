@@ -14,6 +14,9 @@ use crate::telegram::envelope::ChatAdminRights;
 use crate::telegram::parse_chat_admin_rights;
 use serde_json::Value;
 
+mod link_info_text;
+pub use link_info_text::{gift_duration, gift_reason, language_progress};
+
 /// One `InternalLinkType` answer, reduced to the fields Quill acts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InternalLink {
@@ -83,7 +86,13 @@ pub enum InternalLink {
     ChatBoost {
         url: String,
     },
-    PremiumGiftCode,
+    PremiumGiftCode {
+        code: String,
+    },
+    /// `internalLinkTypeLanguagePack`: `t.me/setlanguage/<id>`.
+    LanguagePack {
+        id: String,
+    },
     VideoChat {
         username: String,
         live_stream: bool,
@@ -127,6 +136,10 @@ pub enum SettingsTarget {
     SavedMessages,
     /// The Telegram Premium page (`internalLinkTypePremiumFeaturesPage`).
     Premium,
+    /// "Privacy Policy": a web page, so Quill says where it is.
+    PrivacyPolicy,
+    /// The language page: Quill ships English only.
+    Language,
     /// A page Quill has no screen for; the settings list opens instead.
     Unsupported,
 }
@@ -154,6 +167,14 @@ pub enum DeepLinkUi {
     /// `bg`: the wallpaper preview for a background name (`searchBackground`).
     Background {
         name: String,
+    },
+    /// `giftcode`: the box with the code's details and an Apply button.
+    GiftCode {
+        code: String,
+    },
+    /// `setlanguage`: the language pack's details; nothing is switched.
+    LanguagePack {
+        id: String,
     },
 }
 
@@ -191,6 +212,9 @@ fn settings_target(section: Option<&str>) -> SettingsTarget {
         "settingsSectionEditProfile" => SettingsTarget::EditProfile,
         "settingsSectionNotifications" => SettingsTarget::Notifications,
         "settingsSectionPrivacyAndSecurity" => SettingsTarget::PrivacyAndSecurity,
+        "settingsSectionPremium" => SettingsTarget::Premium,
+        "settingsSectionPrivacyPolicy" => SettingsTarget::PrivacyPolicy,
+        "settingsSectionLanguage" => SettingsTarget::Language,
         _ => SettingsTarget::Unsupported,
     }
 }
@@ -288,7 +312,12 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
             url: text(value, "url"),
         },
         "PremiumFeaturesPage" => InternalLink::Settings(SettingsTarget::Premium),
-        "PremiumGiftCode" => InternalLink::PremiumGiftCode,
+        "PremiumGiftCode" => InternalLink::PremiumGiftCode {
+            code: text(value, "code"),
+        },
+        "LanguagePack" => InternalLink::LanguagePack {
+            id: text(value, "language_pack_id"),
+        },
         "VideoChat" => InternalLink::VideoChat {
             username: text(value, "chat_username"),
             live_stream: flag(value, "is_live_stream"),
@@ -493,6 +522,12 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
                 LinkRoute::Ui(DeepLinkUi::Share { text: text.clone() })
             }
         }
+        InternalLink::Settings(SettingsTarget::PrivacyPolicy) => LinkRoute::Message(
+            "The Telegram Privacy Policy is at https://telegram.org/privacy.".into(),
+        ),
+        InternalLink::Settings(SettingsTarget::Language) => LinkRoute::Message(
+            "Quill is available in English only for now, so there is no language to pick.".into(),
+        ),
         InternalLink::Settings(target) => LinkRoute::Ui(DeepLinkUi::Settings(*target)),
         InternalLink::AuthenticationCode { .. } => LinkRoute::Message(
             "This is a sign-in code link. Codes are only used while signing in, and you are \
@@ -509,7 +544,21 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
                 LinkRoute::Resolve(A::BoostLink { url: url.clone() })
             }
         }
-        InternalLink::PremiumGiftCode => LinkRoute::Message(format!("Gift codes {NOT_SUPPORTED}")),
+        // The box checks the code and applies it only on a click.
+        InternalLink::PremiumGiftCode { code } => {
+            if code.is_empty() {
+                LinkRoute::Message("This gift code link is broken.".into())
+            } else {
+                LinkRoute::Ui(DeepLinkUi::GiftCode { code: code.clone() })
+            }
+        }
+        InternalLink::LanguagePack { id } => {
+            if id.is_empty() {
+                LinkRoute::Message("This language link is broken.".into())
+            } else {
+                LinkRoute::Ui(DeepLinkUi::LanguagePack { id: id.clone() })
+            }
+        }
         // Opens the group or channel, whose header has the join button.
         // Joining straight from a link would open the microphone unasked, so
         // the call itself is not joined here.
@@ -614,3 +663,6 @@ mod tests;
 
 #[cfg(test)]
 mod web_app_link_tests;
+
+#[cfg(test)]
+mod premium_language_link_tests;

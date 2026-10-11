@@ -113,7 +113,9 @@ pub fn parse_tg_url(url: &str) -> Option<DeepLinkAction> {
 /// First path segments of `t.me` links that are not usernames (stickers,
 /// proxies, languages, share sheets, ...). They fall through to TDLib's
 /// own `getDeepLinkInfo` text instead of a bogus `searchPublicChat`.
-const WEB_RESERVED_PATHS: [&str; 24] = [
+const WEB_RESERVED_PATHS: [&str; 26] = [
+    "premium_offer",
+    "premium_multigift",
     "addstickers",
     "addemoji",
     "addtheme",
