@@ -191,7 +191,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Tapping a /command in a group chat sends it addressed to that bot <!-- parity:render-bot-command-click -->
 - [x] Tapping a timestamp link seeks the video or voice message to that moment <!-- parity:render-media-timestamp-seek -->
 - [x] "Open this link?" confirmation when a link's label differs from its real address <!-- parity:render-hidden-link-confirm -->
-- [ ] Hovering a text link shows its full address in a tooltip <!-- parity:render-link-hover-tooltip -->
+- [x] Hovering a text link shows its full address in a tooltip <!-- parity:render-link-hover-tooltip -->
 - [x] Reply header shows the replied sender's name in their color <!-- parity:render-reply-header-sender -->
 - [x] Reply header shows a media thumbnail, quote mark, other-chat name, and story replies <!-- parity:render-reply-header-media -->
 - [x] Replied-to messages outside the loaded history are fetched and previewed <!-- parity:render-reply-outside-window -->
@@ -890,7 +890,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
 - [ ] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
 - [ ] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
-- [ ] Disable sponsored messages (Premium) <!-- parity:premium-disable-sponsored -->
+- [x] Hide ads (Premium) <!-- parity:premium-disable-sponsored -->
 - [ ] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
 - [ ] Fragment and TON wallet flows (blocked: external web services, link-out only) <!-- parity:premium-fragment-ton -->
 
@@ -940,7 +940,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] addlist links add a shared folder <!-- parity:deeplink-addlist -->
 - [ ] Background and theme links preview and apply them <!-- parity:deeplink-bg-theme -->
 - [x] +phone links open a chat with that number <!-- parity:deeplink-phone -->
-- [ ] ?startgroup and ?startchannel links add a bot to a group or channel <!-- parity:deeplink-startgroup -->
+- [x] ?startgroup and ?startchannel links add a bot to a group or channel <!-- parity:deeplink-startgroup -->
 - [x] Message links with ?thread, ?comment, ?single and topic ids open the right thread <!-- parity:deeplink-thread-comment -->
 - [x] Story and story album links open the story viewer <!-- parity:deeplink-story -->
 - [x] ?t= timestamp links seek the media to that time <!-- parity:deeplink-timestamp -->
