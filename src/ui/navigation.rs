@@ -12,6 +12,8 @@ use quill::telegram::envelope::ChatKind;
 
 #[derive(Clone, Copy)]
 pub(super) enum NavigationAction {
+    /// `parity:platform-new-window`: the open chat in a window of its own.
+    NewWindow,
     Saved,
     MyProfile,
     MyStories,
@@ -87,6 +89,11 @@ impl QuillApp {
             NavigationAction::ChatArchive => {
                 if let Some(chat) = self.session().and_then(|s| s.open_chat) {
                     self.toggle_archive(chat, cx);
+                }
+            }
+            NavigationAction::NewWindow => {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                    self.open_chat_in_new_window(chat, window, cx);
                 }
             }
             NavigationAction::ChatFolders => {
@@ -360,6 +367,7 @@ impl QuillApp {
             && chat.is_some_and(|c| c.is_forum_chat())
             && chat_id
                 .is_some_and(|id| self.session().is_some_and(|s| s.chat_can_manage_topics(id)));
+        let new_window = chat.is_some_and(|c| self.can_open_chat_window(c));
         let gifts_ok = live
             && chat.is_some_and(|c| {
                 matches!(c.kind, ChatKind::Private { user_id } if user_id.0 > 0)
@@ -412,6 +420,11 @@ impl QuillApp {
                     ),
                     ("Received gifts", NavigationAction::ChatGifts, gifts_ok),
                     ("Send collectible gift", NavigationAction::Gift, true),
+                    (
+                        "Open in new window",
+                        NavigationAction::NewWindow,
+                        new_window,
+                    ),
                 ] {
                     if !visible {
                         continue;

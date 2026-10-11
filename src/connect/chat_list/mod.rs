@@ -54,7 +54,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.prepare_history_window(chat_id);
         // Channels are ungated since Phase 2.2: they follow the normal
         // openChat / history path; sponsored rows fetch for every channel.
-        self.send_open_chat(chat_id)?;
+        // A chat shown in its own window is open in TDLib already.
+        if !self.session.window_chats.contains(&chat_id) {
+            self.send_open_chat(chat_id)?;
+        }
         self.maybe_probe_channel_membership()?;
         self.maybe_fetch_bot_info()?;
         self.maybe_fetch_bot_commands()?;

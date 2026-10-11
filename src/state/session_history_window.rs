@@ -215,9 +215,7 @@ impl Session {
         messages: Vec<ParsedMessage>,
         seq: u64,
     ) {
-        if self.take_stale_history_request(pending)
-            || pending.view_generation != Some(self.view_generation)
-        {
+        if self.take_stale_history_request(pending) || self.history_view_stale(pending) {
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some("messages".into()),

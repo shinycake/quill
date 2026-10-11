@@ -106,6 +106,8 @@ pub struct QuillApp {
     pub(super) viewer: super::viewer_state::ViewerUi,
     /// Chat folders UI: the tab strip, editor, manager, share and invite boxes.
     pub(super) folders: super::folders_state::FolderUi,
+    /// Chats open in windows of their own and the frame scope that names the one being drawn (`ui/chat_window`).
+    pub(super) windows: super::chat_window::ChatWindows,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

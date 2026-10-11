@@ -41,8 +41,10 @@ impl QuillApp {
         // kit Phase 3: the scroller resets when the open chat/topic
         // changes. Read the key up front — the `session` borrow must end
         // before the state below is assigned.
+        let viewed_chat = self.viewed_chat();
+        let viewed_topic = self.viewed_topic();
         let thread_window = session
-            .and_then(|s| s.open_chat.and_then(|chat| s.thread_for_chat(chat)))
+            .and_then(|s| viewed_chat.and_then(|chat| s.thread_for_chat(chat)))
             .map(|thread| ThreadWindow {
                 thread_id: thread.thread_id,
                 unread_anchor: thread.unread_anchor,
@@ -51,11 +53,8 @@ impl QuillApp {
                 window_epoch: thread.window_epoch,
             });
         let history_key = (
-            session
-                .and_then(|s| s.open_chat)
-                .map(|chat| chat.0)
-                .unwrap_or(-1),
-            session.and_then(|s| s.open_topic),
+            viewed_chat.map(|chat| chat.0).unwrap_or(-1),
+            viewed_topic,
             thread_window.as_ref().map_or(0, |thread| thread.thread_id),
         );
         // The loaded window: the thread's own (it opens around its read
@@ -65,8 +64,8 @@ impl QuillApp {
         let (unread_anchor, has_newer, window_epoch) = match &thread_window {
             Some(thread) => (thread.unread_anchor, thread.has_newer, thread.window_epoch),
             None => session
-                .filter(|s| s.open_topic.is_none())
-                .and_then(|s| s.open_chat.and_then(|chat| s.histories.get(&chat.0)))
+                .filter(|_| viewed_topic.is_none())
+                .and_then(|s| viewed_chat.and_then(|chat| s.histories.get(&chat.0)))
                 .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
                 .unwrap_or((None, false, 0)),
         };
@@ -614,7 +613,11 @@ impl QuillApp {
                 .justify_center()
                 .child(super::anim_layer::occluder(div().w(px(128.)).h_full()))
         });
-        let look = self.chat_look(self.open_chat_id().map(|c| c.0), cx);
+        let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
+        // Built for a chat window: its deferred paging addresses that chat,
+        // and the pointer listeners below (drag selection over the main
+        // window's rows) are not registered.
+        let window_chat = self.windows.scope;
         super::selectable_text::selection_viewport(
             super::wallpaper::paint_wallpaper(
                 div()
@@ -657,14 +660,18 @@ impl QuillApp {
             .child(super::history_fx::reveal_viewport(
                 reveal,
                 MessageScroller::new(id, self.history.scroller.clone(), move |ix, _window, cx| {
-                    let gif_view = weak.clone();
-                    cx.defer(move |cx| {
-                        let _ = gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
-                    });
+                    if window_chat.is_none() {
+                        let gif_view = weak.clone();
+                        cx.defer(move |cx| {
+                            let _ = gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
+                        });
+                    }
                     if ix == 0 {
                         let weak = weak.clone();
                         cx.defer(move |cx| {
-                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
+                            let _ = weak.update(cx, |this, cx| {
+                                this.maybe_auto_load_older_in(window_chat, cx)
+                            });
                         });
                     }
                     // Prefetch the next newer page a few rows before the
@@ -672,7 +679,9 @@ impl QuillApp {
                     if has_newer && ix + NEWER_PREFETCH_ROWS >= count {
                         let weak = weak.clone();
                         cx.defer(move |cx| {
-                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_newer(cx));
+                            let _ = weak.update(cx, |this, cx| {
+                                this.maybe_auto_load_newer_in(window_chat, cx)
+                            });
                         });
                     }
                     weak.update(cx, |this, cx| this.render_history_row(ix, cx))
@@ -688,14 +697,20 @@ impl QuillApp {
                 // only scrolling to its end.
                 .with_jump_button_renderer({
                     let jump = cx.weak_entity();
+                    let scroller = self.history.scroller.clone();
                     move |button| {
+                        let scroller = scroller.clone();
                         button
                             .when(unread_count > 0, |button| {
                                 button.label(unread_count.to_string())
                             })
                             .on_click(move |_, _, cx| {
-                                let _ =
-                                    jump.update(cx, |this, cx| this.jump_to_latest_messages(cx));
+                                let _ = jump.update(cx, |this, cx| match window_chat {
+                                    Some(chat) => {
+                                        this.jump_to_latest_in_window(chat, &scroller, cx)
+                                    }
+                                    None => this.jump_to_latest_messages(cx),
+                                });
                             })
                     }
                 })
@@ -717,6 +732,9 @@ impl QuillApp {
                         *hit_rows.borrow_mut() =
                             rows.iter().map(|(ix, row, _)| (*ix, *row)).collect();
                         viewport.set(Some(bounds));
+                        if window_chat.is_some() {
+                            return;
+                        }
                         let moved = drag_app.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                             if phase.bubble() && event.pressed_button == Some(MouseButton::Left) {
@@ -822,9 +840,10 @@ impl QuillApp {
                 this.child(day_separator(label, cx))
             })
             .when(row.unread_divider(), |this| {
+                let viewed = self.viewed_chat();
                 let unread_at_open = self
                     .session()
-                    .and_then(|s| s.open_chat.and_then(|chat| s.histories.get(&chat.0)))
+                    .and_then(|s| viewed.and_then(|chat| s.histories.get(&chat.0)))
                     .map_or(0, |h| h.unread_at_open);
                 this.child(unread_divider(unread_at_open, cx))
             })

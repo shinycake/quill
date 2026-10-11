@@ -9,7 +9,7 @@
 //! second copy can go out meanwhile. Everything else surfaces as before,
 //! with the "Too many attempts" notice for user actions (reducer side).
 use super::*;
-use crate::ids::RequestId;
+use crate::ids::{ChatId, RequestId};
 use crate::state::PENDING_REQUEST_TTL;
 use crate::telegram::envelope::{Envelope, EnvelopePayload};
 use std::time::{Duration, Instant};
@@ -109,12 +109,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The "Couldn't load messages · Retry" action: clear the failure and
     /// request the first page again.
     pub fn retry_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if let Some(chat_id) = self.session.open_chat
-            && let Some(history) = self.session.histories.get_mut(&chat_id.0)
-        {
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        self.retry_history_for(chat_id)
+    }
+
+    /// [`Self::retry_history`] for a chat on screen (the open chat or one
+    /// shown in its own window).
+    pub fn retry_history_for(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
             history.load_failed = false;
         }
-        self.fetch_history()
+        self.fetch_history_for(chat_id)
     }
 }
 

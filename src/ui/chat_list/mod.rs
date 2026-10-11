@@ -135,6 +135,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A chat with a window of its own shows there (Telegram Desktop
+        // `showHistoryInDifferentWindow`); the main window stays put.
+        if !thread_switch && self.routed_to_chat_window(chat_id, cx) {
+            return;
+        }
         self.flush_leaving_draft(cx);
         // A reply aimed at this chat from another one survives the draft
         // restore below ("Reply in Another Chat").

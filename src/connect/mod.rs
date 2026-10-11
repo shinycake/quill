@@ -11,6 +11,7 @@ mod quick_replies;
 pub use call_audio::{CallAudio, LevelSource, tap_wanted};
 mod calls;
 mod chat_list;
+mod chat_window;
 mod composer;
 mod connect_flow;
 mod contacts;

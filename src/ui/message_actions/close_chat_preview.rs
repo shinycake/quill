@@ -277,6 +277,23 @@ impl QuillApp {
             };
         }
         use gpui_kit::assets::IconName as Lucide;
+        // tdesktop `Filler::addNewWindow` heads the chat-list menu.
+        if self.can_open_chat_window(&chat) {
+            item_window!(
+                5,
+                Lucide::ExternalLink,
+                "chat-menu-new-window",
+                "Open in new window",
+                this,
+                window,
+                cx,
+                {
+                    this.chat_list.menu = None;
+                    this.open_chat_in_new_window(chat_id, window, cx);
+                    cx.notify();
+                }
+            );
+        }
         item!(
             10,
             if archived {

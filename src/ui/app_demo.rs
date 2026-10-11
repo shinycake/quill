@@ -458,6 +458,7 @@ impl QuillApp {
             viewer: super::viewer_state::ViewerUi::new(&audio_output),
             mini_apps: Default::default(),
             folders: super::folders_state::FolderUi::new(),
+            windows: Default::default(),
         };
 
         if let Some(demo) = demo {

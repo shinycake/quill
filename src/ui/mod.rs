@@ -23,6 +23,7 @@ mod bottom_action;
 mod calls_state;
 mod chat_list_state;
 mod chat_theme;
+mod chat_window;
 mod clipboard_files;
 mod composer_rtl;
 mod composer_state;

@@ -427,6 +427,8 @@ pub(super) fn session_chat_row(
         // Plain arrow while hovering: on macOS 26 the pointing hand reads
         // as a drag affordance, which a row you only click isn't.
         .when(!selected, |this| this.pressable(cx.theme()))
+        // UI tests find the row by its id (inert outside test support).
+        .test_support()
         .aria_selected(selected)
         .when(selected, |this| {
             this.hover(|s| s.bg(cx.theme().primary.opacity(0.3)))
@@ -443,11 +445,16 @@ pub(super) fn session_chat_row(
         } else {
             cx.theme().sidebar
         })
-        .on_click(cx.listener(move |this, _, window, cx| {
+        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
             // Slice CL3: in multi-select mode a row click toggles the
             // check instead of opening the chat.
             if selecting {
                 this.toggle_chat_selected(id, cx);
+            } else if event.modifiers().secondary() {
+                // Ctrl+click (Cmd on macOS) opens the chat in a new window
+                // (tdesktop `dialogs_inner_widget.cpp`: `row.newWindow =
+                // modifiers & Qt::ControlModifier`).
+                this.open_chat_in_new_window(id, window, cx);
             } else {
                 this.select_listed_chat(id, window, cx);
             }

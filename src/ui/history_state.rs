@@ -102,7 +102,7 @@ pub(crate) struct HistoryUi {
 }
 
 impl HistoryUi {
-    pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
+    pub(super) fn new(cx: &mut App) -> Self {
         Self {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             rows: Vec::new(),

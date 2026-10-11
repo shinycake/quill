@@ -529,44 +529,13 @@ impl QuillApp {
         // Saved Messages: the sublist list, one sublist or a tag filter.
         let saved_mode = self.saved_mode();
         let saved_rows = self.saved_rows();
-        // Rebuild the history rows only when something that feeds them
-        // changed; otherwise skip snapshotting the messages altogether.
-        let ui_hash = self.history_rows_ui_hash();
-        let today = quill::local_time::civil_local(quill::local_time::now_unix()).day_number();
-        let rows_input = |list: &'static str, history: Option<&quill::state::HistoryState>| {
-            let key = ui_hash.map(|ui| HistoryRowsKey {
-                list,
-                chat: open.map(|chat| chat.0),
-                topic: open_topic,
-                messages_revision: history.map_or(0, |h| h.messages.revision()),
-                session_revision: session.map_or(0, |s| s.revision),
-                window_epoch: history.map_or(0, |h| h.window_epoch),
-                unread_anchor: history.and_then(|h| h.unread_anchor),
-                highlight: highlight_id,
-                ui,
-                translate: self.translate_revision(),
-                today,
-            });
-            let reuse = key.is_some() && key == self.history.rows_key;
-            let messages = (!reuse).then(|| {
-                let mut messages: Vec<quill::state::HistoryMessage> = history
-                    .map(|h| h.ordered().into_iter().cloned().collect())
-                    .unwrap_or_default();
-                // A translated chat shows the translations in place.
-                if let Some(chat_id) = open {
-                    self.apply_chat_translation(chat_id, &mut messages);
-                    // A channel joined in this session ends with "You
-                    // joined this channel" and the similar-channels strip
-                    // (tdesktop `insertJoinedMessage`).
-                    if let Some(notice) = session.and_then(|s| s.joined_notice_row(chat_id)) {
-                        messages.push(notice);
-                    }
-                }
-                messages
-            });
-            (key, messages)
-        };
-        let (main_key, main_messages) = rows_input("session-history", main_history);
+        let (main_key, main_messages) = self.history_rows_input(
+            "session-history",
+            open,
+            open_topic,
+            main_history,
+            highlight_id,
+        );
         // Topic views page their own history type; they always rebuild.
         let topic_key: Option<HistoryRowsKey> = None;
         let topic_messages = Some(
@@ -809,6 +778,56 @@ impl QuillApp {
                     }
                 },
             ))
+    }
+
+    /// What the history rows of `chat` are built from: the key that says
+    /// whether the last build can be reused (`None`: not cacheable) and,
+    /// when it cannot, the messages to build them from (translations and
+    /// the joined-channel notice applied).
+    pub(in crate::ui) fn history_rows_input(
+        &self,
+        list: &'static str,
+        chat: Option<ChatId>,
+        topic: Option<i32>,
+        history: Option<&quill::state::HistoryState>,
+        highlight_id: Option<MessageId>,
+    ) -> (Option<HistoryRowsKey>, Option<Vec<HistoryMessage>>) {
+        // Rebuild the history rows only when something that feeds them
+        // changed; otherwise skip snapshotting the messages altogether.
+        let session = self.session();
+        let ui_hash = self.history_rows_ui_hash();
+        let today = quill::local_time::civil_local(quill::local_time::now_unix()).day_number();
+        let key = ui_hash.map(|ui| HistoryRowsKey {
+            list,
+            chat: chat.map(|chat| chat.0),
+            topic,
+            messages_revision: history.map_or(0, |h| h.messages.revision()),
+            session_revision: session.map_or(0, |s| s.revision),
+            window_epoch: history.map_or(0, |h| h.window_epoch),
+            unread_anchor: history.and_then(|h| h.unread_anchor),
+            highlight: highlight_id,
+            ui,
+            translate: self.translate_revision(),
+            today,
+        });
+        let reuse = key.is_some() && key == self.history.rows_key;
+        let messages = (!reuse).then(|| {
+            let mut messages: Vec<HistoryMessage> = history
+                .map(|h| h.ordered().into_iter().cloned().collect())
+                .unwrap_or_default();
+            // A translated chat shows the translations in place.
+            if let Some(chat_id) = chat {
+                self.apply_chat_translation(chat_id, &mut messages);
+                // A channel joined in this session ends with "You joined
+                // this channel" and the similar-channels strip (tdesktop
+                // `insertJoinedMessage`).
+                if let Some(notice) = session.and_then(|s| s.joined_notice_row(chat_id)) {
+                    messages.push(notice);
+                }
+            }
+            messages
+        });
+        (key, messages)
     }
 
     /// The part of the history row inputs that lives in the app rather than

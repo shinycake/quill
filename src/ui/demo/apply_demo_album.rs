@@ -77,12 +77,29 @@ impl QuillApp {
         attachment: Option<&ComposerAttachment>,
         reply: Option<&ComposerReplyTo>,
     ) {
+        let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) else {
+            return;
+        };
+        self.apply_demo_outgoing_to(chat_id, text, attachment, reply);
+    }
+
+    /// [`Self::apply_demo_outgoing`] into `chat_id`, which need not be the
+    /// open chat (a chat shown in its own window).
+    pub(in crate::ui) fn apply_demo_outgoing_to(
+        &mut self,
+        chat_id: ChatId,
+        text: &str,
+        attachment: Option<&ComposerAttachment>,
+        reply: Option<&ComposerReplyTo>,
+    ) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let Some(chat_id) = session.open_chat else {
-            return;
-        };
+        // The seed applied its fixtures with its own counter; an envelope
+        // numbered below `last_seq` is dropped as out of order.
+        self.demo_ui
+            .seq
+            .fetch_max(session.last_seq, std::sync::atomic::Ordering::Relaxed);
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         // After the newest loaded message, so the send lands at the bottom
         // and repeated sends don't replace each other.
