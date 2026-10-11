@@ -40,6 +40,9 @@ pub struct BotInfo {
     pub group_admin_rights: Option<ChatAdminRights>,
     /// `botInfo.default_channel_administrator_rights`, same for channels.
     pub channel_admin_rights: Option<ChatAdminRights>,
+    /// `botInfo.verification_parameters`: set only for the bot's owner, who
+    /// may then verify accounts with this bot.
+    pub verification_parameters: Option<crate::bot_verification::BotVerificationParameters>,
 }
 
 /// Slice B2: `botMenuButton text:string url:string = BotMenuButton;`
@@ -118,6 +121,9 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
         group_admin_rights: parse_requested_rights(value.get("default_group_administrator_rights")),
         channel_admin_rights: parse_requested_rights(
             value.get("default_channel_administrator_rights"),
+        ),
+        verification_parameters: crate::bot_verification::parse_bot_verification_parameters(
+            value.get("verification_parameters"),
         ),
     })
 }

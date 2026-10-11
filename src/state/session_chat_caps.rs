@@ -175,6 +175,56 @@ impl Session {
             .unwrap_or_default()
     }
 
+    /// The verifying bot's custom emoji drawn before the title in rows and
+    /// the header (tdesktop `drawVerified`); `None` when no bot verified
+    /// the chat.
+    pub fn chat_bot_verification_icon(&self, chat: &ChatSummary) -> Option<i64> {
+        self.chat_badge_inputs(chat)
+            .and_then(|(verification, _, _)| crate::bot_verification::leading_icon(verification))
+    }
+
+    /// `botInfo.verification_parameters` of a bot the viewer owns and may
+    /// verify accounts with.
+    pub fn bot_verification_parameters(
+        &self,
+        bot_user_id: i64,
+    ) -> Option<&crate::bot_verification::BotVerificationParameters> {
+        self.bots
+            .bot_info
+            .get(&bot_user_id)?
+            .as_ref()?
+            .verification_parameters
+            .as_ref()
+    }
+
+    /// A user's bot verification icon for the profile name.
+    pub fn user_bot_verification_icon(&self, user_id: i64) -> Option<i64> {
+        crate::bot_verification::leading_icon(self.user(user_id)?.verification)
+    }
+
+    /// The bot verification text of a user's profile, from the cached
+    /// full info.
+    pub fn user_bot_verification(
+        &self,
+        user_id: i64,
+    ) -> Option<&crate::bot_verification::BotVerification> {
+        self.user_full_info(user_id)?
+            .extras
+            .bot_verification
+            .as_ref()
+    }
+
+    /// The bot verification text of a supergroup or channel profile.
+    pub fn supergroup_bot_verification(
+        &self,
+        supergroup_id: i64,
+    ) -> Option<&crate::bot_verification::BotVerification> {
+        self.supergroup_full_info(supergroup_id)?
+            .admin
+            .bot_verification
+            .as_ref()
+    }
+
     fn chat_badge_inputs(
         &self,
         chat: &ChatSummary,

@@ -22,6 +22,16 @@ impl Session {
                 self.chats_state.chat_action_error =
                     Some(format!("could not load similar bots (error {})", err.code));
             }
+            Some(RequestPurpose::SetMessageSenderBotVerification) => {
+                self.chats_state.chat_action_error =
+                    Some(format!("could not verify the account (error {})", err.code));
+            }
+            Some(RequestPurpose::RemoveMessageSenderBotVerification) => {
+                self.chats_state.chat_action_error = Some(format!(
+                    "could not remove the verification (error {})",
+                    err.code
+                ));
+            }
             Some(RequestPurpose::ShareWithBot) => {
                 self.chats_state.chat_action_error = Some(format!(
                     "the bot could not receive what you shared (error {})",

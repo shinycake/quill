@@ -4,12 +4,14 @@
 //! monoforum label.
 
 /// `verificationStatus` (TDLib `schema/td_api.tl:860`), the flags the chat
-/// list needs. `bot_verification_icon_custom_emoji_id` is not kept.
+/// list needs. `bot_icon` is `bot_verification_icon_custom_emoji_id`: the
+/// custom emoji a verifying bot shows before the name, 0 for none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct VerificationStatus {
     pub is_verified: bool,
     pub is_scam: bool,
     pub is_fake: bool,
+    pub bot_icon: i64,
 }
 
 /// What to draw after the title, if anything.
@@ -120,6 +122,7 @@ mod tests {
         is_verified: false,
         is_scam: false,
         is_fake: false,
+        bot_icon: 0,
     };
 
     #[test]
@@ -158,6 +161,7 @@ mod tests {
             is_verified: true,
             is_scam: true,
             is_fake: true,
+            bot_icon: 0,
         };
         assert_eq!(title_badge(scam, true, 5), Some(TitleBadge::Scam));
         let fake = VerificationStatus {
@@ -191,6 +195,7 @@ mod tests {
             is_verified: true,
             is_scam: true,
             is_fake: false,
+            bot_icon: 0,
         };
         assert_eq!(header_badges(scam, true, 5), vec![TitleBadge::Scam]);
         let fake = VerificationStatus {

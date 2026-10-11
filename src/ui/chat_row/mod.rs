@@ -318,6 +318,8 @@ pub(super) fn session_chat_row(
     title_badge: Option<TitleBadge>,
     // Still image for a Premium emoji status, once downloaded.
     badge_emoji: Option<std::path::PathBuf>,
+    // The verifying bot's icon before the title, once downloaded.
+    verify_icon: Option<std::path::PathBuf>,
     // Slice chatlist-list-style: preview line count, media icons, and
     // formatted preview (Settings → Appearance → Chat list rows).
     row_style: ChatListRowStyle,
@@ -565,6 +567,9 @@ pub(super) fn session_chat_row(
                                         )
                                         .when_some(kind_icon, |this, icon| {
                                             this.child(row_glyph(icon, cx.theme().muted_foreground))
+                                        })
+                                        .when_some(verify_icon, |this, path| {
+                                            this.child(super::bot_verify_icon::bot_verify_icon(path))
                                         })
                                         .child(
                                             div()

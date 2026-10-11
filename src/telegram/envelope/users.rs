@@ -341,6 +341,12 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_verified: flag("is_verified"),
         is_scam: flag("is_scam"),
         is_fake: flag("is_fake"),
+        bot_icon: int64(
+            value
+                .get("verification_status")
+                .and_then(|v| v.get("bot_verification_icon_custom_emoji_id")),
+        )
+        .unwrap_or(0),
     };
     let emoji_status_id = value
         .get("emoji_status")

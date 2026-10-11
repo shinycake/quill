@@ -248,6 +248,9 @@ pub struct UserProfileExtras {
     pub calls_private: bool,
     /// `supports_video_calls` is false.
     pub video_calls_unsupported: bool,
+    /// `bot_verification`: the bot that verified the user, with its
+    /// description (shown on the profile).
+    pub bot_verification: Option<crate::bot_verification::BotVerification>,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -327,6 +330,9 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             || flag(info, "has_private_calls") == Some(true),
         calls_private: flag(info, "has_private_calls") == Some(true),
         video_calls_unsupported: flag(info, "supports_video_calls") == Some(false),
+        bot_verification: crate::bot_verification::parse_bot_verification(
+            info.get("bot_verification"),
+        ),
     }
 }
 
@@ -345,7 +351,7 @@ pub struct CalendarDay {
 
 /// B7: the `supergroupFullInfo` flags behind the group admin toggles
 /// (schema 1.8.67, line 2792).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SupergroupFullAdmin {
     /// `can_hide_members` — `toggleSupergroupHasHiddenMembers` may be used.
     pub can_hide_members: bool,
@@ -358,6 +364,9 @@ pub struct SupergroupFullAdmin {
     /// `can_have_sponsored_messages` — only reported to the channel owner;
     /// false means ads are switched off.
     pub can_have_sponsored_messages: bool,
+    /// `bot_verification`: the bot that verified the chat, with its
+    /// description (shown on the profile).
+    pub bot_verification: Option<crate::bot_verification::BotVerification>,
 }
 
 /// A chat's name color and reply emoji (`chat.accent_color_id`,

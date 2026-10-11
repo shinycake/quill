@@ -117,6 +117,8 @@ mod auth_ui;
 mod boosts_overview;
 mod bot_pending;
 mod bot_stream;
+mod bot_verify_dialog;
+mod bot_verify_icon;
 mod bots;
 mod bots_extras;
 mod bubble_header;
