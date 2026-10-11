@@ -195,6 +195,9 @@ pub enum GroupsPayload {
         description: String,
         member_count: i32,
         linked_chat_id: i64,
+        /// `direct_messages_chat_id`: the channel's direct messages group (or
+        /// the channel, for that group); 0 when none.
+        direct_messages_chat_id: i64,
         slow_mode_delay: i32,
         slow_mode_delay_expires_in: f64,
         my_boost_count: i32,
@@ -387,6 +390,9 @@ pub enum GroupsPayload {
         description: String,
         member_count: i32,
         linked_chat_id: i64,
+        /// `direct_messages_chat_id`: the channel's direct messages group (or
+        /// the channel, for that group); 0 when none.
+        direct_messages_chat_id: i64,
         slow_mode_delay: i32,
         slow_mode_delay_expires_in: f64,
         my_boost_count: i32,

@@ -306,7 +306,12 @@ fn supergroup_username_and_linked_chat_cached() {
         &mut session,
         &seq,
         &sink,
-        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":13,"supergroup_full_info":{"@type":"supergroupFullInfo","description":"CANARY channel","member_count":12345,"linked_chat_id":14}}"#,
+        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":13,"supergroup_full_info":{"@type":"supergroupFullInfo","description":"CANARY channel","member_count":12345,"linked_chat_id":14,"direct_messages_chat_id":15}}"#,
+    );
+    // The channel's direct messages group.
+    assert_eq!(
+        session.chat_direct_messages_chat(ChatId(13)),
+        Some(ChatId(15))
     );
     let info = session.supergroup_full_info(13).unwrap();
     assert_eq!(info.description, "CANARY channel");

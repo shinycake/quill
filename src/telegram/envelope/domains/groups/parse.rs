@@ -210,6 +210,7 @@ pub(crate) fn parse_groups_payload(
             // Parity slice: `linked_chat_id` (schema 1.8.67, line 2792) —
             // the discussion-group chat id (0 = none).
             linked_chat_id: int53_or_zero(value.get("linked_chat_id")),
+            direct_messages_chat_id: int53_or_zero(value.get("direct_messages_chat_id")),
             // Phase A1: slow-mode fields (schema 1.8.67, lines 2758–2759)
             // plus the boost bypass counts (lines 2779–2780). The expiry is
             // `double` in the schema; `as_f64` accepts integer JSON too.
@@ -281,6 +282,11 @@ pub(crate) fn parse_groups_payload(
                     value
                         .get("supergroup_full_info")
                         .and_then(|info| info.get("linked_chat_id")),
+                ),
+                direct_messages_chat_id: int53_or_zero(
+                    value
+                        .get("supergroup_full_info")
+                        .and_then(|info| info.get("direct_messages_chat_id")),
                 ),
                 // Phase A1: slow-mode + boost fields (schema 1.8.67,
                 // lines 2758–2759 / 2779–2780), nested like the other fields.

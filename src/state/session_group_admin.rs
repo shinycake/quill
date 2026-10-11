@@ -119,6 +119,25 @@ impl Session {
             .map(ChatId)
     }
 
+    /// The channel's direct messages group (or, for that group, its
+    /// channel) from `supergroupFullInfo.direct_messages_chat_id`; `None`
+    /// when there is none or the full info isn't fetched yet.
+    pub fn chat_direct_messages_chat(&self, chat_id: ChatId) -> Option<ChatId> {
+        let id = self.chat_supergroup(chat_id)?;
+        self.groups
+            .supergroup_full_infos
+            .get(&id)
+            .map(|info| info.direct_messages_chat_id)
+            .filter(|chat| *chat != 0)
+            .map(ChatId)
+    }
+
+    pub(crate) fn set_direct_messages_chat(&mut self, supergroup_id: i64, chat_id: i64) {
+        if let Some(info) = self.groups.supergroup_full_infos.get_mut(&supergroup_id) {
+            info.direct_messages_chat_id = chat_id;
+        }
+    }
+
     /// The cached allowed-reactions setting; `None` until the chat arrives
     /// with one.
     pub fn chat_available_reactions(&self, chat_id: ChatId) -> Option<&ChatAvailableReactions> {

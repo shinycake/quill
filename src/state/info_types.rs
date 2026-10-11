@@ -74,6 +74,9 @@ pub struct SupergroupFullInfoData {
     /// Parity slice: `linked_chat_id` (schema 1.8.67, line 2792) — the
     /// discussion-group chat id for a channel; 0 when none.
     pub linked_chat_id: i64,
+    /// `direct_messages_chat_id`: the channel's direct messages group, or
+    /// the channel for that group; 0 when none.
+    pub direct_messages_chat_id: i64,
     /// Phase A1: `slow_mode_delay` (schema 1.8.67, line 2758) — seconds
     /// between messages for non-administrator members; 0 = disabled.
     pub slow_mode_delay: i32,
@@ -116,6 +119,7 @@ impl Default for SupergroupFullInfoData {
             description: String::new(),
             member_count: 0,
             linked_chat_id: 0,
+            direct_messages_chat_id: 0,
             slow_mode_delay: 0,
             slow_mode_delay_expires_in: 0.0,
             my_boost_count: 0,

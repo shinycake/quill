@@ -293,6 +293,21 @@ impl QuillApp {
             .items_center()
             .justify_center()
             .gap_3();
+        // tdesktop's direct-message button at the bar's left edge opens the
+        // channel's direct messages group.
+        let direct = session.chat_direct_messages_chat(open);
+        let direct_button = |cx: &mut Context<Self>| {
+            direct.map(|direct| {
+                Button::new("channel-direct-messages")
+                    .icon(gpui_kit::assets::IconName::MessageCircle)
+                    .ghost()
+                    .tooltip("Direct messages")
+                    .accessibility_label("Direct messages")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_listed_chat(direct, window, cx);
+                    }))
+            })
+        };
         match status {
             None => Some(
                 footer
@@ -307,6 +322,7 @@ impl QuillApp {
             // Not subscribed: one clear action.
             Some(ChannelMemberStatus::Left) => Some(
                 footer
+                    .children(direct_button(cx))
                     .child(
                         Button::new("channel-join")
                             .label("Join channel")
@@ -327,6 +343,7 @@ impl QuillApp {
                 let discussion = session.discussion_chat_id(open);
                 Some(
                     footer
+                        .children(direct_button(cx))
                         .child(
                             Button::new("channel-mute-toggle")
                                 .label(
