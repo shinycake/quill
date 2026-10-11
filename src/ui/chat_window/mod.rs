@@ -27,6 +27,7 @@
 //! one of `Session::window_chats`.
 
 mod body;
+mod saved;
 mod slot;
 #[cfg(test)]
 mod tests;
@@ -57,6 +58,10 @@ pub(crate) struct ChatWindows {
     pub(super) main: Option<AnyWindowHandle>,
     /// New windows cascade from the main window; this counts them.
     cascade: u32,
+    /// A write of the open windows is scheduled (`saved`).
+    save_pending: bool,
+    /// The windows from last time (`saved`).
+    restore: saved::Restore,
     /// Keys go to the window that received them: the interceptor runs
     /// before any handler and puts that window's state in place.
     _key_scope: Subscription,
@@ -87,8 +92,15 @@ impl ChatWindows {
             dialog_host: None,
             main: None,
             cascade: 0,
+            save_pending: false,
+            restore: saved::Restore::default(),
             _key_scope: key_scope,
         }
+    }
+
+    /// Every open chat window, as its chat and window.
+    fn open_windows(&self) -> impl Iterator<Item = (ChatId, AnyWindowHandle)> + '_ {
+        self.open.iter().map(|open| (open.chat_id, open.handle))
     }
 
     fn window_for(&self, chat_id: ChatId) -> Option<&OpenChatWindow> {
@@ -220,6 +232,18 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_chat_window_at(chat_id, None, window, cx);
+    }
+
+    /// [`Self::open_chat_in_new_window`] at `bounds` (a window brought
+    /// back from last time), else cascaded from the main window.
+    pub(super) fn open_chat_window_at(
+        &mut self,
+        chat_id: ChatId,
+        bounds: Option<Bounds<Pixels>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.windows.activate(chat_id, cx) {
             return;
         }
@@ -256,12 +280,14 @@ impl QuillApp {
         }
         self.set_window_scope(outer);
         // Cascade from the main window, wherever the request came from.
-        let bounds = self
-            .windows
-            .main
-            .and_then(|main| main.update(cx, |_, window, _| window.bounds()).ok())
-            .unwrap_or_else(|| window.bounds());
-        let bounds = self.windows.next_bounds(bounds);
+        let bounds = bounds.unwrap_or_else(|| {
+            let main = self
+                .windows
+                .main
+                .and_then(|main| main.update(cx, |_, window, _| window.bounds()).ok())
+                .unwrap_or_else(|| window.bounds());
+            self.windows.next_bounds(main)
+        });
         let owner = cx.entity();
         cx.defer(move |cx| {
             let opened = view::open_chat_window(owner.clone(), chat_id, bounds, cx);
@@ -285,6 +311,7 @@ impl QuillApp {
                     view,
                     slot,
                 });
+                app.schedule_chat_windows_save(cx);
                 cx.notify();
             });
             // The chat's draft goes into the window's compose field, which
@@ -355,12 +382,34 @@ impl QuillApp {
             self.windows.last_input = None;
         }
         self.windows.dialog_closed_in(Some(chat_id));
+        self.set_window_chat_active(chat_id, false);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_chat_window(chat_id);
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_window_chat(chat_id);
         }
+        self.schedule_chat_windows_save(cx);
         cx.notify();
+    }
+
+    /// Whether `chat_id`'s window is the active one, for the session's
+    /// notification decision (a message shown in an active window is read
+    /// on arrival, so it does not notify; Telegram Desktop reads it when
+    /// the active window shows it).
+    pub(super) fn set_window_chat_active(&mut self, chat_id: ChatId, active: bool) {
+        let Some(session) = self
+            .live
+            .as_mut()
+            .map(|live| &mut live.driver.session)
+            .or(self.demo_session.as_mut())
+        else {
+            return;
+        };
+        if active && session.window_chats.contains(&chat_id) {
+            session.active_window_chats.insert(chat_id);
+        } else {
+            session.active_window_chats.remove(&chat_id);
+        }
     }
 
     /// The main window shows no chat any more (Telegram Desktop

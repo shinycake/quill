@@ -132,6 +132,10 @@ pub struct NotifyInput<'a> {
     pub open_chat: Option<ChatId>,
     /// Whether the OS considers our window focused (`Window::is_window_active`).
     pub app_active: bool,
+    /// The chat is shown in a chat window of its own that is the active
+    /// one (`Session::active_window_chats`): Telegram Desktop reads a
+    /// message shown in an active window on arrival, so it never notifies.
+    pub shown_in_active_window: bool,
     /// `settings::Preferences::hide_notification_previews` (default true).
     pub hide_previews: bool,
     /// Effective preview allowance (`Session::effective_preview_allowed`):
@@ -198,6 +202,9 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
         return None;
     }
     if input.app_active && input.open_chat == Some(chat_id) {
+        return None;
+    }
+    if input.shown_in_active_window {
         return None;
     }
     match notify_event(&message.content) {

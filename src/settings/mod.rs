@@ -9,11 +9,13 @@ mod accounts;
 mod appearance;
 mod badge;
 mod chat_prefs;
+mod chat_windows;
 mod media;
 pub use accounts::*;
 pub use appearance::*;
 pub use badge::*;
 pub use chat_prefs::*;
+pub use chat_windows::*;
 pub use media::*;
 
 pub const APP_DIR_NAME: &str = "Quill";

@@ -22,6 +22,8 @@ pub(crate) struct ChatWindowView {
     pub(super) shell: Entity<QuillShell>,
     /// The native title last handed to the platform.
     title_shown: String,
+    /// The geometry at the last render; a change is saved for next time.
+    bounds_seen: Option<Bounds<Pixels>>,
     /// The window's bookkeeping ran (the app knows the window is gone).
     closed: bool,
     _observe: Subscription,
@@ -43,6 +45,7 @@ impl ChatWindowView {
             slot: Rc::new(RefCell::new(slot)),
             shell,
             title_shown: String::new(),
+            bounds_seen: None,
             closed: false,
             _observe: observe,
         }
@@ -103,10 +106,16 @@ impl Render for ChatWindowView {
             self.title_shown = title;
         }
         let active = window.is_window_active();
+        let bounds = window.bounds();
+        let moved = self.bounds_seen.replace(bounds) != Some(bounds);
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
-        let outer = app.update(cx, |app, _| {
+        let outer = app.update(cx, |app, cx| {
             app.windows.note_active(chat_id, active);
+            app.set_window_chat_active(chat_id, active);
+            if moved {
+                app.schedule_chat_windows_save(cx);
+            }
             let outer = app.windows.scope;
             app.set_window_scope(Some(chat_id));
             outer

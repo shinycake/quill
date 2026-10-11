@@ -46,3 +46,4 @@ mod threads;
 mod unread_totals;
 mod updates_sync;
 mod users;
+mod window_chats;

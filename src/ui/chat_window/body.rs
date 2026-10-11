@@ -10,8 +10,7 @@
 use super::super::app::QuillApp;
 use super::super::conversation::ConversationPart;
 use gpui_kit::TestSupportExt;
-use gpui_kit::assets::IconName;
-use gpui_kit::component::{ActiveTheme, Icon, StyledExt};
+
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -28,7 +27,18 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if self.account.passcode.locked {
-            return self.chat_window_lock_cover(cx);
+            // Telegram Desktop's passcode lock covers every window
+            // (`Application::lockByPasscode` → `setupPasscodeLock` on each):
+            // the same box, unlocking everywhere at once.
+            self.passcode_frame(window, cx);
+            return div()
+                .id("chat-window-locked")
+                .relative()
+                .flex()
+                .flex_1()
+                .size_full()
+                .child(self.lock_overlay(cx))
+                .into_any_element();
         }
         // Rows this window painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
@@ -126,32 +136,6 @@ impl QuillApp {
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
-            .into_any_element()
-    }
-
-    /// While the local passcode is on, the window shows nothing of the
-    /// chat; unlocking happens in the main window.
-    fn chat_window_lock_cover(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .id("chat-window-locked")
-            .flex()
-            .flex_col()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .child(
-                Icon::new(IconName::Lock)
-                    .size(px(28.))
-                    .text_color(cx.theme().muted_foreground),
-            )
-            .child(div().font_semibold().child("Quill is locked"))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Enter your passcode in the main window to continue."),
-            )
             .into_any_element()
     }
 }

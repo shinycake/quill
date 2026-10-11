@@ -127,18 +127,8 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
-        let chat_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search in chat")
-                .auto_grow(1, 1)
-                .submit_on_enter(true)
-        });
-        let forward_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search chats")
-                .auto_grow(1, 1)
-                .submit_on_enter(true)
-        });
+        let chat_search_input = Self::new_chat_search_field(window, cx);
+        let forward_search_input = Self::new_forward_search_field(window, cx);
         let stories = super::stories_state::StoryUi::new(window, cx);
         cx.subscribe_in(
             &group_call_composer,
@@ -238,50 +228,6 @@ impl QuillApp {
                         quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
                         this.activate_first_search_result(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
-        cx.subscribe_in(
-            &chat_search_input,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                let text = state.read(cx).value().to_string();
-                if matches!(event, InputEvent::Change) {
-                    this.sync_chat_search_query(&text, cx);
-                }
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
-                    ) {
-                        this.jump_selected_chat_search_hit(cx);
-                    }
-                }
-            },
-        )
-        .detach();
-        cx.subscribe_in(
-            &forward_search_input,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    let text = state.read(cx).value().to_string();
-                    this.sync_share_search(&text, cx);
-                }
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
-                    ) {
-                        if this.share.reply_elsewhere_open {
-                            this.choose_first_reply_chat(window, cx);
-                        } else {
-                            this.activate_first_forward_destination(cx);
-                        }
                     }
                 }
             },

@@ -69,6 +69,8 @@ pub struct Session {
     pub open_chat: Option<ChatId>,
     /// Chats shown in a window of their own (`parity:platform-new-window`); they stay open in TDLib and page their history while `open_chat` changes.
     pub window_chats: std::collections::BTreeSet<ChatId>,
+    /// The window chats whose window is the active one: their messages are read on arrival, so they do not notify.
+    pub active_window_chats: std::collections::BTreeSet<ChatId>,
     /// Phase 8.1: whether the OS considers our window focused. The UI sets
     /// this from `Window::is_window_active` on every render; it defaults to
     /// true so the reducer never notifies before the first paint measures it.
