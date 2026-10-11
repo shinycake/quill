@@ -1031,7 +1031,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] "Do you still remember your password?" check <!-- parity:settings-password-remember -->
 - [x] Terminate old sessions if inactive for a chosen time <!-- parity:settings-inactive-sessions -->
 - [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
-- [ ] Session details box and rename this device <!-- parity:settings-session-details -->
+- [x] Session details box and rename this device <!-- parity:settings-session-details -->
 - [x] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
 - [ ] Bots and websites: mini-app permissions and delete cloud drafts <!-- parity:settings-bots-websites -->
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
