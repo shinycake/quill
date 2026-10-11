@@ -514,61 +514,7 @@ impl QuillApp {
             }
         })
         .detach();
-        let notification_app = cx.weak_entity();
-        cx.on_system_notification_response(move |response, cx| {
-            if let Some((account, call_id)) =
-                quill::notify_call::parse_call_notification_tag(&response.tag)
-            {
-                let _ = notification_app.update(cx, |this, cx| {
-                    if this
-                        .session()
-                        .is_none_or(|s| account != format!("account:{}", s.account.0))
-                    {
-                        return;
-                    }
-                    let action = quill::notify_call::CallNotificationAction::from_id(
-                        response.action_id.as_ref().map(|id| id.as_ref()),
-                    );
-                    if let Ok(mut clicks) = this.calls.notify_clicks.lock() {
-                        clicks.push((call_id, action));
-                    }
-                    cx.notify();
-                });
-                // Same as a chat click: a hidden window may never render on
-                // its own, and the pick runs from `flush_notifications`.
-                cx.activate(true);
-                for window in cx.windows() {
-                    let _ = window.update(cx, |_, window, _| window.activate_window());
-                }
-                return;
-            }
-            let Some((account, chat_id)) = quill::notify::parse_notification_tag(&response.tag)
-            else {
-                return;
-            };
-            let _ = notification_app.update(cx, |this, cx| {
-                if this
-                    .session()
-                    .is_none_or(|s| account != format!("account:{}", s.account.0))
-                {
-                    return;
-                }
-                let action = quill::notify::NotificationAction::from_id(
-                    response.action_id.as_ref().map(|id| id.as_ref()),
-                );
-                if let Ok(mut clicks) = this.notify.notify_clicks.lock() {
-                    clicks.push((chat_id, action));
-                }
-                cx.notify();
-            });
-            // A hidden (close-to-tray) or minimized window may never render
-            // again on its own: bring the app forward from the click itself
-            // so `flush_notifications` runs and opens the chat.
-            cx.activate(true);
-            for window in cx.windows() {
-                let _ = window.update(cx, |_, window, _| window.activate_window());
-            }
-        });
+        QuillApp::register_notification_responses(cx);
         if demo.is_none() && !app.account.passcode.deferred_connect {
             // With a local passcode the database key is wrapped: the
             // connection starts after the first unlock (tdesktop starts locked).

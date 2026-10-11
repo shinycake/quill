@@ -37,3 +37,10 @@ that, the `parity:notify-avatar` tick is not added.
 Unit tests for cache naming, mask, rendering a rectangular photo to a round
 icon, and the Linux argument order. `gate.sh` passes. Not run against a real
 notification daemon.
+
+## Follow-up
+
+Done in `docs/decisions/codex-notify-native.md`: the picture rides beside the
+GPUI notification through the `notification_extras` patch (attachment on
+macOS, circle-cropped `appLogoOverride` on Windows), and Linux passes it as
+the `app_icon` of the D-Bus `Notify` call.

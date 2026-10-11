@@ -6229,6 +6229,8 @@ dependencies = [
  "futures-channel",
  "gpui-base",
  "gpui-kit",
+ "gpui-pre-macos",
+ "gpui-pre-windows",
  "image",
  "interprocess",
  "inventory",
