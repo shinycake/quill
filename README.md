@@ -253,7 +253,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
 - [ ] Edit Image, Edit Video and Edit Cover on your own media <!-- parity:menu-edit-media-items -->
 - [x] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
-- [ ] Go To Message from search, pinned and saved lists <!-- parity:menu-go-to-message -->
+- [x] Go To Message from search, pinned and saved lists <!-- parity:menu-go-to-message -->
 - [x] Add or edit a fact check as a channel admin <!-- parity:menu-fact-check-edit -->
 - [x] Save an audio message as a notification tone <!-- parity:menu-save-notification-tone -->
 - [x] Copy Post Link versus Copy Message Link wording and "members only" hint <!-- parity:menu-copy-post-link-wording -->
