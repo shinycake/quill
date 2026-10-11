@@ -106,6 +106,7 @@ impl Session {
             last_read_inbox_message_id: Some(chat.last_read_inbox_message_id),
             open_chat: self.open_chat,
             app_active: self.app_active,
+            shown_in_active_window: self.active_window_chats.contains(&message.chat_id),
             hide_previews: self.settings.hide_notification_previews,
             chat_preview_allowed,
             pinned_allowed: self.effective_pinned_allowed(chat),

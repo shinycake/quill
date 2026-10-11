@@ -41,6 +41,7 @@ fn input<'a>(
         last_read_inbox_message_id: Some(MessageId(0)),
         open_chat,
         app_active,
+        shown_in_active_window: false,
         hide_previews: false,
         chat_preview_allowed: true,
         pinned_allowed: true,

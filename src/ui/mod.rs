@@ -64,6 +64,7 @@ mod privacy;
 mod privacy_extra;
 mod privacy_state;
 mod recording_state;
+mod search_fields;
 mod search_state;
 mod selectable_text;
 mod selection_drag;

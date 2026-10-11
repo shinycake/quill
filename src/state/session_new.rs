@@ -32,6 +32,7 @@ impl Session {
             groups: GroupsState::new(),
             open_chat: None,
             window_chats: std::collections::BTreeSet::new(),
+            active_window_chats: std::collections::BTreeSet::new(),
             app_active: true,
             settings: SettingsState::new(),
             sync: UpdatesSync::default(),

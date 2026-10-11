@@ -19,6 +19,7 @@ use super::super::composer_state::ComposerUi;
 use super::super::history_state::HistoryUi;
 use super::super::message_state::MessageUi;
 use super::super::pickers_state::PickerUi;
+use super::super::share_state::ShareUi;
 use super::super::viewer_state::ViewerUi;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
@@ -35,6 +36,10 @@ pub(super) struct WindowSlot {
     pub(super) message_ui: MessageUi,
     pub(super) pickers: PickerUi,
     pub(super) viewer: ViewerUi,
+    /// The window's own "Search in chat" field (`SearchUi::chat_input`).
+    pub(super) chat_search_input: Entity<TextareaState>,
+    /// The window's own share box, forward selection and picker field.
+    pub(super) share: ShareUi,
     pub(super) session: SessionView,
     /// The window was the active one at its last render.
     pub(super) active: bool,
@@ -70,6 +75,7 @@ impl WindowSlot {
             })
             .detach();
         }
+        let forward_search_input = QuillApp::new_forward_search_field(window, cx);
         Self {
             history: HistoryUi::new(cx),
             composer,
@@ -77,6 +83,8 @@ impl WindowSlot {
             message_ui: MessageUi::new(window, cx),
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
             viewer: ViewerUi::new(&app.playback.audio.output()),
+            chat_search_input: QuillApp::new_chat_search_field(window, cx),
+            share: ShareUi::new(window, cx, forward_search_input),
             session: SessionView::of_chat(chat_id),
             active: false,
         }
@@ -112,6 +120,8 @@ impl QuillApp {
         std::mem::swap(&mut self.message_ui, &mut slot.message_ui);
         std::mem::swap(&mut self.pickers, &mut slot.pickers);
         std::mem::swap(&mut self.viewer, &mut slot.viewer);
+        std::mem::swap(&mut self.search_ui.chat_input, &mut slot.chat_search_input);
+        std::mem::swap(&mut self.share, &mut slot.share);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.swap_view(&mut slot.session);
         } else if let Some(session) = self.demo_session.as_mut() {

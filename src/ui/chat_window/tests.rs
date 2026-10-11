@@ -440,3 +440,80 @@ fn ctrl_or_cmd_click_on_a_chat_row_opens_its_window(cx: &mut TestAppContext) {
     assert_eq!(h.window_chats(cx), vec![OTHER]);
     assert_eq!(h.open_chat(cx), Some(OPEN), "a plain select did not happen");
 }
+
+#[gpui_kit::test]
+fn a_chat_window_searches_and_forwards_with_fields_of_its_own(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.settle(cx);
+    let (main_search, main_forward) = h.app.read_with(cx, |app, _| {
+        (
+            app.search_ui.chat_input.entity_id(),
+            app.share.search_input.entity_id(),
+        )
+    });
+    // With the window's state in place the fields are the window's own.
+    let (window_search, window_forward) = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            (
+                app.search_ui.chat_input.entity_id(),
+                app.share.search_input.entity_id(),
+            )
+        })
+    });
+    assert_ne!(main_search, window_search);
+    assert_ne!(main_forward, window_forward);
+
+    // Searching in the window's chat types into the window's field; the
+    // main window's search stays closed and empty.
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("chat-find", cx);
+        window.input("later", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    h.settle(cx);
+    let (window_text, window_open, main_text, main_open) = h.app.read_with(cx, |app, cx| {
+        let slot = app.windows.slot_for(OTHER).expect("slot");
+        let slot = slot.borrow();
+        (
+            slot.chat_search_input.read(cx).value().to_string(),
+            slot.session.chat_search.open,
+            app.search_ui.chat_input.read(cx).value().to_string(),
+            app.session().is_some_and(|s| s.search.chat_search.open),
+        )
+    });
+    assert_eq!(window_text, "later");
+    assert!(window_open, "the window's chat search opened");
+    assert_eq!(main_text, "");
+    assert!(!main_open, "the main window's search stayed closed");
+}
+
+#[gpui_kit::test]
+fn the_passcode_box_covers_a_chat_window_too(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app
+        .update(cx, |app, _| app.account.passcode.locked = true);
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("lock-submit").is_some(),
+            "the window shows the passcode box"
+        );
+        assert!(
+            window.try_find("composer-send").is_none(),
+            "nothing of the chat shows while locked"
+        );
+    })
+    .unwrap();
+    h.app
+        .update(cx, |app, _| app.account.passcode.locked = false);
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("lock-submit").is_none());
+        assert!(window.try_find("composer-send").is_some());
+    })
+    .unwrap();
+}
