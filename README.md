@@ -554,7 +554,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
 - [x] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
 - [x] Boosts list, boost link, boost features table and unrestrict-by-boosts setting <!-- parity:admin-boosts-list -->
-- [ ] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
+- [x] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
 - [ ] Monetization, revenue and earnings sections (deferred: low impact) <!-- parity:admin-monetization -->
 - [ ] Channel direct messages settings and paid-message price <!-- parity:admin-direct-messages -->
 - [x] Auto-translate channel and sponsored-messages toggles <!-- parity:admin-auto-translate -->
