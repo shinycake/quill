@@ -16,6 +16,8 @@ for frag in "$@"; do
   while IFS= read -r line || [ -n "$line" ]; do
     id="$(printf '%s' "$line" | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')"
     [ -z "$id" ] && continue
+    # Accept bare IDs ("premium-promo-page") as well as "parity:premium-promo-page".
+    case "$id" in parity:*) ;; *) id="parity:$id" ;; esac
     if grep -q -F "<!-- $id -->" README.md; then
       # flip "- [ ] ... <!-- id -->" to "- [x] ..." (only unchecked lines)
       if grep -q -E "^- \[ \] .*<!--[ ]*$id[ ]*-->" README.md; then
