@@ -793,7 +793,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Emoji set style picker <!-- parity:emoji-set-style -->
 - [ ] "Replace emoji automatically" setting <!-- parity:emoji-replace-auto -->
 - [x] Quick reaction on double-click and choose the default quick reaction <!-- parity:reactions-quick-double-click -->
-- [ ] Double-click-to-reply setting and reply or reaction corner buttons <!-- parity:reactions-corner-settings -->
+- [x] Double-click-to-reply setting and reply or reaction corner buttons <!-- parity:reactions-corner-settings -->
 - [x] Reaction animation when you send a reaction <!-- parity:reactions-fly-animation -->
 - [ ] Send paid (star) reactions with toast and undo <!-- parity:reactions-paid-send -->
 - [x] Who reacted: hover tooltip and full list per emoji <!-- parity:reactions-who-reacted -->
