@@ -125,6 +125,7 @@ mod tests {
                 thumb_width: 0,
                 thumb_height: 0,
                 requires_premium: false,
+                premium_animation: None,
             },
             incoming,
         }

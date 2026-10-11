@@ -393,8 +393,14 @@ pub(in crate::ui) fn session_history_row(
             look.plain,
             cx,
         )),
-        MessageContent::Sticker(sticker) => {
-            let attachment = sticker_attachment(
+        MessageContent::Sticker(sticker) => Some(crate::ui::premium_sticker_effect::wrap(
+            message.id.0 as u64,
+            sticker,
+            message.pending,
+            message.chat_id.0,
+            message.id.0,
+            message.is_outgoing,
+            sticker_attachment(
                 message.id.0 as u64,
                 sticker,
                 files,
@@ -402,24 +408,9 @@ pub(in crate::ui) fn session_history_row(
                 media_roots,
                 sticker_frame,
                 cx,
-            );
-            // A tap opens the sticker's set (tdesktop `StickerSetBox`).
-            let set_id = sticker.set_id;
-            Some(if set_id != 0 && !message.pending {
-                div()
-                    .id(("sticker-open-set", message.id.0 as u64))
-                    .cursor_pointer()
-                    .role(gpui_kit::Role::Button)
-                    .aria_label("Open sticker set")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.view_message_sticker_set(set_id, cx);
-                    }))
-                    .child(attachment)
-                    .into_any_element()
-            } else {
-                attachment
-            })
-        }
+            ),
+            cx,
+        )),
         MessageContent::VoiceNote(note) => Some(voice_note_row(
             message.chat_id,
             message.id,

@@ -77,6 +77,7 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
             thumb_width: 0,
             thumb_height: 0,
             requires_premium: false,
+            premium_animation: None,
         });
     session.open_chat(ChatId(11));
     session
@@ -678,6 +679,7 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
                 thumb_width: 0,
                 thumb_height: 0,
                 requires_premium: false,
+                premium_animation: None,
             });
     }
     match kind {

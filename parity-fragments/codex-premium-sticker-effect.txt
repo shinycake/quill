@@ -1,0 +1,1 @@
+parity:render-premium-sticker-effect

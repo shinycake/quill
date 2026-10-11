@@ -398,6 +398,7 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
         thumb_width: 0,
         thumb_height: 0,
         requires_premium: false,
+        premium_animation: None,
     };
     app.update(vcx, |app, _| {
         let panel = &mut app.demo_session.as_mut().unwrap().stickers.stickers;
