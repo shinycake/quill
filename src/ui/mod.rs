@@ -18,6 +18,7 @@ mod auth_recovery;
 mod auth_state;
 mod autoscroll_ui;
 mod bidi_line;
+mod bot_about;
 mod bottom_action;
 mod calls_state;
 mod chat_list_state;
