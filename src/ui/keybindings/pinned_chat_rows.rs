@@ -88,6 +88,14 @@ pub(super) fn message_rows() -> Vec<ShortcutRow> {
             "Messages",
             ToggleMessageSelection,
         ),
+        // tdesktop's chord. Some systems take Ctrl+Space themselves (an
+        // input-source switch); the Shift+A chord above always works.
+        row(
+            "ctrl-space",
+            "Select the focused message",
+            "Messages",
+            ToggleMessageSelection,
+        ),
         row(
             "up",
             "Focus the older message while selecting",

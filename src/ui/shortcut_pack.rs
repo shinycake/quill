@@ -319,9 +319,10 @@ impl QuillApp {
         true
     }
 
-    /// Cmd/Ctrl+Space: toggle the focused message in the selection, which
-    /// starts selection mode (`HistoryInner::keyPressEvent`). With no
-    /// focused message it acts on the newest loaded one.
+    /// Ctrl+Space (or Cmd/Ctrl+Shift+A): toggle the focused message in the
+    /// selection, which starts selection mode
+    /// (`HistoryInner::keyPressEvent`). With no focused message it acts on
+    /// the newest loaded one.
     pub(super) fn toggle_focused_selection_by_key(
         &mut self,
         window: &mut Window,
@@ -345,7 +346,68 @@ impl QuillApp {
         self.message_ui.selection_anchor = Some(focus);
         self.message_ui.selection_focus = Some(focus);
         self.toggle_forward_select(chat_id, focus, false, cx);
+        if self.selecting_in(chat_id) {
+            // The keyboard stays on the rows: Space keeps toggling, Up and
+            // Down move the focus (tdesktop focuses `HistoryInner`).
+            window.focus(&self.message_ui.history_focus, cx);
+        }
         true
+    }
+
+    /// Keys while the history rows have focus (a row press, a drag or
+    /// Ctrl+Space put it there; `HistoryInner::keyPressEvent`): Space
+    /// toggles the focused message while selecting, and typing goes to
+    /// the composer (`tryProcessKeyInput`), so a selection never swallows
+    /// what the user types.
+    pub(in crate::ui) fn history_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        let modifiers = keystroke.modifiers;
+        if modifiers.platform || modifiers.control || modifiers.alt || modifiers.function {
+            return;
+        }
+        if keystroke.key == "space" && !modifiers.shift {
+            let selecting = self
+                .session()
+                .and_then(|s| s.open_chat)
+                .is_some_and(|chat| self.selecting_in(chat));
+            if selecting && self.toggle_focused_selection_by_key(window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
+        if let Some(text) = keystroke.key_char.clone()
+            && !text.is_empty()
+            && !text.chars().any(char::is_control)
+        {
+            self.composer.update(cx, |input, cx| {
+                input.focus(window, cx);
+                input.insert(text, window, cx);
+            });
+            cx.stop_propagation();
+        }
+    }
+
+    /// Bring the focused row on screen, only when it is off screen
+    /// (`keyPressEvent` scrolls to `accessibilityChildRect` just then).
+    fn scroll_selection_focus_into_view(&mut self, focus: MessageId, cx: &mut Context<Self>) {
+        let Some(index) = self.history.rows.iter().position(|row| row.contains(focus)) else {
+            return;
+        };
+        let on_screen = self
+            .history
+            .scroll_view_probe
+            .get()
+            .is_some_and(|(first, last)| first < index && index < last);
+        if !on_screen {
+            self.history.scroller.update(cx, |state, cx| {
+                state.scroll_to_item(index, cx);
+            });
+        }
     }
 
     /// Up / Down while selecting move the focused row; with Shift they
@@ -404,7 +466,8 @@ impl QuillApp {
             self.message_ui.selection_anchor = Some(new);
         }
         self.message_ui.selection_focus = Some(new);
-        self.jump_to_replied_message(new, cx);
+        self.scroll_selection_focus_into_view(new, cx);
+        cx.notify();
         true
     }
 

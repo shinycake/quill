@@ -99,6 +99,7 @@ pub mod rich;
 pub mod row_fx;
 pub mod schedule;
 pub mod search_filters;
+pub mod selection_drag;
 pub mod selection_pin;
 pub mod send_button;
 pub mod send_rights;
