@@ -285,3 +285,38 @@ fn refused_report_and_personal_photo_surface_as_notices() {
         );
     }
 }
+
+#[test]
+fn user_full_info_parses_call_restrictions() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 32);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","can_be_called":false,"has_private_calls":true,"supports_video_calls":false,"bio":null,"bot_info":null}}"#,
+            extra.0
+        ),
+    );
+    let extras = &session.user_full_info(32).expect("cached").extras;
+    assert!(extras.calls_blocked && extras.calls_private && extras.video_calls_unsupported);
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 33);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bio":null,"bot_info":null}}"#,
+            extra.0
+        ),
+    );
+    assert!(
+        !session
+            .user_full_info(33)
+            .expect("cached")
+            .extras
+            .calls_blocked
+    );
+}

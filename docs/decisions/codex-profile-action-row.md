@@ -22,13 +22,18 @@ yourself and bots.
   both act on the open chat; from a group member's profile they are hidden.
 - The row wraps instead of overflowing.
 
+## Call restrictions
+
+`userFullInfo.can_be_called`, `has_private_calls` and `supports_video_calls` are
+now parsed into `UserProfileExtras`. Call and Video render disabled with a
+tooltip giving the reason when calls are blocked (video also when the user
+doesn't support it).
+
 ## Not done
 
 - Group and channel profiles keep their current layout (no Join/Leave/Discuss
   tiles yet).
-- "Call disabled if the user forbids calls" needs `userFullInfo.can_be_called`
-  which Quill does not parse; Call stays visible and fails with the existing
-  error.
+
 
 ## Verification
 

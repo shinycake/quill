@@ -242,6 +242,12 @@ pub struct UserProfileExtras {
     pub business: Option<crate::business_info::BusinessInfo>,
     /// `main_profile_tab`: the tab the profile opens on.
     pub main_profile_tab: Option<crate::profile_tab::ProfileTab>,
+    /// `can_be_called` is false or `has_private_calls` is true.
+    pub calls_blocked: bool,
+    /// `has_private_calls`: the block comes from the user's privacy settings.
+    pub calls_private: bool,
+    /// `supports_video_calls` is false.
+    pub video_calls_unsupported: bool,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -317,7 +323,15 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .and_then(super::users::parse_profile_photo),
         business: crate::business_info::parse_business_info(info.get("business_info")),
         main_profile_tab: crate::profile_tab::ProfileTab::from_value(info.get("main_profile_tab")),
+        calls_blocked: flag(info, "can_be_called") == Some(false)
+            || flag(info, "has_private_calls") == Some(true),
+        calls_private: flag(info, "has_private_calls") == Some(true),
+        video_calls_unsupported: flag(info, "supports_video_calls") == Some(false),
     }
+}
+
+fn flag(info: &serde_json::Value, key: &str) -> Option<bool> {
+    info.get(key).and_then(serde_json::Value::as_bool)
 }
 
 /// One `messageCalendarDay` (schema line 3191): the first message sent on

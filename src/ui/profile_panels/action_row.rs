@@ -8,6 +8,7 @@ use crate::ui::group_panels::info_tile;
 use crate::ui::navigation::NavigationAction;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::telegram::envelope::MUTE_FOREVER;
 
@@ -95,6 +96,23 @@ impl QuillApp {
         if actions.is_empty() {
             return None;
         }
+        let extras = session
+            .and_then(|s| s.user_full_info(user_id))
+            .map(|i| &i.extras);
+        let call_off = extras.and_then(|e| {
+            if e.calls_private {
+                Some("This user's privacy settings don't allow calls.")
+            } else if e.calls_blocked {
+                Some("This user can't be called.")
+            } else {
+                None
+            }
+        });
+        let video_off = call_off.or_else(|| {
+            extras
+                .is_some_and(|e| e.video_calls_unsupported)
+                .then_some("This user doesn't support video calls.")
+        });
         let muted = session
             .zip(open_chat)
             .and_then(|(s, chat)| s.chats.get(&chat.0))
@@ -129,6 +147,16 @@ impl QuillApp {
                     cx,
                 )
                 .into_any_element(),
+                ProfileAction::Call if call_off.is_some() => {
+                    disabled_tile("info-panel-call", IconName::Phone, "Call", call_off, cx)
+                }
+                ProfileAction::Video if video_off.is_some() => disabled_tile(
+                    "info-panel-video-call",
+                    IconName::Video,
+                    "Video",
+                    video_off,
+                    cx,
+                ),
                 ProfileAction::Call => info_tile(
                     "info-panel-call",
                     IconName::Phone,
@@ -200,6 +228,41 @@ impl QuillApp {
         }
         Some(row.into_any_element())
     }
+}
+
+/// A tile that cannot be used, with the reason as its tooltip.
+fn disabled_tile(
+    id: &'static str,
+    icon: IconName,
+    label: &'static str,
+    reason: Option<&'static str>,
+    cx: &App,
+) -> AnyElement {
+    div()
+        .id(id)
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_1()
+        .w(px(76.))
+        .py_2()
+        .rounded_lg()
+        .bg(cx.theme().secondary)
+        .opacity(0.5)
+        .role(gpui_kit::Role::Button)
+        .aria_label(label)
+        .when_some(reason, |this, text| {
+            this.tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(text).build(window, cx)
+            })
+        })
+        .child(
+            Icon::new(icon)
+                .size(px(18.))
+                .text_color(cx.theme().muted_foreground),
+        )
+        .child(div().text_xs().child(label))
+        .into_any_element()
 }
 
 #[cfg(test)]
