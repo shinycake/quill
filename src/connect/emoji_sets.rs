@@ -69,15 +69,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let expiration = if duration_secs == 0 || custom_emoji_id.is_none() {
+        let expiration = if custom_emoji_id.is_none() {
             0
         } else {
-            let now = crate::state::unix_ms_now() / 1000;
-            i32::try_from(
-                now.checked_add(duration_secs as u64)
-                    .ok_or(ConnectSendError::InvalidRequest)?,
+            crate::main_menu::emoji_status_expiration(
+                crate::state::unix_ms_now() / 1000,
+                duration_secs,
             )
-            .map_err(|_| ConnectSendError::InvalidRequest)?
+            .ok_or(ConnectSendError::InvalidRequest)?
         };
         self.session.stickers.emoji.status_note = None;
         let request = self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {

@@ -1,0 +1,2 @@
+parity:chatlist-main-menu
+parity:settings-emoji-status-menu

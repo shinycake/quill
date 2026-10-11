@@ -178,7 +178,9 @@ impl QuillApp {
                                 quill::state::unix_ms_now() / 1000 + *s as u64 <= i32::MAX as u64
                             });
                         if let Some(secs) = secs {
-                            if let Some(live) = this.live.as_mut() {
+                            if let Some(id) = this.chat_list.status_other_for.take() {
+                                this.change_emoji_status_for(id, secs, cx);
+                            } else if let Some(live) = this.live.as_mut() {
                                 live.driver.session.stickers.emoji.status_duration_secs = secs;
                             }
                         } else {
@@ -243,8 +245,13 @@ impl QuillApp {
                 } else {
                     div().child(sticker.emoji.clone()).into_any_element()
                 };
-                choices = choices.child(
-                    div().flex().flex_col().items_center().child(visual).child(
+                let cell = div()
+                    .id(SharedString::from(format!("status-cell-{title}-{id}")))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .child(visual)
+                    .child(
                         Button::new(format!("status-{title}-{id}"))
                             .label(if sticker.emoji.is_empty() {
                                 "Set status".into()
@@ -256,8 +263,9 @@ impl QuillApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.change_emoji_status(Some(id), cx)
                             })),
-                    ),
-                );
+                    );
+                choices =
+                    choices.child(self.with_status_duration_menu(cell, id, premium && !busy, cx));
             }
             section = section.child(div().text_xs().child(title)).child(choices);
         }
