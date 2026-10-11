@@ -231,7 +231,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
 - [x] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
 - [ ] Fact-check block under messages <!-- parity:render-fact-check -->
-- [ ] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
+- [x] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
 
 ### Message menu & selection
 

@@ -1,1 +1,0 @@
-parity:render-sponsored-info
