@@ -3,8 +3,9 @@
 //! full compose control for the story reply field).
 use super::*;
 use crate::telegram::requests::{
-    AnimationSend, StickerSend, StoryReplyTarget, VoiceNoteSend, send_animation_story_reply,
-    send_sticker_story_reply, send_voice_note_story_reply,
+    AnimationSend, StickerSend, StoryReplyTarget, VideoNoteSend, VideoNoteThumbnailSend,
+    VoiceNoteSend, send_animation_story_reply, send_sticker_story_reply,
+    send_video_note_story_reply, send_voice_note_story_reply,
 };
 use crate::voice::VoiceDraft;
 
@@ -119,6 +120,36 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self_destruct: None,
                 },
             )
+        })
+    }
+
+    /// Reply to a story with a finished round video recording.
+    pub fn send_story_reply_video_note(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        draft: &crate::video::VideoNoteDraft,
+    ) -> Result<RequestId, ConnectSendError> {
+        let target = self
+            .story_reply_media_target(chat_id, story_id)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let path = crate::local_path::pick_send_path(&draft.path)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let path = path.to_string_lossy().into_owned();
+        let thumbnail = crate::video::write_video_note_thumbnail(&draft.path).map(|thumb| {
+            VideoNoteThumbnailSend {
+                path: thumb.path.to_string_lossy().into_owned(),
+                width: thumb.width,
+                height: thumb.height,
+            }
+        });
+        let note = VideoNoteSend {
+            duration: draft.duration_secs,
+            length: draft.length,
+            thumbnail,
+        };
+        self.send_story_reply_json(chat_id, story_id, |extra| {
+            send_video_note_story_reply(extra, chat_id, target, &path, &note)
         })
     }
 }

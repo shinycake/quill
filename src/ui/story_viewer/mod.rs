@@ -416,7 +416,7 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        let text = self.stories.reply_input.read(cx).value().to_string();
+        let text = self.story_reply_markup(cx);
         if text.trim().is_empty() {
             return;
         }

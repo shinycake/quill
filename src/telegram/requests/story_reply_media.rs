@@ -9,7 +9,8 @@
 
 use super::stories::input_message_reply_to_story;
 use super::{
-    AnimationSend, StickerSend, VoiceNoteSend, send_animation, send_sticker, send_voice_note,
+    AnimationSend, StickerSend, VideoNoteSend, VoiceNoteSend, send_animation, send_sticker,
+    send_video_note, send_voice_note,
 };
 use crate::ids::{ChatId, RequestId};
 use serde_json::Value;
@@ -80,6 +81,20 @@ pub fn send_voice_note_story_reply(
     retarget(send_voice_note(extra, chat_id, voice), target)
 }
 
+/// `sendMessage` + `inputMessageVideoNote` (a round video), replying to a story.
+pub fn send_video_note_story_reply(
+    extra: RequestId,
+    chat_id: ChatId,
+    target: StoryReplyTarget,
+    path: &str,
+    note: &VideoNoteSend,
+) -> String {
+    retarget(
+        send_video_note(extra, chat_id, None, path, note, None),
+        target,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,6 +162,25 @@ mod tests {
         assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToStory");
         assert_eq!(v["reply_to"]["story_id"], 6);
         assert_eq!(v["input_message_content"]["@type"], "inputMessageAnimation");
+    }
+
+    #[test]
+    fn video_note_reply_targets_the_story() {
+        let json = send_video_note_story_reply(
+            RequestId(8),
+            ChatId(7),
+            target(),
+            "/tmp/n.mp4",
+            &VideoNoteSend {
+                duration: 3,
+                length: 384,
+                thumbnail: None,
+            },
+        );
+        let v = parse(&json);
+        assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToStory");
+        assert_eq!(v["reply_to"]["story_id"], 6);
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageVideoNote");
     }
 
     #[test]

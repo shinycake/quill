@@ -9,9 +9,13 @@
 //! of to the open chat.
 
 use super::*;
+use crate::ui::composer_field::{emoji_token, field_doc};
 use crate::ui::media_panel::PanelTab;
+use crate::ui::recording::RecordMode;
+use gpui_base::input::InputContent;
 use gpui_kit::assets::IconName;
 use quill::telegram::requests::{AnimationSend, StickerSend};
+use quill::video::VideoNoteCapture;
 use quill::voice::VoiceCapture;
 
 /// The story the reply row is open on: `(poster chat, story id)`.
@@ -94,14 +98,33 @@ impl QuillApp {
                 }))
                 .into_any_element()
         } else {
-            Button::new("story-reply-mic")
-                .icon(IconName::Mic)
-                .ghost()
-                .tooltip("Record a voice message")
-                .accessibility_label("Record a voice message")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.start_story_reply_voice(cx);
-                }))
+            let video = self.record_mode() == RecordMode::Video;
+            let label = if video {
+                "Record a video message"
+            } else {
+                "Record a voice message"
+            };
+            // Right-click flips voice / video, as on the composer's mic.
+            div()
+                .id("story-reply-mic-wrap")
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _, _, cx| this.toggle_record_mode(cx)),
+                )
+                .child(
+                    Button::new("story-reply-mic")
+                        .icon(if video {
+                            IconName::Video
+                        } else {
+                            IconName::Mic
+                        })
+                        .ghost()
+                        .tooltip(label)
+                        .accessibility_label(label)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.start_story_reply_recording(cx);
+                        })),
+                )
                 .into_any_element()
         };
         div()
@@ -124,6 +147,7 @@ impl QuillApp {
                 div().flex_1().min_w_0().child(
                     Textarea::new(&self.stories.reply_input)
                         .aria_label("Reply to story")
+                        .token(self.field_token_renderer(&self.stories.reply_input, cx))
                         .h(px(40.)),
                 ),
             )
@@ -238,9 +262,46 @@ impl QuillApp {
         true
     }
 
+    /// A custom emoji picked in the panel goes into the reply field as one
+    /// inline token, like the composer's. `true` when it did.
+    pub(in crate::ui) fn route_story_reply_custom_emoji(
+        &mut self,
+        fallback: &str,
+        custom_emoji_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.story_reply_panel_active() {
+            return false;
+        }
+        let fallback = if fallback.is_empty() { "⭐" } else { fallback };
+        let text = fallback.to_string();
+        let len = text.len();
+        let content = InputContent::new(text.clone())
+            .with_token(0..len, emoji_token(custom_emoji_id, &text))
+            .unwrap_or_else(|_| InputContent::new(text));
+        self.stories.reply_input.update(cx, |input, cx| {
+            let range = input.selected_range();
+            if input
+                .replace_range_with_content(range, content.clone(), window, cx)
+                .is_err()
+            {
+                input.replace(content.text().to_string(), window, cx);
+            }
+            input.focus(window, cx);
+        });
+        cx.notify();
+        true
+    }
+
+    /// The reply field as composer markup: formatting and custom emoji
+    /// become entities when it is sent.
+    pub(in crate::ui) fn story_reply_markup(&self, cx: &App) -> String {
+        field_doc(self.stories.reply_input.read(cx)).to_markup()
+    }
+
     /// An emoji picked in the panel goes into the reply field. `true` when
-    /// it did. A custom emoji is inserted as its plain emoji: the reply text
-    /// is sent without entities.
+    /// it did.
     pub(in crate::ui) fn route_story_reply_emoji(
         &mut self,
         emoji: &str,
@@ -276,10 +337,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The mic: record a voice message for the story (Telegram Desktop's
-    /// story reply field records voice and round video; Quill records
-    /// voice).
-    pub(in crate::ui) fn start_story_reply_voice(&mut self, cx: &mut Context<Self>) {
+    /// The mic: record a voice or round video message for the story, in the
+    /// composer's current record mode (Telegram Desktop's story reply field
+    /// records both).
+    pub(in crate::ui) fn start_story_reply_recording(&mut self, cx: &mut Context<Self>) {
         if self.recording_active() || self.story_reply_target().is_none() {
             return;
         }
@@ -287,7 +348,82 @@ impl QuillApp {
             self.stories.reply_panel = false;
             self.close_media_panel(cx);
         }
-        self.with_capture_access(false, Self::begin_story_voice_capture, cx);
+        match self.record_mode() {
+            RecordMode::Audio => {
+                self.with_capture_access(false, Self::begin_story_voice_capture, cx)
+            }
+            RecordMode::Video => {
+                self.with_capture_access(true, Self::begin_story_video_capture, cx)
+            }
+        }
+    }
+
+    fn begin_story_video_capture(&mut self, cx: &mut Context<Self>) {
+        if self.recording_active() {
+            return;
+        }
+        let hq = self
+            .session()
+            .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
+        match VideoNoteCapture::start(hq) {
+            Ok(capture) => {
+                self.recording.video_note_capture = Some(capture);
+                self.stories.reply_recording = true;
+                self.spawn_voice_tick(cx);
+                self.connection.status_note = "recording video reply".into();
+            }
+            Err(err) => {
+                self.connection.status_note = err;
+            }
+        }
+        cx.notify();
+    }
+
+    /// The recording bar's Send for a round video started from the reply
+    /// row. `true` when it handled the send; ffmpeg finishes the file off
+    /// the main thread.
+    pub(in crate::ui) fn story_reply_video_recording(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.story_reply_recording_active() {
+            return false;
+        }
+        let Some((chat_id, story_id)) = self.story_reply_target() else {
+            return false;
+        };
+        if self.slow_mode_blocked(chat_id, cx) {
+            return true;
+        }
+        let Some(capture) = self.recording.video_note_capture.take() else {
+            return true;
+        };
+        self.recording.locked = false;
+        self.recording.discard_confirm = false;
+        self.stories.reply_recording = false;
+        cx.notify();
+        let finished = cx.background_spawn(async move { capture.finish() });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = finished.await;
+            let _ = this.update_in(cx, |this, _window, cx| {
+                let sent = match result {
+                    Ok(draft) => this.live.as_mut().map(|live| {
+                        live.driver
+                            .send_story_reply_video_note(chat_id, story_id, &draft)
+                            .is_ok()
+                    }),
+                    Err(err) => {
+                        this.connection.status_note = err;
+                        cx.notify();
+                        return;
+                    }
+                };
+                this.finish_story_reply_media(sent, "video message", cx);
+            });
+        })
+        .detach();
+        true
     }
 
     fn begin_story_voice_capture(&mut self, cx: &mut Context<Self>) {
