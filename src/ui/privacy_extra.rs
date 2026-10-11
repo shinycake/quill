@@ -47,6 +47,9 @@ pub(crate) struct PrivacyUi {
     pub file_open_remember: bool,
     /// The session details view inside the sessions dialog.
     pub session_details: Option<i64>,
+    /// "Rename current device" form is open on the details view.
+    pub renaming_device: bool,
+    pub rename_input: Entity<gpui_kit::component::input::InputState>,
     /// "Reset statistics" is awaiting its confirmation.
     pub network_reset_confirm: bool,
 }
@@ -66,6 +69,11 @@ impl PrivacyUi {
             file_open: None,
             file_open_remember: false,
             session_details: None,
+            renaming_device: false,
+            rename_input: cx.new(|cx| {
+                gpui_kit::component::input::InputState::new(window, cx)
+                    .placeholder(quill::settings::DEFAULT_DEVICE_MODEL)
+            }),
             network_reset_confirm: false,
         }
     }

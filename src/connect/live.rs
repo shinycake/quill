@@ -163,6 +163,7 @@ pub fn start_prepared_live_connect(
     // Slice parity:settings-language: the app language tag load the same
     // way (defaults to "en" when unset).
     session.settings.language_prefs = load_language_prefs(&prepared.paths);
+    session.settings.device_prefs = crate::settings::load_device_prefs(&prepared.paths);
     // Slice S4: local per-network auto-download settings load the same
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).

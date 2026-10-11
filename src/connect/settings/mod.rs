@@ -5,7 +5,8 @@ use crate::ids::{ChatId, RequestId};
 use crate::notify::NotificationSoundKind;
 use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use crate::settings::{
-    load_preferences, save_badge_prefs, save_call_prefs, save_language_prefs, save_preferences,
+    load_preferences, save_badge_prefs, save_call_prefs, save_device_prefs, save_language_prefs,
+    save_preferences,
 };
 use crate::state::RequestPurpose;
 use crate::state::SettingsPurpose;
@@ -310,5 +311,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`language_prefs.json`) next to the account.
     pub fn save_language_prefs(&mut self) -> std::io::Result<()> {
         save_language_prefs(&self.paths, &self.session.settings.language_prefs)
+    }
+
+    /// parity:settings-session-details: persist the custom device name.
+    pub fn save_device_prefs(&mut self) -> std::io::Result<()> {
+        save_device_prefs(&self.paths, &self.session.settings.device_prefs)
     }
 }

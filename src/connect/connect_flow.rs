@@ -64,6 +64,7 @@ pub fn build_set_tdlib_parameters(
     paths: &AccountPaths,
     database_key: &DatabaseKey,
     system_language_code: &str,
+    custom_device_model: &str,
 ) -> SetTdlibParameters {
     SetTdlibParameters {
         use_test_dc: std::env::var("QUILL_USE_TEST_DC")
@@ -74,7 +75,7 @@ pub fn build_set_tdlib_parameters(
         database_encryption_key_b64: database_key.tdlib_base64(),
         api_id: credentials.api_id,
         api_hash: credentials.api_hash.clone(),
-        device_model: "Desktop".into(),
+        device_model: crate::settings::select_device_model(custom_device_model),
         system_version: std::env::consts::OS.into(),
         application_version: crate::version::APP.into(),
         system_language_code: system_language_code.into(),

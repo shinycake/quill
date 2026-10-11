@@ -7,6 +7,7 @@ use super::chat_theme::danger;
 use super::format_helpers::format_session_last_active;
 use super::security::quiet_danger;
 use gpui_kit::component::button::*;
+use gpui_kit::component::input::Input;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -188,15 +189,29 @@ impl QuillApp {
                     "This location estimate is based on the IP address and may not always be accurate.",
                 ),
         );
+        if s.is_current && self.privacy.extra.renaming_device {
+            return body.child(self.rename_device_form(cx)).into_any_element();
+        }
         let mut actions = div().flex().justify_between().gap_2().child(
             Button::new("session-details-back")
                 .label("Back")
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.privacy.extra.session_details = None;
+                    this.privacy.extra.renaming_device = false;
                     cx.notify();
                 })),
         );
+        if s.is_current {
+            actions = actions.child(
+                Button::new("session-details-rename")
+                    .label("Rename")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.begin_rename_device(window, cx);
+                    })),
+            );
+        }
         if !s.is_current {
             actions = actions.child(
                 Button::new(format!("session-details-terminate-{session_id}"))
@@ -210,5 +225,87 @@ impl QuillApp {
             );
         }
         body.child(actions).into_any_element()
+    }
+
+    fn begin_rename_device(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self
+            .session()
+            .map(|s| s.settings.device_prefs.custom_device_model.clone())
+            .unwrap_or_default();
+        self.privacy
+            .extra
+            .rename_input
+            .update(cx, |input, cx| input.set_value(current, window, cx));
+        self.privacy.extra.renaming_device = true;
+        cx.notify();
+    }
+
+    /// tdesktop `RenameBox`: a device name field with Save and Cancel.
+    fn rename_device_form(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child("Rename current device"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Device name"),
+            )
+            .child(Input::new(&self.privacy.extra.rename_input).aria_label("Device name"))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("The new name applies after Quill restarts."),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("session-rename-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.privacy.extra.renaming_device = false;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("session-rename-save")
+                            .label("Save")
+                            .primary()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.save_device_name(cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn save_device_name(&mut self, cx: &mut Context<Self>) {
+        let raw = self.privacy.extra.rename_input.read(cx).value().to_string();
+        let prefs = quill::settings::DevicePrefs {
+            custom_device_model: quill::settings::clean_device_model(&raw),
+        };
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.settings.device_prefs = prefs;
+            if let Err(err) = live.driver.save_device_prefs() {
+                self.connection.status_note = format!("couldn't save device name: {err}");
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.settings.device_prefs = prefs;
+            self.connection.status_note = "demo: device name is not saved".into();
+        }
+        self.privacy.extra.renaming_device = false;
+        cx.notify();
     }
 }

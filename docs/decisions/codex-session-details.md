@@ -1,4 +1,4 @@
-# Session details box and rename this device (audit, no code change)
+# Session details box and rename this device
 
 ## What tdesktop does
 `settings/sections/settings_active_sessions.cpp`:
@@ -19,13 +19,17 @@ rows (`src/ui/security/twofa_status_body.rs`), backed by
 `toggleSessionCanAcceptCalls` / `toggleSessionCanAcceptSecretChats`.
 
 ## Rename this device
-TDLib 1.8.68 (`schema/td_api.tl`) has no `setDeviceName` or equivalent for an
-existing session. tdesktop's rename is purely a local setting applied to the
-`device_model` of the next `setTdlibParameters`
-(`src/telegram/requests/auth.rs`). Implementing it means a persisted setting
-plus a restart or re-login to take effect, which is a separate settings feature,
-not a sessions request. Nothing was changed and the parity fragment was
-deliberately not written.
+TDLib 1.8.68 has no method to rename an existing session. tdesktop's rename is a
+local `customDeviceModel` setting used as the `device_model` of the next
+`setTdlibParameters`, and Quill now does the same:
+- `settings::DevicePrefs` (`device_prefs.json`, next to `language_prefs.json`),
+  loaded in `connect/live.rs` before parameters are sent; `select_device_model`
+  cleans whitespace, caps at 64 characters and falls back to "Desktop".
+- `build_set_tdlib_parameters` takes the custom name.
+- The current-session details view has a "Rename" button that shows an inline
+  form (Device name input, Save, Cancel, "applies after Quill restarts") in
+  place of a separate dialog, matching the existing details-view pattern.
 
 ## Verification
-Read-only comparison of the sources above; no behavior change.
+Unit tests: prefs round-trip and corrupt file, `select_device_model` cases, and
+`setTdlibParameters` JSON `device_model` with and without a custom name. gate.sh.
