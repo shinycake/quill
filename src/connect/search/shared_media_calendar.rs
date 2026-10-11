@@ -40,6 +40,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.media.shared_media.chat_id != Some(chat_id) {
             return Ok(());
         }
+        let Some(filter) = tab.filter_constructor() else {
+            return Ok(());
+        };
         let generation = self
             .session
             .media
@@ -49,7 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetSharedMedia { tab, generation },
             Some(chat_id),
         );
-        let filter = search_messages_filter_json(tab.filter_constructor());
+        let filter = search_messages_filter_json(filter);
         match self.sender.send_json(&search_chat_messages(
             extra,
             chat_id,

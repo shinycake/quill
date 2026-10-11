@@ -30,4 +30,6 @@ pub enum MediaPayload {
         is_paused: bool,
         complete_date: i32,
     },
+    /// `audios` — the `getUserProfileAudios` answer (schema line 566).
+    ProfileAudios(ProfileAudiosPage),
 }

@@ -116,6 +116,7 @@ fn chat_prefs_roundtrip_and_missing_file() {
         spellcheck_enabled: false,
         suggest_emoji: false,
         replace_emoji: false,
+        profile_media_tabs_expanded: true,
     };
     save_chat_prefs(&paths, &prefs).unwrap();
     assert_eq!(load_chat_prefs(&paths), prefs);

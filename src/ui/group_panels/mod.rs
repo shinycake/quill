@@ -207,6 +207,8 @@ impl QuillApp {
             }
             let fetch = match target {
                 InfoPanelTarget::User(user_id) => {
+                    // The saved music behind the profile's music button.
+                    let _ = live.driver.fetch_playlist(user_id, false);
                     // B10: the groups you share with the user, listed under
                     // the media counts (yourself has none).
                     if live.driver.session.my_user_id != Some(user_id) {

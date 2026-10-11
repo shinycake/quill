@@ -63,6 +63,7 @@ impl Session {
                     }
                 }
             }
+            MediaPayload::ProfileAudios(page) => self.apply_profile_audios(page, pending),
         }
     }
 }

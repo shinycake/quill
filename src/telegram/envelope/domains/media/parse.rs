@@ -37,6 +37,9 @@ pub(crate) fn parse_media_payload(
                 .unwrap_or(false),
             complete_date: int53_or_zero(value.get("complete_date")).sat_i32(),
         })),
+        "audios" => Ok(EnvelopePayload::Media(MediaPayload::ProfileAudios(
+            parse_profile_audios(value),
+        ))),
         "file" => Ok(EnvelopePayload::Media(MediaPayload::File(parse_file(
             Some(value),
         )?))),

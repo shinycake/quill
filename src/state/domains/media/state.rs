@@ -58,6 +58,11 @@ pub struct MediaState {
     /// Message counts per `searchMessagesFilter*` (index into
     /// `MEDIA_COUNT_FILTERS`) for chats whose info panel was opened.
     pub chat_media_counts: HashMap<i64, HashMap<u8, i32>>,
+    /// Saved music per user (`getUserProfileAudios`), for the profile's
+    /// music button and the Playlist page.
+    pub playlists: HashMap<i64, Playlist>,
+    /// Thumbnails of the Stories and Gifts grids waiting for a download.
+    pub(crate) profile_thumbs_due: Vec<FileId>,
 }
 
 impl MediaState {
@@ -80,6 +85,8 @@ impl MediaState {
             shared_media: SharedMediaState::default(),
             map_thumbs: MapThumbs::default(),
             chat_media_counts: HashMap::new(),
+            playlists: HashMap::new(),
+            profile_thumbs_due: Vec::new(),
         }
     }
 }

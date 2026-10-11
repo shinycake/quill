@@ -42,7 +42,7 @@ fn update_user_full_info_stores_the_main_tab_and_opens_the_gallery_on_it() {
 }
 
 #[test]
-fn tabs_without_a_gallery_fall_back_to_media() {
+fn gifts_and_posts_open_their_own_gallery_tabs() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     private_chat(&mut session, &seq, &sink);
@@ -58,7 +58,7 @@ fn tabs_without_a_gallery_fall_back_to_media() {
     );
     assert_eq!(
         session.main_profile_gallery_tab(ChatId(6)),
-        SharedMediaTab::Media
+        SharedMediaTab::Gifts
     );
 }
 

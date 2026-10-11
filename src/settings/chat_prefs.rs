@@ -61,6 +61,12 @@ pub struct ChatPrefs {
     /// default on): `:-)`, `<3` and `:name:` become emoji as you type.
     #[serde(default = "default_true")]
     pub replace_emoji: bool,
+    /// tdesktop's `profile-media-tabs-expanded` experimental option
+    /// (default off): the shared-media gallery shows Photos and Videos as
+    /// two tabs instead of one Media tab. A local client option, not an
+    /// account setting.
+    #[serde(default)]
+    pub profile_media_tabs_expanded: bool,
 }
 
 impl Default for ChatPrefs {
@@ -71,6 +77,7 @@ impl Default for ChatPrefs {
             spellcheck_enabled: true,
             suggest_emoji: true,
             replace_emoji: true,
+            profile_media_tabs_expanded: false,
         }
     }
 }

@@ -135,7 +135,9 @@ fn shared_media_tgx_copy_is_verbatim() {
     for tab in SharedMediaTab::ALL {
         assert!(!tab.label().is_empty());
         assert!(!tab.glyph().is_empty());
-        assert!(tab.filter_constructor().starts_with("searchMessagesFilter"));
+        if let Some(filter) = tab.filter_constructor() {
+            assert!(filter.starts_with("searchMessagesFilter"));
+        }
     }
 }
 

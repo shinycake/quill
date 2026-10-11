@@ -601,14 +601,14 @@ fn search_chat_messages_filter_carries_tab_constructor() {
         ),
         (
             crate::state::SharedMediaTab::Voice,
-            "searchMessagesFilterVoiceNote",
+            "searchMessagesFilterVoiceAndVideoNote",
         ),
         (
             crate::state::SharedMediaTab::Gifs,
             "searchMessagesFilterAnimation",
         ),
     ] {
-        assert_eq!(tab.filter_constructor(), constructor);
+        assert_eq!(tab.filter_constructor(), Some(constructor));
         let json = search_chat_messages(
             RequestId(27),
             ChatId(11),

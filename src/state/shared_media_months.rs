@@ -43,7 +43,13 @@ pub fn calendar_media(tab: SharedMediaTab) -> Option<SearchMediaKind> {
         SharedMediaTab::Music => Some(SearchMediaKind::Music),
         SharedMediaTab::Links => Some(SearchMediaKind::Links),
         SharedMediaTab::Voice => Some(SearchMediaKind::Voice),
-        SharedMediaTab::Gifs => None,
+        // The calendar filters by media kind; these tabs have none of their own.
+        SharedMediaTab::Gifs
+        | SharedMediaTab::Photos
+        | SharedMediaTab::Videos
+        | SharedMediaTab::Polls
+        | SharedMediaTab::Stories
+        | SharedMediaTab::Gifts => None,
     }
 }
 
@@ -131,6 +137,8 @@ mod tests {
             label: String::new(),
             message: None,
             date,
+            action: SharedMediaAction::Message,
+            visual: SharedMediaVisual::None,
         }
     }
 

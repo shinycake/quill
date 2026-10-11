@@ -20,6 +20,9 @@ impl QuillApp {
     /// never shows while a fetch is in flight.
     pub(super) fn shared_media_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
+        if let Some(user_id) = session.media.shared_media.playlist_user {
+            return Some(self.playlist_panel(user_id, cx));
+        }
         if !session.media.shared_media.open {
             return None;
         }
@@ -38,6 +41,7 @@ impl QuillApp {
             )
         });
         let active_tab = session.media.shared_media.active_tab;
+        let visible_tabs = session.shared_media_visible_tabs();
         let tab = &session.media.shared_media.tabs[active_tab.index()];
         let status = tab.status;
         let total_count = tab.total_count;
@@ -90,20 +94,27 @@ impl QuillApp {
                 // as a kit underline `TabBar` — the active tab keeps its
                 // "· count" suffix while the tab is ready.
                 let weak = cx.weak_entity();
-                let mut bar = TabBar::new(("shared-media-tabs", chat_id.0 as u64)).underline();
-                for tab_option in SharedMediaTab::ALL {
-                    let is_active = tab_option == active_tab;
+                let mut bar = TabBar::new(("shared-media-tabs", chat_id.0 as u64))
+                    .underline()
+                    .menu(true);
+                for tab_option in &visible_tabs {
+                    let is_active = *tab_option == active_tab;
+                    let name = tab_option.label_in(is_channel);
                     let label =
                         if is_active && total_count > 0 && status == SharedMediaTabStatus::Ready {
-                            format!("{} · {total_count}", tab_option.label())
+                            format!("{name} · {total_count}")
                         } else {
-                            tab_option.label().to_string()
+                            name.to_string()
                         };
                     bar = bar.child(Tab::new().label(label));
                 }
-                bar.selected_index(active_tab.index())
+                let selected = visible_tabs
+                    .iter()
+                    .position(|tab| *tab == active_tab)
+                    .unwrap_or(0);
+                bar.selected_index(selected)
                     .on_click(move |ix, _window, cx| {
-                        if let Some(tab) = SharedMediaTab::ALL.get(*ix).copied() {
+                        if let Some(tab) = visible_tabs.get(*ix).copied() {
                             let _ = weak.update(cx, |this, cx| {
                                 this.select_shared_media_tab_ui(tab, cx);
                             });
@@ -121,7 +132,10 @@ impl QuillApp {
                 .py_10()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(format!("Loading {}…", active_tab.label().to_lowercase()))
+                .child(format!(
+                    "Loading {}…",
+                    active_tab.label_in(is_channel).to_lowercase()
+                ))
                 .into_any_element(),
             SharedMediaTabStatus::Failed => div()
                 .flex_1()
@@ -139,7 +153,7 @@ impl QuillApp {
                         .text_color(cx.theme().foreground)
                         .child(format!(
                             "Couldn't load {}.",
-                            active_tab.label().to_lowercase()
+                            active_tab.label_in(is_channel).to_lowercase()
                         )),
                 )
                 .when(!error.is_empty(), |this| {
@@ -172,6 +186,11 @@ impl QuillApp {
                 .into_any_element(),
             SharedMediaTabStatus::Empty => {
                 self.shared_media_empty_state(active_tab, is_channel, cx)
+            }
+            SharedMediaTabStatus::Ready
+                if matches!(active_tab, SharedMediaTab::Stories | SharedMediaTab::Gifts) =>
+            {
+                self.shared_media_grid(active_tab, cx)
             }
             SharedMediaTabStatus::Ready => self.shared_media_ready_list(active_tab, cx),
         };
@@ -225,6 +244,13 @@ impl QuillApp {
     pub(super) fn open_shared_media_ui(&mut self, cx: &mut Context<Self>) {
         if self.pane_mode() != PaneMode::Ready {
             return;
+        }
+        let split = self.chat_prefs.profile_media_tabs_expanded;
+        if let Some(live) = self.live.as_mut() {
+            let gallery = &mut live.driver.session.media.shared_media;
+            if !gallery.open {
+                gallery.media_split = split;
+            }
         }
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_shared_media() {

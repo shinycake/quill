@@ -176,6 +176,9 @@ impl QuillApp {
             !s.profile_chat_list(ProfileChatsKind::GroupsInCommon, user_id)
                 .is_empty()
         });
+        if let Some(button) = self.playlist_music_button(user_id, cx) {
+            body = body.child(button);
+        }
         if let Some(section) =
             self.media_counts_section(if groups_loaded { 0 } else { groups_in_common }, cx)
         {
