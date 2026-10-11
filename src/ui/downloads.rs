@@ -74,9 +74,9 @@ impl QuillApp {
         .flatten()
         .filter(|id| {
             self.session().is_some_and(|s| {
-                s.failed_downloads.contains(&id.0)
+                s.media.failed_downloads.contains(&id.0)
                     || (s.file(*id).and_then(|f| f.usable_path()).is_none()
-                        && !s.downloading.contains(&id.0)
+                        && !s.media.downloading.contains(&id.0)
                         && !s.requests.has_download(*id)
                         && !s.file(*id).is_some_and(|f| f.local.is_downloading_active))
             })
@@ -96,7 +96,7 @@ impl QuillApp {
     pub(super) fn open_downloaded_file(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         let path: Option<PathBuf> = self
             .session()
-            .and_then(|s| s.files.get(&file_id.0))
+            .and_then(|s| s.media.files.get(&file_id.0))
             .and_then(|f| f.usable_path())
             .map(PathBuf::from);
         match path {
@@ -115,7 +115,7 @@ impl QuillApp {
     pub(super) fn reveal_downloaded_file(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         let path: Option<PathBuf> = self
             .session()
-            .and_then(|s| s.files.get(&file_id.0))
+            .and_then(|s| s.media.files.get(&file_id.0))
             .and_then(|f| f.usable_path())
             .map(PathBuf::from);
         self.connection.status_note = match path {
@@ -185,13 +185,13 @@ impl QuillApp {
     /// panel; toggled from the sidebar "Downloads" entry.
     pub(super) fn downloads_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.downloads_panel_open {
+        if !session.media.downloads_panel_open {
             return None;
         }
-        let mut active: Vec<i32> = session.user_downloads.iter().copied().collect();
+        let mut active: Vec<i32> = session.media.user_downloads.iter().copied().collect();
         active.sort_unstable();
-        let recent: Vec<i32> = session.completed_downloads.iter().copied().collect();
-        let mut failed: Vec<i32> = session.failed_downloads.iter().copied().collect();
+        let recent: Vec<i32> = session.media.completed_downloads.iter().copied().collect();
+        let mut failed: Vec<i32> = session.media.failed_downloads.iter().copied().collect();
         failed.sort_unstable();
         let mut panel = div()
             .id("downloads-panel")
@@ -221,9 +221,9 @@ impl QuillApp {
                             .tooltip("Close downloads")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
-                                    live.driver.session.downloads_panel_open = false;
+                                    live.driver.session.media.downloads_panel_open = false;
                                 } else if let Some(session) = this.demo_session.as_mut() {
-                                    session.downloads_panel_open = false;
+                                    session.media.downloads_panel_open = false;
                                 }
                                 cx.notify();
                             })),
@@ -307,7 +307,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.session();
-        let file = session.as_ref().and_then(|s| s.files.get(&file_id));
+        let file = session.as_ref().and_then(|s| s.media.files.get(&file_id));
         let name = session
             .as_ref()
             .map(|s| download_display_name(s, file_id))
@@ -322,7 +322,7 @@ impl QuillApp {
         let paused = active
             && session
                 .as_ref()
-                .is_some_and(|s| s.paused_downloads.contains(&file_id));
+                .is_some_and(|s| s.media.paused_downloads.contains(&file_id));
         let done = file.map_or(0, |f| f.local.downloaded_size);
         let meta = if active {
             let amount = if done > 0 && !size_label.is_empty() {

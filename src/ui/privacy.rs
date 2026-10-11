@@ -251,7 +251,9 @@ impl QuillApp {
     /// the search panel shows the people you message most
     /// (`lng_settings_top_peers_*`; TDLib option `disable_top_chats`).
     fn privacy_frequent_contacts_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let enabled = !self.session().is_some_and(|s| s.search.top_chats_disabled);
+        let enabled = !self
+            .session()
+            .is_some_and(|s| s.search.search.top_chats_disabled);
         div()
             .flex()
             .flex_col()
@@ -1486,7 +1488,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     }
     session.my_user_id = Some(60);
     session.payments.premium_option = Some(true);
-    session.user_full_infos.insert(
+    session.users_state.user_full_infos.insert(
         60,
         quill::state::UserFullInfoData {
             extras: quill::telegram::envelope::UserProfileExtras {
@@ -1521,7 +1523,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
     session.settings.blocked_senders = Some(vec![63]);
     session.settings.blocked_total = 1;
-    session.contacts = Some(vec![61, 62, 63]);
+    session.users_state.contacts = Some(vec![61, 62, 63]);
 }
 /// Slice S3: the Privacy-screen row value for one rule key: the base
 /// choice, with the always/never exception counts when non-zero (TGX

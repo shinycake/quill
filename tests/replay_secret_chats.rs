@@ -69,7 +69,7 @@ fn replay_secret_chat_unknown_state_queues_get_secret_chat() {
     let secret = session.chats.get(&31).unwrap();
     assert!(secret.supported());
     assert!(!secret.can_post());
-    assert!(session.secret_chat_fetch_queue.contains(&31));
+    assert!(session.users_state.secret_chat_fetch_queue.contains(&31));
     // No duplicate queueing if the same chat arrives again.
     apply_all_seq(
         &mut session,
@@ -81,6 +81,7 @@ fn replay_secret_chat_unknown_state_queues_get_secret_chat() {
     );
     assert_eq!(
         session
+            .users_state
             .secret_chat_fetch_queue
             .iter()
             .filter(|id| **id == 31)
@@ -128,5 +129,5 @@ fn replay_secret_chat_pending_to_ready_to_closed() {
     );
     let chat = session.chats.get(&31).unwrap();
     assert!(!chat.can_post());
-    assert!(session.secret_chat_fetch_queue.is_empty());
+    assert!(session.users_state.secret_chat_fetch_queue.is_empty());
 }

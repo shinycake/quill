@@ -206,7 +206,7 @@ impl QuillApp {
     ) -> MediaFacts {
         let protected = session.chat_has_protected_content(chat_id);
         let file = session.file(target.file_id);
-        let downloading = session.downloading.contains(&target.file_id.0)
+        let downloading = session.media.downloading.contains(&target.file_id.0)
             || session.requests.has_download(target.file_id)
             || file.is_some_and(|f| f.local.is_downloading_active);
         let content = quill::telegram::envelope::effective_content(
@@ -219,20 +219,24 @@ impl QuillApp {
             can_save: !protected && actions.is_none_or(|a| a.can_be_saved),
             set_installed: session
                 .stickers
+                .stickers
                 .sets
                 .iter()
                 .any(|set| set.id == target.set_id),
             favorite: (target.kind == MediaKind::Sticker
-                && (session.stickers.installed_loaded || !session.stickers.favorites.is_empty()))
+                && (session.stickers.stickers.installed_loaded
+                    || !session.stickers.stickers.favorites.is_empty()))
             .then(|| {
                 session
+                    .stickers
                     .stickers
                     .favorites
                     .iter()
                     .any(|s| s.file_id == target.file_id)
             }),
-            gif_saved: session.gifs.loaded.then(|| {
+            gif_saved: session.stickers.gifs.loaded.then(|| {
                 session
+                    .stickers
                     .gifs
                     .animations
                     .iter()
@@ -244,7 +248,7 @@ impl QuillApp {
                     target,
                     file.map_or(0, |f| f.display_size()),
                     session.settings.saved_notification_sounds.len(),
-                    session.tone_limits,
+                    session.messages.tone_limits,
                 ),
         }
     }
@@ -511,7 +515,7 @@ impl QuillApp {
             let result = live.driver.manage_sticker_set(set_id, install, false);
             if result.is_ok() {
                 // The dialog stays; the set's state follows TDLib's update.
-                live.driver.session.sticker_set_view = None;
+                live.driver.session.stickers.sticker_set_view = None;
                 self.message_ui.menu_ui.sticker_set_open = false;
                 self.connection.status_note = if install {
                     "sticker set added".into()
@@ -566,7 +570,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.manage_sticker_set(set_id, false, true) {
                 Ok(_) => {
-                    live.driver.session.sticker_set_view = None;
+                    live.driver.session.stickers.sticker_set_view = None;
                     self.message_ui.menu_ui.sticker_set_open = false;
                     self.connection.status_note = ARCHIVED_NOTE.into();
                     self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
@@ -582,7 +586,7 @@ impl QuillApp {
     pub(super) fn close_sticker_set_dialog(&mut self, cx: &mut Context<Self>) {
         self.message_ui.menu_ui.sticker_set_open = false;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.sticker_set_view = None;
+            live.driver.session.stickers.sticker_set_view = None;
         }
         cx.notify();
     }
@@ -599,7 +603,9 @@ impl QuillApp {
                 this.close_sticker_set_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let view = this.session().and_then(|s| s.sticker_set_view.clone());
+            let view = this
+                .session()
+                .and_then(|s| s.stickers.sticker_set_view.clone());
             // The previews download once the set has arrived.
             if let Some(live) = this.live.as_mut() {
                 let _ = live.driver.ensure_sticker_set_view_files();
@@ -897,7 +903,7 @@ impl QuillApp {
     fn audience_faces(&self, chat_id: ChatId, message_id: MessageId) -> Vec<MessageSender> {
         let Some(audience) = self
             .session()
-            .and_then(|s| s.message_audience.as_ref())
+            .and_then(|s| s.messages.message_audience.as_ref())
             .filter(|a| a.chat_id == chat_id && a.message_id == message_id)
         else {
             return Vec::new();
@@ -944,6 +950,7 @@ impl QuillApp {
         ));
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
         let audience = session
+            .messages
             .message_audience
             .as_ref()
             .filter(|a| a.chat_id == chat_id && a.message_id == message_id);
@@ -1066,7 +1073,7 @@ impl QuillApp {
         self.message_ui.menu_ui.page = MessageMenuPage::Audience;
         self.message_ui.menu_ui.audience_tab = several.then(|| reaction.clone());
         if several && let Some(live) = self.live.as_mut() {
-            live.driver.session.wanted_reactor_tab =
+            live.driver.session.messages.wanted_reactor_tab =
                 Some((menu.chat_id, menu.message_id, reaction));
         }
         cx.notify();
@@ -1108,6 +1115,7 @@ impl QuillApp {
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
         let roots = self.media_display_roots();
         let Some(audience) = session
+            .messages
             .message_audience
             .as_ref()
             .filter(|a| a.chat_id == chat_id && a.message_id == message_id)
@@ -1117,6 +1125,7 @@ impl QuillApp {
         // An admin may drop one member's reaction when TDLib says this
         // message allows it (`messageProperties.can_delete_reactions`).
         let can_delete_reactions = session
+            .messages
             .message_menu_actions
             .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
         let person = |ix: u64,
@@ -1410,7 +1419,8 @@ impl QuillApp {
     }
 
     fn message_report_flow(&self) -> Option<quill::state::MessageReportFlow> {
-        self.session().and_then(|s| s.message_report.clone())
+        self.session()
+            .and_then(|s| s.messages.message_report.clone())
     }
 
     /// The user chose a reason.

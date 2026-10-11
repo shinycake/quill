@@ -102,7 +102,10 @@ fn get_contacts_accepts_matching_response() {
         ),
     );
     assert!(session.contacts_settled());
-    assert_eq!(session.contacts.as_deref(), Some([31, 32, 33].as_slice()));
+    assert_eq!(
+        session.users_state.contacts.as_deref(),
+        Some([31, 32, 33].as_slice())
+    );
     // User 33 never arrived via `updateUser` → no row yet.
     let rows = session.contact_rows();
     assert_eq!(rows.len(), 2);
@@ -129,7 +132,7 @@ fn get_contacts_error_surfaces_retry() {
             extra.0
         ),
     );
-    assert!(session.contacts_error);
+    assert!(session.users_state.contacts_error);
     assert!(session.contacts_settled());
 }
 
@@ -200,7 +203,7 @@ fn add_contact_ok_invalidates_contacts() {
             list_extra.0
         ),
     );
-    assert!(session.contacts.is_some());
+    assert!(session.users_state.contacts.is_some());
     let add_extra = session.request_for_user(RequestPurpose::AddContact, 55);
     apply_json(
         &mut session,
@@ -208,7 +211,7 @@ fn add_contact_ok_invalidates_contacts() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add_extra.0),
     );
-    assert!(session.contacts.is_none());
+    assert!(session.users_state.contacts.is_none());
 }
 
 #[test]
@@ -218,7 +221,7 @@ fn a6_imported_contacts_response_invalidates_and_notices() {
     // invalidates the list and records the notice.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.contacts = Some(vec![31]);
+    session.users_state.contacts = Some(vec![31]);
     let extra = session.request(RequestPurpose::ImportContacts, None);
     apply_json(
         &mut session,
@@ -229,9 +232,9 @@ fn a6_imported_contacts_response_invalidates_and_notices() {
             extra.0
         ),
     );
-    assert!(session.contacts.is_none());
+    assert!(session.users_state.contacts.is_none());
     assert_eq!(
-        session.contacts_notice.as_deref(),
+        session.users_state.contacts_notice.as_deref(),
         Some("Contacts imported.")
     );
 }
@@ -250,7 +253,7 @@ fn a6_remove_contact_ok_clears_cached_is_contact() {
         r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","phone_number":"+15550101031","status":{"@type":"userStatusRecently"},"is_contact":true,"type":{"@type":"userTypeRegular"}}}"#,
     );
     assert!(session.users.get(&31).expect("user").is_contact);
-    session.contacts = Some(vec![31]);
+    session.users_state.contacts = Some(vec![31]);
     let extra = session.request_for_user(RequestPurpose::RemoveContact, 31);
     apply_json(
         &mut session,
@@ -258,9 +261,12 @@ fn a6_remove_contact_ok_clears_cached_is_contact() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.contacts.is_none());
+    assert!(session.users_state.contacts.is_none());
     assert!(!session.users.get(&31).expect("user").is_contact);
-    assert_eq!(session.contacts_notice.as_deref(), Some("Contact deleted."));
+    assert_eq!(
+        session.users_state.contacts_notice.as_deref(),
+        Some("Contact deleted.")
+    );
 }
 
 #[test]
@@ -281,7 +287,14 @@ fn a6_block_ok_updates_cached_blocked() {
             extra.0
         ),
     );
-    assert!(!session.user_full_infos.get(&31).expect("info").blocked);
+    assert!(
+        !session
+            .users_state
+            .user_full_infos
+            .get(&31)
+            .expect("info")
+            .blocked
+    );
     let extra = session.request_for_user(
         RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { block: true }),
         31,
@@ -292,7 +305,14 @@ fn a6_block_ok_updates_cached_blocked() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.user_full_infos.get(&31).expect("info").blocked);
+    assert!(
+        session
+            .users_state
+            .user_full_infos
+            .get(&31)
+            .expect("info")
+            .blocked
+    );
 }
 
 /// A live session never sends `getMe`: the own id and Premium state come

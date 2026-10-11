@@ -69,7 +69,7 @@ fn sticker_panel_loads_installed_set_and_send_uses_input_file_id() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.stickers.selected_set_id, Some(77));
+    assert_eq!(driver.session.stickers.stickers.selected_set_id, Some(77));
     let set_req = recorder
         .snapshot()
         .into_iter()
@@ -92,7 +92,7 @@ fn sticker_panel_loads_installed_set_and_send_uses_input_file_id() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.stickers.stickers.len(), 1);
+    assert_eq!(driver.session.stickers.stickers.stickers.len(), 1);
     assert!(
         recorder
             .snapshot()
@@ -186,8 +186,11 @@ fn gif_panel_loads_saved_animations_and_send_uses_input_animation() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.gifs.animations.len(), 1);
-    assert_eq!(driver.session.gifs.animations[0].file_id, FileId(33));
+    assert_eq!(driver.session.stickers.gifs.animations.len(), 1);
+    assert_eq!(
+        driver.session.stickers.gifs.animations[0].file_id,
+        FileId(33)
+    );
     assert!(
         recorder
             .snapshot()

@@ -47,6 +47,7 @@ impl Session {
     ) {
         let me = self.my_user_id;
         let Some(search) = self
+            .messages
             .mention_search
             .as_mut()
             .filter(|s| s.request == Some(request))

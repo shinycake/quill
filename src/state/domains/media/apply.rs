@@ -32,7 +32,7 @@ impl Session {
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetMapThumbnailFile
                 {
-                    self.map_thumbs.answered(pending.id, file.id.0);
+                    self.media.map_thumbs.answered(pending.id, file.id.0);
                 }
                 self.upsert_file(file, true);
             }
@@ -47,18 +47,19 @@ impl Session {
                 // path (recent list + unstick).
                 // The idle file update can precede the list's pause event.
                 // A later authoritative list update restores that transfer.
-                if (is_paused || complete_date != 0) && self.failed_downloads.remove(&file_id) {
-                    self.user_downloads.insert(file_id);
-                    self.downloading.insert(file_id);
+                if (is_paused || complete_date != 0) && self.media.failed_downloads.remove(&file_id)
+                {
+                    self.media.user_downloads.insert(file_id);
+                    self.media.downloading.insert(file_id);
                 }
                 if complete_date != 0 {
                     self.record_completed_user_download(file_id);
                     self.unstick_download(file_id);
-                } else if self.user_downloads.contains(&file_id) {
+                } else if self.media.user_downloads.contains(&file_id) {
                     if is_paused {
-                        self.paused_downloads.insert(file_id);
+                        self.media.paused_downloads.insert(file_id);
                     } else {
-                        self.paused_downloads.remove(&file_id);
+                        self.media.paused_downloads.remove(&file_id);
                     }
                 }
             }

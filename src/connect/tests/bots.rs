@@ -36,13 +36,13 @@ fn resolve_inline_bot_sends_search_public_chat_with_generation() {
         )
         .unwrap();
 
-    let gen1 = driver.session.inline_bot_resolve_seq + 1;
+    let gen1 = driver.session.bots.inline_bot_resolve_seq + 1;
     driver
         .resolve_inline_bot("gif")
         .expect("resolve")
         .expect("request id");
     assert_eq!(
-        driver.session.inline_bot_resolve,
+        driver.session.bots.inline_bot_resolve,
         Some(InlineBotResolve::Resolving {
             username: "gif".into(),
             generation: gen1,
@@ -54,7 +54,7 @@ fn resolve_inline_bot_sends_search_public_chat_with_generation() {
         .expect("request id");
     let gen2 = gen1 + 1;
     assert_eq!(
-        driver.session.inline_bot_resolve,
+        driver.session.bots.inline_bot_resolve,
         Some(InlineBotResolve::Resolving {
             username: "gifs".into(),
             generation: gen2,

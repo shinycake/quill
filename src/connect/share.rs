@@ -21,17 +21,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let query = query.trim();
         if query.is_empty() {
-            self.session.share_search.clear();
+            self.session.messages.share_search.clear();
             return Ok(());
         }
-        if self.session.share_search.query == query {
+        if self.session.messages.share_search.query == query {
             return Ok(());
         }
         let local = self.session.request(RequestPurpose::SearchShareChats, None);
         let server = self
             .session
             .request(RequestPurpose::SearchShareChatsOnServer, None);
-        self.session.share_search.begin(query, local, server);
+        self.session
+            .messages
+            .share_search
+            .begin(query, local, server);
         let result = self
             .sender
             .send_json(&search_chats(local, query, SHARE_SEARCH_LIMIT))
@@ -42,7 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if result.is_err() {
             self.session.requests.take(local);
             self.session.requests.take(server);
-            self.session.share_search.clear();
+            self.session.messages.share_search.clear();
         }
         result
     }

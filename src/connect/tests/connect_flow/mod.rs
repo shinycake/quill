@@ -140,7 +140,7 @@ fn driver_inline_query_first_page_sends_dedupes_and_rolls_back() {
         .inline_query(77, ChatId(1), "@gif cats", "")
         .expect("first page")
         .expect("request id");
-    match &driver.session.inline_query {
+    match &driver.session.bots.inline_query {
         Some(slot) => {
             assert_eq!(slot.chat_id, ChatId(1));
             assert_eq!(slot.bot_user_id, 77);
@@ -172,7 +172,12 @@ fn driver_inline_query_first_page_sends_dedupes_and_rolls_back() {
         Ok(None)
     );
     assert!(matches!(
-        driver.session.inline_query.as_ref().map(|slot| &slot.fetch),
+        driver
+            .session
+            .bots
+            .inline_query
+            .as_ref()
+            .map(|slot| &slot.fetch),
         Some(InlineQueryFetch::Loading)
     ));
     assert_eq!(inline_query_sends().len(), 1);
@@ -182,7 +187,7 @@ fn driver_inline_query_first_page_sends_dedupes_and_rolls_back() {
     let (dir2, mut driver2) = failing_inline_query_driver();
     let failed = driver2.inline_query(77, ChatId(1), "@gif cats", "");
     assert!(matches!(failed, Err(ConnectSendError::Native)));
-    assert!(driver2.session.inline_query.is_none());
+    assert!(driver2.session.bots.inline_query.is_none());
     let _ = std::fs::remove_dir_all(&dir2);
 }
 

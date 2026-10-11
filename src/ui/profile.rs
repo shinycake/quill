@@ -125,9 +125,9 @@ impl QuillApp {
             })
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.profile_edit_error = None;
-            live.driver.session.username_check = None;
-            live.driver.session.username_check_pending = None;
+            live.driver.session.users_state.profile_edit_error = None;
+            live.driver.session.users_state.username_check = None;
+            live.driver.session.users_state.username_check_pending = None;
         }
         self.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(
             window, cx, &first, &last, &bio, &username, accent,
@@ -167,7 +167,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_name(&first, &last) {
             Ok(_) => self.connection.status_note = "Name update requested.".into(),
             Err(err) => self.connection.status_note = format!("set name failed: {err:?}"),
@@ -187,7 +187,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_bio(bio.trim()) {
             Ok(_) => self.connection.status_note = "Bio update requested.".into(),
             Err(err) => self.connection.status_note = format!("set bio failed: {err:?}"),
@@ -214,7 +214,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         if let Err(err) = live.driver.check_username(&username) {
             self.connection.status_note = format!("username check failed: {err:?}");
         }
@@ -237,7 +237,7 @@ impl QuillApp {
             .unwrap_or_default();
         let checked_ok = self
             .session()
-            .and_then(|s| s.username_check.clone())
+            .and_then(|s| s.users_state.username_check.clone())
             .is_some_and(|(text, result)| {
                 text == username && result == UsernameCheckResult::Available
             });
@@ -252,7 +252,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_username(&username) {
             Ok(_) => self.connection.status_note = "Username update requested.".into(),
             Err(err) => self.connection.status_note = format!("set username failed: {err:?}"),
@@ -292,7 +292,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         if let Err(err) = live.driver.reorder_active_usernames(&new_order) {
             self.connection.status_note = format!("reorder failed: {err:?}");
         }
@@ -311,7 +311,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         match live.driver.toggle_username_is_active(username, is_active) {
             Ok(_) => self.connection.status_note = "Username update requested.".into(),
             Err(err) => self.connection.status_note = format!("username toggle failed: {err:?}"),
@@ -339,7 +339,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_profile_photo(&path) {
             Ok(_) => self.connection.status_note = "Photo update requested.".into(),
             Err(err) => self.connection.status_note = format!("set photo failed: {err:?}"),
@@ -371,7 +371,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_profile_accent_color(selected) {
             Ok(_) => self.connection.status_note = "Accent color update requested.".into(),
             Err(err) => self.connection.status_note = format!("set accent color failed: {err:?}"),
@@ -397,7 +397,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        live.driver.session.profile_edit_error = None;
+        live.driver.session.users_state.profile_edit_error = None;
         match live.driver.delete_profile_photo(photo_id) {
             Ok(_) => self.connection.status_note = "Photo removal requested.".into(),
             Err(err) => self.connection.status_note = format!("remove photo failed: {err:?}"),
@@ -430,15 +430,17 @@ impl QuillApp {
         let username_text = dialog.username_text(cx);
         let verdict = self
             .session()
-            .and_then(|s| s.username_check.clone())
+            .and_then(|s| s.users_state.username_check.clone())
             .filter(|(text, _)| *text == username_text)
             .map(|(_, result)| result);
         let checking = verdict.is_none()
             && self
                 .session()
-                .and_then(|s| s.username_check_pending.clone())
+                .and_then(|s| s.users_state.username_check_pending.clone())
                 .is_some_and(|text| text == username_text);
-        let error = self.session().and_then(|s| s.profile_edit_error.clone());
+        let error = self
+            .session()
+            .and_then(|s| s.users_state.profile_edit_error.clone());
         let section_muted = cx.theme().muted_foreground;
         let section = move |title: &'static str| {
             div()

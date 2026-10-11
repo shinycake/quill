@@ -81,7 +81,8 @@ impl Session {
                 self.set_chat_message_sender(chat_id.0, message_sender);
                 self.set_chat_translatable(chat_id.0, is_translatable);
                 if reply_markup_message_id.0 > 0 {
-                    self.reply_keyboards
+                    self.bots
+                        .reply_keyboards
                         .markup_message_ids
                         .insert(chat_id.0, reply_markup_message_id.0);
                 }
@@ -205,11 +206,12 @@ impl Session {
                     .insert(chat_id, available_reactions);
                 // An open reaction picker for this chat refetches.
                 if self
+                    .stickers
                     .message_reaction_options
                     .as_ref()
                     .is_some_and(|options| options.chat_id.0 == chat_id)
                 {
-                    self.reaction_options_stale = true;
+                    self.stickers.reaction_options_stale = true;
                 }
             }
             // Batch 8: `updateChatActionBar` (schema 1.8.67, line 10526).

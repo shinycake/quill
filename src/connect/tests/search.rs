@@ -112,17 +112,17 @@ fn driver_search_happy_empty_error_and_select() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.search.status, SearchStatus::Ready);
-    assert_eq!(driver.session.search.chat_ids, vec![ChatId(7)]);
+    assert_eq!(driver.session.search.search.status, SearchStatus::Ready);
+    assert_eq!(driver.session.search.search.chat_ids, vec![ChatId(7)]);
     driver
         .select_search_message(ChatId(7), MessageId(50), "", None, 0)
         .unwrap();
-    assert_eq!(driver.session.search.status, SearchStatus::Closed);
+    assert_eq!(driver.session.search.search.status, SearchStatus::Closed);
     assert_eq!(driver.session.open_chat, Some(ChatId(7)));
     // The hit opens in context: a window loads around it (highlighted)
     // instead of the lone hit being spliced into the history.
     assert_eq!(
-        driver.session.chat_search.jump,
+        driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Loading {
             message_id: MessageId(50)
         }
@@ -165,8 +165,8 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.status, SearchStatus::Ready);
-    assert!(driver.session.search.recents);
+    assert_eq!(driver.session.search.search.status, SearchStatus::Ready);
+    assert!(driver.session.search.search.recents);
 
     let empty = commit_typed_search(&mut driver, "zzz");
     let SearchFlight::Query(empty_chats, empty_messages, empty_public) = empty else {
@@ -199,7 +199,7 @@ fn driver_search_happy_empty_error_and_select() {
             )
             .unwrap();
     // Phase 7.2: `Empty` only once the public search settles too.
-    assert_eq!(driver.session.search.status, SearchStatus::Searching);
+    assert_eq!(driver.session.search.search.status, SearchStatus::Searching);
     driver
         .ingest(
             copy_and_parse(
@@ -213,7 +213,7 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.status, SearchStatus::Empty);
+    assert_eq!(driver.session.search.search.status, SearchStatus::Empty);
 
     let fail = commit_typed_search(&mut driver, "nope");
     let SearchFlight::Query(fail_chats, fail_messages, fail_public) = fail else {
@@ -246,7 +246,7 @@ fn driver_search_happy_empty_error_and_select() {
         )
         .unwrap();
     // Phase 7.2: the public request still in flight keeps `Searching`.
-    assert_eq!(driver.session.search.status, SearchStatus::Searching);
+    assert_eq!(driver.session.search.search.status, SearchStatus::Searching);
     driver
         .ingest(
             copy_and_parse(
@@ -260,9 +260,9 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.status, SearchStatus::Failed);
+    assert_eq!(driver.session.search.search.status, SearchStatus::Failed);
     driver.close_search();
-    assert_eq!(driver.session.search.status, SearchStatus::Closed);
+    assert_eq!(driver.session.search.search.status, SearchStatus::Closed);
     assert!(!sink.rendered().contains("CANARY_DRV"));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -357,7 +357,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
     assert!(driver.open_chat_search().unwrap());
-    assert!(driver.session.chat_search.open);
+    assert!(driver.session.search.chat_search.open);
 
     let t1 = match driver.set_chat_search_query("h").unwrap() {
         ChatSearchQueryOutcome::Debounced { token } => token,
@@ -418,9 +418,12 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.chat_search.status, SearchStatus::Ready);
     assert_eq!(
-        driver.session.chat_search.jump,
+        driver.session.search.chat_search.status,
+        SearchStatus::Ready
+    );
+    assert_eq!(
+        driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Ready {
             message_id: MessageId(50)
         }
@@ -454,7 +457,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
             )
             .unwrap();
     assert_eq!(
-        driver.session.chat_search.jump,
+        driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Ready {
             message_id: MessageId(40)
         }
@@ -482,7 +485,10 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.chat_search.status, SearchStatus::Empty);
+    assert_eq!(
+        driver.session.search.chat_search.status,
+        SearchStatus::Empty
+    );
 
     // Jumping to 40 replaced the window (50 was newer and not adjacent to
     // the loaded page): it now knows it stops short of the latest message.
@@ -490,7 +496,10 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
     assert!(!history.contains(MessageId(50)));
     assert!(history.has_newer);
     driver.close_chat_search();
-    assert_eq!(driver.session.chat_search.status, SearchStatus::Closed);
+    assert_eq!(
+        driver.session.search.chat_search.status,
+        SearchStatus::Closed
+    );
     assert_eq!(driver.session.open_chat, Some(ChatId(7)));
     assert!(
         driver

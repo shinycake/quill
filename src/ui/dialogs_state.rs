@@ -6,7 +6,7 @@ use gpui_kit::*;
 
 pub(crate) struct DialogUi {
     /// Profile layer opened from a sender avatar (tdesktop's
-    /// `Info::LayerWidget`); presents `session.open_info_panel`.
+    /// `Info::LayerWidget`); presents `session.users_state.open_info_panel`.
     pub(super) profile_modal: Option<super::profile_modal::ProfileModal>,
     /// B10: edit-contact / birthday / personal-channel / share-contact
     /// dialog behind the profile panels.

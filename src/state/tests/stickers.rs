@@ -18,9 +18,9 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.trending.len(), 1);
-    assert_eq!(with_purpose.stickers.trending[0].id, 77);
-    assert!(with_purpose.stickers.trending_is_premium);
+    assert_eq!(with_purpose.stickers.stickers.trending.len(), 1);
+    assert_eq!(with_purpose.stickers.stickers.trending[0].id, 77);
+    assert!(with_purpose.stickers.stickers.trending_is_premium);
 
     // A stray trendingStickerSets (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -31,7 +31,7 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"trendingStickerSets","total_count":1,"is_premium":false,"sets":[]}"#,
     );
-    assert!(without_purpose.stickers.trending.is_empty());
+    assert!(without_purpose.stickers.stickers.trending.is_empty());
 
     // Favorites arrive as the bare `stickers` type under
     // GetFavoriteStickers.
@@ -45,8 +45,8 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.favorites.len(), 1);
-    assert_eq!(with_purpose.stickers.favorites[0].emoji, "😀");
+    assert_eq!(with_purpose.stickers.stickers.favorites.len(), 1);
+    assert_eq!(with_purpose.stickers.stickers.favorites[0].emoji, "😀");
 
     // searchStickerSets answers with `stickerSets` under
     // SearchStickerSets (not the installed-sets slot).
@@ -60,9 +60,9 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.found_sets.len(), 1);
-    assert_eq!(with_purpose.stickers.found_sets[0].id, 78);
-    assert!(with_purpose.stickers.sets.is_empty());
+    assert_eq!(with_purpose.stickers.stickers.found_sets.len(), 1);
+    assert_eq!(with_purpose.stickers.stickers.found_sets[0].id, 78);
+    assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     // A removeFavoriteSticker `ok` clears the favorites cache.
     let extra = with_purpose.request(RequestPurpose::RemoveFavoriteSticker, None);
@@ -72,11 +72,11 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.favorites.is_empty());
+    assert!(with_purpose.stickers.stickers.favorites.is_empty());
 
     // A changeStickerSet `ok` drops the installed-sets cache so the
     // panel refetches the authoritative list.
-    with_purpose.stickers.sets = vec![with_purpose.stickers.trending[0].clone()];
+    with_purpose.stickers.stickers.sets = vec![with_purpose.stickers.stickers.trending[0].clone()];
     let extra = with_purpose.request(RequestPurpose::ChangeStickerSet, None);
     apply_json(
         &mut with_purpose,
@@ -84,7 +84,7 @@ fn s8_sticker_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.sets.is_empty());
+    assert!(with_purpose.stickers.stickers.sets.is_empty());
 }
 
 #[test]
@@ -107,10 +107,10 @@ fn s9_gif_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.gifs.search_results.len(), 1);
-    assert_eq!(with_purpose.gifs.search_results[0].file_id.0, 101);
-    assert_eq!(with_purpose.gifs.search_next_offset, "50");
-    assert!(with_purpose.inline_query.is_none());
+    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 1);
+    assert_eq!(with_purpose.stickers.gifs.search_results[0].file_id.0, 101);
+    assert_eq!(with_purpose.stickers.gifs.search_next_offset, "50");
+    assert!(with_purpose.bots.inline_query.is_none());
 
     // Second page appends new entries (deduped by file id) and
     // refreshes the offset.
@@ -129,9 +129,9 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     );
     // g1 (file 101) was already on page one — deduped; g2 (file 102)
     // appends; the offset advances to "" (exhausted).
-    assert_eq!(with_purpose.gifs.search_results.len(), 2);
-    assert_eq!(with_purpose.gifs.search_results[1].file_id.0, 102);
-    assert_eq!(with_purpose.gifs.search_next_offset, "");
+    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 2);
+    assert_eq!(with_purpose.stickers.gifs.search_results[1].file_id.0, 102);
+    assert_eq!(with_purpose.stickers.gifs.search_next_offset, "");
 
     // A stray inlineQueryResults (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -142,11 +142,11 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"inlineQueryResults","inline_query_id":7,"button":null,"results":[],"next_offset":"9"}"#,
     );
-    assert!(without_purpose.gifs.search_results.is_empty());
+    assert!(without_purpose.stickers.gifs.search_results.is_empty());
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    with_purpose.gifs.animations = with_purpose.gifs.search_results.clone();
+    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -154,10 +154,10 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.gifs.animations.is_empty());
+    assert!(with_purpose.stickers.gifs.animations.is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    with_purpose.gifs.animations = with_purpose.gifs.search_results.clone();
+    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -165,7 +165,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.gifs.animations.is_empty());
+    assert!(with_purpose.stickers.gifs.animations.is_empty());
 
     // updateAnimationSearchParameters stores provider + emojis.
     apply_json(
@@ -174,8 +174,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         r#"{"@type":"updateAnimationSearchParameters","provider":"Tenor","emojis":["😀","🎉"]}"#,
     );
-    assert_eq!(with_purpose.gifs.search_provider, "Tenor");
-    assert_eq!(with_purpose.gifs.provider_emojis, vec!["😀", "🎉"]);
+    assert_eq!(with_purpose.stickers.gifs.search_provider, "Tenor");
+    assert_eq!(with_purpose.stickers.gifs.provider_emojis, vec!["😀", "🎉"]);
 }
 
 #[test]
@@ -219,7 +219,8 @@ fn message_emoji_packs_are_distinct_and_skip_unresolved_emoji() {
         thumb_height: 0,
         requires_premium: false,
     };
-    session.emoji.custom_emoji_stickers = vec![sticker(1, 70), sticker(2, 70), sticker(3, 71)];
+    session.stickers.emoji.custom_emoji_stickers =
+        vec![sticker(1, 70), sticker(2, 70), sticker(3, 71)];
     let entity = |id: i64, at: usize| TextEntity {
         utf8_start: at,
         utf8_end: at + 1,

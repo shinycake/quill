@@ -91,7 +91,7 @@ impl QuillApp {
                     let _ = live.driver.fetch_sticker_menu_facts();
                 }
                 Some(quill::telegram::envelope::MessageContent::Animation(_))
-                    if !live.driver.session.gifs.loaded =>
+                    if !live.driver.session.stickers.gifs.loaded =>
                 {
                     let _ = live.driver.show_saved_gifs();
                 }
@@ -140,7 +140,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let Some(choice) = session.default_reaction.clone() else {
+        let Some(choice) = session.stickers.default_reaction.clone() else {
             return;
         };
         let can_react = session
@@ -161,10 +161,10 @@ impl QuillApp {
         const FALLBACK: [&str; 8] = ["👍", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🎉"];
         let session = self.session();
         let active: Vec<String> = session
-            .map(|s| s.active_reactions.clone())
+            .map(|s| s.stickers.active_reactions.clone())
             .filter(|list| !list.is_empty())
             .unwrap_or_else(|| FALLBACK.iter().map(|e| e.to_string()).collect());
-        let current = session.and_then(|s| s.default_reaction.clone());
+        let current = session.and_then(|s| s.stickers.default_reaction.clone());
         let muted = cx.theme().muted_foreground;
         let mut strip = div().flex().flex_wrap().gap_1().px_2();
         for (ix, emoji) in active.into_iter().take(24).enumerate() {
@@ -256,7 +256,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.set_default_reaction(&choice);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.default_reaction = Some(choice);
+            session.stickers.default_reaction = Some(choice);
         }
         cx.notify();
     }
@@ -351,6 +351,7 @@ impl QuillApp {
     pub(super) fn custom_emoji_still(&self, id: i64) -> Option<std::path::PathBuf> {
         let item = self
             .session()?
+            .stickers
             .emoji
             .custom_emoji_stickers
             .iter()
@@ -377,7 +378,8 @@ impl QuillApp {
                     let fallback = self
                         .session()
                         .and_then(|s| {
-                            s.emoji
+                            s.stickers
+                                .emoji
                                 .custom_emoji_stickers
                                 .iter()
                                 .find(|item| item.custom_emoji_id == Some(*id))
@@ -446,7 +448,7 @@ impl QuillApp {
     ) -> AnyElement {
         let session = self.session();
         let options = session
-            .and_then(|s| s.message_reaction_options.as_ref())
+            .and_then(|s| s.stickers.message_reaction_options.as_ref())
             .filter(|o| o.chat_id == chat_id && o.message_id == message_id);
         let Some(options) = options else {
             // Options are on their way: keep the strip's height steady.
@@ -506,7 +508,7 @@ impl QuillApp {
                             // reaction, custom packs); otherwise the grid.
                             let custom = this
                                 .session()
-                                .and_then(|s| s.message_reaction_options.as_ref())
+                                .and_then(|s| s.stickers.message_reaction_options.as_ref())
                                 .is_some_and(|o| o.allow_custom_emoji);
                             let position = this.message_ui.menu.map(|menu| menu.position);
                             match position {

@@ -26,31 +26,31 @@ impl Session {
             }
             _ => {}
         }
-        if self.search.matches_generation(pending) {
+        if self.search.search.matches_generation(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
-                    self.search.accept_chats(Vec::new(), true);
+                    self.search.search.accept_chats(Vec::new(), true);
                 }
                 Some(
                     RequestPurpose::SearchMessages
                     | RequestPurpose::SearchPublicPosts
                     | RequestPurpose::SearchPublicMessagesByTag,
                 ) => {
-                    self.search.accept_messages(Vec::new(), true);
+                    self.search.search.accept_messages(Vec::new(), true);
                 }
                 // The supplement failing changes nothing the user sees.
                 Some(RequestPurpose::SearchChatsOnServer) => {}
                 Some(RequestPurpose::SearchPublicChats) => {
-                    self.search.accept_public_chats(Vec::new(), true);
+                    self.search.search.accept_public_chats(Vec::new(), true);
                 }
                 _ => {}
             }
         }
-        if self.chat_search.matches_generation(pending)
+        if self.search.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
         {
-            self.chat_search.loading_more = false;
-            self.chat_search.next_from_message_id = MessageId(0);
+            self.search.chat_search.loading_more = false;
+            self.search.chat_search.next_from_message_id = MessageId(0);
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetChatMessageByDate) => self.fail_date_jump(err.code == 404),
@@ -58,16 +58,17 @@ impl Session {
                 self.fail_message_calendar(pending)
             }
             Some(RequestPurpose::SearchFromMembers) => {
-                if let Some(picker) = self.chat_search.from_picker.as_mut() {
+                if let Some(picker) = self.search.chat_search.from_picker.as_mut() {
                     picker.request = None;
                 }
             }
             _ => {}
         }
-        if self.chat_search.matches_generation(pending)
+        if self.search.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
-            self.chat_search
+            self.search
+                .chat_search
                 .accept_hits(Vec::new(), 0, MessageId(0), true);
         }
     }

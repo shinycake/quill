@@ -196,7 +196,8 @@ impl QuillApp {
             },
             ScheduleTarget::Share | ScheduleTarget::RescheduleSelected => None,
             ScheduleTarget::Reschedule(id) => self.session().and_then(|s| {
-                s.scheduled_messages
+                s.messages
+                    .scheduled_messages
                     .iter()
                     .find(|m| m.id == id)
                     .and_then(|m| match m.scheduling_state {
@@ -478,7 +479,7 @@ impl QuillApp {
         let mut selected = self.composer_ui.scheduled_selected.clone();
         let existing: Vec<MessageId> = self
             .session()
-            .map(|s| s.scheduled_messages.iter().map(|m| m.id).collect())
+            .map(|s| s.messages.scheduled_messages.iter().map(|m| m.id).collect())
             .unwrap_or_default();
         quill::selection_pin::prune_selected(&mut selected, &existing);
         selected
@@ -612,7 +613,7 @@ impl QuillApp {
         let kind = self.schedule_kind();
         let messages: Vec<ParsedMessage> = self
             .session()
-            .map(|session| session.scheduled_messages.clone())
+            .map(|session| session.messages.scheduled_messages.clone())
             .unwrap_or_default();
         let selected = self.selected_scheduled();
         let bar = (!selected.is_empty()).then(|| self.scheduled_selection_bar(selected.len(), cx));

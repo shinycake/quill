@@ -306,10 +306,12 @@ impl QuillApp {
         let chat_id = session.open_chat?;
         let ad = session.open_sponsored_tail().cloned();
         let report = session
+            .messages
             .sponsored_report
             .clone()
             .filter(|flight| flight.chat_id == chat_id);
         let outcome = session
+            .messages
             .last_sponsored_report
             .clone()
             .filter(|outcome| outcome.chat_id == chat_id);
@@ -317,9 +319,9 @@ impl QuillApp {
             return None;
         }
         let look = self.bubble_look(cx);
-        let files: HashMap<i32, ParsedFile> = session.files.clone();
-        let downloading = session.downloading.clone();
-        let failed = session.failed_downloads.clone();
+        let files: HashMap<i32, ParsedFile> = session.media.files.clone();
+        let downloading = session.media.downloading.clone();
+        let failed = session.media.failed_downloads.clone();
         let media_roots = self.media_display_roots();
         let mut list = div()
             .id("sponsored-footer")
@@ -564,7 +566,10 @@ impl QuillApp {
     /// Live: the driver sends the follow-up request. Demo: resolve with
     /// `reportSponsoredResultOk` through the same reducer.
     pub(super) fn pick_sponsored_report_option(&mut self, option_id: &str, cx: &mut Context<Self>) {
-        let Some(flight) = self.session().and_then(|s| s.sponsored_report.clone()) else {
+        let Some(flight) = self
+            .session()
+            .and_then(|s| s.messages.sponsored_report.clone())
+        else {
             return;
         };
         if let Some(live) = self.live.as_mut() {

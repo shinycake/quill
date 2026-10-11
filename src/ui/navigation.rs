@@ -133,10 +133,10 @@ impl QuillApp {
             }
             NavigationAction::Downloads => {
                 if let Some(live) = self.live.as_mut() {
-                    let open = &mut live.driver.session.downloads_panel_open;
+                    let open = &mut live.driver.session.media.downloads_panel_open;
                     *open = !*open;
                 } else if let Some(session) = self.demo_session.as_mut() {
-                    session.downloads_panel_open = !session.downloads_panel_open;
+                    session.media.downloads_panel_open = !session.media.downloads_panel_open;
                 }
                 cx.notify();
             }

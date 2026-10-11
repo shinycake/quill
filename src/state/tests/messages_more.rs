@@ -62,7 +62,7 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
             .all(|c| c.supported())
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
-    session.in_flight_forward = Some(ForwardFlight {
+    session.messages.in_flight_forward = Some(ForwardFlight {
         extra,
         dest_chat_id: ChatId(12),
         from_chat_id: ChatId(11),
@@ -77,7 +77,11 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
             extra.0
         ),
     );
-    let result = session.last_forward.as_ref().expect("forward result");
+    let result = session
+        .messages
+        .last_forward
+        .as_ref()
+        .expect("forward result");
     assert_eq!(result.dest_chat_id, ChatId(12));
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![MessageId(80)]);
@@ -428,7 +432,7 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.pending_force_reply,
+        session.bots.pending_force_reply,
         Some(ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
@@ -442,7 +446,7 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":true,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.pending_force_reply,
+        session.bots.pending_force_reply,
         Some(ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
@@ -456,7 +460,7 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":308,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"z","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.pending_force_reply,
+        session.bots.pending_force_reply,
         Some(ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
@@ -603,8 +607,14 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
     use crate::telegram::envelope::MessageSchedulingState;
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.scheduled_messages.push(scheduled_entry(70, 1000));
-    session.scheduled_messages.push(scheduled_entry(71, 2000));
+    session
+        .messages
+        .scheduled_messages
+        .push(scheduled_entry(70, 1000));
+    session
+        .messages
+        .scheduled_messages
+        .push(scheduled_entry(71, 2000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
             message_id: MessageId(70),
@@ -619,11 +629,11 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert_eq!(
-        session.scheduled_messages[0].scheduling_state,
+        session.messages.scheduled_messages[0].scheduling_state,
         Some(MessageSchedulingState::SendAtDate { send_date: 5000 })
     );
     assert_eq!(
-        session.scheduled_messages[1].scheduling_state,
+        session.messages.scheduled_messages[1].scheduling_state,
         Some(MessageSchedulingState::SendAtDate { send_date: 2000 })
     );
 }
@@ -633,8 +643,14 @@ fn send_now_ok_drops_the_scheduled_entry() {
     use crate::composer::ComposerScheduling;
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.scheduled_messages.push(scheduled_entry(70, 1000));
-    session.scheduled_messages.push(scheduled_entry(71, 2000));
+    session
+        .messages
+        .scheduled_messages
+        .push(scheduled_entry(70, 1000));
+    session
+        .messages
+        .scheduled_messages
+        .push(scheduled_entry(71, 2000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
             message_id: MessageId(70),
@@ -648,7 +664,12 @@ fn send_now_ok_drops_the_scheduled_entry() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    let ids: Vec<i64> = session.scheduled_messages.iter().map(|m| m.id.0).collect();
+    let ids: Vec<i64> = session
+        .messages
+        .scheduled_messages
+        .iter()
+        .map(|m| m.id.0)
+        .collect();
     assert_eq!(ids, vec![71]);
 }
 
@@ -657,7 +678,10 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
     use crate::composer::ComposerScheduling;
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.scheduled_messages.push(scheduled_entry(70, 1000));
+    session
+        .messages
+        .scheduled_messages
+        .push(scheduled_entry(70, 1000));
     let extra = session.request(
         RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
             message_id: MessageId(70),
@@ -674,8 +698,8 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
             extra.0
         ),
     );
-    assert_eq!(session.scheduled_messages.len(), 1);
-    let err = session.resend_error.expect("error surfaced");
+    assert_eq!(session.messages.scheduled_messages.len(), 1);
+    let err = session.messages.resend_error.expect("error surfaced");
     assert!(err.contains("Could not send the message now"), "{err}");
 }
 

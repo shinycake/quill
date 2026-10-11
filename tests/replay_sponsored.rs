@@ -9,7 +9,7 @@ fn replay_sponsored_messages_fetch_and_labels() {
     let seq = AtomicU64::new(0);
     let session = sponsored_test_session(&sink, &seq);
 
-    let entry = session.sponsored.get(&13).unwrap();
+    let entry = session.messages.sponsored.get(&13).unwrap();
     assert_eq!(entry.messages_between, 3);
     assert_eq!(entry.messages.len(), 2);
     assert_eq!(entry.messages[0].kind_label(), "Sponsored");
@@ -42,7 +42,7 @@ fn replay_sponsored_report_option_required_then_ok() {
 
     // The Recommended row is not reportable.
     assert!(session.begin_sponsored_report(chat_id, 9002).is_none());
-    assert!(session.sponsored_report.is_none());
+    assert!(session.messages.sponsored_report.is_none());
 
     assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
     let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
@@ -55,7 +55,7 @@ fn replay_sponsored_report_option_required_then_ok() {
             extra.0
         )],
     );
-    let flight = session.sponsored_report.clone().unwrap();
+    let flight = session.messages.sponsored_report.clone().unwrap();
     assert_eq!(flight.chat_id, chat_id);
     assert_eq!(flight.message_id, 9001);
     assert_eq!(flight.title, "Why report?");
@@ -75,8 +75,8 @@ fn replay_sponsored_report_option_required_then_ok() {
             extra.0
         )],
     );
-    assert!(session.sponsored_report.is_none());
-    let outcome = session.last_sponsored_report.clone().unwrap();
+    assert!(session.messages.sponsored_report.is_none());
+    let outcome = session.messages.last_sponsored_report.clone().unwrap();
     assert_eq!(outcome.chat_id, chat_id);
     assert_eq!(outcome.message_id, 9001);
     assert_eq!(outcome.user_message(), "Report sent");
@@ -100,8 +100,8 @@ fn replay_sponsored_report_failed() {
             extra.0
         )],
     );
-    assert!(session.sponsored_report.is_none());
-    let outcome = session.last_sponsored_report.clone().unwrap();
+    assert!(session.messages.sponsored_report.is_none());
+    let outcome = session.messages.last_sponsored_report.clone().unwrap();
     assert_eq!(outcome.user_message(), "Could not report this message");
 }
 
@@ -130,7 +130,7 @@ fn replay_sponsored_report_ads_hidden_and_premium_required() {
             &seq,
             &[&format!(r#"{{"@type":"{}","@extra":"{}"}}"#, ctor, extra.0)],
         );
-        let outcome = session.last_sponsored_report.clone().unwrap();
+        let outcome = session.messages.last_sponsored_report.clone().unwrap();
         assert_eq!(outcome.user_message(), message);
     }
 }

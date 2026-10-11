@@ -97,16 +97,16 @@ fn library_sets_load_lazily_with_a_cap_and_failures_are_not_retried() {
         first.0,
         sticker_json(100, 1, 900)
     ));
-    let loaded = &h.driver.session.media_library.set_stickers[&1];
+    let loaded = &h.driver.session.media.media_library.set_stickers[&1];
     assert_eq!(loaded.len(), 1);
-    assert!(h.driver.session.files.contains_key(&900));
+    assert!(h.driver.session.media.files.contains_key(&900));
 
     let second = Harness::extra_of(&requests[1]);
     h.ingest(&format!(
         r#"{{"@type":"error","@extra":"{}","code":400,"message":"STICKERSET_INVALID"}}"#,
         second.0
     ));
-    assert!(h.driver.session.media_library.failed.contains(&2));
+    assert!(h.driver.session.media.media_library.failed.contains(&2));
     // Two slots freed: sets 5 and 6 go out; 1 (loaded) and 2 (failed) don't.
     h.driver.ensure_library_sets(&wanted).unwrap();
     let ids: Vec<String> = h
@@ -141,7 +141,13 @@ fn message_reaction_options_parse_and_custom_emoji_reactions_toggle() {
         r#"{{"@type":"availableReactions","@extra":"{}","top_reactions":[{{"@type":"availableReaction","type":{{"@type":"reactionTypeEmoji","emoji":"👍"}},"needs_premium":false}},{{"@type":"availableReaction","type":{{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"77"}},"needs_premium":true}}],"recent_reactions":[{{"@type":"availableReaction","type":{{"@type":"reactionTypeEmoji","emoji":"👍"}},"needs_premium":false}}],"popular_reactions":[{{"@type":"availableReaction","type":{{"@type":"reactionTypeEmoji","emoji":"🔥"}},"needs_premium":false}}],"allow_custom_emoji":true,"are_tags":false,"unavailability_reason":null}}"#,
         extra.0
     ));
-    let options = h.driver.session.message_reaction_options.clone().unwrap();
+    let options = h
+        .driver
+        .session
+        .stickers
+        .message_reaction_options
+        .clone()
+        .unwrap();
     assert_eq!(options.message_id, MessageId(50));
     assert!(options.allow_custom_emoji);
     assert_eq!(
@@ -212,7 +218,7 @@ fn custom_emoji_packs_survive_the_installed_sets_update() {
         r#"{{"@type":"stickerSets","@extra":"{}","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"7","title":"Retro Font","name":"retro","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":false,"sticker_type":{{"@type":"stickerTypeCustomEmoji"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":60,"covers":[]}}]}}"#,
         latest.0
     ));
-    let sets = &h.driver.session.emoji.installed_sets;
+    let sets = &h.driver.session.stickers.emoji.installed_sets;
     assert_eq!(sets.len(), 1);
     assert_eq!(sets[0].title, "Retro Font");
 }

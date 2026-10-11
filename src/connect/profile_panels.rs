@@ -30,7 +30,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if matches!(
-            self.session.profile_chat_lists.get(&(kind, id)),
+            self.session.users_state.profile_chat_lists.get(&(kind, id)),
             Some(ProfileChatsFetch::Loading | ProfileChatsFetch::Loaded(_))
         ) {
             return Ok(None);
@@ -52,12 +52,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             ProfileChatsKind::SuitableDiscussionChats => get_suitable_discussion_chats(extra),
         };
         self.session
+            .users_state
             .profile_chat_lists
             .insert((kind, id), ProfileChatsFetch::Loading);
         match self.send_json_request(extra, &json) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
-                self.session.profile_chat_lists.remove(&(kind, id));
+                self.session
+                    .users_state
+                    .profile_chat_lists
+                    .remove(&(kind, id));
                 Err(err)
             }
         }
@@ -86,6 +90,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// leave channels.
     pub fn fetch_suitable_personal_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         self.session
+            .users_state
             .profile_chat_lists
             .remove(&(ProfileChatsKind::SuitablePersonalChats, 0));
         self.fetch_profile_chats(ProfileChatsKind::SuitablePersonalChats, 0)
@@ -101,7 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if matches!(
-            self.session.user_profile_photos.get(&user_id),
+            self.session.users_state.user_profile_photos.get(&user_id),
             Some(ProfilePhotosFetch::Loading | ProfilePhotosFetch::Loaded { .. })
         ) {
             return Ok(None);
@@ -110,13 +115,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request_for_user(RequestPurpose::GetUserProfilePhotos, user_id);
         self.session
+            .users_state
             .user_profile_photos
             .insert(user_id, ProfilePhotosFetch::Loading);
         let json = get_user_profile_photos(extra, user_id, 0, PROFILE_PHOTOS_LIMIT);
         match self.send_json_request(extra, &json) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
-                self.session.user_profile_photos.remove(&user_id);
+                self.session
+                    .users_state
+                    .user_profile_photos
+                    .remove(&user_id);
                 Err(err)
             }
         }

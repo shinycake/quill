@@ -67,7 +67,7 @@ fn gifts_page_applies_and_registers_sticker_files() {
     );
     assert_eq!(session.payments.hub.gifts.len(), 1);
     assert!(session.payments.hub.gifts_loaded && !session.payments.hub.gifts_loading);
-    assert!(session.files.contains_key(&88));
+    assert!(session.media.files.contains_key(&88));
 }
 
 #[test]

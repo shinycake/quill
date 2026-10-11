@@ -4,22 +4,22 @@ use super::*;
 impl Session {
     /// Resolve a hit: already loaded, tombstoned/deleted, or needs `getChatHistory` around.
     pub fn begin_chat_search_jump(&mut self, message_id: MessageId) -> ChatSearchJumpNeed {
-        self.chat_search.jump_serial += 1;
-        let Some(chat_id) = self.chat_search.chat_id.or(self.open_chat) else {
-            self.chat_search.jump = ChatSearchJump::Missing { message_id };
+        self.search.chat_search.jump_serial += 1;
+        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat) else {
+            self.search.chat_search.jump = ChatSearchJump::Missing { message_id };
             return ChatSearchJumpNeed::Missing;
         };
-        self.chat_search.select_message(message_id);
+        self.search.chat_search.select_message(message_id);
         let history = self.histories.entry(chat_id.0).or_default();
         if history.is_tombstone(message_id) {
-            self.chat_search.jump = ChatSearchJump::Missing { message_id };
+            self.search.chat_search.jump = ChatSearchJump::Missing { message_id };
             return ChatSearchJumpNeed::Missing;
         }
         if history.contains(message_id) {
-            self.chat_search.jump = ChatSearchJump::Ready { message_id };
+            self.search.chat_search.jump = ChatSearchJump::Ready { message_id };
             return ChatSearchJumpNeed::AlreadyReady;
         }
-        self.chat_search.jump = ChatSearchJump::Loading { message_id };
+        self.search.chat_search.jump = ChatSearchJump::Loading { message_id };
         ChatSearchJumpNeed::LoadAround
     }
 
@@ -27,15 +27,15 @@ impl Session {
         let Some(chat_id) = self.open_chat else {
             return;
         };
-        if !self.chat_search.open {
-            self.chat_search.open_for(chat_id);
+        if !self.search.chat_search.open {
+            self.search.chat_search.open_for(chat_id);
         }
         let trimmed = query.trim();
         if trimmed.is_empty() {
-            self.chat_search.clear_query();
+            self.search.chat_search.clear_query();
             return;
         }
-        let _ = self.chat_search.begin_query(trimmed);
+        let _ = self.search.chat_search.begin_query(trimmed);
         let needle = trimmed.to_lowercase();
         let hits: Vec<SearchMessageHit> = self
             .histories
@@ -69,9 +69,15 @@ impl Session {
             })
             .unwrap_or_default();
         let total = hits.len() as i32;
-        self.chat_search
+        self.search
+            .chat_search
             .accept_hits(hits, total, MessageId(0), false);
-        if let Some(id) = self.chat_search.selected_hit().map(|hit| hit.message_id) {
+        if let Some(id) = self
+            .search
+            .chat_search
+            .selected_hit()
+            .map(|hit| hit.message_id)
+        {
             let _ = self.begin_chat_search_jump(id);
         }
     }
@@ -87,13 +93,14 @@ impl Session {
     pub fn promote_search_message(&mut self, chat_id: ChatId, message_id: MessageId) {
         let Some(index) = self
             .search
+            .search
             .messages
             .iter()
             .position(|hit| hit.chat_id == chat_id && hit.message_id == message_id)
         else {
             return;
         };
-        let hit = self.search.messages[index].clone();
+        let hit = self.search.search.messages[index].clone();
         let row = hit.into_history();
         self.index_poll(&row);
         self.histories.entry(chat_id.0).or_default().upsert(row);
@@ -110,23 +117,23 @@ impl Session {
     }
 
     pub fn apply_local_search_filter(&mut self, query: &str) {
-        self.search.open = true;
-        self.search.query = query.to_string();
-        self.search.generation = self.search.generation.saturating_add(1);
-        self.search.clear_results();
-        self.search.recents = query.trim().is_empty();
-        self.search.chat_ids = self
+        self.search.search.open = true;
+        self.search.search.query = query.to_string();
+        self.search.search.generation = self.search.search.generation.saturating_add(1);
+        self.search.search.clear_results();
+        self.search.search.recents = query.trim().is_empty();
+        self.search.search.chat_ids = self
             .local_search_chats(query)
             .into_iter()
             .map(|chat| chat.id)
             .collect();
-        self.search.chats_done = true;
-        self.search.messages_done = true;
+        self.search.search.chats_done = true;
+        self.search.search.messages_done = true;
         if query.trim().is_empty() {
-            self.search.chat_ids.clear();
-            self.search.status = SearchStatus::Idle;
+            self.search.search.chat_ids.clear();
+            self.search.search.status = SearchStatus::Idle;
         } else {
-            self.search.finish_if_complete();
+            self.search.search.finish_if_complete();
         }
     }
 

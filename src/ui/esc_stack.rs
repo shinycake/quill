@@ -37,13 +37,15 @@ macro_rules! layer {
 pub(super) static ESC_LAYERS: &[EscLayer] = &[
     layer!(
         "instant-view",
-        |app| app
-            .live
-            .as_ref()
-            .is_some_and(|live| live.driver.session.instant_view.is_some()),
+        |app| app.live.as_ref().is_some_and(|live| live
+            .driver
+            .session
+            .messages
+            .instant_view
+            .is_some()),
         |app, _, cx| {
             if let Some(live) = app.live.as_mut() {
-                live.driver.session.instant_view = None;
+                live.driver.session.messages.instant_view = None;
             }
             cx.notify();
         }
@@ -237,7 +239,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "sponsored-report",
         |app| app
             .session()
-            .is_some_and(|session| session.sponsored_report.is_some()),
+            .is_some_and(|session| session.messages.sponsored_report.is_some()),
         |app, _, cx| app.dismiss_sponsored_report_ui(cx)
     ),
     layer!(
@@ -276,7 +278,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "shared-media",
         |app| app
             .session()
-            .is_some_and(|session| session.shared_media.open),
+            .is_some_and(|session| session.media.shared_media.open),
         |app, _, cx| app.close_shared_media_ui(cx)
     ),
     layer!(
@@ -334,12 +336,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "downloads-panel",
         |app| app
             .session()
-            .is_some_and(|session| session.downloads_panel_open),
+            .is_some_and(|session| session.media.downloads_panel_open),
         |app, _, cx| {
             if let Some(live) = app.live.as_mut() {
-                live.driver.session.downloads_panel_open = false;
+                live.driver.session.media.downloads_panel_open = false;
             } else if let Some(session) = app.demo_session.as_mut() {
-                session.downloads_panel_open = false;
+                session.media.downloads_panel_open = false;
             }
             cx.notify();
         }
@@ -349,7 +351,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| !app.profile_modal_active()
             && app
                 .session()
-                .is_some_and(|session| session.open_info_panel.is_some()),
+                .is_some_and(|session| session.users_state.open_info_panel.is_some()),
         |app, _, cx| app.close_info_panel(cx)
     ),
 ];
@@ -483,7 +485,7 @@ mod dispatch_tests {
             }),
             ("downloads-panel", |app, _, _| {
                 if let Some(session) = app.demo_session.as_mut() {
-                    session.downloads_panel_open = true;
+                    session.media.downloads_panel_open = true;
                 }
             }),
         ]

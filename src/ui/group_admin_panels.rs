@@ -50,7 +50,7 @@ impl QuillApp {
                     cx.notify();
                 })),
         );
-        if session.stickers.failed || session.emoji.failed {
+        if session.stickers.stickers.failed || session.stickers.emoji.failed {
             section = section.child(
                 div()
                     .text_sm()
@@ -62,13 +62,13 @@ impl QuillApp {
                 false,
                 "Group stickers",
                 info.map_or(0, |i| i.sticker_set_id),
-                &session.stickers.sets,
+                &session.stickers.stickers.sets,
             ),
             (
                 true,
                 "Group emoji",
                 info.map_or(0, |i| i.custom_emoji_sticker_set_id),
-                &session.emoji.installed_sets,
+                &session.stickers.emoji.installed_sets,
             ),
         ] {
             let current_label = if current == 0 {

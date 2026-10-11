@@ -124,7 +124,7 @@ fn rate_limited_history_page_is_retried_after_the_wait() {
     // stays closed and no duplicate goes out meanwhile.
     assert!(h.driver.session.requests.get(extra).is_some());
     assert!(!h.driver.session.history_load_failed(ChatId(7)));
-    assert!(h.driver.session.flood_notice.is_none());
+    assert!(h.driver.session.messages.flood_notice.is_none());
     assert!(h.driver.fetch_history().unwrap().is_none());
     assert_eq!(h.sends_of(extra), 1);
 
@@ -177,7 +177,7 @@ fn user_actions_are_not_retried_and_show_the_flood_notice() {
         .request(RequestPurpose::SendMessage, Some(ChatId(7)));
     h.flood(extra, "Too Many Requests: retry after 12");
     assert_eq!(
-        h.driver.session.flood_notice.take().as_deref(),
+        h.driver.session.messages.flood_notice.take().as_deref(),
         Some("Too many attempts. Try again in 12 seconds.")
     );
     h.driver
@@ -198,7 +198,7 @@ fn background_lookups_stay_quiet_when_flood_persists() {
         .session
         .request(RequestPurpose::GetUserFullInfo, None);
     h.flood(extra, "FLOOD_WAIT_900");
-    assert!(h.driver.session.flood_notice.is_none());
+    assert!(h.driver.session.messages.flood_notice.is_none());
 }
 
 #[test]
@@ -208,7 +208,7 @@ fn failed_send_with_flood_keeps_the_retry_affordance() {
         r#"{"@type":"updateMessageSendFailed","old_message_id":-1,"error":{"code":429,"message":"Too Many Requests: retry after 9"},"message":{"@type":"message","id":5,"chat_id":7,"is_outgoing":true,"date":1700000000,"sending_state":{"@type":"messageSendingStateFailed","error":{"code":429,"message":"Too Many Requests: retry after 9"},"can_retry":true,"need_another_sender":false,"retry_after":9},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
     );
     assert_eq!(
-        h.driver.session.flood_notice.take().as_deref(),
+        h.driver.session.messages.flood_notice.take().as_deref(),
         Some("Too many attempts. Try again in 9 seconds.")
     );
     let row = h

@@ -207,7 +207,7 @@ impl QuillApp {
             );
         let contacts = self
             .session()
-            .and_then(|s| s.contacts.clone())
+            .and_then(|s| s.users_state.contacts.clone())
             .unwrap_or_default();
         let mut rows = div()
             .id("group-call-invite-rows")

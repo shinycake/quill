@@ -23,7 +23,7 @@ impl Session {
                 | RequestPurpose::GetDefaultEmojiStatuses
                 | RequestPurpose::GetCustomEmojiStickers,
             ) => {
-                self.emoji.status_note = Some(call_request_error_line(
+                self.stickers.emoji.status_note = Some(call_request_error_line(
                     err,
                     "Could not update emoji statuses. Retry the action",
                 ));
@@ -33,12 +33,12 @@ impl Session {
         // Slice G2: `boostChat` failed — the status is refetched on
         // success only, so nothing to roll back.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
-            self.stickers.loading_sets = false;
-            self.stickers.failed = true;
+            self.stickers.stickers.loading_sets = false;
+            self.stickers.stickers.failed = true;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
-            self.stickers.loading_set = false;
-            self.stickers.failed = true;
+            self.stickers.stickers.loading_set = false;
+            self.stickers.stickers.failed = true;
         }
         if let Some(RequestPurpose::Stickers(StickersPurpose::LoadLibrarySet { set_id })) =
             pending.map(|p| p.purpose)
@@ -52,23 +52,23 @@ impl Session {
             self.finish_sticker_batch_item(set_id, false);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {
-            self.emoji.mutation_failed = true;
-            self.emoji.mutating_set = None;
+            self.stickers.emoji.mutation_failed = true;
+            self.stickers.emoji.mutating_set = None;
         }
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
-            self.emoji.pending_status_emoji = None;
+            self.stickers.emoji.pending_status_emoji = None;
         }
         if emoji_purpose == Some(RequestPurpose::GetEmojiSet)
             || emoji_purpose == Some(RequestPurpose::ChangeEmojiSet)
             || (emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets)
-                && self.emoji.tab == crate::emoji::EmojiSetTab::Installed)
+                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Installed)
             || (emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets)
-                && self.emoji.tab == crate::emoji::EmojiSetTab::Trending)
+                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Trending)
             || (emoji_purpose == Some(RequestPurpose::SearchEmojiSets)
-                && self.emoji.tab == crate::emoji::EmojiSetTab::Search)
+                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Search)
         {
-            self.emoji.failed = true;
+            self.stickers.emoji.failed = true;
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -86,7 +86,7 @@ impl Session {
                     | RequestPurpose::RemoveFavoriteSticker
             )
         ) {
-            self.stickers.failed = true;
+            self.stickers.stickers.failed = true;
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -95,20 +95,20 @@ impl Session {
                     | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
             )
         ) {
-            self.gifs.search_failed = true;
-            self.gifs.search_loading = false;
+            self.stickers.gifs.search_failed = true;
+            self.stickers.gifs.search_loading = false;
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.gifs.failed = true;
+            self.stickers.gifs.failed = true;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.gifs.loading = false;
-            self.gifs.loaded = true;
-            self.gifs.failed = true;
-            self.gifs.stale = false;
+            self.stickers.gifs.loading = false;
+            self.stickers.gifs.loaded = true;
+            self.stickers.gifs.failed = true;
+            self.stickers.gifs.stale = false;
         }
     }
 }

@@ -25,7 +25,7 @@ impl Session {
     /// A `chats` answer to one of our profile list fetches.
     pub(crate) fn apply_profile_chats(&mut self, chat_ids: &[ChatId], pending: &PendingRequest) {
         if let Some(key) = Self::profile_chats_key(pending) {
-            self.profile_chat_lists.insert(
+            self.users_state.profile_chat_lists.insert(
                 key,
                 ProfileChatsFetch::Loaded(chat_ids.iter().map(|id| id.0).collect()),
             );
@@ -36,12 +36,14 @@ impl Session {
     /// show a Retry row instead of spinning forever.
     pub(crate) fn fail_profile_fetch(&mut self, pending: &PendingRequest, reason: String) {
         if let Some(key) = Self::profile_chats_key(pending) {
-            self.profile_chat_lists
+            self.users_state
+                .profile_chat_lists
                 .insert(key, ProfileChatsFetch::Failed(reason));
         } else if pending.purpose == RequestPurpose::GetUserProfilePhotos
             && let Some(user_id) = pending.user_id
         {
-            self.user_profile_photos
+            self.users_state
+                .user_profile_photos
                 .insert(user_id, ProfilePhotosFetch::Failed(reason));
         }
     }
@@ -70,7 +72,7 @@ impl Session {
                 self.upsert_file(file, false);
             }
         }
-        self.user_profile_photos.insert(
+        self.users_state.user_profile_photos.insert(
             user_id,
             ProfilePhotosFetch::Loaded {
                 total_count,
@@ -85,7 +87,7 @@ impl Session {
     /// in the loaded list moves to the front instead of repeating.
     pub fn profile_gallery(&self, user_id: i64) -> Option<(Vec<ProfilePhoto>, Option<i64>)> {
         let Some(ProfilePhotosFetch::Loaded { photos, .. }) =
-            self.user_profile_photos.get(&user_id)
+            self.users_state.user_profile_photos.get(&user_id)
         else {
             return None;
         };
@@ -97,7 +99,7 @@ impl Session {
 
     /// The chat ids of a loaded profile list; empty while loading.
     pub fn profile_chat_list(&self, kind: ProfileChatsKind, id: i64) -> &[i64] {
-        match self.profile_chat_lists.get(&(kind, id)) {
+        match self.users_state.profile_chat_lists.get(&(kind, id)) {
             Some(ProfileChatsFetch::Loaded(ids)) => ids,
             _ => &[],
         }

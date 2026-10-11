@@ -58,13 +58,14 @@ fn sponsored_tail_hides_after_report_and_hide() {
     assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(false));
     assert_eq!(
         session
+            .messages
             .last_sponsored_report
             .clone()
             .unwrap()
             .user_message(),
         "Hiding sponsored messages needs Telegram Premium"
     );
-    assert!(!session.sponsored_hidden);
+    assert!(!session.messages.sponsored_hidden);
 
     // Premium: the driver sends toggleHasSponsoredMessagesEnabled(false);
     // `ok` hides everything.
@@ -87,7 +88,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
         &seq,
         &[&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0)],
     );
-    assert!(session.sponsored_hidden);
+    assert!(session.messages.sponsored_hidden);
     assert!(session.open_sponsored_tail().is_none());
     assert!(!session.sponsored_fetch_due(chat_id, std::time::Instant::now()));
 }

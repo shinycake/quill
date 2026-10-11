@@ -60,7 +60,7 @@ fn replay_contacts_list_and_user_full_info() {
     let info = session.user_full_info(32).expect("full info cached");
     assert_eq!(info.bio, "CANARY_REPLAY_bio");
     assert_eq!(info.photo_file_id, Some(902));
-    assert!(session.files.contains_key(&902));
+    assert!(session.media.files.contains_key(&902));
 
     // A later status update refreshes the contact row.
     apply_all_seq(

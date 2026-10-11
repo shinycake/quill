@@ -199,13 +199,13 @@ fn push_custom_packs(
     session: &quill::state::Session,
     matches: Option<&std::collections::HashSet<String>>,
 ) {
-    for set in &session.emoji.installed_sets {
+    for set in &session.stickers.emoji.installed_sets {
         let title: SharedString = if set.title.is_empty() {
             set.name.clone().into()
         } else {
             set.title.clone().into()
         };
-        let items = session.media_library.set_stickers.get(&set.id);
+        let items = session.media.media_library.set_stickers.get(&set.id);
         let cells: Vec<PanelCell> = match (items, matches) {
             (Some(items), matches) => items
                 .iter()
@@ -266,7 +266,7 @@ impl QuillApp {
         } else if tab == PanelTab::Gifs
             && let Some(session) = self.demo_session.as_mut()
         {
-            session.gifs.open = true;
+            session.stickers.gifs.open = true;
         }
         cx.notify();
     }
@@ -328,7 +328,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_gif_panel();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.gifs.close();
+            session.stickers.gifs.close();
         }
         cx.notify();
         true
@@ -343,7 +343,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.open_gif_panel();
                 } else if let Some(session) = self.demo_session.as_mut() {
-                    session.gifs.open = true;
+                    session.stickers.gifs.open = true;
                 }
             }
         }
@@ -354,11 +354,11 @@ impl QuillApp {
     pub(super) fn panel_item(&self, source: StickerSource, ix: usize) -> Option<&StickerItem> {
         let session = self.session()?;
         match source {
-            StickerSource::Set(id) => session.media_library.set_stickers.get(&id)?.get(ix),
-            StickerSource::Recent => session.stickers.recent.get(ix),
-            StickerSource::Favorites => session.stickers.favorites.get(ix),
-            StickerSource::Found => session.stickers.found_stickers.get(ix),
-            StickerSource::CustomEmoji => session.emoji.custom_emoji_stickers.get(ix),
+            StickerSource::Set(id) => session.media.media_library.set_stickers.get(&id)?.get(ix),
+            StickerSource::Recent => session.stickers.stickers.recent.get(ix),
+            StickerSource::Favorites => session.stickers.stickers.favorites.get(ix),
+            StickerSource::Found => session.stickers.stickers.found_stickers.get(ix),
+            StickerSource::CustomEmoji => session.stickers.emoji.custom_emoji_stickers.get(ix),
         }
     }
 
@@ -464,7 +464,7 @@ impl QuillApp {
                     quill::emoji_catalog::search(None, query)
                         .map(|entry| entry.emoji.replace('\u{fe0f}', ""))
                         .collect();
-                for emoji in &session.emoji.keyword_emojis {
+                for emoji in &session.stickers.emoji.keyword_emojis {
                     if !has_skin_tone(emoji) && seen.insert(emoji.replace('\u{fe0f}', "")) {
                         cells.push(PanelCell::Emoji(SharedString::from(emoji.clone())));
                     }
@@ -483,7 +483,8 @@ impl QuillApp {
                     .recent_custom_emoji_ids
                     .iter()
                     .filter_map(|id| {
-                        s.emoji
+                        s.stickers
+                            .emoji
                             .custom_emoji_stickers
                             .iter()
                             .position(|item| item.custom_emoji_id == Some(*id))
@@ -552,6 +553,7 @@ impl QuillApp {
             return (rows, sections);
         };
         let Some(options) = session
+            .stickers
             .message_reaction_options
             .as_ref()
             .filter(|o| o.chat_id == target.chat_id && o.message_id == target.message_id)
@@ -563,7 +565,14 @@ impl QuillApp {
         let matches: Option<std::collections::HashSet<String>> = (!query.is_empty()).then(|| {
             quill::emoji_catalog::search(None, query)
                 .map(|entry| strip(entry.emoji))
-                .chain(session.emoji.keyword_emojis.iter().map(|e| strip(e)))
+                .chain(
+                    session
+                        .stickers
+                        .emoji
+                        .keyword_emojis
+                        .iter()
+                        .map(|e| strip(e)),
+                )
                 .collect()
         });
         let wanted = |emoji: &str| {
@@ -579,11 +588,12 @@ impl QuillApp {
                     .then(|| PanelCell::Emoji(super::reactions::emoji_presentation(&emoji).into())),
                 ReactionChoice::CustomEmoji(id) => {
                     let ix = session
+                        .stickers
                         .emoji
                         .custom_emoji_stickers
                         .iter()
                         .position(|item| item.custom_emoji_id == Some(id))?;
-                    wanted(&session.emoji.custom_emoji_stickers[ix].emoji).then_some(
+                    wanted(&session.stickers.emoji.custom_emoji_stickers[ix].emoji).then_some(
                         PanelCell::Custom {
                             source: StickerSource::CustomEmoji,
                             ix,
@@ -619,7 +629,7 @@ impl QuillApp {
             });
             push_grid(
                 &mut rows,
-                (0..session.stickers.found_stickers.len()).map(|ix| PanelCell::Sticker {
+                (0..session.stickers.stickers.found_stickers.len()).map(|ix| PanelCell::Sticker {
                     source: StickerSource::Found,
                     ix,
                 }),
@@ -633,13 +643,13 @@ impl QuillApp {
                 StickerSource::Favorites,
                 "Favorites",
                 gpui_kit::assets::IconName::Star,
-                session.stickers.favorites.len(),
+                session.stickers.stickers.favorites.len(),
             ),
             (
                 StickerSource::Recent,
                 "Recently used",
                 gpui_kit::assets::IconName::Clock,
-                session.stickers.recent.len(),
+                session.stickers.stickers.recent.len(),
             ),
         ] {
             if len == 0 {
@@ -661,7 +671,7 @@ impl QuillApp {
                 true,
             );
         }
-        for set in &session.stickers.sets {
+        for set in &session.stickers.stickers.sets {
             let title: SharedString = if set.title.is_empty() {
                 set.name.clone().into()
             } else {
@@ -676,7 +686,7 @@ impl QuillApp {
                 label: title,
                 set_id: Some(set.id),
             });
-            match session.media_library.set_stickers.get(&set.id) {
+            match session.media.media_library.set_stickers.get(&set.id) {
                 Some(items) => push_grid(
                     &mut rows,
                     (0..items.len()).map(|ix| PanelCell::Sticker {
@@ -705,7 +715,7 @@ impl QuillApp {
         [item.display_file_id(), item.thumb_file_id]
             .into_iter()
             .flatten()
-            .filter_map(|id| session.files.get(&id.0)?.usable_path())
+            .filter_map(|id| session.media.files.get(&id.0)?.usable_path())
             .find_map(|path| sandboxed_display_path(path, &roots))
     }
 
@@ -933,13 +943,21 @@ impl QuillApp {
             .map(ImageSource::Render)
             .or_else(|| still.map(ImageSource::from));
         let file_id = item.file_id;
-        let favorite = self
-            .session()
-            .is_some_and(|s| s.stickers.favorites.iter().any(|f| f.file_id == file_id));
+        let favorite = self.session().is_some_and(|s| {
+            s.stickers
+                .stickers
+                .favorites
+                .iter()
+                .any(|f| f.file_id == file_id)
+        });
         let in_recent = recent_section
-            && self
-                .session()
-                .is_some_and(|s| s.stickers.recent.iter().any(|r| r.file_id == file_id));
+            && self.session().is_some_and(|s| {
+                s.stickers
+                    .stickers
+                    .recent
+                    .iter()
+                    .any(|r| r.file_id == file_id)
+            });
         let owner = cx.entity().downgrade();
         let (emoji, width, height) = (item.emoji.clone(), item.width, item.height);
         let thumb = item
@@ -996,7 +1014,11 @@ impl QuillApp {
                                 if let Some(live) = this.live.as_mut() {
                                     let _ = live.driver.remove_recent_sticker(file_id);
                                 } else if let Some(session) = this.demo_session.as_mut() {
-                                    session.stickers.recent.retain(|s| s.file_id != file_id);
+                                    session
+                                        .stickers
+                                        .stickers
+                                        .recent
+                                        .retain(|s| s.file_id != file_id);
                                 }
                                 cx.notify();
                             });

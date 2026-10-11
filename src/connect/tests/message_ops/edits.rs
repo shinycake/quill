@@ -114,32 +114,36 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
-    // A scheduled send lives in `session.scheduled_messages`, not history.
-    driver.session.scheduled_messages.push(ParsedMessage {
-        sender: None,
-        id: MessageId(70),
-        chat_id: ChatId(7),
-        date: 0,
-        is_outgoing: true,
-        is_pinned: false,
-        topic_id: None,
-        thread_id: None,
-        ephemeral: None,
-        media_album_id: 0,
-        author_signature: None,
-        scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
-        can_retry: false,
-        send_state: Default::default(),
-        content: MessageContent::Text(TextContent::plain("scheduled draft")),
-        files: Vec::new(),
-        reply_to: None,
-        forward_info: None,
-        extras: Default::default(),
-        interaction_info: None,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-    });
+    // A scheduled send lives in `session.messages.scheduled_messages`, not history.
+    driver
+        .session
+        .messages
+        .scheduled_messages
+        .push(ParsedMessage {
+            sender: None,
+            id: MessageId(70),
+            chat_id: ChatId(7),
+            date: 0,
+            is_outgoing: true,
+            is_pinned: false,
+            topic_id: None,
+            thread_id: None,
+            ephemeral: None,
+            media_album_id: 0,
+            author_signature: None,
+            scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
+            can_retry: false,
+            send_state: Default::default(),
+            content: MessageContent::Text(TextContent::plain("scheduled draft")),
+            files: Vec::new(),
+            reply_to: None,
+            forward_info: None,
+            extras: Default::default(),
+            interaction_info: None,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+        });
 
     // A non-scheduled edit for the same id finds nothing in history.
     let plain = ComposerEdit {
@@ -366,6 +370,7 @@ fn driver_forward_messages_shape_and_dest_result() {
             .unwrap();
     let result = driver
         .session
+        .messages
         .last_forward
         .as_ref()
         .expect("forward result");
@@ -518,31 +523,35 @@ fn driver_edit_scheduled_message_sends_scheduling_state() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
-    driver.session.scheduled_messages.push(ParsedMessage {
-        sender: None,
-        id: MessageId(70),
-        chat_id: ChatId(7),
-        date: 0,
-        is_outgoing: true,
-        is_pinned: false,
-        topic_id: None,
-        thread_id: None,
-        ephemeral: None,
-        media_album_id: 0,
-        author_signature: None,
-        scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
-        can_retry: false,
-        send_state: Default::default(),
-        content: MessageContent::Text(TextContent::plain("later")),
-        files: Vec::new(),
-        reply_to: None,
-        forward_info: None,
-        extras: Default::default(),
-        interaction_info: None,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-    });
+    driver
+        .session
+        .messages
+        .scheduled_messages
+        .push(ParsedMessage {
+            sender: None,
+            id: MessageId(70),
+            chat_id: ChatId(7),
+            date: 0,
+            is_outgoing: true,
+            is_pinned: false,
+            topic_id: None,
+            thread_id: None,
+            ephemeral: None,
+            media_album_id: 0,
+            author_signature: None,
+            scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
+            can_retry: false,
+            send_state: Default::default(),
+            content: MessageContent::Text(TextContent::plain("later")),
+            files: Vec::new(),
+            reply_to: None,
+            forward_info: None,
+            extras: Default::default(),
+            interaction_info: None,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+        });
     // Unknown ids are refused before anything is sent.
     assert_eq!(
         driver.edit_scheduled_message(ChatId(7), MessageId(71), ComposerScheduling::None),

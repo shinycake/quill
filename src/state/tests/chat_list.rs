@@ -267,7 +267,7 @@ fn chat_photo_remembered_from_update_new_chat() {
         r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Demo","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"photo":{"@type":"chatPhotoInfo","small":{"@type":"file","id":91,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"big":{"@type":"file","id":92,"size":0,"expected_size":0,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":false,"uploaded_size":0}},"minithumbnail":null,"has_animation":false,"is_personal":false}}}"#,
     );
     assert_eq!(session.chats.get(&11).unwrap().photo_file_id, Some(91));
-    assert!(session.files.contains_key(&91));
+    assert!(session.media.files.contains_key(&91));
     // `updateNewChat` without a photo leaves no avatar.
     apply_json(
         &mut session,
@@ -605,21 +605,21 @@ fn cl1_clear_history_error_surfaces() {
 fn r8_text_length_option_tracked_and_floored() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    assert_eq!(session.message_text_length_max, 4096);
+    assert_eq!(session.messages.message_text_length_max, 4096);
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateOption","name":"message_text_length_max","value":{"@type":"optionValueInteger","value":8192}}"#,
     );
-    assert_eq!(session.message_text_length_max, 8192);
+    assert_eq!(session.messages.message_text_length_max, 8192);
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateOption","name":"message_text_length_max","value":{"@type":"optionValueInteger","value":0}}"#,
     );
-    assert_eq!(session.message_text_length_max, 1);
+    assert_eq!(session.messages.message_text_length_max, 1);
 }
 
 #[test]

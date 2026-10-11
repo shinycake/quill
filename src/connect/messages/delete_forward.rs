@@ -169,11 +169,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // Several destinations (share box) are in flight at once: the first
         // takes the main slot, the rest queue behind it.
-        let queued = self.session.in_flight_forward.is_some();
+        let queued = self.session.messages.in_flight_forward.is_some();
         if queued {
-            self.session.queued_forward_flights.push(flight);
+            self.session.messages.queued_forward_flights.push(flight);
         } else {
-            self.session.in_flight_forward = Some(flight);
+            self.session.messages.in_flight_forward = Some(flight);
         }
         let json = forward_messages_with_options(
             extra,
@@ -190,10 +190,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 if queued {
                     self.session
+                        .messages
                         .queued_forward_flights
                         .retain(|f| f.extra != extra);
                 } else {
-                    self.session.in_flight_forward = None;
+                    self.session.messages.in_flight_forward = None;
                 }
                 Err(err)
             }

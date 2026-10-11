@@ -78,7 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// both keep the target in `Session`; the UI then fetches the panel
     /// data through the driver.
     pub fn set_info_panel(&mut self, target: Option<InfoPanelTarget>) {
-        self.session.open_info_panel = target;
+        self.session.users_state.open_info_panel = target;
     }
 
     /// Slice G1: `deleteChat` (schema 1.8.67, line 11850) — deletes the
@@ -378,7 +378,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        if !(self.session.search.recents && !self.session.search.chat_ids.is_empty()) {
+        if !(self.session.search.search.recents && !self.session.search.search.chat_ids.is_empty())
+        {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
@@ -386,8 +387,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.search.chat_ids.clear();
-        self.session.search.status = SearchStatus::Idle;
+        self.session.search.search.chat_ids.clear();
+        self.session.search.search.status = SearchStatus::Idle;
         Ok(Some(extra))
     }
 

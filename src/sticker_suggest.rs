@@ -192,9 +192,9 @@ mod tests {
         let seq = AtomicU64::new(0);
         // Simulate an in-flight suggestion: purpose registered, slot set.
         let extra = session.request(RequestPurpose::SuggestStickers, None);
-        session.stickers.suggest_for = Some("😀".into());
+        session.stickers.stickers.suggest_for = Some("😀".into());
         apply_json(&mut session, &seq, &sink, &stickers_answer(extra.0));
-        assert!(!session.stickers.suggestions.is_empty());
+        assert!(!session.stickers.stickers.suggestions.is_empty());
 
         // Clear path: drop the purpose, clear the slot.
         drop(
@@ -208,13 +208,13 @@ mod tests {
                 .requests
                 .has_purpose(RequestPurpose::SuggestStickers)
         );
-        assert!(session.stickers.suggest_for.is_none());
-        assert!(session.stickers.suggestions.is_empty());
+        assert!(session.stickers.stickers.suggest_for.is_none());
+        assert!(session.stickers.stickers.suggestions.is_empty());
 
         // A late answer for the taken request has no pending entry left,
         // so it dispatches as a stray and the slot stays empty.
         apply_json(&mut session, &seq, &sink, &stickers_answer(extra.0));
-        assert!(session.stickers.suggestions.is_empty());
+        assert!(session.stickers.stickers.suggestions.is_empty());
     }
 
     /// Slice S12: composer sticker suggestions are stored only under a
@@ -227,7 +227,7 @@ mod tests {
         let seq = AtomicU64::new(0);
         // Two installed sets; the suggest answers below reference set 77
         // (installed) and set 99 (not installed).
-        with_purpose.stickers.sets = vec![
+        with_purpose.stickers.stickers.sets = vec![
             StickerSetInfo {
                 id: 77,
                 title: "Demo".into(),
@@ -255,26 +255,26 @@ mod tests {
         // the suggestions slot; the search slot is untouched.
         let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
-        assert_eq!(with_purpose.stickers.suggestions.len(), 2);
-        assert!(with_purpose.stickers.found_stickers.is_empty());
+        assert_eq!(with_purpose.stickers.stickers.suggestions.len(), 2);
+        assert!(with_purpose.stickers.stickers.found_stickers.is_empty());
 
         // InstalledOnly: the set-99 sticker is filtered out.
         with_purpose.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
         let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
-        assert_eq!(with_purpose.stickers.suggestions.len(), 1);
-        assert_eq!(with_purpose.stickers.suggestions[0].set_id, 77);
+        assert_eq!(with_purpose.stickers.stickers.suggestions.len(), 1);
+        assert_eq!(with_purpose.stickers.stickers.suggestions[0].set_id, 77);
 
         // None: the answer is dropped and the slot cleared.
         with_purpose.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
         let extra = with_purpose.request(RequestPurpose::SuggestStickers, None);
         apply_json(&mut with_purpose, &seq, &sink, &answer(extra.0));
-        assert!(with_purpose.stickers.suggestions.is_empty());
+        assert!(with_purpose.stickers.stickers.suggestions.is_empty());
 
         // A stray `stickers` answer (no matching purpose) is ignored.
         let (mut without_purpose, sink2) = session();
         let seq2 = AtomicU64::new(0);
         apply_json(&mut without_purpose, &seq2, &sink2, &answer(0));
-        assert!(without_purpose.stickers.suggestions.is_empty());
+        assert!(without_purpose.stickers.stickers.suggestions.is_empty());
     }
 }

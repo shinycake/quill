@@ -38,7 +38,7 @@ impl Session {
                     self.upsert_file(file, false);
                     id
                 });
-                self.user_full_infos.insert(
+                self.users_state.user_full_infos.insert(
                     user_id,
                     UserFullInfoData {
                         bio,
@@ -52,9 +52,9 @@ impl Session {
                     .chat_id
                     .and_then(|chat_id| self.bot_user_id_for_chat(chat_id))
                 {
-                    self.bot_info.insert(bot_id, bot_info);
-                } else if pending.user_id.is_some() && self.bot_user_ids.contains(&user_id) {
-                    self.bot_info.insert(user_id, bot_info);
+                    self.bots.bot_info.insert(bot_id, bot_info);
+                } else if pending.user_id.is_some() && self.bots.bot_user_ids.contains(&user_id) {
+                    self.bots.bot_info.insert(user_id, bot_info);
                 }
             }
         }

@@ -528,7 +528,7 @@ impl QuillApp {
             .font_semibold()
             .text_color(cx.theme().muted_foreground)
             .child(title);
-        match session.profile_chat_lists.get(&(kind, key))? {
+        match session.users_state.profile_chat_lists.get(&(kind, key))? {
             ProfileChatsFetch::Loaded(ids) => {
                 let rows: Vec<AnyElement> = ids
                     .iter()
@@ -624,7 +624,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.profile_chat_lists.remove(&(kind, key));
+            live.driver
+                .session
+                .users_state
+                .profile_chat_lists
+                .remove(&(kind, key));
             let _ = match kind {
                 ProfileChatsKind::GroupsInCommon => live.driver.fetch_groups_in_common(key),
                 ProfileChatsKind::SimilarChats => live.driver.fetch_similar_chats(ChatId(key)),
@@ -660,10 +664,18 @@ impl QuillApp {
         };
         // A failed earlier fetch is retried.
         if matches!(
-            live.driver.session.user_profile_photos.get(&user_id),
+            live.driver
+                .session
+                .users_state
+                .user_profile_photos
+                .get(&user_id),
             Some(ProfilePhotosFetch::Failed(_))
         ) {
-            live.driver.session.user_profile_photos.remove(&user_id);
+            live.driver
+                .session
+                .users_state
+                .user_profile_photos
+                .remove(&user_id);
         }
         match live.driver.fetch_user_profile_photos(user_id) {
             Ok(_) => self.dialogs.pending_profile_gallery = Some(user_id),
@@ -680,7 +692,7 @@ impl QuillApp {
         };
         let Some(state) = self
             .session()
-            .and_then(|s| s.user_profile_photos.get(&user_id))
+            .and_then(|s| s.users_state.user_profile_photos.get(&user_id))
             .cloned()
         else {
             return false;
@@ -1332,6 +1344,7 @@ impl QuillApp {
                     .and_then(|me| session.user_full_info(me))
                     .map_or(0, |i| i.extras.personal_chat_id);
                 let fetch = session
+                    .users_state
                     .profile_chat_lists
                     .get(&(ProfileChatsKind::SuitablePersonalChats, 0))
                     .cloned();

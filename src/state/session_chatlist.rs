@@ -6,7 +6,7 @@ impl Session {
         let extra = self
             .requests
             .register_download(self.account_generation, file_id);
-        self.download_extras.insert(extra.0, file_id.0);
+        self.media.download_extras.insert(extra.0, file_id.0);
         extra
     }
 
@@ -99,8 +99,8 @@ impl Session {
     }
 
     pub fn open_chat(&mut self, chat_id: ChatId) {
-        if self.chat_search.chat_id != Some(chat_id) {
-            self.chat_search.close();
+        if self.search.chat_search.chat_id != Some(chat_id) {
+            self.search.chat_search.close();
         }
         // Slice media-shared-gallery: switching chats closes the gallery so
         // its title and rows can't outlive the chat they belong to. `close`
@@ -108,7 +108,7 @@ impl Session {
         // chat. Same-chat re-select never reaches this method (see
         // `ConnectDriver::select_chat`), so the gallery survives it.
         if self.open_chat != Some(chat_id) {
-            self.shared_media.close();
+            self.media.shared_media.close();
         }
         self.open_chat = Some(chat_id);
         // Phase 5.1: switching chats leaves the topic view.

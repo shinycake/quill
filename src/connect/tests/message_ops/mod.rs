@@ -137,7 +137,7 @@ fn driver_send_reply_shape_and_jump_to_replied() {
         None
     );
     assert_eq!(
-        driver.session.chat_search.jump,
+        driver.session.search.chat_search.jump,
         crate::state::ChatSearchJump::Ready {
             message_id: MessageId(50)
         }
@@ -168,7 +168,7 @@ fn driver_send_snapshot_rejects_overlong_caption() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
-    driver.session.message_caption_length_max = 4;
+    driver.session.messages.message_caption_length_max = 4;
 
     let snap = crate::composer::ComposerSnapshot::capture_with_attachment(
         ChatId(7),
@@ -190,7 +190,7 @@ fn driver_send_snapshot_rejects_overlong_caption() {
 
     // At the limit the gate passes (the missing file then fails the
     // send — the gate is what this test pins).
-    driver.session.message_caption_length_max = 7;
+    driver.session.messages.message_caption_length_max = 7;
     let snap = crate::composer::ComposerSnapshot::capture_with_attachment(
         ChatId(7),
         driver.session.view_generation,
@@ -223,7 +223,7 @@ fn driver_send_album_rejects_overlong_caption() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
-    driver.session.message_caption_length_max = 4;
+    driver.session.messages.message_caption_length_max = 4;
 
     let snap = crate::composer::ComposerSnapshot::capture_album(
         ChatId(7),
@@ -268,7 +268,7 @@ fn driver_edit_snapshot_rejects_overlong_caption() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
-    driver.session.message_caption_length_max = 4;
+    driver.session.messages.message_caption_length_max = 4;
 
     // Inject an outgoing photo message with a caption into history.
     let msg_json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":7,"is_outgoing":true,"date":1700000000,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[]},"caption":{"@type":"formattedText","text":"hi","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}"#;
@@ -307,7 +307,7 @@ fn driver_edit_snapshot_rejects_overlong_text() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
-    driver.session.message_text_length_max = 5;
+    driver.session.messages.message_text_length_max = 5;
 
     let msg_json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":7,"is_outgoing":true,"date":1700000000,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#;
     let owned = copy_and_parse(msg_json, &seq, &dyn_sink).expect("parse msg");
@@ -406,7 +406,7 @@ fn driver_edit_snapshot_with_replacement_sends_edit_message_media() {
 #[test]
 fn driver_instant_view_success_ingest() {
     // MED4: a `webPageInstantView` answer for a tracked
-    // `GetWebPageInstantView` request populates `session.instant_view`
+    // `GetWebPageInstantView` request populates `session.messages.instant_view`
     // (the UI drains it into the reader). The URL rides
     // `instant_view_urls`, keyed by the request id.
     use crate::telegram::client::copy_and_parse;
@@ -427,6 +427,7 @@ fn driver_instant_view_success_ingest() {
         .request(RequestPurpose::GetWebPageInstantView, None);
     driver
         .session
+        .messages
         .instant_view_urls
         .insert(extra, "https://example.com/article".to_string());
 
@@ -436,10 +437,15 @@ fn driver_instant_view_success_ingest() {
     );
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse IV");
     driver.ingest(owned).expect("ingest IV");
-    let iv = driver.session.instant_view.as_ref().expect("IV stored");
+    let iv = driver
+        .session
+        .messages
+        .instant_view
+        .as_ref()
+        .expect("IV stored");
     assert_eq!(iv.url, "https://example.com/article");
     // A success is never stashed as a browser fallback.
-    assert!(driver.session.instant_view_fallback_url.is_none());
+    assert!(driver.session.messages.instant_view_fallback_url.is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -465,6 +471,7 @@ fn driver_instant_view_error_falls_back() {
         .request(RequestPurpose::GetWebPageInstantView, None);
     driver
         .session
+        .messages
         .instant_view_urls
         .insert(extra, "https://example.com/noiv".to_string());
 
@@ -474,9 +481,9 @@ fn driver_instant_view_error_falls_back() {
     );
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse error");
     driver.ingest(owned).expect("ingest error");
-    assert!(driver.session.instant_view.is_none());
+    assert!(driver.session.messages.instant_view.is_none());
     assert_eq!(
-        driver.session.instant_view_fallback_url.as_deref(),
+        driver.session.messages.instant_view_fallback_url.as_deref(),
         Some("https://example.com/noiv")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -485,7 +492,7 @@ fn driver_instant_view_error_falls_back() {
 #[test]
 fn driver_link_preview_prefetch_ingest() {
     // MED4b: a `linkPreview` answer for a tracked `GetLinkPreview`
-    // request populates `session.composer_preview` (the chip reads
+    // request populates `session.messages.composer_preview` (the chip reads
     // it); a 404 becomes "no link info" (`Some(None)`), never a
     // card. The URL rides `composer_preview_urls`, keyed by id.
     use crate::telegram::client::copy_and_parse;
@@ -504,9 +511,10 @@ fn driver_link_preview_prefetch_ingest() {
     let extra = driver.session.request(RequestPurpose::GetLinkPreview, None);
     driver
         .session
+        .messages
         .composer_preview_urls
         .insert(extra, "https://example.com/story".to_string());
-    driver.session.composer_preview = Some(ComposerLinkPreview {
+    driver.session.messages.composer_preview = Some(ComposerLinkPreview {
         url: "https://example.com/story".to_string(),
         preview: None,
     });
@@ -519,6 +527,7 @@ fn driver_link_preview_prefetch_ingest() {
     driver.ingest(owned).expect("ingest preview");
     let stored = driver
         .session
+        .messages
         .composer_preview
         .as_ref()
         .expect("preview stored");
@@ -538,6 +547,7 @@ fn driver_link_preview_prefetch_ingest() {
     let stale = driver.session.request(RequestPurpose::GetLinkPreview, None);
     driver
         .session
+        .messages
         .composer_preview_urls
         .insert(stale, "https://example.com/old".to_string());
     let json = format!(
@@ -548,6 +558,7 @@ fn driver_link_preview_prefetch_ingest() {
     driver.ingest(owned).expect("ingest stale");
     let stored = driver
         .session
+        .messages
         .composer_preview
         .as_ref()
         .expect("preview kept");
@@ -557,9 +568,10 @@ fn driver_link_preview_prefetch_ingest() {
     let miss = driver.session.request(RequestPurpose::GetLinkPreview, None);
     driver
         .session
+        .messages
         .composer_preview_urls
         .insert(miss, "https://example.com/story".to_string());
-    driver.session.composer_preview = Some(ComposerLinkPreview {
+    driver.session.messages.composer_preview = Some(ComposerLinkPreview {
         url: "https://example.com/story".to_string(),
         preview: None,
     });
@@ -571,6 +583,7 @@ fn driver_link_preview_prefetch_ingest() {
     driver.ingest(owned).expect("ingest 404");
     let stored = driver
         .session
+        .messages
         .composer_preview
         .as_ref()
         .expect("state kept");

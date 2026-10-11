@@ -824,9 +824,10 @@ impl QuillApp {
             .map(|session| {
                 session
                     .stickers
+                    .stickers
                     .recent
                     .iter()
-                    .chain(&session.stickers.favorites)
+                    .chain(&session.stickers.stickers.favorites)
                     .take(16)
                     .map(|item| item.thumb_file_id.unwrap_or(item.file_id))
                     .filter(|id| session.should_download(*id))
@@ -850,9 +851,10 @@ impl QuillApp {
             .map(|session| {
                 session
                     .stickers
+                    .stickers
                     .recent
                     .iter()
-                    .chain(&session.stickers.favorites)
+                    .chain(&session.stickers.stickers.favorites)
                     .filter(|item| seen.insert(item.file_id.0))
                     // One row under the emoji.
                     .take(16)
@@ -861,7 +863,7 @@ impl QuillApp {
                             .thumb_file_id
                             .into_iter()
                             .chain([item.file_id])
-                            .find_map(|id| session.files.get(&id.0)?.usable_path())
+                            .find_map(|id| session.media.files.get(&id.0)?.usable_path())
                             .and_then(|path| {
                                 quill::local_path::sandboxed_display_path(path, &roots)
                             })?;
@@ -946,6 +948,7 @@ impl QuillApp {
             .session()
             .and_then(|session| {
                 session
+                    .media
                     .files
                     .get(&file_id.0)?
                     .usable_path()

@@ -146,7 +146,7 @@ pub(super) fn session_wallpaper(
     let path = background
         .file
         .as_ref()
-        .and_then(|f| session.files.get(&f.id.0))
+        .and_then(|f| session.media.files.get(&f.id.0))
         .and_then(|f| f.usable_path());
     background_wallpaper(background, path)
 }

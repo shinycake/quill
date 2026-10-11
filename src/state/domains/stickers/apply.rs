@@ -14,9 +14,9 @@ impl Session {
     ) {
         match payload {
             StickersPayload::UpdateActiveEmojiReactions { emojis } => {
-                self.active_reactions = emojis.clone();
-                self.active_emoji_reactions = emojis;
-                self.reaction_options_stale = true;
+                self.stickers.active_reactions = emojis.clone();
+                self.stickers.active_emoji_reactions = emojis;
+                self.stickers.reaction_options_stale = true;
             }
             StickersPayload::StickerSets { sets, .. } => {
                 if matches!(
@@ -26,7 +26,7 @@ impl Session {
                     ))
                 ) {
                     // B11: "Attached Stickers" of a photo or video.
-                    self.stickers.attached_answer = Some(sets.first().map(|set| set.id));
+                    self.stickers.stickers.attached_answer = Some(sets.first().map(|set| set.id));
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
                 {
@@ -66,19 +66,21 @@ impl Session {
             // refetches) or store the pushed value.
             StickersPayload::UpdateRecentStickers { is_attached } => {
                 if !is_attached {
-                    self.stickers.recent_stale = true;
+                    self.stickers.stickers.recent_stale = true;
                 }
             }
-            StickersPayload::UpdateFavoriteStickers => self.stickers.favorites_stale = true,
+            StickersPayload::UpdateFavoriteStickers => {
+                self.stickers.stickers.favorites_stale = true
+            }
             StickersPayload::UpdateTrendingStickerSets { is_regular } => {
                 if is_regular {
-                    self.stickers.trending_stale = true;
+                    self.stickers.stickers.trending_stale = true;
                 } else {
-                    self.emoji.trending_stale = true;
+                    self.stickers.emoji.trending_stale = true;
                 }
             }
             StickersPayload::UpdateDefaultReactionType { reaction_type } => {
-                self.default_reaction = ReactionChoice::from_type(&reaction_type);
+                self.stickers.default_reaction = ReactionChoice::from_type(&reaction_type);
             }
             // Slice S8: `getTrendingStickerSets` answers with
             // `trendingStickerSets`.
@@ -88,11 +90,11 @@ impl Session {
                 total_count,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
-                    self.stickers.trending_total = total_count.max(0) as usize;
+                    self.stickers.stickers.trending_total = total_count.max(0) as usize;
                     self.accept_trending_sticker_sets(sets, is_premium);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).
-                    self.emoji.trending_total = total_count;
+                    self.stickers.emoji.trending_total = total_count;
                     self.accept_trending_emoji_sets(sets, is_premium);
                 }
             }
@@ -112,8 +114,8 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
                     self.accept_recent_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetGreetingStickers) {
-                    self.stickers.greeting = stickers;
-                    self.stickers.greeting_loaded = true;
+                    self.stickers.stickers.greeting = stickers;
+                    self.stickers.stickers.greeting_loaded = true;
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
                     // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
                     self.accept_custom_emoji_stickers(stickers);
@@ -139,8 +141,8 @@ impl Session {
                 is_custom_emoji,
             } => {
                 if is_custom_emoji && id > 0 {
-                    self.emoji.outdated_packs.insert(id);
-                    if self.emoji.selected_set_id == Some(id) {
+                    self.stickers.emoji.outdated_packs.insert(id);
+                    if self.stickers.emoji.selected_set_id == Some(id) {
                         drop(self.requests.take_purpose(RequestPurpose::GetEmojiSet));
                     }
                 }
@@ -194,7 +196,7 @@ impl Session {
                 })) = pending.map(|p| p.purpose)
                 {
                     if !title.is_empty() {
-                        self.emoji_pack_titles.insert(set_id, title);
+                        self.stickers.emoji_pack_titles.insert(set_id, title);
                     }
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::LoadLibrarySet {
                     set_id,
@@ -203,16 +205,17 @@ impl Session {
                     self.remember_files(&files);
                     self.accept_library_set(set_id, stickers);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetEmojiSet)
-                    && self.emoji.selected_set_id == Some(id)
+                    && self.stickers.emoji.selected_set_id == Some(id)
                 {
                     self.remember_files(&files);
-                    self.emoji.failed = false;
-                    self.emoji.preview_title = title;
-                    self.emoji
+                    self.stickers.emoji.failed = false;
+                    self.stickers.emoji.preview_title = title;
+                    self.stickers
+                        .emoji
                         .pack_files
                         .insert(id, stickers.iter().map(|item| item.file_id).collect());
-                    self.emoji.outdated_packs.remove(&id);
-                    self.emoji.preview = stickers;
+                    self.stickers.emoji.outdated_packs.remove(&id);
+                    self.stickers.emoji.preview = stickers;
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
                     self.remember_files(&files);
                     self.accept_sticker_set(id, stickers);
@@ -225,14 +228,14 @@ impl Session {
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {
-                self.gifs.stale = true;
+                self.stickers.gifs.stale = true;
             }
             // Slice S9: `updateAnimationSearchParameters` (schema 1.8.67,
             // line 11064) — server-pushed; store the provider name and the
             // new suggested search emojis for the GIF search surface.
             StickersPayload::UpdateAnimationSearchParameters { provider, emojis } => {
-                self.gifs.search_provider = provider;
-                self.gifs.provider_emojis = emojis;
+                self.stickers.gifs.search_provider = provider;
+                self.stickers.gifs.provider_emojis = emojis;
             }
         }
     }

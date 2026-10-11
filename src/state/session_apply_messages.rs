@@ -22,7 +22,7 @@ impl Session {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetChatScheduledMessages
         {
-            self.scheduled_messages = messages.to_vec();
+            self.messages.scheduled_messages = messages.to_vec();
             return;
         }
         if let Some(pending) = pending
@@ -77,7 +77,7 @@ impl Session {
                 .iter()
                 .map(|message| message.sender.map(|sender| self.sender_label(sender)))
                 .collect();
-            if let Some(export) = self.chat_export.as_mut()
+            if let Some(export) = self.messages.chat_export.as_mut()
                 && export.chat_id == chat_id
             {
                 // `getChatHistory` is inclusive of `from_message_id`, so the
@@ -299,7 +299,7 @@ impl Session {
             ))
         ) {
             if pending.and_then(|p| p.chat_id) == self.open_chat {
-                self.unread_jump = oldest_message_id(messages.iter().map(|m| m.id));
+                self.messages.unread_jump = oldest_message_id(messages.iter().map(|m| m.id));
             }
             return;
         }
@@ -313,28 +313,30 @@ impl Session {
                     .map(|message| history_message(message, false))
                     .collect();
                 rows.sort_by_key(|row| std::cmp::Reverse(row.id.0));
-                self.pinned_messages.insert(chat_id.0, rows);
+                self.messages.pinned_messages.insert(chat_id.0, rows);
             }
             return;
         }
-        if self.chat_search.matches_generation(pending)
+        if self.search.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
         {
             for message in &messages {
                 self.remember_files(&message.files);
             }
             let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-            self.chat_search
+            self.search
+                .chat_search
                 .append_hits(hits, total_count, next_from_message_id);
         }
-        if self.chat_search.matches_generation(pending)
+        if self.search.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
             for message in &messages {
                 self.remember_files(&message.files);
             }
             let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-            self.chat_search
+            self.search
+                .chat_search
                 .accept_hits(hits, total_count, next_from_message_id, false);
         }
         // Slice media-shared-gallery: one gallery-tab page.
@@ -350,7 +352,7 @@ impl Session {
                 .iter()
                 .map(|message| SharedMediaItem::from_parsed(tab, message))
                 .collect();
-            self.shared_media.accept(
+            self.media.shared_media.accept(
                 chat_id,
                 tab,
                 generation,
@@ -370,7 +372,7 @@ impl Session {
                 .iter()
                 .map(|message| SharedMediaItem::from_parsed(tab, message))
                 .collect();
-            self.shared_media.accept_more(
+            self.media.shared_media.accept_more(
                 chat_id,
                 tab,
                 generation,
@@ -435,6 +437,7 @@ impl Session {
         // M1 fix-up: the edited message may be a scheduled send —
         // refresh the scheduled-list entry too, not just history.
         if let Some(slot) = self
+            .messages
             .scheduled_messages
             .iter_mut()
             .find(|m| m.chat_id == chat_id && m.id == message_id)
@@ -445,7 +448,8 @@ impl Session {
             message.content = content.clone();
         });
         if loaded && let MessageContent::Poll(poll) = &content {
-            self.poll_messages
+            self.messages
+                .poll_messages
                 .entry(poll.poll.id)
                 .or_default()
                 .insert((chat_id.0, message_id.0));
@@ -474,7 +478,8 @@ impl Session {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_new_message(&mut self, message: ParsedMessage) {
         if !message.is_outgoing {
-            self.pending_bot_messages
+            self.messages
+                .pending_bot_messages
                 .remove(&(message.chat_id.0, message.topic_id.unwrap_or(0)));
         }
         // Phase 8.1: decide before upserting; the queue is drained by
@@ -531,7 +536,7 @@ impl Session {
             }
         }
         if let Some(target) = force_reply {
-            self.pending_force_reply = Some(target);
+            self.bots.pending_force_reply = Some(target);
         }
         if let Some(notification) = notification {
             self.queue_notification_with_sound(notification, sound);
@@ -541,10 +546,11 @@ impl Session {
 
 impl Session {
     pub fn expire_pending_bot_messages(&mut self, now_ms: u64) -> bool {
-        let before = self.pending_bot_messages.len();
-        self.pending_bot_messages
+        let before = self.messages.pending_bot_messages.len();
+        self.messages
+            .pending_bot_messages
             .retain(|_, pending| pending.expires_at_ms > now_ms);
-        before != self.pending_bot_messages.len()
+        before != self.messages.pending_bot_messages.len()
     }
 
     pub(crate) fn finish_pending_bot_stop(
@@ -554,7 +560,7 @@ impl Session {
         draft_id: i64,
     ) {
         let key = (chat_id.0, topic_id);
-        if let Some(pending) = self.pending_bot_messages.get_mut(&key)
+        if let Some(pending) = self.messages.pending_bot_messages.get_mut(&key)
             && pending.draft_id == draft_id
         {
             if pending.keep_on_stop {
@@ -562,7 +568,7 @@ impl Session {
                 pending.stopped = true;
                 pending.stop_failed = false;
             } else {
-                self.pending_bot_messages.remove(&key);
+                self.messages.pending_bot_messages.remove(&key);
             }
         }
     }

@@ -89,7 +89,7 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_forward(session, &self.demo_ui.sink, &self.demo_ui.seq);
-            self.share.forward_result = session.last_forward.clone();
+            self.share.forward_result = session.messages.last_forward.clone();
         }
         let mut draft =
             ForwardDraft::from_message(ChatId(11), MessageId(101), false).expect("forward 101");
@@ -131,7 +131,7 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             use quill::state::{MessageReactionOptions, ReactionChoice};
             let emoji = |e: &str| ReactionChoice::Emoji(e.to_string());
-            session.message_reaction_options = Some(MessageReactionOptions {
+            session.stickers.message_reaction_options = Some(MessageReactionOptions {
                 chat_id: ChatId(11),
                 message_id: MessageId(101),
                 top: ["❤", "👍", "🔥", "😂", "😮", "😢", "🎉"]

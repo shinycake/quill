@@ -9,7 +9,7 @@ impl Session {
             return false;
         };
         match chat.kind {
-            ChatKind::Private { user_id } => !self.bot_user_ids.contains(&user_id.0),
+            ChatKind::Private { user_id } => !self.bots.bot_user_ids.contains(&user_id.0),
             _ => false,
         }
     }
@@ -22,7 +22,7 @@ impl Session {
     pub fn bot_user_id_for_chat(&self, chat_id: ChatId) -> Option<i64> {
         let chat = self.chats.get(&chat_id.0)?;
         match chat.kind {
-            ChatKind::Private { user_id } if self.bot_user_ids.contains(&user_id.0) => {
+            ChatKind::Private { user_id } if self.bots.bot_user_ids.contains(&user_id.0) => {
                 Some(user_id.0)
             }
             _ => None,
@@ -33,7 +33,7 @@ impl Session {
     /// `updateUserFullInfo`) already populated it.
     pub fn bot_info_for_chat(&self, chat_id: ChatId) -> Option<&BotInfo> {
         self.bot_user_id_for_chat(chat_id)
-            .and_then(|user_id| self.bot_info.get(&user_id))
+            .and_then(|user_id| self.bots.bot_info.get(&user_id))
             .and_then(|info| info.as_ref())
     }
 
@@ -105,7 +105,7 @@ impl Session {
         if chat.secret_state != Some(SecretChatState::Ready) {
             return None;
         }
-        self.secret_chat_states.get(secret_chat_id)
+        self.users_state.secret_chat_states.get(secret_chat_id)
     }
 
     /// Phase 6: cached user object, if an `updateUser` has been seen.
@@ -204,7 +204,7 @@ impl Session {
 
     /// Phase 6: cached `userFullInfo` bio, if fetched.
     pub fn user_full_info(&self, user_id: i64) -> Option<&UserFullInfoData> {
-        self.user_full_infos.get(&user_id)
+        self.users_state.user_full_infos.get(&user_id)
     }
 
     /// Phase 6: cached `supergroupFullInfo`, if fetched.
@@ -445,7 +445,7 @@ impl Session {
     /// history win, as they carry edits.
     pub fn pinned_list(&self, chat_id: ChatId) -> Vec<&HistoryMessage> {
         let history = self.histories.get(&chat_id.0);
-        match self.pinned_messages.get(&chat_id.0) {
+        match self.messages.pinned_messages.get(&chat_id.0) {
             Some(list) => list
                 .iter()
                 .map(|message| {
@@ -483,11 +483,14 @@ impl Session {
     ) {
         match scheduling {
             ComposerScheduling::None => {
-                self.scheduled_messages.retain(|m| m.id != message_id);
-                self.message_action_note = Some("message sent".into());
+                self.messages
+                    .scheduled_messages
+                    .retain(|m| m.id != message_id);
+                self.messages.message_action_note = Some("message sent".into());
             }
             ComposerScheduling::SendAtDate(send_date) => {
                 if let Some(message) = self
+                    .messages
                     .scheduled_messages
                     .iter_mut()
                     .find(|m| m.id == message_id)
@@ -496,24 +499,25 @@ impl Session {
                         send_date: send_date as i32,
                     });
                 }
-                self.message_action_note = Some("message rescheduled".into());
+                self.messages.message_action_note = Some("message rescheduled".into());
             }
             ComposerScheduling::SendWhenOnline => {
                 if let Some(message) = self
+                    .messages
                     .scheduled_messages
                     .iter_mut()
                     .find(|m| m.id == message_id)
                 {
                     message.scheduling_state = Some(MessageSchedulingState::SendWhenOnline);
                 }
-                self.message_action_note = Some("message rescheduled".into());
+                self.messages.message_action_note = Some("message rescheduled".into());
             }
         }
     }
 
     /// Whether the user is a known bot.
     pub fn is_bot_user(&self, user_id: i64) -> bool {
-        self.bot_user_ids.contains(&user_id)
+        self.bots.bot_user_ids.contains(&user_id)
     }
 
     /// Whether the chat has scheduled messages
@@ -802,6 +806,7 @@ impl Session {
     /// updates arrive).
     pub fn contact_rows(&self) -> Vec<ContactRow> {
         let mut rows: Vec<ContactRow> = self
+            .users_state
             .contacts
             .as_deref()
             .unwrap_or(&[])
@@ -828,7 +833,7 @@ impl Session {
     /// Phase 6: `true` once a `users` answer (or a failed attempt) settled —
     /// the contacts tab shows rows, an error, or a loading state.
     pub fn contacts_settled(&self) -> bool {
-        self.contacts.is_some() || self.contacts_error
+        self.users_state.contacts.is_some() || self.users_state.contacts_error
     }
 
     /// Phase 3.3: merged `/`-menu rows for the open chat's bot — the
@@ -844,6 +849,7 @@ impl Session {
             .map(|info| info.commands.as_slice())
             .unwrap_or(&[]);
         let global: &[BotCommand] = self
+            .bots
             .bot_commands
             .get(&user_id)
             .map(Vec::as_slice)
@@ -852,11 +858,11 @@ impl Session {
     }
 
     pub fn mark_draft_dirty(&mut self, chat_id: ChatId) {
-        self.draft_dirty.insert(chat_id.0);
+        self.messages.draft_dirty.insert(chat_id.0);
     }
 
     pub fn draft_is_dirty(&self, chat_id: ChatId) -> bool {
-        self.draft_dirty.contains(&chat_id.0)
+        self.messages.draft_dirty.contains(&chat_id.0)
     }
 
     /// Local persist (after `setChatDraftMessage`, or the demo path). Clears the dirty bit.
@@ -864,7 +870,7 @@ impl Session {
         if let Some(chat) = self.chats.get_mut(&chat_id.0) {
             chat.draft = draft;
         }
-        self.draft_dirty.remove(&chat_id.0);
+        self.messages.draft_dirty.remove(&chat_id.0);
     }
 }
 

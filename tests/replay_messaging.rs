@@ -371,7 +371,7 @@ fn replay_reply_to_message_quote_and_jump() {
         quill::state::ChatSearchJumpNeed::AlreadyReady
     );
     assert_eq!(
-        session.chat_search.jump,
+        session.search.chat_search.jump,
         quill::state::ChatSearchJump::Ready {
             message_id: quill::ids::MessageId(50)
         }
@@ -391,7 +391,7 @@ fn replay_reply_to_message_quote_and_jump() {
         )],
     );
     assert_eq!(
-        session.chat_search.jump,
+        session.search.chat_search.jump,
         quill::state::ChatSearchJump::Ready {
             message_id: quill::ids::MessageId(40)
         }
@@ -462,7 +462,7 @@ fn replay_forward_messages_result_and_attribution() {
         ],
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(quill::ids::ChatId(8)));
-    session.in_flight_forward = Some(quill::state::ForwardFlight {
+    session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
         extra,
         dest_chat_id: quill::ids::ChatId(8),
         from_chat_id: quill::ids::ChatId(7),
@@ -477,7 +477,11 @@ fn replay_forward_messages_result_and_attribution() {
             extra.0
         )],
     );
-    let result = session.last_forward.as_ref().expect("forward result");
+    let result = session
+        .messages
+        .last_forward
+        .as_ref()
+        .expect("forward result");
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![quill::ids::MessageId(80)]);
     assert_eq!(result.success_label(), "Forwarded to Bob");

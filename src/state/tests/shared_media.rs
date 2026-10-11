@@ -9,10 +9,13 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     let chat = ChatId(11);
-    let tab = session.shared_media.open_for(chat);
+    let tab = session.media.shared_media.open_for(chat);
     assert_eq!(tab, SharedMediaTab::Media);
     // Empty answer → Empty, never Ready.
-    let generation = session.shared_media.begin_fetch(SharedMediaTab::Media);
+    let generation = session
+        .media
+        .shared_media
+        .begin_fetch(SharedMediaTab::Media);
     let extra = session.request(
         RequestPurpose::GetSharedMedia {
             tab: SharedMediaTab::Media,
@@ -29,11 +32,14 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
             extra.0
         ),
     );
-    let media = &session.shared_media.tabs[SharedMediaTab::Media.index()];
+    let media = &session.media.shared_media.tabs[SharedMediaTab::Media.index()];
     assert_eq!(media.status, SharedMediaTabStatus::Empty);
     assert!(media.items.is_empty());
     // Ready answer → Ready with items.
-    let generation = session.shared_media.begin_fetch(SharedMediaTab::Files);
+    let generation = session
+        .media
+        .shared_media
+        .begin_fetch(SharedMediaTab::Files);
     let extra = session.request(
         RequestPurpose::GetSharedMedia {
             tab: SharedMediaTab::Files,
@@ -50,12 +56,15 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
             extra.0
         ),
     );
-    let files = &session.shared_media.tabs[SharedMediaTab::Files.index()];
+    let files = &session.media.shared_media.tabs[SharedMediaTab::Files.index()];
     assert_eq!(files.status, SharedMediaTabStatus::Ready);
     assert_eq!(files.items.len(), 1);
     assert_eq!(files.items[0].label, "report.pdf");
     // Stale generation → dropped, tab keeps its old state.
-    let generation = session.shared_media.begin_fetch(SharedMediaTab::Music);
+    let generation = session
+        .media
+        .shared_media
+        .begin_fetch(SharedMediaTab::Music);
     let extra = session.request(
         RequestPurpose::GetSharedMedia {
             tab: SharedMediaTab::Music,
@@ -63,8 +72,8 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
         },
         Some(chat),
     );
-    session.shared_media.close();
-    session.shared_media.open_for(ChatId(12));
+    session.media.shared_media.close();
+    session.media.shared_media.open_for(ChatId(12));
     apply_json(
         &mut session,
         &seq,
@@ -74,10 +83,13 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
             extra.0
         ),
     );
-    let music = &session.shared_media.tabs[SharedMediaTab::Music.index()];
+    let music = &session.media.shared_media.tabs[SharedMediaTab::Music.index()];
     assert_eq!(music.status, SharedMediaTabStatus::Idle);
     // Error → Failed with the server text.
-    let generation = session.shared_media.begin_fetch(SharedMediaTab::Links);
+    let generation = session
+        .media
+        .shared_media
+        .begin_fetch(SharedMediaTab::Links);
     let extra = session.request(
         RequestPurpose::GetSharedMedia {
             tab: SharedMediaTab::Links,
@@ -94,7 +106,7 @@ fn shared_media_empty_ready_failed_and_stale_drop() {
             extra.0
         ),
     );
-    let links = &session.shared_media.tabs[SharedMediaTab::Links.index()];
+    let links = &session.media.shared_media.tabs[SharedMediaTab::Links.index()];
     assert_eq!(links.status, SharedMediaTabStatus::Failed);
     assert!(!links.error.is_empty());
 }
@@ -134,15 +146,15 @@ fn open_chat_closes_shared_media_gallery() {
     // B's conversation and row jumps resolve the message id against B);
     // the same-chat path leaves it open.
     let (mut session, _sink) = session();
-    session.shared_media.open_for(ChatId(11));
-    assert!(session.shared_media.open);
+    session.media.shared_media.open_for(ChatId(11));
+    assert!(session.media.shared_media.open);
     session.open_chat(ChatId(12));
-    assert!(!session.shared_media.open);
-    assert_eq!(session.shared_media.chat_id, None);
-    session.shared_media.open_for(ChatId(12));
+    assert!(!session.media.shared_media.open);
+    assert_eq!(session.media.shared_media.chat_id, None);
+    session.media.shared_media.open_for(ChatId(12));
     session.open_chat(ChatId(12));
-    assert!(session.shared_media.open);
-    assert_eq!(session.shared_media.chat_id, Some(ChatId(12)));
+    assert!(session.media.shared_media.open);
+    assert_eq!(session.media.shared_media.chat_id, Some(ChatId(12)));
 }
 
 fn found_documents(extra: RequestId, total: i32, next_from: i64, ids: &[i64]) -> String {
@@ -170,8 +182,8 @@ fn shared_media_pages_older_messages_for_the_viewer() {
     let seq = AtomicU64::new(1);
     let chat = ChatId(11);
     let tab = SharedMediaTab::Media;
-    session.shared_media.open_for(chat);
-    let generation = session.shared_media.begin_fetch(tab);
+    session.media.shared_media.open_for(chat);
+    let generation = session.media.shared_media.begin_fetch(tab);
     let extra = session.request(
         RequestPurpose::GetSharedMedia { tab, generation },
         Some(chat),
@@ -182,7 +194,7 @@ fn shared_media_pages_older_messages_for_the_viewer() {
         &sink,
         &found_documents(extra, 4, 150, &[200, 150]),
     );
-    let state = &session.shared_media.tabs[tab.index()];
+    let state = &session.media.shared_media.tabs[tab.index()];
     assert_eq!(state.status, SharedMediaTabStatus::Ready);
     assert_eq!(state.next_from, MessageId(150));
     assert!(state.can_load_more());
@@ -191,11 +203,11 @@ fn shared_media_pages_older_messages_for_the_viewer() {
         "the viewable tabs keep the messages"
     );
 
-    let (more_generation, from) = session.shared_media.begin_fetch_more(tab).unwrap();
+    let (more_generation, from) = session.media.shared_media.begin_fetch_more(tab).unwrap();
     assert_eq!(from, MessageId(150));
     assert_eq!(more_generation, generation, "paging keeps the generation");
     assert!(
-        session.shared_media.begin_fetch_more(tab).is_none(),
+        session.media.shared_media.begin_fetch_more(tab).is_none(),
         "one page in flight at a time"
     );
     let extra = session.request(
@@ -212,13 +224,13 @@ fn shared_media_pages_older_messages_for_the_viewer() {
         &sink,
         &found_documents(extra, 4, 0, &[150, 120, 100]),
     );
-    let state = &session.shared_media.tabs[tab.index()];
+    let state = &session.media.shared_media.tabs[tab.index()];
     let ids: Vec<i64> = state.items.iter().map(|item| item.message_id.0).collect();
     assert_eq!(ids, vec![200, 150, 120, 100]);
     assert_eq!(state.total_count, 4);
     assert!(!state.loading_more);
     assert!(!state.can_load_more(), "oldest message reached");
-    assert!(session.shared_media.begin_fetch_more(tab).is_none());
+    assert!(session.media.shared_media.begin_fetch_more(tab).is_none());
 }
 
 #[test]
@@ -227,8 +239,8 @@ fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
     let seq = AtomicU64::new(1);
     let chat = ChatId(11);
     let tab = SharedMediaTab::Media;
-    session.shared_media.open_for(chat);
-    let generation = session.shared_media.begin_fetch(tab);
+    session.media.shared_media.open_for(chat);
+    let generation = session.media.shared_media.begin_fetch(tab);
     let extra = session.request(
         RequestPurpose::GetSharedMedia { tab, generation },
         Some(chat),
@@ -239,7 +251,7 @@ fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
         &sink,
         &found_documents(extra, 9, 150, &[200, 150]),
     );
-    let (g, _) = session.shared_media.begin_fetch_more(tab).unwrap();
+    let (g, _) = session.media.shared_media.begin_fetch_more(tab).unwrap();
     let extra = session.request(
         RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation: g }),
         Some(chat),
@@ -253,7 +265,7 @@ fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
             extra.0
         ),
     );
-    let state = &session.shared_media.tabs[tab.index()];
+    let state = &session.media.shared_media.tabs[tab.index()];
     assert_eq!(state.status, SharedMediaTabStatus::Ready, "list stays");
     assert_eq!(state.items.len(), 2);
     assert!(
@@ -262,18 +274,22 @@ fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
     );
 
     // A page that lands after the gallery closed is dropped.
-    let (g, _) = session.shared_media.begin_fetch_more(tab).unwrap();
+    let (g, _) = session.media.shared_media.begin_fetch_more(tab).unwrap();
     let extra = session.request(
         RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { tab, generation: g }),
         Some(chat),
     );
-    session.shared_media.close();
-    session.shared_media.open_for(chat);
+    session.media.shared_media.close();
+    session.media.shared_media.open_for(chat);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &found_documents(extra, 9, 0, &[120]),
     );
-    assert!(session.shared_media.tabs[tab.index()].items.is_empty());
+    assert!(
+        session.media.shared_media.tabs[tab.index()]
+            .items
+            .is_empty()
+    );
 }

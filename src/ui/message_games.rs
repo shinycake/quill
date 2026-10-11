@@ -120,7 +120,7 @@ fn game_scores_panel(
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
     let row_id = message_id.0 as u64;
-    let scores = session.game_scores.get(&(chat_id.0, message_id.0))?;
+    let scores = session.bots.game_scores.get(&(chat_id.0, message_id.0))?;
     let mut panel = div()
         .id(("game-scores-panel", row_id))
         .flex()
@@ -184,10 +184,10 @@ impl QuillApp {
         if self
             .live
             .as_ref()
-            .is_some_and(|live| live.driver.session.game_scores.contains_key(&key))
+            .is_some_and(|live| live.driver.session.bots.game_scores.contains_key(&key))
         {
             if let Some(live) = self.live.as_mut() {
-                live.driver.session.game_scores.remove(&key);
+                live.driver.session.bots.game_scores.remove(&key);
             }
             cx.notify();
             return;
@@ -201,13 +201,13 @@ impl QuillApp {
             return;
         };
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.game_scores.insert(key, None);
+            live.driver.session.bots.game_scores.insert(key, None);
             live.driver
                 .send_game_high_scores(chat_id, message_id, user_id)
         });
         if !matches!(sent, Some(Ok(_))) {
             if let Some(live) = self.live.as_mut() {
-                live.driver.session.game_scores.remove(&key);
+                live.driver.session.bots.game_scores.remove(&key);
             }
             self.set_status_note("Couldn't reach Telegram; try again.", cx);
         }

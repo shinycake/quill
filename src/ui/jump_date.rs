@@ -49,7 +49,7 @@ impl QuillApp {
         } else if let Some(calendar) = self
             .demo_session
             .as_mut()
-            .and_then(|s| s.history_calendar.as_mut())
+            .and_then(|s| s.search.history_calendar.as_mut())
         {
             calendar.show_month(month);
         }
@@ -96,7 +96,10 @@ impl QuillApp {
     }
 
     pub(super) fn jump_date_body(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(calendar) = self.session().and_then(|s| s.history_calendar.clone()) else {
+        let Some(calendar) = self
+            .session()
+            .and_then(|s| s.search.history_calendar.clone())
+        else {
             return div().into_any_element();
         };
         let today = local_day_number(now_unix());
@@ -216,7 +219,7 @@ impl QuillApp {
                 calendar.media.label().to_lowercase()
             )
         };
-        let note = self.session().and_then(|s| s.date_jump_note.clone());
+        let note = self.session().and_then(|s| s.search.date_jump_note.clone());
         div()
             .id("jump-date")
             .mx_auto()
@@ -243,7 +246,7 @@ crate::ui::shell::register_dialogs! {
         // Slice parity:platform-shortcuts-reference: informational, lowest
         // priority.
         7100,
-        |app| app.session().is_some_and(|s| s.history_calendar.is_some()),
+        |app| app.session().is_some_and(|s| s.search.history_calendar.is_some()),
         QuillApp::build_jump_date_dialog,
     ),
 }

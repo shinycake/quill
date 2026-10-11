@@ -151,7 +151,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         option_index: usize,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let key = (chat_id.0, message_id.0, option_index as i32);
-        let offset = match self.session.poll_voters.get(&key) {
+        let offset = match self.session.messages.poll_voters.get(&key) {
             Some(PollVotersFetch::Loaded { voters, .. }) => voters.len() as i32,
             _ => return Ok(None),
         };
@@ -195,7 +195,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let key = (chat_id.0, message_id.0, option_index as i32);
         if matches!(
-            self.session.poll_voters.get(&key),
+            self.session.messages.poll_voters.get(&key),
             Some(PollVotersFetch::Loading)
         ) || self.session.requests.has_purpose_for_chat(
             RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
@@ -211,7 +211,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A "load more" must not clobber the loaded page while it flies.
         if offset > 0
             && !matches!(
-                self.session.poll_voters.get(&key),
+                self.session.messages.poll_voters.get(&key),
                 Some(PollVotersFetch::Loaded { .. })
             )
         {
@@ -219,6 +219,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if offset == 0 {
             self.session
+                .messages
                 .poll_voters
                 .insert(key, PollVotersFetch::Loading);
         }
@@ -244,7 +245,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 if offset == 0 {
-                    self.session.poll_voters.remove(&key);
+                    self.session.messages.poll_voters.remove(&key);
                 }
                 Err(err)
             }

@@ -357,7 +357,7 @@ fn driver_group_sticker_set_gates_and_shape() {
     let sent = recorder.snapshot().len();
     driver.load_group_sticker_choices(ChatId(10)).unwrap();
     assert_eq!(recorder.snapshot().len(), sent);
-    assert!(!driver.session.stickers.open && !driver.session.emoji.open);
+    assert!(!driver.session.stickers.stickers.open && !driver.session.stickers.emoji.open);
     let extra = driver
         .set_supergroup_sticker_set(ChatId(10), 1234567890123)
         .unwrap()

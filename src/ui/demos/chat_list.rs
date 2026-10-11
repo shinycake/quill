@@ -61,8 +61,8 @@ impl QuillApp {
         // Slice CL2: sidebar search showing the empty-result state.
         if let Some(session) = self.demo_session.as_mut() {
             session.open_search();
-            session.search.begin_query("xyzzy-no-such-chat");
-            session.search.status = SearchStatus::Empty;
+            session.search.search.begin_query("xyzzy-no-such-chat");
+            session.search.search.status = SearchStatus::Empty;
         }
         self.connection.status_note = "screenshot demo — search empty state".into();
     }

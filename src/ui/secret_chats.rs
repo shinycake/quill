@@ -20,7 +20,10 @@ impl QuillApp {
         let open = session.open_chat?;
         let chat = session.chats.get(&open.0)?;
         let secret_chat_id = chat.secret_chat_id()?;
-        let record = session.secret_chat_states.get(&secret_chat_id)?;
+        let record = session
+            .users_state
+            .secret_chat_states
+            .get(&secret_chat_id)?;
         let name = Self::secret_peer_name(Some(session), record.user_id, "Your contact");
         Some((name, record.layer))
     }

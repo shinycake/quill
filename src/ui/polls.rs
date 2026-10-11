@@ -248,6 +248,7 @@ impl QuillApp {
             self.session()
                 .and_then(|session| {
                     session
+                        .messages
                         .poll_voters
                         .get(&(chat_id.0, message_id.0, index as i32))
                 })
@@ -338,7 +339,7 @@ impl QuillApp {
     ) -> AnyElement {
         let fetch = self
             .session()
-            .and_then(|session| session.poll_stats.get(&(chat_id.0, message_id.0)))
+            .and_then(|session| session.messages.poll_stats.get(&(chat_id.0, message_id.0)))
             .cloned();
         let mut section = div().flex().flex_col().gap_1().pb_2();
         section = match fetch {

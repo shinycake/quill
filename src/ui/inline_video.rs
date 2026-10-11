@@ -574,7 +574,7 @@ impl QuillApp {
         if super::native_video::decodes_in_process() && !tile.within_inline_area() {
             return None;
         }
-        let file = session.files.get(&file_id.0)?;
+        let file = session.media.files.get(&file_id.0)?;
         if file.usable_path().is_none() {
             // Like Telegram Desktop, fetch a clip that should autoplay
             // (within a size cap) in the background; it starts once local.

@@ -37,10 +37,10 @@ impl Session {
                 if name == "disable_top_chats"
                     && let OptionValue::Boolean(off) = &value
                 {
-                    self.search.top_chats_disabled = *off;
+                    self.search.search.top_chats_disabled = *off;
                     if *off {
-                        self.search.top_chats.clear();
-                        self.search.top_menu = None;
+                        self.search.search.top_chats.clear();
+                        self.search.search.top_menu = None;
                     }
                 }
                 if name == "my_id"
@@ -67,13 +67,16 @@ impl Session {
                 }
                 if let OptionValue::Integer(limit) = &value {
                     match name.as_str() {
-                        "notification_sound_size_max" => self.tone_limits.max_size = *limit,
+                        "notification_sound_size_max" => {
+                            self.messages.tone_limits.max_size = *limit
+                        }
                         "notification_sound_duration_max" => {
-                            self.tone_limits.max_duration =
+                            self.messages.tone_limits.max_duration =
                                 (*limit).clamp(0, i64::from(i32::MAX)) as i32
                         }
                         "notification_sound_count_max" => {
-                            self.tone_limits.max_count = usize::try_from(*limit).unwrap_or(0)
+                            self.messages.tone_limits.max_count =
+                                usize::try_from(*limit).unwrap_or(0)
                         }
                         _ => {}
                     }
@@ -81,22 +84,23 @@ impl Session {
                 if name == "pending_text_message_period"
                     && let OptionValue::Integer(period) = &value
                 {
-                    self.pending_bot_period_secs = u64::try_from(*period).unwrap_or(0);
+                    self.messages.pending_bot_period_secs = u64::try_from(*period).unwrap_or(0);
                 }
                 if name == "animation_search_bot_username" {
                     let username = match &value {
                         OptionValue::String(name) => name.clone(),
                         _ => String::new(),
                     };
-                    if self.gifs.search_bot_username != username {
-                        self.gifs.search_bot_username = username;
-                        self.gifs.search_bot_user_id = None;
+                    if self.stickers.gifs.search_bot_username != username {
+                        self.stickers.gifs.search_bot_username = username;
+                        self.stickers.gifs.search_bot_user_id = None;
                     }
                 }
                 if name == "message_caption_length_max"
                     && let OptionValue::Integer(limit) = value
                 {
-                    self.message_caption_length_max = limit.max(0).min(i64::from(i32::MAX)) as i32;
+                    self.messages.message_caption_length_max =
+                        limit.max(0).min(i64::from(i32::MAX)) as i32;
                 }
                 // R8: plain-text limit (tdesktop `messageLengthCurrent`).
                 // A zero or negative value would make every send look
@@ -104,7 +108,8 @@ impl Session {
                 if name == "message_text_length_max"
                     && let OptionValue::Integer(limit) = value
                 {
-                    self.message_text_length_max = limit.clamp(1, i64::from(i32::MAX)) as i32;
+                    self.messages.message_text_length_max =
+                        limit.clamp(1, i64::from(i32::MAX)) as i32;
                 }
                 // Slice CL1: pin-limit options (schema:13674) for the
                 // client-side pin pre-check.
@@ -131,7 +136,8 @@ impl Session {
                     pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
-                    self.chat_media_counts
+                    self.media
+                        .chat_media_counts
                         .entry(chat_id.0)
                         .or_default()
                         .insert(filter, count);
@@ -168,7 +174,7 @@ impl Session {
                 // B1: `getLoginUrl` returns `httpUrl` too (schema 1.8.67,
                 // line 7458) — the authorized URL after consent.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {
-                    self.last_login_url_info = Some(LoginUrlInfo::Open { url });
+                    self.bots.last_login_url_info = Some(LoginUrlInfo::Open { url });
                 }
             }
             // Slice msg-richtext-ai-tools: `fixedText` / `formattedText`

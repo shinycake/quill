@@ -1304,6 +1304,7 @@ impl QuillApp {
                             .driver
                             .session
                             .stickers
+                            .stickers
                             .sets
                             .iter()
                             .map(|set| set.id)
@@ -1794,7 +1795,7 @@ impl QuillApp {
                     ),
                     GroupConfirmAction::RemoveInstalledStickerSets => (
                         "Remove installed sticker sets".to_string(),
-                        format!("Remove all {} installed sticker sets? You can install them again later.",this.session().map(|s|s.stickers.sets.len()).unwrap_or(0)),
+                        format!("Remove all {} installed sticker sets? You can install them again later.",this.session().map(|s|s.stickers.stickers.sets.len()).unwrap_or(0)),
                         "Remove all".to_string(),
                     ),
                     GroupConfirmAction::RemoveEmojiSet { .. } => ("Remove emoji pack".to_string(),"Remove this emoji pack? You can install it again later.".to_string(),"Remove".to_string()),

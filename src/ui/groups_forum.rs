@@ -344,7 +344,7 @@ impl QuillApp {
         let path_for = |sticker: &quill::telegram::envelope::StickerItem| {
             sticker
                 .display_file_id()
-                .and_then(|id| session.and_then(|s| s.files.get(&id.0)))
+                .and_then(|id| session.and_then(|s| s.media.files.get(&id.0)))
                 .and_then(|file| file.usable_path())
                 .and_then(|path| sandboxed_display_path(path, &roots))
         };

@@ -23,7 +23,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.installed_loaded
+        if !self.session.stickers.stickers.installed_loaded
             && !self
                 .session
                 .requests
@@ -37,7 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(err);
             }
         }
-        if self.session.emoji.installed_sets.is_empty()
+        if self.session.stickers.emoji.installed_sets.is_empty()
             && !self
                 .session
                 .requests
@@ -56,7 +56,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(err);
             }
         }
-        if self.session.stickers.recent.is_empty()
+        if self.session.stickers.stickers.recent.is_empty()
             && !self
                 .session
                 .requests
@@ -70,7 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(err);
             }
         }
-        if self.session.stickers.favorites.is_empty() {
+        if self.session.stickers.stickers.favorites.is_empty() {
             self.sticker_request_favorites()?;
         }
         Ok(())
@@ -91,7 +91,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
-            self.session.media_library.loading.insert(set_id);
+            self.session.media.media_library.loading.insert(set_id);
         }
         Ok(())
     }
@@ -119,13 +119,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
+            .stickers
             .message_reaction_options
             .as_ref()
             .is_some_and(|o| o.chat_id == chat_id && o.message_id == message_id)
         {
             return Ok(None);
         }
-        self.session.message_reaction_options = None;
+        self.session.stickers.message_reaction_options = None;
         let purpose = RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
             message_id: message_id.0,
         });
@@ -158,7 +159,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.message_menu_actions = None;
+        self.session.messages.message_menu_actions = None;
         let extra = self.session.request(
             RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
                 chat_id,
@@ -202,7 +203,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, value,
             )) {
             Ok(()) => {
-                self.session.default_reaction = Some(choice.clone());
+                self.session.stickers.default_reaction = Some(choice.clone());
                 Ok(extra)
             }
             Err(err) => {

@@ -42,7 +42,7 @@ fn inline_rows(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Vec<InlineRow>>
     let text = app.composer.read(cx).value().to_string();
     let (username, query) = inline_query_trigger(&text)?;
     let session = app.session()?;
-    let rows = match &session.inline_bot_resolve {
+    let rows = match &session.bots.inline_bot_resolve {
         None | Some(InlineBotResolve::Resolving { .. }) => {
             vec![InlineRow::Status(format!("Resolving @{username}…"))]
         }
@@ -58,7 +58,7 @@ fn inline_rows(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Vec<InlineRow>>
         // attempt itself is the capability check).
         Some(InlineBotResolve::Resolved { user_id, .. }) => {
             let chat_id = app.open_chat_id()?;
-            let slot = session.inline_query.as_ref().filter(|slot| {
+            let slot = session.bots.inline_query.as_ref().filter(|slot| {
                 slot.chat_id == chat_id && slot.bot_user_id == *user_id && slot.query == query
             });
             match slot.map(|slot| &slot.fetch) {
@@ -143,7 +143,10 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let username_changed = match self.session().and_then(|s| s.inline_bot_resolve.as_ref()) {
+        let username_changed = match self
+            .session()
+            .and_then(|s| s.bots.inline_bot_resolve.as_ref())
+        {
             Some(InlineBotResolve::Resolving { username: u, .. })
             | Some(InlineBotResolve::Resolved { username: u, .. })
             | Some(InlineBotResolve::Failed { username: u, .. }) => u != username,
@@ -160,7 +163,8 @@ impl QuillApp {
         // Same username: only bots with inline mode (or unknown
         // capability) get a debounced query.
         let proceed = matches!(
-            self.session().and_then(|s| s.inline_bot_resolve.as_ref()),
+            self.session()
+                .and_then(|s| s.bots.inline_bot_resolve.as_ref()),
             Some(InlineBotResolve::Resolved {
                 is_inline: Some(true) | None,
                 ..
@@ -194,7 +198,7 @@ impl QuillApp {
         };
         let resolved_same = self
             .session()
-            .and_then(|s| s.inline_bot_resolve.as_ref())
+            .and_then(|s| s.bots.inline_bot_resolve.as_ref())
             .is_some_and(|r| match r {
                 InlineBotResolve::Resolved {
                     username: u,
@@ -230,13 +234,13 @@ impl QuillApp {
         };
         match hit {
             Some((_, false, _)) => {
-                live.driver.session.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                live.driver.session.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
                     username: username.to_string(),
                     reason: format!("@{username} is not a bot"),
                 });
             }
             Some((user_id, true, is_inline)) => {
-                live.driver.session.inline_bot_resolve = Some(InlineBotResolve::Resolved {
+                live.driver.session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
                     username: username.to_string(),
                     user_id,
                     is_inline: Some(is_inline),
@@ -244,7 +248,7 @@ impl QuillApp {
             }
             None => {
                 if live.driver.resolve_inline_bot(username).is_err() {
-                    live.driver.session.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                    live.driver.session.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
                         username: username.to_string(),
                         reason: "could not look up the bot".to_string(),
                     });
@@ -259,7 +263,7 @@ impl QuillApp {
     fn maybe_dispatch_inline_query(&mut self, username: &str, query: &str, cx: &mut Context<Self>) {
         let (user_id, chat_id) = match (
             self.session()
-                .and_then(|s| s.inline_bot_resolve.as_ref())
+                .and_then(|s| s.bots.inline_bot_resolve.as_ref())
                 .and_then(|r| match r {
                     InlineBotResolve::Resolved { user_id, .. } => Some(*user_id),
                     _ => None,
@@ -271,7 +275,7 @@ impl QuillApp {
         };
         let fresh = self
             .session()
-            .and_then(|s| s.inline_query.as_ref())
+            .and_then(|s| s.bots.inline_query.as_ref())
             .is_some_and(|slot| {
                 slot.chat_id == chat_id && slot.bot_user_id == user_id && slot.query == query
             });
@@ -394,7 +398,7 @@ impl QuillApp {
                 };
                 let (user_id, chat_id, offset) = match (
                     self.session()
-                        .and_then(|s| s.inline_bot_resolve.as_ref())
+                        .and_then(|s| s.bots.inline_bot_resolve.as_ref())
                         .and_then(|r| match r {
                             InlineBotResolve::Resolved { user_id, .. } => Some(*user_id),
                             _ => None,

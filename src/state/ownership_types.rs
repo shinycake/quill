@@ -136,6 +136,7 @@ impl Session {
         user_id: i64,
     ) {
         let Some(audience) = self
+            .messages
             .message_audience
             .as_mut()
             .filter(|a| a.chat_id == chat_id && a.message_id == message_id)
@@ -213,9 +214,10 @@ mod tests {
             reactions: vec![reaction(8), reaction(9)],
             next_offset: String::new(),
         });
-        session.message_audience = Some(audience);
+        session.messages.message_audience = Some(audience);
         session.drop_reactor_from_audience(chat, msg, 8);
         let page = session
+            .messages
             .message_audience
             .as_ref()
             .unwrap()
@@ -228,6 +230,7 @@ mod tests {
         session.drop_reactor_from_audience(chat, MessageId(51), 9);
         assert_eq!(
             session
+                .messages
                 .message_audience
                 .unwrap()
                 .reactions

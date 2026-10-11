@@ -308,6 +308,7 @@ pub(in crate::ui) fn download_display_name(session: &Session, file_id: i32) -> S
         }
     }
     session
+        .media
         .files
         .get(&file_id)
         .and_then(|f| f.usable_path())

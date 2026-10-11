@@ -278,7 +278,7 @@ impl QuillApp {
         let reply = self.composer_ui.pending_reply.as_ref()?;
         let session = self.session()?;
         let query = self.share.search_input.read(cx).value().to_string();
-        let searching = session.share_search.is_searching();
+        let searching = session.messages.share_search.is_searching();
         let secret = |id: ChatId| {
             session
                 .chats

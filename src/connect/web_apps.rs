@@ -35,12 +35,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: Option<ChatId>,
         source: LaunchSource,
     ) {
-        self.session.web_apps.pending = Some(WebAppPending {
+        self.session.bots.web_apps.pending = Some(WebAppPending {
             bot_user_id,
             chat_id: chat_id.map(|id| id.0),
             source,
         });
-        self.session.web_apps.open_result = None;
+        self.session.bots.web_apps.open_result = None;
     }
 
     /// `openWebApp` from a menu button, an inline `web_app` button or an
@@ -154,7 +154,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }),
             None,
         )?;
-        self.session.web_apps.found = None;
+        self.session.bots.web_apps.found = None;
         let json = search_web_app(extra, bot_user_id, short_name);
         self.send_json_request(extra, &json)
     }
@@ -178,7 +178,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         data: &str,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(RequestPurpose::SendWebAppData, None)?;
-        self.session.web_apps.data_sent = None;
+        self.session.bots.web_apps.data_sent = None;
         let json = send_web_app_data(extra, bot_user_id, button_text, data);
         self.send_json_request(extra, &json)
     }
@@ -192,7 +192,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }),
             None,
         )?;
-        self.session.web_apps.write_access = None;
+        self.session.bots.web_apps.write_access = None;
         let json = can_bot_send_messages(extra, bot_user_id);
         self.send_json_request(extra, &json)
     }
@@ -206,7 +206,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }),
             None,
         )?;
-        self.session.web_apps.write_access = None;
+        self.session.bots.web_apps.write_access = None;
         let json = allow_bot_to_send_messages(extra, bot_user_id);
         self.send_json_request(extra, &json)
     }
@@ -220,7 +220,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { bot_user_id }),
             None,
         )?;
-        self.session.web_apps.attachment_menu_bot = None;
+        self.session.bots.web_apps.attachment_menu_bot = None;
         let json = get_attachment_menu_bot(extra, bot_user_id);
         self.send_json_request(extra, &json)
     }
@@ -236,7 +236,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { bot_user_id, added }),
             None,
         )?;
-        self.session.web_apps.attachment_menu_toggled = None;
+        self.session.bots.web_apps.attachment_menu_toggled = None;
         let json =
             toggle_bot_is_added_to_attachment_menu(extra, bot_user_id, added, allow_write_access);
         self.send_json_request(extra, &json)
@@ -245,9 +245,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `getGrossingWebAppBots` for the Apps tab; once per session unless
     /// it failed.
     pub fn fetch_grossing_web_app_bots(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.web_apps.grossing_loading
+        if self.session.bots.web_apps.grossing_loading
             || self
                 .session
+                .bots
                 .web_apps
                 .grossing_bots
                 .as_ref()
@@ -256,12 +257,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.web_app_extra(RequestPurpose::GetGrossingWebAppBots, None)?;
-        self.session.web_apps.grossing_loading = true;
+        self.session.bots.web_apps.grossing_loading = true;
         let json = get_grossing_web_app_bots(extra, GROSSING_APPS_LIMIT);
         match self.send_json_request(extra, &json) {
             Ok(id) => Ok(Some(id)),
             Err(err) => {
-                self.session.web_apps.grossing_loading = false;
+                self.session.bots.web_apps.grossing_loading = false;
                 Err(err)
             }
         }
@@ -278,6 +279,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.web_app_extra(RequestPurpose::SendWebAppCustomRequest, None)?;
         self.session
+            .bots
             .web_apps
             .custom_requests
             .insert(extra.0, req_id.to_string());
@@ -285,7 +287,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.send_json_request(extra, &json) {
             Ok(id) => Ok(id),
             Err(err) => {
-                self.session.web_apps.custom_requests.remove(&extra.0);
+                self.session.bots.web_apps.custom_requests.remove(&extra.0);
                 Err(err)
             }
         }

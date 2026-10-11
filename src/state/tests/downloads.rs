@@ -158,7 +158,7 @@ fn download_error_unsticks_in_flight_file() {
         ),
     );
     assert!(session.should_download(FileId(4)));
-    assert!(!session.downloading.contains(&4));
+    assert!(!session.media.downloading.contains(&4));
     assert!(!sink.rendered().contains("CANARY_FILE_ERR"));
 }
 
@@ -177,7 +177,7 @@ fn download_unsticks_after_file_extra_then_idle_update_or_error() {
     );
     assert!(session.requests.take(extra).is_none());
     assert!(!session.should_download(FileId(4)));
-    assert!(session.downloading.contains(&4));
+    assert!(session.media.downloading.contains(&4));
     apply_json(
         &mut session,
         &seq,
@@ -188,7 +188,7 @@ fn download_unsticks_after_file_extra_then_idle_update_or_error() {
         ),
     );
     assert!(session.should_download(FileId(4)));
-    assert!(!session.downloading.contains(&4));
+    assert!(!session.media.downloading.contains(&4));
 
     let extra = session.request_download(FileId(5));
     session.begin_download(FileId(5));
@@ -209,7 +209,7 @@ fn download_unsticks_after_file_extra_then_idle_update_or_error() {
         ),
     );
     assert!(session.should_download(FileId(5)));
-    assert!(!session.downloading.contains(&5));
+    assert!(!session.media.downloading.contains(&5));
     assert!(!sink.rendered().contains("CANARY_FILE_ERR2"));
 }
 
@@ -329,7 +329,7 @@ fn auto_download_skips_files_over_size_cap() {
     );
     assert_eq!(session.auto_download_media_file_ids(), vec![FileId(4)]);
     // File 4 balloons past the cap: skipped from here on.
-    session.files.get_mut(&4).unwrap().size = 100 * 1024 * 1024;
+    session.media.files.get_mut(&4).unwrap().size = 100 * 1024 * 1024;
     assert!(session.auto_download_media_file_ids().is_empty());
 }
 
@@ -350,25 +350,26 @@ fn completed_user_downloads_land_in_recent_list() {
     };
     // User-initiated download completing → recorded.
     session.begin_download(FileId(7));
-    session.user_downloads.insert(7);
+    session.media.user_downloads.insert(7);
     session.upsert_file(completed(7), true);
     // Automatic thumb completing → not recorded.
     session.begin_download(FileId(8));
     session.upsert_file(completed(8), true);
     assert_eq!(
         session
+            .media
             .completed_downloads
             .iter()
             .copied()
             .collect::<Vec<_>>(),
         vec![7]
     );
-    assert!(!session.downloading.contains(&7));
-    assert!(!session.user_downloads.contains(&7));
+    assert!(!session.media.downloading.contains(&7));
+    assert!(!session.media.user_downloads.contains(&7));
     // begin_download clears a recorded failure (retry path).
-    session.failed_downloads.insert(9);
+    session.media.failed_downloads.insert(9);
     session.begin_download(FileId(9));
-    assert!(!session.failed_downloads.contains(&9));
+    assert!(!session.media.failed_downloads.contains(&9));
 }
 
 #[test]
@@ -386,20 +387,20 @@ fn stalled_user_download_marks_failed_but_cancel_does_not() {
     let seq = AtomicU64::new(0);
     // Stalled: in-flight, then idle without completing.
     session.begin_download(FileId(12));
-    session.user_downloads.insert(12);
+    session.media.user_downloads.insert(12);
     apply_json(&mut session, &seq, &sink, &update_file(12, true));
-    assert!(!session.failed_downloads.contains(&12));
+    assert!(!session.media.failed_downloads.contains(&12));
     apply_json(&mut session, &seq, &sink, &update_file(12, false));
-    assert!(session.failed_downloads.contains(&12));
-    assert!(!session.downloading.contains(&12));
-    assert!(!session.user_downloads.contains(&12));
+    assert!(session.media.failed_downloads.contains(&12));
+    assert!(!session.media.downloading.contains(&12));
+    assert!(!session.media.user_downloads.contains(&12));
     // Cancelled: abort first, then the idle echo arrives.
     session.begin_download(FileId(13));
-    session.user_downloads.insert(13);
+    session.media.user_downloads.insert(13);
     session.abort_download(FileId(13));
     apply_json(&mut session, &seq, &sink, &update_file(13, true));
     apply_json(&mut session, &seq, &sink, &update_file(13, false));
-    assert!(!session.failed_downloads.contains(&13));
+    assert!(!session.media.failed_downloads.contains(&13));
 }
 
 #[test]
@@ -411,26 +412,26 @@ fn update_file_download_tracks_pause_and_completion() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.begin_download(FileId(31));
-    session.user_downloads.insert(31);
+    session.media.user_downloads.insert(31);
     let update = |paused: bool, complete: i32| {
         format!(
             r#"{{"@type":"updateFileDownload","file_id":31,"complete_date":{complete},"is_paused":{paused},"counts":{{"@type":"downloadedFileCounts","being_downloaded":1,"recently_downloaded":0}}}}"#,
         )
     };
     apply_json(&mut session, &seq, &sink, &update(true, 0));
-    assert!(session.paused_downloads.contains(&31));
-    assert!(session.user_downloads.contains(&31));
-    assert!(session.downloading.contains(&31));
+    assert!(session.media.paused_downloads.contains(&31));
+    assert!(session.media.user_downloads.contains(&31));
+    assert!(session.media.downloading.contains(&31));
     apply_json(&mut session, &seq, &sink, &update(false, 0));
-    assert!(!session.paused_downloads.contains(&31));
-    assert!(session.user_downloads.contains(&31));
+    assert!(!session.media.paused_downloads.contains(&31));
+    assert!(session.media.user_downloads.contains(&31));
     // Completion: recent list + full unstick (paused cleared too).
-    session.paused_downloads.insert(31);
+    session.media.paused_downloads.insert(31);
     apply_json(&mut session, &seq, &sink, &update(false, 1723456789));
-    assert!(session.completed_downloads.contains(&31));
-    assert!(!session.user_downloads.contains(&31));
-    assert!(!session.downloading.contains(&31));
-    assert!(!session.paused_downloads.contains(&31));
+    assert!(session.media.completed_downloads.contains(&31));
+    assert!(!session.media.user_downloads.contains(&31));
+    assert!(!session.media.downloading.contains(&31));
+    assert!(!session.media.paused_downloads.contains(&31));
 }
 
 #[test]
@@ -448,9 +449,9 @@ fn update_file_download_ignores_non_user_downloads() {
         )
     };
     apply_json(&mut session, &seq, &sink, &update(true, 0));
-    assert!(!session.paused_downloads.contains(&32));
+    assert!(!session.media.paused_downloads.contains(&32));
     apply_json(&mut session, &seq, &sink, &update(false, 1723456789));
-    assert!(!session.completed_downloads.contains(&32));
+    assert!(!session.media.completed_downloads.contains(&32));
 }
 
 #[test]
@@ -463,7 +464,7 @@ fn download_file_error_marks_failed_download() {
     let seq = AtomicU64::new(0);
     let extra = session.request_download(FileId(11));
     session.begin_download(FileId(11));
-    session.user_downloads.insert(11);
+    session.media.user_downloads.insert(11);
     apply_json(
         &mut session,
         &seq,
@@ -473,8 +474,8 @@ fn download_file_error_marks_failed_download() {
             extra.0
         ),
     );
-    assert!(!session.downloading.contains(&11));
-    assert!(session.failed_downloads.contains(&11));
+    assert!(!session.media.downloading.contains(&11));
+    assert!(session.media.failed_downloads.contains(&11));
     // Automatic download: unstuck, but not recorded as failed.
     let extra = session.request_download(FileId(12));
     session.begin_download(FileId(12));
@@ -487,8 +488,8 @@ fn download_file_error_marks_failed_download() {
             extra.0
         ),
     );
-    assert!(!session.downloading.contains(&12));
-    assert!(!session.failed_downloads.contains(&12));
+    assert!(!session.media.downloading.contains(&12));
+    assert!(!session.media.failed_downloads.contains(&12));
 }
 
 #[test]
@@ -538,7 +539,7 @@ fn paused_download_survives_idle_file_updates_in_either_order() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
         session.begin_download(FileId(31));
-        session.user_downloads.insert(31);
+        session.media.user_downloads.insert(31);
         let pause =
             r#"{"@type":"updateFileDownload","file_id":31,"complete_date":0,"is_paused":true}"#;
         if pause_first {
@@ -562,17 +563,17 @@ fn paused_download_survives_idle_file_updates_in_either_order() {
         if !pause_first {
             apply_json(&mut session, &seq, &sink, pause);
         }
-        assert!(session.user_downloads.contains(&31));
-        assert!(session.downloading.contains(&31));
-        assert!(session.paused_downloads.contains(&31));
-        assert!(!session.failed_downloads.contains(&31));
+        assert!(session.media.user_downloads.contains(&31));
+        assert!(session.media.downloading.contains(&31));
+        assert!(session.media.paused_downloads.contains(&31));
+        assert!(!session.media.failed_downloads.contains(&31));
         apply_json(
             &mut session,
             &seq,
             &sink,
             r#"{"@type":"updateFileDownload","file_id":31,"complete_date":0,"is_paused":false}"#,
         );
-        assert!(session.user_downloads.contains(&31));
-        assert!(!session.paused_downloads.contains(&31));
+        assert!(session.media.user_downloads.contains(&31));
+        assert!(!session.media.paused_downloads.contains(&31));
     }
 }

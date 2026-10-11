@@ -199,9 +199,11 @@ impl Session {
     /// `secret_chat_fetch_queue`.
     pub(crate) fn accept_secret_chat(&mut self, secret_chat: &ParsedSecretChat) {
         let state = secret_chat.state.clone();
-        self.secret_chat_states
+        self.users_state
+            .secret_chat_states
             .insert(secret_chat.id, secret_chat.clone());
-        self.secret_chat_fetch_queue
+        self.users_state
+            .secret_chat_fetch_queue
             .retain(|id| *id != secret_chat.id);
         for chat in self.chats.values_mut() {
             if let ChatKind::Secret { secret_chat_id, .. } = &chat.kind

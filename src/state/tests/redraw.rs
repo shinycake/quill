@@ -167,9 +167,9 @@ fn automatic_downloads_redraw_later_and_user_downloads_now() {
             r#"{{"@type":"updateFile","file":{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":8}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}}}}"#
         )
     };
-    session.downloading.insert(5);
+    session.media.downloading.insert(5);
     assert_eq!(need(&session, &progress(5)), RedrawNeed::Later);
-    session.user_downloads.insert(5);
+    session.media.user_downloads.insert(5);
     assert_eq!(need(&session, &progress(5)), RedrawNeed::Now);
     // Not a download of ours (an upload in flight): at once.
     assert_eq!(need(&session, &progress(6)), RedrawNeed::Now);
@@ -352,7 +352,7 @@ fn group_records_and_online_counts_redraw_now_for_the_open_group() {
 #[test]
 fn a_finished_download_redraws_now_wherever_it_shows() {
     let mut session = two_chats();
-    session.downloading.insert(5);
+    session.media.downloading.insert(5);
     // An avatar or thumbnail in flight draws nothing yet.
     assert_eq!(need(&session, &file(5, false)), RedrawNeed::Later);
     // The update that completes it shows the picture at once.
@@ -362,8 +362,8 @@ fn a_finished_download_redraws_now_wherever_it_shows() {
 #[test]
 fn the_open_chats_media_downloads_show_live_progress() {
     let mut session = two_chats();
-    session.downloading.insert(5);
-    session.open_chat_media_downloads.insert(5);
+    session.media.downloading.insert(5);
+    session.media.open_chat_media_downloads.insert(5);
     assert_eq!(need(&session, &file(5, false)), RedrawNeed::Now);
 }
 
@@ -372,6 +372,6 @@ fn download_manager_updates_redraw_now_for_downloads_the_user_started() {
     let mut session = two_chats();
     let download = r#"{"@type":"updateFileDownload","file_id":31,"complete_date":0,"is_paused":false,"counts":{"@type":"downloadedFileCounts","being_downloaded":1,"recently_downloaded":0}}"#;
     assert_eq!(need(&session, download), RedrawNeed::Later);
-    session.user_downloads.insert(31);
+    session.media.user_downloads.insert(31);
     assert_eq!(need(&session, download), RedrawNeed::Now);
 }

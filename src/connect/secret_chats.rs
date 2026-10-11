@@ -70,10 +70,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let queued: Vec<i32> = std::mem::take(&mut self.session.secret_chat_fetch_queue);
+        let queued: Vec<i32> =
+            std::mem::take(&mut self.session.users_state.secret_chat_fetch_queue);
         for secret_chat_id in queued {
             if self
                 .session
+                .users_state
                 .secret_chat_states
                 .contains_key(&secret_chat_id)
             {
@@ -84,7 +86,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .has_pending_for_secret_chat(RequestPurpose::GetSecretChat, secret_chat_id);
             if in_flight {
-                self.session.secret_chat_fetch_queue.push(secret_chat_id);
+                self.session
+                    .users_state
+                    .secret_chat_fetch_queue
+                    .push(secret_chat_id);
                 continue;
             }
             let extra = self
@@ -95,7 +100,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&get_secret_chat(extra, secret_chat_id))
             {
                 self.session.requests.take(extra);
-                self.session.secret_chat_fetch_queue.push(secret_chat_id);
+                self.session
+                    .users_state
+                    .secret_chat_fetch_queue
+                    .push(secret_chat_id);
                 return Err(err);
             }
         }

@@ -7,7 +7,7 @@ impl Session {
             self.requests.invalidate_auth();
             // Download requests were dropped and files may be cleared
             // below: every avatar gets one fresh look.
-            self.avatar_rescan = true;
+            self.media.avatar_rescan = true;
         }
         if matches!(
             state,
@@ -37,24 +37,24 @@ impl Session {
             self.shutdown = ShutdownPhase::Closed;
             self.requests.invalidate_account();
             self.account_generation.bump();
-            self.files.clear();
-            self.downloading.clear();
-            self.stalled_auto_downloads.clear();
-            self.download_extras.clear();
-            self.search.close();
-            self.chat_search.close();
-            self.in_flight_forward = None;
-            self.queued_forward_flights.clear();
+            self.media.files.clear();
+            self.media.downloading.clear();
+            self.media.stalled_auto_downloads.clear();
+            self.media.download_extras.clear();
+            self.search.search.close();
+            self.search.chat_search.close();
+            self.messages.in_flight_forward = None;
+            self.messages.queued_forward_flights.clear();
             self.chats_state.chat_message_sender.clear();
             self.chats_state.send_as_options.clear();
-            self.share_search = ShareSearch::default();
-            self.last_forward = None;
+            self.messages.share_search = ShareSearch::default();
+            self.messages.last_forward = None;
         }
         if matches!(state, AuthorizationState::LoggingOut) {
             self.requests.invalidate_account();
-            self.search.close();
-            self.chat_search.close();
-            self.in_flight_forward = None;
+            self.search.search.close();
+            self.search.chat_search.close();
+            self.messages.in_flight_forward = None;
         }
         if matches!(state, AuthorizationState::Closing) {
             self.shutdown = ShutdownPhase::WaitingClosed;
@@ -165,7 +165,7 @@ impl Session {
             && !game.short_name.is_empty()
             && let Some(bot_id) = self.bot_user_id_for_chat(chat_id)
         {
-            let games = self.bot_games.entry(bot_id).or_default();
+            let games = self.bots.bot_games.entry(bot_id).or_default();
             if !games.iter().any(|g| g.short_name == game.short_name) {
                 games.push(GameInfo {
                     short_name: game.short_name.clone(),
@@ -253,7 +253,8 @@ impl Session {
     /// Record a loaded poll row in `poll_messages` (see `apply_update_poll`).
     pub(crate) fn index_poll(&mut self, message: &HistoryMessage) {
         if let MessageContent::Poll(content) = &message.content {
-            self.poll_messages
+            self.messages
+                .poll_messages
                 .entry(content.poll.id)
                 .or_default()
                 .insert((message.chat_id.0, message.id.0));

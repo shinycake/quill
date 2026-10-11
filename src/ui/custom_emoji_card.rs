@@ -20,7 +20,8 @@ impl QuillApp {
         let set_id = self
             .session()
             .and_then(|s| {
-                s.emoji
+                s.stickers
+                    .emoji
                     .custom_emoji_stickers
                     .iter()
                     .find(|item| item.custom_emoji_id == Some(emoji_id))
@@ -38,9 +39,9 @@ impl QuillApp {
 
     fn clear_custom_emoji_preview(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.custom_emoji_preview = None;
+            live.driver.session.stickers.custom_emoji_preview = None;
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.custom_emoji_preview = None;
+            session.stickers.custom_emoji_preview = None;
         }
         self.message_ui.custom_emoji_card_seen = None;
         cx.notify();
@@ -49,7 +50,7 @@ impl QuillApp {
     /// The card, while a tapped emoji's pack is known. A new card starts
     /// its own timer.
     pub(super) fn custom_emoji_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let preview: CustomEmojiPreview = self.session()?.custom_emoji_preview.clone()?;
+        let preview: CustomEmojiPreview = self.session()?.stickers.custom_emoji_preview.clone()?;
         if self.message_ui.custom_emoji_card_seen.as_ref() != Some(&preview) {
             self.message_ui.custom_emoji_card_seen = Some(preview.clone());
             let shown = preview.clone();

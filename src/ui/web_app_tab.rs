@@ -23,6 +23,7 @@ impl QuillApp {
         let session = self.session()?;
         let user = session.users.get(&bot_id)?;
         let subtitle = session
+            .bots
             .bot_info
             .get(&bot_id)
             .and_then(|info| info.as_ref())
@@ -57,9 +58,9 @@ impl QuillApp {
     /// The chip that reaches the tab from the empty, focused search.
     pub(super) fn apps_entry_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.search.recents
-            || !session.search.query.trim().is_empty()
-            || session.search.filters.scope == SearchScope::Apps
+        if !session.search.search.recents
+            || !session.search.search.query.trim().is_empty()
+            || session.search.search.filters.scope == SearchScope::Apps
         {
             return None;
         }
@@ -74,8 +75,10 @@ impl QuillApp {
                         .small()
                         .tooltip("Mini apps you use and the most popular ones")
                         .on_click(cx.listener(|this, _, _, cx| {
-                            let mut next =
-                                this.session().map(|s| s.search.filters).unwrap_or_default();
+                            let mut next = this
+                                .session()
+                                .map(|s| s.search.search.filters)
+                                .unwrap_or_default();
                             next.scope = SearchScope::Apps;
                             this.set_search_filters(next, cx);
                         })),
@@ -91,6 +94,7 @@ impl QuillApp {
             .session()
             .map(|session| {
                 let used: Vec<i64> = session
+                    .bots
                     .web_apps
                     .attachment_menu_bots
                     .iter()
@@ -99,8 +103,8 @@ impl QuillApp {
                     .collect();
                 (
                     used,
-                    session.web_apps.grossing_bots.clone(),
-                    session.web_apps.grossing_loading,
+                    session.bots.web_apps.grossing_bots.clone(),
+                    session.bots.web_apps.grossing_loading,
                 )
             })
             .unwrap_or((Vec::new(), None, false));

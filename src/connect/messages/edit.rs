@@ -19,12 +19,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !supported {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // M1: scheduled sends live in `session.scheduled_messages`
+        // M1: scheduled sends live in `session.messages.scheduled_messages`
         // (`ParsedMessage`, never pending), not in history
         // (`HistoryMessage`) — same `editMessageText` request, different
         // validation source.
         let owned = if edit.scheduled {
             self.session
+                .messages
                 .scheduled_messages
                 .iter()
                 .find(|m| m.chat_id == edit.chat_id && m.id == edit.message_id)
@@ -56,7 +57,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // R8: text edits are bounded by `message_text_length_max`
         // (counted after markup parsing, in UTF-16 units).
         if matches!(edit.kind, ComposerEditKind::Text) {
-            let limit = self.session.message_text_length_max;
+            let limit = self.session.messages.message_text_length_max;
             if crate::text_split::units_over_limit(caption, limit) > 0 {
                 return Err(ConnectSendError::TextTooLong { limit });
             }
@@ -155,11 +156,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // M1: delete a scheduled send. Scheduled messages live in
-        // `session.scheduled_messages`, not in history, so the
+        // `session.messages.scheduled_messages`, not in history, so the
         // history-validated `delete_confirmed` can't take them. `revoke`
         // is always false (no for-everyone distinction before sending).
         let known = self
             .session
+            .messages
             .scheduled_messages
             .iter()
             .any(|m| m.chat_id == chat_id && m.id == message_id);
@@ -193,6 +195,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let known = self
             .session
+            .messages
             .scheduled_messages
             .iter()
             .any(|m| m.chat_id == chat_id && m.id == message_id);
@@ -253,7 +256,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// M1: load a chat's scheduled (pending) sends into
-    /// `session.scheduled_messages` (TDLib 1.8.67,
+    /// `session.messages.scheduled_messages` (TDLib 1.8.67,
     /// `schema/td_api.tl:12000`).
     pub fn get_chat_scheduled_messages(
         &mut self,

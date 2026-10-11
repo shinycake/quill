@@ -460,6 +460,7 @@ impl QuillApp {
             _ => AttachChatKind::Group,
         };
         session
+            .bots
             .web_apps
             .attachment_menu_bots
             .iter()
@@ -896,6 +897,7 @@ impl QuillApp {
             .ok();
         let in_attachment_menu = self.session().is_some_and(|session| {
             session
+                .bots
                 .web_apps
                 .attachment_menu_bots
                 .iter()
@@ -903,7 +905,7 @@ impl QuillApp {
         });
         let privacy_policy_url = self
             .session()
-            .and_then(|session| session.bot_info.get(&launch.bot_user_id))
+            .and_then(|session| session.bots.bot_info.get(&launch.bot_user_id))
             .and_then(|info| info.as_ref())
             .map(|info| info.privacy_policy_url.clone())
             .filter(|url| quill::text::openable_http_url(url));
@@ -986,7 +988,7 @@ impl QuillApp {
             || self.mini_apps.awaiting_toggle.is_some()
             || self
                 .session()
-                .is_some_and(|session| session.web_apps.pending.is_some())
+                .is_some_and(|session| session.bots.web_apps.pending.is_some())
     }
 
     /// The session's one-shot answers.
@@ -994,7 +996,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let apps = &mut live.driver.session.web_apps;
+        let apps = &mut live.driver.session.bots.web_apps;
         let open_result = apps.open_result.take();
         let write_access = apps.write_access.take();
         let custom_replies = std::mem::take(&mut apps.custom_replies);

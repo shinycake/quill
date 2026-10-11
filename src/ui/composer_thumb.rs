@@ -81,12 +81,13 @@ impl QuillApp {
         let roots = self.media_display_roots();
         let path = match &message.content {
             // Whatever size is already downloaded, thumbnail first.
-            MessageContent::Photo(photo) => photo_display_path(photo, &session.files, &roots),
+            MessageContent::Photo(photo) => photo_display_path(photo, &session.media.files, &roots),
             _ => None,
         }
         .or_else(|| {
             sources.files.iter().find_map(|id| {
                 session
+                    .media
                     .files
                     .get(&id.0)
                     .and_then(|file| file.usable_path())

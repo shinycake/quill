@@ -68,15 +68,16 @@ impl Session {
             .into_iter()
             .filter(|chat| Self::can_share_to(chat))
             .collect();
-        if query.trim().is_empty() || self.share_search.query != query.trim() {
+        if query.trim().is_empty() || self.messages.share_search.query != query.trim() {
             return result;
         }
         let mut seen: HashSet<i64> = result.iter().map(|chat| chat.id.0).collect();
         for id in self
+            .messages
             .share_search
             .local
             .iter()
-            .chain(self.share_search.server.iter())
+            .chain(self.messages.share_search.server.iter())
         {
             if let Some(chat) = self.chats.get(id)
                 && Self::can_share_to(chat)

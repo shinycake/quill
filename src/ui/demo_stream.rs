@@ -77,7 +77,7 @@ impl QuillApp {
             .map(|(id, _)| *id)
             .find(|id| *id != private_chat)
             .unwrap_or(private_chat);
-        session.downloading.insert(STREAM_FILE_ID);
+        session.media.downloading.insert(STREAM_FILE_ID);
         let json = match step % 8 {
             0 => format!(
                 r#"{{"@type":"updateUserStatus","user_id":{user},"status":{{"@type":"userStatusOffline","was_online":{step}}}}}"#

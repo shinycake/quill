@@ -8,7 +8,7 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
 
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.scheduled_messages.push(ParsedMessage {
+    session.messages.scheduled_messages.push(ParsedMessage {
         sender: None,
         id: MessageId(70),
         chat_id: ChatId(7),
@@ -43,9 +43,9 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
             extra.0,
         ),
     );
-    assert_eq!(session.scheduled_messages.len(), 1);
+    assert_eq!(session.messages.scheduled_messages.len(), 1);
     assert_eq!(
-        session.scheduled_messages[0].content.preview(),
+        session.messages.scheduled_messages[0].content.preview(),
         "edited draft"
     );
     assert!(

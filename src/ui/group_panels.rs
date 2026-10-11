@@ -306,7 +306,7 @@ impl QuillApp {
                 self.connection.status_note = format!("photo download failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.open_info_panel = Some(target);
+            session.users_state.open_info_panel = Some(target);
         }
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin
@@ -335,7 +335,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.set_info_panel(None);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.open_info_panel = None;
+            session.users_state.open_info_panel = None;
         }
         cx.notify();
     }
@@ -358,9 +358,9 @@ impl QuillApp {
         let counts = session
             .open_chat
             .filter(|chat_id| {
-                session.info_panel_target_for_chat(*chat_id) == session.open_info_panel
+                session.info_panel_target_for_chat(*chat_id) == session.users_state.open_info_panel
             })
-            .and_then(|chat_id| session.chat_media_counts.get(&chat_id.0));
+            .and_then(|chat_id| session.media.chat_media_counts.get(&chat_id.0));
         let icons = [
             IconName::Image,
             IconName::Video,
@@ -509,7 +509,7 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<(&'static str, AnyElement)> {
-        let target = self.session()?.open_info_panel?;
+        let target = self.session()?.users_state.open_info_panel?;
         let (title, content) = match target {
             InfoPanelTarget::User(user_id) => ("Contact info", self.user_info_panel(user_id, cx)),
             InfoPanelTarget::Supergroup(supergroup_id) => {
@@ -561,7 +561,7 @@ impl QuillApp {
             .and_then(|s| {
                 info.as_ref()
                     .and_then(|i| i.photo_file_id)
-                    .and_then(|id| s.files.get(&id))
+                    .and_then(|id| s.media.files.get(&id))
                     .and_then(|file| file.usable_path())
                     .or_else(|| s.user_photo_path(user_id))
             })

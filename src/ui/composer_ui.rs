@@ -39,8 +39,8 @@ pub(super) fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>
     if let Some(owned) = copy_and_parse(&history, seq, &dyn_sink) {
         session.apply(owned);
     }
-    session.stickers.open = true;
-    session.stickers.loading_sets = true;
+    session.stickers.stickers.open = true;
+    session.stickers.stickers.loading_sets = true;
     let sets_extra = session.request(RequestPurpose::GetInstalledStickerSets, None);
     let sets = format!(
         r#"{{"@type":"stickerSets","@extra":"{}","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"77","title":"Demo stickers","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":2,"covers":[]}}]}}"#,
@@ -69,7 +69,7 @@ pub(super) fn apply_ready_sticker_playback(
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let root = super::demo::demo_media_allowlist();
-    session.stickers.stickers.clear();
+    session.stickers.stickers.stickers.clear();
     for (id, name, format) in [
         (44, "demo-sticker.tgs", "stickerFormatTgs"),
         (45, "demo-sticker.webm", "stickerFormatWebm"),
@@ -82,6 +82,7 @@ pub(super) fn apply_ready_sticker_playback(
             session.apply(owned);
         }
         session
+            .stickers
             .stickers
             .stickers
             .push(quill::telegram::envelope::StickerItem {
@@ -245,14 +246,15 @@ impl QuillApp {
     }
 
     pub(super) fn gif_panel_open(&self) -> bool {
-        self.session().is_some_and(|session| session.gifs.open)
+        self.session()
+            .is_some_and(|session| session.stickers.gifs.open)
     }
 
     pub(super) fn close_gif_panel(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_gif_panel();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.gifs.close();
+            session.stickers.gifs.close();
         }
         self.connection.status_note = "GIFs closed".into();
         cx.notify();
@@ -314,7 +316,8 @@ impl QuillApp {
     }
 
     pub(super) fn sticker_panel_open(&self) -> bool {
-        self.session().is_some_and(|session| session.stickers.open)
+        self.session()
+            .is_some_and(|session| session.stickers.stickers.open)
     }
 
     pub(super) fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {
@@ -322,7 +325,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_sticker_panel();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.close();
+            session.stickers.stickers.close();
         }
         self.connection.status_note = "stickers closed".into();
         cx.notify();
@@ -473,9 +476,9 @@ impl QuillApp {
             // No URL: drop any stale preview so the chip never shows a
             // preview for a URL that's no longer there.
             if let Some(live) = self.live.as_mut()
-                && live.driver.session.composer_preview.is_some()
+                && live.driver.session.messages.composer_preview.is_some()
             {
-                live.driver.session.composer_preview = None;
+                live.driver.session.messages.composer_preview = None;
             }
             return;
         };
@@ -486,7 +489,7 @@ impl QuillApp {
         let already = self
             .live
             .as_ref()
-            .and_then(|live| live.driver.session.composer_preview.as_ref())
+            .and_then(|live| live.driver.session.messages.composer_preview.as_ref())
             .is_some_and(|p| p.url == url);
         if already {
             return;
@@ -699,7 +702,7 @@ impl QuillApp {
         // the demo session.
         let stored = self
             .session()
-            .and_then(|s| s.composer_preview.clone())
+            .and_then(|s| s.messages.composer_preview.clone())
             .filter(|p| p.url == first);
         let fetched: Option<quill::telegram::envelope::LinkPreview> =
             stored.as_ref().and_then(|p| p.preview.clone()).flatten();
@@ -922,7 +925,7 @@ impl QuillApp {
         let limit = self
             .live
             .as_ref()
-            .map(|live| live.driver.session.message_caption_length_max)
+            .map(|live| live.driver.session.messages.message_caption_length_max)
             .unwrap_or(1024);
         let over = text_len as i64 > i64::from(limit.max(0));
         Some(

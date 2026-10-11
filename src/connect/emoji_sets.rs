@@ -14,9 +14,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.emoji.status_open = true;
-        self.session.emoji.status_note = None;
-        self.session.emoji.status_resolution_attempted.clear();
+        self.session.stickers.emoji.status_open = true;
+        self.session.stickers.emoji.status_note = None;
+        self.session
+            .stickers
+            .emoji
+            .status_resolution_attempted
+            .clear();
         for (purpose, build) in [
             (
                 RequestPurpose::GetRecentEmojiStatuses,
@@ -75,12 +79,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             )
             .map_err(|_| ConnectSendError::InvalidRequest)?
         };
-        self.session.emoji.status_note = None;
+        self.session.stickers.emoji.status_note = None;
         let request = self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
             crate::telegram::requests_emoji::set_emoji_status(extra, custom_emoji_id, expiration)
         })?;
         if request.is_some() {
-            self.session.emoji.pending_status_emoji = custom_emoji_id;
+            self.session.stickers.emoji.pending_status_emoji = custom_emoji_id;
         }
         Ok(request)
     }
@@ -93,7 +97,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.emoji.status_note = None;
+        self.session.stickers.emoji.status_note = None;
         self.emoji_set_request(
             RequestPurpose::ClearRecentEmojiStatuses,
             crate::telegram::requests_emoji::clear_recent_emoji_statuses,
@@ -102,8 +106,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub(crate) fn maybe_resolve_emoji_status_choices(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
-            || !self.session.emoji.open
-            || !self.session.emoji.status_open
+            || !self.session.stickers.emoji.open
+            || !self.session.stickers.emoji.status_open
             || self
                 .session
                 .requests
@@ -113,17 +117,38 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let mut ids: Vec<_> = self
             .session
+            .stickers
             .emoji
             .recent_statuses
             .iter()
             .map(|s| s.custom_emoji_id)
-            .chain(self.session.emoji.themed_status_ids.iter().copied())
-            .chain(self.session.emoji.default_status_ids.iter().copied())
+            .chain(
+                self.session
+                    .stickers
+                    .emoji
+                    .themed_status_ids
+                    .iter()
+                    .copied(),
+            )
+            .chain(
+                self.session
+                    .stickers
+                    .emoji
+                    .default_status_ids
+                    .iter()
+                    .copied(),
+            )
             .filter(|id| {
                 *id > 0
-                    && !self.session.emoji.status_resolution_attempted.contains(id)
                     && !self
                         .session
+                        .stickers
+                        .emoji
+                        .status_resolution_attempted
+                        .contains(id)
+                    && !self
+                        .session
+                        .stickers
                         .emoji
                         .custom_emoji_stickers
                         .iter()
@@ -135,6 +160,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ids.truncate(200);
         if !ids.is_empty() {
             self.session
+                .stickers
                 .emoji
                 .status_resolution_attempted
                 .extend(ids.iter().copied());
@@ -167,9 +193,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .iter()
                 .copied()
                 .filter(|id| {
-                    !self.session.emoji.status_resolution_attempted.contains(id)
+                    !self
+                        .session
+                        .stickers
+                        .emoji
+                        .status_resolution_attempted
+                        .contains(id)
                         && !self
                             .session
+                            .stickers
                             .emoji
                             .custom_emoji_stickers
                             .iter()
@@ -181,6 +213,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ids.truncate(200);
         if !ids.is_empty() {
             self.session
+                .stickers
                 .emoji
                 .status_resolution_attempted
                 .extend(ids.iter().copied());
@@ -204,11 +237,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.emoji.failed = false;
+        self.session.stickers.emoji.failed = false;
         let extra = self.session.request(purpose, None);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
-            self.session.emoji.failed = true;
+            self.session.stickers.emoji.failed = true;
             if matches!(
                 purpose,
                 RequestPurpose::SetEmojiStatus
@@ -218,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     | RequestPurpose::GetDefaultEmojiStatuses
                     | RequestPurpose::GetCustomEmojiStickers
             ) {
-                self.session.emoji.status_note =
+                self.session.stickers.emoji.status_note =
                     Some("Could not update emoji statuses. Retry the action.".into());
             }
             return Err(err);
@@ -231,6 +264,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let ids: Vec<_> = self
             .session
+            .stickers
             .emoji
             .trending_sets
             .iter()
@@ -248,7 +282,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.emoji.open = true;
+        self.session.stickers.emoji.open = true;
         self.select_emoji_set_tab(EmojiSetTab::Installed)
     }
 
@@ -259,9 +293,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.emoji.tab = tab;
-        self.session.emoji.selected_set_id = None;
-        self.session.emoji.preview.clear();
+        self.session.stickers.emoji.tab = tab;
+        self.session.stickers.emoji.selected_set_id = None;
+        self.session.stickers.emoji.preview.clear();
         drop(
             self.session
                 .requests
@@ -278,7 +312,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .requests
                         .take_purpose(RequestPurpose::GetTrendingEmojiSets),
                 );
-                self.session.emoji.trending_offset = 0;
+                self.session.stickers.emoji.trending_offset = 0;
                 self.emoji_set_request(RequestPurpose::GetTrendingEmojiSets, |id| {
                     get_trending_emoji_sets(id, 0, 100)
                 })
@@ -299,7 +333,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::GetKeywordEmojis),
         );
-        self.session.emoji.keyword_emojis.clear();
+        self.session.stickers.emoji.keyword_emojis.clear();
         let query = query.trim();
         if query.is_empty() {
             return Ok(());
@@ -332,9 +366,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::SearchEmojiSets),
         );
-        self.session.emoji.search_query = query.trim().to_string();
-        self.session.emoji.found_sets.clear();
-        let query = self.session.emoji.search_query.clone();
+        self.session.stickers.emoji.search_query = query.trim().to_string();
+        self.session.stickers.emoji.found_sets.clear();
+        let query = self.session.stickers.emoji.search_query.clone();
         self.emoji_set_request(RequestPurpose::SearchEmojiSets, |id| {
             search_emoji_sets(id, &query)
         })
@@ -344,10 +378,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.emoji.trending_has_more {
+        if !self.session.stickers.emoji.trending_has_more {
             return Ok(None);
         }
-        let offset = self.session.emoji.trending_next_offset;
+        let offset = self.session.stickers.emoji.trending_next_offset;
         if self
             .session
             .requests
@@ -355,7 +389,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.emoji.trending_offset = offset;
+        self.session.stickers.emoji.trending_offset = offset;
         self.emoji_set_request(RequestPurpose::GetTrendingEmojiSets, |id| {
             get_trending_emoji_sets(id, offset, 100)
         })
@@ -373,9 +407,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::GetEmojiSet),
         );
-        self.session.emoji.selected_set_id = Some(set_id);
-        self.session.emoji.preview.clear();
-        self.session.emoji.preview_title.clear();
+        self.session.stickers.emoji.selected_set_id = Some(set_id);
+        self.session.stickers.emoji.preview.clear();
+        self.session.stickers.emoji.preview_title.clear();
         self.emoji_set_request(RequestPurpose::GetEmojiSet, |id| {
             get_sticker_set(id, set_id)
         })
@@ -389,22 +423,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.emoji.mutation_failed = false;
+        self.session.stickers.emoji.mutation_failed = false;
         let request = self.emoji_set_request(RequestPurpose::ChangeEmojiSet, |id| {
             change_sticker_set(id, set_id, installed, false)
         })?;
         if request.is_some() {
-            self.session.emoji.mutating_set = Some((set_id, installed));
+            self.session.stickers.emoji.mutating_set = Some((set_id, installed));
         }
         Ok(request)
     }
 
     pub fn download_emoji_pack(&mut self, set_id: i64) -> Result<(), ConnectSendError> {
-        if self.session.emoji.outdated_packs.contains(&set_id) {
+        if self.session.stickers.emoji.outdated_packs.contains(&set_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let ids = self
             .session
+            .stickers
             .emoji
             .pack_files
             .get(&set_id)
@@ -425,8 +460,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .requests
             .take_purpose(RequestPurpose::GetInstalledEmojiSets)
             .is_some()
-            || !self.session.emoji.installed_sets.is_empty()
-            || self.session.emoji.open;
+            || !self.session.stickers.emoji.installed_sets.is_empty()
+            || self.session.stickers.emoji.open;
         for purpose in [
             RequestPurpose::SearchEmojiSets,
             RequestPurpose::GetTrendingEmojiSets,
@@ -443,20 +478,20 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_installed_emoji_sets,
             )?;
         }
-        if !self.session.emoji.open {
+        if !self.session.stickers.emoji.open {
             return Ok(());
         }
-        match self.session.emoji.tab {
+        match self.session.stickers.emoji.tab {
             EmojiSetTab::Search => {
-                let query = self.session.emoji.search_query.clone();
+                let query = self.session.stickers.emoji.search_query.clone();
                 self.search_emoji_packs(&query)?;
             }
             EmojiSetTab::Trending => {
                 self.select_emoji_set_tab(EmojiSetTab::Trending)?;
             }
             EmojiSetTab::Installed => {
-                self.session.emoji.selected_set_id = None;
-                self.session.emoji.preview.clear();
+                self.session.stickers.emoji.selected_set_id = None;
+                self.session.stickers.emoji.preview.clear();
             }
         }
         Ok(())
@@ -482,11 +517,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .requests
                     .take_purpose(RequestPurpose::GetAnimatedEmoji),
             );
-            self.session.emoji.animated_emoji = None;
-            self.session.emoji.animated_emoji_for = None;
+            self.session.stickers.emoji.animated_emoji = None;
+            self.session.stickers.emoji.animated_emoji_for = None;
             return Ok(None);
         };
-        if self.session.emoji.animated_emoji_for.as_deref() == Some(emoji) {
+        if self.session.stickers.emoji.animated_emoji_for.as_deref() == Some(emoji) {
             return Ok(None);
         }
         drop(
@@ -494,14 +529,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::GetAnimatedEmoji),
         );
-        self.session.emoji.animated_emoji = None;
-        self.session.emoji.animated_emoji_for = Some(emoji.to_string());
+        self.session.stickers.emoji.animated_emoji = None;
+        self.session.stickers.emoji.animated_emoji_for = Some(emoji.to_string());
         let extra = self.session.request(RequestPurpose::GetAnimatedEmoji, None);
         match self.sender.send_json(&get_animated_emoji(extra, emoji)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.emoji.animated_emoji_for = None;
+                self.session.stickers.emoji.animated_emoji_for = None;
                 Err(err)
             }
         }

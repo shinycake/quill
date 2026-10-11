@@ -13,7 +13,7 @@ impl Session {
     ) {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::AddProfileAudio) => {
-                self.message_action_note = Some(format!(
+                self.messages.message_action_note = Some(format!(
                     "could not save to your profile: {}",
                     error_reason(err)
                 ));
@@ -32,7 +32,7 @@ impl Session {
                 | RequestPurpose::DeleteProfilePhoto
                 | RequestPurpose::SetProfileAccentColor,
             ) => {
-                self.profile_edit_error =
+                self.users_state.profile_edit_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));
             }
             // B10: profile panel fetches keep the reason for a Retry row;
@@ -75,15 +75,15 @@ impl Session {
                 } else {
                     "synced contacts"
                 };
-                self.contacts_notice =
+                self.users_state.contacts_notice =
                     Some(format!("could not delete {what} (error {})", err.code));
             }
             Some(RequestPurpose::ImportContacts) => {
-                self.contacts_notice =
+                self.users_state.contacts_notice =
                     Some(format!("could not import contacts (error {})", err.code));
             }
             Some(RequestPurpose::ClearImportedContacts) => {
-                self.contacts_notice = Some(format!(
+                self.users_state.contacts_notice = Some(format!(
                     "could not delete synced contacts (error {})",
                     err.code
                 ));
@@ -93,7 +93,7 @@ impl Session {
         // Phase 6: a failed `getContacts` surfaces a retry in the
         // contacts tab instead of a stuck spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-            self.contacts_error = true;
+            self.users_state.contacts_error = true;
         }
     }
 }

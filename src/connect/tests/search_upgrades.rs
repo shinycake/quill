@@ -126,7 +126,7 @@ fn a_hashtag_click_searches_the_tag_in_the_chosen_scope() {
     assert_eq!(tag.len(), 1);
     assert_eq!(tag[0]["tag"], "#dune");
     assert!(fx.requests("searchPublicPosts").is_empty());
-    assert!(fx.driver.session.search.open);
+    assert!(fx.driver.session.search.search.open);
 
     let flight = fx
         .driver
@@ -178,9 +178,9 @@ fn opening_search_loads_frequent_contacts_unless_disabled() {
 #[test]
 fn removing_a_frequent_contact_is_optimistic() {
     let mut fx = Fixture::new();
-    fx.driver.session.search.top_chats = vec![ChatId(11), ChatId(12)];
+    fx.driver.session.search.search.top_chats = vec![ChatId(11), ChatId(12)];
     fx.driver.remove_top_chat(ChatId(11)).unwrap();
-    assert_eq!(fx.driver.session.search.top_chats, vec![ChatId(12)]);
+    assert_eq!(fx.driver.session.search.search.top_chats, vec![ChatId(12)]);
     let sent = fx.requests("removeTopChat");
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["chat_id"], 11);
@@ -192,11 +192,11 @@ fn removing_a_frequent_contact_is_optimistic() {
 #[test]
 fn removing_one_recent_search_sends_remove_recently_found_chat() {
     let mut fx = Fixture::new();
-    fx.driver.session.search.open = true;
-    fx.driver.session.search.recents = true;
-    fx.driver.session.search.chat_ids = vec![ChatId(7), ChatId(8)];
+    fx.driver.session.search.search.open = true;
+    fx.driver.session.search.search.recents = true;
+    fx.driver.session.search.search.chat_ids = vec![ChatId(7), ChatId(8)];
     fx.driver.remove_recent_search(ChatId(7)).unwrap();
-    assert_eq!(fx.driver.session.search.chat_ids, vec![ChatId(8)]);
+    assert_eq!(fx.driver.session.search.search.chat_ids, vec![ChatId(8)]);
     let sent = fx.requests("removeRecentlyFoundChat");
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["chat_id"], 7);

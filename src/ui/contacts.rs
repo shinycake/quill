@@ -221,8 +221,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         use quill::contacts_index::{HEADER_HEIGHT, ListItem, ROW_HEIGHT};
-        let failed = self.session().is_some_and(|s| s.contacts_error);
-        let loading = self.session().is_some_and(|s| s.contacts.is_none()) && !failed;
+        let failed = self.session().is_some_and(|s| s.users_state.contacts_error);
+        let loading = self
+            .session()
+            .is_some_and(|s| s.users_state.contacts.is_none())
+            && !failed;
         let note = |text: &'static str, cx: &mut Context<Self>| {
             div()
                 .px_2()
@@ -294,7 +297,7 @@ impl QuillApp {
             if let Err(err) = live.driver.save_contact_prefs() {
                 self.connection.status_note = format!("couldn't save contact prefs: {err}");
             }
-            if next && live.driver.session.contacts.is_none() {
+            if next && live.driver.session.users_state.contacts.is_none() {
                 // Re-enable refetches the server list so the tab
                 // converges with TDLib immediately.
                 if let Err(err) = live.driver.fetch_contacts() {
@@ -399,8 +402,8 @@ impl QuillApp {
             .and_then(|path| {
                 quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
             });
-        let selected =
-            self.session().and_then(|s| s.open_info_panel) == Some(InfoPanelTarget::User(user_id));
+        let selected = self.session().and_then(|s| s.users_state.open_info_panel)
+            == Some(InfoPanelTarget::User(user_id));
         let online = self
             .session()
             .and_then(|s| s.user(user_id))

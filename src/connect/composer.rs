@@ -299,7 +299,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `None` clears the suggestions.
     pub fn search_mentions(&mut self, query: Option<&str>) -> Result<(), ConnectSendError> {
         let Some(chat_id) = self.session.open_chat else {
-            self.session.mention_search = None;
+            self.session.messages.mention_search = None;
             return Ok(());
         };
         let is_group = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
@@ -313,11 +313,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             )
         });
         let Some(query) = query.filter(|_| is_group) else {
-            self.session.mention_search = None;
+            self.session.messages.mention_search = None;
             return Ok(());
         };
         if self
             .session
+            .messages
             .mention_search
             .as_ref()
             .is_some_and(|s| s.chat_id == chat_id && s.query == query)
@@ -327,8 +328,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SearchMentionMembers, Some(chat_id));
-        let previous = self.session.mention_search.take();
-        self.session.mention_search = Some(crate::state::MentionSearch {
+        let previous = self.session.messages.mention_search.take();
+        self.session.messages.mention_search = Some(crate::state::MentionSearch {
             chat_id,
             query: query.to_string(),
             // Keep showing the previous matches while the new query loads.
@@ -345,7 +346,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session.mention_search = None;
+            self.session.messages.mention_search = None;
             return Err(err);
         }
         Ok(())

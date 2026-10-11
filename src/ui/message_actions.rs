@@ -107,7 +107,7 @@ impl QuillApp {
         // milliseconds), channel posts offer only what any reader can do.
         let actions = self
             .session()
-            .and_then(|s| s.message_menu_actions)
+            .and_then(|s| s.messages.message_menu_actions)
             .filter(|(c, m, _)| *c == chat_id && *m == message_id)
             .map(|(_, _, actions)| actions);
         let chat_kind = self
@@ -745,7 +745,7 @@ impl QuillApp {
         let pack_name = match packs[..] {
             [only] => self
                 .session()
-                .and_then(|s| s.emoji_pack_titles.get(&only).cloned()),
+                .and_then(|s| s.stickers.emoji_pack_titles.get(&only).cloned()),
             _ => None,
         };
         if let Some((before, bold, after)) =
@@ -1568,11 +1568,23 @@ impl QuillApp {
     /// `message_rich_block`. A refusal is never rendered as a reader.
     pub(super) fn instant_view_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if let Some(live) = self.live.as_mut()
-            && let Some(url) = live.driver.session.instant_view_fallback_url.take()
+            && let Some(url) = live
+                .driver
+                .session
+                .messages
+                .instant_view_fallback_url
+                .take()
         {
             self.open_message_url(&url, cx);
         }
-        let page = self.live.as_ref()?.driver.session.instant_view.clone()?;
+        let page = self
+            .live
+            .as_ref()?
+            .driver
+            .session
+            .messages
+            .instant_view
+            .clone()?;
         let url = page.url.clone();
         Some(
             div()
@@ -1600,7 +1612,7 @@ impl QuillApp {
                                 .accessibility_label("Close")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(live) = this.live.as_mut() {
-                                        live.driver.session.instant_view = None;
+                                        live.driver.session.messages.instant_view = None;
                                     }
                                     cx.notify();
                                 })),

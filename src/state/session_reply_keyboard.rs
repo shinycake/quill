@@ -33,14 +33,17 @@ impl Session {
             (Some(id), Some(ReplyMarkup::ShowKeyboard(keyboard))) => Some((id, keyboard)),
             _ => None,
         };
-        self.reply_keyboards.by_chat.insert(chat_id.0, keyboard);
+        self.bots
+            .reply_keyboards
+            .by_chat
+            .insert(chat_id.0, keyboard);
     }
 
     /// What TDLib last said about the chat's keyboard: `None` when it said
     /// nothing (fall back to the loaded messages), `Some(None)` for a removed
     /// keyboard.
     pub fn chat_reply_keyboard(&self, chat_id: ChatId) -> Option<&ChatKeyboard> {
-        self.reply_keyboards.by_chat.get(&chat_id.0)
+        self.bots.reply_keyboards.by_chat.get(&chat_id.0)
     }
 
     /// The keyboard to show in a chat: TDLib's own answer when it gave one
@@ -68,8 +71,12 @@ impl Session {
     /// reply-markup message, nothing was reported yet, and the message is
     /// not in the loaded history.
     pub fn reply_markup_message_to_fetch(&self, chat_id: ChatId) -> Option<MessageId> {
-        let id = *self.reply_keyboards.markup_message_ids.get(&chat_id.0)?;
-        if id <= 0 || self.reply_keyboards.by_chat.contains_key(&chat_id.0) {
+        let id = *self
+            .bots
+            .reply_keyboards
+            .markup_message_ids
+            .get(&chat_id.0)?;
+        if id <= 0 || self.bots.reply_keyboards.by_chat.contains_key(&chat_id.0) {
             return None;
         }
         let loaded = self
@@ -81,7 +88,8 @@ impl Session {
 
     /// Recent inline bots from `getRecentInlineBots`, newest first.
     pub fn recent_inline_bots(&self) -> &[i64] {
-        self.reply_keyboards
+        self.bots
+            .reply_keyboards
             .recent_inline_bots
             .as_deref()
             .unwrap_or(&[])

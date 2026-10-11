@@ -34,7 +34,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self
                 .session
                 .request(RequestPurpose::GetMapThumbnailFile, Some(chat_id));
-            self.session.map_thumbs.expect(extra, key);
+            self.session.media.map_thumbs.expect(extra, key);
             let json = crate::telegram::requests::get_map_thumbnail_file(
                 extra,
                 key.latitude(),
@@ -49,7 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Ok(()) => extras.push(extra),
                 Err(err) => {
                     self.session.requests.take(extra);
-                    self.session.map_thumbs.unsent(extra);
+                    self.session.media.map_thumbs.unsent(extra);
                     return Err(err);
                 }
             }
@@ -68,12 +68,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let ids = self.session.auto_download_media_file_ids();
         let session = &mut self.session;
         session
+            .media
             .open_chat_media_downloads
-            .retain(|id| session.downloading.contains(id));
+            .retain(|id| session.media.downloading.contains(id));
         let mut extras = Vec::new();
         for file_id in ids {
             if let Some(extra) = self.download_file(file_id, AUTO_MEDIA_DOWNLOAD_PRIORITY)? {
-                self.session.open_chat_media_downloads.insert(file_id.0);
+                self.session
+                    .media
+                    .open_chat_media_downloads
+                    .insert(file_id.0);
                 extras.push(extra);
             }
         }
@@ -104,6 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err) => {
                     // Not sent: keep this and the rest due for the next ingest.
                     self.session
+                        .media
                         .avatar_downloads_due
                         .extend(ids[index..].iter().map(|id| id.0));
                     return Err(err);
@@ -126,7 +131,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.should_download(file_id)
-            || self.session.stalled_auto_downloads.contains(&file_id.0)
+            || self
+                .session
+                .media
+                .stalled_auto_downloads
+                .contains(&file_id.0)
         {
             return Ok(None);
         }
@@ -201,7 +210,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request_download(file_id);
         self.session.begin_download(file_id);
         let request = if let Some((chat_id, message_id)) = origin {
-            self.session.user_downloads.insert(file_id.0);
+            self.session.media.user_downloads.insert(file_id.0);
             add_file_to_downloads_request(
                 extra,
                 file_id,
@@ -220,7 +229,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 // The request never reached TDLib: record the failure
                 // like an error response so the row offers Retry.
-                self.session.failed_downloads.insert(file_id.0);
+                self.session.media.failed_downloads.insert(file_id.0);
                 self.session.abort_download(file_id);
                 Err(err)
             }
@@ -248,7 +257,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if file_id.0 == 0 || !self.session.user_downloads.contains(&file_id.0) {
+        if file_id.0 == 0 || !self.session.media.user_downloads.contains(&file_id.0) {
             return Ok(false);
         }
         let extra = self
@@ -276,13 +285,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if file_id.0 == 0 || !self.session.downloading.contains(&file_id.0) {
+        if file_id.0 == 0 || !self.session.media.downloading.contains(&file_id.0) {
             return Ok(false);
         }
         let extra = self
             .session
             .request(RequestPurpose::CancelDownloadFile, None);
-        let payload = if self.session.user_downloads.contains(&file_id.0) {
+        let payload = if self.session.media.user_downloads.contains(&file_id.0) {
             remove_file_from_downloads_request(extra, file_id, false)
         } else {
             cancel_download_file_request(extra, file_id, false)

@@ -35,8 +35,8 @@ pub(super) fn apply_ready_gifs(session: &mut Session, sink: &Arc<MemorySink>, se
             session.apply(owned);
         }
     }
-    session.gifs.open = true;
-    session.gifs.loading = true;
+    session.stickers.gifs.open = true;
+    session.stickers.gifs.loading = true;
     let extra = session.request(RequestPurpose::GetSavedAnimations, None);
     let saved = format!(
         r#"{{"@type":"animations","@extra":"{}","animations":[{{"@type":"animation","duration":1,"width":240,"height":140,"file_name":"demo-gif.gif","mime_type":"image/gif","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"animation":{local_clip}}},{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"saved.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{pending}}}]}}"#,
@@ -212,6 +212,7 @@ impl QuillApp {
         }
         let Some(file_id) = animation.play_file_id().filter(|id| {
             session
+                .media
                 .files
                 .get(&id.0)
                 .and_then(|file| file.usable_path())
@@ -317,6 +318,7 @@ impl QuillApp {
         }
         let path = self.session().and_then(|session| {
             session
+                .media
                 .files
                 .get(&file_id.0)
                 .and_then(|file| file.usable_path())
@@ -444,6 +446,7 @@ impl QuillApp {
         }
         let path = self.session().and_then(|session| {
             session
+                .media
                 .files
                 .get(&file_id.0)
                 .and_then(|file| file.usable_path())
@@ -503,6 +506,7 @@ impl QuillApp {
         };
         let ready = self.session().is_some_and(|session| {
             session
+                .media
                 .files
                 .get(&file_id.0)
                 .and_then(|file| file.usable_path())
@@ -519,6 +523,7 @@ impl QuillApp {
         };
         let ready = self.session().is_some_and(|session| {
             session
+                .media
                 .files
                 .get(&file_id.0)
                 .and_then(|file| file.usable_path())

@@ -27,7 +27,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.show_saved_gifs();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.gifs.search_mode = false;
+            session.stickers.gifs.search_mode = false;
         }
         cx.notify();
     }
@@ -52,11 +52,11 @@ impl QuillApp {
     pub(super) fn gif_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let panel = self
             .session()
-            .map(|session| session.gifs.clone())
+            .map(|session| session.stickers.gifs.clone())
             .unwrap_or_default();
         let files = self
             .session()
-            .map(|session| session.files.clone())
+            .map(|session| session.media.files.clone())
             .unwrap_or_default();
         let roots = self.media_display_roots();
         let (cx_muted, cx_muted_fg) = (cx.theme().muted, cx.theme().muted_foreground);

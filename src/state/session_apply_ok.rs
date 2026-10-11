@@ -36,13 +36,13 @@ impl Session {
                 self.calls.recent_calls_clearing = false;
             }
             Some(RequestPurpose::AddProfileAudio) => {
-                self.message_action_note = Some("saved to your profile".into());
+                self.messages.message_action_note = Some("saved to your profile".into());
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
-                self.message_action_note = Some("messages deleted".into());
+                self.messages.message_action_note = Some("messages deleted".into());
             }
             Some(RequestPurpose::ReportSupergroupSpam) => {
-                self.message_action_note = Some("spam reported".into());
+                self.messages.message_action_note = Some("spam reported".into());
             }
             // Forum extras and Saved Messages sublists (batch B16).
             Some(RequestPurpose::Threads(ThreadsPurpose::DeleteSavedMessagesTopicHistory {
@@ -68,7 +68,7 @@ impl Session {
                 message_id,
                 user_id,
             })) => {
-                self.message_action_note = Some("reaction deleted".into());
+                self.messages.message_action_note = Some("reaction deleted".into());
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.drop_reactor_from_audience(chat_id, MessageId(message_id), user_id);
                 }
@@ -272,13 +272,13 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddFavoriteSticker | RequestPurpose::RemoveFavoriteSticker)
         ) {
-            self.stickers.favorites.clear();
+            self.stickers.stickers.favorites.clear();
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::ClearRecentStickers)
         ) {
-            self.stickers.recent.clear();
+            self.stickers.stickers.recent.clear();
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -293,20 +293,23 @@ impl Session {
         })) = pending.map(|p| p.purpose)
         {
             self.finish_sticker_batch_item(set_id, true);
-            for sets in [&mut self.stickers.trending, &mut self.stickers.found_sets] {
+            for sets in [
+                &mut self.stickers.stickers.trending,
+                &mut self.stickers.stickers.found_sets,
+            ] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {
                     set.is_installed = installed;
                 }
             }
-            self.stickers.sets.clear();
-            self.stickers.installed_loaded = false;
-            self.stickers.archived.clear();
-            self.stickers.archived_has_more = false;
-            self.stickers.archived_next_offset = 0;
-            if self.stickers.tab == StickerTab::Archived {
-                self.stickers.selected_set_id = None;
-                self.stickers.loaded_set_id = None;
-                self.stickers.stickers.clear();
+            self.stickers.stickers.sets.clear();
+            self.stickers.stickers.installed_loaded = false;
+            self.stickers.stickers.archived.clear();
+            self.stickers.stickers.archived_has_more = false;
+            self.stickers.stickers.archived_next_offset = 0;
+            if self.stickers.stickers.tab == StickerTab::Archived {
+                self.stickers.stickers.selected_set_id = None;
+                self.stickers.stickers.loaded_set_id = None;
+                self.stickers.stickers.stickers.clear();
             }
         }
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
@@ -319,8 +322,8 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.gifs.animations.clear();
-            self.gifs.loaded = false;
+            self.stickers.gifs.animations.clear();
+            self.stickers.gifs.loaded = false;
         }
         // Phase C3a: a successful `leaveGroupCall` /
         // `endGroupCall` drops the tracked call (the `ok`
@@ -723,31 +726,32 @@ impl Session {
             Some(RequestPurpose::SetProfilePhoto | RequestPurpose::DeleteProfilePhoto)
         ) && let Some(me) = self.my_user_id
         {
-            self.user_profile_photos.remove(&me);
+            self.users_state.user_profile_photos.remove(&me);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContact) {
             // Phase 6: the new contact arrives via `updateUser`
             // (`is_contact` flips); invalidate the list so the
             // contacts tab refetches it.
-            self.contacts = None;
-            self.contacts_error = false;
+            self.users_state.contacts = None;
+            self.users_state.contacts_error = false;
         }
         // Slice A6: a contacts mutation landed — never optimistic:
         // the new list arrives via the `getContacts` refetch the
         // tab triggers.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveContact) => {
-                self.contacts = None;
-                self.contacts_error = false;
+                self.users_state.contacts = None;
+                self.users_state.contacts_error = false;
                 // The delete-synced-contacts batch remove shares
                 // this purpose but carries no user_id — its notice
                 // must not read as a single delete (or overwrite
                 // the synced flow's own notice on arrival order).
-                self.contacts_notice = Some(if pending.and_then(|p| p.user_id).is_some() {
-                    "Contact deleted.".to_string()
-                } else {
-                    "Synced contacts deleted from the servers.".to_string()
-                });
+                self.users_state.contacts_notice =
+                    Some(if pending.and_then(|p| p.user_id).is_some() {
+                        "Contact deleted.".to_string()
+                    } else {
+                        "Synced contacts deleted from the servers.".to_string()
+                    });
                 // Slice A6: the server confirmed the deletion —
                 // drop the contact flag on the cached user too so
                 // the info panel stops offering "Delete contact"
@@ -759,14 +763,14 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ImportContacts) => {
-                self.contacts = None;
-                self.contacts_error = false;
-                self.contacts_notice = Some("Contacts imported.".to_string());
+                self.users_state.contacts = None;
+                self.users_state.contacts_error = false;
+                self.users_state.contacts_notice = Some("Contacts imported.".to_string());
             }
             Some(RequestPurpose::ClearImportedContacts) => {
-                self.contacts = None;
-                self.contacts_error = false;
-                self.contacts_notice =
+                self.users_state.contacts = None;
+                self.users_state.contacts_error = false;
+                self.users_state.contacts_notice =
                     Some("Synced contacts deleted from the servers.".to_string());
             }
             _ => {}
@@ -782,7 +786,7 @@ impl Session {
             && let RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { block }) =
                 p.purpose
             && let Some(user_id) = p.user_id
-            && let Some(info) = self.user_full_infos.get_mut(&user_id)
+            && let Some(info) = self.users_state.user_full_infos.get_mut(&user_id)
         {
             info.blocked = block;
         }

@@ -284,7 +284,10 @@ impl Session {
             reply.chat_id
         };
         let external = target_chat != message.chat_id;
-        let fetched = self.reply_targets.get(&(message.chat_id.0, message.id.0));
+        let fetched = self
+            .messages
+            .reply_targets
+            .get(&(message.chat_id.0, message.id.0));
         let original: Option<&HistoryMessage> = self
             .histories
             .get(&target_chat.0)
@@ -493,6 +496,7 @@ impl Session {
                 continue;
             }
             if self
+                .messages
                 .reply_targets
                 .contains_key(&(message.chat_id.0, message.id.0))
             {
@@ -528,7 +532,7 @@ impl Session {
         message: ParsedMessage,
     ) {
         self.remember_files(&message.files);
-        self.reply_targets.insert(
+        self.messages.reply_targets.insert(
             (chat_id.0, message_id.0),
             ReplyTarget::Loaded(Box::new(history_message(message, false))),
         );
@@ -536,7 +540,8 @@ impl Session {
 
     /// `getRepliedMessage` failed: the original is gone or unreachable.
     pub(crate) fn reject_replied_message(&mut self, chat_id: ChatId, message_id: MessageId) {
-        self.reply_targets
+        self.messages
+            .reply_targets
             .insert((chat_id.0, message_id.0), ReplyTarget::Missing);
     }
 
@@ -544,7 +549,7 @@ impl Session {
     /// bubble strips draw.
     pub(crate) fn reply_thumb_file_ids(&self) -> Vec<FileId> {
         let mut ids = Vec::new();
-        for target in self.reply_targets.values() {
+        for target in self.messages.reply_targets.values() {
             if let ReplyTarget::Loaded(found) = target {
                 ids.extend(thumb_candidates(effective_content(
                     &found.content,

@@ -181,18 +181,18 @@ fn chat_translatable_flag_follows_the_update() {
 #[test]
 fn chat_translated_to_toggles_and_bumps_the_revision() {
     let mut h = Harness::new();
-    let before = h.driver.session.translate.revision;
+    let before = h.driver.session.messages.translate.revision;
     h.driver
         .session
         .set_chat_translated_to(ChatId(7), Some("en"));
     assert_eq!(h.driver.session.chat_translated_to(ChatId(7)), Some("en"));
-    assert!(h.driver.session.translate.revision > before);
-    let after = h.driver.session.translate.revision;
+    assert!(h.driver.session.messages.translate.revision > before);
+    let after = h.driver.session.messages.translate.revision;
     h.driver
         .session
         .set_chat_translated_to(ChatId(7), Some("en"));
     assert_eq!(
-        h.driver.session.translate.revision, after,
+        h.driver.session.messages.translate.revision, after,
         "no change, no bump"
     );
     h.driver.session.set_chat_translated_to(ChatId(7), None);

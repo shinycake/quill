@@ -614,7 +614,7 @@ fn map_tile_path(
     files: &HashMap<i32, ParsedFile>,
     media_roots: &[PathBuf],
 ) -> Option<PathBuf> {
-    let file_id = session?.map_thumbs.file_id(location)?;
+    let file_id = session?.media.map_thumbs.file_id(location)?;
     files
         .get(&file_id)
         .and_then(|file| file.usable_path())
@@ -1156,8 +1156,8 @@ pub(super) fn session_history_row(
             // Slice media-downloads-pause: the pause toggle only appears
             // for user-initiated (listed) downloads.
             session
-                .filter(|s| s.user_downloads.contains(&doc.file_id.0))
-                .map(|s| s.paused_downloads.contains(&doc.file_id.0)),
+                .filter(|s| s.media.user_downloads.contains(&doc.file_id.0))
+                .map(|s| s.media.paused_downloads.contains(&doc.file_id.0)),
             None,
             cx,
         )),
@@ -1416,7 +1416,7 @@ pub(super) fn session_history_row(
             media_roots,
             session
                 .as_ref()
-                .map(|s| s.emoji.custom_emoji_stickers.as_slice())
+                .map(|s| s.stickers.emoji.custom_emoji_stickers.as_slice())
                 .unwrap_or(&[]),
             &animated_emoji,
             revealed,
@@ -1803,7 +1803,8 @@ fn custom_emoji_chip_glyph(
 ) -> AnyElement {
     let size = super::reactions::CHIP_GLYPH;
     let sticker = session.and_then(|s| {
-        s.emoji
+        s.stickers
+            .emoji
             .custom_emoji_stickers
             .iter()
             .find(|item| item.custom_emoji_id == Some(id))

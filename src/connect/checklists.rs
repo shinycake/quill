@@ -108,12 +108,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let key = (chat_id.0, message_id.0);
         if matches!(
-            self.session.poll_stats.get(&key),
+            self.session.messages.poll_stats.get(&key),
             Some(PollStatsFetch::Loading)
         ) {
             return Ok(None);
         }
-        self.session.poll_stats.insert(key, PollStatsFetch::Loading);
+        self.session
+            .messages
+            .poll_stats
+            .insert(key, PollStatsFetch::Loading);
         let result = self.send_tracked(
             RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics {
                 chat_id,
@@ -125,7 +128,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match result {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
-                self.session.poll_stats.remove(&key);
+                self.session.messages.poll_stats.remove(&key);
                 Err(err)
             }
         }

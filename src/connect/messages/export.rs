@@ -52,7 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.chat_export.is_some() {
+        if self.session.messages.chat_export.is_some() {
             return Err(ConnectSendError::InvalidRequest);
         }
         // Protected chats can't be saved or forwarded, so they can't be
@@ -61,12 +61,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.chat_has_protected_content(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chat_export = Some(crate::chat_export::ChatExportState::with_options(
-            chat_id,
-            chat_title,
-            options,
-            crate::local_time::now_unix(),
-        ));
+        self.session.messages.chat_export =
+            Some(crate::chat_export::ChatExportState::with_options(
+                chat_id,
+                chat_title,
+                options,
+                crate::local_time::now_unix(),
+            ));
         self.send_export_page()
     }
 
@@ -76,10 +77,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn pump_chat_export(&mut self) {
         let done_paging = self
             .session
+            .messages
             .chat_export
             .as_ref()
             .is_some_and(|e| e.done_paging && !e.settled());
-        if done_paging && let Some(export) = self.session.chat_export.as_mut() {
+        if done_paging && let Some(export) = self.session.messages.chat_export.as_mut() {
             let dir = crate::chat_export::default_export_dir();
             match crate::chat_export::write_export(export, &dir) {
                 Ok(path) => export.finished_path = Some(path),
@@ -89,12 +91,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let need_page = self
             .session
+            .messages
             .chat_export
             .as_ref()
             .is_some_and(|e| !e.in_flight && !e.done_paging && !e.settled());
         if need_page
             && self.send_export_page().is_err()
-            && let Some(export) = self.session.chat_export.as_mut()
+            && let Some(export) = self.session.messages.chat_export.as_mut()
         {
             export.failed = Some("failed to send TDLib request".into());
         }
@@ -105,6 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let (chat_id, from) = {
             let export = self
                 .session
+                .messages
                 .chat_export
                 .as_ref()
                 .ok_or(ConnectSendError::InvalidRequest)?;
@@ -124,7 +128,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        if let Some(export) = self.session.chat_export.as_mut() {
+        if let Some(export) = self.session.messages.chat_export.as_mut() {
             export.in_flight = true;
         }
         Ok(())

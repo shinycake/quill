@@ -277,7 +277,7 @@ fn private_draft_debounces_then_flushes_and_skips_channels() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.draft_clears, vec![ChatId(7)]);
+    assert_eq!(driver.session.messages.draft_clears, vec![ChatId(7)]);
     driver.clear_draft_after_send(ChatId(7), true).unwrap();
     assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
     assert!(!sink.rendered().contains("CANARY"));

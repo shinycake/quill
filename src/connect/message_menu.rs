@@ -180,7 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // A right-clicked reaction chip asked for its own tab.
         if let Some((wanted_chat, wanted_message, reaction)) =
-            self.session.wanted_reactor_tab.take()
+            self.session.messages.wanted_reactor_tab.take()
             && wanted_chat == chat_id
             && wanted_message == message_id
             && can_react_list
@@ -206,6 +206,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let filter = reaction.map_or(0, crate::state::reaction_filter_key);
         let Some(audience) = self
             .session
+            .messages
             .message_audience
             .as_ref()
             .filter(|a| a.chat_id == chat_id && a.message_id == message_id)
@@ -345,6 +346,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let allowed = self
             .session
+            .messages
             .message_menu_actions
             .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
         if !allowed {
@@ -421,7 +423,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.sticker_set_view = Some(crate::state::StickerSetView {
+        self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView {
             set_id,
             stage: crate::state::StickerSetViewStage::Loading,
             files_requested: false,
@@ -445,7 +447,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn fetch_emoji_pack_title(&mut self, set_id: i64) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
             || set_id == 0
-            || self.session.emoji_pack_titles.contains_key(&set_id)
+            || self
+                .session
+                .stickers
+                .emoji_pack_titles
+                .contains_key(&set_id)
         {
             return Ok(());
         }
@@ -488,7 +494,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Download the sticker previews of the open set view, once.
     pub fn ensure_sticker_set_view_files(&mut self) -> Result<(), ConnectSendError> {
-        let Some(view) = self.session.sticker_set_view.as_mut() else {
+        let Some(view) = self.session.stickers.sticker_set_view.as_mut() else {
             return Ok(());
         };
         let crate::state::StickerSetViewStage::Ready { stickers, .. } = &view.stage else {
@@ -512,7 +518,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.installed_loaded
+        if !self.session.stickers.stickers.installed_loaded
             && !self
                 .session
                 .requests

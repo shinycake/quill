@@ -18,7 +18,7 @@ impl Session {
                 next_offset,
                 ..
             } => {
-                if self.search.matches_generation(pending)
+                if self.search.search.matches_generation(pending)
                     && matches!(
                         pending.map(|p| p.purpose),
                         Some(
@@ -31,7 +31,7 @@ impl Session {
                         self.remember_files(&message.files);
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-                    self.search.accept_messages(hits, false);
+                    self.search.search.accept_messages(hits, false);
                 }
                 // Phase C2i: `searchCallMessages` pages for the
                 // Recent-calls tab. `searchCallMessages` returns call and
@@ -53,15 +53,15 @@ impl Session {
                 are_limits_exceeded,
                 ..
             } => {
-                if self.search.matches_generation(pending)
+                if self.search.search.matches_generation(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchPublicPosts)
                 {
                     for message in &messages {
                         self.remember_files(&message.files);
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-                    self.search.public_limits_exceeded = are_limits_exceeded;
-                    self.search.accept_messages(hits, false);
+                    self.search.search.public_limits_exceeded = are_limits_exceeded;
+                    self.search.search.accept_messages(hits, false);
                 }
             }
             SearchPayload::MessageCalendar { days, .. } => {

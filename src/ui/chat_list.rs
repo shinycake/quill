@@ -195,14 +195,14 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 live.driver.close_gif_panel();
             } else if let Some(session) = self.demo_session.as_mut() {
-                session.gifs.close();
+                session.stickers.gifs.close();
             }
         }
         if self.sticker_panel_open() {
             if let Some(live) = self.live.as_mut() {
                 live.driver.close_sticker_panel();
             } else if let Some(session) = self.demo_session.as_mut() {
-                session.stickers.close();
+                session.stickers.stickers.close();
             }
         }
         if self.live.is_some() {
@@ -226,7 +226,10 @@ impl QuillApp {
         let text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&text);
         // Telegram Desktop's info column follows the open chat.
-        if self.session().is_some_and(|s| s.open_info_panel.is_some()) {
+        if self
+            .session()
+            .is_some_and(|s| s.users_state.open_info_panel.is_some())
+        {
             match self
                 .session()
                 .and_then(|s| s.info_panel_target_for_chat(chat_id))

@@ -122,6 +122,7 @@ fn reply_outside_the_window_is_fetched_and_filled_in() {
         Some(ChatId(GROUP)),
     );
     session
+        .messages
         .reply_targets
         .insert((GROUP, 500), ReplyTarget::Loading);
     assert!(session.reply_fetch_candidates().is_empty());

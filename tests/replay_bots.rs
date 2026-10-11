@@ -186,7 +186,7 @@ fn replay_bot_commands_error_records_empty_set() {
             cmd_extra.0
         )],
     );
-    assert!(session.bot_commands.contains_key(&21));
+    assert!(session.bots.bot_commands.contains_key(&21));
     assert!(session.command_menu_items(chat).is_empty());
 }
 
@@ -305,7 +305,11 @@ fn replay_callback_query_answer_surfaced() {
             extra.0
         )],
     );
-    let answer = session.last_callback_answer.take().expect("answer stored");
+    let answer = session
+        .bots
+        .last_callback_answer
+        .take()
+        .expect("answer stored");
     assert_eq!(answer.text, "Voted!");
     assert!(!answer.show_alert);
     assert!(answer.url.is_empty());
@@ -318,7 +322,7 @@ fn replay_callback_query_answer_surfaced() {
             r#"{"@type":"callbackQueryAnswer","@extra":"999","text":"stray","show_alert":false,"url":""}"#,
         ],
     );
-    assert!(session.last_callback_answer.is_none());
+    assert!(session.bots.last_callback_answer.is_none());
     // Error on the in-flight request → fallback note, no TDLib text echoed.
     let extra = session.request(
         RequestPurpose::GetCallbackQueryAnswer,
@@ -333,7 +337,11 @@ fn replay_callback_query_answer_surfaced() {
             extra.0
         )],
     );
-    let answer = session.last_callback_answer.take().expect("fallback note");
+    let answer = session
+        .bots
+        .last_callback_answer
+        .take()
+        .expect("fallback note");
     assert_eq!(answer.text, "bot did not answer");
     assert!(answer.url.is_empty());
 }

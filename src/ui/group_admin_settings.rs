@@ -690,6 +690,7 @@ impl QuillApp {
                         muted,
                     ));
                     match session
+                        .users_state
                         .profile_chat_lists
                         .get(&(ProfileChatsKind::SuitableDiscussionChats, 0))
                         .cloned()

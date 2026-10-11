@@ -78,7 +78,7 @@ fn other_device_changes_refetch_the_loaded_lists() {
     );
     assert_eq!(count(&recorder, "getRecentStickers"), 0);
 
-    driver.session.stickers.recent = vec![sticker(1)];
+    driver.session.stickers.stickers.recent = vec![sticker(1)];
     feed(
         &mut driver,
         &seq,
@@ -95,7 +95,7 @@ fn other_device_changes_refetch_the_loaded_lists() {
     );
     assert_eq!(count(&recorder, "getRecentStickers"), 1);
 
-    driver.session.stickers.favorites = vec![sticker(3)];
+    driver.session.stickers.stickers.favorites = vec![sticker(3)];
     feed(
         &mut driver,
         &seq,
@@ -108,8 +108,8 @@ fn other_device_changes_refetch_the_loaded_lists() {
     let regular = r#"{"@type":"updateTrendingStickerSets","sticker_type":{"@type":"stickerTypeRegular"},"sticker_sets":{"@type":"trendingStickerSets","total_count":0,"sets":[],"is_premium":false}}"#;
     feed(&mut driver, &seq, &sink, regular);
     assert_eq!(count(&recorder, "getTrendingStickerSets"), 0);
-    driver.session.stickers.open = true;
-    driver.session.stickers.tab = StickerTab::Trending;
+    driver.session.stickers.stickers.open = true;
+    driver.session.stickers.stickers.tab = StickerTab::Trending;
     feed(&mut driver, &seq, &sink, regular);
     assert_eq!(count(&recorder, "getTrendingStickerSets"), 1);
 }
@@ -124,7 +124,7 @@ fn default_reaction_is_kept_and_set() {
         r#"{"@type":"updateDefaultReactionType","reaction_type":{"@type":"reactionTypeEmoji","emoji":"❤"}}"#,
     );
     assert_eq!(
-        driver.session.default_reaction,
+        driver.session.stickers.default_reaction,
         Some(ReactionChoice::Emoji("❤".into()))
     );
     feed(
@@ -133,7 +133,7 @@ fn default_reaction_is_kept_and_set() {
         &sink,
         r#"{"@type":"updateActiveEmojiReactions","emojis":["👍","❤"]}"#,
     );
-    assert_eq!(driver.session.active_reactions, vec!["👍", "❤"]);
+    assert_eq!(driver.session.stickers.active_reactions, vec!["👍", "❤"]);
 
     driver
         .set_default_reaction(&ReactionChoice::Emoji("🔥".into()))
@@ -141,7 +141,7 @@ fn default_reaction_is_kept_and_set() {
     let sent = sent_request(&recorder, "setDefaultReactionType");
     assert_eq!(sent["reaction_type"]["emoji"], "🔥");
     assert_eq!(
-        driver.session.default_reaction,
+        driver.session.stickers.default_reaction,
         Some(ReactionChoice::Emoji("🔥".into()))
     );
 }
@@ -151,7 +151,7 @@ fn picker_options_are_refetched_when_reactions_change() {
     let (mut driver, recorder, sink, seq) = driver();
     let chat = ChatId(11);
     let message = MessageId(101);
-    driver.session.message_reaction_options = Some(crate::state::MessageReactionOptions {
+    driver.session.stickers.message_reaction_options = Some(crate::state::MessageReactionOptions {
         chat_id: chat,
         message_id: message,
         top: vec![ReactionChoice::Emoji("👍".into())],
@@ -175,7 +175,7 @@ fn picker_options_are_refetched_when_reactions_change() {
     );
     let sent = sent_request(&recorder, "getMessageAvailableReactions");
     assert_eq!(sent["message_id"], 101);
-    assert!(driver.session.message_reaction_options.is_none());
+    assert!(driver.session.stickers.message_reaction_options.is_none());
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn reactor_tabs_page_per_reaction() {
         &page("o1", sent["@extra"].as_str().unwrap()),
     );
     let key = crate::state::reaction_filter_key(&heart);
-    let audience = driver.session.message_audience.as_ref().unwrap();
+    let audience = driver.session.messages.message_audience.as_ref().unwrap();
     assert_eq!(audience.filtered[&key].ready().unwrap().reactions.len(), 1);
 
     // The next page appends and carries the new offset.
@@ -224,7 +224,7 @@ fn reactor_tabs_page_per_reaction() {
         &sink,
         &page("", more["@extra"].as_str().unwrap()),
     );
-    let audience = driver.session.message_audience.as_ref().unwrap();
+    let audience = driver.session.messages.message_audience.as_ref().unwrap();
     let ready = audience.filtered[&key].ready().unwrap();
     assert_eq!(ready.reactions.len(), 2);
     assert!(ready.next_offset.is_empty());
@@ -240,12 +240,12 @@ fn reactor_tabs_page_per_reaction() {
 #[test]
 fn removing_a_recent_sticker_drops_it_at_once() {
     let (mut driver, recorder, _sink, _seq) = driver();
-    driver.session.stickers.recent = vec![sticker(1), sticker(2)];
+    driver.session.stickers.stickers.recent = vec![sticker(1), sticker(2)];
     driver.remove_recent_sticker(FileId(1)).unwrap();
     let sent = sent_request(&recorder, "removeRecentSticker");
     assert_eq!(sent["sticker"]["id"], 1);
     assert_eq!(sent["is_attached"], false);
-    assert_eq!(driver.session.stickers.recent.len(), 1);
+    assert_eq!(driver.session.stickers.stickers.recent.len(), 1);
     assert!(driver.remove_recent_sticker(FileId(0)).is_err());
 }
 
@@ -268,10 +268,10 @@ fn keyword_emoji_search_uses_the_typed_language() {
         sent["@extra"].as_str().unwrap()
     );
     feed(&mut driver, &seq, &sink, &body);
-    assert_eq!(driver.session.emoji.keyword_emojis, vec!["🔥"]);
+    assert_eq!(driver.session.stickers.emoji.keyword_emojis, vec!["🔥"]);
     // A cleared query forgets the matches.
     driver.search_keyword_emojis("").unwrap();
-    assert!(driver.session.emoji.keyword_emojis.is_empty());
+    assert!(driver.session.stickers.emoji.keyword_emojis.is_empty());
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn greeting_and_attached_stickers_load() {
         sent["@extra"].as_str().unwrap()
     );
     feed(&mut driver, &seq, &sink, &body);
-    assert_eq!(driver.session.stickers.greeting.len(), 1);
+    assert_eq!(driver.session.stickers.stickers.greeting.len(), 1);
 
     driver.fetch_attached_sticker_sets(FileId(42)).unwrap();
     let sent = sent_request(&recorder, "getAttachedStickerSets");

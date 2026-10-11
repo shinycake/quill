@@ -486,7 +486,7 @@ impl QuillApp {
         let open = session.open_chat?;
         let bot_id = session.bot_user_id_for_chat(open)?;
         let info: BotInfo = session.bot_info_for_chat(open)?.clone();
-        let start_param = session.bot_start_params.get(&open.0).cloned();
+        let start_param = session.bots.bot_start_params.get(&open.0).cloned();
         // Telegram Desktop shows the bot card only in an empty chat (or
         // while a START link waits); once there are messages it's a normal
         // conversation, with commands behind the composer's Menu button.
@@ -503,7 +503,7 @@ impl QuillApp {
             .get(&bot_id)
             .map(|user| user.username.clone())
             .unwrap_or_default();
-        let similar = session.similar_bots.get(&bot_id).cloned();
+        let similar = session.bots.similar_bots.get(&bot_id).cloned();
         let mut panel = div()
             .id("bot-info")
             .flex()
@@ -573,7 +573,7 @@ impl QuillApp {
         // schema 1.8.67 line 5234). Each offers Send → `inputMessageGame`
         // to the open chat (schema:6156). Only games TDLib delivered are
         // listed — short names are never invented.
-        if let Some(games) = session.bot_games.get(&bot_id)
+        if let Some(games) = session.bots.bot_games.get(&bot_id)
             && !games.is_empty()
         {
             let mut section = div().id("bot-games").flex().flex_col().gap_1().child(
@@ -731,7 +731,7 @@ impl QuillApp {
                 .send_bot_start_message(chat_id, bot_id, &parameter)
             {
                 Ok(Some(_)) => {
-                    live.driver.session.bot_start_params.remove(&chat_id.0);
+                    live.driver.session.bots.bot_start_params.remove(&chat_id.0);
                     "starting bot…".to_string()
                 }
                 Ok(None) => "request already in flight".to_string(),
@@ -755,6 +755,7 @@ impl QuillApp {
                 Ok(Some(_)) => {
                     live.driver
                         .session
+                        .bots
                         .similar_bots
                         .entry(bot_id)
                         .or_insert(SimilarBotsFetch::Loading);

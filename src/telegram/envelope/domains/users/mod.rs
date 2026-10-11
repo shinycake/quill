@@ -45,7 +45,7 @@ pub enum UsersPayload {
     /// `getUserFullInfo user_id:int53 = UserFullInfo`, line 11501). The
     /// response carries no user id; it is resolved from the pending
     /// request in `Session::apply`, so only `bot_info` (from
-    /// `userFullInfo.bot_info:botInfo`, line 2468), `bio` (from
+    /// `userFullInfo.bots.bot_info:botInfo`, line 2468), `bio` (from
     /// `userFullInfo.bio:formattedText`) and the preferred profile-photo
     /// file (from `userFullInfo.photo:chatPhoto` sizes) are kept.
     UserFullInfo {

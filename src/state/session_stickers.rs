@@ -3,8 +3,8 @@ use super::*;
 
 impl Session {
     pub fn sticker_requires_premium(&self, file_id: FileId) -> bool {
-        [&self.stickers.stickers, &self.stickers.recent, &self.stickers.favorites,
-            &self.stickers.found_stickers, &self.stickers.suggestions].into_iter()
+        [&self.stickers.stickers.stickers, &self.stickers.stickers.recent, &self.stickers.stickers.favorites,
+            &self.stickers.stickers.found_stickers, &self.stickers.stickers.suggestions].into_iter()
             .flatten().any(|sticker| sticker.file_id == file_id && sticker.requires_premium)
             || self.histories.values().flat_map(|history| history.messages.values()).chain(self.threads.topic_histories.values().flat_map(|history| history.messages.values())).any(|message| {
                 matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium)
@@ -14,99 +14,118 @@ impl Session {
     pub(crate) fn finish_sticker_batch_item(&mut self, set_id: i64, success: bool) {
         if let Some(index) = self
             .stickers
+            .stickers
             .batch_pending
             .iter()
             .position(|id| *id == set_id)
         {
-            self.stickers.batch_pending.remove(index);
+            self.stickers.stickers.batch_pending.remove(index);
             if success {
-                self.stickers.batch_completed += 1;
+                self.stickers.stickers.batch_completed += 1;
             } else {
-                self.stickers.batch_failed += 1;
+                self.stickers.stickers.batch_failed += 1;
             }
         }
     }
 
     pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         let next = sets.last().map(|set| set.id).unwrap_or(0);
-        self.stickers.archived_has_more =
-            sets.len() == 100 && next > 0 && next != self.stickers.archived_offset;
-        self.stickers.archived_next_offset = next;
-        if self.stickers.archived_offset == 0 {
-            self.stickers.archived.clear();
+        self.stickers.stickers.archived_has_more =
+            sets.len() == 100 && next > 0 && next != self.stickers.stickers.archived_offset;
+        self.stickers.stickers.archived_next_offset = next;
+        if self.stickers.stickers.archived_offset == 0 {
+            self.stickers.stickers.archived.clear();
         }
-        let mut ids: HashSet<_> = self.stickers.archived.iter().map(|set| set.id).collect();
+        let mut ids: HashSet<_> = self
+            .stickers
+            .stickers
+            .archived
+            .iter()
+            .map(|set| set.id)
+            .collect();
         self.stickers
+            .stickers
             .archived
             .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
-        self.stickers.failed = false;
+        self.stickers.stickers.failed = false;
     }
 
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        self.stickers.loading_sets = false;
-        self.stickers.failed = false;
-        self.stickers.sets = sets;
-        self.stickers.installed_loaded = true;
-        if self.stickers.tab != StickerTab::Installed {
+        self.stickers.stickers.loading_sets = false;
+        self.stickers.stickers.failed = false;
+        self.stickers.stickers.sets = sets;
+        self.stickers.stickers.installed_loaded = true;
+        if self.stickers.stickers.tab != StickerTab::Installed {
             return;
         }
         let still_selected = self
             .stickers
+            .stickers
             .selected_set_id
-            .is_some_and(|id| self.stickers.sets.iter().any(|set| set.id == id));
+            .is_some_and(|id| self.stickers.stickers.sets.iter().any(|set| set.id == id));
         if !still_selected {
-            self.stickers.selected_set_id = self.stickers.sets.first().map(|set| set.id);
-            self.stickers.loaded_set_id = None;
-            self.stickers.stickers.clear();
+            self.stickers.stickers.selected_set_id =
+                self.stickers.stickers.sets.first().map(|set| set.id);
+            self.stickers.stickers.loaded_set_id = None;
+            self.stickers.stickers.stickers.clear();
         }
     }
 
     /// Replace the first trending page; append later pages without duplicate sets.
     pub fn accept_trending_sticker_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
-        self.stickers.trending_next_offset = self.stickers.trending_offset + sets.len();
+        self.stickers.stickers.trending_next_offset =
+            self.stickers.stickers.trending_offset + sets.len();
         if sets.is_empty() {
-            self.stickers.trending_total = self.stickers.trending_next_offset;
+            self.stickers.stickers.trending_total = self.stickers.stickers.trending_next_offset;
         }
-        if self.stickers.trending_offset == 0 {
-            self.stickers.trending = sets;
+        if self.stickers.stickers.trending_offset == 0 {
+            self.stickers.stickers.trending = sets;
         } else {
-            let mut ids: HashSet<_> = self.stickers.trending.iter().map(|set| set.id).collect();
+            let mut ids: HashSet<_> = self
+                .stickers
+                .stickers
+                .trending
+                .iter()
+                .map(|set| set.id)
+                .collect();
             self.stickers
+                .stickers
                 .trending
                 .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
         }
-        self.stickers.trending_is_premium = is_premium;
+        self.stickers.stickers.trending_is_premium = is_premium;
     }
 
     /// Slice S8: store a `getFavoriteStickers` answer.
     pub fn accept_favorite_stickers(&mut self, stickers: Vec<StickerItem>) {
-        self.stickers.favorites = stickers;
+        self.stickers.stickers.favorites = stickers;
     }
 
     /// Slice S8: store a `getRecentStickers` answer.
     pub fn accept_recent_stickers(&mut self, stickers: Vec<StickerItem>) {
-        self.stickers.recent = stickers;
+        self.stickers.stickers.recent = stickers;
     }
 
     /// Slice S8: store a `searchStickerSets` answer.
     pub fn accept_found_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        self.stickers.found_sets = sets;
+        self.stickers.stickers.found_sets = sets;
     }
 
     /// Slice S8: store a `searchStickers` answer.
     pub fn accept_found_stickers(&mut self, stickers: Vec<StickerItem>) {
-        self.stickers.search_has_more = stickers.len() == 100;
-        if self.stickers.search_offset == 0 {
-            self.stickers.found_stickers.clear();
+        self.stickers.stickers.search_has_more = stickers.len() == 100;
+        if self.stickers.stickers.search_offset == 0 {
+            self.stickers.stickers.found_stickers.clear();
         }
-        self.stickers.search_offset += stickers.len();
+        self.stickers.stickers.search_offset += stickers.len();
         let mut files: HashSet<_> = self
+            .stickers
             .stickers
             .found_stickers
             .iter()
             .map(|sticker| sticker.file_id)
             .collect();
-        self.stickers.found_stickers.extend(
+        self.stickers.stickers.found_stickers.extend(
             stickers
                 .into_iter()
                 .filter(|sticker| files.insert(sticker.file_id)),
@@ -115,9 +134,9 @@ impl Session {
 
     /// Slice S12: drop the composer sticker suggestions.
     pub fn clear_sticker_suggestions(&mut self) {
-        self.stickers.suggestions.clear();
-        self.stickers.suggest_for = None;
-        self.stickers.suggest_waiting_for_sets = false;
+        self.stickers.stickers.suggestions.clear();
+        self.stickers.stickers.suggest_for = None;
+        self.stickers.stickers.suggest_waiting_for_sets = false;
     }
 
     /// Slice S12: store a `searchStickers` answer issued for the
@@ -130,14 +149,20 @@ impl Session {
                 self.clear_sticker_suggestions();
             }
             StickerSuggestMode::InstalledOnly => {
-                let installed: HashSet<i64> = self.stickers.sets.iter().map(|set| set.id).collect();
-                self.stickers.suggestions = stickers
+                let installed: HashSet<i64> = self
+                    .stickers
+                    .stickers
+                    .sets
+                    .iter()
+                    .map(|set| set.id)
+                    .collect();
+                self.stickers.stickers.suggestions = stickers
                     .into_iter()
                     .filter(|sticker| installed.contains(&sticker.set_id))
                     .collect();
             }
             StickerSuggestMode::InstalledAndRecommended => {
-                self.stickers.suggestions = stickers;
+                self.stickers.stickers.suggestions = stickers;
             }
         }
     }
@@ -147,11 +172,11 @@ impl Session {
     /// cache so the panel refetches the authoritative list instead of
     /// showing a stale order.
     pub fn invalidate_installed_sticker_sets(&mut self) {
-        self.stickers.installed_loaded = false;
-        self.stickers.sets.clear();
-        self.stickers.selected_set_id = None;
-        self.stickers.loaded_set_id = None;
-        self.stickers.stickers.clear();
+        self.stickers.stickers.installed_loaded = false;
+        self.stickers.stickers.sets.clear();
+        self.stickers.stickers.selected_set_id = None;
+        self.stickers.stickers.loaded_set_id = None;
+        self.stickers.stickers.stickers.clear();
     }
 
     /// Slice S15: apply TDLib's `updateInstalledStickerSets` order to the
@@ -162,11 +187,11 @@ impl Session {
     /// flows converge on TDLib's authoritative order.
     pub fn apply_installed_sticker_set_order(&mut self, ids: &[i64], is_regular: bool) {
         let sets = if is_regular {
-            &mut self.stickers.sets
+            &mut self.stickers.stickers.sets
         } else {
             // Non-regular types (custom emoji; mask sets are never fetched)
             // route to the emoji panel's installed sets.
-            &mut self.emoji.installed_sets
+            &mut self.stickers.emoji.installed_sets
         };
         if sets.is_empty() || ids.is_empty() {
             return;
@@ -176,27 +201,27 @@ impl Session {
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {
-        if self.stickers.selected_set_id == Some(set_id) {
+        if self.stickers.stickers.selected_set_id == Some(set_id) {
             return;
         }
-        self.stickers.selected_set_id = Some(set_id);
-        self.stickers.loaded_set_id = None;
-        self.stickers.stickers.clear();
-        self.stickers.loading_set = false;
-        self.stickers.failed = false;
+        self.stickers.stickers.selected_set_id = Some(set_id);
+        self.stickers.stickers.loaded_set_id = None;
+        self.stickers.stickers.stickers.clear();
+        self.stickers.stickers.loading_set = false;
+        self.stickers.stickers.failed = false;
     }
 
     pub fn mark_sticker_set_loading(&mut self) {
-        self.stickers.loading_set = true;
-        self.stickers.failed = false;
+        self.stickers.stickers.loading_set = true;
+        self.stickers.stickers.failed = false;
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.gifs.loading = false;
-        self.gifs.failed = false;
-        self.gifs.stale = false;
-        self.gifs.animations = animations;
-        self.gifs.loaded = true;
+        self.stickers.gifs.loading = false;
+        self.stickers.gifs.failed = false;
+        self.stickers.gifs.stale = false;
+        self.stickers.gifs.animations = animations;
+        self.stickers.gifs.loaded = true;
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -210,24 +235,25 @@ impl Session {
         next_offset: String,
         first_page: bool,
     ) {
-        self.gifs.search_loading = false;
-        self.gifs.search_failed = false;
+        self.stickers.gifs.search_loading = false;
+        self.stickers.gifs.search_failed = false;
         if first_page {
-            self.gifs.search_results = animations;
+            self.stickers.gifs.search_results = animations;
         } else {
             for item in animations {
                 if !self
+                    .stickers
                     .gifs
                     .search_results
                     .iter()
                     .any(|r| r.file_id == item.file_id)
                 {
-                    self.gifs.search_results.push(item);
+                    self.stickers.gifs.search_results.push(item);
                 }
             }
         }
-        self.gifs.search_next_offset =
-            if !next_offset.is_empty() && next_offset == self.gifs.search_offset {
+        self.stickers.gifs.search_next_offset =
+            if !next_offset.is_empty() && next_offset == self.stickers.gifs.search_offset {
                 String::new()
             } else {
                 next_offset
@@ -235,16 +261,17 @@ impl Session {
     }
 
     pub fn accept_sticker_set(&mut self, id: i64, stickers: Vec<StickerItem>) {
-        self.stickers.loading_set = false;
+        self.stickers.stickers.loading_set = false;
         if self
+            .stickers
             .stickers
             .selected_set_id
             .is_some_and(|selected| selected != id)
         {
             return;
         }
-        self.stickers.failed = false;
-        self.stickers.loaded_set_id = Some(id);
-        self.stickers.stickers = stickers;
+        self.stickers.stickers.failed = false;
+        self.stickers.stickers.loaded_set_id = Some(id);
+        self.stickers.stickers.stickers = stickers;
     }
 }

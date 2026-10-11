@@ -114,7 +114,7 @@ impl Session {
         for message in history.messages.values() {
             if let Some(location) = message_location(&message.content) {
                 let key = MapKey::of(&location);
-                if !self.map_thumbs.has_asked(&key) && !wanted.contains(&key) {
+                if !self.media.map_thumbs.has_asked(&key) && !wanted.contains(&key) {
                     wanted.push(key);
                 }
             }
@@ -133,7 +133,7 @@ impl Session {
         let mut ids = Vec::new();
         for message in history.messages.values() {
             if let Some(location) = message_location(&message.content)
-                && let Some(file_id) = self.map_thumbs.file_id(&location)
+                && let Some(file_id) = self.media.map_thumbs.file_id(&location)
                 && self.should_download(FileId(file_id))
                 && !ids.contains(&FileId(file_id))
             {

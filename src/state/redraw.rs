@@ -121,7 +121,7 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
         }
         P::Media(MediaPayload::UpdateFile(file)) => file_need(session, file),
         P::Media(MediaPayload::UpdateFileDownload { file_id, .. }) => {
-            if session.user_downloads.contains(file_id) {
+            if session.media.user_downloads.contains(file_id) {
                 RedrawNeed::Now
             } else {
                 RedrawNeed::Later
@@ -206,15 +206,16 @@ fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
     let id = file.id.0;
     let completes = file.local.is_downloading_completed
         && !session
+            .media
             .files
             .get(&id)
             .is_some_and(|known| known.local.is_downloading_completed);
     if completes
-        || session.user_downloads.contains(&id)
-        || session.open_chat_media_downloads.contains(&id)
+        || session.media.user_downloads.contains(&id)
+        || session.media.open_chat_media_downloads.contains(&id)
     {
         RedrawNeed::Now
-    } else if session.downloading.contains(&id) || file.local.is_downloading_completed {
+    } else if session.media.downloading.contains(&id) || file.local.is_downloading_completed {
         RedrawNeed::Later
     } else {
         RedrawNeed::Now

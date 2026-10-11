@@ -211,7 +211,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// separate `message_text_length_max` option (untracked here — out of
     /// this slice).
     fn check_caption_length(&self, caption: &str) -> Result<(), ConnectSendError> {
-        let limit = self.session.message_caption_length_max;
+        let limit = self.session.messages.message_caption_length_max;
         if caption.chars().count() as i64 > i64::from(limit.max(0)) {
             Err(ConnectSendError::CaptionTooLong { limit })
         } else {

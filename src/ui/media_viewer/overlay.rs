@@ -84,11 +84,13 @@ impl QuillApp {
                 natural_size: None,
             });
         let (position, total) = self.viewer.state.position().unwrap_or((0, 0));
-        let files: HashMap<i32, ParsedFile> =
-            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let files: HashMap<i32, ParsedFile> = self
+            .session()
+            .map(|s| s.media.files.clone())
+            .unwrap_or_default();
         let downloading: HashSet<i32> = self
             .session()
-            .map(|s| s.downloading.clone())
+            .map(|s| s.media.downloading.clone())
             .unwrap_or_default();
         let roots = self.media_display_roots();
         let thumb_path = viewer_display_path(&item, &files, &roots);
@@ -496,7 +498,7 @@ impl QuillApp {
             .map(|session| {
                 custom_emoji_paths(
                     &item.caption_entities,
-                    &session.emoji.custom_emoji_stickers,
+                    &session.stickers.emoji.custom_emoji_stickers,
                     &files,
                     &roots,
                 )

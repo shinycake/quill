@@ -456,7 +456,7 @@ impl QuillApp {
                         .when_some(info_target, |this, target| {
                             let open = self
                                 .session()
-                                .is_some_and(|s| s.open_info_panel == Some(target));
+                                .is_some_and(|s| s.users_state.open_info_panel == Some(target));
                             this.child(
                                 Button::new("chat-info-toggle")
                                     .icon(gpui_kit::assets::IconName::PanelRight)
@@ -997,8 +997,8 @@ impl QuillApp {
             open.and_then(|id| session.and_then(|s| s.chats.get(&id.0).cloned()));
         let media_roots = self.media_display_roots();
         let sender_name = title.clone();
-        let chat_search_open = session.is_some_and(|s| s.chat_search.open);
-        let highlight_id = session.and_then(|s| match s.chat_search.jump {
+        let chat_search_open = session.is_some_and(|s| s.search.chat_search.open);
+        let highlight_id = session.and_then(|s| match s.search.chat_search.jump {
             ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } => {
                 Some(message_id)
             }
@@ -1378,7 +1378,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.session();
-        let jump_serial = session.map_or(0, |s| s.chat_search.jump_serial);
+        let jump_serial = session.map_or(0, |s| s.search.chat_search.jump_serial);
         // Phase B4: secret chats word the timer-change service row as
         // "Self-destruct".
         let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
@@ -1680,11 +1680,12 @@ impl QuillApp {
                 .session()
                 .map(|s| {
                     (
-                        s.files
+                        s.media
+                            .files
                             .values()
                             .filter(|file| file.usable_path().is_some())
                             .count(),
-                        s.downloading.len(),
+                        s.media.downloading.len(),
                     )
                 })
                 .unwrap_or_default();
@@ -2133,9 +2134,9 @@ impl QuillApp {
         let no_files = HashMap::new();
         let no_ids = std::collections::HashSet::new();
         let session = self.session();
-        let files = session.map_or(&no_files, |s| &s.files);
-        let downloading = session.map_or(&no_ids, |s| &s.downloading);
-        let failed = session.map_or(&no_ids, |s| &s.failed_downloads);
+        let files = session.map_or(&no_files, |s| &s.media.files);
+        let downloading = session.map_or(&no_ids, |s| &s.media.downloading);
+        let failed = session.map_or(&no_ids, |s| &s.media.failed_downloads);
         // Settings → Appearance: font size + bubble/plain style.
         let look = self.bubble_look(cx);
         match row {

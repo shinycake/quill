@@ -246,7 +246,7 @@ fn deleting_a_reaction_needs_the_message_to_allow_it() {
         r#"{"@type":"ok"}"#,
     );
     assert_eq!(
-        driver.session.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.as_deref(),
         Some("reaction deleted")
     );
 }

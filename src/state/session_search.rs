@@ -31,11 +31,11 @@ impl Session {
     }
 
     pub fn open_search(&mut self) {
-        self.search.open_field();
+        self.search.search.open_field();
     }
 
     pub fn close_search(&mut self) {
-        self.search.close();
+        self.search.search.close();
     }
 
     pub fn open_chat_search(&mut self) -> bool {
@@ -49,12 +49,12 @@ impl Session {
         {
             return false;
         }
-        self.chat_search.open_for(chat_id);
+        self.search.chat_search.open_for(chat_id);
         true
     }
 
     pub fn close_chat_search(&mut self) {
-        self.chat_search.close();
+        self.search.chat_search.close();
     }
 
     pub(crate) fn apply_history_around(
@@ -110,7 +110,7 @@ impl Session {
         seq: u64,
     ) {
         if !matches!(
-            self.chat_search.jump,
+            self.search.chat_search.jump,
             ChatSearchJump::Loading { message_id: current } if current == message_id
         ) {
             self.diagnostics.record(Diagnostic {
@@ -122,12 +122,15 @@ impl Session {
             });
             return;
         }
-        let Some(chat_id) = pending.and_then(|p| p.chat_id).or(self.chat_search.chat_id) else {
+        let Some(chat_id) = pending
+            .and_then(|p| p.chat_id)
+            .or(self.search.chat_search.chat_id)
+        else {
             return;
         };
         let history = self.histories.entry(chat_id.0).or_default();
         // Tombstone, 404/error, or around-load without the id: deleted/inaccessible.
-        self.chat_search.jump = if history.contains(message_id) {
+        self.search.chat_search.jump = if history.contains(message_id) {
             ChatSearchJump::Ready { message_id }
         } else {
             ChatSearchJump::Missing { message_id }

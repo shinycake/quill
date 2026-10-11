@@ -60,20 +60,24 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
         &mut session,
         &demo_file_json(61, &demo_thumb_png_path(), true),
     );
-    session.emoji.custom_emoji_stickers.push(StickerItem {
-        custom_emoji_id: Some(4242),
-        id: 4242,
-        set_id: 0,
-        emoji: "😀".to_string(),
-        width: 512,
-        height: 512,
-        format: StickerFormat::Webp,
-        file_id: FileId(61),
-        thumb_file_id: None,
-        thumb_width: 0,
-        thumb_height: 0,
-        requires_premium: false,
-    });
+    session
+        .stickers
+        .emoji
+        .custom_emoji_stickers
+        .push(StickerItem {
+            custom_emoji_id: Some(4242),
+            id: 4242,
+            set_id: 0,
+            emoji: "😀".to_string(),
+            width: 512,
+            height: 512,
+            format: StickerFormat::Webp,
+            file_id: FileId(61),
+            thumb_file_id: None,
+            thumb_width: 0,
+            thumb_height: 0,
+            requires_premium: false,
+        });
     session.open_chat(ChatId(11));
     session
 }
@@ -263,14 +267,14 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
     // Completed document 25 → lands in the recent list.
     apply(&mut session, &document(204, 25, "report.pdf", 460_800));
     session.begin_download(FileId(25));
-    session.user_downloads.insert(25);
+    session.media.user_downloads.insert(25);
     apply(
         &mut session,
         &file_update(25, 460_800, 460_800, false, "/tmp/report.pdf"),
     );
     // Active document 24 (the Media seed's notes.txt): 42% progress.
     session.begin_download(FileId(24));
-    session.user_downloads.insert(24);
+    session.media.user_downloads.insert(24);
     apply(&mut session, &file_update(24, 24, 10, true, ""));
     // Paused document 27 → "paused" state + Resume toggle on the chip and
     // the manager row (slice media-downloads-pause).
@@ -279,7 +283,7 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
         &document(206, 27, "big-video.mp4", 100_000_000),
     );
     session.begin_download(FileId(27));
-    session.user_downloads.insert(27);
+    session.media.user_downloads.insert(27);
     apply(
         &mut session,
         &file_update(27, 100_000_000, 30_000_000, true, ""),
@@ -301,8 +305,8 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
     );
     // Failed document 26 → Retry chip on the row.
     apply(&mut session, &document(205, 26, "archive.zip", 1_048_576));
-    session.failed_downloads.insert(26);
-    session.downloads_panel_open = true;
+    session.media.failed_downloads.insert(26);
+    session.media.downloads_panel_open = true;
     session
 }
 
@@ -657,20 +661,24 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
         ) {
             session.apply(owned);
         }
-        session.emoji.custom_emoji_stickers.push(StickerItem {
-            custom_emoji_id: Some(4343),
-            id: 4343,
-            set_id: 0,
-            emoji: "😀".to_string(),
-            width: 512,
-            height: 512,
-            format: StickerFormat::Tgs,
-            file_id: FileId(4343),
-            thumb_file_id: None,
-            thumb_width: 0,
-            thumb_height: 0,
-            requires_premium: false,
-        });
+        session
+            .stickers
+            .emoji
+            .custom_emoji_stickers
+            .push(StickerItem {
+                custom_emoji_id: Some(4343),
+                id: 4343,
+                set_id: 0,
+                emoji: "😀".to_string(),
+                width: 512,
+                height: 512,
+                format: StickerFormat::Tgs,
+                file_id: FileId(4343),
+                thumb_file_id: None,
+                thumb_width: 0,
+                thumb_height: 0,
+                requires_premium: false,
+            });
     }
     match kind {
         DemoSeed::ReadyChats => {
@@ -1142,6 +1150,7 @@ impl QuillApp {
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let id = -(session.view_generation.0 as i64);
         let path = session
+            .media
             .files
             .get(&file_id.0)
             .and_then(|file| file.usable_path())
@@ -1180,6 +1189,7 @@ impl QuillApp {
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let id = -(session.view_generation.0 as i64);
         let path = session
+            .media
             .files
             .get(&file_id.0)
             .and_then(|file| file.usable_path())
@@ -1329,7 +1339,7 @@ impl QuillApp {
             return;
         };
         let extra = session.request(RequestPurpose::ForwardMessages, Some(dest));
-        session.in_flight_forward = Some(quill::state::ForwardFlight {
+        session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
             extra,
             dest_chat_id: dest,
             from_chat_id: draft.from_chat_id,
