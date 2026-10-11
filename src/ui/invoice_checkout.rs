@@ -153,7 +153,7 @@ impl QuillApp {
             .map(|s| s.payments.giveaway.options.clone())
             .unwrap_or_default();
         let note = match draft.validate(quill::local_time::now_unix() as i32) {
-            Err(error) => Some(error.text()),
+            Err(error) => Some(error.text_for(&draft.limits)),
             Ok(()) => match giveaway_invoice(&draft, &options) {
                 Some(invoice) => {
                     self.start_invoice_checkout(invoice, window, cx);

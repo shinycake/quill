@@ -8,9 +8,13 @@
 
 mod about;
 mod award;
+mod limits;
+mod members;
 
 pub use about::{AboutText, GiveawayTextContext, about_text};
 pub use award::*;
+pub use limits::*;
+pub use members::*;
 
 use crate::telegram::envelope::{
     GiveawayPrize, ParsedPrepaidGiveaway, PremiumGiveawayOption, StarGiveawayOption,
@@ -57,16 +61,22 @@ pub enum GiveawayFormError {
 
 impl GiveawayFormError {
     pub fn text(self) -> String {
+        self.text_for(&GiveawayLimits::default())
+    }
+
+    /// The message with the limits the account really has.
+    pub fn text_for(self, limits: &GiveawayLimits) -> String {
+        let (chats, countries) = (limits.chats_max, limits.countries_max);
         match self {
             Self::NoOption => "Choose how many prizes to give away.".into(),
             Self::TooManyChats => {
-                format!("You can add up to {ADDITIONAL_CHATS_MAX} groups and channels.")
+                format!("You can add up to {chats} groups and channels.")
             }
             Self::TooManyCountries => {
-                format!("You can pick up to {COUNTRIES_MAX} countries.")
+                format!("You can pick up to {countries} countries.")
             }
             Self::TooManyUsers => {
-                format!("You can pick up to {ADDITIONAL_CHATS_MAX} members.")
+                format!("You can pick up to {chats} members.")
             }
             Self::PrizeTooLong => {
                 format!("The additional prize can be up to {PRIZE_DESCRIPTION_MAX} characters.")
@@ -97,6 +107,8 @@ pub struct GiveawayDraft {
     /// Winners for the chosen Stars option.
     pub star_winners: i32,
     pub additional_chat_ids: Vec<i64>,
+    /// The limits the form checks against; set from the account's options.
+    pub limits: GiveawayLimits,
     /// Members who get a Premium gift code each instead of a random
     /// giveaway. Empty = a random giveaway.
     pub award_user_ids: Vec<i64>,
@@ -126,6 +138,7 @@ impl GiveawayDraft {
             star_option: 0,
             star_winners: 0,
             additional_chat_ids: Vec::new(),
+            limits: GiveawayLimits::default(),
             award_user_ids: Vec::new(),
             country_codes: Vec::new(),
             only_new_members: false,
@@ -157,7 +170,7 @@ impl GiveawayDraft {
             self.additional_chat_ids.remove(index);
             return Ok(());
         }
-        if self.additional_chat_ids.len() >= ADDITIONAL_CHATS_MAX {
+        if self.additional_chat_ids.len() >= self.limits.chats_max {
             return Err(GiveawayFormError::TooManyChats);
         }
         self.additional_chat_ids.push(chat_id);
@@ -175,13 +188,13 @@ impl GiveawayDraft {
                 return Err(GiveawayFormError::NoOption);
             }
         }
-        if self.additional_chat_ids.len() > ADDITIONAL_CHATS_MAX {
+        if self.additional_chat_ids.len() > self.limits.chats_max {
             return Err(GiveawayFormError::TooManyChats);
         }
-        if self.country_codes.len() > COUNTRIES_MAX {
+        if self.country_codes.len() > self.limits.countries_max {
             return Err(GiveawayFormError::TooManyCountries);
         }
-        if self.award_user_ids.len() > ADDITIONAL_CHATS_MAX {
+        if self.award_user_ids.len() > self.limits.chats_max {
             return Err(GiveawayFormError::TooManyUsers);
         }
         if self.prize_description.chars().count() > PRIZE_DESCRIPTION_MAX {

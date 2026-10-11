@@ -13,7 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::premium_hub::group_digits;
 use quill::stars_gift::can_gift_stars;
-use quill::telegram::envelope::format_payment_price;
+use quill::telegram::envelope::{ChatKind, format_payment_price};
 
 const TITLE: &str = "Gift Stars";
 /// Rows drawn at once; the search narrows the rest.
@@ -187,30 +187,67 @@ impl QuillApp {
                     .value()
                     .trim()
                     .to_lowercase();
+                let eligible = |id: i64| {
+                    session
+                        .users
+                        .get(&id)
+                        .filter(|u| can_gift_stars(u.id, session.my_user_id, u.is_bot))
+                        .map(|u| (u.id, u.display_name()))
+                };
+                // tdesktop lists the frequent contacts first and leaves
+                // them out of the contacts below, until a search starts.
+                let frequent: Vec<(i64, String)> =
+                    if query.is_empty() && !session.search.search.top_chats_disabled {
+                        session
+                            .search
+                            .search
+                            .top_chats
+                            .iter()
+                            .filter_map(|chat| match session.chats.get(&chat.0)?.kind {
+                                ChatKind::Private { user_id } => eligible(user_id.0),
+                                _ => None,
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
                 let mut people: Vec<(i64, String)> = session
                     .users_state
                     .contacts
                     .iter()
                     .flatten()
-                    .filter_map(|id| session.users.get(id))
-                    .filter(|u| can_gift_stars(u.id, session.my_user_id, u.is_bot))
-                    .map(|u| (u.id, u.display_name()))
-                    .filter(|(_, name)| query.is_empty() || name.to_lowercase().contains(&query))
+                    .filter_map(|id| eligible(*id))
+                    .filter(|(id, name)| {
+                        !frequent.iter().any(|(f, _)| f == id)
+                            && (query.is_empty() || name.to_lowercase().contains(&query))
+                    })
                     .collect();
                 people.sort_by_key(|(_, name)| name.to_lowercase());
-                if session.users_state.contacts.is_none() {
+                if !frequent.is_empty() {
                     body = body.child(
                         div()
-                            .text_sm()
+                            .text_xs()
+                            .font_semibold()
                             .text_color(muted)
-                            .child("Loading contacts\u{2026}"),
+                            .child("Frequent contacts"),
                     );
-                } else if people.is_empty() {
+                    for (id, name) in frequent {
+                        let label = name.clone();
+                        body = body.child(
+                            Button::new(("stars-gift-frequent", id.unsigned_abs()))
+                                .label(label)
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.pick_stars_gift_user(id, name.clone(), window, cx);
+                                })),
+                        );
+                    }
                     body = body.child(
                         div()
-                            .text_sm()
+                            .text_xs()
+                            .font_semibold()
                             .text_color(muted)
-                            .child("No contacts found."),
+                            .child("Contacts"),
                     );
                 }
                 for (id, name) in people.into_iter().take(ROWS_MAX) {

@@ -39,11 +39,15 @@ impl PaymentUi {
                 .placeholder("Search")
                 .submit_on_enter(false)
         });
-        cx.subscribe_in(&pick_search, window, |_, _, event: &InputEvent, _, cx| {
-            if matches!(event, InputEvent::Change) {
-                cx.notify();
-            }
-        })
+        cx.subscribe_in(
+            &pick_search,
+            window,
+            |this, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.pick_search_changed(cx);
+                }
+            },
+        )
         .detach();
         Self {
             dialog: None,

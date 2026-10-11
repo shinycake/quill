@@ -139,6 +139,7 @@ impl QuillApp {
         let form = self.giveaway.form.as_ref()?;
         let options = &self.session()?.payments.giveaway.options;
         let mut draft = form.draft.clone();
+        draft.limits = self.session()?.payments.giveaway.limits;
         if draft.prepaid.is_none() {
             match draft.kind {
                 GiveawayKind::Premium => settle_premium(&mut draft, &options.premium),
@@ -180,12 +181,13 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_giveaway_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+        let limits = self.giveaway_limits();
         let mut refused = None;
         self.edit_giveaway(cx, |draft| {
             refused = draft.toggle_chat(chat_id).err();
         });
         if let (Some(error), Some(form)) = (refused, self.giveaway.form.as_mut()) {
-            form.note = Some(error.text());
+            form.note = Some(error.text_for(&limits));
         }
     }
 
@@ -203,10 +205,11 @@ impl QuillApp {
             return;
         };
         let verdict = draft.validate(now_unix() as i32);
+        let limits = draft.limits;
         if let Some(form) = self.giveaway.form.as_mut() {
             match verdict {
                 Ok(()) => form.confirming = true,
-                Err(error) => form.note = Some(error.text()),
+                Err(error) => form.note = Some(error.text_for(&limits)),
             }
         }
         cx.notify();

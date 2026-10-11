@@ -134,6 +134,11 @@ pub enum PaymentsPurpose {
     GetPremiumGiftOptions,
     /// `sendGift`: spends Stars, sent only on the send button.
     SendStarGift,
+    /// `getSupergroupMembers` for a page of the "Choose members" list;
+    /// `generation` tells an older search from the current one.
+    GetAwardMembers {
+        generation: u64,
+    },
 }
 
 impl PaymentsPurpose {

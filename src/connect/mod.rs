@@ -41,6 +41,7 @@ pub use media_library::REACTION_STRIP_SIZE;
 mod attach_bot_icons;
 mod checklists;
 mod gift_manage;
+mod giveaway_members;
 mod main_profile_tab;
 mod message_actions;
 mod message_link_at;

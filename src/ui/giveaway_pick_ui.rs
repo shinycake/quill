@@ -16,13 +16,13 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::giveaway::{
-    ADDITIONAL_CHATS_MAX, COUNTRIES_MAX, GiveawayDraft, GiveawayKind, PERIOD_MAX_SECS,
-    PRIZE_DESCRIPTION_MAX, gift_code_months, gift_code_price,
+    GiveawayDraft, GiveawayKind, GiveawayLimits, PERIOD_MAX_SECS, PRIZE_DESCRIPTION_MAX,
+    gift_code_months, gift_code_price,
 };
 use quill::ids::ChatId;
 use quill::local_time::now_unix;
-use quill::state::{GiveawayOptions, MemberListFilter, Session, SupergroupMembersFetch};
-use quill::telegram::envelope::{ChatKind, MessageSender, format_payment_price};
+use quill::state::{GiveawayOptions, Session};
+use quill::telegram::envelope::{ChatKind, format_payment_price};
 
 /// Rows drawn at once; the search narrows the rest.
 const ROWS_MAX: usize = 150;
@@ -80,8 +80,9 @@ impl QuillApp {
             );
         }
         body = body.child(about_line(format!(
-            "Choose the groups and channels users need to join to take part in the giveaway. {}/{ADDITIONAL_CHATS_MAX} added.",
-            draft.additional_chat_ids.len()
+            "Choose the groups and channels users need to join to take part in the giveaway. {}/{} added.",
+            draft.additional_chat_ids.len(),
+            draft.limits.chats_max
         )));
 
         // Who may take part.
@@ -235,7 +236,8 @@ impl QuillApp {
                 ),
         )
         .child(about_line(format!(
-            "Choose up to {COUNTRIES_MAX} countries. Users with a number from Fragment can take part in any giveaway."
+            "Choose up to {} countries. Users with a number from Fragment can take part in any giveaway.",
+            draft.limits.countries_max
         )))
     }
 
@@ -360,11 +362,7 @@ impl QuillApp {
         if let (Some(live), Some(chat)) = (self.live.as_mut(), chat) {
             match page {
                 GiveawayPage::Users => {
-                    let _ = live.driver.fetch_supergroup_members(
-                        ChatId(chat),
-                        MemberListFilter::Recent,
-                        "",
-                    );
+                    let _ = live.driver.search_award_members(ChatId(chat), "");
                 }
                 GiveawayPage::Countries => {
                     let _ = live.driver.fetch_countries();
@@ -386,23 +384,55 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The giveaway limits of this account.
+    pub(super) fn giveaway_limits(&self) -> GiveawayLimits {
+        self.session()
+            .map(|s| s.payments.giveaway.limits)
+            .unwrap_or_default()
+    }
+
+    /// The next page of the members list.
+    fn load_more_award(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_more_award_members();
+        }
+        cx.notify();
+    }
+
+    /// The search field changed: on the members page, search on the server.
+    pub(super) fn pick_search_changed(&mut self, cx: &mut Context<Self>) {
+        let query = self.payments.pick_search.read(cx).value().to_string();
+        let on_users = self
+            .giveaway
+            .form
+            .as_ref()
+            .filter(|f| f.page == GiveawayPage::Users)
+            .map(|f| f.draft.boosted_chat_id);
+        if let (Some(chat), Some(live)) = (on_users, self.live.as_mut()) {
+            let _ = live.driver.search_award_members(ChatId(chat), &query);
+        }
+        cx.notify();
+    }
+
     fn toggle_award_member(&mut self, user_id: i64, cx: &mut Context<Self>) {
+        let limits = self.giveaway_limits();
         let mut refused = None;
         self.edit_giveaway(cx, |draft| {
             refused = draft.toggle_award_user(user_id).err();
         });
         if let (Some(error), Some(form)) = (refused, self.giveaway.form.as_mut()) {
-            form.note = Some(error.text());
+            form.note = Some(error.text_for(&limits));
         }
     }
 
     fn toggle_giveaway_country(&mut self, code: String, cx: &mut Context<Self>) {
+        let limits = self.giveaway_limits();
         let mut refused = None;
         self.edit_giveaway(cx, |draft| {
             refused = draft.toggle_country(&code).err();
         });
         if let (Some(error), Some(form)) = (refused, self.giveaway.form.as_mut()) {
-            form.note = Some(error.text());
+            form.note = Some(error.text_for(&limits));
         }
     }
 
@@ -428,67 +458,64 @@ impl QuillApp {
         body = body.child(Input::new(&self.payments.pick_search).aria_label("Search"));
         match form.page {
             GiveawayPage::Users => {
+                let list = &session.payments.giveaway.award_members;
                 body = body.child(about_line(format!(
-                    "Choose up to {ADDITIONAL_CHATS_MAX} members. {} chosen.",
+                    "Choose up to {} members. {} chosen.",
+                    draft.limits.chats_max,
                     draft.award_user_ids.len()
                 )));
-                let fetch = session
-                    .groups
-                    .supergroup_members
-                    .get(&(draft.boosted_chat_id, MemberListFilter::Recent));
-                match fetch {
-                    Some(SupergroupMembersFetch::Loaded { members, .. }) => {
-                        let mut people: Vec<(i64, String)> = members
-                            .iter()
-                            .filter_map(|m| match m.member_id {
-                                MessageSender::User { user_id } => Some(user_id),
-                                MessageSender::Chat { .. } => None,
-                            })
-                            .filter(|id| Some(*id) != session.my_user_id)
-                            .filter_map(|id| session.users.get(&id))
-                            .filter(|u| !u.is_bot)
-                            .map(|u| (u.id, u.display_name()))
-                            .filter(|(_, name)| {
-                                query.is_empty() || name.to_lowercase().contains(&query)
-                            })
-                            .collect();
-                        people.sort_by_key(|(_, name)| name.to_lowercase());
-                        if people.is_empty() {
-                            body = body.child(
-                                div().text_sm().text_color(muted).child("No members found."),
-                            );
-                        }
-                        for (id, name) in people.into_iter().take(ROWS_MAX) {
-                            body = body.child(
-                                Checkbox::new(("giveaway-award-user", id.unsigned_abs()))
-                                    .checked(draft.award_user_ids.contains(&id))
-                                    .label(name)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.toggle_award_member(id, cx);
-                                    })),
-                            );
-                        }
-                    }
-                    Some(SupergroupMembersFetch::Failed(reason)) => {
-                        body = body.child(
-                            div()
-                                .text_sm()
-                                .child(format!("Couldn't load the members: {reason}")),
-                        );
-                    }
-                    _ => {
-                        body = body.child(
-                            div()
-                                .text_sm()
-                                .text_color(muted)
-                                .child("Loading members\u{2026}"),
-                        );
-                    }
+                let chosen_first = draft
+                    .award_user_ids
+                    .iter()
+                    .filter(|id| !list.user_ids.contains(id));
+                let people = chosen_first.chain(list.user_ids.iter()).map(|id| {
+                    let name = session
+                        .users
+                        .get(id)
+                        .map(|u| u.display_name())
+                        .unwrap_or_else(|| format!("User {id}"));
+                    (*id, name)
+                });
+                // The chosen members stay on top when a search hides them.
+                let mut shown = 0;
+                for (id, name) in people {
+                    shown += 1;
+                    body = body.child(
+                        Checkbox::new(("giveaway-award-user", id.unsigned_abs()))
+                            .checked(draft.award_user_ids.contains(&id))
+                            .label(name)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.toggle_award_member(id, cx);
+                            })),
+                    );
+                }
+                if let Some(error) = list.error.as_ref() {
+                    body = body.child(div().text_sm().child(error.clone()));
+                } else if list.loading {
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child("Loading members\u{2026}"),
+                    );
+                } else if shown == 0 {
+                    body = body.child(div().text_sm().text_color(muted).child("No members found."));
+                }
+                if list.can_load_more() || list.error.is_some() {
+                    body = body.child(
+                        Button::new("giveaway-award-more")
+                            .label("Load more")
+                            .ghost()
+                            .small()
+                            .disabled(list.loading)
+                            .on_click(cx.listener(|this, _, _, cx| this.load_more_award(cx))),
+                    );
                 }
             }
             GiveawayPage::Countries => {
                 body = body.child(about_line(format!(
-                    "Choose up to {COUNTRIES_MAX} countries. {} chosen.",
+                    "Choose up to {} countries. {} chosen.",
+                    draft.limits.countries_max,
                     draft.country_codes.len()
                 )));
                 match session.auth_state.countries.as_ref() {
@@ -540,6 +567,13 @@ impl QuillApp {
                     .text_sm()
                     .child(note.clone()),
             );
+        }
+        if form.page == GiveawayPage::Users {
+            // Scrolling the list asks for the next page as well.
+            return body
+                .id("giveaway-award-list")
+                .on_scroll_wheel(cx.listener(|this, _, _, cx| this.load_more_award(cx)))
+                .into_any_element();
         }
         body.into_any_element()
     }

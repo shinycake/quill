@@ -395,6 +395,11 @@ impl Session {
                     && pending.purpose == RequestPurpose::SearchFromMembers
                 {
                     self.apply_from_members(pending.id, &members);
+                } else if let Some(RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers {
+                    generation,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.apply_award_members(generation, &members, total_count);
                 } else if let Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
                     filter,
                 })) = pending.map(|p| p.purpose)

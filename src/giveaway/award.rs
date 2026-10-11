@@ -6,7 +6,7 @@
 //! tdesktop prices it as the one-person price times the number of members
 //! (`PremiumGiftCodeOptions::optionsForGiveaway`); the server checks the
 //! amount.
-use super::{ADDITIONAL_CHATS_MAX, COUNTRIES_MAX, GiveawayDraft, GiveawayKind};
+use super::{GiveawayDraft, GiveawayKind};
 use crate::telegram::envelope::PremiumGiveawayOption;
 
 impl GiveawayDraft {
@@ -23,7 +23,7 @@ impl GiveawayDraft {
             self.award_user_ids.remove(index);
             return Ok(());
         }
-        if self.award_user_ids.len() >= ADDITIONAL_CHATS_MAX {
+        if self.award_user_ids.len() >= self.limits.chats_max {
             return Err(super::GiveawayFormError::TooManyUsers);
         }
         self.award_user_ids.push(user_id);
@@ -36,7 +36,7 @@ impl GiveawayDraft {
             self.country_codes.remove(index);
             return Ok(());
         }
-        if self.country_codes.len() >= COUNTRIES_MAX {
+        if self.country_codes.len() >= self.limits.countries_max {
             return Err(super::GiveawayFormError::TooManyCountries);
         }
         self.country_codes.push(code.to_string());

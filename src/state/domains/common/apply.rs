@@ -84,6 +84,7 @@ impl Session {
                     self.payments.gift_text_length_max = usize::try_from(*limit).ok();
                 }
                 if let OptionValue::Integer(limit) = &value {
+                    self.payments.giveaway.limits.apply_option(&name, *limit);
                     match name.as_str() {
                         "notification_sound_size_max" => {
                             self.messages.tone_limits.max_size = *limit

@@ -58,18 +58,45 @@ documents that value).
 Nothing is paid by choosing a pack, members or a country. Every payment
 still goes through Pay in the checkout.
 
+## Follow-up: paging, option limits, frequent contacts
+
+- **All members, paged.** The members page no longer reuses the 200-member
+  `Recent` cache. `src/giveaway/members.rs` (`AwardMembers`) and
+  `src/connect/giveaway_members.rs` page `getSupergroupMembers` 100 at a
+  time. A typed name restarts the list with
+  `supergroupMembersFilterSearch` on the server. Each list has a generation
+  carried by its requests (`PaymentsPurpose::GetAwardMembers`), so an answer
+  to an older search is dropped. Bots and yourself are left out but still
+  count towards the offset. The next page loads from a "Load more" button
+  and from any scroll-wheel event on the list (the dialog's scroll container
+  gives no scroll position to hook).
+- **Limits from TDLib.** `GiveawayLimits` (`src/giveaway/limits.rs`) reads
+  `giveaway_additional_chat_count_max` and `giveaway_country_count_max` from
+  `updateOption`; the names are in the schema's `giveawayParameters` docs and
+  TDLib's `OptionManager`. The constants (10) stay as the fallback. The
+  members limit uses the chat-count option because tdesktop uses one
+  `giveaway_add_peers_max` for both, and TDLib maps that config key to the
+  chat-count option. The draft carries the limits, the form messages name
+  them (`text_for`).
+- **Frequent contacts.** The Gift Stars list starts with the people from
+  `getTopChats` (`topChatCategoryUsers`, the search domain's existing
+  `top_chats`), under "Frequent contacts", and leaves them out of "Contacts"
+  until a search starts. Skipped when the account switched frequent contacts
+  off, as in tdesktop (`CollectGiftFrequentUsers`).
+
 ## Not done
 
-- The member list is the `Recent` page of `getSupergroupMembers` (up to 200),
-  filtered locally by the search field. A larger channel only shows its
-  recent members. tdesktop pages through the full list.
-- The limits are constants (10 members, 10 countries), not read from the
-  `giveaway_*` options.
-- tdesktop's frequent-contacts block on top of the Gift Stars contact list is
-  not shown.
+- tdesktop's Gift Stars list and the send-gift list also have a birthdays
+  section; Quill does not.
+- A very long member list still renders every loaded row (no row recycling).
 
 ## How it was verified
 
+- Follow-up tests: option names and fallback, the form checking its limits,
+  paging and stale-generation handling of the members list, and driver tests
+  with recorded JSON (recent then search filter, offsets, bots and self
+  skipped, older answer dropped, non-channel refused, `updateOption` limits,
+  Gift Stars also asks for the top chats).
 - Unit tests: request JSON for gifted Stars, the Stars-paid Premium gift,
   gift codes and countries in the parameters; toggles and limits; per-member
   price and months; driver tests with recorded JSON (contact gets their packs,

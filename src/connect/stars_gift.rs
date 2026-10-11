@@ -15,6 +15,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         state.clear_target();
         state.open = true;
         self.fetch_contacts()?;
+        // The people you write to most are listed first, unless the
+        // frequent contacts are switched off.
+        let _ = self.fetch_top_chats();
         Ok(())
     }
 

@@ -20,6 +20,8 @@ fn a_contact_is_asked_for_their_packs_and_the_answer_lands() {
     driver.open_stars_gift().unwrap();
     assert!(driver.session.payments.stars_gift.open);
     sent_request(&recorder, "getContacts");
+    // The frequent contacts load too, for the top of the list.
+    sent_request(&recorder, "getTopChats");
     driver.choose_stars_gift_user(42, "Ada").unwrap();
     let request = sent_request(&recorder, "getStarGiftPaymentOptions");
     assert_eq!(request["user_id"], 42);
