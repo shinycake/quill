@@ -326,6 +326,16 @@ mod tests {
     }
 
     #[test]
+    fn letters_are_unicode_aware() {
+        assert_eq!(section_letter("борис"), 'Б');
+        assert_eq!(section_letter("Ёлка"), 'Ё');
+        assert_eq!(section_letter("سارة"), 'س');
+        assert_eq!(section_letter("ñandú"), 'Ñ');
+        assert_eq!(section_letter("_hidden"), '#');
+        assert_eq!(section_letter("٣ days"), '#');
+    }
+
+    #[test]
     fn last_seen_rank_orders_buckets() {
         use UserStatusKind as S;
         let ranks = [
