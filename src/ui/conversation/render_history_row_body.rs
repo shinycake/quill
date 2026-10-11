@@ -87,6 +87,17 @@ impl QuillApp {
                     match &message.content {
                         MessageContent::Sticker(sticker) => {
                             self.history_sticker(sticker.file_id, sticker.format, cx)
+                                .map(|visual| {
+                                    // tdesktop `Sticker::mirrorHorizontal`.
+                                    if crate::ui::sticker_mirror::mirrors(
+                                        sticker.premium_animation.is_some(),
+                                        message.is_outgoing,
+                                    ) {
+                                        crate::ui::sticker_mirror::mirrored(visual)
+                                    } else {
+                                        visual
+                                    }
+                                })
                         }
                         MessageContent::Dice(dice) => dice
                             .final_sticker

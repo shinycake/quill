@@ -287,6 +287,7 @@ mod spoiler_fx;
 mod sponsored;
 mod sponsored_about;
 mod statistics;
+mod sticker_mirror;
 mod sticker_playback;
 mod stickers_ui;
 mod stories_menu_ui;

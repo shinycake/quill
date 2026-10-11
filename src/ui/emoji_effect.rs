@@ -209,17 +209,10 @@ thread_local! {
     static MIRRORED: RefCell<Vec<(i32, Arc<[Arc<RenderImage>]>)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The frames of `file` mirrored, made once and kept.
-fn mirrored_frames(file: i32, frames: &Arc<[Arc<RenderImage>]>) -> Arc<[Arc<RenderImage>]> {
-    if let Some(found) = MIRRORED.with(|m| {
-        m.borrow()
-            .iter()
-            .find(|(id, _)| *id == file)
-            .map(|(_, frames)| frames.clone())
-    }) {
-        return found;
-    }
-    let flipped: Arc<[Arc<RenderImage>]> = frames
+/// Every frame of `frames` mirrored left to right (a frame that cannot be
+/// read stays as it is).
+pub(super) fn flip_frames(frames: &[Arc<RenderImage>]) -> Arc<[Arc<RenderImage>]> {
+    frames
         .iter()
         .map(|frame| {
             let width = frame.size(0).width.0.max(0) as u32;
@@ -235,7 +228,20 @@ fn mirrored_frames(file: i32, frames: &Arc<[Arc<RenderImage>]>) -> Arc<[Arc<Rend
             }
         })
         .collect::<Vec<_>>()
-        .into();
+        .into()
+}
+
+/// The frames of `file` mirrored, made once and kept.
+fn mirrored_frames(file: i32, frames: &Arc<[Arc<RenderImage>]>) -> Arc<[Arc<RenderImage>]> {
+    if let Some(found) = MIRRORED.with(|m| {
+        m.borrow()
+            .iter()
+            .find(|(id, _)| *id == file)
+            .map(|(_, frames)| frames.clone())
+    }) {
+        return found;
+    }
+    let flipped = flip_frames(frames);
     MIRRORED.with(|m| {
         let mut m = m.borrow_mut();
         if m.len() >= 2 {
