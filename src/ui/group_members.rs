@@ -592,7 +592,10 @@ impl QuillApp {
                 MessageSender::User { user_id } => format!("User {user_id}"),
                 MessageSender::Chat { chat_id } => format!("Channel {chat_id}"),
             });
-        let status_label = Self::member_status_label(member.status);
+        let status_label = match member.restriction {
+            Some(restriction) => super::restricted_exceptions::restricted_row_status(restriction),
+            None => Self::member_status_label(member.status).to_string(),
+        };
         // Slice G1: show the admin custom title (`chatMember.tag`,
         // schema 1.8.67 line 2526) next to the status when set.
         let tag_label = (!member.tag.is_empty()).then(|| format!("❝{}❞", member.tag));
