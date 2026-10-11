@@ -496,17 +496,19 @@ impl QuillApp {
         Some(chips.into_any_element())
     }
 
-    /// Global search narrowing, shown once there is a query: chat type
-    /// (tdesktop `lng_search_filter_*`), content tab and date window.
+    /// The strip of tabs under the field and, once there is a query, the
+    /// narrowing of the tab: chat type (tdesktop `lng_search_filter_*`),
+    /// archive and date window.
     pub(in crate::ui) fn search_filter_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let filters = session.search.search.filters;
-        if session.search.search.query.trim().is_empty() && filters.scope != SearchScope::Apps {
-            return None;
-        }
+        let tab = SearchTab::of(&filters);
         let query = session.search.search.query.trim().to_string();
         let has_chat = session.open_chat.is_some();
-        // tdesktop's search tabs: This chat / My messages / Public posts.
+        let strip = self.search_tab_strip(tab, cx);
+        if query.is_empty() {
+            return Some(strip);
+        }
         let mut scopes = Vec::new();
         if has_chat {
             let query = query.clone();
@@ -521,80 +523,49 @@ impl QuillApp {
                 .into_any_element(),
             );
         }
-        for scope in SearchScope::ALL {
-            scopes.push(
-                Self::filter_chip(
-                    ("search-scope", scope as u64),
-                    scope.label(),
-                    filters.scope == scope,
-                    move |this, _, cx| {
-                        let mut next = this
-                            .session()
-                            .map(|s| s.search.search.filters)
-                            .unwrap_or_default();
-                        next.scope = scope;
-                        this.set_search_filters(next, cx);
-                    },
-                    cx,
-                )
-                .into_any_element(),
-            );
-        }
-        let archive_chip = Self::filter_chip(
-            "search-filter-archived",
-            "From archive",
-            filters.archived,
-            move |this, _, cx| {
-                let mut next = this
-                    .session()
-                    .map(|s| s.search.search.filters)
-                    .unwrap_or_default();
-                next.archived = !next.archived;
-                this.set_search_filters(next, cx);
-            },
-            cx,
-        )
-        .into_any_element();
         let mut types = Vec::new();
-        for kind in SearchChatType::ALL {
-            types.push(
-                Self::filter_chip(
-                    ("search-filter-type", kind as u64),
-                    kind.label(),
-                    filters.chat_type == kind,
-                    move |this, _, cx| {
-                        let mut next = this
-                            .session()
-                            .map(|s| s.search.search.filters)
-                            .unwrap_or_default();
-                        next.chat_type = kind;
-                        this.set_search_filters(next, cx);
-                    },
-                    cx,
-                )
-                .into_any_element(),
-            );
+        if tab.has_chat_type() {
+            // "Channels" is a tab of its own.
+            for kind in SearchChatType::ALL
+                .into_iter()
+                .filter(|kind| *kind != SearchChatType::Channels)
+            {
+                types.push(
+                    Self::filter_chip(
+                        ("search-filter-type", kind as u64),
+                        kind.label(),
+                        filters.chat_type == kind,
+                        move |this, _, cx| {
+                            let mut next = this
+                                .session()
+                                .map(|s| s.search.search.filters)
+                                .unwrap_or_default();
+                            next.chat_type = kind;
+                            this.set_search_filters(next, cx);
+                        },
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
         }
-        let mut media = Vec::new();
-        for kind in SearchMediaKind::ALL {
-            media.push(
-                Self::filter_chip(
-                    ("search-filter-media", kind as u64),
-                    kind.label(),
-                    filters.media == kind,
-                    move |this, _, cx| {
-                        let mut next = this
-                            .session()
-                            .map(|s| s.search.search.filters)
-                            .unwrap_or_default();
-                        next.media = kind;
-                        this.set_search_filters(next, cx);
-                    },
-                    cx,
-                )
-                .into_any_element(),
-            );
-        }
+        types.push(
+            Self::filter_chip(
+                "search-filter-archived",
+                "From archive",
+                filters.archived,
+                move |this, _, cx| {
+                    let mut next = this
+                        .session()
+                        .map(|s| s.search.search.filters)
+                        .unwrap_or_default();
+                    next.archived = !next.archived;
+                    this.set_search_filters(next, cx);
+                },
+                cx,
+            )
+            .into_any_element(),
+        );
         let mut dates = Vec::new();
         for range in SearchDateRange::ALL {
             dates.push(
@@ -641,19 +612,20 @@ impl QuillApp {
                         .children(chips),
                 )
         };
-        types.push(archive_chip);
-        let public = filters.scope == SearchScope::PublicPosts;
+        // Apps and Posts have no chat-type, archive or date narrowing.
+        let narrowing = tab.searches_messages();
         Some(
             div()
                 .id("search-filters")
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(group("Search", scopes))
-                // Public posts have no chat-type, content or date narrowing.
-                .when(!public, |this| {
+                .child(strip)
+                .when(!scopes.is_empty(), |this| {
+                    this.child(group("Search", scopes))
+                })
+                .when(narrowing, |this| {
                     this.child(group("Chats", types))
-                        .child(group("Content", media))
                         .child(group("Date", dates))
                 })
                 .into_any_element(),
@@ -799,13 +771,24 @@ impl QuillApp {
         confirm: SearchConfirm,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (text, action) = match confirm {
-            SearchConfirm::ClearRecents => {
-                ("Do you want to clear your search history?", "Clear all")
-            }
+        let paid_price = self
+            .session()
+            .and_then(|s| s.search.search.tabs.limits)
+            .map_or(0, |limits| limits.star_count);
+        let (text, action): (String, String) = match confirm {
+            SearchConfirm::PaidPostSearch => (
+                format!(
+                    "Search public posts for \u{2605}{paid_price}? The Stars are spent on this one search."
+                ),
+                format!("Search for \u{2605}{paid_price}"),
+            ),
+            SearchConfirm::ClearRecents => (
+                "Do you want to clear your search history?".into(),
+                "Clear all".into(),
+            ),
             SearchConfirm::DisableTopChats => (
-                "Clear and disable the frequent contacts list? You can turn it back on in Settings > Privacy > Suggest frequent contacts.",
-                "Hide",
+                "Clear and disable the frequent contacts list? You can turn it back on in Settings > Privacy > Suggest frequent contacts.".into(),
+                "Hide".into(),
             ),
         };
         div()

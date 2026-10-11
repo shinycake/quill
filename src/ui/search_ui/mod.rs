@@ -30,6 +30,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::search_filters::{
     SearchChatType, SearchDateRange, SearchMediaKind, SearchScope, tag_query,
 };
+use quill::search_tabs::SearchTab;
 use quill::state::{
     ChatSearchJump, FromPicker, RequestPurpose, SearchConfirm, SearchStatus, Session,
 };
@@ -414,6 +415,7 @@ impl QuillApp {
         match confirm {
             Some(SearchConfirm::ClearRecents) => self.clear_search_recents(cx),
             Some(SearchConfirm::DisableTopChats) => self.set_top_chats_disabled(true, cx),
+            Some(SearchConfirm::PaidPostSearch) => self.search_public_posts_paid_ui(cx),
             None => {}
         }
     }
@@ -865,6 +867,8 @@ impl QuillApp {
 
 mod chat_search_bar;
 mod search_results;
+mod tab_results;
+mod tab_strip;
 
 #[cfg(test)]
 mod match_tests {

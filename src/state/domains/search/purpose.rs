@@ -19,6 +19,16 @@ pub enum SearchPurpose {
     SearchPublicPosts,
     /// `searchPublicMessagesByTag` (the "Public posts" scope of a hashtag).
     SearchPublicMessagesByTag,
+    /// The next page of the open global search (`searchMessages` or
+    /// `searchPublicMessagesByTag` with the saved `next_offset`; appended to
+    /// the hits, carries the search generation).
+    SearchMessagesMore,
+    /// The next page of `searchPublicPosts`.
+    SearchPublicPostsMore,
+    /// `getRecommendedChats`: the Channels tab's recommendations.
+    GetRecommendedChats,
+    /// `getPublicPostSearchLimits`: the free searches left for the Posts tab.
+    GetPublicPostSearchLimits,
     /// `getTopChats(topChatCategoryUsers)`: the "Frequent contacts" strip.
     GetTopChats,
     /// `removeTopChat`; response is `ok`, the entry left the strip
@@ -55,6 +65,10 @@ flat_purposes!(Search(SearchPurpose) {
     SearchChatsOnServer,
     SearchPublicPosts,
     SearchPublicMessagesByTag,
+    SearchMessagesMore,
+    SearchPublicPostsMore,
+    GetRecommendedChats,
+    GetPublicPostSearchLimits,
     GetTopChats,
     RemoveTopChat,
     RemoveRecentlyFoundChat,

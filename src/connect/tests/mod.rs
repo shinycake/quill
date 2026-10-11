@@ -54,6 +54,7 @@ mod reactions_live;
 mod registration;
 mod reply_keyboard;
 mod search;
+mod search_tabs;
 mod search_upgrades;
 mod settings;
 mod settings_account;

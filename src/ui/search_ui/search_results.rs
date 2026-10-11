@@ -15,10 +15,21 @@ impl QuillApp {
         let chat_ids: Vec<ChatId> = session
             .map(|s| s.search.search.merged_chat_ids())
             .unwrap_or_default();
+        let tab = session.map_or(SearchTab::Chats, |s| {
+            SearchTab::of(&s.search.search.filters)
+        });
         let public_scope = session
             .is_some_and(|s| s.search.search.filters.scope == SearchScope::PublicPosts && !recents);
-        let apps_scope =
-            session.is_some_and(|s| s.search.search.filters.scope == SearchScope::Apps);
+        let apps_scope = tab == SearchTab::Apps;
+        // The Channels tab lists its channels until a query is typed; the
+        // media tabs list their kind of message from every chat.
+        let channels_idle = tab == SearchTab::Channels && query.trim().is_empty();
+        // Photos, Videos and Voice list everything whatever is typed.
+        let browsing_media = tab.is_media() && (query.trim().is_empty() || !tab.takes_query());
+        let show_chats = matches!(tab, SearchTab::Chats | SearchTab::Channels) && !channels_idle;
+        let show_messages = !matches!(tab, SearchTab::Apps | SearchTab::Downloads)
+            && !channels_idle
+            && !(tab == SearchTab::Posts && query.trim().is_empty());
         let limits_exceeded = session.is_some_and(|s| s.search.search.public_limits_exceeded);
         let messages: Vec<(ChatId, MessageId, String, String, i32)> = session
             .map(|s| {
@@ -74,20 +85,43 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
+        let only_channels = |rows: Vec<(ChatId, String, String)>| -> Vec<(ChatId, String, String)> {
+            if tab != SearchTab::Channels {
+                return rows;
+            }
+            rows.into_iter()
+                .filter(|(id, ..)| {
+                    session
+                        .and_then(|s| s.chats.get(&id.0))
+                        .is_some_and(|chat| chat.is_channel())
+                })
+                .collect()
+        };
+        let chats = only_channels(chats);
+        let public_chats = only_channels(public_chats);
         let has_results = !chats.is_empty() || !public_chats.is_empty() || !messages.is_empty();
         // Only states the results don't already show: still loading with
         // nothing yet, nothing found, failure.
         let hint = match status {
-            _ if apps_scope => String::new(),
+            _ if apps_scope || channels_idle || tab == SearchTab::Downloads => String::new(),
+            _ if tab == SearchTab::Posts && query.trim().is_empty() => tab.idle_hint().to_string(),
+            SearchStatus::Idle if tab != SearchTab::Chats => tab.idle_hint().to_string(),
             SearchStatus::Idle if recents && has_results => String::new(),
-            SearchStatus::Idle => "Type to search chats and messages.".to_string(),
+            SearchStatus::Idle => tab.idle_hint().to_string(),
             SearchStatus::Searching if has_results => String::new(),
             SearchStatus::Searching if recents => "Loading recent chats…".to_string(),
+            SearchStatus::Searching if browsing_media => "Loading…".to_string(),
             SearchStatus::Searching => format!("Searching “{query}”…"),
+            SearchStatus::Empty if browsing_media => tab.idle_hint().to_string(),
+            SearchStatus::Empty if tab == SearchTab::Channels => {
+                format!("No channels match “{query}”.")
+            }
+            SearchStatus::Empty if tab.is_media() => {
+                format!("Nothing matches “{query}”.")
+            }
             SearchStatus::Ready => String::new(),
             SearchStatus::Empty if public_scope && limits_exceeded => {
-                "The free daily limit for searching public posts is used up. Try again tomorrow."
-                    .to_string()
+                "The free daily limit for searching public posts is used up.".to_string()
             }
             SearchStatus::Empty if public_scope => {
                 format!("No public posts match “{query}”.")
@@ -103,18 +137,58 @@ impl QuillApp {
             "Messages"
         };
         let confirm = session.and_then(|s| s.search.search.confirm);
-        div()
-            .id("search-results")
+        let messages_empty = messages.is_empty();
+        // A new query, tab or filter starts the list from its top.
+        if let Some(search) = session.map(|s| &s.search.search) {
+            if self.search_ui.seen_generation.get() != search.generation {
+                self.search_ui.seen_generation.set(search.generation);
+                self.search_ui
+                    .results_scroll
+                    .set_offset(point(px(0.), px(0.)));
+            }
+            // Infinite scroll: look again once this frame is laid out, so a
+            // page that left the list short of the viewport asks for more.
+            let tabs = &search.tabs;
+            if tabs.has_more() && !tabs.loading_more && !tabs.more_failed {
+                let entity = cx.entity();
+                cx.defer(move |cx| {
+                    entity.update(cx, |this, cx| this.maybe_load_more_search(cx));
+                });
+            }
+        }
+        let bar = self.search_filter_bar(cx);
+        let body = div()
+            .id("search-results-body")
             .flex()
             .flex_col()
             .gap_2()
-            .when_some(self.search_filter_bar(cx), |this, bar| this.child(bar))
-            .when_some(self.apps_entry_chip(cx), |this, chip| this.child(chip))
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.search_ui.results_scroll)
+            .on_scroll_wheel(cx.listener(|this, _, _, cx| {
+                if this
+                    .session()
+                    .is_some_and(|s| s.search.search.tabs.has_more())
+                {
+                    this.notify_sidebar(cx);
+                }
+            }))
+            .when(tab == SearchTab::Posts, |this| {
+                this.children(self.posts_quota_line(cx))
+                    .children(self.posts_paid_block(cx))
+            })
+            .when(tab == SearchTab::Downloads, |this| {
+                this.child(self.search_downloads_block(&query, cx))
+            })
+            .when(channels_idle, |this| {
+                this.children(self.channels_tab_block(cx))
+            })
             .when(apps_scope, |this| {
                 this.child(self.apps_tab_block(&query, cx))
             })
             .when_some(
-                (recents && !apps_scope)
+                (recents && tab == SearchTab::Chats)
                     .then(|| self.frequent_contacts(cx))
                     .flatten(),
                 |this, strip| this.child(strip),
@@ -133,7 +207,7 @@ impl QuillApp {
                         .child(hint),
                 )
             })
-            .when(!chats.is_empty() && !apps_scope, |this| {
+            .when(!chats.is_empty() && show_chats, |this| {
                 let mut block = div().id("search-chats").flex().flex_col().gap_1().child(
                     div()
                         .flex()
@@ -199,7 +273,7 @@ impl QuillApp {
             .when_some(self.story_search_section(&query, cx), |this, section| {
                 this.child(section)
             })
-            .when(!public_chats.is_empty() && !apps_scope, |this| {
+            .when(!public_chats.is_empty() && show_chats, |this| {
                 let mut block = div()
                     .id("search-public-chats")
                     .flex()
@@ -221,7 +295,10 @@ impl QuillApp {
                 }
                 this.child(block)
             })
-            .when(!messages.is_empty() && !apps_scope, |this| {
+            .when(!messages.is_empty() && show_messages, |this| {
+                if let Some(media) = tab.media_tab() {
+                    return this.children(self.search_media_block(media, cx));
+                }
                 let mut block = div()
                     .id("search-messages")
                     .flex()
@@ -245,5 +322,17 @@ impl QuillApp {
                 }
                 this.child(block)
             })
+            .when(!messages_empty && show_messages, |this| {
+                this.children(self.search_load_more_row(cx))
+            });
+        div()
+            .id("search-results")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .flex_1()
+            .min_h_0()
+            .children(bar)
+            .child(body)
     }
 }

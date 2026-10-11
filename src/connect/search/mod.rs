@@ -21,6 +21,7 @@ use crate::telegram::requests::{
 mod chat_search;
 mod shared_media_calendar;
 mod sponsored;
+mod tabs;
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub fn open_search(&mut self) -> Result<Option<SearchFlight>, ConnectSendError> {
@@ -58,8 +59,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let trimmed = query.trim();
+        let tab = self.search_tab();
+        if tab.is_media() && !tab.takes_query() {
+            // tdesktop lists Photos, Videos and Voice whatever is typed;
+            // the text is only kept for the tabs that use it.
+            self.clear_typed_debounce();
+            self.session.search.search.query = trimmed.to_string();
+            return Ok(SearchQueryOutcome::Unchanged);
+        }
         if trimmed.is_empty() {
             self.clear_typed_debounce();
+            if self.on_media_tab() {
+                return Ok(match self.browse_media_if_needed()? {
+                    Some(flight) => SearchQueryOutcome::Sent(flight),
+                    None => SearchQueryOutcome::Unchanged,
+                });
+            }
             if self.session.search.search.open
                 && self.session.search.search.query.is_empty()
                 && self.session.search.search.recents
@@ -160,10 +175,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.clear_typed_debounce();
         self.session.search.search.filters = filters;
+        let tab = crate::search_tabs::SearchTab::of(&filters);
+        if tab == crate::search_tabs::SearchTab::Channels {
+            let _ = self.fetch_recommended_chats();
+        }
+        if tab.is_media() && !tab.takes_query() {
+            return self.browse_media();
+        }
         let query = self.session.search.search.query.clone();
         let trimmed = query.trim();
         if trimmed.is_empty() {
-            return Ok(None);
+            // The empty field shows what the tab stands for.
+            return if tab == crate::search_tabs::SearchTab::Chats {
+                self.request_recents()
+            } else if tab.is_media() {
+                self.browse_media()
+            } else {
+                Ok(None)
+            };
         }
         let _search_gen = self.session.search.search.begin_query(trimmed);
         self.send_typed_search(trimmed)
@@ -232,26 +261,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.abort_typed_search(chats_extra, messages_extra, public_extra);
             return Err(err);
         }
-        let filters = crate::telegram::requests::SearchMessagesFilters {
-            community_id: self.session.search.search.community_filter,
-            chat_type: self.session.search.search.filters.chat_type,
-            media: self.session.search.search.filters.media,
-            min_date: self
-                .session
-                .search
-                .search
-                .filters
-                .date
-                .min_date(crate::local_time::now_unix()),
-            max_date: self
-                .session
-                .search
-                .search
-                .filters
-                .date
-                .max_date(crate::local_time::now_unix()),
-            archived: self.session.search.search.filters.archived,
-        };
+        let filters = self.current_message_filters();
         if let Err(err) = self.sender.send_json(&search_messages_filtered(
             messages_extra,
             trimmed,
@@ -304,6 +314,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             RequestPurpose::SearchPublicPosts
         };
+        if tag.is_none() {
+            let _ = self.fetch_public_post_limits(trimmed);
+        }
         let extra = self.session.request_search(purpose, search_gen);
         let json = match tag {
             Some(tag) => search_public_messages_by_tag(extra, tag, "", SEARCH_LIMIT),

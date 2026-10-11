@@ -8,6 +8,9 @@ pub enum SearchConfirm {
     ClearRecents,
     /// `lng_recent_hide_sure`: clear and disable the frequent contacts.
     DisableTopChats,
+    /// Spend Stars on one public-posts search once the free ones are gone
+    /// (the price is `SearchTabsState::limits`).
+    PaidPostSearch,
 }
 
 /// Global search (official sidebar field): recents, then `searchChats` + `searchMessages`.
@@ -135,6 +138,8 @@ pub struct SearchState {
     pub public_limits_exceeded: bool,
     /// Empty-query surface: `searchRecentlyFoundChats` (official Recent).
     pub recents: bool,
+    /// Paging, recommendations and quota of the strip's tabs.
+    pub tabs: SearchTabsState,
     pub(crate) chats_done: bool,
     pub(crate) messages_done: bool,
     pub(crate) public_done: bool,
@@ -162,6 +167,7 @@ impl Default for SearchState {
             top_menu: None,
             public_limits_exceeded: false,
             recents: false,
+            tabs: SearchTabsState::default(),
             chats_done: false,
             messages_done: false,
             public_done: false,
@@ -224,6 +230,17 @@ impl SearchState {
         self.generation
     }
 
+    /// A media tab that ignores the typed text (Photos, Videos, Voice):
+    /// the query stays in the field's mirror, the list restarts.
+    pub fn begin_browse(&mut self) -> u64 {
+        self.open = true;
+        self.generation = self.generation.saturating_add(1);
+        self.status = SearchStatus::Searching;
+        self.clear_results();
+        self.recents = false;
+        self.generation
+    }
+
     pub fn begin_query(&mut self, query: &str) -> u64 {
         self.open = true;
         self.query = query.to_string();
@@ -240,6 +257,7 @@ impl SearchState {
         self.public_chat_ids.clear();
         self.server_chat_ids.clear();
         self.public_limits_exceeded = false;
+        self.tabs.reset_paging();
         self.chats_done = false;
         self.messages_done = false;
         self.public_done = false;

@@ -51,6 +51,10 @@ pub enum SearchMediaKind {
     #[default]
     All,
     Media,
+    /// Photos only and videos only: the global search tabs split what the
+    /// in-chat "Media" chip joins (tdesktop `MediaType::Photo` / `Video`).
+    Photos,
+    Videos,
     Links,
     Files,
     Music,
@@ -71,6 +75,8 @@ impl SearchMediaKind {
         match self {
             Self::All => "All",
             Self::Media => "Media",
+            Self::Photos => "Photos",
+            Self::Videos => "Videos",
             Self::Links => "Links",
             Self::Files => "Files",
             Self::Music => "Music",
@@ -84,6 +90,8 @@ impl SearchMediaKind {
         match self {
             Self::All => None,
             Self::Media => Some("searchMessagesFilterPhotoAndVideo"),
+            Self::Photos => Some("searchMessagesFilterPhoto"),
+            Self::Videos => Some("searchMessagesFilterVideo"),
             Self::Links => Some("searchMessagesFilterUrl"),
             Self::Files => Some("searchMessagesFilterDocument"),
             Self::Music => Some("searchMessagesFilterAudio"),
@@ -161,6 +169,9 @@ pub enum SearchScope {
     /// Mini apps (tdesktop's Apps tab): the apps in use and the grossing
     /// ones; no message search runs.
     Apps,
+    /// The downloads list (tdesktop's Downloads tab); no message search
+    /// runs. Not in [`Self::ALL`], which feeds the hashtag scope chips.
+    Downloads,
 }
 
 impl SearchScope {
@@ -171,12 +182,13 @@ impl SearchScope {
             Self::MyMessages => "My messages",
             Self::PublicPosts => "Public posts",
             Self::Apps => "Apps",
+            Self::Downloads => "Downloads",
         }
     }
 
     /// Whether the scope searches messages at all.
     pub fn searches_messages(self) -> bool {
-        !matches!(self, Self::Apps)
+        !matches!(self, Self::Apps | Self::Downloads)
     }
 }
 

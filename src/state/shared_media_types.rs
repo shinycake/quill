@@ -202,11 +202,11 @@ pub struct SharedMediaItem {
 }
 
 impl SharedMediaItem {
-    /// Row label from the parsed message: caption first, then file name /
-    /// URL, then a kind fallback — never empty.
-    pub fn from_parsed(tab: SharedMediaTab, message: &ParsedMessage) -> Self {
-        let glyph = tab.glyph();
-        let label = match &message.content {
+    /// Row label of one message under a tab: caption first, then file name /
+    /// URL, then a kind fallback — never empty. The global search tabs
+    /// label their hits the same way.
+    pub fn label_for(tab: SharedMediaTab, content: &MessageContent) -> String {
+        match content {
             MessageContent::Photo(c) => caption_or(&[&c.caption], "Photo"),
             MessageContent::Video(c) => caption_or(&[&c.caption, &c.file_name], "Video"),
             MessageContent::Document(c) => caption_or(&[&c.caption, &c.file_name], "File"),
@@ -236,7 +236,13 @@ impl SharedMediaItem {
                 caption_or(&[url, &preview], "Link")
             }
             _ => tab.label().to_string(),
-        };
+        }
+    }
+
+    /// Row from the parsed message, labelled by [`Self::label_for`].
+    pub fn from_parsed(tab: SharedMediaTab, message: &ParsedMessage) -> Self {
+        let glyph = tab.glyph();
+        let label = Self::label_for(tab, &message.content);
         let message_copy = matches!(
             tab,
             SharedMediaTab::Media

@@ -106,7 +106,13 @@ fn public_posts_scope_sends_only_the_posts_request() {
         })
         .unwrap();
     let sent = fx.recorder.snapshot();
-    let new: Vec<&String> = sent.iter().skip(before).collect();
+    // The quota check is free and rides along; the search itself is one
+    // request.
+    let new: Vec<&String> = sent
+        .iter()
+        .skip(before)
+        .filter(|json| !json.contains("getPublicPostSearchLimits"))
+        .collect();
     assert_eq!(new.len(), 1, "{new:?}");
     let posts: Value = serde_json::from_str(new[0]).unwrap();
     assert_eq!(posts["@type"], "searchPublicPosts");

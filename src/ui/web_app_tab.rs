@@ -4,12 +4,9 @@
 
 use super::app::QuillApp;
 use super::search_ui::search_result_row;
-use gpui_kit::assets::IconName;
-use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::search_filters::SearchScope;
 
 /// One row of the tab.
 struct AppRow {
@@ -53,38 +50,6 @@ impl QuillApp {
                     || row.subtitle.to_lowercase().contains(&needle)
             })
             .collect()
-    }
-
-    /// The chip that reaches the tab from the empty, focused search.
-    pub(super) fn apps_entry_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.session()?;
-        if !session.search.search.recents
-            || !session.search.search.query.trim().is_empty()
-            || session.search.search.filters.scope == SearchScope::Apps
-        {
-            return None;
-        }
-        Some(
-            div()
-                .flex()
-                .child(
-                    Button::new("search-apps-entry")
-                        .label("Apps")
-                        .icon(IconName::Bot)
-                        .ghost()
-                        .small()
-                        .tooltip("Mini apps you use and the most popular ones")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let mut next = this
-                                .session()
-                                .map(|s| s.search.search.filters)
-                                .unwrap_or_default();
-                            next.scope = SearchScope::Apps;
-                            this.set_search_filters(next, cx);
-                        })),
-                )
-                .into_any_element(),
-        )
     }
 
     /// The tab's body.

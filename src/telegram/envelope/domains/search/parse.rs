@@ -28,6 +28,19 @@ pub(crate) fn parse_search_payload(
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         })),
+        "publicPostSearchLimits" => {
+            let int = |key: &str| value.get(key).and_then(Value::as_i64).unwrap_or(0);
+            Ok(EnvelopePayload::Search(SearchPayload::PublicPostLimits {
+                daily_free: int("daily_free_query_count").sat_i32(),
+                remaining_free: int("remaining_free_query_count").sat_i32(),
+                next_free_in: int("next_free_query_in").sat_i32(),
+                star_count: int("star_count"),
+                current_query_free: value
+                    .get("is_current_query_free")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            }))
+        }
         "foundMessages" => {
             let messages = value
                 .get("messages")

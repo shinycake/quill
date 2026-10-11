@@ -188,11 +188,10 @@ impl QuillApp {
         if !session.media.downloads_panel_open {
             return None;
         }
-        let mut active: Vec<i32> = session.media.user_downloads.iter().copied().collect();
-        active.sort_unstable();
-        let recent: Vec<i32> = session.media.completed_downloads.iter().copied().collect();
-        let mut failed: Vec<i32> = session.media.failed_downloads.iter().copied().collect();
-        failed.sort_unstable();
+        let (active, recent) = (
+            session.media.user_downloads.len(),
+            session.media.completed_downloads.len(),
+        );
         let mut panel = div()
             .id("downloads-panel")
             .w(px(300.))
@@ -240,7 +239,7 @@ impl QuillApp {
                     .child(summary),
             );
         }
-        if active.is_empty() && recent.is_empty() {
+        if active == 0 && recent == 0 {
             panel = panel.child(
                 div()
                     .px_3()
@@ -250,50 +249,74 @@ impl QuillApp {
                     .child("No downloads yet."),
             );
         } else {
-            if !active.is_empty() {
-                panel = panel.child(
-                    div()
-                        .px_3()
-                        .pt_2()
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Active"),
-                );
-                for file_id in active {
-                    panel = panel.child(self.download_row(file_id, true, false, cx));
-                }
-            }
-            if !failed.is_empty() {
-                panel = panel.child(
-                    div()
-                        .px_3()
-                        .pt_2()
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Failed"),
-                );
-                for file_id in failed {
-                    panel = panel.child(self.download_row(file_id, false, true, cx));
-                }
-            }
-            if !recent.is_empty() {
-                panel = panel.child(
-                    div()
-                        .px_3()
-                        .pt_2()
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Recent"),
-                );
-                for file_id in recent.into_iter().rev() {
-                    panel = panel.child(self.download_row(file_id, false, false, cx));
-                }
-            }
+            panel = panel.children(self.download_sections("", cx));
         }
         Some(panel.into_any_element())
+    }
+
+    /// Whether the download list has anything to show: tdesktop's search
+    /// strip lists its Downloads tab only then.
+    pub(super) fn has_downloads(&self) -> bool {
+        self.session().is_some_and(|s| {
+            !(s.media.user_downloads.is_empty()
+                && s.media.completed_downloads.is_empty()
+                && s.media.failed_downloads.is_empty())
+        })
+    }
+
+    /// The Active / Failed / Recent sections of the list, rows whose file
+    /// name contains `query` (empty = all). Shared by the downloads panel
+    /// and the Downloads tab of the global search.
+    pub(super) fn download_sections(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let Some(session) = self.session() else {
+            return Vec::new();
+        };
+        let needle = query.trim().to_lowercase();
+        let keep = |file_id: &i32| {
+            needle.is_empty()
+                || download_display_name(session, *file_id)
+                    .to_lowercase()
+                    .contains(&needle)
+        };
+        let mut active: Vec<i32> = session.media.user_downloads.iter().copied().collect();
+        active.sort_unstable();
+        active.retain(keep);
+        let mut failed: Vec<i32> = session.media.failed_downloads.iter().copied().collect();
+        failed.sort_unstable();
+        failed.retain(keep);
+        let mut recent: Vec<i32> = session.media.completed_downloads.iter().copied().collect();
+        recent.retain(keep);
+        let muted = cx.theme().muted_foreground;
+        let heading = |text: &'static str| {
+            div()
+                .px_3()
+                .pt_2()
+                .text_xs()
+                .font_semibold()
+                .text_color(muted)
+                .child(text)
+                .into_any_element()
+        };
+        let mut out = Vec::new();
+        if !active.is_empty() {
+            out.push(heading("Active"));
+            for file_id in active {
+                out.push(self.download_row(file_id, true, false, cx));
+            }
+        }
+        if !failed.is_empty() {
+            out.push(heading("Failed"));
+            for file_id in failed {
+                out.push(self.download_row(file_id, false, true, cx));
+            }
+        }
+        if !recent.is_empty() {
+            out.push(heading("Recent"));
+            for file_id in recent.into_iter().rev() {
+                out.push(self.download_row(file_id, false, false, cx));
+            }
+        }
+        out
     }
 
     /// MED3: one downloads-manager row. Active rows show the live progress
