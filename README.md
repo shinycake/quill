@@ -1040,7 +1040,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 ### Settings: notifications
 
-- [ ] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
+- [x] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
 - [x] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
 - [x] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
 - [ ] Desktop notification options: position, count, display, volume (partial: volume shipped; position, count and display only apply to custom notification windows, and Quill uses system notifications) <!-- parity:notify-desktop-options -->
@@ -1049,7 +1049,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
 - [x] Events: contact joined Telegram, pinned messages <!-- parity:notify-events -->
 - [x] Include muted chats in folder counters <!-- parity:notify-muted-counters -->
-- [ ] Sender avatar in OS notifications (partial: Linux shipped; macOS and Windows need an image field on GPUI SystemNotification) <!-- parity:notify-avatar -->
+- [x] Sender avatar in OS notifications (partial: Linux shipped; macOS and Windows need an image field on GPUI SystemNotification) <!-- parity:notify-avatar -->
 
 ### Settings: appearance & chat
 
