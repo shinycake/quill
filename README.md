@@ -949,7 +949,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 - [x] Server popups (service notifications) are shown <!-- parity:updates-service-notification -->
 - [x] Updated Terms of Service can be read and accepted <!-- parity:updates-terms-of-service -->
-- [ ] Server-defined chat themes, backgrounds and accent colors are applied <!-- parity:updates-theme-colors -->
+- [x] Server-defined chat themes, backgrounds and accent colors are applied <!-- parity:updates-theme-colors -->
 - [x] Chat sender, view-as-topics and default-disable-notification changes apply live <!-- parity:updates-chat-flags -->
 - [x] Downloads list stays in sync with file download updates <!-- parity:updates-downloads-sync -->
 - [x] Dice emoji list and animated emoji click updates <!-- parity:updates-dice-emoji -->
