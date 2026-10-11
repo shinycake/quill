@@ -239,6 +239,7 @@ mod send_button_ui;
 mod send_limits;
 mod service_row;
 mod settings_account_ui;
+mod settings_phone_suggestion;
 mod settings_ui;
 mod share_box_ui;
 mod share_content_ui;

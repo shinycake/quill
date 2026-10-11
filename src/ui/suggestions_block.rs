@@ -18,7 +18,7 @@ impl QuillApp {
     }
 
     /// Dismiss: `hideSuggestedAction` / `hideContactCloseBirthdays`.
-    fn dismiss_suggestion(&mut self, suggestion: &Suggestion, cx: &mut Context<Self>) {
+    pub(super) fn dismiss_suggestion(&mut self, suggestion: &Suggestion, cx: &mut Context<Self>) {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.hide_suggestion(suggestion).is_err() {
@@ -139,7 +139,7 @@ impl QuillApp {
         let phone = session
             .my_user_id
             .and_then(|me| session.user(me))
-            .map(|user| user.phone_number.clone())
+            .map(|user| super::group_panels::format_phone(&user.phone_number))
             .unwrap_or_default();
         let (title, about) = copy(&suggestion, &names, &phone);
         let theme = cx.theme();
@@ -187,7 +187,8 @@ impl QuillApp {
                                 .small()
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.connection.status_note = "Please change your phone number in the official Telegram app on your phone as soon as possible.".into();
+                                    this.connection.status_note =
+                                        quill::phone_suggestion::CHANGE_NOTE.into();
                                     cx.notify();
                                 })),
                         ),
