@@ -225,6 +225,15 @@ pub(in crate::ui) fn session_history_row(
         .clone()
         .filter(|_| message.forward_info.is_none());
     let footer_meta = FooterMeta::of(message, receipt, views, signature.clone());
+    // Telegram Desktop widens a picture to its caption's longest line (the
+    // time's skip block included when the caption ends the bubble).
+    let info_width = footer_meta.reserve(footer_reserve(message.is_outgoing));
+    let caption_w = bubble_width::caption_width(
+        cx,
+        bubble_width::caption_of(&message.content),
+        look.font,
+        (!caption_above_media(&message.content)).then_some(info_width),
+    );
     let chips = message.reaction_chips();
     // Telegram Desktop shows who reacted (small avatars) instead of a
     // count when there are at most three known reactors, outside channels.
@@ -337,13 +346,10 @@ pub(in crate::ui) fn session_history_row(
             !caption_below && !badges && !has_chips,
         )
     };
-    let extra_media = match effective_content(&message.content, message.ephemeral.as_ref()) {
+    let content = effective_content(&message.content, message.ephemeral.as_ref());
+    let (frame_w, frame_h) = single_media_frame(content, caption_w).unwrap_or_default();
+    let extra_media = match content {
         MessageContent::Photo(photo) if photo.has_spoiler && !media_revealed => {
-            let (frame_w, frame_h) = photo
-                .largest_size()
-                .or_else(|| photo.thumb_size())
-                .map(|size| media_frame(MediaFrameKind::Photo, size.width, size.height))
-                .unwrap_or_else(|| media_frame(MediaFrameKind::Photo, 0, 0));
             Some(spoiler_cover(
                 message.id.0 as u64,
                 message.chat_id,
@@ -357,11 +363,9 @@ pub(in crate::ui) fn session_history_row(
             ))
         }
         MessageContent::Video(video) if video.has_spoiler && !media_revealed => {
-            let (frame_w, frame_h) = media_frame(MediaFrameKind::Video, video.width, video.height);
             Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, corners, cx))
         }
         MessageContent::Animation(animation) if animation.has_spoiler && !media_revealed => {
-            let (frame_w, frame_h) = media_frame(MediaFrameKind::Gif, animation.width, animation.height);
             Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, corners, cx))
         }
         MessageContent::Photo(photo) => {
@@ -384,6 +388,7 @@ pub(in crate::ui) fn session_history_row(
                 None,
                 Some((message.chat_id, message.id)),
                 corners,
+                caption_w,
                 cx,
             ))
         }
@@ -437,6 +442,8 @@ pub(in crate::ui) fn session_history_row(
             files,
             downloading,
             seek_bar.as_ref().expect("voice row always has a seek view"),
+            look.plain,
+            f32::from(info_width).ceil() as i32,
             cx,
         )),
         MessageContent::Audio(audio) => Some(audio_row(
@@ -461,6 +468,7 @@ pub(in crate::ui) fn session_history_row(
             None,
             Some((message.chat_id, message.id)),
             corners,
+            caption_w,
             cx,
         )),
         MessageContent::Video(video) => Some(video_attachment(
@@ -475,6 +483,7 @@ pub(in crate::ui) fn session_history_row(
             None,
             Some((message.chat_id, message.id)),
             corners,
+            caption_w,
             cx,
         )),
         MessageContent::VideoNote(note) => Some(video_note_attachment(
@@ -490,7 +499,9 @@ pub(in crate::ui) fn session_history_row(
             inline,
             cx,
         )),
-        MessageContent::Poll(poll) => Some(poll_body(message.chat_id, message.id, poll, cx)),
+        MessageContent::Poll(poll) => {
+            Some(poll_body(message.chat_id, message.id, poll, look.plain, cx))
+        }
         // B15: checklist card (tasks, done marks, completer names).
         MessageContent::Checklist(checklist) => Some(checklist_body(
             message.chat_id,
@@ -748,42 +759,29 @@ pub(in crate::ui) fn session_history_row(
             // opacity the layer can't apply, so the slice draws its specks.
             let cover = super::super::anim_layer::with_layer(None, || {
                 match effective_content(&message.content, message.ephemeral.as_ref()) {
-                    MessageContent::Photo(photo) if photo.has_spoiler => {
-                        let (frame_w, frame_h) = photo
-                            .largest_size()
-                            .or_else(|| photo.thumb_size())
-                            .map(|size| media_frame(MediaFrameKind::Photo, size.width, size.height))
-                            .unwrap_or_else(|| media_frame(MediaFrameKind::Photo, 0, 0));
-                        Some(spoiler_cover(
-                            message.id.0 as u64,
-                            message.chat_id,
-                            message.id,
-                            photo.minithumbnail.as_ref(),
-                            None,
-                            frame_w,
-                            frame_h,
-                            corners,
-                            cx,
-                        ))
-                    }
-                    MessageContent::Video(video) if video.has_spoiler => {
-                        let (frame_w, frame_h) =
-                            media_frame(MediaFrameKind::Video, video.width, video.height);
-                        Some(spoiler_cover(
-                            message.id.0 as u64,
-                            message.chat_id,
-                            message.id,
-                            None,
-                            None,
-                            frame_w,
-                            frame_h,
-                            corners,
-                            cx,
-                        ))
-                    }
+                    MessageContent::Photo(photo) if photo.has_spoiler => Some(spoiler_cover(
+                        message.id.0 as u64,
+                        message.chat_id,
+                        message.id,
+                        photo.minithumbnail.as_ref(),
+                        None,
+                        frame_w,
+                        frame_h,
+                        corners,
+                        cx,
+                    )),
+                    MessageContent::Video(video) if video.has_spoiler => Some(spoiler_cover(
+                        message.id.0 as u64,
+                        message.chat_id,
+                        message.id,
+                        None,
+                        None,
+                        frame_w,
+                        frame_h,
+                        corners,
+                        cx,
+                    )),
                     MessageContent::Animation(animation) if animation.has_spoiler => {
-                        let (frame_w, frame_h) =
-                            media_frame(MediaFrameKind::Gif, animation.width, animation.height);
                         Some(spoiler_cover(
                             message.id.0 as u64,
                             message.chat_id,
@@ -880,18 +878,13 @@ pub(in crate::ui) fn session_history_row(
     // footer only widens it when the media is tiny.
     let media_width = (extra_media_present && !emoji_only)
         .then(|| {
-            single_media_width(effective_content(
-                &message.content,
-                message.ephemeral.as_ref(),
-            ))
+            single_media_width(
+                effective_content(&message.content, message.ephemeral.as_ref()),
+                caption_w,
+            )
         })
         .flatten()
-        .map(|width| {
-            media_content_width(
-                width,
-                footer_meta.reserve(footer_reserve(message.is_outgoing)),
-            )
-        });
+        .map(|width| media_content_width(width, info_width));
     let mut more_btn = Some(more_btn);
     let mut avatar_link = avatar_link(&sender_avatar, message, cx);
     let mut chrome = |footer_inline: bool| {

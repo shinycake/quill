@@ -22,6 +22,8 @@ pub(super) fn poll_body(
     chat_id: ChatId,
     message_id: MessageId,
     content: &PollContent,
+    // The bubble look: a plain bubble has no padding to take off the width.
+    plain: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let poll = &content.poll;
@@ -35,6 +37,9 @@ pub(super) fn poll_body(
         .flex_col()
         .gap_1()
         .mt_1()
+        // Telegram Desktop `Poll::countOptimalSize`: never narrower than
+        // `msgFileMinWidth`; the question and answers widen it.
+        .min_w(super::history::bubble_width::poll_min_width(plain))
         .child(
             super::bidi_line::aligned_block(poll.question.clone())
                 .text_sm()

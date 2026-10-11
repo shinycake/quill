@@ -14,14 +14,24 @@ pub(in crate::ui) fn photo_attachment(
     // pass `None`).
     viewer: Option<(ChatId, MessageId)>,
     corners: MediaCorners,
+    // The caption's longest line (0 without one): a wide caption widens
+    // the picture, as in Telegram Desktop (`media_frame_for`).
+    caption_width: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let open_id = photo.open_file_id().unwrap_or(FileId(0));
     let (frame_w, frame_h) = photo
         .largest_size()
         .or_else(|| photo.thumb_size())
-        .map(|size| media_frame(MediaFrameKind::Photo, size.width, size.height))
-        .unwrap_or_else(|| media_frame(MediaFrameKind::Photo, 0, 0));
+        .map(|size| {
+            media_frame_for(
+                MediaFrameKind::Photo,
+                size.width,
+                size.height,
+                caption_width,
+            )
+        })
+        .unwrap_or_else(|| media_frame_for(MediaFrameKind::Photo, 0, 0, caption_width));
     if !photo.is_secret
         && !photo.has_spoiler
         && let Some(path) = photo_display_path(photo, files, media_roots)
@@ -176,6 +186,8 @@ pub(in crate::ui) fn animation_attachment(
     // viewer, which plays the GIF in a loop (history rows only).
     viewer: Option<(ChatId, MessageId)>,
     corners: MediaCorners,
+    // The caption's longest line (0 without one); see `media_frame_for`.
+    caption_width: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
@@ -200,7 +212,12 @@ pub(in crate::ui) fn animation_attachment(
                 .map(|path| {
                     crate::ui::image_budget::sized_media(
                         &path,
-                        media_frame(MediaFrameKind::Gif, animation.width, animation.height),
+                        media_frame_for(
+                            MediaFrameKind::Gif,
+                            animation.width,
+                            animation.height,
+                            caption_width,
+                        ),
                         Some((animation.width, animation.height)),
                         crate::ui::image_budget::Fit::Cover,
                     )
@@ -210,7 +227,12 @@ pub(in crate::ui) fn animation_attachment(
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = animation.is_secret || animation.has_spoiler;
-    let (frame_w, frame_h) = media_frame(MediaFrameKind::Gif, animation.width, animation.height);
+    let (frame_w, frame_h) = media_frame_for(
+        MediaFrameKind::Gif,
+        animation.width,
+        animation.height,
+        caption_width,
+    );
     let live = inline.is_some();
     let picture = if let Some(inline) = inline {
         // The badge rides with the clip: an animation layer redraws both.
@@ -339,6 +361,8 @@ pub(in crate::ui) fn video_attachment(
     // Secret/spoiler videos never get the handler.
     viewer: Option<(ChatId, MessageId)>,
     corners: MediaCorners,
+    // The caption's longest line (0 without one); see `media_frame_for`.
+    caption_width: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
@@ -372,7 +396,12 @@ pub(in crate::ui) fn video_attachment(
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = video.is_secret || video.has_spoiler;
-    let (frame_w, frame_h) = media_frame(MediaFrameKind::Video, video.width, video.height);
+    let (frame_w, frame_h) = media_frame_for(
+        MediaFrameKind::Video,
+        video.width,
+        video.height,
+        caption_width,
+    );
     let live = inline.is_some();
     let total = video.duration;
     let picture = if let Some(inline) = inline {

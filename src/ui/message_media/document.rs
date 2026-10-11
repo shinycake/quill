@@ -202,14 +202,16 @@ pub(in crate::ui) fn document_chip(
     } else {
         None
     };
+    // `msgFileMinWidth` to `msgMaxWidth`; the name widens the row between.
+    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(false);
     div()
         .id(("doc-chip", row_id))
         .mt_1()
         .flex()
         .items_center()
         .gap_3()
-        .min_w(px(quill::bubble_layout::FILE_MIN_WIDTH as f32))
-        .max_w(px(quill::bubble_layout::MSG_MAX_WIDTH as f32))
+        .min_w(min_width)
+        .max_w(max_width)
         .child(disc)
         .child(
             div()

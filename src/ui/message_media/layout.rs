@@ -12,28 +12,35 @@ pub(in crate::ui) enum MediaFrameKind {
     Gif,
 }
 
-/// Display frame for a photo, video or GIF in a bubble, as Telegram
-/// Desktop sizes it (`quill::bubble_layout::photo_current` /
-/// `clip_current` at the bubble's widest): fitted into 430x430 (GIFs 320),
-/// never upscaled, at least 200 wide in a bubble and 100 on a side, a tall
-/// picture cropped to a square unless the crop would lose over a quarter.
-/// A not-yet-downloaded placeholder already has the final size, so the
-/// row keeps its height when the file arrives.
+/// Display frame for a photo, video or GIF in a bubble without a caption;
+/// see [`media_frame_for`].
 pub(in crate::ui) fn media_frame(
     kind: MediaFrameKind,
     width: i32,
     height: i32,
 ) -> (Pixels, Pixels) {
-    use quill::bubble_layout::{
-        ClipKind, MAX_MEDIA_SIZE, MediaContext, Size, clip_current, photo_current,
-    };
+    media_frame_for(kind, width, height, 0)
+}
+
+/// Display frame for a photo, video or GIF in a bubble, as Telegram
+/// Desktop sizes it (`quill::bubble_layout::photo_current` /
+/// `clip_current` at the bubble's widest): fitted into 430x430 (GIFs 320),
+/// never upscaled on its own, at least 200 wide in a bubble and 100 on a
+/// side, a tall picture cropped to a square unless the crop would lose over
+/// a quarter. A caption wider than the picture widens it up to
+/// `msgMaxWidth` (`caption_width` is its longest line, unpadded;
+/// `Photo::countCurrentSize`'s `maxWithCaption`), the picture then showing
+/// more of its height. A not-yet-downloaded placeholder already has the
+/// final size, so the row keeps its height when the file arrives.
+pub(in crate::ui) fn media_frame_for(
+    kind: MediaFrameKind,
+    width: i32,
+    height: i32,
+    caption_width: i32,
+) -> (Pixels, Pixels) {
+    use quill::bubble_layout::{ClipKind, MAX_MEDIA_SIZE, Size, clip_current, photo_current};
     let dims = Size::new(width, height);
-    let context = MediaContext {
-        has_bubble: true,
-        info_width: 0,
-        keyboard_width: 0,
-        caption_width: 0,
-    };
+    let context = crate::ui::history::bubble_width::media_context(caption_width, 0);
     let size = match kind {
         MediaFrameKind::Photo => photo_current(dims, context, MAX_MEDIA_SIZE),
         MediaFrameKind::Video => clip_current(dims, ClipKind::Video, context, 0, MAX_MEDIA_SIZE),
@@ -70,27 +77,52 @@ pub(in crate::ui) fn bubble_outer_width(content: Pixels, media_led: bool, plain:
     }
 }
 
-/// Display width of a single photo / video / GIF, `None` for content that
-/// doesn't lead with such media.
+/// Display width of a single photo / video / GIF with a caption of
+/// `caption_width` (0 without), `None` for content that doesn't lead with
+/// such media.
 pub(in crate::ui) fn single_media_width(
     content: &quill::telegram::envelope::MessageContent,
+    caption_width: i32,
 ) -> Option<Pixels> {
+    single_media_frame(content, caption_width).map(|(w, _)| w)
+}
+
+/// Display frame of a single photo / video / GIF with a caption of
+/// `caption_width` (0 without), `None` for content that doesn't lead with
+/// such media.
+pub(in crate::ui) fn single_media_frame(
+    content: &quill::telegram::envelope::MessageContent,
+    caption_width: i32,
+) -> Option<(Pixels, Pixels)> {
     use quill::telegram::envelope::MessageContent;
-    let (w, _) = match content {
+    let frame = match content {
         MessageContent::Photo(photo) => photo
             .largest_size()
             .or_else(|| photo.thumb_size())
-            .map(|size| media_frame(MediaFrameKind::Photo, size.width, size.height))
-            .unwrap_or_else(|| media_frame(MediaFrameKind::Photo, 0, 0)),
-        MessageContent::Video(video) => {
-            media_frame(MediaFrameKind::Video, video.width, video.height)
-        }
-        MessageContent::Animation(animation) => {
-            media_frame(MediaFrameKind::Gif, animation.width, animation.height)
-        }
+            .map(|size| {
+                media_frame_for(
+                    MediaFrameKind::Photo,
+                    size.width,
+                    size.height,
+                    caption_width,
+                )
+            })
+            .unwrap_or_else(|| media_frame_for(MediaFrameKind::Photo, 0, 0, caption_width)),
+        MessageContent::Video(video) => media_frame_for(
+            MediaFrameKind::Video,
+            video.width,
+            video.height,
+            caption_width,
+        ),
+        MessageContent::Animation(animation) => media_frame_for(
+            MediaFrameKind::Gif,
+            animation.width,
+            animation.height,
+            caption_width,
+        ),
         _ => return None,
     };
-    Some(w)
+    Some(frame)
 }
 
 /// Hover group for a media frame: the pause disc shows only on hover
@@ -279,8 +311,40 @@ impl MediaCorners {
 
 #[cfg(test)]
 mod tests {
-    use super::{bubble_outer_width, media_content_width};
+    use super::{MediaFrameKind, bubble_outer_width, media_content_width, media_frame_for};
     use gpui_kit::px;
+
+    #[test]
+    fn a_wide_caption_widens_the_picture_up_to_msg_max_width() {
+        // Without a caption a 300x300 picture keeps its size.
+        assert_eq!(
+            media_frame_for(MediaFrameKind::Photo, 300, 300, 0),
+            (px(300.), px(300.))
+        );
+        // A caption 380 px wide (402 with padding) widens it to 402; the
+        // square picture is cropped to that strip, since showing it whole
+        // would mean covering more than a quarter (`adjustHeightForLessCrop`).
+        assert_eq!(
+            media_frame_for(MediaFrameKind::Photo, 300, 300, 380),
+            (px(402.), px(300.))
+        );
+        // A slightly wider caption keeps the picture whole: the cover
+        // loses under a quarter, so the full height is shown.
+        assert_eq!(
+            media_frame_for(MediaFrameKind::Photo, 300, 300, 340),
+            (px(362.), px(362.))
+        );
+        // Never past msgMaxWidth.
+        assert_eq!(
+            media_frame_for(MediaFrameKind::Photo, 300, 300, 1000).0,
+            px(430.)
+        );
+        // A GIF stays inside maxGifSize whatever the caption.
+        assert_eq!(
+            media_frame_for(MediaFrameKind::Gif, 300, 200, 1000).0,
+            px(320.)
+        );
+    }
 
     #[test]
     fn media_decides_the_bubble_width() {

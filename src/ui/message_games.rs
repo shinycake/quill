@@ -53,6 +53,7 @@ pub(super) fn game_card(
             None,
             None,
             MediaCorners::small(),
+            0,
             cx,
         )));
     }
