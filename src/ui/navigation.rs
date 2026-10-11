@@ -33,7 +33,7 @@ pub(super) enum NavigationAction {
     ArchivedStickers,
     Storage,
     Proxy,
-    QuickReplies,
+    Business,
     Subscriptions,
     Stars,
     Premium,
@@ -178,7 +178,7 @@ impl QuillApp {
                 self.open_data_storage(cx);
             }
             NavigationAction::Proxy => self.open_proxy_list(cx),
-            NavigationAction::QuickReplies => self.open_quick_replies(window, cx),
+            NavigationAction::Business => self.open_business(window, cx),
             NavigationAction::Subscriptions => {
                 self.open_subscriptions(cx);
             }
@@ -641,7 +641,6 @@ impl QuillApp {
                         ("Notifications and sounds", NavigationAction::Notifications),
                         ("Appearance", NavigationAction::Appearance),
                         ("Chat settings", NavigationAction::ChatSettings),
-                        ("Quick replies", NavigationAction::QuickReplies),
                         ("Privacy and security", NavigationAction::Privacy),
                         ("Devices", NavigationAction::Sessions),
                         ("Data and storage", NavigationAction::Storage),
@@ -649,6 +648,7 @@ impl QuillApp {
                         ("Stars", NavigationAction::Stars),
                         ("My gifts", NavigationAction::MyGifts),
                         ("Telegram Premium", NavigationAction::Premium),
+                        ("Telegram Business", NavigationAction::Business),
                         ("Star subscriptions", NavigationAction::Subscriptions),
                         ("Contacts", NavigationAction::ContactsSettings),
                         ("Calls", NavigationAction::CallSettings),

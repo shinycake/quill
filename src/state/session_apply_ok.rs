@@ -23,6 +23,7 @@ impl Session {
         self.apply_web_app_ok(pending);
         self.apply_owned_bots_ok(pending);
         self.apply_privacy_data_ok(pending);
+        self.apply_business_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme

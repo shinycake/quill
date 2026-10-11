@@ -5,6 +5,7 @@ mod auth;
 mod backgrounds;
 mod bot_verification;
 mod bots;
+mod business_settings;
 mod call_audio;
 mod owned_bots;
 mod quick_replies;

@@ -321,6 +321,7 @@ impl Session {
                 self.settings.reaction_notification_settings = Some(settings);
             }
             SettingsPayload::QuickReplies(update) => self.apply_quick_replies(update),
+            SettingsPayload::TimeZones(zones) => self.apply_time_zones(zones),
         }
     }
 }

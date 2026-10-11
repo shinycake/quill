@@ -220,11 +220,18 @@ pub struct BusinessInfo {
     /// TDLib's snapshot, used when no local hours are known.
     pub next_open_in: i32,
     pub next_close_in: i32,
+    /// The own account's greeting message; `None` when off or not ours.
+    pub greeting: Option<crate::business_settings::GreetingSettings>,
+    /// The own account's away message; `None` when off or not ours.
+    pub away: Option<crate::business_settings::AwaySettings>,
 }
 
 impl BusinessInfo {
     pub fn is_empty(&self) -> bool {
-        self.location.is_none() && self.opening_hours.is_none()
+        self.location.is_none()
+            && self.opening_hours.is_none()
+            && self.greeting.is_none()
+            && self.away.is_none()
     }
 
     /// Whether the two schedules differ, which is when the "local time" /
@@ -314,6 +321,8 @@ pub fn parse_business_info(value: Option<&Value>) -> Option<BusinessInfo> {
         local_opening_hours: parse_hours(value.get("local_opening_hours")),
         next_open_in: int("next_open_in"),
         next_close_in: int("next_close_in"),
+        greeting: crate::business_settings::parse_greeting(value.get("greeting_message_settings")),
+        away: crate::business_settings::parse_away(value.get("away_message_settings")),
     };
     (!info.is_empty()).then_some(info)
 }

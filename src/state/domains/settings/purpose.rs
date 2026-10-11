@@ -227,6 +227,15 @@ pub enum SettingsPurpose {
     /// Add, edit, delete, rename or send of quick replies; the result
     /// arrives as updates.
     MutateQuickReplies,
+    /// `getTimeZones` for the business hours editor. Response is
+    /// `timeZones`.
+    GetTimeZones,
+    /// `setBusinessGreetingMessageSettings` / `setBusinessAwayMessageSettings`
+    /// / `setBusinessOpeningHours` / `setBusinessLocation`. Response is
+    /// `ok`; the saved value arrives as `updateUserFullInfo`.
+    SaveBusinessSetting {
+        kind: crate::business_settings::BusinessSettingKind,
+    },
 }
 
 flat_purposes!(Settings(SettingsPurpose) {
@@ -271,4 +280,5 @@ flat_purposes!(Settings(SettingsPurpose) {
     GetLanguagePackInfo,
     LoadQuickReplyShortcuts,
     MutateQuickReplies,
+    GetTimeZones,
 });
