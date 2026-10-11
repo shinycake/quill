@@ -265,9 +265,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Delete a member's reaction as an admin <!-- parity:menu-delete-reaction -->
 - [x] Selection bar: Copy Selected as Text <!-- parity:selection-copy-text -->
 - [x] Selection bar: Download, Save, Unpin, Report, Send Now and Reschedule selected messages <!-- parity:selection-bulk-actions -->
-- [ ] Drag-select across messages and Shift-click range selection <!-- parity:selection-drag-range -->
+- [x] Drag-select across messages and Shift-click range selection <!-- parity:selection-drag-range -->
 - [x] Delete key removes the selected messages and Esc clears the selection <!-- parity:selection-delete-key -->
-- [ ] Keyboard selection with Ctrl+Space and per-message focus <!-- parity:selection-keyboard -->
+- [x] Keyboard selection with Ctrl+Space and per-message focus <!-- parity:selection-keyboard -->
 - [x] Pin confirmation with "Notify all members" and "Also pin for {user}" <!-- parity:pin-confirm-options -->
 - [x] Unpin-all and hide-pinned confirmations with message counts (partial: basic confirm exists) <!-- parity:pin-unpin-all-confirm -->
 
