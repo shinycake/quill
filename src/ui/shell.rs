@@ -8,6 +8,7 @@ use gpui_kit::component::dialog::{Dialog, DialogContent};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::ids::ChatId;
 pub(super) fn title_bar(
     mode: PaneMode,
     live: bool,
@@ -247,20 +248,47 @@ impl QuillShell {
     /// Runs inside the shell's render: the app is not leased here, so
     /// `open_dialog`/`close_dialog` (which lease only `Root`) are safe.
     fn sync_kit_dialogs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_kit_dialogs_in(None, window, cx);
+    }
+
+    /// Whether this shell shows a kit dialog now.
+    pub(super) fn dialog_open(&self) -> bool {
+        self.open_dialog.is_some()
+    }
+
+    /// [`Self::sync_kit_dialogs`] for the window `host` (`None`: the main
+    /// window, `Some(chat)`: that chat's own window). The flags are
+    /// app-wide; the dialog opens in the window whose input asked for it
+    /// and stays there (`ChatWindows::dialog_may_open_in`). Runs with the
+    /// host window's state in place, so the builders read it.
+    pub(super) fn sync_kit_dialogs_in(
+        &mut self,
+        host: Option<ChatId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let app = self.app.clone();
         let shell = cx.entity();
         // Snapshot the flags once; the app is not leased here.
         let winner = Self::first_open(app.read(cx));
         let first_open = winner.map(|r| r.kind);
+        if self.open_dialog.is_none() {
+            // Closed by the kit (Esc, backdrop, ✕): the host is free again.
+            app.update(cx, |app, _| app.windows.dialog_closed_in(host));
+        }
+        let may_open = app.read(cx).windows.dialog_may_open_in(host);
+        let first_open = first_open.filter(|_| may_open);
         if self.open_dialog != first_open {
             // Close the currently shown dialog (if any) before opening
             // the next one, so a transition (e.g. folder manager ->
             // editor) never stacks two kit dialogs.
             if self.open_dialog.is_some() {
                 window.close_dialog(cx);
+                app.update(cx, |app, _| app.windows.dialog_closed_in(host));
             }
             self.open_dialog = first_open;
-            if let Some(spec) = winner {
+            if let Some(spec) = winner.filter(|_| may_open) {
+                app.update(cx, |app, _| app.windows.dialog_opened_in(host));
                 let build = spec.build;
                 let app_c = app.clone();
                 let shell_c = shell.clone();

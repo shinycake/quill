@@ -614,9 +614,9 @@ impl QuillApp {
                 .child(super::anim_layer::occluder(div().w(px(128.)).h_full()))
         });
         let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
-        // Built for a chat window: its deferred paging addresses that chat,
-        // and the pointer listeners below (drag selection over the main
-        // window's rows) are not registered.
+        // Built for a chat window: the work the rows defer (paging, GIF
+        // autoplay, the jump button) runs with that window's state in
+        // place (`in_window_scope`).
         let window_chat = self.windows.scope;
         super::selectable_text::selection_viewport(
             super::wallpaper::paint_wallpaper(
@@ -660,17 +660,21 @@ impl QuillApp {
             .child(super::history_fx::reveal_viewport(
                 reveal,
                 MessageScroller::new(id, self.history.scroller.clone(), move |ix, _window, cx| {
-                    if window_chat.is_none() {
-                        let gif_view = weak.clone();
-                        cx.defer(move |cx| {
-                            let _ = gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
+                    let gif_view = weak.clone();
+                    cx.defer(move |cx| {
+                        let _ = gif_view.update(cx, |this, cx| {
+                            this.in_window_scope(window_chat, cx, |this, cx| {
+                                this.maybe_autoplay_gif(ix, cx)
+                            })
                         });
-                    }
+                    });
                     if ix == 0 {
                         let weak = weak.clone();
                         cx.defer(move |cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.maybe_auto_load_older_in(window_chat, cx)
+                                this.in_window_scope(window_chat, cx, |this, cx| {
+                                    this.maybe_auto_load_older(cx)
+                                })
                             });
                         });
                     }
@@ -680,7 +684,9 @@ impl QuillApp {
                         let weak = weak.clone();
                         cx.defer(move |cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.maybe_auto_load_newer_in(window_chat, cx)
+                                this.in_window_scope(window_chat, cx, |this, cx| {
+                                    this.maybe_auto_load_newer(cx)
+                                })
                             });
                         });
                     }
@@ -697,19 +703,16 @@ impl QuillApp {
                 // only scrolling to its end.
                 .with_jump_button_renderer({
                     let jump = cx.weak_entity();
-                    let scroller = self.history.scroller.clone();
                     move |button| {
-                        let scroller = scroller.clone();
                         button
                             .when(unread_count > 0, |button| {
                                 button.label(unread_count.to_string())
                             })
                             .on_click(move |_, _, cx| {
-                                let _ = jump.update(cx, |this, cx| match window_chat {
-                                    Some(chat) => {
-                                        this.jump_to_latest_in_window(chat, &scroller, cx)
-                                    }
-                                    None => this.jump_to_latest_messages(cx),
+                                let _ = jump.update(cx, |this, cx| {
+                                    this.in_window_scope(window_chat, cx, |this, cx| {
+                                        this.jump_to_latest_messages(cx)
+                                    })
                                 });
                             })
                     }
@@ -732,9 +735,6 @@ impl QuillApp {
                         *hit_rows.borrow_mut() =
                             rows.iter().map(|(ix, row, _)| (*ix, *row)).collect();
                         viewport.set(Some(bounds));
-                        if window_chat.is_some() {
-                            return;
-                        }
                         let moved = drag_app.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                             if phase.bubble() && event.pressed_button == Some(MouseButton::Left) {

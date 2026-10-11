@@ -1,28 +1,25 @@
-//! The chat window's view: what is per window (chat, history view state,
-//! compose field), the swap that lets `QuillApp`'s conversation code draw
-//! it, and the window itself.
+//! The chat window's view: the window itself, its slot, the scope around
+//! its body's layout and paint, and its kit dialog layer.
 
 use super::super::app::QuillApp;
-use super::super::history_state::HistoryUi;
-use gpui_kit::component::input::{InputEvent, TextareaState};
+use super::super::shell::QuillShell;
+use super::slot::{SharedSlot, WindowSlot, scope_probe};
 use gpui_kit::component::{Root, StyledExt, TitleBar};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::{DraftTopic, enter_event_from_kit, send_text_on_enter, should_send_on_enter};
 use quill::ids::ChatId;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// One chat window's view. `QuillApp` builds the body (header, history,
-/// compose field) with this view's state swapped in; see [`WindowScope`].
+/// One chat window's view. `QuillApp` builds the body with this window's
+/// slot swapped in; see `slot` and [`WindowScope`].
 pub(crate) struct ChatWindowView {
     owner: WeakEntity<QuillApp>,
     chat_id: ChatId,
-    /// This window's history view state: swapped into `QuillApp::history`
-    /// while the window is built, laid out or painted.
-    history: Rc<RefCell<HistoryUi>>,
-    pub(super) composer: Entity<TextareaState>,
-    /// Why the last send did not go out, shown under the compose field.
-    pub(super) note: Option<String>,
+    pub(super) slot: SharedSlot,
+    /// Hosts this window's kit dialog (the same registry as the main
+    /// window's shell; the dialog opens where the input asked for it).
+    pub(super) shell: Entity<QuillShell>,
     /// The native title last handed to the platform.
     title_shown: String,
     /// The window's bookkeeping ran (the app knows the window is gone).
@@ -37,60 +34,14 @@ impl ChatWindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (send_key_mode, draft) = owner.read_with(cx, |app, _| {
-            let draft = app.session().and_then(|session| {
-                if !session.accepts_composer_draft(chat_id, DraftTopic::Chat) {
-                    return None;
-                }
-                session
-                    .draft_for(chat_id, DraftTopic::Chat)
-                    .map(|draft| draft.text.clone())
-            });
-            (app.chat_prefs.send_key_mode, draft)
-        });
-        let submit_on_enter = send_key_mode == quill::composer::SendKeyMode::Enter;
-        let composer = cx.new(|cx| {
-            let mut state = TextareaState::new(window, cx)
-                .placeholder("Write a message...")
-                .auto_grow(1, 8)
-                .submit_on_enter(submit_on_enter);
-            state.set_span_styler(Some(super::super::composer_field::span_styler()), cx);
-            if let Some(draft) = draft {
-                let doc = quill::composer_doc::ComposerDoc::from_markup(&draft);
-                state.set_value(super::super::composer_field::doc_content(&doc), window, cx);
-            }
-            state
-        });
-        cx.subscribe_in(
-            &composer,
-            window,
-            move |this, state, event: &InputEvent, window, cx| match event {
-                InputEvent::PressEnter { secondary, shift } => {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        enter_event_from_kit(*shift, *secondary, marked),
-                        send_key_mode,
-                    ) {
-                        this.send(window, cx);
-                    }
-                }
-                InputEvent::Change => {
-                    this.note = None;
-                    this.save_draft(true, cx);
-                    cx.notify();
-                }
-                _ => {}
-            },
-        )
-        .detach();
-        let history = Rc::new(RefCell::new(HistoryUi::new(cx)));
+        let slot = owner.update(cx, |app, cx| WindowSlot::new(app, chat_id, window, cx));
+        let shell = cx.new(|_| QuillShell::new(owner.clone()));
         let observe = cx.observe(&owner, |_, _, cx| cx.notify());
         Self {
             owner: owner.downgrade(),
             chat_id,
-            history,
-            composer,
-            note: None,
+            slot: Rc::new(RefCell::new(slot)),
+            shell,
             title_shown: String::new(),
             closed: false,
             _observe: observe,
@@ -102,87 +53,23 @@ impl ChatWindowView {
         self.chat_id
     }
 
-    /// The compose field's content as markup (formatting kept).
-    fn markup(&self, cx: &App) -> String {
-        super::super::composer_field::field_doc(self.composer.read(cx)).to_markup()
-    }
-
-    /// Send what is typed to this window's chat and clear the field.
-    pub(crate) fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let markup = send_text_on_enter(
-            self.markup(cx),
-            self.owner
-                .read_with(cx, |app, _| app.chat_prefs.send_key_mode)
-                .unwrap_or_default(),
-        );
-        if markup.trim().is_empty() {
-            return;
-        }
-        let chat_id = self.chat_id;
-        let sent = self
-            .owner
-            .update(cx, |app, cx| app.send_text_to_chat(chat_id, markup, cx))
-            .unwrap_or_else(|_| Err("The app is gone.".into()));
-        match sent {
-            Ok(()) => {
-                self.composer
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                self.note = None;
-            }
-            Err(note) => self.note = Some(note),
-        }
-        cx.notify();
-    }
-
-    /// The field's text as the chat's draft (`delayed`: tdesktop's 1 s /
-    /// 5 s save timer; `false` flushes, on close).
-    fn save_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
-        let markup = self.markup(cx);
-        let chat_id = self.chat_id;
-        let _ = self.owner.update(cx, |app, cx| {
-            app.save_chat_draft(chat_id, DraftTopic::Chat, &markup, None, delayed, cx);
-        });
-    }
-
     /// The window is going away: flush the draft and tell the app.
     fn closing(&mut self, cx: &mut Context<Self>) {
         if self.closed {
             return;
         }
         self.closed = true;
-        self.save_draft(false, cx);
         let chat_id = self.chat_id;
-        let _ = self
-            .owner
-            .update(cx, |app, cx| app.chat_window_closed(chat_id, cx));
+        let _ = self.owner.update(cx, |app, cx| {
+            app.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
+            app.chat_window_closed(chat_id, cx);
+        });
     }
 
     /// Close the window from inside it (title bar close, Cmd/Ctrl+W).
     pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.closing(cx);
         window.remove_window();
-    }
-
-    /// Swap this window's history view state into the app and name the
-    /// chat as the one being viewed. Paired with [`Self::exit_scope`];
-    /// nothing may hold the app between the two.
-    fn enter_scope(
-        app: &WeakEntity<QuillApp>,
-        chat_id: ChatId,
-        history: &Rc<RefCell<HistoryUi>>,
-        cx: &mut App,
-    ) {
-        let _ = app.update(cx, |app, _| {
-            std::mem::swap(&mut app.history, &mut *history.borrow_mut());
-            app.windows.scope = Some(chat_id);
-        });
-    }
-
-    fn exit_scope(app: &WeakEntity<QuillApp>, history: &Rc<RefCell<HistoryUi>>, cx: &mut App) {
-        let _ = app.update(cx, |app, _| {
-            std::mem::swap(&mut app.history, &mut *history.borrow_mut());
-            app.windows.scope = None;
-        });
     }
 }
 
@@ -215,15 +102,23 @@ impl Render for ChatWindowView {
             window.set_window_title(&title);
             self.title_shown = title;
         }
-        let composer = self.composer.clone();
-        let note = self.note.clone();
-        let view = cx.weak_entity();
-        let weak_app = self.owner.clone();
-        Self::enter_scope(&weak_app, chat_id, &self.history, cx);
-        let body = app.update(cx, |app, cx| {
-            app.chat_window_body(chat_id, &composer, view.clone(), note, window, cx)
+        let active = window.is_window_active();
+        // A window may draw in the middle of another window's input: the
+        // scope in place then is restored afterwards.
+        let outer = app.update(cx, |app, _| {
+            app.windows.note_active(chat_id, active);
+            let outer = app.windows.scope;
+            app.set_window_scope(Some(chat_id));
+            outer
         });
-        Self::exit_scope(&weak_app, &self.history, cx);
+        // The kit dialog this window hosts, built with its state in place.
+        self.shell.update(cx, |shell, cx| {
+            shell.sync_kit_dialogs_in(Some(chat_id), window, cx)
+        });
+        let dialog_open = self.shell.read(cx).dialog_open();
+        let body = app.update(cx, |app, cx| app.chat_window_body(chat_id, window, cx));
+        app.update(cx, |app, _| app.set_window_scope(outer));
+        let view = cx.weak_entity();
         let title_bar = TitleBar::new()
             .on_close_window({
                 let view = view.clone();
@@ -241,6 +136,7 @@ impl Render for ChatWindowView {
         div()
             .id("chat-window")
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .on_action({
@@ -249,34 +145,68 @@ impl Render for ChatWindowView {
                     let _ = view.update(cx, |this, cx| this.close(window, cx));
                 }
             })
+            // Window-wide text selection, as in the main window.
+            .child(gpui_kit::base::TextSelectionLayer)
+            .child(scope_probe(self.owner.clone(), Some(chat_id)))
             .child(title_bar)
             .child(WindowScope {
-                app: weak_app,
-                chat_id,
-                history: self.history.clone(),
+                app: self.owner.clone(),
+                target: Some(chat_id),
                 child: body,
+            })
+            .when(dialog_open, |this| {
+                // Kit dialog contents paint at priority 10; occlude the
+                // body right below them (as the main shell does).
+                this.child(
+                    deferred(
+                        anchored().position(point(px(0.), px(0.))).child(
+                            div()
+                                .id("chat-window-dialog-barrier")
+                                .w(window.viewport_size().width)
+                                .h(window.viewport_size().height)
+                                .occlude(),
+                        ),
+                    )
+                    .with_priority(9),
+                )
             })
             .into_any_element()
     }
 }
 
-/// Marks the window body's layout and paint as the chat window's: the
-/// history rows built lazily inside the message scroller read the window's
-/// `HistoryUi` and `QuillApp::viewed_chat` resolves to the window's chat.
-/// The same idea as `app_slice::SliceScope`, with the view state swapped
-/// as well as the scope named.
-struct WindowScope {
+/// Marks a window body's layout and paint as `target`'s window's
+/// (`None`: the main window's): rows the message scroller builds lazily,
+/// and everything else that renders during layout or paint, read that
+/// window's state. The scope in place before each phase is restored after
+/// it, since a window may draw in the middle of another window's input.
+pub(in crate::ui) struct WindowScope {
     app: WeakEntity<QuillApp>,
-    chat_id: ChatId,
-    history: Rc<RefCell<HistoryUi>>,
+    target: Option<ChatId>,
     child: AnyElement,
 }
 
 impl WindowScope {
+    /// Wrap a window's content.
+    pub(in crate::ui) fn new(
+        app: WeakEntity<QuillApp>,
+        target: Option<ChatId>,
+        child: AnyElement,
+    ) -> Self {
+        Self { app, target, child }
+    }
+
     fn scoped<R>(&self, cx: &mut App, f: impl FnOnce(&mut App) -> R) -> R {
-        ChatWindowView::enter_scope(&self.app, self.chat_id, &self.history, cx);
+        let target = self.target;
+        let outer = self
+            .app
+            .update(cx, |app, _| {
+                let outer = app.windows.scope;
+                app.set_window_scope(target);
+                outer
+            })
+            .unwrap_or(None);
         let result = f(cx);
-        ChatWindowView::exit_scope(&self.app, &self.history, cx);
+        let _ = self.app.update(cx, |app, _| app.set_window_scope(outer));
         result
     }
 }
@@ -346,13 +276,14 @@ impl Element for WindowScope {
 
 /// Open the window for `chat_id` at `bounds`. The kit `Root` hosts the
 /// window's own dialog and notification layers; the title bar is Quill's
-/// (kit `TitleBar`, like the main window's).
+/// (kit `TitleBar`, like the main window's). Returns the window, its view
+/// and its slot; the caller registers them before the window first draws.
 pub(super) fn open_chat_window(
     owner: Entity<QuillApp>,
     chat_id: ChatId,
     bounds: Bounds<Pixels>,
     cx: &mut App,
-) -> Result<(AnyWindowHandle, WeakEntity<ChatWindowView>), String> {
+) -> Result<(AnyWindowHandle, WeakEntity<ChatWindowView>, SharedSlot), String> {
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(380.), px(400.))),
@@ -366,13 +297,11 @@ pub(super) fn open_chat_window(
         show: true,
         ..Default::default()
     };
-    let view_slot: Rc<RefCell<Option<WeakEntity<ChatWindowView>>>> = Rc::default();
-    let view_out = view_slot.clone();
+    let built: Rc<RefCell<Option<(WeakEntity<ChatWindowView>, SharedSlot)>>> = Rc::default();
+    let built_out = built.clone();
     let handle = cx.open_window(options, move |window, cx| {
         let view = cx.new(|cx| ChatWindowView::new(owner, chat_id, window, cx));
-        *view_out.borrow_mut() = Some(view.downgrade());
-        let composer = view.read(cx).composer.clone();
-        composer.update(cx, |input, cx| input.focus(window, cx));
+        *built_out.borrow_mut() = Some((view.downgrade(), view.read(cx).slot.clone()));
         let weak = view.downgrade();
         window.on_window_should_close(cx, move |_, cx| {
             let _ = weak.update(cx, |this, cx| this.closing(cx));
@@ -382,9 +311,9 @@ pub(super) fn open_chat_window(
         cx.new(|cx| Root::new(view, window, cx))
     });
     let handle = handle.map_err(|err| err.to_string())?;
-    let view = view_slot
+    let (view, slot) = built
         .borrow_mut()
         .take()
         .ok_or_else(|| "the window built no view".to_string())?;
-    Ok((handle.into(), view))
+    Ok((handle.into(), view, slot))
 }

@@ -560,9 +560,16 @@ impl QuillApp {
             multiple: true,
             prompt: Some("Choose Files".into()),
         });
+        // The picker answers later: attach into the composer of the
+        // window that asked (`chat_window::slot`).
+        let window_chat = self.windows.scope;
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await {
-                let _ = this.update(cx, |this, cx| this.attach_picked(paths, as_files, cx));
+                let _ = this.update(cx, |this, cx| {
+                    this.in_window_scope(window_chat, cx, |this, cx| {
+                        this.attach_picked(paths, as_files, cx)
+                    })
+                });
             }
         })
         .detach();

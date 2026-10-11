@@ -261,67 +261,6 @@ impl QuillApp {
     /// in-flight `getChatHistory` requests and stops at `loaded_complete`).
     /// The window stops short of the latest message and its end is near:
     /// load the next newer page (the driver dedupes in-flight requests).
-    /// [`Self::maybe_auto_load_newer`], or the next newer page of a chat
-    /// shown in its own window.
-    pub(in crate::ui) fn maybe_auto_load_newer_in(
-        &mut self,
-        window_chat: Option<ChatId>,
-        cx: &mut Context<Self>,
-    ) {
-        match window_chat {
-            Some(chat) => {
-                if let Some(live) = self.live.as_mut()
-                    && matches!(live.driver.fetch_history_newer_for(chat), Ok(Some(_)))
-                {
-                    cx.notify();
-                }
-            }
-            None => self.maybe_auto_load_newer(cx),
-        }
-    }
-
-    /// [`Self::maybe_auto_load_older`], or the next older page of a chat
-    /// shown in its own window.
-    pub(in crate::ui) fn maybe_auto_load_older_in(
-        &mut self,
-        window_chat: Option<ChatId>,
-        cx: &mut Context<Self>,
-    ) {
-        match window_chat {
-            Some(chat) => {
-                if let Some(live) = self.live.as_mut()
-                    && matches!(live.driver.fetch_history_for(chat), Ok(Some(_)))
-                {
-                    cx.notify();
-                }
-            }
-            None => self.maybe_auto_load_older(cx),
-        }
-    }
-
-    /// The jump button of a chat window: drop the unread divider, replace
-    /// a window that stops short of the latest message, scroll to the end.
-    pub(in crate::ui) fn jump_to_latest_in_window(
-        &mut self,
-        chat: ChatId,
-        scroller: &Entity<gpui_kit::component::message_scroller::MessageScrollerState>,
-        cx: &mut Context<Self>,
-    ) {
-        let mut replaced = false;
-        if let Some(live) = self.live.as_mut() {
-            let history = live.driver.session.histories.entry(chat.0).or_default();
-            history.unread_anchor = None;
-            if history.has_newer {
-                live.driver.session.reset_history_window(chat);
-                replaced = live.driver.fetch_history_for(chat).is_ok();
-            }
-        }
-        if !replaced {
-            scroller.update(cx, |state, cx| state.scroll_to_end(cx));
-        }
-        cx.notify();
-    }
-
     pub(in crate::ui) fn maybe_auto_load_newer(&mut self, cx: &mut Context<Self>) {
         let in_thread = self.thread_active();
         if let Some(live) = self.live.as_mut()

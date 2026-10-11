@@ -194,6 +194,11 @@ impl AudioEngine {
         }
     }
 
+    /// The app's one output, for another engine to play on.
+    pub(super) fn output(&self) -> SharedOutput {
+        self.output.clone()
+    }
+
     /// Play `path` from `offset_secs`, replacing whatever played.
     pub(super) fn start(
         &mut self,

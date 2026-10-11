@@ -3,65 +3,114 @@
 //! Telegram Desktop (`Core::App().ensureSeparateWindowFor(id)`,
 //! core/application.cpp) opens a `Window::Controller` per
 //! `SeparateId`: the same account, its own active chat, header, history and
-//! compose field, no chat list. Opening the chat that is active in the main
-//! window moves it there (`SessionController::showInNewWindow` clears the
-//! main window's section stack first); asking again for a chat that has a
-//! window activates that window; picking the chat in the main window's list
-//! or clicking its notification also activates the window
+//! compose field, no chat list; a forum opens with its topic list. Opening
+//! the chat that is active in the main window moves it there
+//! (`SessionController::showInNewWindow` clears the main window's section
+//! stack first); asking again for a chat that has a window activates that
+//! window; picking the chat in the main window's list or clicking its
+//! notification also activates the window
 //! (`MainWidget::showHistoryInDifferentWindow`,
-//! `Application::windowForShowingHistory`). Closing the window closes it,
+//! `Application::windowForShowingHistory`); a chat opened from inside a
+//! chat window shows in the main window. Closing the window closes it,
 //! nothing else.
 //!
 //! Quill keeps one `QuillApp` (one `Session`, one TDLib client, the
 //! notifications, playback, dialogs and preferences). Each chat window is a
-//! [`view::ChatWindowView`] that owns what is per window: the chat it
-//! shows, its history view state (`HistoryUi`: scroller, row cache,
-//! probes) and its compose field. The window's body is built by `QuillApp`'s
-//! own header and history code; while a chat window is built, laid out or
-//! painted, its `HistoryUi` is swapped into `QuillApp::history` and
-//! `ChatWindows::scope` names its chat, so `QuillApp::viewed_chat` resolves
-//! to it instead of the main window's `open_chat` (see `view::WindowScope`).
-//! On the session side the chat is one of `Session::window_chats`.
+//! [`view::ChatWindowView`] whose [`slot::WindowSlot`] owns what is per
+//! window: the history view state, the compose field and its state, the
+//! message menu and selection, the pickers, the media viewer, and the
+//! session's view of the chat. `QuillApp::set_window_scope` swaps a slot
+//! in while its window is drawn or handles input, so the app's own
+//! conversation, composer and overlay code serves every window; kit
+//! dialogs open in the window whose input asked for them
+//! (`QuillShell::sync_kit_dialogs_in`). On the session side the chat is
+//! one of `Session::window_chats`.
 
 mod body;
+mod slot;
 #[cfg(test)]
 mod tests;
 mod view;
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::composer::{ComposerSnapshot, DraftTopic};
 use quill::ids::ChatId;
 use quill::state::ChatSummary;
-pub(super) use view::ChatWindowView;
+pub(in crate::ui) use slot::scope_probe;
+#[cfg(all(test, feature = "demo-capture"))]
+use view::ChatWindowView;
+pub(in crate::ui) use view::WindowScope;
 
-/// The open chat windows and the frame-scope bookkeeping (a `QuillApp`
-/// field, `windows`).
-#[derive(Default)]
+/// The open chat windows and the scope bookkeeping (a `QuillApp` field,
+/// `windows`).
 pub(crate) struct ChatWindows {
     open: Vec<OpenChatWindow>,
-    /// The chat whose window is being built, laid out or painted (`None`:
-    /// the main window). Set by `view::WindowScope`.
+    /// The chat whose window's state is in place (`None`: the main
+    /// window's). See `slot`.
     pub(super) scope: Option<ChatId>,
+    /// The window the last input event happened in (`None`: the main
+    /// window): a dialog it asks for opens there.
+    pub(super) last_input: Option<ChatId>,
+    /// The window showing the kit dialog (`Some(None)`: the main window).
+    dialog_host: Option<Option<ChatId>>,
+    /// The main window, as last rendered.
+    pub(super) main: Option<AnyWindowHandle>,
     /// New windows cascade from the main window; this counts them.
     cascade: u32,
+    /// Keys go to the window that received them: the interceptor runs
+    /// before any handler and puts that window's state in place.
+    _key_scope: Subscription,
 }
 
 struct OpenChatWindow {
     chat_id: ChatId,
     handle: AnyWindowHandle,
+    #[cfg(all(test, feature = "demo-capture"))]
     view: WeakEntity<ChatWindowView>,
+    slot: slot::SharedSlot,
 }
 
 impl ChatWindows {
-    /// Whether `chat_id` has a window of its own.
-    #[cfg(all(test, feature = "demo-capture"))]
-    pub(super) fn has(&self, chat_id: ChatId) -> bool {
-        self.window_for(chat_id).is_some()
+    pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
+        let app = cx.weak_entity();
+        let key_scope = cx.intercept_keystrokes(move |_, window, cx| {
+            let id = window.window_handle().window_id();
+            let _ = app.update(cx, |app, _| {
+                let chat = app.windows.chat_for_window(id);
+                app.note_window_input(chat);
+            });
+        });
+        Self {
+            open: Vec::new(),
+            scope: None,
+            last_input: None,
+            dialog_host: None,
+            main: None,
+            cascade: 0,
+            _key_scope: key_scope,
+        }
     }
 
     fn window_for(&self, chat_id: ChatId) -> Option<&OpenChatWindow> {
         self.open.iter().find(|open| open.chat_id == chat_id)
+    }
+
+    /// The chat shown by the window with this id, if it is a chat window.
+    fn chat_for_window(&self, id: WindowId) -> Option<ChatId> {
+        self.open
+            .iter()
+            .find(|open| open.handle.window_id() == id)
+            .map(|open| open.chat_id)
+    }
+
+    fn slot_for(&self, chat_id: ChatId) -> Option<slot::SharedSlot> {
+        self.window_for(chat_id).map(|open| open.slot.clone())
+    }
+
+    /// Whether `chat_id` has a window of its own.
+    #[cfg(all(test, feature = "demo-capture"))]
+    pub(super) fn has(&self, chat_id: ChatId) -> bool {
+        self.window_for(chat_id).is_some()
     }
 
     /// The view of the window showing `chat_id`.
@@ -69,6 +118,42 @@ impl ChatWindows {
     pub(super) fn view_for(&self, chat_id: ChatId) -> Option<Entity<ChatWindowView>> {
         self.window_for(chat_id)
             .and_then(|open| open.view.upgrade())
+    }
+
+    /// Whether a chat window's state is in place.
+    pub(super) fn in_window(&self) -> bool {
+        self.scope.is_some()
+    }
+
+    /// A chat window is the active one (the frame clock runs for it).
+    pub(super) fn any_active(&self) -> bool {
+        self.open.iter().any(|open| open.slot.borrow().active)
+    }
+
+    pub(super) fn note_active(&self, chat_id: ChatId, active: bool) {
+        if let Some(slot) = self.slot_for(chat_id) {
+            slot.borrow_mut().active = active;
+        }
+    }
+
+    /// Whether the window `host` (`None`: the main window) may open the
+    /// kit dialog the app flags ask for: the one already showing a dialog
+    /// keeps it; otherwise the window the last input happened in.
+    pub(super) fn dialog_may_open_in(&self, host: Option<ChatId>) -> bool {
+        match self.dialog_host {
+            Some(current) => current == host,
+            None => self.last_input == host,
+        }
+    }
+
+    pub(super) fn dialog_opened_in(&mut self, host: Option<ChatId>) {
+        self.dialog_host = Some(host);
+    }
+
+    pub(super) fn dialog_closed_in(&mut self, host: Option<ChatId>) {
+        if self.dialog_host == Some(host) {
+            self.dialog_host = None;
+        }
     }
 
     /// Bring the window showing `chat_id` to the front, with its compose
@@ -79,22 +164,12 @@ impl ChatWindows {
             return false;
         };
         cx.activate(true);
-        let view = open.view.clone();
+        let composer = open.slot.borrow().composer.clone();
         let _ = open.handle.update(cx, |_, window, cx| {
             window.activate_window();
-            if let Some(view) = view.upgrade() {
-                view.read(cx)
-                    .composer
-                    .clone()
-                    .update(cx, |input, cx| input.focus(window, cx));
-            }
+            composer.update(cx, |input, cx| input.focus(window, cx));
         });
         true
-    }
-
-    /// Whether a chat window's body is being built now.
-    pub(super) fn in_window(&self) -> bool {
-        self.scope.is_some()
     }
 
     /// Where the next window opens: a 3/4-sized window stepping down and
@@ -123,24 +198,17 @@ impl QuillApp {
         self.windows.scope.or_else(|| self.open_chat_id())
     }
 
-    /// The open forum topic of the content being built now: a chat window
-    /// shows its chat's plain history, so none there.
+    /// The open forum topic of the content being built now.
     pub(super) fn viewed_topic(&self) -> Option<i32> {
-        if self.windows.in_window() {
-            None
-        } else {
-            self.session().and_then(|session| session.open_topic)
-        }
+        self.session().and_then(|session| session.open_topic)
     }
 
     /// Whether the menus offer "Open in new window" for `chat`. Telegram
-    /// Desktop shows it for every peer (`Filler::addNewWindow`, forums as a
-    /// Forum window with the topic list, communities as a Community
-    /// window); Quill's chat window shows a plain history, so forums (their
-    /// topic list) wait for a later slice, as does the locked state
+    /// Desktop shows it for every peer (`Filler::addNewWindow`); Quill
+    /// offers it for every supported chat while unlocked
     /// (`SeparateWindowLocked`).
     pub(super) fn can_open_chat_window(&self, chat: &ChatSummary) -> bool {
-        chat.supported() && !chat.is_forum_chat() && !self.account.passcode.locked
+        chat.supported() && !self.account.passcode.locked
     }
 
     /// "Open in new window" (Telegram Desktop `showInNewWindow`): activate
@@ -167,11 +235,16 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // Asked from inside a chat window: the main window's view is the
+        // one that lets go of the chat.
+        let outer = self.windows.scope;
+        self.set_window_scope(None);
         // The session side first: the chat is a window chat before the main
         // window lets go of it, so TDLib keeps it open.
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.open_chat_window(chat_id) {
                 self.connection.status_note = format!("could not open the chat window: {err:?}");
+                self.set_window_scope(outer);
                 cx.notify();
                 return;
             }
@@ -181,23 +254,48 @@ impl QuillApp {
         if self.open_chat_id() == Some(chat_id) {
             self.leave_open_chat(window, cx);
         }
-        let bounds = self.windows.next_bounds(window.bounds());
+        self.set_window_scope(outer);
+        // Cascade from the main window, wherever the request came from.
+        let bounds = self
+            .windows
+            .main
+            .and_then(|main| main.update(cx, |_, window, _| window.bounds()).ok())
+            .unwrap_or_else(|| window.bounds());
+        let bounds = self.windows.next_bounds(bounds);
         let owner = cx.entity();
         cx.defer(move |cx| {
-            let result = view::open_chat_window(owner.clone(), chat_id, bounds, cx);
-            owner.update(cx, |app, cx| {
-                match result {
-                    Ok((handle, view)) => app.windows.open.push(OpenChatWindow {
-                        chat_id,
-                        handle,
-                        view,
-                    }),
-                    Err(_) => {
+            let opened = view::open_chat_window(owner.clone(), chat_id, bounds, cx);
+            let (handle, view, slot) = match opened {
+                Ok(opened) => opened,
+                Err(_) => {
+                    owner.update(cx, |app, cx| {
                         app.connection.status_note = "Couldn't open the chat window".into();
                         app.chat_window_closed(chat_id, cx);
-                    }
+                    });
+                    return;
                 }
+            };
+            owner.update(cx, |app, cx| {
+                #[cfg(not(all(test, feature = "demo-capture")))]
+                let _ = view;
+                app.windows.open.push(OpenChatWindow {
+                    chat_id,
+                    handle,
+                    #[cfg(all(test, feature = "demo-capture"))]
+                    view,
+                    slot,
+                });
                 cx.notify();
+            });
+            // The chat's draft goes into the window's compose field, which
+            // takes the keyboard.
+            let _ = handle.update(cx, |_, window, cx| {
+                owner.update(cx, |app, cx| {
+                    app.in_window_scope(Some(chat_id), cx, |app, cx| {
+                        app.restore_open_draft(window, cx);
+                        app.composer.update(cx, |input, cx| input.focus(window, cx));
+                    });
+                });
             });
         });
         cx.notify();
@@ -211,10 +309,52 @@ impl QuillApp {
         self.windows.activate(chat_id, cx)
     }
 
+    /// A chat chosen from inside a chat window (a link, a search hit, a
+    /// mention) opens in the main window, as Telegram Desktop hands a
+    /// non-primary window's navigation to the primary one. Returns
+    /// whether the request was taken over (`false` in the main window).
+    pub(super) fn routed_to_main_window(
+        &mut self,
+        chat_id: ChatId,
+        thread_switch: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(from) = self.windows.scope else {
+            return false;
+        };
+        if from == chat_id {
+            // The window shows it already.
+            return true;
+        }
+        let Some(main) = self.windows.main else {
+            return false;
+        };
+        let owner = cx.entity();
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                owner.update(cx, |app, cx| {
+                    app.set_window_scope(None);
+                    app.select_chat_with(chat_id, thread_switch, window, cx);
+                });
+                cx.activate(true);
+                window.activate_window();
+            });
+        });
+        true
+    }
+
     /// The window showing `chat_id` is gone (closed by the user, or by the
     /// app because the chat or the session went away).
     pub(super) fn chat_window_closed(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        // Its state must not stay in the app's place.
+        if self.windows.scope == Some(chat_id) {
+            self.set_window_scope(None);
+        }
         self.windows.open.retain(|open| open.chat_id != chat_id);
+        if self.windows.last_input == Some(chat_id) {
+            self.windows.last_input = None;
+        }
+        self.windows.dialog_closed_in(Some(chat_id));
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_chat_window(chat_id);
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -258,53 +398,6 @@ impl QuillApp {
             self.close_info_panel(cx);
         }
         cx.notify();
-    }
-
-    /// Send the text typed in `chat_id`'s window. Only text: the window's
-    /// compose field has no attachments, replies or edits yet.
-    pub(super) fn send_text_to_chat(
-        &mut self,
-        chat_id: ChatId,
-        markup: String,
-        cx: &mut Context<Self>,
-    ) -> Result<(), String> {
-        if markup.trim().is_empty() {
-            return Ok(());
-        }
-        let Some(chat) = self
-            .session()
-            .and_then(|session| session.chats.get(&chat_id.0))
-            .cloned()
-        else {
-            return Err("This chat is gone.".into());
-        };
-        if self.session().is_some_and(|session| session.is_frozen()) {
-            return Err("Your account is frozen and can't send messages.".into());
-        }
-        if !chat.supported() {
-            return Err("This chat type is not supported yet.".into());
-        }
-        if !chat.can_post() {
-            return Err("You can't send messages here.".into());
-        }
-        let limit = self.text_length_limit();
-        if quill::text_split::units_over_limit(&markup, limit) > 0 {
-            return Err("This message is too long.".into());
-        }
-        self.remember_sent_hashtags(&markup);
-        if let Some(live) = self.live.as_mut() {
-            let generation = live.driver.session.view_generation;
-            let snapshot = ComposerSnapshot::capture(chat_id, generation, markup);
-            live.driver
-                .send_snapshot(&snapshot)
-                .map_err(|err| format!("Couldn't send the message ({err:?})."))?;
-        } else if self.demo_session.is_some() {
-            self.apply_demo_outgoing_to(chat_id, &markup, None, None);
-        }
-        // The chat's cloud draft was this text: clear it now.
-        self.save_chat_draft(chat_id, DraftTopic::Chat, "", None, false, cx);
-        cx.notify();
-        Ok(())
     }
 
     /// The native title of `chat_id`'s window: the chat name, with its

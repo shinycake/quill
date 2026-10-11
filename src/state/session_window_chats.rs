@@ -70,3 +70,46 @@ impl Session {
         Some(prev)
     }
 }
+
+/// The part of the session that is a window's view rather than the
+/// account's data: what the window looks at and the views layered on it.
+/// Telegram Desktop keeps these per `SessionController`; Quill keeps the
+/// main window's in `Session` and swaps a chat window's in while that
+/// window is drawn or handles input (`ui::chat_window`).
+#[derive(Debug, Default)]
+pub struct SessionView {
+    pub open_chat: Option<ChatId>,
+    pub open_topic: Option<i32>,
+    pub thread: Option<ThreadView>,
+    pub saved_sublist: Option<SavedSublistView>,
+    pub saved_tag_search: Option<SavedTagSearch>,
+    pub chat_search: ChatSearchState,
+    pub shared_media: SharedMediaState,
+}
+
+impl SessionView {
+    /// A fresh view of `chat_id`: its plain history, nothing layered.
+    pub fn of_chat(chat_id: ChatId) -> Self {
+        Self {
+            open_chat: Some(chat_id),
+            ..Self::default()
+        }
+    }
+}
+
+impl Session {
+    /// Exchange the session's view with `view` (symmetric: calling it
+    /// twice restores the original).
+    pub fn swap_view(&mut self, view: &mut SessionView) {
+        std::mem::swap(&mut self.open_chat, &mut view.open_chat);
+        std::mem::swap(&mut self.open_topic, &mut view.open_topic);
+        std::mem::swap(&mut self.threads.thread, &mut view.thread);
+        std::mem::swap(&mut self.threads.saved.sublist, &mut view.saved_sublist);
+        std::mem::swap(
+            &mut self.threads.saved.tag_search,
+            &mut view.saved_tag_search,
+        );
+        std::mem::swap(&mut self.search.chat_search, &mut view.chat_search);
+        std::mem::swap(&mut self.media.shared_media, &mut view.shared_media);
+    }
+}
