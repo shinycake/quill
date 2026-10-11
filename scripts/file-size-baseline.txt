@@ -10,4 +10,3 @@
 1863 src/ui/history.rs
 1087 src/ui/keybindings.rs
 1968 src/ui/message_text.rs
-1623 src/ui/web_app_ui.rs
