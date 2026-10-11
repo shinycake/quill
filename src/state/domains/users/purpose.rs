@@ -57,6 +57,9 @@ pub enum UsersPurpose {
     /// `setAccentColor` (schema 1.8.68, line 15205). Response is `ok`; the
     /// new name color arrives via `updateUser` on our own user.
     SetAccentColor,
+    /// `setUpgradedGiftColors` (schema 1.8.68, line 15209). Response is
+    /// `ok`; the colors arrive via `updateUser` on our own user.
+    SetUpgradedGiftColors,
     /// `getDefaultBackgroundCustomEmojiStickers` (schema 1.8.68, line
     /// 15154). Response is `stickers`: the reply and profile icon choices.
     GetBackgroundEmojiIcons,
@@ -128,6 +131,7 @@ flat_purposes!(Users(UsersPurpose) {
     DeleteProfilePhoto,
     SetProfileAccentColor,
     SetAccentColor,
+    SetUpgradedGiftColors,
     GetBackgroundEmojiIcons,
     RemoveContact,
     ImportContacts,

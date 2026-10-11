@@ -25,6 +25,9 @@ pub enum PeerColorTab {
 pub struct PeerColorDraft {
     pub name_color_id: i32,
     pub name_emoji_id: i64,
+    /// `upgradedGiftColors.id` of the worn collectible gift; 0 = none. When
+    /// set it replaces the name color and the reply icon.
+    pub gift_colors_id: i64,
     pub profile_color_id: i32,
     pub profile_emoji_id: i64,
 }
@@ -48,7 +51,8 @@ impl PeerColorDraft {
             return ApplyOutcome::NeedsPremium;
         }
         let name = self.name_color_id != current.name_color_id
-            || self.name_emoji_id != current.name_emoji_id;
+            || self.name_emoji_id != current.name_emoji_id
+            || self.gift_colors_id != current.gift_colors_id;
         let profile = self.profile_color_id != current.profile_color_id
             || self.profile_emoji_id != current.profile_emoji_id;
         if name || profile {
@@ -115,9 +119,31 @@ mod tests {
         PeerColorDraft {
             name_color_id: 1,
             name_emoji_id: 0,
+            gift_colors_id: 0,
             profile_color_id: -1,
             profile_emoji_id: 0,
         }
+    }
+
+    #[test]
+    fn wearing_or_dropping_a_gift_counts_as_a_name_change() {
+        let current = draft();
+        let mut edited = current;
+        edited.gift_colors_id = 99;
+        assert_eq!(
+            edited.apply_outcome(&current, true),
+            ApplyOutcome::Send {
+                name: true,
+                profile: false
+            }
+        );
+        assert_eq!(
+            current.apply_outcome(&edited, true),
+            ApplyOutcome::Send {
+                name: true,
+                profile: false
+            }
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@ use super::{
     DeepLinkAction, DeepLinkUi, InternalLink, LinkRoute, SettingsTarget, invite_hash,
     login_code_from_link, needs_internal_resolution, parse_internal_link, route,
 };
+use crate::peer_color::PeerColorTab;
 use serde_json::{Value, json};
 
 fn parsed(value: Value) -> InternalLink {
@@ -185,6 +186,63 @@ fn ui_links_route_without_a_request() {
             json!({"@type":"internalLinkTypeSettings","section":{"@type":"settingsSectionAppearance"}})
         ),
         LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::Appearance))
+    );
+    for (section, subsection, tab) in [
+        (
+            "settingsSectionEditProfile",
+            "your-color",
+            PeerColorTab::Profile,
+        ),
+        (
+            "settingsSectionEditProfile",
+            "profile-color/name",
+            PeerColorTab::Name,
+        ),
+        (
+            "settingsSectionEditProfile",
+            "profile-color/name/use-gift",
+            PeerColorTab::Name,
+        ),
+        (
+            "settingsSectionEditProfile",
+            "profile-color/profile/add-icons",
+            PeerColorTab::Profile,
+        ),
+        (
+            "settingsSectionAppearance",
+            "your-color/name/add-icons",
+            PeerColorTab::Name,
+        ),
+        (
+            "settingsSectionAppearance",
+            "your-color",
+            PeerColorTab::Profile,
+        ),
+    ] {
+        assert_eq!(
+            route_of(json!({
+                "@type": "internalLinkTypeSettings",
+                "section": {"@type": section, "subsection": subsection}
+            })),
+            LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::PeerColor(tab))),
+            "{section} {subsection}"
+        );
+    }
+    // Other subsections keep their page; the color words only count in
+    // the two sections that have the box.
+    assert_eq!(
+        route_of(json!({
+            "@type": "internalLinkTypeSettings",
+            "section": {"@type": "settingsSectionAppearance", "subsection": "night-mode"}
+        })),
+        LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::Appearance))
+    );
+    assert_eq!(
+        route_of(json!({
+            "@type": "internalLinkTypeSettings",
+            "section": {"@type": "settingsSectionDevices", "subsection": "your-color"}
+        })),
+        LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::Devices))
     );
     assert_eq!(
         route_of(

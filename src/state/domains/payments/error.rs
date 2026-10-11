@@ -65,6 +65,9 @@ impl Session {
                 self.payments.hub.tx_error =
                     Some(format!("Couldn't load transactions: {}", error_reason(err)));
             }
+            Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
+                self.users_state.wearable_gifts_loaded = true;
+            }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 self.payments.hub.gifts_loading = false;
                 self.payments.hub.gifts_error =

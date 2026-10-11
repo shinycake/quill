@@ -379,6 +379,7 @@ impl QuillApp {
                         ),
                 );
                 body = body.child(this.appearance_theme_section(cx));
+                body = body.child(this.appearance_peer_color_section(cx));
                 body = body.child(this.appearance_spellcheck_section(cx));
                 body = body.child(this.appearance_suggest_emoji_section(cx));
                 body = body.child(this.appearance_auto_night_section(cx));

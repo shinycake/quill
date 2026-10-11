@@ -460,6 +460,8 @@ pub struct GiftInfo {
     pub sticker: Option<StickerContent>,
     /// Files of the sticker, for the downloader.
     pub files: Vec<crate::telegram::envelope::ParsedFile>,
+    /// `upgradedGift.colors`: the scheme the gift lends to its wearer.
+    pub colors: Option<crate::gift_colors::UpgradedGiftColors>,
 }
 
 fn sticker_content(
@@ -522,6 +524,9 @@ pub fn parse_gift_info(gift: &Value) -> GiftInfo {
             backdrop,
             sticker,
             files,
+            colors: gift
+                .get("colors")
+                .and_then(crate::gift_colors::parse_upgraded_gift_colors),
         };
     }
     let (sticker, files) = sticker_content(gift.get("sticker"));
@@ -533,6 +538,7 @@ pub fn parse_gift_info(gift: &Value) -> GiftInfo {
         backdrop: None,
         sticker,
         files,
+        colors: None,
     }
 }
 
