@@ -21,6 +21,7 @@ pub mod business_start_page;
 pub mod call_device_prefs;
 pub mod calls;
 pub mod chat_bottom_bar;
+pub mod chat_header_menu;
 pub mod chat_swipe;
 pub mod chatlist_archive;
 pub mod chatlist_calls;

@@ -506,12 +506,13 @@ impl QuillApp {
             );
         }
         // Slice CL3: Report — gated on `chat.can_be_reported` (schema
-        // 1.8.67, line 3606); sends the simple spam report
-        // (`reportChat` with empty option_id/message_ids, schema:3667).
-        if chat.can_be_reported {
+        // 1.8.67, line 3606); opens the report flow with the reasons the
+        // server offers (`reportChat` with no message ids, answered by a
+        // `reportChatResult`).
+        if chat.can_be_reported && self.live.is_some() {
             item!(70, Lucide::Flag, "chat-menu-report", "Report", this, cx, {
-                this.open_group_confirm(chat_id, GroupConfirmAction::ReportChat, cx);
                 this.chat_list.menu = None;
+                this.open_message_report(chat_id, Vec::new(), cx);
                 cx.notify();
             });
         }

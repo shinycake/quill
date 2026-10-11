@@ -39,11 +39,6 @@ impl QuillApp {
                         "Delete this chat and its history from your chat list?".to_string(),
                         "Delete".to_string(),
                     ),
-                    GroupConfirmAction::ReportChat => (
-                        "Report chat".to_string(),
-                        "Report this chat to Telegram moderators as spam?".to_string(),
-                        "Report".to_string(),
-                    ),
                     GroupConfirmAction::BlockUser { block } => {
                         if block {
                             (

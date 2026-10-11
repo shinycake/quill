@@ -90,7 +90,12 @@ impl QuillApp {
     /// A boost link opens the channel and its info panel, where the boost
     /// level and the Boost button are (`boost_section`). Nothing is boosted
     /// until the user presses the button.
-    fn open_boost_panel(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_boost_panel(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let supergroup = self.session().and_then(|session| {
             session
                 .chats
