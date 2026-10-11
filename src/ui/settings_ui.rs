@@ -364,6 +364,7 @@ impl QuillApp {
             .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed)));
         let ptt_section = self.push_to_talk_settings(&prefs.push_to_talk, cx);
         let mic_test_section = self.mic_test_section(cx);
+        let device_prefs_section = self.call_device_prefs_section(cx);
         // Phase 6: one kit RadioGroup per privacy setting. Controlled:
         // the chosen index writes the value and the owner re-renders.
         let privacy_group =
@@ -514,6 +515,7 @@ impl QuillApp {
             })
             .child(ptt_section)
             .child(mic_test_section)
+            .child(device_prefs_section)
             .child(
                 div()
                     .text_xs()
