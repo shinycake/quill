@@ -74,6 +74,9 @@ pub(crate) struct HistoryUi {
     /// The list's window bounds at the last paint (drag selection
     /// autoscrolls when the pointer leaves them).
     pub(super) viewport: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// The open chat's palette (its emoji theme, its wallpaper's tone),
+    /// set when the history renders and applied while rows are built.
+    pub(super) palette: std::cell::Cell<Option<super::chat_palette::ChatPalette>>,
     /// Pinned bar position per chat: index into the pinned list, newest
     /// first. A click on the bar jumps there and steps to the next older.
     pub(super) pinned_cursor: HashMap<i64, usize>,
@@ -127,6 +130,7 @@ impl HistoryUi {
             scroll_view_probe: Default::default(),
             hit_rows: Default::default(),
             viewport: Default::default(),
+            palette: Default::default(),
             pinned_cursor: HashMap::new(),
             hidden_pinned: HashMap::new(),
             pinned_list_open: false,

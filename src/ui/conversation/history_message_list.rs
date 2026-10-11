@@ -483,6 +483,15 @@ impl QuillApp {
                                 .motion
                                 .start_reveal(prev_count, std::time::Instant::now());
                         }
+                        // A sent message turns a freeform wallpaper.
+                        if following
+                            && !newer_page
+                            && self.history.rows[prev_count.min(count)..count]
+                                .iter()
+                                .any(super::chat_palette::row_is_outgoing)
+                        {
+                            self.rotate_wallpaper_on_send(cx);
+                        }
                     }
                     (_, Some(_), Some((_, prev_last)))
                         if last == Some(prev_last) && count > prev_count =>
@@ -594,7 +603,11 @@ impl QuillApp {
         // Inline players for rows that don't render this pass stop.
         self.playback.inline_videos.borrow_mut().begin_render();
         let weak = cx.weak_entity();
-        let date_pill = self.scroll_date_pill(cx);
+        let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
+        let palette = self.history_palette(&look, cx);
+        self.history.palette.set(palette);
+        let date_pill =
+            super::chat_palette::with_palette(palette, false, || self.scroll_date_pill(cx));
         let probe = self.history.scroll_probe.clone();
         let top_probe = self.history.scroll_top_probe.clone();
         let view_probe = self.history.scroll_view_probe.clone();
@@ -615,7 +628,6 @@ impl QuillApp {
                 .justify_center()
                 .child(super::anim_layer::occluder(div().w(px(128.)).h_full()))
         });
-        let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
         // Built for a chat window: the work the rows defer (paging, GIF
         // autoplay, the jump button) runs with that window's state in
         // place (`in_window_scope`).
@@ -658,8 +670,9 @@ impl QuillApp {
                 // theme background).
                 look.wallpaper.as_ref(),
                 look.dimming,
-                super::wallpaper_cache::Slot::History,
+                super::wallpaper_cache::Slot::History(cx.entity_id()),
             )
+            .children(self.wallpaper_fade(&look, cx))
             .child(super::history_fx::reveal_viewport(
                 reveal,
                 MessageScroller::new(id, self.history.scroller.clone(), move |ix, _window, cx| {
@@ -823,7 +836,11 @@ impl QuillApp {
         if unreported {
             cx.notify();
         }
-        let element = self.render_history_row_body(row, cx);
+        let palette = self.history.palette.get();
+        let outgoing = super::chat_palette::row_is_outgoing(row);
+        let element = super::chat_palette::with_palette(palette, outgoing, || {
+            self.render_history_row_body(row, cx)
+        });
         let has_day = row.day_label().is_some();
         let probe = self.history.scroll_probe.clone();
         // Notes where the row is painted, for the floating date pill.
@@ -840,7 +857,9 @@ impl QuillApp {
             .flex_col()
             .child(tracker)
             .when_some(row.day_label(), |this, label| {
-                this.child(day_separator(label, cx))
+                this.child(super::chat_palette::with_palette(palette, false, || {
+                    day_separator(label, cx)
+                }))
             })
             .when(row.unread_divider(), |this| {
                 let viewed = self.viewed_chat();
@@ -848,7 +867,9 @@ impl QuillApp {
                     .session()
                     .and_then(|s| viewed.and_then(|chat| s.histories.get(&chat.0)))
                     .map_or(0, |h| h.unread_at_open);
-                this.child(unread_divider(unread_at_open, cx))
+                this.child(super::chat_palette::with_palette(palette, false, || {
+                    unread_divider(unread_at_open, cx)
+                }))
             })
             .child(element)
             .into_any_element()

@@ -17,6 +17,8 @@ pub struct ChatsState {
     pub chat_backgrounds: HashMap<i64, ChatBackground>,
     /// `chat.theme` (emoji theme name) / `updateChatTheme`, by chat id.
     pub chat_theme_names: HashMap<i64, String>,
+    /// `chat.theme` when it is a gift theme: its settings, by chat id.
+    pub chat_gift_themes: HashMap<i64, EmojiChatTheme>,
     /// `updateEmojiChatThemes`: the themes a private chat can pick.
     pub emoji_chat_themes: Vec<EmojiChatTheme>,
     /// `searchBackground` answer for a `bg/` link; `None` until it arrives.
@@ -94,6 +96,7 @@ impl ChatsState {
             background_set_for_dark: false,
             chat_backgrounds: HashMap::new(),
             chat_theme_names: HashMap::new(),
+            chat_gift_themes: HashMap::new(),
             emoji_chat_themes: Vec::new(),
             searched_background: None,
             background_url: None,

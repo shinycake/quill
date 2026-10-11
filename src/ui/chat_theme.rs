@@ -86,12 +86,14 @@ pub fn set_theme_mode(mode: ThemeMode, window: Option<&mut Window>, cx: &mut App
 /// (`Some`) overrides both while high contrast is active; `None` keeps
 /// the dark value in high-contrast mode (semantic hues are designed for
 /// black backgrounds, so only surfaces/text/borders need overrides).
+/// While a chat with an emoji theme builds its rows, tokens come out
+/// recoloured by the theme (`chat_palette`).
 #[inline]
 fn pick(dark_hex: u32, light_hex: u32, hc_hex: Option<u32>) -> Rgba {
     if high_contrast() {
         return hex(hc_hex.unwrap_or(dark_hex));
     }
-    hex(if dark() { dark_hex } else { light_hex })
+    super::chat_palette::recolor(hex(if dark() { dark_hex } else { light_hex }))
 }
 
 /// [`pick`] for `0xRRGGBBAA` values.
@@ -100,7 +102,13 @@ fn pick_a(dark_hex: u32, light_hex: u32, hc_hex: Option<u32>) -> Rgba {
     if high_contrast() {
         return hex_a(hc_hex.unwrap_or(dark_hex));
     }
-    hex_a(if dark() { dark_hex } else { light_hex })
+    super::chat_palette::recolor(hex_a(if dark() { dark_hex } else { light_hex }))
+}
+
+/// The base accent the palette is drawn around (what a chat theme's
+/// colorizer moves away from): `accent_strong` without any theme.
+pub(crate) fn base_accent_hex() -> u32 {
+    if dark() { 0x1f6feb } else { 0x0969da }
 }
 
 // --- accent ---
@@ -125,7 +133,8 @@ pub fn accent_info() -> Rgba {
 /// Text on solid colored fills: white in both modes (official-client behavior).
 #[inline]
 pub fn text_on_fill() -> Rgba {
-    hex(0xffffff)
+    // Inside an outgoing bubble of a themed chat: the theme's bubble text.
+    super::chat_palette::on_fill_text().unwrap_or(hex(0xffffff))
 }
 #[inline]
 pub fn text_bright() -> Rgba {

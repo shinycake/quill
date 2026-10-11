@@ -734,6 +734,50 @@ fn chat_look_requests_count_acks_and_surface_errors() {
 }
 
 #[test]
+fn gift_themes_apply_their_own_settings_and_replace_emoji_themes() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatTheme","chat_id":5,"theme":{"@type":"chatThemeEmoji","name":"T"}}"#,
+    );
+    assert_eq!(
+        session
+            .chats_state
+            .chat_theme_names
+            .get(&5)
+            .map(String::as_str),
+        Some("T")
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatTheme","chat_id":5,"theme":{"@type":"chatThemeGift","gift_theme":{"@type":"giftChatTheme","gift":{"@type":"upgradedGift","name":"Pepe-1"},"light_settings":{"@type":"themeSettings","accent_color":1193046},"dark_settings":{"@type":"themeSettings","accent_color":6636321}}}}"#,
+    );
+    assert!(!session.chats_state.chat_theme_names.contains_key(&5));
+    assert_eq!(
+        session
+            .chat_theme_settings(5, false)
+            .map(|s| s.accent_color),
+        Some(0x123456)
+    );
+    assert_eq!(
+        session.chat_theme_settings(5, true).map(|s| s.accent_color),
+        Some(0x654321)
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatTheme","chat_id":5}"#,
+    );
+    assert!(session.chat_theme_settings(5, false).is_none());
+}
+
+#[test]
 fn background_share_links_land_once_and_errors_surface() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

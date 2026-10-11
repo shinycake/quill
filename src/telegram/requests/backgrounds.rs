@@ -171,6 +171,31 @@ pub fn set_chat_background(
     .to_string()
 }
 
+/// `setChatBackground` with an image file from disk (`inputBackgroundLocal`)
+/// as a photo wallpaper, blurred or not (tdesktop `uploadForPeer`).
+pub fn set_chat_background_local(
+    extra: RequestId,
+    chat_id: i64,
+    path: &str,
+    blurred: bool,
+    dark_theme_dimming: i32,
+    only_for_self: bool,
+) -> String {
+    json!({
+        "@type": "setChatBackground",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "background": {
+            "@type": "inputBackgroundLocal",
+            "background": { "@type": "inputFileLocal", "path": path },
+        },
+        "type": { "@type": "backgroundTypeWallpaper", "is_blurred": blurred, "is_moving": false },
+        "dark_theme_dimming": dark_theme_dimming.clamp(0, 100),
+        "only_for_self": only_for_self,
+    })
+    .to_string()
+}
+
 /// `deleteChatBackground` (`schema/td_api.tl:13873`). Response is `ok`;
 /// `updateChatBackground` carries the result.
 pub fn delete_chat_background(extra: RequestId, chat_id: i64, restore_previous: bool) -> String {
@@ -257,6 +282,19 @@ mod tests {
         let v = parse(delete_chat_background(RequestId(2), 7, false));
         assert_eq!(v["@type"], "deleteChatBackground");
         assert_eq!(v["restore_previous"], false);
+        let v = parse(set_chat_background_local(
+            RequestId(6),
+            7,
+            "/a/b.jpg",
+            true,
+            40,
+            false,
+        ));
+        assert_eq!(v["background"]["@type"], "inputBackgroundLocal");
+        assert_eq!(v["background"]["background"]["path"], "/a/b.jpg");
+        assert_eq!(v["type"]["is_blurred"], true);
+        assert_eq!(v["dark_theme_dimming"], 40);
+        assert_eq!(v["only_for_self"], false);
         let v = parse(set_chat_theme(RequestId(3), 7, "🏠"));
         assert_eq!(v["theme"]["@type"], "inputChatThemeEmoji");
         assert_eq!(v["theme"]["name"], "🏠");

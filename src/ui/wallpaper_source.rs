@@ -190,16 +190,19 @@ impl Sources {
                 width,
                 height,
             ))),
-            Wallpaper::Fill(fill) => {
-                Some(whole(compose_fill(&FillSampler::new(fill), width, height)))
-            }
+            Wallpaper::Fill(fill, rotation) => Some(whole(compose_fill(
+                &FillSampler::rotated(fill, *rotation),
+                width,
+                height,
+            ))),
             Wallpaper::Pattern {
                 fill,
                 path,
                 intensity,
                 inverted,
+                rotation,
             } => {
-                let sampler = FillSampler::new(fill);
+                let sampler = FillSampler::rotated(fill, *rotation);
                 let pattern = remember(&mut self.patterns, path.clone(), || {
                     Pattern::read(path).map(Arc::new)
                 });
@@ -299,6 +302,7 @@ mod tests {
             path: path.clone(),
             intensity: 50,
             inverted: false,
+            rotation: 0,
         };
         let out = sources.render(&pattern, 60, 40).unwrap();
         assert_eq!((out.raster.width, out.raster.height), (60, 40));

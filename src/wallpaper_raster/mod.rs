@@ -123,6 +123,12 @@ impl FillSampler {
     /// linearly along the rotation, three or four make the freeform
     /// gradient (rotation 0, the wallpaper's resting phase).
     pub fn new(fill: &BackgroundFill) -> Self {
+        Self::rotated(fill, 0)
+    }
+
+    /// [`Self::new`] after `rotation` steps of tdesktop's rotation on
+    /// send. Only freeform gradients rotate.
+    pub fn rotated(fill: &BackgroundFill, rotation: u16) -> Self {
         match fill {
             BackgroundFill::Solid(color) => Self::Solid(channels(*color)),
             BackgroundFill::Gradient { top, bottom, angle } => {
@@ -133,7 +139,8 @@ impl FillSampler {
                 1 => Self::Solid(channels(colors[0])),
                 2 => Self::linear(colors, 0),
                 _ => {
-                    let small = small_complex_gradient(colors, 0);
+                    let (phase, progress) = freeform_phase(rotation);
+                    let small = small_complex_gradient(colors, phase, progress);
                     let rgb = small
                         .rgba
                         .as_chunks::<4>()
@@ -218,6 +225,28 @@ impl FillSampler {
             px[3] = 255;
         }
     }
+}
+
+/// One send's step of the freeform rotation, in tdesktop's doubled units
+/// (`ChatTheme::generateNextBackgroundRotation`, `kAddRotationDoubled`).
+pub const ROTATION_STEP: u16 = 720 - 45;
+
+/// The rotation after one more send.
+pub fn next_rotation(rotation: u16) -> u16 {
+    (rotation + ROTATION_STEP) % 720
+}
+
+/// The gradient phase (rotation / 45) and point progress for a doubled
+/// rotation (tdesktop `ComputeRealRotation` / `ComputeRealProgress`): odd
+/// steps sit halfway between two phases.
+pub fn freeform_phase(rotation: u16) -> (usize, f32) {
+    let doubled = i32::from(rotation % 720);
+    let (degrees, progress) = if doubled % 2 == 1 {
+        (((doubled - 45) / 2).rem_euclid(360), 0.5)
+    } else {
+        ((doubled / 2) % 360, 1.0)
+    };
+    ((degrees.clamp(0, 315) / 45) as usize, progress)
 }
 
 /// The colour `t` (0-1) along evenly spaced `stops`.

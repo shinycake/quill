@@ -550,7 +550,9 @@ fn unread_divider(count: i32, cx: &App) -> impl IntoElement {
         .py_1()
         .flex()
         .justify_center()
-        .bg(cx.theme().secondary.opacity(0.7))
+        .bg(super::chat_palette::service_bg(
+            cx.theme().secondary.opacity(0.7),
+        ))
         .text_xs()
         .font_medium()
         .text_color(cx.theme().secondary_foreground)
@@ -586,7 +588,7 @@ pub(super) fn pill_label(label: &str, cx: &App) -> Stateful<Div> {
         .px_3()
         .py_0p5()
         .rounded_full()
-        .bg(cx.theme().secondary)
+        .bg(super::chat_palette::service_bg(cx.theme().secondary))
         .text_xs()
         .font_medium()
         .text_color(cx.theme().secondary_foreground)

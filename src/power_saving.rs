@@ -2,8 +2,8 @@
 //!
 //! A flag set means "save power here": that animation stays still. Only the
 //! categories that animate something in Quill are offered. tdesktop also has
-//! wallpaper rotation, reaction-menu emoji, premium-status emoji and message
-//! effects; Quill has none of those animations, so there is nothing to gate.
+//! reaction-menu emoji, premium-status emoji and message effects; Quill has
+//! none of those animations, so there is nothing to gate.
 //!
 //! The bits keep tdesktop's values so a future import of its settings maps
 //! one to one. The current set lives in a process-wide atomic: the views read
@@ -24,6 +24,9 @@ pub enum Flag {
     EmojiPanel,
     /// Animated emoji in messages and the chat list.
     EmojiChat,
+    /// Wallpaper rotation: the freeform gradient turning on each sent
+    /// message (tdesktop `kChatBackground`).
+    ChatBackground,
     /// The moving specks over spoilers.
     ChatSpoiler,
     /// The pulses and rings on the call panels.
@@ -38,6 +41,7 @@ impl Flag {
             Self::StickersChat => 1 << 2,
             Self::EmojiPanel => 1 << 3,
             Self::EmojiChat => 1 << 5,
+            Self::ChatBackground => 1 << 6,
             Self::ChatSpoiler => 1 << 7,
             Self::Calls => 1 << 8,
         }
@@ -45,11 +49,12 @@ impl Flag {
 }
 
 /// All categories Quill offers, in the dialog's order.
-pub const ALL_FLAGS: [Flag; 7] = [
+pub const ALL_FLAGS: [Flag; 8] = [
     Flag::StickersPanel,
     Flag::StickersChat,
     Flag::EmojiPanel,
     Flag::EmojiChat,
+    Flag::ChatBackground,
     Flag::ChatSpoiler,
     Flag::Calls,
     Flag::Animations,
@@ -61,6 +66,7 @@ pub const ALL_BITS: u32 = Flag::Animations.bit()
     | Flag::StickersChat.bit()
     | Flag::EmojiPanel.bit()
     | Flag::EmojiChat.bit()
+    | Flag::ChatBackground.bit()
     | Flag::ChatSpoiler.bit()
     | Flag::Calls.bit();
 
@@ -88,7 +94,10 @@ pub const GROUPS: [Group; 5] = [
     },
     Group {
         title: Some("Animations in Chats"),
-        items: &[(Flag::ChatSpoiler, "Animated spoiler effect")],
+        items: &[
+            (Flag::ChatBackground, "Wallpaper rotation"),
+            (Flag::ChatSpoiler, "Animated spoiler effect"),
+        ],
     },
     Group {
         title: None,
@@ -196,6 +205,7 @@ mod tests {
         // ui/power_saving.h
         assert_eq!(Flag::Animations.bit(), 1);
         assert_eq!(Flag::StickersChat.bit(), 4);
+        assert_eq!(Flag::ChatBackground.bit(), 64);
         assert_eq!(Flag::ChatSpoiler.bit(), 128);
         assert_eq!(Flag::Calls.bit(), 256);
     }
@@ -203,7 +213,12 @@ mod tests {
     #[test]
     fn sanitize_drops_unknown_bits() {
         assert_eq!(sanitize(u32::MAX), ALL_BITS);
-        assert_eq!(sanitize(1 << 6), 0, "wallpaper rotation is not offered");
+        assert_eq!(
+            sanitize(1 << 6),
+            Flag::ChatBackground.bit(),
+            "wallpaper rotation"
+        );
+        assert_eq!(sanitize(1 << 4), 0, "reaction emoji are not offered");
         assert_eq!(sanitize(Flag::Calls.bit()), Flag::Calls.bit());
     }
 

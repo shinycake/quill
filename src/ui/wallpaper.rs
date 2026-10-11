@@ -19,8 +19,9 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum Wallpaper {
     Solid(u32),
-    /// A two-colour or freeform gradient.
-    Fill(BackgroundFill),
+    /// A two-colour or freeform gradient, and the freeform rotation (in
+    /// tdesktop's doubled steps; see `wallpaper_raster::next_rotation`).
+    Fill(BackgroundFill, u16),
     /// A downloaded photo; `blurred` is Telegram's Blur, `tiled` the local
     /// "Tile background" choice.
     Image {
@@ -35,6 +36,8 @@ pub(super) enum Wallpaper {
         /// 0-100; negative also means inverted.
         intensity: i32,
         inverted: bool,
+        /// The fill's freeform rotation.
+        rotation: u16,
     },
 }
 
@@ -44,9 +47,60 @@ impl Wallpaper {
     pub(super) fn backdrop(&self) -> u32 {
         match self {
             Wallpaper::Solid(c) => *c,
-            Wallpaper::Fill(fill) | Wallpaper::Pattern { fill, .. } => fill.average(),
+            Wallpaper::Fill(fill, _) | Wallpaper::Pattern { fill, .. } => fill.average(),
             Wallpaper::Image { .. } => 0x202020,
         }
+    }
+
+    /// Whether sending turns this wallpaper (a freeform gradient, alone or
+    /// under a pattern; tdesktop rotates only three or four colours).
+    pub(super) fn rotates(&self) -> bool {
+        match self {
+            Wallpaper::Fill(BackgroundFill::Freeform(colors), _)
+            | Wallpaper::Pattern {
+                fill: BackgroundFill::Freeform(colors),
+                ..
+            } => colors.len() >= 3,
+            _ => false,
+        }
+    }
+
+    /// The same wallpaper at `rotation`.
+    pub(super) fn with_rotation(self, rotation: u16) -> Self {
+        match self {
+            Wallpaper::Fill(fill, _) => Wallpaper::Fill(fill, rotation),
+            Wallpaper::Pattern {
+                fill,
+                path,
+                intensity,
+                inverted,
+                ..
+            } => Wallpaper::Pattern {
+                fill,
+                path,
+                intensity,
+                inverted,
+                rotation,
+            },
+            other => other,
+        }
+    }
+
+    /// The wallpaper's identity, whatever its rotation.
+    pub(super) fn identity(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        self.clone().with_rotation(0).hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// The wallpaper at the rotation its sends have reached.
+    pub(super) fn with_stored_rotation(self) -> Self {
+        if !self.rotates() {
+            return self;
+        }
+        let rotation = ROTATIONS.with(|r| r.borrow().get(&self.identity()).copied());
+        self.with_rotation(rotation.unwrap_or(0))
     }
 
     /// The same wallpaper with Blur on or off (photos only).
@@ -62,11 +116,33 @@ impl Wallpaper {
     }
 }
 
+thread_local! {
+    /// Freeform rotation per wallpaper identity (tdesktop keeps it on the
+    /// chat theme, which the chats showing the same wallpaper share).
+    static ROTATIONS: std::cell::RefCell<std::collections::HashMap<u64, u16>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Turn `wallpaper` one step, as sending a message does
+/// (`ChatTheme::rotateComplexGradientBackground`). False when it does not
+/// rotate.
+pub(super) fn rotate(wallpaper: &Wallpaper) -> bool {
+    if !wallpaper.rotates() {
+        return false;
+    }
+    ROTATIONS.with(|r| {
+        let mut map = r.borrow_mut();
+        let entry = map.entry(wallpaper.identity()).or_insert(0);
+        *entry = quill::wallpaper_raster::next_rotation(*entry);
+    });
+    true
+}
+
 fn fill_wallpaper(fill: &BackgroundFill) -> Wallpaper {
     match fill {
         BackgroundFill::Solid(color) => Wallpaper::Solid(*color),
         BackgroundFill::Freeform(colors) if colors.len() == 1 => Wallpaper::Solid(colors[0]),
-        other => Wallpaper::Fill(other.clone()),
+        other => Wallpaper::Fill(other.clone(), 0),
     }
 }
 
@@ -90,6 +166,7 @@ pub(super) fn background_wallpaper(
                 path: PathBuf::from(path),
                 intensity: *intensity,
                 inverted: *inverted,
+                rotation: 0,
             },
             None => fill_wallpaper(fill),
         }),
@@ -141,6 +218,29 @@ pub(super) fn session_wallpaper(
     background_wallpaper(background, path)
 }
 
+/// What a gallery thumbnail shows: a photo from the document's small
+/// thumbnail (never blurred, as in tdesktop's `BackgroundBox`), anything
+/// else as it paints in the chat.
+pub(super) fn thumbnail_wallpaper(
+    session: &quill::state::Session,
+    background: &Background,
+) -> Option<Wallpaper> {
+    if background.needs_image()
+        && let Some(path) = background
+            .thumbnail
+            .as_ref()
+            .and_then(|f| session.media.files.get(&f.id.0))
+            .and_then(|f| f.usable_path())
+    {
+        return Some(Wallpaper::Image {
+            path: PathBuf::from(path),
+            blurred: false,
+            tiled: false,
+        });
+    }
+    session_wallpaper(session, background)
+}
+
 /// Paint `wallpaper` (and, for photos, the dark-mode dimming) behind
 /// `this`'s children. `slot` names the area for the render cache.
 pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
@@ -149,7 +249,7 @@ pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
     dimming: u8,
     slot: Slot,
 ) -> T {
-    let history = slot == Slot::History;
+    let history = matches!(slot, Slot::History(_));
     // The history reports its area every frame: gradient bubbles take
     // their colors from where they sit in it.
     let area_probe = || {
@@ -202,7 +302,7 @@ impl QuillApp {
         use gpui_kit::component::theme::ActiveTheme;
         let paint = self
             .session()
-            .and_then(|s| session_wallpaper(s, background));
+            .and_then(|s| thumbnail_wallpaper(s, background));
         let muted = cx.theme().muted_foreground;
         let tile = div()
             .id(id)
@@ -280,16 +380,19 @@ impl QuillApp {
         let outgoing = chat_id.and_then(|id| {
             Some(OutgoingFill::from_theme(
                 self.session()?.chat_theme_settings(id, dark)?,
+                dark,
             ))
         });
         match own {
             Some((wallpaper, dimming)) => ChatLook {
-                wallpaper: Some(wallpaper),
+                wallpaper: Some(wallpaper.with_stored_rotation()),
                 dimming: if dark { dimming } else { 0 },
                 outgoing,
             },
             None => ChatLook {
-                wallpaper: self.current_wallpaper(cx),
+                wallpaper: self
+                    .current_wallpaper(cx)
+                    .map(Wallpaper::with_stored_rotation),
                 dimming: 0,
                 outgoing,
             },
@@ -318,6 +421,7 @@ mod tests {
             is_dark: false,
             name: "x".into(),
             file: None,
+            thumbnail: None,
             kind,
         }
     }
@@ -335,12 +439,12 @@ mod tests {
         };
         assert_eq!(
             background_wallpaper(&bg(BackgroundType::Fill(gradient.clone())), None),
-            Some(Wallpaper::Fill(gradient))
+            Some(Wallpaper::Fill(gradient, 0))
         );
         let freeform = BackgroundFill::Freeform(vec![1, 2, 3, 4]);
         assert_eq!(
             background_wallpaper(&bg(BackgroundType::Fill(freeform.clone())), None),
-            Some(Wallpaper::Fill(freeform)),
+            Some(Wallpaper::Fill(freeform, 0)),
             "all four colours reach the renderer"
         );
     }
@@ -377,6 +481,29 @@ mod tests {
             .unwrap()
             .with_blur(false);
         assert!(matches!(sharp, Wallpaper::Image { blurred: false, .. }));
+    }
+
+    #[test]
+    fn freeform_wallpapers_rotate_per_identity() {
+        use super::rotate;
+        let four = Wallpaper::Fill(BackgroundFill::Freeform(vec![1, 2, 3, 4]), 0);
+        let two = Wallpaper::Fill(
+            BackgroundFill::Gradient {
+                top: 1,
+                bottom: 2,
+                angle: 0,
+            },
+            0,
+        );
+        assert!(four.rotates() && !two.rotates());
+        assert!(!rotate(&two));
+        assert_eq!(four.clone().with_stored_rotation(), four);
+        assert!(rotate(&four));
+        let turned = four.clone().with_stored_rotation();
+        assert_eq!(turned, four.clone().with_rotation(675));
+        assert_eq!(turned.identity(), four.identity(), "same wallpaper");
+        assert!(rotate(&turned), "the identity ignores the rotation");
+        assert_eq!(four.clone().with_stored_rotation(), four.with_rotation(630));
     }
 
     #[test]

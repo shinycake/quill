@@ -51,6 +51,9 @@ pub struct Background {
     pub name: String,
     /// The image or pattern file; `None` for plain fills.
     pub file: Option<ParsedFile>,
+    /// The document's small preview (`document.thumbnail`): the gallery
+    /// draws photos from it, like tdesktop's `BackgroundBox`.
+    pub thumbnail: Option<ParsedFile>,
     pub kind: BackgroundType,
 }
 
@@ -176,6 +179,13 @@ pub(crate) fn parse_background(value: &Value) -> Option<Background> {
             .unwrap_or_default()
             .to_string(),
         file: parse_file(value.get("document").and_then(|d| d.get("document"))).ok(),
+        thumbnail: parse_file(
+            value
+                .get("document")
+                .and_then(|d| d.get("thumbnail"))
+                .and_then(|t| t.get("file")),
+        )
+        .ok(),
         kind: parse_background_type(value.get("type"))?,
     })
 }
@@ -235,6 +245,17 @@ mod tests {
         .unwrap();
         assert!(photo.needs_image());
         assert_eq!(photo.file.as_ref().unwrap().usable_path(), Some("/x/p.jpg"));
+        assert!(photo.thumbnail.is_none());
+        let thumbed = parse_background(&json!({
+            "@type":"background","id":5,"name":"t",
+            "document":{"@type":"document",
+                "thumbnail":{"@type":"thumbnail","format":{"@type":"thumbnailFormatJpeg"},"width":90,"height":160,
+                    "file":{"@type":"file","id":8,"size":5}},
+                "document":{"@type":"file","id":7,"size":10}},
+            "type":{"@type":"backgroundTypeWallpaper","is_blurred":false,"is_moving":false}
+        }))
+        .unwrap();
+        assert_eq!(thumbed.thumbnail.as_ref().map(|f| f.id.0), Some(8));
         assert_eq!(
             photo.kind,
             BackgroundType::Wallpaper {
