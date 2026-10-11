@@ -26,6 +26,8 @@ pub struct QuillApp {
     pub(super) chat_list: super::chat_list_state::ChatListUi,
     /// Stories UI state: the strip, viewer, composer, story page and their boxes.
     pub(super) stories: super::stories_state::StoryUi,
+    /// The Premium feature preview's clip player (`ui/premium_preview_state.rs`).
+    pub(super) premium_preview: super::premium_preview_state::PremiumPreviewUi,
     /// Message history: rows, window, scroll probes, highlights and pinned bar (`ui/history_state.rs`).
     pub(super) history: super::history_state::HistoryUi,
     /// Window and per-frame bookkeeping: animation demand, focus restore, quit guard (`ui/frame_state.rs`).

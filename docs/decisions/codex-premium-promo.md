@@ -36,10 +36,33 @@ Items: `parity:premium-promo-page`, `parity:premium-limit-upsell`.
   (`premium-in-app-purchase` stays blocked). `viewPremiumFeature` and
   `clickPremiumSubscriptionButton` are not called, and neither does tdesktop.
 
+## Follow-up round
+
+- Folder limits (`FiltersLimitBox`, `FilterChatsLimitBox`, `FilterLinksLimitBox`)
+  were already hooked at their sites (new folder, folder editor save,
+  invite links, the chat pickers) with their own box in
+  `ui/folder_extras.rs`. Its button now says "Increase Limit" and opens the
+  Premium page like the other boxes ("Get Premium" for the tag notice).
+- `joinChatByInviteLink` failing with `CHANNELS_TOO_MUCH` opens the
+  communities box (`state/domains/chats/error.rs`).
+- File size: TDLib 1.8.68 has no upload-size option and `getPremiumFeatures`
+  has no file-size limit type, so the 2000 MiB / 4000 MiB values stay as
+  constants (tdesktop reads them from app config, which TDLib does not
+  expose).
+- Feature previews: tapping a feature opens a preview page in the Premium
+  dialog (not a separate box) with its `premiumFeaturePromotionAnimation`
+  clip played muted and looped on `NativeVideo`, the text, dots and
+  Previous / Next paging, and the subscribe button. The clip is downloaded
+  when the page opens. "Premium stickers" shows example stickers from
+  `getPremiumStickerExamples` instead of a video, as tdesktop does. The
+  player lives in `ui/premium_preview_state.rs`. Not done: the swipe pager
+  and the per-feature demo layouts of tdesktop (chat mock-ups, reaction
+  effects); the clip and the first frames fall back to a gradient with a
+  star until downloaded.
+
 ## Not done
 
-Feature preview boxes with video or sticker previews (tdesktop
-`premium_preview_box.cpp`) are not built; the feature rows are text only.
+Swipe paging and tdesktop's feature-specific preview layouts (see above).
 The GIF box appears when the loaded saved list was already full, not from a
 server error, because TDLib replaces the oldest GIF silently.
 

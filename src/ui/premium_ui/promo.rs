@@ -6,8 +6,19 @@
 //! payment itself (`premium-in-app-purchase` stays blocked).
 
 use super::*;
+use crate::ui::native_video::{NativeVideo, Purpose};
 use gpui_kit::assets::IconName;
-use quill::premium_hub::promo::{PromoPage, button_plan, limit_lines, subscribe_label};
+use quill::ids::FileId;
+use quill::local_path::sandboxed_display_path;
+use quill::premium_hub::promo::{
+    PromoPage, animation_for, button_plan, limit_lines, step_preview, subscribe_label,
+};
+
+/// The feature whose preview shows example stickers (tdesktop shows a
+/// sticker carousel there instead of a video).
+const STICKERS_FEATURE: &str = "Premium stickers";
+/// Stickers shown in that preview.
+const STICKER_TILES: usize = 6;
 
 /// Tint of the feature icons, cycled down the list.
 const ICON_TINTS: [(u32, u32); 5] = [
@@ -47,7 +58,86 @@ impl QuillApp {
             .unwrap_or_default()
     }
 
+    fn preview_feature_title(&self, index: usize) -> Option<&'static str> {
+        self.session()?
+            .payments
+            .hub
+            .premium
+            .as_ref()?
+            .features
+            .get(index)
+            .map(|f| f.title)
+    }
+
+    /// Ask for the example stickers and fetch their files as they arrive
+    /// (the answer lands a moment later, so this checks a few times).
+    fn start_sticker_examples(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.maybe_fetch_premium_stickers();
+        }
+        cx.spawn(async move |this, cx| {
+            for _ in 0..10 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(600))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    let ids: Vec<FileId> = this
+                        .session()
+                        .map(|s| {
+                            s.payments
+                                .hub
+                                .premium_stickers
+                                .iter()
+                                .take(STICKER_TILES)
+                                .filter_map(|st| st.display_file_id())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if let Some(live) = this.live.as_mut() {
+                        for id in ids {
+                            let _ = live.driver.download_file(id, 16);
+                        }
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Title of the Premium dialog on the current page.
+    pub(super) fn promo_title(&self) -> String {
+        match self.promo_page() {
+            PromoPage::Overview => "Telegram Premium".into(),
+            PromoPage::Limits => "Doubled Limits".into(),
+            PromoPage::Preview(index) => self
+                .session()
+                .and_then(|s| s.payments.hub.premium.as_ref())
+                .and_then(|info| info.features.get(index))
+                .map_or_else(|| "Telegram Premium".into(), |f| f.title.to_string()),
+        }
+    }
+
     fn set_promo_page(&mut self, page: PromoPage, cx: &mut Context<Self>) {
+        // A new page starts without the old clip; a preview asks for its own.
+        self.premium_preview.stop();
+        if let PromoPage::Preview(index) = page {
+            let clip = self
+                .session()
+                .and_then(|s| {
+                    let hub = &s.payments.hub;
+                    let feature = hub.premium.as_ref()?.features.get(index)?;
+                    animation_for(&hub.premium_state.as_ref()?.animations, feature.title)
+                        .map(|a| a.file_id)
+                })
+                .filter(|id| *id > 0);
+            if let (Some(id), Some(live)) = (clip, self.live.as_mut()) {
+                let _ = live.driver.download_file(FileId(id), 32);
+            }
+            if self.preview_feature_title(index) == Some(STICKERS_FEATURE) {
+                self.start_sticker_examples(cx);
+            }
+        }
         if let Some(hub) = self.hub_mut() {
             hub.promo_page = page;
         }
@@ -59,6 +149,7 @@ impl QuillApp {
         match self.promo_page() {
             PromoPage::Overview => self.promo_overview(cx),
             PromoPage::Limits => self.promo_limits(cx),
+            PromoPage::Preview(index) => self.promo_preview(index, cx),
         }
     }
 
@@ -149,15 +240,18 @@ impl QuillApp {
                             .child(div().text_sm().font_semibold().child(feature.title))
                             .child(div().text_xs().text_color(muted).child(feature.about)),
                     );
-                if limits_row {
-                    row = row
-                        .cursor_pointer()
-                        .hover(|s| s.bg(fill_muted()))
-                        .child(Icon::new(IconName::ChevronRight).with_size(px(14.)))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_promo_page(PromoPage::Limits, cx);
-                        }));
-                }
+                let target = if limits_row {
+                    PromoPage::Limits
+                } else {
+                    PromoPage::Preview(index)
+                };
+                row = row
+                    .cursor_pointer()
+                    .hover(|s| s.bg(fill_muted()))
+                    .child(Icon::new(IconName::ChevronRight).with_size(px(14.)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_promo_page(target, cx);
+                    }));
                 list = list.child(row);
             }
             body = body.child(list);
@@ -290,6 +384,204 @@ impl QuillApp {
         }
         body.child(
             Button::new("premium-limits-back")
+                .label("Back")
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.set_promo_page(PromoPage::Overview, cx);
+                })),
+        )
+    }
+}
+
+impl QuillApp {
+    /// The current frame of the preview clip, opening the muted looping
+    /// player once the clip is a local sandboxed file.
+    fn preview_picture(&self, file_id: i32) -> Option<crate::ui::native_video::VideoPicture> {
+        if self.premium_preview.file_id.get() != Some(file_id) {
+            self.premium_preview.stop();
+        }
+        if self.premium_preview.video.borrow().is_none() {
+            let roots = self.media_display_roots();
+            let path = self
+                .session()?
+                .media
+                .files
+                .get(&file_id)
+                .and_then(|file| file.usable_path())
+                .and_then(|path| sandboxed_display_path(path, &roots))?;
+            let mut video = NativeVideo::open(&path, Purpose::Inline { max_edge: 720 }).ok()?;
+            video.set_volume(0.0);
+            video.play();
+            *self.premium_preview.video.borrow_mut() = Some(video);
+            self.premium_preview.file_id.set(Some(file_id));
+        }
+        let mut slot = self.premium_preview.video.borrow_mut();
+        let video = slot.as_mut()?;
+        if video.error().is_some() {
+            return None;
+        }
+        // Loop: `play` rewinds a clip that reached its end.
+        if !video.is_playing() {
+            video.play();
+        }
+        video.frame()
+    }
+
+    /// One feature with its promotion clip and paging to the others.
+    fn promo_preview(&self, index: usize, cx: &mut Context<Self>) -> Div {
+        let muted = cx.theme().muted_foreground;
+        let Some(session) = self.session() else {
+            return div();
+        };
+        let hub = &session.payments.hub;
+        let subscribed =
+            hub.premium_state.as_ref().is_some_and(|s| s.is_subscribed) || session.my_is_premium();
+        let Some(info) = hub.premium.as_ref().filter(|i| !i.features.is_empty()) else {
+            return div();
+        };
+        let count = info.features.len();
+        let index = index.min(count - 1);
+        let feature = info.features[index];
+        let clip = hub
+            .premium_state
+            .as_ref()
+            .and_then(|s| animation_for(&s.animations, feature.title))
+            .cloned();
+        let side = px(340.);
+        let height = match clip.as_ref() {
+            Some(c) if c.width > 0 && c.height > 0 => {
+                (side * (c.height as f32 / c.width as f32)).clamp(px(180.), px(300.))
+            }
+            _ => px(200.),
+        };
+        let picture = if feature.title == STICKERS_FEATURE {
+            None
+        } else {
+            clip.as_ref().and_then(|c| self.preview_picture(c.file_id))
+        };
+        let stage = div()
+            .w(side)
+            .h(height)
+            .rounded_lg()
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(linear_gradient(
+                135.,
+                linear_color_stop(rgb(0x6b93ff), 0.),
+                linear_color_stop(rgb(0xe46ace), 1.),
+            ));
+        let stage = match picture {
+            Some(picture) => {
+                self.request_animation_tick(30, cx);
+                stage.child(picture.element(side, height, ObjectFit::Cover, Corners::all(px(12.))))
+            }
+            None if feature.title == STICKERS_FEATURE && !hub.premium_stickers.is_empty() => {
+                let roots = self.media_display_roots();
+                let mut grid = div()
+                    .flex()
+                    .flex_wrap()
+                    .justify_center()
+                    .gap_2()
+                    .p_3()
+                    .size_full();
+                for (i, sticker) in hub.premium_stickers.iter().take(STICKER_TILES).enumerate() {
+                    let path = [sticker.display_file_id(), sticker.thumb_file_id]
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|id| session.media.files.get(&id.0)?.usable_path())
+                        .find_map(|p| sandboxed_display_path(p, &roots));
+                    let tile = div()
+                        .id(("premium-sticker", i))
+                        .size(px(96.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center();
+                    grid = grid.child(match path {
+                        Some(path) => tile.child(
+                            img(crate::ui::image_budget::sized_media(
+                                &path,
+                                (px(96.), px(96.)),
+                                Some((sticker.width, sticker.height)),
+                                crate::ui::image_budget::Fit::Contain,
+                            ))
+                            .size(px(96.))
+                            .object_fit(ObjectFit::Contain),
+                        ),
+                        None => tile.text_size(px(40.)).child(sticker.emoji.clone()),
+                    });
+                }
+                stage.child(grid)
+            }
+            None => stage.child(
+                Icon::new(IconName::StarFill)
+                    .with_size(px(48.))
+                    .text_color(rgb(0xffffff)),
+            ),
+        };
+        let mut dots = div().flex().items_center().justify_center().gap_1p5();
+        for i in 0..count {
+            dots = dots.child(div().size(px(6.)).rounded_full().bg(if i == index {
+                rgb(0x6b93ff).into()
+            } else {
+                cx.theme().muted
+            }));
+        }
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .child(stage)
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .text_center()
+                    .child(feature.title),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .text_center()
+                    .child(feature.about),
+            )
+            .child(dots)
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("premium-preview-prev")
+                            .label("Previous")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_promo_page(
+                                    PromoPage::Preview(step_preview(index, count, -1)),
+                                    cx,
+                                );
+                            })),
+                    )
+                    .child(
+                        Button::new("premium-preview-next")
+                            .label("Next")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_promo_page(
+                                    PromoPage::Preview(step_preview(index, count, 1)),
+                                    cx,
+                                );
+                            })),
+                    ),
+            );
+        if !subscribed {
+            body = body.child(self.promo_subscribe(cx));
+        }
+        body.child(
+            Button::new("premium-preview-back")
                 .label("Back")
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {

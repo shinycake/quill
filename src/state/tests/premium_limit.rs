@@ -113,3 +113,24 @@ fn premium_availability_follows_the_option() {
     );
     assert!(!session.premium_possible());
 }
+
+#[test]
+fn invite_link_join_over_the_limit_opens_the_channels_box() {
+    let (mut session, sink) = session();
+    session.chats_state.deep_link = Some(DeepLinkState::ResolvingChat {
+        action: DeepLinkAction::JoinInvite { hash: "h".into() },
+        generation: 3,
+    });
+    fail(
+        &mut session,
+        &sink,
+        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation: 3 }),
+        None,
+        "CHANNELS_TOO_MUCH",
+    );
+    assert_eq!(session.chats_state.deep_link, None);
+    assert_eq!(
+        session.payments.hub.limit_box,
+        Some((PremiumLimitKind::Channels, 0))
+    );
+}

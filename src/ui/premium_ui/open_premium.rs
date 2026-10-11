@@ -17,6 +17,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn close_premium(&mut self, cx: &mut Context<Self>) {
+        self.premium_preview.stop();
         if let Some(hub) = self.hub_mut() {
             hub.premium_open = false;
         }
@@ -34,10 +35,7 @@ impl QuillApp {
                 this.close_premium(cx);
             });
         app.update(cx, |this, cx| {
-            let title = match this.promo_page() {
-                quill::premium_hub::promo::PromoPage::Overview => "Telegram Premium",
-                quill::premium_hub::promo::PromoPage::Limits => "Doubled Limits",
-            };
+            let title = this.promo_title();
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title));

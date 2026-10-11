@@ -8,8 +8,8 @@ use crate::state::PaymentsPurpose;
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests_premium::{
-    get_premium_features, get_premium_state, get_received_gifts, get_star_transactions, sell_gift,
-    toggle_gift_is_saved,
+    get_premium_features, get_premium_state, get_premium_sticker_examples, get_received_gifts,
+    get_star_transactions, sell_gift, toggle_gift_is_saved,
 };
 
 /// Rows per `getStarTransactions` page.
@@ -237,6 +237,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(extra)
+    }
+
+    /// Fetch the example stickers for the stickers feature preview, once.
+    pub fn maybe_fetch_premium_stickers(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let hub = &mut self.session.payments.hub;
+        if hub.premium_stickers_asked {
+            return Ok(None);
+        }
+        hub.premium_stickers_asked = true;
+        hub.premium_stickers_loading = true;
+        let extra = self
+            .session
+            .request(RequestPurpose::GetPremiumStickerExamples, None);
+        if let Err(err) = self.send_json_request(extra, &get_premium_sticker_examples(extra)) {
+            self.session.payments.hub.premium_stickers_loading = false;
+            self.session.payments.hub.premium_stickers_asked = false;
+            return Err(err);
+        }
+        Ok(Some(extra))
     }
 
     /// Fetch the Premium explainer (`getPremiumFeatures` + `getPremiumState`).

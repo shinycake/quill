@@ -19,6 +19,9 @@ pub enum PromoPage {
     Overview,
     /// "Doubled limits": every limit with its free and Premium value.
     Limits,
+    /// The preview of the feature at this index of the feature list, with
+    /// its promotion clip (tdesktop `premium_preview_box.cpp`).
+    Preview(usize),
 }
 
 /// One `premiumStatePaymentOption`.
@@ -61,6 +64,60 @@ pub fn parse_plans(state: &Value) -> Vec<PremiumPlan> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// One promotion clip: which feature (by its row title) and the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PremiumAnimation {
+    pub title: &'static str,
+    pub file_id: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// `premiumState.animations`; unknown features and clips without a file
+/// are dropped.
+pub fn parse_animations(state: &Value) -> Vec<PremiumAnimation> {
+    state
+        .get("animations")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    let kind = row.get("feature")?.get("@type")?.as_str()?;
+                    let title = super::feature_row(kind)?.title;
+                    let clip = row.get("animation")?;
+                    let file_id = i32::try_from(int(clip.get("animation")?.get("id"))).ok()?;
+                    if file_id <= 0 {
+                        return None;
+                    }
+                    Some(PremiumAnimation {
+                        title,
+                        file_id,
+                        width: int(clip.get("width")) as i32,
+                        height: int(clip.get("height")) as i32,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The clip of the feature with this row title.
+pub fn animation_for<'a>(
+    animations: &'a [PremiumAnimation],
+    title: &str,
+) -> Option<&'a PremiumAnimation> {
+    animations.iter().find(|a| a.title == title)
+}
+
+/// The preview page one step from `index` in a list of `count` features,
+/// wrapping around (`delta` is 1 or -1).
+pub fn step_preview(index: usize, count: usize, delta: i32) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    (index as i64 + i64::from(delta)).rem_euclid(count as i64) as usize
 }
 
 impl PremiumPlan {
@@ -206,6 +263,32 @@ mod tests {
         assert_eq!(plans[0].total_text(), "USD 4.99 per month");
         // The state parser carries the same list.
         assert_eq!(parse_premium_state(&state()).options, plans);
+    }
+
+    #[test]
+    fn animations_map_to_feature_rows() {
+        let state = json!({"animations": [
+            {"feature": {"@type": "premiumFeatureVoiceRecognition"},
+             "animation": {"width": 640, "height": 480, "animation": {"id": 77}}},
+            {"feature": {"@type": "premiumFeatureNewerThanThis"},
+             "animation": {"animation": {"id": 5}}},
+            {"feature": {"@type": "premiumFeatureDisabledAds"},
+             "animation": {"animation": {"id": 0}}}
+        ]});
+        let clips = parse_animations(&state);
+        assert_eq!(clips.len(), 1);
+        let clip = animation_for(&clips, "Voice-to-text conversion").unwrap();
+        assert_eq!((clip.file_id, clip.width, clip.height), (77, 640, 480));
+        assert!(animation_for(&clips, "No ads").is_none());
+        assert_eq!(parse_premium_state(&state).animations, clips);
+    }
+
+    #[test]
+    fn preview_paging_wraps() {
+        assert_eq!(step_preview(0, 5, -1), 4);
+        assert_eq!(step_preview(4, 5, 1), 0);
+        assert_eq!(step_preview(2, 5, 1), 3);
+        assert_eq!(step_preview(0, 0, 1), 0);
     }
 
     #[test]

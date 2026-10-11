@@ -266,6 +266,7 @@ impl QuillApp {
             menu_bar: AppMenuBar::new(cx),
             chat_list: super::chat_list_state::ChatListUi::new(window, cx),
             stories,
+            premium_preview: Default::default(),
             history: super::history_state::HistoryUi::new(cx),
             frame: super::frame_state::FrameUi::new(cx),
             group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
