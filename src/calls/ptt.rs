@@ -14,11 +14,32 @@ use serde::{Deserialize, Serialize};
 
 /// Default key: Space, like most voice apps.
 pub const DEFAULT_PTT_KEY: &str = "space";
-/// Selectable release delays in milliseconds (`pushToTalkDelay` in tdesktop
-/// is a free slider from 20 to 1000 ms; presets keep the UI a radio group).
-pub const RELEASE_DELAYS_MS: [u32; 4] = [20, 200, 500, 1000];
+/// Release delay slider, as in tdesktop (`kDelaysCount = 201`,
+/// `DelayByIndex(i) = i * 10` ms): 0 to 2 s in 10 ms steps.
+pub const DELAY_STEP_MS: u32 = 10;
+/// Number of slider positions (0 ms through 2000 ms).
+pub const DELAY_STEPS: u32 = 201;
 /// Upper bound enforced on loaded values.
-pub const MAX_RELEASE_DELAY_MS: u32 = 1000;
+pub const MAX_RELEASE_DELAY_MS: u32 = (DELAY_STEPS - 1) * DELAY_STEP_MS;
+
+/// Delay at slider position `index` (clamped to the last position).
+pub fn delay_by_index(index: u32) -> u32 {
+    index.min(DELAY_STEPS - 1) * DELAY_STEP_MS
+}
+
+/// Slider position closest to `delay_ms`.
+pub fn index_for_delay(delay_ms: u32) -> u32 {
+    (delay_ms.min(MAX_RELEASE_DELAY_MS) + DELAY_STEP_MS / 2) / DELAY_STEP_MS
+}
+
+/// "Release delay: 200 ms" / "Release delay: 1.25 s" (tdesktop `FormatDelay`).
+pub fn delay_label(delay_ms: u32) -> String {
+    if delay_ms < 1000 {
+        format!("Release delay: {delay_ms} ms")
+    } else {
+        format!("Release delay: {:.2} s", f64::from(delay_ms) / 1000.0)
+    }
+}
 
 /// Persisted push-to-talk settings (part of `CallPrefs`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -222,7 +243,36 @@ mod tests {
         cfg.release_delay_ms = 99_999;
         let clean = cfg.sanitized();
         assert_eq!(clean.key, "space");
-        assert_eq!(clean.release_delay_ms, 1000);
+        assert_eq!(clean.release_delay_ms, 2000);
+    }
+
+    #[test]
+    fn delay_slider_covers_zero_to_two_seconds() {
+        use super::{DELAY_STEPS, delay_by_index, delay_label, index_for_delay};
+        assert_eq!(delay_by_index(0), 0);
+        assert_eq!(delay_by_index(20), 200);
+        assert_eq!(delay_by_index(DELAY_STEPS - 1), 2000);
+        assert_eq!(delay_by_index(9_999), 2000, "clamped");
+        assert_eq!(index_for_delay(200), 20);
+        assert_eq!(index_for_delay(204), 20);
+        assert_eq!(index_for_delay(205), 21);
+        assert_eq!(index_for_delay(u32::MAX), 200);
+        for i in 0..DELAY_STEPS {
+            assert_eq!(index_for_delay(delay_by_index(i)), i);
+        }
+        assert_eq!(delay_label(0), "Release delay: 0 ms");
+        assert_eq!(delay_label(990), "Release delay: 990 ms");
+        assert_eq!(delay_label(1000), "Release delay: 1.00 s");
+        assert_eq!(delay_label(1250), "Release delay: 1.25 s");
+    }
+
+    #[test]
+    fn long_delay_keeps_the_microphone_open_until_it_elapses() {
+        let mut ptt = PushToTalk::new();
+        ptt.key_down();
+        assert_eq!(ptt.key_up(100, 2000), None);
+        assert_eq!(ptt.tick(2099), None);
+        assert_eq!(ptt.tick(2100), Some(PttAction::Mute));
     }
 
     #[test]
