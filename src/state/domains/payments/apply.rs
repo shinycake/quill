@@ -28,6 +28,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm) {
                     self.payments.form = Some(form);
                     self.payments.form_loading = false;
+                    self.payments.form_paid = false;
                     self.payments.validated = None;
                     self.payments.shipping_id = None;
                     self.payments.note = None;
@@ -49,6 +50,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::SendPaymentForm) {
                     self.payments.sending = false;
                     if result.success {
+                        self.payments.form_paid = true;
                         self.payments.note = Some("✅ Payment successful".to_string());
                     } else if !result.verification_url.is_empty() {
                         // Schema: the URL is for additional payment

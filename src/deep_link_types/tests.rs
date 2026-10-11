@@ -330,9 +330,22 @@ fn boost_and_premium_links_route_to_their_screens() {
 }
 
 #[test]
+fn an_invoice_link_opens_the_checkout_and_a_nameless_one_is_broken() {
+    assert_eq!(
+        route_of(json!({"@type": "internalLinkTypeInvoice", "invoice_name": "slug1"})),
+        LinkRoute::Ui(DeepLinkUi::Invoice {
+            name: "slug1".into()
+        })
+    );
+    assert!(matches!(
+        route_of(json!({"@type": "internalLinkTypeInvoice"})),
+        LinkRoute::Message(_)
+    ));
+}
+
+#[test]
 fn unsupported_targets_say_so_and_never_open_a_browser() {
     for ty in [
-        "internalLinkTypeInvoice",
         "internalLinkTypePremiumGiftCode",
         "internalLinkTypeVideoChat",
         "internalLinkTypeGroupCall",

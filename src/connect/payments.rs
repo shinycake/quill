@@ -1,6 +1,7 @@
 //! Connect driver: payments.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::payment_invoice::InputInvoice;
 use crate::state::BankCardLookup;
 use crate::state::PaymentsPurpose;
 use crate::state::{PaymentRequest, RequestPurpose};
@@ -13,21 +14,32 @@ use crate::telegram::requests::{
 use crate::telegram::{delete_saved_credentials, delete_saved_order_info};
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Slice P1: fetch the `paymentForm` for a Buy button press
-    /// (`getPaymentForm`, schema 1.8.67, line 15262). The dialog opens when
-    /// the `paymentForm` answer is applied.
+    /// The `@extra` for a payment request on `invoice`. An invoice message
+    /// must be a real message in a supported chat; any other invoice has
+    /// no chat to check.
+    fn payment_extra(
+        &mut self,
+        invoice: &InputInvoice,
+        purpose: RequestPurpose,
+    ) -> Result<RequestId, ConnectSendError> {
+        match invoice.message() {
+            Some((chat_id, message_id)) => self.callback_query_extra(chat_id, message_id, purpose),
+            None if self.chats_path_active() => Ok(self.session.request(purpose, None)),
+            None => Err(ConnectSendError::InvalidRequest),
+        }
+    }
+
+    /// Slice P1: fetch the `paymentForm` for an invoice (`getPaymentForm`,
+    /// schema 1.8.67, line 15262): a Buy button press, an invoice link or a
+    /// payment toward Telegram. The dialog opens when the `paymentForm`
+    /// answer is applied.
     pub fn send_payment_form_request(
         &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
+        invoice: InputInvoice,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra =
-            self.callback_query_extra(chat_id, message_id, RequestPurpose::GetPaymentForm)?;
-        self.session.payments.request = Some(PaymentRequest {
-            chat_id,
-            message_id,
-        });
-        let json = get_payment_form(extra, chat_id, message_id);
+        let extra = self.payment_extra(&invoice, RequestPurpose::GetPaymentForm)?;
+        let json = get_payment_form(extra, &invoice);
+        self.session.payments.request = Some(PaymentRequest { invoice });
         self.send_json_request(extra, &json)
     }
 
@@ -35,44 +47,38 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the order form and fetch the shipping options.
     pub fn validate_payment_order_info(
         &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
+        invoice: &InputInvoice,
         order: &OrderInfoData,
         allow_save: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra =
-            self.callback_query_extra(chat_id, message_id, RequestPurpose::ValidateOrderInfo)?;
+        let extra = self.payment_extra(invoice, RequestPurpose::ValidateOrderInfo)?;
         self.session.payments.request = Some(PaymentRequest {
-            chat_id,
-            message_id,
+            invoice: invoice.clone(),
         });
-        let json = validate_order_info_request(extra, chat_id, message_id, order, allow_save);
+        let json = validate_order_info_request(extra, invoice, order, allow_save);
         self.send_json_request(extra, &json)
     }
 
     /// Slice P1: `sendPaymentForm` (schema 1.8.67, line 15277) — submit the
-    /// validated order + credentials from the checkout dialog.
+    /// validated order + credentials from the checkout dialog. `credentials`
+    /// is `null` for a payment in Stars.
     #[allow(clippy::too_many_arguments)]
     pub fn submit_payment_form(
         &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
+        invoice: &InputInvoice,
         payment_form_id: i64,
         order_info_id: &str,
         shipping_option_id: &str,
         credentials: serde_json::Value,
         tip_amount: i64,
     ) -> Result<RequestId, ConnectSendError> {
-        let extra =
-            self.callback_query_extra(chat_id, message_id, RequestPurpose::SendPaymentForm)?;
+        let extra = self.payment_extra(invoice, RequestPurpose::SendPaymentForm)?;
         self.session.payments.request = Some(PaymentRequest {
-            chat_id,
-            message_id,
+            invoice: invoice.clone(),
         });
         let json = send_payment_form_request(
             extra,
-            chat_id,
-            message_id,
+            invoice,
             payment_form_id,
             order_info_id,
             shipping_option_id,
@@ -96,8 +102,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetPaymentReceipt, Some(chat_id));
         self.session.payments.request = Some(PaymentRequest {
-            chat_id,
-            message_id,
+            invoice: InputInvoice::Message {
+                chat_id,
+                message_id,
+            },
         });
         let json = get_payment_receipt(extra, chat_id, message_id);
         self.send_json_request(extra, &json)

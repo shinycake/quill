@@ -4,9 +4,9 @@
 //! whether winners are shown.
 //!
 //! A giveaway that is already paid for starts from here
-//! (`launchPrepaidGiveaway`, after an "are you sure" step). A new one
-//! stops at its price: paying needs the card checkout, which Quill has only
-//! for invoice messages.
+//! (`launchPrepaidGiveaway`, after an "are you sure" step). A new one opens
+//! the payment checkout with the chosen option's price
+//! (`ui/invoice_checkout.rs`); the giveaway is created when it is paid.
 
 use super::app::QuillApp;
 use super::giveaway_info_ui::day_text;
@@ -182,7 +182,7 @@ impl QuillApp {
     }
 
     /// The draft as the user sees it, with the prize text from the field.
-    fn giveaway_draft_now(&self, cx: &App) -> Option<GiveawayDraft> {
+    pub(super) fn giveaway_draft_now(&self, cx: &App) -> Option<GiveawayDraft> {
         let mut draft = self.settled_draft()?;
         let form = self.giveaway.form.as_ref()?;
         draft.prize_description = form.prize_input.read(cx).value().to_string();
@@ -609,7 +609,7 @@ impl QuillApp {
                 .child(section_title("Price"))
                 .child(div().id("giveaway-price").text_sm().child(price))
                 .child(about_line(
-                    "Quill can't take payment for a new giveaway yet. Buy one in another Telegram app and it shows up here as a prepaid giveaway to start.",
+                    "Start Giveaway opens the checkout. The giveaway is created once you pay there.",
                 ));
         }
         let note = form.note.clone().or_else(|| match &giveaway.launch {
@@ -695,10 +695,15 @@ impl QuillApp {
                     Button::new("giveaway-start")
                         .label("Start Giveaway")
                         .loading(launching)
-                        // A new giveaway needs a payment Quill can't take.
-                        .disabled(!prepaid || launching)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.ask_to_start_giveaway(cx);
+                        .disabled(launching)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            // A prepaid giveaway asks once more; a new one
+                            // opens the checkout, which is the confirmation.
+                            if prepaid {
+                                this.ask_to_start_giveaway(cx);
+                            } else {
+                                this.pay_new_giveaway(window, cx);
+                            }
                         })),
                 )
             };
@@ -732,7 +737,9 @@ crate::ui::shell::register_dialogs! {
     /// "Boosts via Gifts": start a prepaid giveaway or see a new one's price.
     Giveaway => DialogSpec::new(
         2943,
-        |app| app.giveaway.form.is_some(),
+        // The checkout of a new giveaway takes the screen; the form comes
+        // back when it closes.
+        |app| app.giveaway.form.is_some() && !app.payment_dialog_visible(),
         QuillApp::build_giveaway_dialog,
     ),
 }

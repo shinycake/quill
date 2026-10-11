@@ -29,6 +29,9 @@ pub struct PaymentsState {
     /// "Processing…" and is disabled until the `paymentResult` answer (or
     /// error) lands, so a double-click can't submit twice.
     pub sending: bool,
+    /// The open form was paid: Pay stays off, so one form is never sent
+    /// twice.
+    pub form_paid: bool,
     /// Slice P1: a failed `getPaymentReceipt`, drained into the status
     /// note by `poll_live` — the checkout dialog (which renders
     /// `payment_note`) may be closed when the receipt fetch fails.
@@ -107,6 +110,7 @@ impl PaymentsState {
             receipt_open: false,
             note: None,
             sending: false,
+            form_paid: false,
             receipt_error: None,
             verification_url: None,
             marketplace_gift: None,

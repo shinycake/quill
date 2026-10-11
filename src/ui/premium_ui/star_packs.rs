@@ -2,8 +2,8 @@
 //! lists (tdesktop `settings_credits.cpp`, `Ui::AddCreditsOptions`).
 //!
 //! Telegram Desktop buys a pack with `inputInvoiceTelegram` and
-//! `telegramPaymentPurposeStars`. Quill's checkout only handles invoices in
-//! chat messages, so the packs are shown but not bought here.
+//! `telegramPaymentPurposeStars`. A press on a pack opens the payment
+//! checkout (`ui/invoice_checkout.rs`); nothing is paid until Pay there.
 
 use super::*;
 use quill::star_packs::StarPacksState;
@@ -79,6 +79,17 @@ pub(super) fn star_packs_section(session: &Session, cx: &mut Context<QuillApp>) 
                 .py_1()
                 .rounded_md()
                 .bg(fill_muted())
+                .cursor_pointer()
+                .tab_index(0)
+                .role(gpui_kit::Role::Button)
+                .aria_label(format!(
+                    "Buy {} Stars for {}",
+                    group_digits(pack.star_count),
+                    format_payment_price(&pack.currency, pack.amount)
+                ))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.buy_stars_pack(ix, window, cx);
+                }))
                 .child(
                     div()
                         .text_sm()

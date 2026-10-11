@@ -185,6 +185,11 @@ pub enum DeepLinkUi {
     LanguagePack {
         id: String,
     },
+    /// `invoice` (`t.me/$slug`, `t.me/invoice/slug`): the payment checkout.
+    /// Nothing is paid until the user confirms in it.
+    Invoice {
+        name: String,
+    },
 }
 
 /// The decision for one resolved link.
@@ -587,9 +592,12 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
              already signed in."
                 .into(),
         ),
-        InternalLink::Invoice { .. } => {
-            LinkRoute::Message(format!("Paying an invoice from a link {NOT_SUPPORTED}"))
-        }
+        InternalLink::Invoice { name } => match crate::payment_invoice::invoice_link_invoice(name) {
+            Some(_) => LinkRoute::Ui(DeepLinkUi::Invoice {
+                name: name.trim().to_string(),
+            }),
+            None => LinkRoute::Message("This invoice link is broken.".into()),
+        },
         InternalLink::ChatBoost { url } => {
             if url.is_empty() {
                 LinkRoute::Message("This boost link is broken.".into())

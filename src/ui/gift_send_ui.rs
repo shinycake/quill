@@ -2,9 +2,8 @@
 //! user or channel, a message, "hide my name" and the optional prepaid
 //! upgrade (tdesktop `boxes/star_gift_box.cpp`, `GiftBox` / `SendGiftBox`).
 //! A gift is paid with Stars from the balance, only by the button that names
-//! the total. Telegram Premium gift options are listed; paying for them
-//! needs an official app, because Quill's checkout only handles invoices in
-//! chat messages.
+//! the total. Telegram Premium gift options are paid in the payment
+//! checkout (`ui/invoice_checkout.rs`), not from the Stars balance.
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
@@ -141,7 +140,7 @@ impl QuillApp {
                 body = body.child(selected_gift_panel(this, session, selected, &roots, cx));
             } else {
                 if !send.premium_options.is_empty() {
-                    body = body.child(premium_section(session, cx));
+                    body = body.child(premium_section(this, session, cx));
                 }
                 body = body.child(div().text_sm().font_semibold().child("Gifts for Stars"));
                 if let Some(balance) = session.payments.hub.balance {
@@ -378,40 +377,67 @@ fn selected_gift_panel(
     .into_any_element()
 }
 
-fn premium_section(session: &Session, cx: &mut Context<QuillApp>) -> AnyElement {
+fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp>) -> AnyElement {
     let send = &session.payments.gifts_manage.send;
+    let can_pay = send
+        .recipient
+        .as_ref()
+        .is_some_and(|r| !r.is_self && !r.is_channel);
     let mut col = div().flex().flex_col().gap_1().child(
         div()
             .text_sm()
             .font_semibold()
             .child("Gift Telegram Premium"),
     );
+    if can_pay && let Some(max) = session.payments.gift_text_length_max {
+        col = col
+            .child(Textarea::new(&this.payments.gift_message_input).aria_label("Gift message"))
+            .child(hint(format!("Optional. Up to {max} characters."), cx));
+    }
     for (ix, option) in send.premium_options.iter().enumerate() {
-        col = col.child(
-            div()
-                .id(("premium-gift-option", ix as u64))
-                .flex()
-                .justify_between()
-                .gap_3()
-                .text_sm()
-                .child(div().child(option.title()))
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .when(option.discount_percentage > 0, |row| {
-                            row.child(
-                                div()
-                                    .text_color(super::chat_theme::success())
-                                    .child(format!("-{}%", option.discount_percentage)),
-                            )
-                        })
-                        .child(div().font_medium().child(option.price_label())),
-                ),
-        );
+        let row = div()
+            .id(("premium-gift-option", ix as u64))
+            .flex()
+            .justify_between()
+            .gap_3()
+            .text_sm()
+            .child(div().child(option.title()))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .when(option.discount_percentage > 0, |row| {
+                        row.child(
+                            div()
+                                .text_color(super::chat_theme::success())
+                                .child(format!("-{}%", option.discount_percentage)),
+                        )
+                    })
+                    .child(div().font_medium().child(option.price_label())),
+            );
+        col = col.child(if can_pay {
+            let option = option.clone();
+            row.cursor_pointer()
+                .tab_index(0)
+                .role(gpui_kit::Role::Button)
+                .aria_label(format!(
+                    "Gift Premium for {}, {}",
+                    option.title(),
+                    option.price_label()
+                ))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.buy_premium_gift(option.clone(), window, cx);
+                }))
+        } else {
+            row
+        });
     }
     col.child(hint(
-        "Paying for a Premium gift is not available in Quill yet. Use an official Telegram app to complete it.",
+        if can_pay {
+            "You pay for Premium in the checkout, not with Stars."
+        } else {
+            "Premium can only be gifted to another person."
+        },
         cx,
     ))
     .into_any_element()

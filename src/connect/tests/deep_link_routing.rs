@@ -410,25 +410,32 @@ fn typed_links_route_through_get_internal_link_type() {
         )))
     );
 
-    // Unsupported targets say so; unknown ones ask getDeepLinkInfo.
-    for (link, answer) in [
-        (
+    // An invoice link opens the payment checkout.
+    assert_eq!(
+        open_with(
+            &mut driver,
+            &seq,
+            &sink,
             "tg://invoice?slug=x",
             json!({"@type":"internalLinkTypeInvoice","invoice_name":"x"}),
         ),
-        (
-            "tg://settings/themes",
-            json!({"@type":"internalLinkTypeTheme","theme_name":"x"}),
-        ),
-    ] {
-        assert!(
-            matches!(
-                open_with(&mut driver, &seq, &sink, link, answer),
-                Some(DeepLinkState::ShowText(_))
+        Some(DeepLinkState::Ui(DeepLinkUi::Invoice { name: "x".into() }))
+    );
+
+    // Unsupported targets say so; unknown ones ask getDeepLinkInfo.
+    assert!(
+        matches!(
+            open_with(
+                &mut driver,
+                &seq,
+                &sink,
+                "tg://settings/themes",
+                json!({"@type":"internalLinkTypeTheme","theme_name":"x"}),
             ),
-            "{link}"
-        );
-    }
+            Some(DeepLinkState::ShowText(_))
+        ),
+        "tg://settings/themes"
+    );
     let state = open_with(
         &mut driver,
         &seq,
