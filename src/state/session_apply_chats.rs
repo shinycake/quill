@@ -55,6 +55,7 @@ impl Session {
         if let Some(file) = &photo {
             self.remember_files(std::slice::from_ref(file));
         }
+        self.apply_business_bot_exact(&kind, pending);
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
             self.stickers.gifs.search_bot_user_id = match &kind {
                 ChatKind::Private { user_id }
@@ -611,6 +612,9 @@ impl Session {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_chats(&mut self, chat_ids: Vec<ChatId>, pending: Option<&PendingRequest>) {
+        if self.apply_business_bot_search(&chat_ids, pending) {
+            return;
+        }
         // Parity slice: `getChatFolderChatsToLeave` response for the
         // delete-confirm dialog (correlated via folder_id). Runs
         // before the search branch below consumes `chat_ids`.

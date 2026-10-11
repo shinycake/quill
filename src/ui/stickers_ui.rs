@@ -220,6 +220,10 @@ impl QuillApp {
         if session.my_user_id == Some(user_id.0) || session.is_bot_user(user_id.0) {
             return None;
         }
+        if let Some(intro) = self.business_start_page_intro(user_id.0, cx) {
+            return Some(intro);
+        }
+        let session = self.session()?;
         if !session.stickers.stickers.greeting_loaded {
             let weak = cx.weak_entity();
             cx.defer(move |cx| {

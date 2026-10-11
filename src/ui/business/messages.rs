@@ -1,7 +1,7 @@
 //! The Greeting Message and Away Message screens (tdesktop
 //! `settings_greeting.cpp`, `settings_away_message.cpp`).
 
-use super::{AwayDraft, GreetingDraft, MessageKind, ScheduleChoice, View};
+use super::{AwayDraft, GreetingDraft, Leave, MessageKind, ScheduleChoice};
 use crate::ui::app::QuillApp;
 use crate::ui::quick_replies::View as QuickRepliesView;
 use crate::ui::scheduled::{picked_unix, picker_value};
@@ -234,7 +234,7 @@ impl QuillApp {
         }
         body = body
             .child(self.business_messages_row(MessageKind::Greeting, cx))
-            .child(self.business_recipients_section(MessageKind::Greeting, cx));
+            .child(self.business_recipients_section(super::Recipients::Greeting, cx));
         let selected = bs::INACTIVITY_DAYS.iter().position(|d| *d == days);
         body.child(
             div()
@@ -360,114 +360,90 @@ impl QuillApp {
                     ))
                     .child(div().text_xs().text_color(muted).child(OFFLINE_ABOUT)),
             )
-            .child(self.business_recipients_section(MessageKind::Away, cx))
+            .child(self.business_recipients_section(super::Recipients::Away, cx))
     }
 
-    /// Save of the greeting screen. tdesktop sends nothing when the value
-    /// did not change, and needs the `hello` shortcut to turn it on.
-    pub(super) fn save_business_greeting(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Save of the greeting screen (when it is left).
+    pub(super) fn save_business_greeting(&mut self, _cx: &mut Context<Self>) -> Leave {
         let Some(draft) = self
             .dialogs
             .business_dialog
             .as_ref()
             .and_then(|d| d.greeting.as_ref())
         else {
-            return;
+            return Leave::Go(None);
         };
-        let wanted = if draft.enabled {
-            let (Some(shortcut_id), count) = self.business_shortcut(MessageKind::Greeting) else {
-                self.business_error("Create a greeting message first.", cx);
-                return;
-            };
-            if count == 0 {
-                self.business_error("Create a greeting message first.", cx);
-                return;
-            }
-            Some(GreetingSettings {
+        let (shortcut, count) = self.business_shortcut(MessageKind::Greeting);
+        let wanted = match (draft.enabled, shortcut) {
+            (false, _) => None,
+            (true, Some(shortcut_id)) if count > 0 => Some(GreetingSettings {
                 shortcut_id,
                 recipients: draft.recipients.clone(),
                 inactivity_days: draft.days,
-            })
-        } else {
-            None
+            }),
+            (true, _) => {
+                return Leave::Go(Some(
+                    "The greeting message stays off until it has messages.".into(),
+                ));
+            }
         };
         if wanted == self.my_business().greeting {
-            self.business_go(View::Hub, window, cx);
-            return;
+            return Leave::Go(None);
         }
-        if !self.business_live(cx) {
-            return;
-        }
-        let sent = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.save_business_greeting(wanted.as_ref()));
-        if !matches!(sent, Some(Ok(()))) {
-            self.business_error("Could not send the greeting message settings.", cx);
-            return;
-        }
-        self.business_go(View::Hub, window, cx);
+        self.business_send("greeting message settings", |driver| {
+            driver.save_business_greeting(wanted.as_ref()).is_ok()
+        })
     }
 
-    pub(super) fn save_business_away(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Save of the away screen (when it is left). A custom range that
+    /// ends before it starts keeps the screen open.
+    pub(super) fn save_business_away(&mut self, cx: &mut Context<Self>) -> Leave {
         let Some(draft) = self
             .dialogs
             .business_dialog
             .as_ref()
             .and_then(|d| d.away.as_ref())
         else {
-            return;
+            return Leave::Go(None);
         };
-        let wanted = if draft.enabled {
-            let (Some(shortcut_id), count) = self.business_shortcut(MessageKind::Away) else {
-                self.business_error("Create an away message first.", cx);
-                return;
-            };
-            if count == 0 {
-                self.business_error("Create an away message first.", cx);
-                return;
-            }
-            let schedule = match draft.schedule {
-                ScheduleChoice::Always => AwaySchedule::Always,
-                ScheduleChoice::OutsideHours => AwaySchedule::OutsideOpeningHours,
-                ScheduleChoice::Custom => {
-                    let start = picked_unix(&draft.start, cx);
-                    let end = picked_unix(&draft.end, cx);
-                    match (start, end) {
-                        (Some(start), Some(end)) if !bs::bad_custom_interval(start, end) => {
-                            AwaySchedule::Custom { start, end }
-                        }
-                        _ => {
-                            self.business_error("The end time must be after the start time.", cx);
-                            return;
-                        }
+        let schedule = match draft.schedule {
+            ScheduleChoice::Always => AwaySchedule::Always,
+            ScheduleChoice::OutsideHours => AwaySchedule::OutsideOpeningHours,
+            ScheduleChoice::Custom => {
+                let start = picked_unix(&draft.start, cx);
+                let end = picked_unix(&draft.end, cx);
+                match (start, end) {
+                    (Some(start), Some(end)) if !bs::bad_custom_interval(start, end) => {
+                        AwaySchedule::Custom { start, end }
+                    }
+                    _ if !draft.enabled => AwaySchedule::Always,
+                    _ => {
+                        self.business_error("The end time must be after the start time.", cx);
+                        return Leave::Stay;
                     }
                 }
-            };
-            Some(AwaySettings {
+            }
+        };
+        let (shortcut, count) = self.business_shortcut(MessageKind::Away);
+        let wanted = match (draft.enabled, shortcut) {
+            (false, _) => None,
+            (true, Some(shortcut_id)) if count > 0 => Some(AwaySettings {
                 shortcut_id,
                 recipients: draft.recipients.clone(),
                 schedule,
                 offline_only: draft.offline_only,
-            })
-        } else {
-            None
+            }),
+            (true, _) => {
+                return Leave::Go(Some(
+                    "The away message stays off until it has messages.".into(),
+                ));
+            }
         };
         if wanted == self.my_business().away {
-            self.business_go(View::Hub, window, cx);
-            return;
+            return Leave::Go(None);
         }
-        if !self.business_live(cx) {
-            return;
-        }
-        let sent = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.save_business_away(wanted.as_ref()));
-        if !matches!(sent, Some(Ok(()))) {
-            self.business_error("Could not send the away message settings.", cx);
-            return;
-        }
-        self.business_go(View::Hub, window, cx);
+        self.business_send("away message settings", |driver| {
+            driver.save_business_away(wanted.as_ref()).is_ok()
+        })
     }
 }

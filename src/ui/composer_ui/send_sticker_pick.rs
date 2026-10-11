@@ -15,6 +15,9 @@ impl QuillApp {
         if self.route_story_reply_sticker(file_id, &emoji, (width, height), thumb, cx) {
             return;
         }
+        if self.route_business_start_page_sticker(file_id, cx) {
+            return;
+        }
         if self.session().is_some_and(|session| {
             session.sticker_requires_premium(file_id) && !session.my_is_premium()
         }) {

@@ -322,6 +322,9 @@ impl Session {
             }
             SettingsPayload::QuickReplies(update) => self.apply_quick_replies(update),
             SettingsPayload::TimeZones(zones) => self.apply_time_zones(zones),
+            SettingsPayload::BusinessChatLinks(links) => self.apply_chat_links(links),
+            SettingsPayload::BusinessChatLink(link) => self.apply_chat_link(link),
+            SettingsPayload::BusinessConnectedBot(bot) => self.apply_connected_bot(bot),
         }
     }
 }

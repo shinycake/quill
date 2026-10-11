@@ -158,4 +158,10 @@ pub enum SettingsPayload {
     QuickReplies(crate::quick_replies::QuickRepliesUpdate),
     /// `timeZones` — the `getTimeZones` answer, sorted for the picker.
     TimeZones(Vec<crate::business_settings::TimeZone>),
+    /// `businessChatLinks` — the `getBusinessChatLinks` answer.
+    BusinessChatLinks(Vec<crate::business_chat_links::ChatLink>),
+    /// `businessChatLink` — a created or edited link.
+    BusinessChatLink(crate::business_chat_links::ChatLink),
+    /// `businessConnectedBotInfo` — the `getBusinessConnectedBot` answer.
+    BusinessConnectedBot(Option<crate::business_bots::ConnectedBot>),
 }

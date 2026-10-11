@@ -206,6 +206,8 @@ pub struct SettingsState {
     pub quick_replies: QuickRepliesState,
     /// Telegram Business settings: time zones and saves in flight.
     pub business: BusinessSettingsState,
+    /// Links to chat, the connected chatbot and the Business limits.
+    pub business_extra: BusinessExtraState,
 }
 
 impl SettingsState {
@@ -213,6 +215,7 @@ impl SettingsState {
         Self {
             quick_replies: QuickRepliesState::default(),
             business: BusinessSettingsState::default(),
+            business_extra: BusinessExtraState::default(),
             hide_notification_previews: true,
             inapp_sounds_enabled: true,
             desktop_notifications: true,

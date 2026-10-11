@@ -236,6 +236,28 @@ pub enum SettingsPurpose {
     SaveBusinessSetting {
         kind: crate::business_settings::BusinessSettingKind,
     },
+    /// `getBusinessChatLinks`. Response is `businessChatLinks`.
+    GetChatLinks,
+    /// `createBusinessChatLink` / `editBusinessChatLink` (answer
+    /// `businessChatLink`) or `deleteBusinessChatLink` (`ok`).
+    MutateChatLink {
+        op: ChatLinkOp,
+    },
+    /// `getBusinessConnectedBot`. Response is `businessConnectedBotInfo`,
+    /// or a 404 error when no bot is connected.
+    GetConnectedBot,
+    /// `setBusinessConnectedBot` / `deleteBusinessConnectedBot`. Response
+    /// is `ok`; the bot is asked for again.
+    SaveConnectedBot,
+    /// The chatbot lookup: `searchPublicChat` (answer `chat`) or
+    /// `searchChatsOnServer` / `searchPublicChats` (answer `chats`).
+    LookupBusinessBot {
+        generation: u32,
+        part: BotLookupPart,
+    },
+    /// `toggleHasSponsoredMessagesEnabled`. Response is `ok`; the value
+    /// arrives as `updateUserFullInfo`.
+    SetSponsoredEnabled,
 }
 
 flat_purposes!(Settings(SettingsPurpose) {
@@ -281,4 +303,8 @@ flat_purposes!(Settings(SettingsPurpose) {
     LoadQuickReplyShortcuts,
     MutateQuickReplies,
     GetTimeZones,
+    GetChatLinks,
+    GetConnectedBot,
+    SaveConnectedBot,
+    SetSponsoredEnabled,
 });

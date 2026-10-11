@@ -459,6 +459,15 @@ pub(crate) fn parse_settings_payload(
         "timeZones" => Ok(EnvelopePayload::Settings(SettingsPayload::TimeZones(
             crate::business_settings::parse_time_zones(value),
         ))),
+        "businessChatLinks" => Ok(EnvelopePayload::Settings(
+            SettingsPayload::BusinessChatLinks(crate::business_chat_links::parse_links(value)),
+        )),
+        "businessChatLink" => crate::business_chat_links::parse_link(value)
+            .map(|link| EnvelopePayload::Settings(SettingsPayload::BusinessChatLink(link)))
+            .ok_or(ParseError::MissingField),
+        "businessConnectedBotInfo" => Ok(EnvelopePayload::Settings(
+            SettingsPayload::BusinessConnectedBot(crate::business_bots::parse_connected_bot(value)),
+        )),
         _ => return Ok(None),
     };
     payload.map(Some)

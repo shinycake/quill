@@ -1,7 +1,7 @@
 //! The Business Hours screen, its weekday editor and the time zone list
 //! (tdesktop `settings_working_hours.cpp`).
 
-use super::{DayRow, HoursDraft, View};
+use super::{DayRow, HoursDraft, Leave, View};
 use crate::ui::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -419,9 +419,10 @@ impl QuillApp {
             .child(list)
     }
 
-    /// Save of the hours screen. Off, or on with no open day, removes the
-    /// hours (tdesktop sends an empty `WorkingHours` then).
-    pub(super) fn save_business_hours(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Save of the hours screen (when it is left). Off, or on with no
+    /// open day, removes the hours (tdesktop sends an empty
+    /// `WorkingHours` then).
+    pub(super) fn save_business_hours(&mut self, cx: &mut Context<Self>) -> Leave {
         let Some((enabled, week)) = self
             .dialogs
             .business_dialog
@@ -429,12 +430,12 @@ impl QuillApp {
             .and_then(|d| d.hours.as_ref())
             .map(|h| (h.enabled, h.week.clone()))
         else {
-            return;
+            return Leave::Go(None);
         };
         let wanted = if enabled && !week.is_empty() {
             let Some(zone) = self.business_zone() else {
                 self.business_error("The time zones are still loading.", cx);
-                return;
+                return Leave::Stay;
             };
             let raw = edit::normalized(week)
                 .into_iter()
@@ -445,20 +446,10 @@ impl QuillApp {
             None
         };
         if wanted == self.my_business().opening_hours {
-            self.business_go(View::Hub, window, cx);
-            return;
+            return Leave::Go(None);
         }
-        if !self.business_live(cx) {
-            return;
-        }
-        let sent = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.save_business_hours(wanted.as_ref()));
-        if !matches!(sent, Some(Ok(()))) {
-            self.business_error("Could not send the business hours.", cx);
-            return;
-        }
-        self.business_go(View::Hub, window, cx);
+        self.business_send("business hours", |driver| {
+            driver.save_business_hours(wanted.as_ref()).is_ok()
+        })
     }
 }

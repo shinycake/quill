@@ -30,6 +30,7 @@ impl Session {
                 self.chat_list.folder_limits.apply_option(&name, &value);
                 self.apply_privacy_option(&name, &value);
                 self.apply_quick_replies_option(&name, &value);
+                self.apply_business_option(&name, &value);
                 if name == "disable_contact_registered_notifications"
                     && let OptionValue::Boolean(off) = &value
                 {
