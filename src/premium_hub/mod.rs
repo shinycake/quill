@@ -558,6 +558,8 @@ pub struct ReceivedGift {
     pub gift: GiftInfo,
     /// Stars the gift converts to (`sellGift`); 0 = not convertible.
     pub sell_star_count: i64,
+    /// Fields the owner actions need (`crate::gift_manage`).
+    pub manage: crate::gift_manage::GiftManageInfo,
 }
 
 impl ReceivedGift {
@@ -594,6 +596,7 @@ pub fn parse_received_gift(value: &Value) -> Option<ReceivedGift> {
         date: int(value.get("date")) as i32,
         gift: parse_gift_info(value.get("gift")?.get("gift")?),
         sell_star_count: int(value.get("sell_star_count")),
+        manage: crate::gift_manage::GiftManageInfo::parse(value),
     })
 }
 

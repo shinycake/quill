@@ -2,6 +2,7 @@
 mod apply;
 mod error;
 mod gift_code;
+mod gift_manage;
 mod giveaway;
 mod limit;
 mod paid;

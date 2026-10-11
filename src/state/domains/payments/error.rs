@@ -138,6 +138,9 @@ impl Session {
                     err.code
                 ));
             }
+            Some(RequestPurpose::Payments(purpose)) if purpose.is_gift_manage() => {
+                self.apply_gift_manage_error(err, purpose)
+            }
             _ => {}
         }
     }

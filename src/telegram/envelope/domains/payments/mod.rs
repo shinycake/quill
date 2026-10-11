@@ -48,4 +48,6 @@ pub enum PaymentsPayload {
     StarPackOptions(Vec<crate::star_packs::StarPack>),
     /// `updateOwnedStarCount`: the signed-in user's Stars balance changed.
     UpdateOwnedStarCount(crate::premium_hub::StarAmount),
+    /// Answers of gift management and sending (`crate::gift_manage`).
+    GiftManage(crate::gift_manage::GiftManagePayload),
 }

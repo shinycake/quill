@@ -2,9 +2,10 @@
 //! gift/giveaway chat cards (tdesktop `settings_credits*`,
 //! `info/peer_gifts/*`, `settings_premium*`, `history_view_service_box`).
 //!
-//! Read-only apart from showing/hiding and converting the user's own gifts
-//! (both confirmed in the dialog). Buying Stars, sending gifts and
-//! subscribing to Premium are never offered here.
+//! Showing, hiding and converting the user's own gifts are confirmed in the
+//! dialog; pin, upgrade, transfer, resale and collections are in
+//! `ui/gift_manage_ui.rs`. Buying Stars and subscribing to Premium are
+//! never offered here.
 
 use super::app::QuillApp;
 use super::chat_theme::{fill_muted, success};
@@ -350,9 +351,28 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title(title));
             let muted = cx.theme().muted_foreground;
             let mut body = div().flex().flex_col().gap_3();
+            if let Some(note) = session.payments.gifts_manage.note.as_ref() {
+                body = body.child(div().text_sm().child(note.clone()));
+            }
             if let Some(gift) = hub.selected_gift() {
-                body = body.child(gift_details(session, gift, mine, &roots, cx));
+                let owner_actions = mine.then(|| {
+                    let typed = this.payments.gift_price_input.read(cx).value().to_string();
+                    super::gift_owner_actions::gift_owner_actions(
+                        session,
+                        gift,
+                        &this.payments.gift_price_input,
+                        &typed,
+                        cx,
+                    )
+                });
+                body = body.child(gift_details(session, gift, mine, owner_actions, &roots, cx));
             } else {
+                body = body.child(super::gift_manage_ui::gift_collection_tabs(
+                    session,
+                    mine,
+                    &this.payments.gift_collection_input,
+                    cx,
+                ));
                 if let Some(err) = hub.gifts_error.as_ref() {
                     body = body.child(div().text_sm().child(err.clone()));
                 }
@@ -610,6 +630,7 @@ fn gift_details(
     session: &Session,
     gift: &ReceivedGift,
     mine: bool,
+    owner_actions: Option<AnyElement>,
     roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -742,6 +763,9 @@ fn gift_details(
                         })),
                 );
             }
+        }
+        if let Some(actions) = owner_actions {
+            col = col.child(actions);
         }
     }
     if let Some(err) = hub.gifts_error.as_ref() {

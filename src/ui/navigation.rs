@@ -39,6 +39,8 @@ pub(super) enum NavigationAction {
     MyGifts,
     ChatGifts,
     Gift,
+    /// The send-gift dialog for the open chat's user or channel.
+    SendGift,
     ChatMute,
     ChatArchive,
     ChatFolders,
@@ -205,6 +207,7 @@ impl QuillApp {
                     self.open_gifts(owner, cx);
                 }
             }
+            NavigationAction::SendGift => self.open_send_gift_dialog(window, cx),
             NavigationAction::Gift => {
                 if self.session().and_then(|s| s.open_chat).is_some() {
                     let busy = self

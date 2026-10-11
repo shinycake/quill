@@ -107,6 +107,51 @@ pub enum PaymentsPurpose {
     GetStarGiveawayOptions,
     /// `launchPrepaidGiveaway`, sent only after a confirmation. Response is `ok`.
     LaunchPrepaidGiveaway,
+    /// `getOption` for one of the gift limits. Response is `optionValueInteger`.
+    GetGiftOption(crate::gift_manage::GiftOption),
+    /// `setPinnedGifts` after a Pin or Unpin tap. Response is `ok`.
+    SetPinnedGifts,
+    /// `upgradeGift`, sent only after the confirmation. Response is
+    /// `upgradeGiftResult`.
+    UpgradeGift,
+    /// `transferGift`, sent only after the confirmation. Response is `ok`.
+    TransferGift,
+    /// `setGiftResalePrice`. Response is `ok`.
+    SetGiftResalePrice,
+    /// `getGiftCollections`. Response is `giftCollections`.
+    GetGiftCollections,
+    /// `createGiftCollection`, `setGiftCollectionName`,
+    /// `addGiftCollectionGifts` and `removeGiftCollectionGifts` answer with
+    /// `giftCollection`; `deleteGiftCollection` with `ok`.
+    ChangeGiftCollection,
+    DeleteGiftCollection,
+    /// `getAvailableGifts` for the send-gift dialog.
+    GetAvailableGifts,
+    /// `getPremiumGiftPaymentOptions` for the send-gift dialog.
+    GetPremiumGiftOptions,
+    /// `sendGift`: spends Stars, sent only on the send button.
+    SendStarGift,
+}
+
+impl PaymentsPurpose {
+    /// Requests of the gift management feature; their failures are handled
+    /// in `gift_manage.rs`.
+    pub fn is_gift_manage(self) -> bool {
+        matches!(
+            self,
+            Self::GetGiftOption(_)
+                | Self::SetPinnedGifts
+                | Self::UpgradeGift
+                | Self::TransferGift
+                | Self::SetGiftResalePrice
+                | Self::GetGiftCollections
+                | Self::ChangeGiftCollection
+                | Self::DeleteGiftCollection
+                | Self::GetAvailableGifts
+                | Self::GetPremiumGiftOptions
+                | Self::SendStarGift
+        )
+    }
 }
 
 flat_purposes!(Payments(PaymentsPurpose) {
@@ -134,4 +179,14 @@ flat_purposes!(Payments(PaymentsPurpose) {
     LaunchPrepaidGiveaway,
     GetStarPackOptions,
     GetPaidReactionSenders,
+    SetPinnedGifts,
+    UpgradeGift,
+    TransferGift,
+    SetGiftResalePrice,
+    GetGiftCollections,
+    ChangeGiftCollection,
+    DeleteGiftCollection,
+    GetAvailableGifts,
+    GetPremiumGiftOptions,
+    SendStarGift,
 });

@@ -224,7 +224,7 @@ fn entry_label(
         HeaderEntry::Statistics => ("Statistics", None),
         HeaderEntry::AutoDelete => ("Auto-Delete", None),
         HeaderEntry::ReceivedGifts => ("Received gifts", Some(N::ChatGifts)),
-        HeaderEntry::Gift => ("Send collectible gift", Some(N::Gift)),
+        HeaderEntry::Gift => ("Send a gift", Some(N::SendGift)),
         HeaderEntry::NewWindow => ("Open in new window", Some(N::NewWindow)),
         HeaderEntry::CloseSecretChat => ("Close secret chat", None),
     }

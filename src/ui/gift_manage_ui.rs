@@ -1,0 +1,372 @@
+//! Owner actions on received gifts: pin, upgrade, transfer, resale price
+//! and collections (tdesktop `info/peer_gifts/*` and the gift view box in
+//! `boxes/star_gift_box.cpp`). Shown in the received-gifts dialog for the
+//! signed-in user's own gifts only. Upgrade and transfer spend Stars, so
+//! each opens an inline confirmation that names the price.
+
+use super::app::QuillApp;
+use gpui_kit::component::button::*;
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::*;
+use gpui_kit::*;
+use quill::gift_manage::{GiftFlow, GiftManageState};
+use quill::premium_hub::group_digits;
+use quill::state::Session;
+
+pub(super) fn stars(n: i64) -> String {
+    format!("{} Stars", group_digits(n))
+}
+
+pub(super) fn panel(cx: &App) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p_2()
+        .rounded_md()
+        .bg(cx.theme().secondary)
+}
+
+pub(super) fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(text.into())
+}
+
+impl QuillApp {
+    fn gift_manage_mut(&mut self) -> Option<&mut GiftManageState> {
+        if let Some(live) = self.live.as_mut() {
+            Some(&mut live.driver.session.payments.gifts_manage)
+        } else {
+            self.demo_session
+                .as_mut()
+                .map(|s| &mut s.payments.gifts_manage)
+        }
+    }
+
+    /// Show `flow` (or close the open one) and prefill its input.
+    pub(super) fn set_gift_flow(
+        &mut self,
+        flow: Option<GiftFlow>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (price, name) = {
+            let session = self.session();
+            let manage = session.map(|s| &s.payments.gifts_manage);
+            let price = match (&flow, session) {
+                (Some(GiftFlow::Resale { id }), Some(s)) => s
+                    .payments
+                    .hub
+                    .gifts
+                    .iter()
+                    .find(|g| g.id == *id)
+                    .filter(|g| g.manage.listed && !g.manage.resale_gram_only)
+                    .map(|g| g.manage.resale_star_count.to_string()),
+                _ => None,
+            };
+            let name = match (&flow, manage) {
+                (Some(GiftFlow::RenameCollection(id)), Some(m)) => {
+                    m.collection(*id).map(|c| c.name.clone())
+                }
+                _ => None,
+            };
+            (price.unwrap_or_default(), name.unwrap_or_default())
+        };
+        self.payments
+            .gift_price_input
+            .update(cx, |input, cx| input.set_value(price, window, cx));
+        self.payments
+            .gift_collection_input
+            .update(cx, |input, cx| input.set_value(name, window, cx));
+        if let Some(manage) = self.gift_manage_mut() {
+            manage.flow = flow;
+        }
+        cx.notify();
+    }
+
+    fn note_gift_refused(&mut self, text: &str) {
+        self.connection.status_note = text.into();
+    }
+
+    fn pick_gift_collection(&mut self, id: i32, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.select_gift_collection(id));
+        if let Some(Err(_)) = sent {
+            self.note_gift_refused("could not open the collection");
+        }
+        cx.notify();
+    }
+
+    pub(super) fn pin_received_gift(&mut self, id: &str, pinned: bool, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.set_gift_pinned(id, pinned));
+        if let Some(Err(_)) = sent {
+            self.note_gift_refused("could not change the pinned gifts");
+        }
+        cx.notify();
+    }
+
+    pub(super) fn toggle_keep_details(&mut self, cx: &mut Context<Self>) {
+        if let Some(GiftFlow::Upgrade { keep_details, .. }) =
+            self.gift_manage_mut().and_then(|m| m.flow.as_mut())
+        {
+            *keep_details = !*keep_details;
+        }
+        cx.notify();
+    }
+
+    pub(super) fn confirm_upgrade(&mut self, id: &str, keep_details: bool, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.upgrade_received_gift(id, keep_details));
+        if let Some(Err(_)) = sent {
+            self.note_gift_refused("could not upgrade the gift");
+        }
+        cx.notify();
+    }
+
+    pub(super) fn confirm_transfer(&mut self, id: &str, cx: &mut Context<Self>) {
+        let chat = self.session().and_then(|s| s.open_chat);
+        let sent = chat.and_then(|chat| {
+            self.live
+                .as_mut()
+                .map(|live| live.driver.transfer_received_gift(id, chat))
+        });
+        if !matches!(sent, Some(Ok(_)) | None) {
+            self.note_gift_refused("could not transfer the gift");
+        }
+        cx.notify();
+    }
+
+    pub(super) fn confirm_resale(&mut self, id: &str, price: Option<i64>, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.set_received_gift_resale_price(id, price));
+        if let Some(Err(_)) = sent {
+            self.note_gift_refused("could not change the resale price");
+        }
+        cx.notify();
+    }
+
+    pub(super) fn change_collection_membership(
+        &mut self,
+        collection_id: i32,
+        gift_id: &str,
+        add: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let sent = self.live.as_mut().map(|live| {
+            live.driver
+                .change_gift_collection(collection_id, gift_id, add)
+        });
+        if let Some(Err(_)) = sent {
+            self.note_gift_refused("could not change the collection");
+        }
+        cx.notify();
+    }
+
+    fn submit_collection_name(&mut self, rename: Option<i32>, cx: &mut Context<Self>) {
+        let name = self
+            .payments
+            .gift_collection_input
+            .read(cx)
+            .value()
+            .to_string();
+        let sent = self.live.as_mut().map(|live| match rename {
+            Some(id) => live.driver.rename_gift_collection(id, &name),
+            None => live.driver.create_gift_collection(&name),
+        });
+        if let Some(Err(_)) = sent {
+            self.note_gift_refused("could not save the collection");
+        }
+        cx.notify();
+    }
+
+    fn confirm_delete_collection(&mut self, id: i32, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.delete_gift_collection(id));
+        if let Some(Err(_)) = sent {
+            self.note_gift_refused("could not delete the collection");
+        }
+        cx.notify();
+    }
+}
+
+/// The tabs above the gifts grid: All gifts and one per collection, plus the
+/// owner's "New" button and the open collection's rename and delete.
+pub(super) fn gift_collection_tabs(
+    session: &Session,
+    mine: bool,
+    name_input: &Entity<InputState>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let manage = &session.payments.gifts_manage;
+    let busy = session.payments.hub.gift_mutating;
+    if manage.collections.is_empty() && !mine {
+        return div().into_any_element();
+    }
+    let active = manage.active_collection;
+    let mut tabs = div().flex().flex_wrap().gap_1();
+    tabs = tabs.child(
+        Button::new("gift-collection-all")
+            .label("All gifts")
+            .small()
+            .selected(active == 0)
+            .on_click(cx.listener(|this, _, _, cx| this.pick_gift_collection(0, cx))),
+    );
+    for collection in &manage.collections {
+        let id = collection.id;
+        tabs = tabs.child(
+            Button::new(format!("gift-collection-{id}"))
+                .label(format!("{} ({})", collection.name, collection.gift_count))
+                .small()
+                .selected(active == id)
+                .on_click(cx.listener(move |this, _, _, cx| this.pick_gift_collection(id, cx))),
+        );
+    }
+    let can_add = (manage.collections.len() as i64) < manage.limits.collections();
+    if mine && can_add {
+        tabs = tabs.child(
+            Button::new("gift-collection-new")
+                .label("+ New collection")
+                .small()
+                .ghost()
+                .disabled(busy)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.set_gift_flow(Some(GiftFlow::NewCollection), window, cx)
+                })),
+        );
+    }
+    let mut col = div().flex().flex_col().gap_2().child(tabs);
+    if mine && active != 0 && manage.flow.is_none() {
+        col = col.child(
+            div()
+                .flex()
+                .gap_1()
+                .child(
+                    Button::new("gift-collection-rename")
+                        .label("Rename")
+                        .small()
+                        .ghost()
+                        .disabled(busy)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.set_gift_flow(Some(GiftFlow::RenameCollection(active)), window, cx)
+                        })),
+                )
+                .child(
+                    Button::new("gift-collection-delete")
+                        .label("Delete collection")
+                        .small()
+                        .ghost()
+                        .disabled(busy)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.set_gift_flow(Some(GiftFlow::DeleteCollection(active)), window, cx)
+                        })),
+                ),
+        );
+    }
+    match &manage.flow {
+        Some(GiftFlow::NewCollection) => {
+            col = col.child(collection_name_form(None, busy, name_input, cx));
+        }
+        Some(GiftFlow::RenameCollection(id)) => {
+            col = col.child(collection_name_form(Some(*id), busy, name_input, cx));
+        }
+        Some(GiftFlow::DeleteCollection(id)) => {
+            let id = *id;
+            let name = manage
+                .collection(id)
+                .map(|c| c.name.clone())
+                .unwrap_or_default();
+            col = col.child(
+                panel(cx)
+                    .child(div().text_sm().child(format!(
+                        "Delete the collection \u{201C}{name}\u{201D}? The gifts stay on your profile."
+                    )))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                Button::new("gift-collection-delete-yes")
+                                    .label("Delete")
+                                    .danger()
+                                    .disabled(busy)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.confirm_delete_collection(id, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("gift-collection-delete-no")
+                                    .label("Keep")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.set_gift_flow(None, window, cx)
+                                    })),
+                            ),
+                    ),
+            );
+        }
+        _ => {}
+    }
+    if mine && !can_add {
+        col = col.child(hint(
+            format!(
+                "You can have up to {} collections.",
+                manage.limits.collections()
+            ),
+            cx,
+        ));
+    }
+    col.into_any_element()
+}
+
+fn collection_name_form(
+    rename: Option<i32>,
+    busy: bool,
+    name_input: &Entity<InputState>,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement {
+    panel(cx)
+        .child(div().text_sm().child(if rename.is_some() {
+            "Rename the collection"
+        } else {
+            "Name the new collection"
+        }))
+        .child(Input::new(name_input).aria_label("Collection name"))
+        .child(hint(
+            "Up to 12 characters. Add gifts from a gift's page.",
+            cx,
+        ))
+        .child(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("gift-collection-save")
+                        .label(if rename.is_some() { "Save" } else { "Create" })
+                        .disabled(busy)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.submit_collection_name(rename, cx)
+                        })),
+                )
+                .child(
+                    Button::new("gift-collection-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.set_gift_flow(None, window, cx)),
+                        ),
+                ),
+        )
+}
