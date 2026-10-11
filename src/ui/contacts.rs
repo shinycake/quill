@@ -290,7 +290,7 @@ impl QuillApp {
     pub(super) fn set_contact_sync(&mut self, on: bool, cx: &mut Context<Self>) {
         let next = on;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.contact_prefs.sync_enabled = next;
+            live.driver.session.settings.contact_prefs.sync_enabled = next;
             if let Err(err) = live.driver.save_contact_prefs() {
                 self.connection.status_note = format!("couldn't save contact prefs: {err}");
             }
@@ -304,7 +304,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // Demo mode — flip the in-memory pref so the toggle visibly
             // works in screenshots.
-            session.contact_prefs.sync_enabled = next;
+            session.settings.contact_prefs.sync_enabled = next;
         }
         cx.notify();
     }

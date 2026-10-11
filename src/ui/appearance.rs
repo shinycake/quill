@@ -265,12 +265,12 @@ impl QuillApp {
             system_language_code: code.to_string(),
         };
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.language_prefs = prefs;
+            live.driver.session.settings.language_prefs = prefs;
             if let Err(err) = live.driver.save_language_prefs() {
                 self.connection.status_note = format!("couldn't save language setting: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.language_prefs = prefs;
+            demo.settings.language_prefs = prefs;
             self.connection.status_note = "demo: language setting is not saved".into();
         }
         cx.notify();
@@ -1595,7 +1595,10 @@ impl QuillApp {
             )
             .child(
                 Switch::new("appearance-large-emoji")
-                    .checked(self.session().is_none_or(|s| s.media_prefs.big_emoji))
+                    .checked(
+                        self.session()
+                            .is_none_or(|s| s.settings.media_prefs.big_emoji),
+                    )
                     .accessibility_label("Large emoji")
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_media_pref(|prefs| prefs.big_emoji = on, cx)
@@ -1616,7 +1619,7 @@ impl QuillApp {
     fn appearance_language_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let current = self
             .session()
-            .map(|s| s.language_prefs.system_language_code.as_str())
+            .map(|s| s.settings.language_prefs.system_language_code.as_str())
             .unwrap_or(DEFAULT_LANGUAGE_CODE);
         let control = RadioGroup::vertical("appearance-language")
             .selected_index(

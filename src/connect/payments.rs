@@ -22,7 +22,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetPaymentForm)?;
-        self.session.payment_request = Some(PaymentRequest {
+        self.session.payments.request = Some(PaymentRequest {
             chat_id,
             message_id,
         });
@@ -41,7 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::ValidateOrderInfo)?;
-        self.session.payment_request = Some(PaymentRequest {
+        self.session.payments.request = Some(PaymentRequest {
             chat_id,
             message_id,
         });
@@ -64,7 +64,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::SendPaymentForm)?;
-        self.session.payment_request = Some(PaymentRequest {
+        self.session.payments.request = Some(PaymentRequest {
             chat_id,
             message_id,
         });
@@ -94,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetPaymentReceipt, Some(chat_id));
-        self.session.payment_request = Some(PaymentRequest {
+        self.session.payments.request = Some(PaymentRequest {
             chat_id,
             message_id,
         });
@@ -136,8 +136,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if (self.session.star_subscriptions.is_some() && !self.session.star_subscriptions_stale)
-            || self.session.star_subscriptions_loading
+        if (self.session.payments.star_subscriptions.is_some()
+            && !self.session.payments.star_subscriptions_stale)
+            || self.session.payments.star_subscriptions_loading
         {
             return Ok(None);
         }
@@ -151,8 +152,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.star_subscriptions_offset.is_empty()
-            || self.session.star_subscriptions_loading
+        if self.session.payments.star_subscriptions_offset.is_empty()
+            || self.session.payments.star_subscriptions_loading
         {
             return Ok(None);
         }
@@ -164,7 +165,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         append: bool,
     ) -> Result<RequestId, ConnectSendError> {
         let offset = if append {
-            self.session.star_subscriptions_offset.clone()
+            self.session.payments.star_subscriptions_offset.clone()
         } else {
             String::new()
         };
@@ -172,11 +173,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append }),
             None,
         );
-        self.session.star_subscriptions_loading = true;
-        self.session.star_subscriptions_error = None;
+        self.session.payments.star_subscriptions_loading = true;
+        self.session.payments.star_subscriptions_error = None;
         let json = get_star_subscriptions(extra, false, &offset);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.star_subscriptions_loading = false;
+            self.session.payments.star_subscriptions_loading = false;
             return Err(err);
         }
         Ok(extra)
@@ -189,10 +190,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_star_subscriptions_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.star_subscriptions_stale {
+        if !self.session.payments.star_subscriptions_stale {
             return Ok(None);
         }
-        self.session.star_subscriptions_stale = false;
+        self.session.payments.star_subscriptions_stale = false;
         self.fetch_star_subscriptions_page(false).map(Some)
     }
 
@@ -205,17 +206,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         subscription_id: &str,
         is_canceled: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::EditStarSubscription, None);
-        self.session.star_subscriptions_mutating = true;
-        self.session.star_subscriptions_error = None;
+        self.session.payments.star_subscriptions_mutating = true;
+        self.session.payments.star_subscriptions_error = None;
         let json = edit_star_subscription(extra, subscription_id, is_canceled);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.star_subscriptions_mutating = false;
+            self.session.payments.star_subscriptions_mutating = false;
             return Err(err);
         }
         Ok(extra)
@@ -229,17 +230,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         subscription_id: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::ReuseStarSubscription, None);
-        self.session.star_subscriptions_mutating = true;
-        self.session.star_subscriptions_error = None;
+        self.session.payments.star_subscriptions_mutating = true;
+        self.session.payments.star_subscriptions_error = None;
         let json = reuse_star_subscription(extra, subscription_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.star_subscriptions_mutating = false;
+            self.session.payments.star_subscriptions_mutating = false;
             return Err(err);
         }
         Ok(extra)

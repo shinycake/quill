@@ -35,7 +35,7 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
     session.remember_emoji_pack_usage(&[10]);
     session.emoji.custom_emoji_stickers.push(sticker(20, 2));
     session.remember_emoji_pack_usage(&[20]);
-    assert_eq!(session.media_prefs.recent_emoji_packs, vec![2]);
+    assert_eq!(session.settings.media_prefs.recent_emoji_packs, vec![2]);
     session.emoji.custom_emoji_stickers.push(sticker(10, 1));
     session.remember_emoji_pack_usage(&[]);
     assert_eq!(
@@ -46,7 +46,7 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
             .collect::<Vec<_>>(),
         vec![2, 1, 3]
     );
-    session.media_prefs.dynamic_emoji_pack_order = false;
+    session.settings.media_prefs.dynamic_emoji_pack_order = false;
     assert_eq!(
         session
             .ordered_emoji_packs()
@@ -55,10 +55,13 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
             .collect::<Vec<_>>(),
         vec![1, 2, 3]
     );
-    session.media_prefs.dynamic_emoji_pack_order = true;
+    session.settings.media_prefs.dynamic_emoji_pack_order = true;
     session.remember_emoji_pack_usage(&[10, 10, -1]);
-    assert_eq!(session.media_prefs.recent_emoji_packs, vec![1, 2]);
-    assert_eq!(session.media_prefs.recent_custom_emoji_ids, vec![10, 20]);
+    assert_eq!(session.settings.media_prefs.recent_emoji_packs, vec![1, 2]);
+    assert_eq!(
+        session.settings.media_prefs.recent_custom_emoji_ids,
+        vec![10, 20]
+    );
 }
 
 fn session() -> (Session, Arc<MemorySink>) {

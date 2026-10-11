@@ -146,7 +146,7 @@ impl QuillApp {
     pub(super) fn join_active_group_call(&mut self, cx: &mut Context<Self>) {
         let id = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.id);
         let Some(id) = id else {
             self.connection.status_note = "No voice chat to join.".into();
@@ -156,7 +156,7 @@ impl QuillApp {
         // Push-to-talk joins with the microphone closed.
         let ptt_on = self
             .session()
-            .is_some_and(|s| s.call_prefs.push_to_talk.enabled);
+            .is_some_and(|s| s.calls.prefs.push_to_talk.enabled);
         if ptt_on {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.set_group_call_self_muted(true);
@@ -170,7 +170,7 @@ impl QuillApp {
                 Err(_) => "Couldn't join the voice chat.".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(call) = session.active_group_call.as_mut() {
+            if let Some(call) = session.calls.active_group_call.as_mut() {
                 call.is_joined = true;
             }
             self.connection.status_note = "screenshot demo — voice chat (no audio yet)".into();
@@ -216,6 +216,7 @@ impl QuillApp {
             live.driver.toggle_group_call_self_mute();
         } else if let Some(session) = self.demo_session.as_mut() {
             let muted = !session
+                .calls
                 .active_group_call
                 .as_ref()
                 .is_some_and(|c| c.is_muted_self);
@@ -229,7 +230,7 @@ impl QuillApp {
     pub(super) fn toggle_group_call_self_hand(&mut self, raise: bool, cx: &mut Context<Self>) {
         let me = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .and_then(|c| {
                 c.participants
                     .iter()
@@ -252,7 +253,7 @@ impl QuillApp {
                     Err(_) => "Couldn't change the hand state.".into(),
                 };
         } else if let Some(session) = self.demo_session.as_mut()
-            && let Some(call) = session.active_group_call.as_mut()
+            && let Some(call) = session.calls.active_group_call.as_mut()
             && let Some(p) = call
                 .participants
                 .iter_mut()
@@ -407,7 +408,7 @@ impl QuillApp {
     ) {
         let current = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .and_then(|call| {
                 call.participants
                     .iter()
@@ -497,9 +498,9 @@ impl QuillApp {
     /// Phase C2f: dismiss the group-call error line on the overlay.
     pub(super) fn dismiss_group_call_error(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.group_call_error = None;
+            live.driver.session.calls.group_call_error = None;
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.group_call_error = None;
+            session.calls.group_call_error = None;
         }
         cx.notify();
     }
@@ -535,7 +536,7 @@ impl QuillApp {
     pub(super) fn fetch_group_call_invite_link(&mut self, cx: &mut Context<Self>) {
         let can_self_unmute = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .is_some_and(|c| c.can_be_managed);
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note =
@@ -565,7 +566,7 @@ impl QuillApp {
     ) {
         let current = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.title.clone())
             .unwrap_or_default();
         let dialog = GroupCallTitleDialog::new(window, cx, &current);
@@ -691,11 +692,11 @@ impl QuillApp {
     pub(super) fn toggle_group_call_recording(&mut self, cx: &mut Context<Self>) {
         let recording = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .is_some_and(|c| c.record_duration > 0);
         let title = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.title.clone())
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {

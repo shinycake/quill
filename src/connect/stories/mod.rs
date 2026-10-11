@@ -36,7 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// loaded stories arrive as `updateChatActiveStories` updates and feed
     /// the story tray above the chat list.
     pub fn maybe_load_active_stories(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() || self.session.stories_active_loaded {
+        if !self.chats_path_active() || self.session.stories.stories_active_loaded {
             return Ok(None);
         }
         if self
@@ -51,7 +51,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::LoadActiveStories, None);
         match self.sender.send_json(&load_active_stories(extra)) {
             Ok(()) => {
-                self.session.stories_active_loaded = true;
+                self.session.stories.stories_active_loaded = true;
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -109,21 +109,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let group_call_id = match self.session.stories.get(&(chat_id.0, story_id)) {
+        let group_call_id = match self.session.stories.stories.get(&(chat_id.0, story_id)) {
             Some(story) => match story.content {
                 StoryContentView::Live { group_call_id, .. } => group_call_id,
                 _ => return Err(ConnectSendError::InvalidRequest),
             },
             None => return Err(ConnectSendError::InvalidRequest),
         };
-        if self.session.active_call.is_some() || self.session.active_group_call.is_some() {
+        if self.session.calls.active_call.is_some()
+            || self.session.calls.active_group_call.is_some()
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.pending_live_story_join.is_some() {
+        if self.session.calls.pending_live_story_join.is_some() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.fetch_group_call(group_call_id)?;
-        self.session.pending_live_story_join = Some(LiveStoryJoinIntent {
+        self.session.calls.pending_live_story_join = Some(LiveStoryJoinIntent {
             group_call_id,
             request: extra,
         });
@@ -141,7 +143,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stories.contains_key(&(chat_id.0, story_id))
+        if self
+            .session
+            .stories
+            .stories
+            .contains_key(&(chat_id.0, story_id))
             || self.session.requests.has_purpose_for_story(
                 RequestPurpose::GetStory,
                 chat_id,
@@ -216,7 +222,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.story_available_reactions.is_some()
+        if self.session.stories.available_reactions.is_some()
             || self
                 .session
                 .requests
@@ -261,7 +267,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let ids: Vec<i64> = ids
             .iter()
             .copied()
-            .filter(|id| *id > 0 && !self.session.story_custom_emoji_stickers.contains_key(id))
+            .filter(|id| *id > 0 && !self.session.stories.custom_emoji_stickers.contains_key(id))
             .collect();
         if ids.is_empty() {
             return Ok(None);
@@ -297,6 +303,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let story = self
             .session
+            .stories
             .stories
             .get(&(chat_id.0, story_id))
             .ok_or(ConnectSendError::InvalidRequest)?;
@@ -344,6 +351,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let story = self
             .session
             .stories
+            .stories
             .get(&(chat_id.0, story_id))
             .ok_or(ConnectSendError::InvalidRequest)?;
         if matches!(story.content, StoryContentView::Live { .. }) {
@@ -385,6 +393,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let deletable = self
             .session
             .stories
+            .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| story.can_be_deleted);
         if !deletable {
@@ -418,7 +427,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.story_page_op = Some(StoryPageOp {
+                self.session.stories.page_op = Some(StoryPageOp {
                     label: story_page_op_label(purpose),
                     state: StoryPageOpState::Failed("could not send".to_string()),
                 });

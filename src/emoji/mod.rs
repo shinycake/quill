@@ -147,15 +147,22 @@ fn viewer_caption_custom_emoji(content: &MessageContent) -> Vec<i64> {
 impl Session {
     pub fn remember_emoji_pack_usage(&mut self, custom_emoji_ids: &[i64]) -> bool {
         for id in custom_emoji_ids.iter().filter(|id| **id > 0) {
-            self.media_prefs
+            self.settings
+                .media_prefs
                 .recent_custom_emoji_ids
                 .retain(|old| old != id);
-            self.media_prefs.recent_custom_emoji_ids.insert(0, *id);
-            self.media_prefs.recent_custom_emoji_ids.truncate(128);
+            self.settings
+                .media_prefs
+                .recent_custom_emoji_ids
+                .insert(0, *id);
+            self.settings
+                .media_prefs
+                .recent_custom_emoji_ids
+                .truncate(128);
         }
         let mut packs = Vec::new();
         // ponytail: 128 recents; stable vector scans, index the cache if this limit grows.
-        for id in &self.media_prefs.recent_custom_emoji_ids {
+        for id in &self.settings.media_prefs.recent_custom_emoji_ids {
             if let Some(set_id) = self
                 .emoji
                 .custom_emoji_stickers
@@ -168,22 +175,23 @@ impl Session {
                 packs.push(set_id);
             }
         }
-        for id in &self.media_prefs.recent_emoji_packs {
+        for id in &self.settings.media_prefs.recent_emoji_packs {
             if !packs.contains(id) {
                 packs.push(*id);
             }
         }
         packs.truncate(128);
-        let changed = packs != self.media_prefs.recent_emoji_packs;
-        self.media_prefs.recent_emoji_packs = packs;
+        let changed = packs != self.settings.media_prefs.recent_emoji_packs;
+        self.settings.media_prefs.recent_emoji_packs = packs;
         changed
     }
 
     pub fn ordered_emoji_packs(&self) -> Vec<&StickerSetInfo> {
         let mut sets: Vec<_> = self.emoji.installed_sets.iter().collect();
-        if self.media_prefs.dynamic_emoji_pack_order {
+        if self.settings.media_prefs.dynamic_emoji_pack_order {
             sets.sort_by_key(|set| {
-                self.media_prefs
+                self.settings
+                    .media_prefs
                     .recent_emoji_packs
                     .iter()
                     .position(|id| *id == set.id)

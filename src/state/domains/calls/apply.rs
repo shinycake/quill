@@ -32,11 +32,11 @@ impl Session {
             CallsPayload::GroupCallId { id } => {
                 if let Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChat { .. })) =
                     pending.map(|p| p.purpose)
-                    && !self.group_call_fetch_queue.contains(&id)
+                    && !self.calls.group_call_fetch_queue.contains(&id)
                 {
-                    self.group_call_fetch_queue.push(id);
+                    self.calls.group_call_fetch_queue.push(id);
                 }
-                self.group_call_error = None;
+                self.calls.group_call_error = None;
             }
             // Phase C2f: `groupCallInfo` — the `joinGroupCall`
             // answer to invitation acceptance. Queue a `getGroupCall`
@@ -49,12 +49,12 @@ impl Session {
                 join_payload,
             } => {
                 if let Some(RequestPurpose::JoinGroupCallInvitation) = pending.map(|p| p.purpose) {
-                    if !self.group_call_fetch_queue.contains(&group_call_id) {
-                        self.group_call_fetch_queue.push(group_call_id);
+                    if !self.calls.group_call_fetch_queue.contains(&group_call_id) {
+                        self.calls.group_call_fetch_queue.push(group_call_id);
                     }
                     self.set_group_call_join_payload(group_call_id, join_payload);
                 }
-                self.group_call_error = None;
+                self.calls.group_call_error = None;
             }
             // Phase C3a: group-call signaling (schema 1.8.67, lines
             // 10819 / 10824 / 10830 / 10836 / 10576). `updateGroupCall`
@@ -103,11 +103,12 @@ impl Session {
                 error,
             } => {
                 if self
+                    .calls
                     .active_group_call
                     .as_ref()
                     .is_some_and(|c| c.id == group_call_id)
                 {
-                    self.group_call_error = Some(call_request_error_line(
+                    self.calls.group_call_error = Some(call_request_error_line(
                         &error,
                         "Could not send the message",
                     ));
@@ -134,7 +135,7 @@ impl Session {
                         .and_then(|c| c.video_chat.as_ref())
                         .map(|vc| vc.group_call_id);
                     if let (Some(call_id), Some(tracked)) =
-                        (call_id, self.active_group_call.as_mut())
+                        (call_id, self.calls.active_group_call.as_mut())
                         && tracked.id == call_id
                     {
                         tracked.rtmp_url = Some(url);
@@ -153,7 +154,7 @@ impl Session {
                         CallsPurpose::InviteGroupCallParticipant { .. }
                     ))
                 ) {
-                    self.group_call_error = match result {
+                    self.calls.group_call_error = match result {
                         InviteGroupCallParticipantResult::Success { .. } => None,
                         InviteGroupCallParticipantResult::UserPrivacyRestricted => Some(
                             "Couldn't invite: that user restricts group-call invitations."

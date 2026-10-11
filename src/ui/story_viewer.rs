@@ -38,7 +38,7 @@ impl QuillApp {
     ) {
         let missing: Vec<i32> = self
             .session()
-            .and_then(|session| session.story_tray.get(&chat_id.0))
+            .and_then(|session| session.stories.tray.get(&chat_id.0))
             .map(|tray| {
                 tray.stories
                     .iter()
@@ -46,7 +46,7 @@ impl QuillApp {
                     .filter(|id| {
                         !self
                             .session()
-                            .is_some_and(|s| s.stories.contains_key(&(chat_id.0, *id)))
+                            .is_some_and(|s| s.stories.stories.contains_key(&(chat_id.0, *id)))
                     })
                     .collect()
             })
@@ -76,9 +76,10 @@ impl QuillApp {
             .session()
             .and_then(|session| {
                 session
-                    .story_tray
+                    .stories
+                    .tray
                     .get(&chat_id.0)
-                    .map(|tray| collect_story_items(chat_id, tray, &session.stories))
+                    .map(|tray| collect_story_items(chat_id, tray, &session.stories.stories))
             })
             .unwrap_or_default();
         let Some(index) = items.iter().position(|item| item.story_id == story_id) else {
@@ -123,7 +124,12 @@ impl QuillApp {
     pub(super) fn current_story(&self) -> Option<ParsedStory> {
         let item = self.stories.viewer.current()?;
         self.session()
-            .and_then(|session| session.stories.get(&(item.chat_id.0, item.story_id)))
+            .and_then(|session| {
+                session
+                    .stories
+                    .stories
+                    .get(&(item.chat_id.0, item.story_id))
+            })
             .cloned()
     }
 
@@ -193,7 +199,7 @@ impl QuillApp {
         self.stories.reaction_picker_open = !self.stories.reaction_picker_open;
         if self.stories.reaction_picker_open {
             if let Some(live) = self.live.as_mut() {
-                if live.driver.session.story_available_reactions.is_none() {
+                if live.driver.session.stories.available_reactions.is_none() {
                     match live.driver.get_story_available_reactions() {
                         Ok(_) => {}
                         Err(_) => {
@@ -234,7 +240,10 @@ impl QuillApp {
     /// `None` while the file isn't downloaded.
     fn story_custom_emoji_path(&self, custom_emoji_id: i64) -> Option<std::path::PathBuf> {
         let session = self.session()?;
-        let sticker = session.story_custom_emoji_stickers.get(&custom_emoji_id)?;
+        let sticker = session
+            .stories
+            .custom_emoji_stickers
+            .get(&custom_emoji_id)?;
         let file_id = sticker.display_file_id()?;
         let path = session.files.get(&file_id.0)?.usable_path()?;
         sandboxed_display_path(path, &self.media_display_roots())
@@ -248,7 +257,8 @@ impl QuillApp {
             return Vec::new();
         };
         let mut ids: Vec<i64> = session
-            .story_available_reactions
+            .stories
+            .available_reactions
             .iter()
             .flatten()
             .filter_map(|reaction| match reaction.kind {
@@ -501,7 +511,7 @@ impl QuillApp {
         };
         let offset = self
             .session()
-            .and_then(|session| session.story_viewers.as_ref())
+            .and_then(|session| session.stories.viewers.as_ref())
             .map(|state| state.next_offset.clone())
             .unwrap_or_default();
         if offset.is_empty() {
@@ -553,7 +563,7 @@ impl QuillApp {
     pub(super) fn clear_terminal_story_report(&mut self) {
         let terminal = self
             .session()
-            .and_then(|session| session.story_report.as_ref())
+            .and_then(|session| session.stories.report.as_ref())
             .is_some_and(|flow| {
                 matches!(
                     flow.stage,
@@ -581,7 +591,8 @@ impl QuillApp {
             if live
                 .driver
                 .session
-                .story_report
+                .stories
+                .report
                 .as_ref()
                 .is_none_or(|flow| flow.story_id != item.story_id)
             {
@@ -634,7 +645,7 @@ impl QuillApp {
         };
         let (option_id, is_optional) = self
             .session()
-            .and_then(|session| session.story_report.as_ref())
+            .and_then(|session| session.stories.report.as_ref())
             .and_then(|flow| match &flow.stage {
                 StoryReportStage::TextRequired {
                     option_id,
@@ -667,7 +678,7 @@ impl QuillApp {
         let now = now_unix_secs();
         let stealth = self
             .session()
-            .map(|session| session.story_stealth)
+            .map(|session| session.stories.stealth)
             .unwrap_or_default();
         if stealth.is_active(now) {
             self.connection.status_note =
@@ -696,7 +707,7 @@ impl QuillApp {
         let now = now_unix_secs();
         let stealth = self
             .session()
-            .map(|session| session.story_stealth)
+            .map(|session| session.stories.stealth)
             .unwrap_or_default();
         if stealth.is_active(now) {
             "Stealth on"
@@ -920,7 +931,7 @@ impl QuillApp {
             };
             ids.iter()
                 .filter_map(|id| {
-                    let sticker = session.story_custom_emoji_stickers.get(id)?;
+                    let sticker = session.stories.custom_emoji_stickers.get(id)?;
                     let file_id = sticker.display_file_id()?;
                     if file_id.0 == 0 {
                         return None;
@@ -1001,7 +1012,7 @@ impl QuillApp {
     pub(super) fn story_reaction_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let reactions = self
             .session()
-            .and_then(|session| session.story_available_reactions.clone())
+            .and_then(|session| session.stories.available_reactions.clone())
             .unwrap_or_default();
         let mut picker = div()
             .id("story-reaction-picker")
@@ -1121,7 +1132,7 @@ impl QuillApp {
         // Phase 9.5 (review fix-up): one shared `story_manage.pending`
         // slot — disable the management buttons while a call is in
         // flight so two ops can't overwrite each other's state.
-        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
+        let manage_busy = self.session().is_some_and(|s| s.stories.manage.pending);
         let is_video = self
             .stories
             .viewer
@@ -1377,7 +1388,7 @@ impl QuillApp {
         }
         if let Some(stealth_err) = self
             .session()
-            .and_then(|session| session.story_stealth_error.clone())
+            .and_then(|session| session.stories.stealth_error.clone())
         {
             column = column.child(div().text_sm().text_color(danger()).child(stealth_err));
         }
@@ -1400,7 +1411,7 @@ impl QuillApp {
     /// count header, "Load more" while `next_offset` is non-empty, and
     /// the loading / error / empty states.
     pub(super) fn story_viewers_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.session().and_then(|s| s.story_viewers.clone());
+        let state = self.session().and_then(|s| s.stories.viewers.clone());
         let mut panel = div()
             .id("story-viewers-panel")
             .flex()
@@ -1498,7 +1509,7 @@ impl QuillApp {
     /// states: Checking/Sending (spinner text), the server-provided
     /// option picker, the details field, Reported / Failed.
     pub(super) fn story_report_ui(&self, cx: &mut Context<Self>) -> AnyElement {
-        let flow = self.session().and_then(|s| s.story_report.clone());
+        let flow = self.session().and_then(|s| s.stories.report.clone());
         let mut panel = div()
             .id("story-report-panel")
             .flex()

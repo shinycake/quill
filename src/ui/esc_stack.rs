@@ -159,7 +159,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "payment-receipt",
         |app| app
             .session()
-            .is_some_and(|session| session.payment_receipt_open),
+            .is_some_and(|session| session.payments.receipt_open),
         |app, _, cx| app.close_payment_receipt(cx)
     ),
     // MED2: Esc never discards a recording silently. With the confirm row

@@ -26,6 +26,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let can_get = self
             .session
             .stories
+            .stories
             .get(&(chat_id.0, story_id))
             .is_some_and(|story| story.can_get_statistics);
         if !can_get {
@@ -82,7 +83,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id, story_id, offset, PAGE,
         )) {
             Ok(()) => {
-                if let Some(state) = self.session.story_insights.as_mut()
+                if let Some(state) = self.session.stories.insights.as_mut()
                     && state.chat_id == chat_id.0
                     && state.story_id == story_id
                 {
@@ -106,7 +107,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if self
             .session
-            .story_insights
+            .stories
+            .insights
             .as_ref()
             .is_some_and(|state| matches!(state.statistics, StoryStatsFetch::Failed(_)))
         {
@@ -134,7 +136,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The next page of the open search.
     pub fn load_more_found_stories(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(search) = self.session.story_search.as_ref() else {
+        let Some(search) = self.session.stories.search.as_ref() else {
             return Ok(None);
         };
         if search.loading || search.next_offset.is_empty() {
@@ -151,7 +153,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let Some(query) = self
             .session
-            .story_search
+            .stories
+            .search
             .as_ref()
             .map(|search| search.query.clone())
         else {

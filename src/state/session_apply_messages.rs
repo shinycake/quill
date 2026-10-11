@@ -181,6 +181,7 @@ impl Session {
         for (story, files) in &stories {
             self.remember_files(files);
             self.stories
+                .stories
                 .insert((story.poster_chat_id, story.id), story.clone());
         }
         let ids: Vec<i32> = stories.iter().map(|(story, _)| story.id).collect();
@@ -190,7 +191,8 @@ impl Session {
                     && let Some(album_id) = pending.and_then(|p| p.story_album_id)
                 {
                     let list = self
-                        .story_album_stories
+                        .stories
+                        .album_stories
                         .entry((chat_id.0, album_id))
                         .or_default();
                     // Phase 9.7: preserve server order (the
@@ -206,7 +208,7 @@ impl Session {
             }
             Some(RequestPurpose::GetChatArchivedStories) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    let entry = self.archived_stories.entry(chat_id.0).or_default();
+                    let entry = self.stories.archived_stories.entry(chat_id.0).or_default();
                     // Phase 9.7: TDLib returns archive stories newest
                     // first (decreasing id); preserve server order
                     // across pages — append new ids, dedupe.
@@ -222,7 +224,7 @@ impl Session {
             }
             Some(RequestPurpose::GetChatPostedToChatPageStories) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    let entry = self.chat_page_stories.entry(chat_id.0).or_default();
+                    let entry = self.stories.chat_page_stories.entry(chat_id.0).or_default();
                     // Phase 9.7: preserve server order (newest
                     // first) across pages — append new ids, dedupe.
                     for id in ids.iter().copied() {
@@ -478,10 +480,10 @@ impl Session {
         // the UI for OS dispatch. The sound decision is made at the
         // same moment (parity slice: notification sounds).
         let decision = self.notification_decision(&message);
-        if decision.is_some() && self.badge_prefs.flash_bounce {
-            self.pending_attention = true;
+        if decision.is_some() && self.settings.badge_prefs.flash_bounce {
+            self.settings.pending_attention = true;
         }
-        let notification = decision.filter(|_| self.desktop_notifications);
+        let notification = decision.filter(|_| self.settings.desktop_notifications);
         let sound = notification.as_ref().and_then(|_| {
             self.chats
                 .get(&message.chat_id.0)

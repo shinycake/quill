@@ -229,8 +229,8 @@ impl Session {
                 self.sender_name_and_accent(Some(sender)).1,
             ),
         };
-        let story = self.stories.get(&(poster.0, reply.story_id));
-        let in_tray = self.story_tray.get(&poster.0).is_some_and(|tray| {
+        let story = self.stories.stories.get(&(poster.0, reply.story_id));
+        let in_tray = self.stories.tray.get(&poster.0).is_some_and(|tray| {
             tray.stories
                 .iter()
                 .any(|info| info.story_id == reply.story_id)
@@ -561,7 +561,7 @@ impl Session {
                     .reply_to
                     .as_ref()
                     .filter(|reply| reply.story_id != 0)
-                    .and_then(|reply| self.stories.get(&(reply.chat_id.0, reply.story_id)))
+                    .and_then(|reply| self.stories.stories.get(&(reply.chat_id.0, reply.story_id)))
                 {
                     ids.extend(story_thumb_candidates(story));
                 }
@@ -583,8 +583,8 @@ impl Session {
             .filter(|reply| reply.story_id != 0 && reply.chat_id.0 != 0)
             .map(|reply| (reply.chat_id, reply.story_id))
             .filter(|(chat, story)| {
-                !self.stories.contains_key(&(chat.0, *story))
-                    && !self.story_reply_attempted.contains(&(chat.0, *story))
+                !self.stories.stories.contains_key(&(chat.0, *story))
+                    && !self.stories.reply_attempted.contains(&(chat.0, *story))
             })
             .collect();
         wanted.sort_by_key(|(chat, story)| (chat.0, *story));

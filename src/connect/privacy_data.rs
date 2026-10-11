@@ -23,13 +23,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.privacy_data.new_chat = Some(NewChatPrivacyState::Loading);
+        self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Loading);
         let extra = self
             .session
             .request(RequestPurpose::GetNewChatPrivacy, None);
         if let Err(err) = self.sender.send_json(&get_new_chat_privacy_settings(extra)) {
             self.session.requests.take(extra);
-            self.session.privacy_data.new_chat = Some(NewChatPrivacyState::Failed);
+            self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Failed);
             return Err(err);
         }
         Ok(())
@@ -45,7 +45,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(NewChatPrivacyState::Ready(current)) = self.session.privacy_data.new_chat else {
+        let Some(NewChatPrivacyState::Ready(current)) = self.session.settings.privacy_data.new_chat
+        else {
             // Not loaded: writing would reset the paid-message price.
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -106,8 +107,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.privacy_data.inactive_session_ttl_days = Some(days);
-        self.session.privacy_data.error = None;
+        self.session.settings.privacy_data.inactive_session_ttl_days = Some(days);
+        self.session.settings.privacy_data.error = None;
         Ok(extra)
     }
 
@@ -118,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         on: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.privacy_data.can_ignore_sensitive {
+        if !self.chats_path_active() || !self.session.settings.privacy_data.can_ignore_sensitive {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
@@ -132,7 +133,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.privacy_data.error = None;
+        self.session.settings.privacy_data.error = None;
         Ok(extra)
     }
 
@@ -157,7 +158,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.privacy_data.error = None;
+        self.session.settings.privacy_data.error = None;
         Ok(extra)
     }
 
@@ -166,13 +167,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.privacy_data.network_loading = true;
+        self.session.settings.privacy_data.network_loading = true;
         let extra = self
             .session
             .request(RequestPurpose::GetNetworkStatistics, None);
         if let Err(err) = self.sender.send_json(&get_network_statistics(extra)) {
             self.session.requests.take(extra);
-            self.session.privacy_data.network_loading = false;
+            self.session.settings.privacy_data.network_loading = false;
             return Err(err);
         }
         Ok(())
@@ -190,7 +191,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.privacy_data.network_usage = None;
+        self.session.settings.privacy_data.network_usage = None;
         let _ = self.fetch_network_statistics();
         Ok(extra)
     }
@@ -201,7 +202,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || password.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.privacy_data.password_check = crate::state::PasswordCheck::Checking;
+        self.session.settings.privacy_data.password_check = crate::state::PasswordCheck::Checking;
         let extra = self
             .session
             .request(RequestPurpose::CheckRememberedPassword, None);
@@ -210,7 +211,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_recovery_email_address(extra, password))
         {
             self.session.requests.take(extra);
-            self.session.privacy_data.password_check = crate::state::PasswordCheck::Failed;
+            self.session.settings.privacy_data.password_check = crate::state::PasswordCheck::Failed;
             return Err(err);
         }
         Ok(())
@@ -237,7 +238,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
                 self.session.suggestions.actions.remove(action);
                 if action == crate::chatlist_suggestions::ACTION_PASSWORD {
-                    self.session.privacy_data.check_password_suggested = false;
+                    self.session.settings.privacy_data.check_password_suggested = false;
                 }
                 Ok(extra)
             }
@@ -270,7 +271,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.privacy_data.check_password_suggested = false;
+        self.session.settings.privacy_data.check_password_suggested = false;
         Ok(extra)
     }
 }

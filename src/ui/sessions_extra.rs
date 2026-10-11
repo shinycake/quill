@@ -17,8 +17,8 @@ impl QuillApp {
     /// "Terminate old sessions" with the five tdesktop periods as chips.
     pub(super) fn sessions_ttl_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let current = session.and_then(|s| s.privacy_data.inactive_session_ttl_days);
-        let error = session.and_then(|s| s.privacy_data.error.clone());
+        let current = session.and_then(|s| s.settings.privacy_data.inactive_session_ttl_days);
+        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
         let mut chips = div().flex().flex_wrap().gap_1();
         for days in SESSION_TTL_DAYS {
             chips = chips.child(
@@ -82,7 +82,7 @@ impl QuillApp {
                     format!("couldn't change the session timeout: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.privacy_data.inactive_session_ttl_days = Some(days);
+            demo.settings.privacy_data.inactive_session_ttl_days = Some(days);
         }
         cx.notify();
     }

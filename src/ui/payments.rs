@@ -33,8 +33,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payment_form_loading = true;
-            live.driver.session.payment_note = None;
+            live.driver.session.payments.form_loading = true;
+            live.driver.session.payments.note = None;
             live.driver.send_payment_form_request(chat_id, message_id)
         });
         match sent {
@@ -43,7 +43,7 @@ impl QuillApp {
             }
             _ => {
                 if let Some(live) = self.live.as_mut() {
-                    live.driver.session.payment_form_loading = false;
+                    live.driver.session.payments.form_loading = false;
                 }
                 self.connection.status_note = "could not load the payment form".into();
             }
@@ -55,7 +55,7 @@ impl QuillApp {
     /// fields from the form's `saved_order_info` (schema:4720) when present.
     pub(super) fn open_payment_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut dialog = PaymentDialog::new(window, cx);
-        if let Some(form) = self.session().and_then(|s| s.payment_form.clone()) {
+        if let Some(form) = self.session().and_then(|s| s.payments.form.clone()) {
             dialog.prefill_from_form(&form, window, cx);
         }
         self.payments.dialog = Some(dialog);
@@ -68,12 +68,12 @@ impl QuillApp {
     pub(super) fn close_payment_dialog(&mut self, cx: &mut Context<Self>) {
         self.payments.dialog = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payment_form = None;
-            live.driver.session.payment_form_loading = false;
-            live.driver.session.payment_note = None;
-            live.driver.session.payment_validated = None;
-            live.driver.session.payment_shipping_id = None;
-            live.driver.session.payment_request = None;
+            live.driver.session.payments.form = None;
+            live.driver.session.payments.form_loading = false;
+            live.driver.session.payments.note = None;
+            live.driver.session.payments.validated = None;
+            live.driver.session.payments.shipping_id = None;
+            live.driver.session.payments.request = None;
         }
         cx.notify();
     }
@@ -81,8 +81,8 @@ impl QuillApp {
     /// Slice P1: close the receipt dialog.
     pub(super) fn close_payment_receipt(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payment_receipt = None;
-            live.driver.session.payment_receipt_open = false;
+            live.driver.session.payments.receipt = None;
+            live.driver.session.payments.receipt_open = false;
         }
         cx.notify();
     }
@@ -259,7 +259,7 @@ impl QuillApp {
                     })),
             );
         }
-        if let Some(validated) = &session.payment_validated
+        if let Some(validated) = &session.payments.validated
             && !validated.shipping_options.is_empty()
         {
             // Phase 6: kit RadioGroup (was: buttons with a ◉/○ prefix).
@@ -270,7 +270,7 @@ impl QuillApp {
                 .map(|option| option.id.clone())
                 .collect();
             let shipping_selected = validated.shipping_options.iter().position(|option| {
-                session.payment_shipping_id.as_deref() == Some(option.id.as_str())
+                session.payments.shipping_id.as_deref() == Some(option.id.as_str())
             });
             body = body.child(
                 div()
@@ -295,7 +295,7 @@ impl QuillApp {
                             }))
                             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
-                                    live.driver.session.payment_shipping_id =
+                                    live.driver.session.payments.shipping_id =
                                         Some(shipping_ids[ix].clone());
                                 }
                                 cx.notify();
@@ -420,7 +420,7 @@ impl QuillApp {
         }
         let can_pay = {
             let terms_ok = invoice.terms_url.is_empty() || dialog.terms_accepted;
-            let order_ok = !needs_order || session.payment_validated.is_some();
+            let order_ok = !needs_order || session.payments.validated.is_some();
             let creds_ok = match &dialog.credential_choice {
                 PaymentCredentialChoice::Saved(_) => true,
                 PaymentCredentialChoice::NewToken => !dialog.token(cx).trim().is_empty(),
@@ -433,7 +433,7 @@ impl QuillApp {
                 format_payment_price(&invoice.currency, total)
             ))
             .primary();
-        body = body.child(if session.payment_sending {
+        body = body.child(if session.payments.sending {
             pay.label("Processing…").disabled(true)
         } else if can_pay {
             pay.on_click(cx.listener(|this, _, window, cx| {
@@ -455,7 +455,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payment_receipt_open = false;
+            live.driver.session.payments.receipt_open = false;
             live.driver.fetch_payment_receipt(chat_id, message_id)
         });
         if !matches!(sent, Some(Ok(_))) {
@@ -471,7 +471,7 @@ impl QuillApp {
         let order = self.payments.dialog.as_ref().map(|dialog| dialog.order(cx));
         let request = self
             .session()
-            .and_then(|session| session.payment_request.clone());
+            .and_then(|session| session.payments.request.clone());
         let allow_save = self
             .payments
             .dialog
@@ -483,7 +483,7 @@ impl QuillApp {
             return;
         };
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payment_note = None;
+            live.driver.session.payments.note = None;
             live.driver.validate_payment_order_info(
                 request.chat_id,
                 request.message_id,
@@ -503,10 +503,10 @@ impl QuillApp {
     pub(super) fn submit_payment(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.session().map(|session| {
             (
-                session.payment_form.clone(),
-                session.payment_request.clone(),
-                session.payment_validated.clone(),
-                session.payment_shipping_id.clone(),
+                session.payments.form.clone(),
+                session.payments.request.clone(),
+                session.payments.validated.clone(),
+                session.payments.shipping_id.clone(),
             )
         });
         let dialog = self.payments.dialog.as_ref();
@@ -543,7 +543,7 @@ impl QuillApp {
             .unwrap_or("");
         let shipping_option_id = shipping_id.as_deref().unwrap_or("");
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payment_note = None;
+            live.driver.session.payments.note = None;
             let sent = live.driver.submit_payment_form(
                 request.chat_id,
                 request.message_id,
@@ -554,7 +554,7 @@ impl QuillApp {
                 0,
             );
             if sent.is_ok() {
-                live.driver.session.payment_sending = true;
+                live.driver.session.payments.sending = true;
             }
             sent
         });
@@ -640,17 +640,17 @@ impl QuillApp {
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close.clone());
             };
-            if session.payment_form.is_none() && !session.payment_form_loading {
+            if session.payments.form.is_none() && !session.payments.form_loading {
                 return dialog.on_close(on_close.clone());
             }
             let Some(dialog_state) = this.payments.dialog.as_ref() else {
                 return dialog.on_close(on_close.clone());
             };
             let mut body = div().flex().flex_col().gap_3();
-            if session.payment_form_loading {
+            if session.payments.form_loading {
                 body = body.child(div().text_sm().child("Loading payment form…"));
             }
-            if let Some(note) = &session.payment_note {
+            if let Some(note) = &session.payments.note {
                 body = body.child(
                     div()
                         .text_sm()
@@ -658,7 +658,7 @@ impl QuillApp {
                         .child(note.clone()),
                 );
             }
-            let Some(form) = session.payment_form.as_ref() else {
+            let Some(form) = session.payments.form.as_ref() else {
                 let body = body.into_any_element();
                 return dialog
                     .content(crate::ui::shell::scrollable_dialog_content({
@@ -739,7 +739,7 @@ impl QuillApp {
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title("Payment receipt"));
             let session = this.session();
-            let receipt = session.as_ref().and_then(|s| s.payment_receipt.as_ref());
+            let receipt = session.as_ref().and_then(|s| s.payments.receipt.as_ref());
             let Some(receipt) = receipt else {
                 return dialog.on_close(on_close);
             };
@@ -837,7 +837,7 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let mut body = div().flex().flex_col().gap_3();
-            if let Some(subs) = session.star_subscriptions.as_ref() {
+            if let Some(subs) = session.payments.star_subscriptions.as_ref() {
                 body = body.child(
                     div()
                         .flex()
@@ -862,7 +862,9 @@ impl QuillApp {
                     );
                 }
             }
-            if session.star_subscriptions_loading && session.star_subscriptions.is_none() {
+            if session.payments.star_subscriptions_loading
+                && session.payments.star_subscriptions.is_none()
+            {
                 body = body.child(
                     div()
                         .text_sm()
@@ -870,11 +872,11 @@ impl QuillApp {
                         .child("Loading subscriptions…"),
                 );
             }
-            if let Some(err) = session.star_subscriptions_error.as_ref() {
+            if let Some(err) = session.payments.star_subscriptions_error.as_ref() {
                 body = body.child(div().text_sm().child(err.clone()));
             }
-            if let Some(subs) = session.star_subscriptions.as_ref() {
-                if subs.subscriptions.is_empty() && !session.star_subscriptions_loading {
+            if let Some(subs) = session.payments.star_subscriptions.as_ref() {
+                if subs.subscriptions.is_empty() && !session.payments.star_subscriptions_loading {
                     body = body.child(
                         div()
                             .text_sm()
@@ -882,8 +884,8 @@ impl QuillApp {
                             .child("No active subscriptions."),
                     );
                 }
-                let mutating = session.star_subscriptions_mutating;
-                let confirming = session.subscription_cancel_confirm.clone();
+                let mutating = session.payments.star_subscriptions_mutating;
+                let confirming = session.payments.subscription_cancel_confirm.clone();
                 let chat_titles: std::collections::HashMap<i64, String> = session
                     .chats
                     .iter()
@@ -899,7 +901,7 @@ impl QuillApp {
                     ));
                 }
                 if !subs.next_offset.is_empty() {
-                    let label = if session.star_subscriptions_loading {
+                    let label = if session.payments.star_subscriptions_loading {
                         "Loading…"
                     } else {
                         "Load more"
@@ -908,7 +910,7 @@ impl QuillApp {
                         Button::new("subs-load-more")
                             .label(label)
                             .ghost()
-                            .disabled(session.star_subscriptions_loading)
+                            .disabled(session.payments.star_subscriptions_loading)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.load_more_subscriptions(cx);
                             })),
@@ -935,7 +937,7 @@ impl QuillApp {
     /// dialog and fetch the list (`getStarSubscriptions`).
     pub(super) fn open_subscriptions(&mut self, cx: &mut Context<Self>) {
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.subscriptions_open = true;
+            live.driver.session.payments.subscriptions_open = true;
             live.driver.maybe_fetch_star_subscriptions()
         });
         if !matches!(sent, Some(Ok(_))) {
@@ -947,8 +949,8 @@ impl QuillApp {
     /// Slice `parity:bots-payment-recurring`: close the Subscriptions dialog.
     pub(super) fn close_subscriptions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.subscriptions_open = false;
-            live.driver.session.subscription_cancel_confirm = None;
+            live.driver.session.payments.subscriptions_open = false;
+            live.driver.session.payments.subscription_cancel_confirm = None;
         }
         cx.notify();
     }
@@ -971,7 +973,7 @@ impl QuillApp {
     /// money action).
     pub(super) fn ask_cancel_subscription(&mut self, id: String, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.subscription_cancel_confirm = Some(id);
+            live.driver.session.payments.subscription_cancel_confirm = Some(id);
         }
         cx.notify();
     }
@@ -981,12 +983,12 @@ impl QuillApp {
     pub(super) fn confirm_cancel_subscription(&mut self, cx: &mut Context<Self>) {
         let id = self
             .session()
-            .and_then(|s| s.subscription_cancel_confirm.clone());
+            .and_then(|s| s.payments.subscription_cancel_confirm.clone());
         let Some(id) = id else {
             return;
         };
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.subscription_cancel_confirm = None;
+            live.driver.session.payments.subscription_cancel_confirm = None;
             live.driver.edit_star_subscription(&id, true)
         });
         if !matches!(sent, Some(Ok(_))) {
@@ -999,7 +1001,7 @@ impl QuillApp {
     /// cancel confirmation without touching the subscription.
     pub(super) fn dismiss_cancel_confirm(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.subscription_cancel_confirm = None;
+            live.driver.session.payments.subscription_cancel_confirm = None;
         }
         cx.notify();
     }
@@ -1198,14 +1200,14 @@ crate::ui::shell::register_dialogs! {
         3500,
         |app| {
             app.payments.dialog.is_some()
-                && app.session().is_some_and(|s| s.payment_form.is_some() || s.payment_form_loading)
+                && app.session().is_some_and(|s| s.payments.form.is_some() || s.payments.form_loading)
         },
         QuillApp::build_payment_dialog,
     ),
 
     PaymentReceipt => DialogSpec::new(
         3600,
-        |app| app.session().is_some_and(|s| s.payment_receipt_open),
+        |app| app.session().is_some_and(|s| s.payments.receipt_open),
         QuillApp::build_payment_receipt_dialog,
     ),
 
@@ -1213,7 +1215,7 @@ crate::ui::shell::register_dialogs! {
     // management dialog.
     Subscriptions => DialogSpec::new(
         3700,
-        |app| app.session().is_some_and(|s| s.subscriptions_open),
+        |app| app.session().is_some_and(|s| s.payments.subscriptions_open),
         QuillApp::build_subscriptions_dialog,
     ),
 }

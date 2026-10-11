@@ -91,7 +91,7 @@ fn create_rich_message_with_ai_round_trips_blocks() {
 #[test]
 fn create_rich_message_with_ai_sends_user_language_code() {
     let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = ai_harness();
-    driver.session.language_prefs.system_language_code = "es".to_string();
+    driver.session.settings.language_prefs.system_language_code = "es".to_string();
     driver
         .create_rich_message_with_ai(ChatId(7), "haiku about rain")
         .expect("create request");

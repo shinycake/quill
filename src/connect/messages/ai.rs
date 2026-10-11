@@ -122,7 +122,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Slice msg-richtext-ai-tools: `createRichMessageWithAi` (TDLib
     /// 1.8.67, `schema/td_api.tl:12168`). The composer text is the
     /// prompt; `language_code` is the user's app language
-    /// (`session.language_prefs.system_language_code`, e.g. "en") —
+    /// (`session.settings.language_prefs.system_language_code`, e.g. "en") —
     /// the schema documents no server-side default for it, so a real
     /// code is always sent. `add_emojis` is false — no pickers in
     /// this slice. The `richMessage` answer replaces the draft (the
@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = create_rich_message_with_ai(
             extra,
             prompt,
-            &self.session.language_prefs.system_language_code,
+            &self.session.settings.language_prefs.system_language_code,
             false,
         );
         if let Err(err) = self.sender.send_json(&json) {

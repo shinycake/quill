@@ -125,7 +125,7 @@ impl Session {
     /// installed sets; `None` drops the answer (the mode changed
     /// mid-flight).
     pub fn accept_sticker_suggestions(&mut self, stickers: Vec<StickerItem>) {
-        match self.media_prefs.sticker_suggest_mode {
+        match self.settings.media_prefs.sticker_suggest_mode {
             StickerSuggestMode::None => {
                 self.clear_sticker_suggestions();
             }

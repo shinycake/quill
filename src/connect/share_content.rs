@@ -127,6 +127,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let forwardable = self
             .session
             .stories
+            .stories
             .get(&(poster_chat_id.0, story_id))
             .is_some_and(|story| story.can_be_forwarded);
         if !self.share_target_ok(chat_id) || !forwardable {

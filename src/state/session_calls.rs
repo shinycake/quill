@@ -15,7 +15,7 @@ impl Session {
     ///   we never saw pending) still records a summary so the end
     ///   screen can show "Missed call".
     pub(crate) fn accept_call_update(&mut self, call: &ParsedCall) {
-        if let Some(active) = self.active_call.as_mut()
+        if let Some(active) = self.calls.active_call.as_mut()
             && active.id == call.id
         {
             if call.state.is_terminal() {
@@ -32,38 +32,42 @@ impl Session {
             }
             return;
         }
-        if self.active_call.is_some() {
+        if self.calls.active_call.is_some() {
             // A *different* call id while one is active. A terminal
             // update for the swap-pending/queued incoming call (the
             // caller hung up) clears it; the first pending incoming
             // raises the swap prompt; further ones auto-decline busy.
             let swap_id = self
-                .call_swap_pending
+                .calls
+                .swap_pending
                 .map(|(id, _, _)| id)
-                .or_else(|| self.call_swap_accept_queued.map(|(id, _)| id));
+                .or_else(|| self.calls.swap_accept_queued.map(|(id, _)| id));
             if Some(call.id) == swap_id {
                 if call.state.is_terminal() {
-                    self.call_swap_pending = None;
-                    self.call_swap_accept_queued = None;
+                    self.calls.swap_pending = None;
+                    self.calls.swap_accept_queued = None;
                 }
                 return;
             }
             if !call.is_outgoing
                 && matches!(call.state, CallState::Pending { .. })
                 && !self
-                    .call_busy_decline_queue
+                    .calls
+                    .busy_decline_queue
                     .iter()
                     .any(|(id, _, _)| *id == call.id)
             {
-                let note =
-                    if self.call_swap_pending.is_none() && self.call_swap_accept_queued.is_none() {
-                        self.call_swap_pending = Some((call.id, call.user_id, call.is_video));
-                        "incoming-while-active-swap-prompt"
-                    } else {
-                        self.call_busy_decline_queue
-                            .push((call.id, call.user_id, call.is_video));
-                        "incoming-while-active-busy-decline"
-                    };
+                let note = if self.calls.swap_pending.is_none()
+                    && self.calls.swap_accept_queued.is_none()
+                {
+                    self.calls.swap_pending = Some((call.id, call.user_id, call.is_video));
+                    "incoming-while-active-swap-prompt"
+                } else {
+                    self.calls
+                        .busy_decline_queue
+                        .push((call.id, call.user_id, call.is_video));
+                    "incoming-while-active-busy-decline"
+                };
                 self.diagnostics.record(Diagnostic {
                     category: "call",
                     type_name: Some("updateCall".to_string()),
@@ -75,10 +79,10 @@ impl Session {
             return;
         }
         if call.state.is_terminal() {
-            self.call_summary = Some(CallSummary::from_terminal(call, 0, false));
+            self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
             return;
         }
-        self.active_call = Some(ActiveCall {
+        self.calls.active_call = Some(ActiveCall {
             id: call.id,
             user_id: call.user_id,
             is_outgoing: call.is_outgoing,
@@ -98,8 +102,8 @@ impl Session {
             remote_screen: RemoteVideoState::Inactive,
             remote_audio_muted: false,
         });
-        self.call_summary = None;
-        self.call_error = None;
+        self.calls.summary = None;
+        self.calls.error = None;
     }
 
     /// Phase C2b: `updateNewCallSignalingData`. The driver also feeds these
@@ -107,7 +111,7 @@ impl Session {
     /// diagnostic record. Data for an unknown call id is dropped (never
     /// buffered without a tracked call).
     pub(crate) fn accept_call_signaling_data(&mut self, call_id: i32, data: Vec<u8>) {
-        let Some(active) = self.active_call.as_mut() else {
+        let Some(active) = self.calls.active_call.as_mut() else {
             return;
         };
         if active.id != call_id {
@@ -131,7 +135,7 @@ impl Session {
     /// record the summary shown on the call-end screen. Any queued
     /// signaling diagnostic data is dropped with the call.
     pub(crate) fn end_active_call(&mut self, call: &ParsedCall) {
-        let Some(active) = self.active_call.take() else {
+        let Some(active) = self.calls.active_call.take() else {
             return;
         };
         let duration_secs = active
@@ -145,13 +149,14 @@ impl Session {
         );
         summary.final_transport = active.transport;
         summary.muted = active.muted;
-        self.call_summary = Some(summary);
+        self.calls.summary = Some(summary);
         // The active call ended on its own — a still-open swap prompt
         // is moot (the incoming call now flows through the normal
         // incoming path). A queued post-swap accept survives: the
         // driver issues acceptCall once this terminal update lands.
-        self.call_swap_pending = None;
-        self.call_busy_decline_queue
+        self.calls.swap_pending = None;
+        self.calls
+            .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
     }
 
@@ -175,12 +180,17 @@ impl Session {
             // activates the call.
             if group_call.scheduled_start_date > 0 {
                 let tracked = self
+                    .calls
                     .active_group_call
                     .get_or_insert_with(|| ActiveGroupCall::fresh(group_call.id));
                 if tracked.id != group_call.id {
                     *tracked = ActiveGroupCall::fresh(group_call.id);
                 }
-                let tracked = self.active_group_call.as_mut().expect("just inserted");
+                let tracked = self
+                    .calls
+                    .active_group_call
+                    .as_mut()
+                    .expect("just inserted");
                 tracked.title = group_call.title.clone();
                 tracked.can_be_managed = group_call.can_be_managed;
                 tracked.is_owned = group_call.is_owned;
@@ -191,11 +201,12 @@ impl Session {
                 return;
             }
             if self
+                .calls
                 .active_group_call
                 .as_ref()
                 .is_some_and(|c| c.id == group_call.id)
             {
-                self.active_group_call = None;
+                self.calls.active_group_call = None;
                 self.diagnostics.record(Diagnostic {
                     category: "group_call",
                     type_name: Some("updateGroupCall".to_string()),
@@ -207,6 +218,7 @@ impl Session {
             return;
         }
         let tracked = self
+            .calls
             .active_group_call
             .get_or_insert_with(|| ActiveGroupCall::fresh(group_call.id));
         if tracked.id != group_call.id {
@@ -214,7 +226,11 @@ impl Session {
             // state; fresh updates repopulate it.
             *tracked = ActiveGroupCall::fresh(group_call.id);
         }
-        let tracked = self.active_group_call.as_mut().expect("just inserted");
+        let tracked = self
+            .calls
+            .active_group_call
+            .as_mut()
+            .expect("just inserted");
         tracked.title = group_call.title.clone();
         tracked.is_video_chat = group_call.is_video_chat;
         tracked.is_live_story = group_call.is_live_story;
@@ -252,7 +268,7 @@ impl Session {
             tracked.rejoin_attempts = 0;
             // Phase C2f: the failure is resolved — a stale
             // group-call error line would lie now.
-            self.group_call_error = None;
+            self.calls.group_call_error = None;
         }
         tracked.sort_participants();
     }
@@ -266,7 +282,7 @@ impl Session {
         group_call_id: i32,
         participant: &ParsedGroupCallParticipant,
     ) {
-        let Some(tracked) = self.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.active_group_call.as_mut() else {
             return;
         };
         if tracked.id != group_call_id {
@@ -297,7 +313,7 @@ impl Session {
         group_call_id: i32,
         participant_user_ids: &[i64],
     ) {
-        let Some(tracked) = self.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.active_group_call.as_mut() else {
             return;
         };
         if tracked.id != group_call_id {
@@ -318,7 +334,7 @@ impl Session {
         group_call_id: i32,
         message: &ParsedGroupCallMessage,
     ) {
-        let Some(tracked) = self.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.active_group_call.as_mut() else {
             return;
         };
         if tracked.id != group_call_id {
@@ -344,7 +360,7 @@ impl Session {
         group_call_id: i32,
         message_ids: &[i32],
     ) {
-        let Some(tracked) = self.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.active_group_call.as_mut() else {
             return;
         };
         if tracked.id != group_call_id {
@@ -363,7 +379,7 @@ impl Session {
         generation: i32,
         emojis: &[String],
     ) {
-        let Some(tracked) = self.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.active_group_call.as_mut() else {
             return;
         };
         if tracked.id != group_call_id {
@@ -406,7 +422,7 @@ impl Session {
                 .filter(|vc| vc.group_call_id == group_call_id)
                 .and_then(|vc| vc.default_participant_id)
         });
-        if let Some(tracked) = self.active_group_call.as_mut()
+        if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
             tracked.join_as = pick_join_as(&senders, tracked.join_as, default);
@@ -416,7 +432,7 @@ impl Session {
 
     /// Choose the identity for the next join (also `None` = yourself).
     pub fn set_group_call_join_as(&mut self, sender: Option<MessageSender>) {
-        if let Some(tracked) = self.active_group_call.as_mut() {
+        if let Some(tracked) = self.calls.active_group_call.as_mut() {
             tracked.join_as = sender;
         }
     }
@@ -424,7 +440,7 @@ impl Session {
     /// Phase C3a: drop the tracked group call after the local user
     /// leaves or ends it.
     pub fn leave_group_call_local(&mut self) {
-        self.active_group_call = None;
+        self.calls.active_group_call = None;
     }
 
     /// Phase C3a: flip the local-only self-mute state. There is no
@@ -432,7 +448,7 @@ impl Session {
     /// parameters, and no audio path exists yet (C2) — the UI labels
     /// this honestly as local-only.
     pub fn set_group_call_self_muted(&mut self, muted: bool) {
-        if let Some(tracked) = self.active_group_call.as_mut() {
+        if let Some(tracked) = self.calls.active_group_call.as_mut() {
             tracked.is_muted_self = muted;
         }
     }
@@ -440,7 +456,7 @@ impl Session {
     /// Phase C3a: clear the `reconnecting` flag once a rejoin has been
     /// issued by the driver.
     pub fn clear_group_call_reconnecting(&mut self) {
-        if let Some(tracked) = self.active_group_call.as_mut() {
+        if let Some(tracked) = self.calls.active_group_call.as_mut() {
             tracked.reconnecting = false;
         }
     }
@@ -449,7 +465,7 @@ impl Session {
     /// the tracked call. Phase C2g consumes it in the driver pump to
     /// finish the native group handshake.
     pub fn set_group_call_join_payload(&mut self, group_call_id: i32, payload: String) {
-        if let Some(tracked) = self.active_group_call.as_mut()
+        if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
             tracked.join_payload = payload;
@@ -460,7 +476,7 @@ impl Session {
     /// response on the tracked call; the driver pump consumes it to
     /// finish the presentation handshake.
     pub fn set_group_call_screen_share_answer(&mut self, group_call_id: i32, payload: String) {
-        if let Some(tracked) = self.active_group_call.as_mut()
+        if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
             tracked.screen_share_answer = payload;
@@ -470,7 +486,7 @@ impl Session {
     /// Phase C3a: store the `getVideoChatInviteLink` `HttpUrl` response
     /// on the tracked call.
     pub fn set_group_call_invite_link(&mut self, group_call_id: i32, link: String) {
-        if let Some(tracked) = self.active_group_call.as_mut()
+        if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
             tracked.invite_link = Some(link);

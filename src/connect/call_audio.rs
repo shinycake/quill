@@ -183,6 +183,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if let Some(call) = self
                 .session
+                .calls
                 .active_call
                 .as_mut()
                 .filter(|call| call.id == call_id)
@@ -196,15 +197,20 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// your speaking state changes. Called from the driver pump.
     pub(crate) fn pump_call_audio(&mut self) -> Result<(), ConnectSendError> {
         self.drain_remote_audio_state();
-        let wanted = self.session.active_group_call.as_ref().and_then(tap_wanted);
+        let wanted = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .and_then(tap_wanted);
         let Some((group_call_id, audio_source)) = wanted else {
             let closing_speaking = self.call_audio.is_open() || self.call_audio.speaking;
             self.call_audio.close();
             self.call_audio.speaking = false;
             if self.call_audio.tracker.reset() && closing_speaking {
                 // You stopped being able to speak while marked speaking.
-                let group_call_id = self.session.active_group_call.as_ref().map(|c| c.id);
-                let audio_source = self.session.active_group_call.as_ref().and_then(|c| {
+                let group_call_id = self.session.calls.active_group_call.as_ref().map(|c| c.id);
+                let audio_source = self.session.calls.active_group_call.as_ref().and_then(|c| {
                     c.participants
                         .iter()
                         .find(|p| p.is_current_user)

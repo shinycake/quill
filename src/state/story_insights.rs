@@ -87,11 +87,12 @@ impl Session {
     /// has; another story starts clean.
     pub fn begin_story_insights(&mut self, chat_id: i64, story_id: i32) {
         let same = self
-            .story_insights
+            .stories
+            .insights
             .as_ref()
             .is_some_and(|state| state.chat_id == chat_id && state.story_id == story_id);
         if !same {
-            self.story_insights = Some(StoryInsightsState {
+            self.stories.insights = Some(StoryInsightsState {
                 chat_id,
                 story_id,
                 ..Default::default()
@@ -100,12 +101,13 @@ impl Session {
     }
 
     pub fn clear_story_insights(&mut self) {
-        self.story_insights = None;
+        self.stories.insights = None;
     }
 
     fn insights_for(&mut self, pending: &PendingRequest) -> Option<&mut StoryInsightsState> {
         let (chat_id, story_id) = (pending.chat_id?, pending.story_id?);
-        self.story_insights
+        self.stories
+            .insights
             .as_mut()
             .filter(|state| state.chat_id == chat_id.0 && state.story_id == story_id)
     }
@@ -154,7 +156,7 @@ impl Session {
 
     /// Start a new public story search; results of an earlier search go.
     pub fn begin_story_search(&mut self, query: StorySearchQuery) {
-        self.story_search = Some(StorySearchState {
+        self.stories.search = Some(StorySearchState {
             query,
             stories: Vec::new(),
             total_count: 0,
@@ -166,14 +168,14 @@ impl Session {
 
     /// Mark the next page of the open search as requested.
     pub fn story_search_page_requested(&mut self) {
-        if let Some(search) = self.story_search.as_mut() {
+        if let Some(search) = self.stories.search.as_mut() {
             search.loading = true;
             search.error = None;
         }
     }
 
     pub fn clear_story_search(&mut self) {
-        self.story_search = None;
+        self.stories.search = None;
     }
 
     pub(crate) fn accept_found_stories(&mut self, found: FoundStoriesView) {
@@ -184,9 +186,11 @@ impl Session {
             .map(|story| (story.poster_chat_id, story.id))
             .collect();
         for story in found.stories {
-            self.stories.insert((story.poster_chat_id, story.id), story);
+            self.stories
+                .stories
+                .insert((story.poster_chat_id, story.id), story);
         }
-        let Some(search) = self.story_search.as_mut() else {
+        let Some(search) = self.stories.search.as_mut() else {
             return;
         };
         search.loading = false;
@@ -201,7 +205,7 @@ impl Session {
     }
 
     pub(crate) fn fail_story_search(&mut self, message: String) {
-        if let Some(search) = self.story_search.as_mut() {
+        if let Some(search) = self.stories.search.as_mut() {
             search.loading = false;
             search.error = Some(message);
         }

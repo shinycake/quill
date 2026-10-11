@@ -24,7 +24,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.hub.tx_loaded || self.session.hub.tx_loading {
+        if self.session.payments.hub.tx_loaded || self.session.payments.hub.tx_loading {
             return Ok(None);
         }
         self.fetch_star_transactions_page(false).map(Some)
@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.hub.tx_offset.is_empty() || self.session.hub.tx_loading {
+        if self.session.payments.hub.tx_offset.is_empty() || self.session.payments.hub.tx_loading {
             return Ok(None);
         }
         self.fetch_star_transactions_page(true).map(Some)
@@ -49,10 +49,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.hub.filter == filter && self.session.hub.tx_loaded {
+        if self.session.payments.hub.filter == filter && self.session.payments.hub.tx_loaded {
             return Ok(None);
         }
-        let hub = &mut self.session.hub;
+        let hub = &mut self.session.payments.hub;
         hub.filter = filter;
         hub.transactions.clear();
         hub.tx_offset.clear();
@@ -71,21 +71,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             .my_user_id
             .ok_or(ConnectSendError::InvalidRequest)?;
         let offset = if append {
-            self.session.hub.tx_offset.clone()
+            self.session.payments.hub.tx_offset.clone()
         } else {
             String::new()
         };
-        let filter = self.session.hub.filter;
+        let filter = self.session.payments.hub.filter;
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append }),
             None,
         );
-        self.session.hub.tx_loading = true;
-        self.session.hub.tx_error = None;
-        self.session.hub.tx_request = extra.0;
+        self.session.payments.hub.tx_loading = true;
+        self.session.payments.hub.tx_error = None;
+        self.session.payments.hub.tx_request = extra.0;
         let json = get_star_transactions(extra, my_user_id, filter, &offset, TX_PAGE);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.hub.tx_loading = false;
+            self.session.payments.hub.tx_loading = false;
             return Err(err);
         }
         Ok(extra)
@@ -100,7 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let hub = &mut self.session.hub;
+        let hub = &mut self.session.payments.hub;
         hub.gifts_open = true;
         hub.gifts_owner = Some(owner);
         hub.gifts.clear();
@@ -120,7 +120,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.hub.gifts_offset.is_empty() || self.session.hub.gifts_loading {
+        if self.session.payments.hub.gifts_offset.is_empty()
+            || self.session.payments.hub.gifts_loading
+        {
             return Ok(None);
         }
         self.fetch_received_gifts_page(true).map(Some)
@@ -129,11 +131,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn fetch_received_gifts_page(&mut self, append: bool) -> Result<RequestId, ConnectSendError> {
         let owner = self
             .session
+            .payments
             .hub
             .gifts_owner
             .ok_or(ConnectSendError::InvalidRequest)?;
         let offset = if append {
-            self.session.hub.gifts_offset.clone()
+            self.session.payments.hub.gifts_offset.clone()
         } else {
             String::new()
         };
@@ -141,11 +144,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }),
             None,
         );
-        self.session.hub.gifts_loading = true;
-        self.session.hub.gifts_request = extra.0;
+        self.session.payments.hub.gifts_loading = true;
+        self.session.payments.hub.gifts_request = extra.0;
         let json = get_received_gifts(extra, owner, &offset, GIFT_PAGE);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.hub.gifts_loading = false;
+            self.session.payments.hub.gifts_loading = false;
             return Err(err);
         }
         Ok(extra)
@@ -156,10 +159,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_received_gifts_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.hub.gifts_stale || self.session.hub.gifts_owner.is_none() {
+        if !self.session.payments.hub.gifts_stale || self.session.payments.hub.gifts_owner.is_none()
+        {
             return Ok(None);
         }
-        self.session.hub.gifts_stale = false;
+        self.session.payments.hub.gifts_stale = false;
         self.fetch_received_gifts_page(false).map(Some)
     }
 
@@ -170,10 +174,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         saved: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.hub.gift_mutating
-            || !self.session.hub.gifts_are_mine(self.session.my_user_id)
+            || self.session.payments.hub.gift_mutating
             || !self
                 .session
+                .payments
+                .hub
+                .gifts_are_mine(self.session.my_user_id)
+            || !self
+                .session
+                .payments
                 .hub
                 .gifts
                 .iter()
@@ -185,11 +194,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved }),
             None,
         );
-        self.session.hub.gift_mutating = true;
-        self.session.hub.gifts_error = None;
+        self.session.payments.hub.gift_mutating = true;
+        self.session.payments.hub.gifts_error = None;
         let json = toggle_gift_is_saved(extra, received_gift_id, saved);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.hub.gift_mutating = false;
+            self.session.payments.hub.gift_mutating = false;
             return Err(err);
         }
         Ok(extra)
@@ -203,23 +212,28 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let convertible = self
             .session
+            .payments
             .hub
             .gifts
             .iter()
             .any(|gift| gift.id == received_gift_id && gift.can_convert());
         if !self.chats_path_active()
-            || self.session.hub.gift_mutating
-            || !self.session.hub.gifts_are_mine(self.session.my_user_id)
+            || self.session.payments.hub.gift_mutating
+            || !self
+                .session
+                .payments
+                .hub
+                .gifts_are_mine(self.session.my_user_id)
             || !convertible
         {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::SellGift, None);
-        self.session.hub.gift_mutating = true;
-        self.session.hub.gifts_error = None;
+        self.session.payments.hub.gift_mutating = true;
+        self.session.payments.hub.gifts_error = None;
         let json = sell_gift(extra, received_gift_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.hub.gift_mutating = false;
+            self.session.payments.hub.gift_mutating = false;
             return Err(err);
         }
         Ok(extra)
@@ -230,16 +244,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.hub.premium.is_some() || self.session.hub.premium_loading {
+        if self.session.payments.hub.premium.is_some() || self.session.payments.hub.premium_loading
+        {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetPremiumFeatures, None);
-        self.session.hub.premium_loading = true;
-        self.session.hub.premium_error = None;
+        self.session.payments.hub.premium_loading = true;
+        self.session.payments.hub.premium_error = None;
         if let Err(err) = self.send_json_request(extra, &get_premium_features(extra)) {
-            self.session.hub.premium_loading = false;
+            self.session.payments.hub.premium_loading = false;
             return Err(err);
         }
         let state_extra = self.session.request(RequestPurpose::GetPremiumState, None);

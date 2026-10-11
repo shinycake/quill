@@ -111,7 +111,7 @@ impl Render for QuillApp {
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in
         // `poll_live`: prefill needs a `&mut Window` for the inputs.)
-        let payment_form = self.session().and_then(|s| s.payment_form.clone());
+        let payment_form = self.session().and_then(|s| s.payments.form.clone());
         if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form)
             && !dialog.prefilled
         {
@@ -179,7 +179,7 @@ impl Render for QuillApp {
         if let Some((chat_id, story_id)) = self.chat_list.pending_story_open {
             let ready = self
                 .session()
-                .is_some_and(|s| s.stories.contains_key(&(chat_id, story_id)));
+                .is_some_and(|s| s.stories.stories.contains_key(&(chat_id, story_id)));
             if ready {
                 self.chat_list.pending_story_open = None;
                 self.rebuild_story_viewer(ChatId(chat_id), story_id, cx);
@@ -200,7 +200,7 @@ impl Render for QuillApp {
         // chats whose active stories should be refreshed (an own story
         // posted from another client appears in the tray this way).
         if let Some(live) = self.live.as_mut() {
-            let chats: Vec<i64> = live.driver.session.story_tray_refresh.drain().collect();
+            let chats: Vec<i64> = live.driver.session.stories.tray_refresh.drain().collect();
             for chat_id in chats {
                 let _ = live.driver.get_chat_active_stories(ChatId(chat_id));
             }
@@ -210,7 +210,8 @@ impl Render for QuillApp {
         // composer. Eligibility is re-checked on every Post press.
         if self.stories.composer.check_sent {
             let answered = self.session().is_some_and(|session| {
-                session.story_post.eligibility.is_some() || session.story_post.check_error.is_some()
+                session.stories.post.eligibility.is_some()
+                    || session.stories.post.check_error.is_some()
             });
             if answered {
                 self.stories.composer.check_sent = false;
@@ -222,7 +223,7 @@ impl Render for QuillApp {
         // owns the busy state again and the flag clears.
         if self.stories.composer.post_sent
             && self.session().is_some_and(|session| {
-                !matches!(session.story_post.outcome, StoryPostOutcome::None)
+                !matches!(session.stories.post.outcome, StoryPostOutcome::None)
             })
         {
             self.stories.composer.post_sent = false;
@@ -234,10 +235,10 @@ impl Render for QuillApp {
         if self.stories.composer.save_sent
             && self
                 .session()
-                .is_some_and(|session| !session.story_manage.pending)
+                .is_some_and(|session| !session.stories.manage.pending)
         {
             self.stories.composer.save_sent = false;
-            let failed = self.session().and_then(|s| s.story_manage.error.clone());
+            let failed = self.session().and_then(|s| s.stories.manage.error.clone());
             match failed {
                 Some(error) => self.stories.composer.local_error = Some(error),
                 None => self.close_story_composer(cx),
@@ -246,20 +247,20 @@ impl Render for QuillApp {
         // Phase 9.5: the viewer cover editor / privacy editor sent a
         // management call — once `story_manage.pending` clears, close
         // the panel on success or leave it open showing the error.
-        if self.stories.cover_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
+        if self.stories.cover_sent && self.session().is_some_and(|s| !s.stories.manage.pending) {
             self.stories.cover_sent = false;
             if self
                 .session()
-                .is_some_and(|s| s.story_manage.error.is_none())
+                .is_some_and(|s| s.stories.manage.error.is_none())
             {
                 self.stories.cover_target = None;
             }
         }
-        if self.stories.privacy_sent && self.session().is_some_and(|s| !s.story_manage.pending) {
+        if self.stories.privacy_sent && self.session().is_some_and(|s| !s.stories.manage.pending) {
             self.stories.privacy_sent = false;
             if self
                 .session()
-                .is_some_and(|s| s.story_manage.error.is_none())
+                .is_some_and(|s| s.stories.manage.error.is_none())
             {
                 self.stories.privacy_edit = None;
             }
@@ -269,6 +270,7 @@ impl Render for QuillApp {
         let current_deleted = self.stories.viewer.current().is_some_and(|item| {
             self.session().is_some_and(|session| {
                 !session
+                    .stories
                     .stories
                     .contains_key(&(item.chat_id.0, item.story_id))
             })

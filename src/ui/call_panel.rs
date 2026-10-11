@@ -164,8 +164,8 @@ impl QuillApp {
     /// (and no ended call still lingering).
     pub(super) fn call_snapshot(&mut self) -> Option<CallSnap> {
         let session = self.session()?;
-        let call = session.active_call.clone();
-        let summary = session.call_summary.clone();
+        let call = session.calls.active_call.clone();
+        let summary = session.calls.summary.clone();
         let (user_id, is_video) = match (&call, &summary) {
             (Some(call), _) => (call.user_id, call.is_video),
             (None, Some(summary)) => (summary.user_id, summary.is_video),
@@ -287,7 +287,7 @@ impl QuillApp {
     /// shut if you closed it, and lingers briefly on "call ended".
     pub(super) fn sync_call_window(&mut self, cx: &mut Context<Self>) {
         let (call_id, incoming, ended, busy) = match self.session() {
-            Some(session) => match (&session.active_call, &session.call_summary) {
+            Some(session) => match (&session.calls.active_call, &session.calls.summary) {
                 (Some(call), _) => (
                     Some(call.id),
                     matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing,
@@ -399,7 +399,7 @@ impl QuillApp {
     /// hang up. A click anywhere else brings the call window back.
     pub(super) fn call_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let call = session.active_call.as_ref()?;
+        let call = session.calls.active_call.as_ref()?;
         let name = session
             .user(call.user_id)
             .map(|u| u.display_name())

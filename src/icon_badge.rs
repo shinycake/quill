@@ -69,7 +69,7 @@ fn trace(line: &str) {
 /// Call from the UI thread (the 1s tray timer); emits only on change.
 pub fn sync_icon_badge(session: Option<&Session>) {
     let unread = session
-        .map(|s| tray::badge_count(s, &s.badge_prefs))
+        .map(|s| tray::badge_count(s, &s.settings.badge_prefs))
         .unwrap_or(0);
     LAST_SENT.with(|last| {
         if last.get() == Some(unread) {

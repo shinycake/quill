@@ -101,21 +101,21 @@ impl Session {
         session: Option<UnconfirmedLogin>,
         count: i32,
     ) {
-        self.notices.unconfirmed = session;
-        self.notices.unconfirmed_count = count;
+        self.settings.notices.unconfirmed = session;
+        self.settings.notices.unconfirmed_count = count;
         if count == 0 {
-            self.notices.unconfirmed_entries.clear();
+            self.settings.notices.unconfirmed_entries.clear();
         } else {
             // The update carries no session id: refetch the list; its
             // answer fills `unconfirmed_entries`.
-            self.sessions_stale = true;
+            self.settings.sessions_stale = true;
         }
     }
 
     /// `getActiveSessions` answered: resolve the sessions behind the
     /// alert from `is_unconfirmed`.
     pub(crate) fn resolve_unconfirmed_entries(&mut self, sessions: &[ParsedSession]) {
-        self.notices.unconfirmed_entries = sessions
+        self.settings.notices.unconfirmed_entries = sessions
             .iter()
             .filter(|session| session.is_unconfirmed)
             .map(|session| UnconfirmedEntry {
@@ -132,60 +132,65 @@ impl Session {
         if kind.starts_with("API_WITHDRAWAL_FEATURE_DISABLED_") || text.trim().is_empty() {
             return;
         }
-        self.notices.service.push_back(ServiceNotice { kind, text });
+        self.settings
+            .notices
+            .service
+            .push_back(ServiceNotice { kind, text });
     }
 
     /// The front popup is dismissed.
     pub fn dismiss_service_notice(&mut self) {
-        self.notices.service.pop_front();
+        self.settings.notices.service.pop_front();
     }
 
     /// One `confirmSession` / `terminateSession` finished.
     pub(crate) fn finish_login_review(&mut self, confirmed: bool, error: Option<String>) {
-        self.notices.review_pending = self.notices.review_pending.saturating_sub(1);
+        self.settings.notices.review_pending =
+            self.settings.notices.review_pending.saturating_sub(1);
         if let Some(error) = error {
-            self.notices.review_error = Some(error);
+            self.settings.notices.review_error = Some(error);
         }
-        if self.notices.review_pending > 0 {
+        if self.settings.notices.review_pending > 0 {
             return;
         }
-        if self.notices.review_error.is_none() {
+        if self.settings.notices.review_error.is_none() {
             let places = if confirmed {
                 Vec::new()
             } else {
-                self.notices
+                self.settings
+                    .notices
                     .unconfirmed_entries
                     .iter()
                     .map(|entry| unconfirmed_place(&entry.device, &entry.location))
                     .collect()
             };
-            self.notices.review_outcome = Some(if confirmed {
+            self.settings.notices.review_outcome = Some(if confirmed {
                 LoginReview::Allowed
             } else {
                 LoginReview::Prevented { places }
             });
-            self.notices.unconfirmed = None;
-            self.notices.unconfirmed_count = 0;
-            self.notices.unconfirmed_entries.clear();
+            self.settings.notices.unconfirmed = None;
+            self.settings.notices.unconfirmed_count = 0;
+            self.settings.notices.unconfirmed_entries.clear();
         }
-        self.sessions_stale = true;
+        self.settings.sessions_stale = true;
     }
 
     pub(crate) fn apply_email_code_info(&mut self, op: PasswordOp, pattern: String) {
         match op {
             PasswordOp::RequestRecoveryCode => {
-                self.twofa_flow.recovery_code_sent_to = Some(pattern);
+                self.auth_state.twofa_flow.recovery_code_sent_to = Some(pattern);
             }
             PasswordOp::SetLoginEmail => {
-                self.twofa_flow.login_email_code_sent_to = Some(pattern);
+                self.auth_state.twofa_flow.login_email_code_sent_to = Some(pattern);
             }
             _ => {}
         }
     }
 
     pub(crate) fn apply_reset_password_result(&mut self, outcome: ResetPasswordOutcome) {
-        self.twofa_flow.recovery_code_sent_to = None;
-        self.twofa_flow.notice = Some(match outcome {
+        self.auth_state.twofa_flow.recovery_code_sent_to = None;
+        self.auth_state.twofa_flow.notice = Some(match outcome {
             ResetPasswordOutcome::Ok => TwofaNotice::PasswordRemoved,
             ResetPasswordOutcome::Pending { reset_date } => {
                 TwofaNotice::ResetPending { reset_date }
@@ -195,23 +200,27 @@ impl Session {
             }
         });
         // The pending date (or the removed password) lives in the state.
-        self.twofa_flow.refetch = true;
+        self.auth_state.twofa_flow.refetch = true;
     }
 
     /// A `PasswordStateOp` answered `passwordState`.
     pub(crate) fn apply_password_state_op(&mut self, op: PasswordOp) {
         match op {
             PasswordOp::RecoverPassword => {
-                self.twofa_flow.recovery_code_sent_to = None;
-                let still_on = self.password_state.as_ref().is_some_and(|s| s.has_password);
-                self.twofa_flow.notice = Some(if still_on {
+                self.auth_state.twofa_flow.recovery_code_sent_to = None;
+                let still_on = self
+                    .auth_state
+                    .password_state
+                    .as_ref()
+                    .is_some_and(|s| s.has_password);
+                self.auth_state.twofa_flow.notice = Some(if still_on {
                     TwofaNotice::PasswordRecovered
                 } else {
                     TwofaNotice::PasswordRemoved
                 });
             }
             PasswordOp::CheckEmailCode => {
-                self.twofa_flow.notice = Some(TwofaNotice::RecoveryEmailConfirmed);
+                self.auth_state.twofa_flow.notice = Some(TwofaNotice::RecoveryEmailConfirmed);
             }
             _ => {}
         }
@@ -219,17 +228,17 @@ impl Session {
 
     /// A `PasswordStateOp` answered `ok`.
     pub(crate) fn apply_password_op_ok(&mut self, op: PasswordOp) {
-        self.password_state_loading = false;
-        self.password_op_error = None;
+        self.auth_state.password_state_loading = false;
+        self.auth_state.password_op_error = None;
         match op {
             PasswordOp::CancelPasswordReset => {
-                self.twofa_flow.notice = Some(TwofaNotice::ResetCancelled);
-                self.twofa_flow.refetch = true;
+                self.auth_state.twofa_flow.notice = Some(TwofaNotice::ResetCancelled);
+                self.auth_state.twofa_flow.refetch = true;
             }
             PasswordOp::CheckLoginEmailCode => {
-                self.twofa_flow.login_email_code_sent_to = None;
-                self.twofa_flow.notice = Some(TwofaNotice::LoginEmailChanged);
-                self.twofa_flow.refetch = true;
+                self.auth_state.twofa_flow.login_email_code_sent_to = None;
+                self.auth_state.twofa_flow.notice = Some(TwofaNotice::LoginEmailChanged);
+                self.auth_state.twofa_flow.refetch = true;
             }
             _ => {}
         }

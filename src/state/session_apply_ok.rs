@@ -30,10 +30,10 @@ impl Session {
                 scheduling,
             })) => self.finish_scheduling_edit(message_id, scheduling),
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                self.recent_calls.clear();
-                self.recent_calls_offset.clear();
-                self.recent_calls_error = false;
-                self.recent_calls_clearing = false;
+                self.calls.recent_calls.clear();
+                self.calls.recent_calls_offset.clear();
+                self.calls.recent_calls_error = false;
+                self.calls.recent_calls_clearing = false;
             }
             Some(RequestPurpose::AddProfileAudio) => {
                 self.message_action_note = Some("saved to your profile".into());
@@ -95,9 +95,9 @@ impl Session {
                     | RequestPurpose::TerminateAllOtherSessions
             )
         ) {
-            self.sessions_stale = true;
-            self.sessions_mutating = false;
-            self.sessions_error = None;
+            self.settings.sessions_stale = true;
+            self.settings.sessions_mutating = false;
+            self.settings.sessions_error = None;
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
         // `toggleSessionCanAcceptCalls` succeeded — same stale
@@ -110,16 +110,16 @@ impl Session {
                     | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. })
             )
         ) {
-            self.sessions_stale = true;
-            self.sessions_mutating = false;
-            self.sessions_error = None;
+            self.settings.sessions_stale = true;
+            self.settings.sessions_mutating = false;
+            self.settings.sessions_error = None;
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.default_auto_delete_secs = Some(seconds);
-            self.default_auto_delete_busy = false;
-            self.default_auto_delete_error = None;
+            self.settings.default_auto_delete_secs = Some(seconds);
+            self.settings.default_auto_delete_busy = false;
+            self.settings.default_auto_delete_error = None;
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -132,16 +132,16 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.account_ttl_days = Some(days);
-            self.account_mutating = false;
-            self.account_error = None;
+            self.settings.account_ttl_days = Some(days);
+            self.settings.account_mutating = false;
+            self.settings.account_error = None;
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::DeleteAccount)
         ) {
-            self.account_mutating = false;
-            self.account_error = None;
+            self.settings.account_mutating = false;
+            self.settings.account_error = None;
         }
         // Slice A8: a `checkPhoneNumberCode` succeeded — the
         // server completed the number change of the number the
@@ -155,16 +155,16 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::CheckPhoneNumberCode)
         ) {
-            if let Some(target) = self.change_number_phone.clone()
+            if let Some(target) = self.auth_state.change_number_phone.clone()
                 && let Some(my_id) = self.my_user_id
                 && let Some(me) = self.users.get_mut(&my_id)
             {
                 me.phone_number = target;
             }
-            self.change_number_phone = None;
-            self.change_number_timeout = None;
-            self.change_number_checking = false;
-            self.change_number_error = None;
+            self.auth_state.change_number_phone = None;
+            self.auth_state.change_number_timeout = None;
+            self.auth_state.change_number_checking = false;
+            self.auth_state.change_number_error = None;
             // A8: drop any stale in-flight send/resend purposes —
             // a late resend answer must not resurrect the
             // completed flow (re-write phone/timeout or park a
@@ -183,10 +183,10 @@ impl Session {
             settings,
         })) = pending.map(|p| p.purpose)
         {
-            *self.data_storage.for_network_mut(network) = settings;
-            self.data_storage.seeded = true;
-            self.data_storage_error = None;
-            self.data_storage_dirty = true;
+            *self.settings.data_storage.for_network_mut(network) = settings;
+            self.settings.data_storage.seeded = true;
+            self.settings.data_storage_error = None;
+            self.settings.data_storage_dirty = true;
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
@@ -201,9 +201,9 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AcceptTermsOfService)
         ) {
-            self.notices.terms = None;
-            self.notices.terms_in_flight = false;
-            self.notices.terms_error = None;
+            self.settings.notices.terms = None;
+            self.settings.notices.terms_in_flight = false;
+            self.settings.notices.terms_error = None;
         }
         // Batch 6: a 2FA step answered `ok` (cancel reset, login email
         // code check).
@@ -218,7 +218,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::SetStorageOption)
         ) {
-            self.data_storage_error = None;
+            self.settings.data_storage_error = None;
         }
         // Slice A4: a `disconnectWebsite` /
         // `disconnectAllWebsites` succeeded — same stale pattern
@@ -230,9 +230,9 @@ impl Session {
                     | RequestPurpose::DisconnectAllWebsites
             )
         ) {
-            self.websites_stale = true;
-            self.websites_mutating = false;
-            self.websites_error = None;
+            self.settings.websites_stale = true;
+            self.settings.websites_mutating = false;
+            self.settings.websites_error = None;
         }
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` succeeded —
@@ -242,26 +242,26 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
         ) {
-            self.star_subscriptions_stale = true;
-            self.star_subscriptions_mutating = false;
-            self.star_subscriptions_error = None;
+            self.payments.star_subscriptions_stale = true;
+            self.payments.star_subscriptions_mutating = false;
+            self.payments.star_subscriptions_error = None;
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
         // the server (the connect driver does it on the same ingest) and,
         // after a conversion, the Stars balance.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
-                self.hub.gift_mutating = false;
-                self.hub.gifts_error = None;
-                self.hub.gifts_stale = true;
+                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gifts_error = None;
+                self.payments.hub.gifts_stale = true;
             }
             Some(RequestPurpose::SellGift) => {
-                self.hub.gift_mutating = false;
-                self.hub.gifts_error = None;
-                self.hub.gift_convert_confirm = None;
-                self.hub.gift_selected = None;
-                self.hub.gifts_stale = true;
-                self.hub.tx_loaded = false;
+                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gifts_error = None;
+                self.payments.hub.gift_convert_confirm = None;
+                self.payments.hub.gift_selected = None;
+                self.payments.hub.gifts_stale = true;
+                self.payments.hub.tx_loaded = false;
             }
             _ => {}
         }
@@ -331,6 +331,7 @@ impl Session {
                 RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id })
                 | RequestPurpose::Calls(CallsPurpose::EndGroupCall { group_call_id }),
             ) if self
+                .calls
                 .active_group_call
                 .as_ref()
                 .is_some_and(|c| c.id == group_call_id) =>
@@ -342,11 +343,12 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::RevokeVideoChatInviteLink {
                 group_call_id,
             })) if self
+                .calls
                 .active_group_call
                 .as_ref()
                 .is_some_and(|c| c.id == group_call_id) =>
             {
-                if let Some(tracked) = self.active_group_call.as_mut() {
+                if let Some(tracked) = self.calls.active_group_call.as_mut() {
                     tracked.invite_link = None;
                 }
             }
@@ -402,7 +404,7 @@ impl Session {
                 | RequestPurpose::EditStoryCover
                 | RequestPurpose::SetStoryPrivacySettings,
             ) => {
-                self.story_manage.pending = false;
+                self.stories.manage.pending = false;
             }
             // Phase 9.7: `reorderStoryAlbums` confirmed — apply
             // the sent album order (correlated via
@@ -411,7 +413,7 @@ impl Session {
             Some(RequestPurpose::ReorderStoryAlbums) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
                     && let Some(order) = pending.and_then(|p| p.story_ids.clone())
-                    && let Some(albums) = self.story_albums.get_mut(&chat_id.0)
+                    && let Some(albums) = self.stories.albums.get_mut(&chat_id.0)
                 {
                     let mut reordered = Vec::with_capacity(albums.len());
                     for id in &order {
@@ -436,10 +438,10 @@ impl Session {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
                     && let Some(album_id) = pending.and_then(|p| p.story_album_id)
                 {
-                    if let Some(albums) = self.story_albums.get_mut(&chat_id.0) {
+                    if let Some(albums) = self.stories.albums.get_mut(&chat_id.0) {
                         albums.retain(|a| a.id != album_id);
                     }
-                    self.story_album_stories.remove(&(chat_id.0, album_id));
+                    self.stories.album_stories.remove(&(chat_id.0, album_id));
                 }
                 self.succeed_story_page_op(RequestPurpose::DeleteStoryAlbum);
             }
@@ -451,7 +453,8 @@ impl Session {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
                     && let Some(ids) = pending.and_then(|p| p.story_ids.clone())
                 {
-                    self.chat_page_stories
+                    self.stories
+                        .chat_page_stories
                         .entry(chat_id.0)
                         .or_default()
                         .pinned_story_ids = ids;
@@ -461,8 +464,8 @@ impl Session {
             // B14: `setCloseFriends` confirmed — the staged ids are the
             // new list.
             Some(RequestPurpose::SetCloseFriends) => {
-                if let Some(ids) = self.close_friends_pending.take() {
-                    self.close_friends = Some(ids);
+                if let Some(ids) = self.stories.close_friends_pending.take() {
+                    self.stories.close_friends = Some(ids);
                 }
                 self.succeed_story_page_op(RequestPurpose::SetCloseFriends);
             }
@@ -480,7 +483,7 @@ impl Session {
         // Phase C2i: `sendCallLog` confirmed — the log upload for
         // the ended call succeeded.
         if let Some(RequestPurpose::SendCallLog) = pending.map(|p| p.purpose)
-            && let Some(summary) = self.call_summary.as_mut()
+            && let Some(summary) = self.calls.summary.as_mut()
         {
             summary.log_sent = true;
             summary.log_error = None;
@@ -505,8 +508,8 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::SetReadDatePrivacy)
         ) {
-            self.read_date_loading = false;
-            self.read_date_error = false;
+            self.settings.read_date_loading = false;
+            self.settings.read_date_error = false;
         }
         // Parity slice: `resetAllNotificationSettings` confirmed — drop the
         // cached scope defaults so the next fetch (or the authoritative
@@ -518,7 +521,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::ResetAllNotificationSettings)
         ) {
-            self.scope_notification_settings.clear();
+            self.settings.scope_notification_settings.clear();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
             // A short OK is not exhaustion; 404 is.
@@ -781,7 +784,7 @@ impl Session {
             info.blocked = block;
         }
         if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
-            self.last_auth_error = None;
+            self.auth_state.last_auth_error = None;
         }
     }
 }

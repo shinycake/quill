@@ -37,6 +37,7 @@ fn group_join_answer_connects_native_transport() {
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.transport_ready)
@@ -74,6 +75,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.transport_ready)
@@ -85,12 +87,14 @@ fn group_rejoin_answer_reconnects_native_transport() {
     handle.start_screen_share(555).expect("mock presentation");
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .expect("tracked call")
         .screen_sharing = true;
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .expect("tracked call")
@@ -102,6 +106,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
     assert_eq!(handle.screen_share_stops(), vec![555]);
     let call = driver
         .session
+        .calls
         .active_group_call
         .as_ref()
         .expect("tracked call");
@@ -124,6 +129,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.transport_ready)
@@ -317,6 +323,7 @@ fn group_screen_share_toggle_handshake() {
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.transport_ready)
@@ -325,6 +332,7 @@ fn group_screen_share_toggle_handshake() {
     // toggle gates on it.
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .expect("tracked call")
@@ -339,6 +347,7 @@ fn group_screen_share_toggle_handshake() {
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.screen_share_pending && !call.screen_sharing)
@@ -359,6 +368,7 @@ fn group_screen_share_toggle_handshake() {
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.screen_sharing && !call.screen_share_pending)
@@ -372,6 +382,7 @@ fn group_screen_share_toggle_handshake() {
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| !call.screen_sharing && !call.screen_share_pending)
@@ -402,6 +413,7 @@ fn group_screen_share_failure_stops_native_presentation() {
     );
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .expect("tracked call")
@@ -412,7 +424,7 @@ fn group_screen_share_failure_stops_native_presentation() {
     assert!(handle.presentation_active(555));
     // Simulate the reducer's error arm: flags cleared, error
     // surfaced, native presentation untouched.
-    if let Some(call) = driver.session.active_group_call.as_mut() {
+    if let Some(call) = driver.session.calls.active_group_call.as_mut() {
         call.screen_share_pending = false;
         call.screen_sharing = false;
         call.screen_share_answer.clear();
@@ -436,6 +448,7 @@ fn group_screen_share_rejected_without_screen_source() {
     let (dir, mut driver, recorder, _handle, _sink, _seq) = ready_group_call_driver();
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .expect("tracked call")
@@ -444,6 +457,7 @@ fn group_screen_share_rejected_without_screen_source() {
     assert!(
         !driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.screen_share_pending || call.screen_sharing)

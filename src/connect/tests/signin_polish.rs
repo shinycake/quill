@@ -121,8 +121,14 @@ fn countries_and_default_code_are_fetched_once_and_stored() {
         &sink,
         json!({"@type":"text","@extra":code.as_extra(),"text":"gb"}),
     );
-    assert_eq!(driver.session.countries.as_ref().unwrap().len(), 2);
-    assert_eq!(driver.session.guessed_country_iso.as_deref(), Some("GB"));
+    assert_eq!(
+        driver.session.auth_state.countries.as_ref().unwrap().len(),
+        2
+    );
+    assert_eq!(
+        driver.session.auth_state.guessed_country_iso.as_deref(),
+        Some("GB")
+    );
     assert_eq!(driver.fetch_countries().unwrap(), None, "cached");
     assert_eq!(driver.fetch_country_code().unwrap(), None, "cached");
     assert!(
@@ -169,7 +175,7 @@ fn email_reset_only_where_tdlib_offers_it() {
         &sink,
         json!({"@type":"error","@extra":id.as_extra(),"code":400,"message":"TASK_ALREADY_EXISTS"}),
     );
-    let err = driver.session.last_auth_error.unwrap();
+    let err = driver.session.auth_state.last_auth_error.unwrap();
     assert_eq!(err.class, ErrorClass::TaskAlreadyExists);
     assert_eq!(err.user_message(), "an email reset is already pending");
 }
@@ -206,7 +212,7 @@ fn phone_errors_are_classified_for_the_banned_box_and_hints() {
             &sink,
             json!({"@type":"error","@extra":id.as_extra(),"code":400,"message":message}),
         );
-        let err = driver.session.last_auth_error.unwrap();
+        let err = driver.session.auth_state.last_auth_error.unwrap();
         assert_eq!(err.class, class);
         assert_eq!(err.user_message(), line);
     }
@@ -220,6 +226,7 @@ fn phone_errors_are_classified_for_the_banned_box_and_hints() {
     assert!(
         driver
             .session
+            .auth_state
             .last_auth_error
             .unwrap()
             .user_message()

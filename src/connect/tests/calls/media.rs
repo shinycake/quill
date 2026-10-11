@@ -11,7 +11,13 @@ fn remote_video_state_drain() {
     handle.emit_remote_video_state(77, RemoteVideoState::Paused);
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     assert_eq!(
-        driver.session.active_call.as_ref().unwrap().remote_video,
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .remote_video,
         RemoteVideoState::Paused
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -87,7 +93,13 @@ fn remote_screen_state_inactive_clears_screen_slot() {
     };
     let pump = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
     let remote_screen = |driver: &ConnectDriver<Arc<RecordingSender>>| {
-        driver.session.active_call.as_ref().unwrap().remote_screen
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .remote_screen
     };
     assert_eq!(remote_screen(&driver), RemoteVideoState::Inactive);
     handle.emit_video_frame(77, frame(false));
@@ -117,12 +129,12 @@ fn set_call_camera_gates_engine_on_transport() {
     // No transport yet: intent stored, engine untouched.
     assert!(driver.set_call_camera(77, false).is_ok());
     assert!(handle.camera_changes().is_empty());
-    assert!(!driver.session.active_call.as_ref().unwrap().camera_on);
+    assert!(!driver.session.calls.active_call.as_ref().unwrap().camera_on);
     // Transport connected: the toggle drives the engine.
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     assert!(driver.set_call_camera(77, true).is_ok());
     assert_eq!(handle.camera_changes(), vec![(77, true, None)]);
-    assert!(driver.session.active_call.as_ref().unwrap().camera_on);
+    assert!(driver.session.calls.active_call.as_ref().unwrap().camera_on);
     assert_eq!(
         driver.set_call_camera(999, true),
         Err(crate::calls::engine::EngineError::NoSuchCall(999))
@@ -147,10 +159,18 @@ fn set_call_screen_share_gates_engine_on_transport() {
     // No transport yet: intent stored, engine untouched.
     assert!(driver.set_call_screen_share(77, true).is_ok());
     assert!(handle.p2p_screen_share_changes().is_empty());
-    assert!(driver.session.active_call.as_ref().unwrap().screen_sharing);
+    assert!(
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .screen_sharing
+    );
     // Phase C2i: screen share clears the camera intent (ntgcalls
     // forbids camera+screen in Capture mode).
-    assert!(!driver.session.active_call.as_ref().unwrap().camera_on);
+    assert!(!driver.session.calls.active_call.as_ref().unwrap().camera_on);
     // Transport connected: the pre-transport screen-share intent
     // applies on connect (pump_call_engine forwards it), then the
     // toggle drives the engine directly.
@@ -160,12 +180,28 @@ fn set_call_screen_share_gates_engine_on_transport() {
         handle.p2p_screen_share_changes(),
         vec![(77, true), (77, false)]
     );
-    assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
+    assert!(
+        !driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .screen_sharing
+    );
     // Phase C2i: enabling the camera clears the screen-share
     // intent symmetrically.
     assert!(driver.set_call_camera(77, true).is_ok());
-    assert!(driver.session.active_call.as_ref().unwrap().camera_on);
-    assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
+    assert!(driver.session.calls.active_call.as_ref().unwrap().camera_on);
+    assert!(
+        !driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .screen_sharing
+    );
     assert_eq!(
         driver.set_call_screen_share(999, true),
         Err(crate::calls::engine::EngineError::NoSuchCall(999))
@@ -185,13 +221,35 @@ fn set_call_screen_share_rejected_without_screen_source() {
         driver.set_call_screen_share(77, true),
         Err(crate::calls::engine::EngineError::NoScreenSource)
     );
-    assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
+    assert!(
+        !driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .screen_sharing
+    );
     assert!(handle.p2p_screen_share_changes().is_empty());
     // Stopping needs no source: simulate a stranded sharing flag
     // and verify it can still be cleared.
-    driver.session.active_call.as_mut().unwrap().screen_sharing = true;
+    driver
+        .session
+        .calls
+        .active_call
+        .as_mut()
+        .unwrap()
+        .screen_sharing = true;
     assert!(driver.set_call_screen_share(77, false).is_ok());
-    assert!(!driver.session.active_call.as_ref().unwrap().screen_sharing);
+    assert!(
+        !driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .screen_sharing
+    );
     assert_eq!(handle.p2p_screen_share_changes(), vec![(77, false)]);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -303,7 +361,7 @@ fn active_call_camera_on_from_is_video() {
                 r#"{{"@type":"updateCall","call":{{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":{is_video},"state":{{"@type":"callStatePending","is_created":true,"is_received":false}}}}}}"#
             ),
         );
-        let call = driver.session.active_call.as_ref().unwrap();
+        let call = driver.session.calls.active_call.as_ref().unwrap();
         assert_eq!(call.camera_on, expected);
         assert_eq!(call.remote_video, RemoteVideoState::Inactive);
         let _ = std::fs::remove_dir_all(&dir);

@@ -226,7 +226,7 @@ fn clear_call_history_empties_the_list_only_on_ok() {
             page.0
         ),
     );
-    assert_eq!(driver.session.recent_calls.len(), 1);
+    assert_eq!(driver.session.calls.recent_calls.len(), 1);
 
     let sent = driver.clear_call_history(true).expect("send").expect("id");
     let request = recorder
@@ -235,8 +235,8 @@ fn clear_call_history_empties_the_list_only_on_ok() {
         .find(|j| j.contains("\"deleteAllCallMessages\""))
         .expect("deleteAllCallMessages sent");
     assert!(request.contains("\"revoke\":true"));
-    assert_eq!(driver.session.recent_calls.len(), 1, "kept until ok");
-    assert!(driver.session.recent_calls_clearing);
+    assert_eq!(driver.session.calls.recent_calls.len(), 1, "kept until ok");
+    assert!(driver.session.calls.recent_calls_clearing);
     assert!(
         driver.clear_call_history(true).expect("again").is_none(),
         "one clear in flight at a time"
@@ -249,8 +249,8 @@ fn clear_call_history_empties_the_list_only_on_ok() {
             sent.0
         ),
     );
-    assert_eq!(driver.session.recent_calls.len(), 1);
-    assert!(!driver.session.recent_calls_clearing);
+    assert_eq!(driver.session.calls.recent_calls.len(), 1);
+    assert!(!driver.session.calls.recent_calls_clearing);
     assert_eq!(
         driver.session.chat_action_error.as_deref(),
         Some("could not clear the call history (error 500)")
@@ -261,7 +261,7 @@ fn clear_call_history_empties_the_list_only_on_ok() {
         &mut driver,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent.0),
     );
-    assert!(driver.session.recent_calls.is_empty());
-    assert!(!driver.session.recent_calls_clearing);
+    assert!(driver.session.calls.recent_calls.is_empty());
+    assert!(!driver.session.calls.recent_calls_clearing);
     let _ = std::fs::remove_dir_all(&dir);
 }

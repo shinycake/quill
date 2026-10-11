@@ -125,15 +125,15 @@ mod tests {
             )
         };
         apply_json(&mut session, &seq, &sink, &albums("no-such-extra"));
-        assert!(!session.story_albums.contains_key(&11));
+        assert!(!session.stories.albums.contains_key(&11));
         let extra = session.request(RequestPurpose::GetChatStoryAlbums, Some(ChatId(11)));
         apply_json(&mut session, &seq, &sink, &albums(&extra.0.to_string()));
-        let names: Vec<&str> = session.story_albums[&11]
+        let names: Vec<&str> = session.stories.albums[&11]
             .iter()
             .map(|a| a.name.as_str())
             .collect();
         assert_eq!(names, ["Travel", "Food"]);
-        assert!(session.story_page_op.is_none());
+        assert!(session.stories.page_op.is_none());
     }
 
     #[test]
@@ -165,7 +165,7 @@ mod tests {
         };
         let (extra, _) = fetch(&mut session, &[301, 302]);
         assert!(matches!(
-            session.story_page_op.as_ref().map(|op| &op.state),
+            session.stories.page_op.as_ref().map(|op| &op.state),
             Some(StoryPageOpState::Checking)
         ));
         apply_json(
@@ -181,8 +181,8 @@ mod tests {
             &sink,
             &stories(&extra.0.to_string(), &[302, 303]),
         );
-        assert_eq!(session.story_album_stories[&(11, 7)], vec![301, 302, 303]);
-        assert!(session.story_page_op.is_none());
+        assert_eq!(session.stories.album_stories[&(11, 7)], vec![301, 302, 303]);
+        assert!(session.stories.page_op.is_none());
     }
 
     #[test]
@@ -225,7 +225,7 @@ mod tests {
             &sink,
             &page(&extra.0.to_string(), None, &[303]),
         );
-        let state = &session.chat_page_stories[&11];
+        let state = &session.stories.chat_page_stories[&11];
         assert_eq!(state.pinned_story_ids, vec![301]);
         assert_eq!(state.story_ids, vec![301, 302, 303]);
     }
@@ -240,7 +240,7 @@ mod tests {
         let extra = session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(11)));
         session.begin_story_page_check(story_page_op_label(RequestPurpose::GetChatArchivedStories));
         assert!(matches!(
-            session.story_page_op.as_ref().map(|op| &op.state),
+            session.stories.page_op.as_ref().map(|op| &op.state),
             Some(StoryPageOpState::Checking)
         ));
         apply_json(
@@ -252,10 +252,10 @@ mod tests {
                 extra.0
             ),
         );
-        let archived = &session.archived_stories[&11];
+        let archived = &session.stories.archived_stories[&11];
         assert_eq!(archived.story_ids, vec![202, 201]);
         assert_eq!(archived.next_from_story_id, Some(201));
-        assert!(session.story_page_op.is_none());
+        assert!(session.stories.page_op.is_none());
     }
 
     #[test]
@@ -267,7 +267,7 @@ mod tests {
         let extra = session.request(RequestPurpose::CreateStoryAlbum, Some(ChatId(11)));
         session.begin_story_page_op(story_page_op_label(RequestPurpose::CreateStoryAlbum));
         assert!(matches!(
-            session.story_page_op.as_ref().map(|op| &op.state),
+            session.stories.page_op.as_ref().map(|op| &op.state),
             Some(StoryPageOpState::Sending)
         ));
         apply_json(
@@ -280,10 +280,10 @@ mod tests {
             ),
         );
         assert!(matches!(
-            session.story_page_op.as_ref().map(|op| &op.state),
+            session.stories.page_op.as_ref().map(|op| &op.state),
             Some(StoryPageOpState::Succeeded)
         ));
-        assert_eq!(session.story_albums[&11][0].name, "New");
+        assert_eq!(session.stories.albums[&11][0].name, "New");
         let extra = session.request(RequestPurpose::DeleteStoryAlbum, Some(ChatId(11)));
         session.begin_story_page_op(story_page_op_label(RequestPurpose::DeleteStoryAlbum));
         apply_json(
@@ -296,7 +296,7 @@ mod tests {
             ),
         );
         assert!(matches!(
-            session.story_page_op.as_ref().map(|op| &op.state),
+            session.stories.page_op.as_ref().map(|op| &op.state),
             Some(StoryPageOpState::Failed(_))
         ));
     }

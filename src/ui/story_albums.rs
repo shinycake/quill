@@ -81,7 +81,7 @@ impl QuillApp {
         };
         let name = self
             .session()
-            .and_then(|s| s.story_albums.get(&chat_id.0))
+            .and_then(|s| s.stories.albums.get(&chat_id.0))
             .and_then(|albums| albums.iter().find(|a| a.id == album_id))
             .map(|a| a.name.clone())
             .unwrap_or_default();
@@ -92,7 +92,7 @@ impl QuillApp {
         }
         let offset = self
             .session()
-            .and_then(|s| s.story_album_stories.get(&(chat_id.0, album_id)))
+            .and_then(|s| s.stories.album_stories.get(&(chat_id.0, album_id)))
             .map(|ids| ids.len() as i32)
             .unwrap_or(0);
         if let Some(live) = self.live.as_mut() {
@@ -227,7 +227,8 @@ impl QuillApp {
         let (chat_id, order) = match self.session().zip(self.stories.page.as_ref()) {
             Some((session, page)) => {
                 let mut ids: Vec<i32> = session
-                    .story_albums
+                    .stories
+                    .albums
                     .get(&page.chat_id.0)
                     .map(|albums| albums.iter().map(|a| a.id).collect())
                     .unwrap_or_default();
@@ -267,7 +268,10 @@ impl QuillApp {
         chat_id: ChatId,
         story_ids: &[i32],
     ) -> (Vec<i32>, Vec<i32>) {
-        let stories = self.live.as_ref().map(|live| &live.driver.session.stories);
+        let stories = self
+            .live
+            .as_ref()
+            .map(|live| &live.driver.session.stories.stories);
         story_ids.iter().copied().partition(|id| {
             stories
                 .and_then(|cached| cached.get(&(chat_id.0, *id)))
@@ -368,7 +372,7 @@ impl QuillApp {
     /// smallest loaded id).
     pub(super) fn load_more_archived_stories(&mut self, cx: &mut Context<Self>) {
         let (chat_id, from_story_id) = match self.stories.page.as_ref().zip(self.session()) {
-            Some((page, session)) => match session.archived_stories.get(&page.chat_id.0) {
+            Some((page, session)) => match session.stories.archived_stories.get(&page.chat_id.0) {
                 Some(archived) => (page.chat_id, archived.next_from_story_id.unwrap_or(0)),
                 None => (page.chat_id, 0),
             },
@@ -389,7 +393,7 @@ impl QuillApp {
     /// id).
     pub(super) fn load_more_chat_page_stories(&mut self, cx: &mut Context<Self>) {
         let (chat_id, from_story_id) = match self.stories.page.as_ref().zip(self.session()) {
-            Some((page, session)) => match session.chat_page_stories.get(&page.chat_id.0) {
+            Some((page, session)) => match session.stories.chat_page_stories.get(&page.chat_id.0) {
                 Some(chat_page) => (
                     page.chat_id,
                     chat_page.story_ids.iter().copied().min().unwrap_or(0),
@@ -416,6 +420,7 @@ impl QuillApp {
         let (chat_id, pinned) = match self.stories.page.as_ref().zip(self.session()) {
             Some((page, session)) => {
                 let mut pinned: Vec<i32> = session
+                    .stories
                     .chat_page_stories
                     .get(&page.chat_id.0)
                     .map(|state| state.pinned_story_ids.clone())
@@ -443,7 +448,7 @@ impl QuillApp {
     /// Phase 9.5: one-line status for posted-story management —
     /// pending spinner or the sanitized failure. `None` when idle.
     pub(super) fn story_manage_status(&self) -> Option<String> {
-        let manage = self.session()?.story_manage.clone();
+        let manage = self.session()?.stories.manage.clone();
         if manage.pending {
             Some("Saving…".into())
         } else {
@@ -471,7 +476,7 @@ impl QuillApp {
     pub(super) fn story_cover_editor(&self, cx: &mut Context<Self>) -> AnyElement {
         // Review fix-up: shared `story_manage.pending` slot — no second
         // op while one is in flight.
-        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
+        let manage_busy = self.session().is_some_and(|s| s.stories.manage.pending);
         div()
             .flex()
             .gap_2()
@@ -513,7 +518,7 @@ impl QuillApp {
         // — management calls need live TDLib.
         if self.live.is_none() {
             if let Some(demo) = self.demo_session.as_mut() {
-                demo.story_manage.error = Some("demo — editing runs with live TDLib".into());
+                demo.stories.manage.error = Some("demo — editing runs with live TDLib".into());
             }
             cx.notify();
             return;
@@ -523,7 +528,7 @@ impl QuillApp {
             Ok(seconds) if seconds >= 0.0 => seconds,
             _ => {
                 if let Some(live) = self.live.as_mut() {
-                    live.driver.session.story_manage.error =
+                    live.driver.session.stories.manage.error =
                         Some("Enter the cover time in seconds (0 or more)".into());
                 }
                 cx.notify();
@@ -537,7 +542,7 @@ impl QuillApp {
             {
                 Ok(_) => self.stories.cover_sent = true,
                 Err(_) => {
-                    live.driver.session.story_manage.error =
+                    live.driver.session.stories.manage.error =
                         Some("Could not send the cover request".into());
                 }
             }
@@ -561,7 +566,7 @@ impl QuillApp {
         };
         let (privacy, selected_user_ids) = self
             .session()
-            .and_then(|s| s.stories.get(&(item.chat_id.0, item.story_id)))
+            .and_then(|s| s.stories.stories.get(&(item.chat_id.0, item.story_id)))
             .and_then(|story| story.privacy_settings.as_ref())
             .and_then(StoryPrivacy::from_settings_json)
             .unwrap_or((StoryPrivacy::Everyone, Vec::new()));
@@ -679,7 +684,7 @@ impl QuillApp {
         let busy = self.stories.privacy_sent;
         // Review fix-up: shared `story_manage.pending` slot — no second
         // op while one is in flight.
-        let manage_busy = self.session().is_some_and(|s| s.story_manage.pending);
+        let manage_busy = self.session().is_some_and(|s| s.stories.manage.pending);
         panel = panel.child(
             div()
                 .flex()
@@ -721,14 +726,14 @@ impl QuillApp {
         // — management calls need live TDLib.
         if self.live.is_none() {
             if let Some(demo) = self.demo_session.as_mut() {
-                demo.story_manage.error = Some("demo — editing runs with live TDLib".into());
+                demo.stories.manage.error = Some("demo — editing runs with live TDLib".into());
             }
             cx.notify();
             return;
         }
         if edit.privacy == StoryPrivacy::SelectedUsers && edit.selected_user_ids.is_empty() {
             if let Some(live) = self.live.as_mut() {
-                live.driver.session.story_manage.error =
+                live.driver.session.stories.manage.error =
                     Some("Pick at least one user for \"Selected users\"".into());
             }
             cx.notify();
@@ -743,7 +748,7 @@ impl QuillApp {
             ) {
                 Ok(_) => self.stories.privacy_sent = true,
                 Err(_) => {
-                    live.driver.session.story_manage.error =
+                    live.driver.session.stories.manage.error =
                         Some("Could not send the privacy request".into());
                 }
             }
@@ -818,7 +823,7 @@ impl QuillApp {
         // the TDLib reason.
         let op_status = self
             .session()
-            .and_then(|s| s.story_page_op.clone())
+            .and_then(|s| s.stories.page_op.clone())
             .map(|op| match op.state {
                 StoryPageOpState::Checking => format!("{}…", op.label),
                 StoryPageOpState::Sending => format!("{}…", op.label),
@@ -828,7 +833,7 @@ impl QuillApp {
         let label_for = |story_id: i32| {
             let caption = self
                 .session()
-                .and_then(|s| s.stories.get(&(chat_id.0, story_id)))
+                .and_then(|s| s.stories.stories.get(&(chat_id.0, story_id)))
                 .map(|story| story.caption.clone())
                 .unwrap_or_default();
             let snippet: String = caption.chars().take(40).collect();
@@ -844,13 +849,13 @@ impl QuillApp {
             // ---- Opened album: rename, delete, stories, add. ----
             let name = self
                 .session()
-                .and_then(|s| s.story_albums.get(&chat_id.0))
+                .and_then(|s| s.stories.albums.get(&chat_id.0))
                 .and_then(|albums| albums.iter().find(|a| a.id == album_id))
                 .map(|a| a.name.clone())
                 .unwrap_or_else(|| format!("Album {album_id}"));
             let story_ids: Vec<i32> = self
                 .session()
-                .and_then(|s| s.story_album_stories.get(&(chat_id.0, album_id)))
+                .and_then(|s| s.stories.album_stories.get(&(chat_id.0, album_id)))
                 .cloned()
                 .unwrap_or_default();
             let mut detail = div()
@@ -971,7 +976,7 @@ impl QuillApp {
             // ---- Album list + create form. ----
             let albums: Vec<(i32, String)> = self
                 .session()
-                .and_then(|s| s.story_albums.get(&chat_id.0))
+                .and_then(|s| s.stories.albums.get(&chat_id.0))
                 .map(|albums| albums.iter().map(|a| (a.id, a.name.clone())).collect())
                 .unwrap_or_default();
             let mut list = div().flex().flex_col().gap_2().child(
@@ -1068,7 +1073,7 @@ impl QuillApp {
             // ---- Chat-page stories with pin/unpin. ----
             let (pinned, chat_page_ids): (Vec<i32>, Vec<i32>) = self
                 .session()
-                .and_then(|s| s.chat_page_stories.get(&chat_id.0))
+                .and_then(|s| s.stories.chat_page_stories.get(&chat_id.0))
                 .map(|state| (state.pinned_story_ids.clone(), state.story_ids.clone()))
                 .unwrap_or_default();
             let mut chat_page = div().flex().flex_col().gap_2().child(
@@ -1119,7 +1124,7 @@ impl QuillApp {
             // ---- Archive. ----
             let archived_ids: Vec<i32> = self
                 .session()
-                .and_then(|s| s.archived_stories.get(&chat_id.0))
+                .and_then(|s| s.stories.archived_stories.get(&chat_id.0))
                 .map(|state| state.story_ids.clone())
                 .unwrap_or_default();
             let mut archive = div().flex().flex_col().gap_2().child(

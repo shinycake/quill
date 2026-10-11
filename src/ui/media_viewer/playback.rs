@@ -442,16 +442,16 @@ impl QuillApp {
     ) {
         let mut prefs = self
             .session()
-            .map(|session| session.media_prefs.clone())
+            .map(|session| session.settings.media_prefs.clone())
             .unwrap_or_default();
         update(&mut prefs);
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.media_prefs = prefs;
+            live.driver.session.settings.media_prefs = prefs;
             if let Err(err) = live.driver.save_media_prefs() {
                 self.connection.status_note = format!("couldn't save media settings: {err}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.media_prefs = prefs;
+            demo.settings.media_prefs = prefs;
         }
         cx.notify();
     }
@@ -461,7 +461,7 @@ impl QuillApp {
     pub(in crate::ui) fn composer_group_media_effective(&self) -> bool {
         self.composer_ui.group_media.unwrap_or_else(|| {
             self.session()
-                .map(|s| s.media_prefs.default_grouping())
+                .map(|s| s.settings.media_prefs.default_grouping())
                 .unwrap_or(true)
         })
     }
@@ -473,7 +473,7 @@ impl QuillApp {
         self.composer_ui.group_media = Some(next);
         if self
             .session()
-            .is_some_and(|s| s.media_prefs.remember_media_grouping)
+            .is_some_and(|s| s.settings.media_prefs.remember_media_grouping)
         {
             self.set_media_pref(|prefs| prefs.group_media = next, cx);
         } else {
@@ -485,7 +485,7 @@ impl QuillApp {
     pub(in crate::ui) fn toggle_remember_media_grouping(&mut self, cx: &mut Context<Self>) {
         let next = !self
             .session()
-            .map(|s| s.media_prefs.remember_media_grouping)
+            .map(|s| s.settings.media_prefs.remember_media_grouping)
             .unwrap_or(false);
         // Turning it on snapshots the current grouping choice.
         let current = self.composer_group_media_effective();

@@ -320,9 +320,14 @@ impl QuillApp {
         // out by the next render (`flush_notifications`): draw it now,
         // whatever the updates were and whether or not the window is in
         // front.
-        let deliver = !live.driver.session.pending_notifications.is_empty()
+        let deliver = !live
+            .driver
+            .session
+            .settings
+            .pending_notifications
+            .is_empty()
             || live.driver.session.pending_force_reply.is_some()
-            || !live.driver.session.pending_sound_plays.is_empty();
+            || !live.driver.session.settings.pending_sound_plays.is_empty();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.folders.tab
@@ -335,7 +340,7 @@ impl QuillApp {
         {
             self.folders.tab = None;
         }
-        let err = live.driver.session.last_auth_error;
+        let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
         if !matches!(&new_auth, AuthorizationState::WaitRegistration { terms: Some(terms) } if self.auth_ui.accepted_registration_terms.as_ref() == Some(terms))
         {
@@ -379,6 +384,7 @@ impl QuillApp {
             if live
                 .driver
                 .session
+                .settings
                 .account_export
                 .as_ref()
                 .is_some_and(|e| !e.finished.load(std::sync::atomic::Ordering::Acquire))
@@ -591,7 +597,7 @@ impl QuillApp {
         if let Some(url) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.payment_verification_url.take())
+            .and_then(|live| live.driver.session.payments.verification_url.take())
         {
             self.open_message_url(&url, cx);
             progressed = true;
@@ -602,7 +608,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.payment_receipt_error.take())
+            .and_then(|live| live.driver.session.payments.receipt_error.take())
         {
             self.connection.status_note = err;
             progressed = true;
@@ -699,7 +705,9 @@ impl QuillApp {
         let clears: Vec<ChatId> = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.pending_notification_clears))
+            .map(|live| {
+                std::mem::take(&mut live.driver.session.settings.pending_notification_clears)
+            })
             .unwrap_or_default();
         for chat_id in clears {
             self.dismiss_os_notification(chat_id, cx);
@@ -721,15 +729,14 @@ impl QuillApp {
         let queued: Vec<QueuedNotification> = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.pending_notifications))
+            .map(|live| std::mem::take(&mut live.driver.session.settings.pending_notifications))
             .unwrap_or_default();
         // tdesktop skips its own sound and the Dock bounce / taskbar flash
         // while the system is in Do Not Disturb; the OS banner is the OS's.
         let dnd = quill::notify_focus::dnd_active();
-        let wants_attention = self
-            .live
-            .as_mut()
-            .is_some_and(|live| std::mem::take(&mut live.driver.session.pending_attention));
+        let wants_attention = self.live.as_mut().is_some_and(|live| {
+            std::mem::take(&mut live.driver.session.settings.pending_attention)
+        });
         if wants_attention
             && quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
                 flash_enabled: true,
@@ -755,7 +762,7 @@ impl QuillApp {
         let plays: Vec<PathBuf> = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.pending_sound_plays))
+            .map(|live| std::mem::take(&mut live.driver.session.settings.pending_sound_plays))
             .unwrap_or_default();
         for path in plays {
             self.notify
@@ -775,7 +782,7 @@ impl QuillApp {
             .map(|mut guard| std::mem::take(&mut *guard))
             .unwrap_or_default();
         let ringing = self.session().and_then(|s| {
-            let call = s.active_call.as_ref()?;
+            let call = s.calls.active_call.as_ref()?;
             (matches!(
                 call.state,
                 quill::telegram::envelope::CallState::Pending { .. }

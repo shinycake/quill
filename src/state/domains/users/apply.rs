@@ -47,7 +47,7 @@ impl Session {
                     self.contacts_error = false;
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
-                    self.close_friends = Some(user_ids);
+                    self.stories.close_friends = Some(user_ids);
                     self.clear_story_page_op(RequestPurpose::GetCloseFriends);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
                     self.reply_keyboards.recent_inline_bots = Some(user_ids);

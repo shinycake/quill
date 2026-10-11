@@ -140,7 +140,13 @@ fn mode_cycles_top_bottom_left_per_chat() {
         SubsectionTabsMode::Top
     );
     // The default is not stored.
-    assert!(session.media_prefs.subsection_tabs_modes.is_empty());
+    assert!(
+        session
+            .settings
+            .media_prefs
+            .subsection_tabs_modes
+            .is_empty()
+    );
 }
 
 #[test]

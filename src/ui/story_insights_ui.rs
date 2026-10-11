@@ -58,7 +58,7 @@ impl QuillApp {
         };
         let offset = self
             .session()
-            .and_then(|s| s.story_insights.as_ref())
+            .and_then(|s| s.stories.insights.as_ref())
             .map(|state| state.forwards_next_offset.clone())
             .unwrap_or_default();
         if offset.is_empty() {
@@ -128,7 +128,7 @@ impl QuillApp {
             .map(|i| (i.chat_id, i.story_id));
         let state = self
             .session()
-            .and_then(|s| s.story_insights.clone())
+            .and_then(|s| s.stories.insights.clone())
             .filter(|state| current == Some((ChatId(state.chat_id), state.story_id)));
         let Some(state) = state else {
             return panel
@@ -352,14 +352,14 @@ impl QuillApp {
     fn open_found_story(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(keys) = self
             .session()
-            .and_then(|s| s.story_search.as_ref())
+            .and_then(|s| s.stories.search.as_ref())
             .map(|search| search.stories.clone())
         else {
             return;
         };
         let items = self
             .session()
-            .map(|s| collect_found_story_items(&keys, &s.stories))
+            .map(|s| collect_found_story_items(&keys, &s.stories.stories))
             .unwrap_or_default();
         let Some(target) = keys.get(index) else {
             return;
@@ -382,7 +382,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let tag = story_search_tag(typed);
-        let search = self.session().and_then(|s| s.story_search.clone());
+        let search = self.session().and_then(|s| s.stories.search.clone());
         let showing = search.as_ref().filter(|search| match &search.query {
             StorySearchQuery::Tag(active) => tag.as_deref() == Some(active.as_str()),
             _ => true,
@@ -425,7 +425,7 @@ impl QuillApp {
             let name = self.chat_title_or_id(*chat_id);
             let date = self
                 .session()
-                .and_then(|s| s.stories.get(&(*chat_id, *story_id)))
+                .and_then(|s| s.stories.stories.get(&(*chat_id, *story_id)))
                 .map(|story| story.date)
                 .unwrap_or(0);
             block = block.child(

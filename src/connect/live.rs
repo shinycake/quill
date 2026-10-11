@@ -146,27 +146,27 @@ pub fn start_prepared_live_connect(
     // Phase C2i: local call prefs (confirm-before-calling, less-data)
     // are loaded once here; the UI saves them back on toggle.
     let mut session = session;
-    session.call_prefs = load_call_prefs(&prepared.paths);
-    session.proxy.prefs = crate::settings::load_proxy_prefs(&prepared.paths);
+    session.calls.prefs = load_call_prefs(&prepared.paths);
+    session.settings.proxy.prefs = crate::settings::load_proxy_prefs(&prepared.paths);
     // MED1: local media prefs (remember-media-grouping) load the same way.
-    session.media_prefs = load_media_prefs(&prepared.paths);
+    session.settings.media_prefs = load_media_prefs(&prepared.paths);
     // Slice A6: local contacts prefs (sync toggle) load the same way.
-    session.contact_prefs = load_contact_prefs(&prepared.paths);
+    session.settings.contact_prefs = load_contact_prefs(&prepared.paths);
     // Slice parity:chatlist-badge-settings: local badge-counter prefs
     // load the same way.
-    session.badge_prefs = load_badge_prefs(&prepared.paths);
+    session.settings.badge_prefs = load_badge_prefs(&prepared.paths);
     // Parity slice: in-app notification sounds toggle (tdesktop "Play
     // sounds") loads the same way.
     let prefs = load_preferences(&prepared.paths);
-    session.inapp_sounds_enabled = prefs.inapp_sounds_enabled;
-    session.desktop_notifications = prefs.desktop_notifications;
+    session.settings.inapp_sounds_enabled = prefs.inapp_sounds_enabled;
+    session.settings.desktop_notifications = prefs.desktop_notifications;
     // Slice parity:settings-language: the app language tag load the same
     // way (defaults to "en" when unset).
-    session.language_prefs = load_language_prefs(&prepared.paths);
+    session.settings.language_prefs = load_language_prefs(&prepared.paths);
     // Slice S4: local per-network auto-download settings load the same
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
-    session.data_storage = load_data_storage_prefs(&prepared.paths);
+    session.settings.data_storage = load_data_storage_prefs(&prepared.paths);
     let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
     match crate::calls::engine::NtgcallsEngine::load() {
         Ok(engine) => {

@@ -317,7 +317,10 @@ fn auth_code_error_is_classified_without_native_message() {
             extra.0
         ),
     );
-    let err = session.last_auth_error.expect("classified auth error");
+    let err = session
+        .auth_state
+        .last_auth_error
+        .expect("classified auth error");
     assert_eq!(err.purpose, RequestPurpose::CheckAuthenticationCode);
     assert_eq!(err.class, ErrorClass::Invalid);
     assert_eq!(err.user_message(), "code not accepted");

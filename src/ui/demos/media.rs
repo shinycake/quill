@@ -161,7 +161,7 @@ impl QuillApp {
             session.downloading.insert(62);
             session.emoji.outdated_packs.insert(3);
             session.emoji.mutating_set = Some((4, true));
-            session.media_prefs.recent_emoji_packs = vec![2, 1];
+            session.settings.media_prefs.recent_emoji_packs = vec![2, 1];
         }
     }
 

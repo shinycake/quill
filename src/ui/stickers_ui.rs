@@ -506,7 +506,7 @@ impl QuillApp {
         }
         let mode = self
             .session()
-            .map(|s| s.media_prefs.sticker_suggest_mode)
+            .map(|s| s.settings.media_prefs.sticker_suggest_mode)
             .unwrap_or_default();
         let query = panel.search_query.to_lowercase();
         let mut seen = std::collections::HashSet::new();

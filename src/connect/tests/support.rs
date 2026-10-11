@@ -410,9 +410,10 @@ pub(crate) fn tracked_group_call(
 
 pub(crate) fn call_state_for_rejoin(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
     let call = tracked_group_call(true, false, false);
-    driver.session.active_group_call = Some(call);
+    driver.session.calls.active_group_call = Some(call);
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()

@@ -16,7 +16,6 @@ use super::format_helpers::format_starts_in;
 use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -125,7 +124,10 @@ fn mute_state(call: &ActiveGroupCall) -> MuteState {
 impl QuillApp {
     /// The group call window's content, built with the app's context.
     pub(super) fn group_call_panel_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(call) = self.session().and_then(|s| s.active_group_call.clone()) else {
+        let Some(call) = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.clone())
+        else {
             return div().size_full().bg(rgb(BG)).into_any_element();
         };
         let state = mute_state(&call);
@@ -286,7 +288,7 @@ impl QuillApp {
         // A request that failed (invite, ban, volume, rejoin…).
         let error = self
             .session()
-            .and_then(|s| s.group_call_error.clone())
+            .and_then(|s| s.calls.group_call_error.clone())
             .map(|error| {
                 div()
                     .id("group-call-error")
@@ -451,86 +453,6 @@ impl QuillApp {
             .children(invite)
             .children(rename)
             .into_any_element()
-    }
-
-    /// The "⋯" menu: the chat's settings and admin tools.
-    fn group_call_menu(&self, call: &ActiveGroupCall, cx: &mut Context<Self>) -> impl IntoElement {
-        let owner = cx.entity().downgrade();
-        let call = call.clone();
-        let chat_shown = self.group_call.chat_shown;
-        let screen_source = self
-            .live
-            .as_ref()
-            .is_some_and(|live| live.driver.group_call_screen_source_available());
-        Button::new("group-call-menu")
-            .icon(IconName::EllipsisVertical)
-            .ghost()
-            .small()
-            .text_color(white())
-            .dropdown_menu(move |mut menu, _, _| {
-                let item = |label: &str, action: fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>)| {
-                    let owner = owner.clone();
-                    PopupMenuItem::new(label.to_string()).on_click(move |_, window, cx| {
-                        let _ = owner.update(cx, |this, cx| action(this, window, cx));
-                    })
-                };
-                if call.is_joined && screen_source {
-                    menu = menu.item(item(
-                        if call.screen_sharing || call.screen_share_pending { "Stop Sharing Screen" } else { "Share Screen" },
-                        |this, _, cx| this.toggle_group_call_screen_share(cx),
-                    ));
-                }
-                if call.are_messages_allowed || !call.messages.is_empty() {
-                    menu = menu.item(item(
-                        if chat_shown { "Hide Chat" } else { "Show Chat" },
-                        |this, _, cx| {
-                            this.group_call.chat_shown = !this.group_call.chat_shown;
-                            cx.notify();
-                        },
-                    ));
-                }
-                match &call.invite_link {
-                    Some(link) => {
-                        let link = link.clone();
-                        let owner = owner.clone();
-                        menu = menu.item(PopupMenuItem::new("Copy Invite Link").on_click(move |_, _, cx| {
-                            let _ = owner.update(cx, |this, cx| this.copy_video_chat_invite_link(&link, cx));
-                        }));
-                    }
-                    None => {
-                        menu = menu.item(item("Share Invite Link", |this, _, cx| this.fetch_group_call_invite_link(cx)));
-                    }
-                }
-                if call.can_be_managed {
-                    if call.invite_link.is_some() {
-                        menu = menu.item(item("Revoke Invite Link", |this, _, cx| this.revoke_group_call_invite_link(cx)));
-                    }
-                    menu = menu.item(item("Stream With…", |this, _, cx| this.fetch_video_chat_rtmp_url(cx)));
-                    menu = menu
-                        .separator()
-                        .item(item("Edit Title", |this, window, cx| this.open_group_call_title_dialog(window, cx)))
-                        .item(item(
-                            if call.record_duration > 0 { "Stop Recording" } else { "Start Recording" },
-                            |this, _, cx| this.toggle_group_call_recording(cx),
-                        ));
-                    if call.can_toggle_mute_new_participants {
-                        menu = menu.item(
-                            item("Mute New Participants", |this, _, cx| this.toggle_video_chat_mute_new(cx))
-                                .checked(call.mute_new_participants),
-                        );
-                    }
-                    if call.can_toggle_are_messages_allowed {
-                        menu = menu.item(
-                            item("Allow Chat", |this, _, cx| this.toggle_group_call_chat(cx))
-                                .checked(call.are_messages_allowed),
-                        );
-                    }
-                    menu = menu
-                        .separator()
-                        .item(item("End Video Chat", |this, _, cx| this.end_active_group_call(cx)));
-                }
-                menu
-            })
     }
 
     /// Video · the big mute button · Leave.
@@ -719,7 +641,7 @@ impl QuillApp {
     pub(super) fn close_group_call_window(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.id)
         {
             self.group_call.window_closed_by_user = Some(id);
@@ -732,7 +654,7 @@ impl QuillApp {
         self.sync_global_ptt(cx);
         let wanted = self
             .session()
-            .and_then(|s| s.active_group_call.as_ref())
+            .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|call| call.id)
             .filter(|id| self.group_call.window_closed_by_user != Some(*id));
         self.prune_group_video_images(wanted);
@@ -776,7 +698,7 @@ impl QuillApp {
                             app.group_call.window = None;
                             app.group_call.window_closed_by_user = app
                                 .session()
-                                .and_then(|s| s.active_group_call.as_ref())
+                                .and_then(|s| s.calls.active_group_call.as_ref())
                                 .map(|c| c.id);
                             cx.notify();
                         });
@@ -831,7 +753,7 @@ impl QuillApp {
     /// The main window's bar for a joined voice chat: mute, the chat's
     /// title and count, leave; a click brings the window back.
     pub(super) fn group_call_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let call = self.session()?.active_group_call.as_ref()?;
+        let call = self.session()?.calls.active_group_call.as_ref()?;
         if !call.is_joined {
             return None;
         }
@@ -942,7 +864,9 @@ impl Render for GroupCallPanel {
         let fullscreen = window.is_fullscreen();
         let body = owner.update(cx, |app, cx| {
             let wants_stage = fullscreen || app.demo_ui.group_stage;
-            let call = app.session().and_then(|s| s.active_group_call.clone());
+            let call = app
+                .session()
+                .and_then(|s| s.calls.active_group_call.clone());
             let stage = call
                 .filter(|_| wants_stage)
                 .and_then(|call| app.group_call_stage(&call, cx));

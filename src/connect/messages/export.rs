@@ -7,12 +7,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder: &std::path::Path,
         media: bool,
     ) -> std::io::Result<()> {
-        if !self.chats_path_active() || self.session.account_export.is_some() {
+        if !self.chats_path_active() || self.session.settings.account_export.is_some() {
             return Err(std::io::Error::other(
                 "Account export is unavailable or already running",
             ));
         }
-        self.session.account_export = Some(crate::account_export::AccountExport::start(
+        self.session.settings.account_export = Some(crate::account_export::AccountExport::start(
             folder,
             self.tdlib_files().to_path_buf(),
             media,
@@ -22,18 +22,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn pump_account_export(&mut self) {
         if let Some(mut request) = self
             .session
+            .settings
             .account_export
             .as_ref()
             .and_then(|export| export.next_request())
         {
             let extra = self.session.request(RequestPurpose::ExportAccount, None);
             request["@extra"] = serde_json::json!({"quill_account_export":extra.as_extra()});
-            if let Some(export) = self.session.account_export.as_mut() {
+            if let Some(export) = self.session.settings.account_export.as_mut() {
                 export.pending = Some(extra);
             }
             if self.sender.send_json(&request.to_string()).is_err() {
                 self.session.requests.take(extra);
-                if let Some(export) = self.session.account_export.as_mut() {
+                if let Some(export) = self.session.settings.account_export.as_mut() {
                     export.fail_send(extra);
                 }
             }

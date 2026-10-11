@@ -25,7 +25,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.proxy_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let proxy = &self.session.proxy;
+        let proxy = &self.session.settings.proxy;
         let wanted = (proxy.list.is_none() && !proxy.fetch_attempted) || proxy.stale;
         if !wanted
             || self
@@ -44,14 +44,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::GetProxies, None);
-        self.session.proxy.loading = true;
-        self.session.proxy.fetch_attempted = true;
-        self.session.proxy.error = None;
+        self.session.settings.proxy.loading = true;
+        self.session.settings.proxy.fetch_attempted = true;
+        self.session.settings.proxy.error = None;
         match self.sender.send_json(&get_proxies(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.proxy.loading = false;
+                self.session.settings.proxy.loading = false;
                 Err(err)
             }
         }
@@ -60,7 +60,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Refetch after a mutation marked the list stale (called from
     /// `ingest`, the `refresh_*_if_stale` pattern).
     pub fn refresh_proxies_if_stale(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.proxy.stale {
+        if !self.session.settings.proxy.stale {
             return Ok(None);
         }
         self.maybe_fetch_proxies()
@@ -70,17 +70,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         build: impl FnOnce(RequestId) -> String,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.proxy_path_active() || self.session.proxy.mutating {
+        if !self.proxy_path_active() || self.session.settings.proxy.mutating {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::MutateProxy, None);
-        self.session.proxy.mutating = true;
-        self.session.proxy.error = None;
+        self.session.settings.proxy.mutating = true;
+        self.session.settings.proxy.error = None;
         match self.sender.send_json(&build(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.proxy.mutating = false;
+                self.session.settings.proxy.mutating = false;
                 Err(err)
             }
         }
@@ -105,16 +105,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         enable: bool,
         comment: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if self.session.proxy.find(proxy_id).is_none() {
+        if self.session.settings.proxy.find(proxy_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.proxy.pings.remove(&proxy_id);
+        self.session.settings.proxy.pings.remove(&proxy_id);
         self.send_proxy_mutation(|extra| edit_proxy(extra, proxy_id, draft, enable, comment))
     }
 
     /// `enableProxy` (TDLib keeps one enabled at a time).
     pub fn enable_proxy(&mut self, proxy_id: i32) -> Result<RequestId, ConnectSendError> {
-        if self.session.proxy.find(proxy_id).is_none() {
+        if self.session.settings.proxy.find(proxy_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.send_proxy_mutation(|extra| enable_proxy(extra, proxy_id))
@@ -126,10 +126,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn remove_proxy(&mut self, proxy_id: i32) -> Result<RequestId, ConnectSendError> {
-        if self.session.proxy.find(proxy_id).is_none() {
+        if self.session.settings.proxy.find(proxy_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.proxy.pings.remove(&proxy_id);
+        self.session.settings.proxy.pings.remove(&proxy_id);
         self.send_proxy_mutation(|extra| remove_proxy(extra, proxy_id))
     }
 
@@ -137,6 +137,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn ping_listed_proxy(&mut self, proxy_id: i32) -> Result<RequestId, ConnectSendError> {
         let draft = self
             .session
+            .settings
             .proxy
             .find(proxy_id)
             .map(|p| p.proxy.clone())
@@ -158,12 +159,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id: slot }),
             None,
         );
-        self.session.proxy.pings.insert(slot, PingStatus::Checking);
+        self.session
+            .settings
+            .proxy
+            .pings
+            .insert(slot, PingStatus::Checking);
         match self.sender.send_json(&ping_proxy(extra, draft)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.proxy.pings.remove(&slot);
+                self.session.settings.proxy.pings.remove(&slot);
                 Err(err)
             }
         }
@@ -178,7 +183,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { on }),
             None,
         );
-        self.session.proxy.error = None;
+        self.session.settings.proxy.error = None;
         match self.sender.send_json(&set_prefer_ipv6(extra, on)) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -190,7 +195,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Persist the auto-switch preferences (`proxy_prefs.json`).
     pub fn save_proxy_prefs(&mut self) -> std::io::Result<()> {
-        save_proxy_prefs(&self.paths, &self.session.proxy.prefs)
+        save_proxy_prefs(&self.paths, &self.session.settings.proxy.prefs)
     }
 
     /// Per-poll proxy work: the first `getProxies`, then the auto-switch
@@ -205,7 +210,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.connection,
             ConnectionState::Ready | ConnectionState::Updating
         );
-        match self.session.proxy.rotation_step(now_ms, connected) {
+        match self.session.settings.proxy.rotation_step(now_ms, connected) {
             RotationAction::None => {}
             RotationAction::Ping(id) => {
                 changed |= self.ping_listed_proxy(id).is_ok();

@@ -15,7 +15,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let group_call_id = match &self.session.active_group_call {
+        let group_call_id = match &self.session.calls.active_group_call {
             Some(call) if call.is_joined => call.id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
@@ -34,6 +34,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let sharing = self
             .session
+            .calls
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
@@ -51,11 +52,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             if let Some(engine) = self.call_engine.as_deref_mut()
                 && let Err(err) = engine.stop_screen_share(group_call_id)
-                && let Some(call) = self.session.active_group_call.as_mut()
+                && let Some(call) = self.session.calls.active_group_call.as_mut()
             {
                 call.transport_error = Some(err.to_string());
             }
-            if let Some(call) = self.session.active_group_call.as_mut() {
+            if let Some(call) = self.session.calls.active_group_call.as_mut() {
                 call.screen_sharing = false;
                 call.screen_share_pending = false;
                 call.screen_share_answer.clear();
@@ -70,7 +71,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             Ok(offer) => offer,
             Err(err) => {
-                if let Some(call) = self.session.active_group_call.as_mut() {
+                if let Some(call) = self.session.calls.active_group_call.as_mut() {
                     call.transport_error = Some(err.to_string());
                 }
                 return Err(ConnectSendError::InvalidRequest);
@@ -91,7 +92,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Err(err);
         }
-        if let Some(call) = self.session.active_group_call.as_mut() {
+        if let Some(call) = self.session.calls.active_group_call.as_mut() {
             call.screen_share_pending = true;
         }
         Ok(extra)
@@ -105,7 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// it so everyone sees the muted icon
     /// (`toggleGroupCallParticipantIsMuted` on yourself).
     pub fn toggle_group_call_self_mute(&mut self) {
-        let Some(call) = self.session.active_group_call.as_ref() else {
+        let Some(call) = self.session.calls.active_group_call.as_ref() else {
             return;
         };
         let muted = !call.is_muted_self;
@@ -115,7 +116,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Set (rather than flip) the self-mute state; push-to-talk drives
     /// this. A no-op when the state already matches.
     pub fn set_group_call_self_mute(&mut self, muted: bool) {
-        let Some(call) = self.session.active_group_call.as_ref() else {
+        let Some(call) = self.session.calls.active_group_call.as_ref() else {
             return;
         };
         if call.is_muted_self == muted {
@@ -143,7 +144,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (group_call_id, enable) = match &self.session.active_group_call {
+        let (group_call_id, enable) = match &self.session.calls.active_group_call {
             Some(call) => (call.id, !call.is_my_video_enabled),
             None => return Err(ConnectSendError::InvalidRequest),
         };
@@ -171,7 +172,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (group_call_id, pause) = match &self.session.active_group_call {
+        let (group_call_id, pause) = match &self.session.calls.active_group_call {
             Some(call) if call.is_my_video_enabled => (call.id, !call.is_my_video_paused),
             _ => return Err(ConnectSendError::InvalidRequest),
         };
@@ -201,7 +202,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let group_call_id = match &self.session.active_group_call {
+        let group_call_id = match &self.session.calls.active_group_call {
             Some(call) => call.id,
             None => return Err(ConnectSendError::InvalidRequest),
         };
@@ -240,7 +241,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let group_call_id = match &self.session.active_group_call {
+        let group_call_id = match &self.session.calls.active_group_call {
             Some(call) => call.id,
             None => return Err(ConnectSendError::InvalidRequest),
         };
@@ -276,7 +277,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (group_call_id, is_video) = match &self.session.active_group_call {
+        let (group_call_id, is_video) = match &self.session.calls.active_group_call {
             Some(call) => (call.id, call.is_video_chat),
             None => return Err(ConnectSendError::InvalidRequest),
         };
@@ -308,7 +309,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let group_call_id = match &self.session.active_group_call {
+        let group_call_id = match &self.session.calls.active_group_call {
             Some(call) if call.is_owned => call.id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
@@ -338,7 +339,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let group_call_id = match &self.session.active_group_call {
+        let group_call_id = match &self.session.calls.active_group_call {
             Some(call) => call.id,
             None => return Err(ConnectSendError::InvalidRequest),
         };
@@ -380,7 +381,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.active_call.is_some() {
+        if self.session.calls.active_call.is_some() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self

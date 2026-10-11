@@ -152,9 +152,9 @@ impl QuillApp {
     /// everybody, or contacts and Premium users only.
     pub(super) fn new_chat_editor(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let state = session.and_then(|s| s.privacy_data.new_chat);
-        let premium = session.is_some_and(|s| s.premium_option == Some(true));
-        let error = session.and_then(|s| s.privacy_data.error.clone());
+        let state = session.and_then(|s| s.settings.privacy_data.new_chat);
+        let premium = session.is_some_and(|s| s.payments.premium_option == Some(true));
+        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
         let mut body = div().flex().flex_col().gap_1();
         body = body.child(
             div()
@@ -240,7 +240,7 @@ impl QuillApp {
     pub(super) fn set_new_chat_allow(&mut self, allow: bool, cx: &mut Context<Self>) {
         let premium = self
             .session()
-            .is_some_and(|s| s.premium_option == Some(true));
+            .is_some_and(|s| s.payments.premium_option == Some(true));
         if !allow && !premium {
             self.connection.status_note = "Restricting new chats needs Telegram Premium.".into();
             cx.notify();
@@ -251,7 +251,7 @@ impl QuillApp {
                 self.connection.status_note = format!("privacy update failed: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut()
-            && let Some(NewChatPrivacyState::Ready(current)) = demo.privacy_data.new_chat
+            && let Some(NewChatPrivacyState::Ready(current)) = demo.settings.privacy_data.new_chat
         {
             demo.set_new_chat_privacy_local(quill::privacy::NewChatPrivacy {
                 allow_from_unknown: allow,
@@ -267,7 +267,7 @@ impl QuillApp {
         let target = PrivacyEditorTarget::Rule(key);
         let current: Option<PrivacyWho> = self
             .session()
-            .and_then(|s| s.privacy.get(&key))
+            .and_then(|s| s.settings.privacy.get(&key))
             .and_then(|st| match st {
                 quill::privacy::PrivacyKeyState::Ready(d) => d.who,
                 _ => None,
@@ -295,7 +295,7 @@ impl QuillApp {
         let settings = session
             .and_then(|s| s.my_gift_settings())
             .unwrap_or_default();
-        let premium = session.is_some_and(|s| s.premium_option == Some(true));
+        let premium = session.is_some_and(|s| s.payments.premium_option == Some(true));
         let mut block = div().flex().flex_col().gap_1().mt_1();
         block = block.child(self.gift_switch(
             cx,
@@ -412,7 +412,7 @@ impl QuillApp {
     ) {
         let premium = self
             .session()
-            .is_some_and(|s| s.premium_option == Some(true));
+            .is_some_and(|s| s.payments.premium_option == Some(true));
         if !premium {
             self.connection.status_note = "Changing gift settings needs Telegram Premium.".into();
             cx.notify();
@@ -437,11 +437,11 @@ impl QuillApp {
     /// account may turn it on) and the file-open confirmations row.
     pub(super) fn privacy_security_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let can_ignore = session.is_some_and(|s| s.privacy_data.can_ignore_sensitive);
+        let can_ignore = session.is_some_and(|s| s.settings.privacy_data.can_ignore_sensitive);
         let ignore = session
-            .and_then(|s| s.privacy_data.ignore_sensitive)
+            .and_then(|s| s.settings.privacy_data.ignore_sensitive)
             .unwrap_or(false);
-        let error = session.and_then(|s| s.privacy_data.error.clone());
+        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
         let mut section = div().flex().flex_col().gap_1();
         section = section.child(
             div()
@@ -527,7 +527,7 @@ impl QuillApp {
                 self.connection.status_note = format!("couldn't change the 18+ setting: {err:?}");
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.privacy_data.ignore_sensitive = Some(on);
+            demo.settings.privacy_data.ignore_sensitive = Some(on);
         }
         cx.notify();
     }
@@ -857,7 +857,7 @@ impl QuillApp {
     pub(super) fn password_check_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let check = self
             .session()
-            .map(|s| s.privacy_data.password_check)
+            .map(|s| s.settings.privacy_data.password_check)
             .unwrap_or_default();
         let mut card = div()
             .id("password-check-card")
@@ -952,7 +952,7 @@ impl QuillApp {
             let _ = live.driver.check_remembered_password(&password);
         } else if let Some(demo) = self.demo_session.as_mut() {
             // No server in the demo: any password "matches".
-            demo.privacy_data.password_check = PasswordCheck::Remembered;
+            demo.settings.privacy_data.password_check = PasswordCheck::Remembered;
         }
         password.zeroize();
         cx.notify();
@@ -962,10 +962,10 @@ impl QuillApp {
     fn dismiss_password_check(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.hide_check_password_suggestion();
-            live.driver.session.privacy_data.password_check = PasswordCheck::Idle;
+            live.driver.session.settings.privacy_data.password_check = PasswordCheck::Idle;
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.privacy_data.check_password_suggested = false;
-            demo.privacy_data.password_check = PasswordCheck::Idle;
+            demo.settings.privacy_data.check_password_suggested = false;
+            demo.settings.privacy_data.password_check = PasswordCheck::Idle;
         }
         cx.notify();
     }
@@ -999,7 +999,7 @@ mod tests {
     fn messages_row_value_follows_the_server_state() {
         let mut session = session();
         assert_eq!(new_chat_privacy_value(&session), "Loading…");
-        session.privacy_data.new_chat = Some(NewChatPrivacyState::Failed);
+        session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Failed);
         assert_eq!(new_chat_privacy_value(&session), "Couldn't load");
         let ready = |allow, stars| {
             Some(NewChatPrivacyState::Ready(NewChatPrivacy {
@@ -1007,11 +1007,11 @@ mod tests {
                 incoming_paid_message_star_count: stars,
             }))
         };
-        session.privacy_data.new_chat = ready(true, 0);
+        session.settings.privacy_data.new_chat = ready(true, 0);
         assert_eq!(new_chat_privacy_value(&session), "Everybody");
-        session.privacy_data.new_chat = ready(false, 0);
+        session.settings.privacy_data.new_chat = ready(false, 0);
         assert_eq!(new_chat_privacy_value(&session), "Contacts & Premium");
-        session.privacy_data.new_chat = ready(false, 15);
+        session.settings.privacy_data.new_chat = ready(false, 15);
         assert_eq!(new_chat_privacy_value(&session), "15 Stars per message");
     }
 }
@@ -1058,7 +1058,7 @@ mod dispatch_tests {
     }
 
     fn rule_who(app: &QuillApp, key: PrivacySettingKey) -> Option<PrivacyWho> {
-        match app.demo_session.as_ref()?.privacy.get(&key)? {
+        match app.demo_session.as_ref()?.settings.privacy.get(&key)? {
             PrivacyKeyState::Ready(detail) => detail.who,
             _ => None,
         }
@@ -1082,7 +1082,7 @@ mod dispatch_tests {
         // Without Premium the change is refused and says why.
         app.update_in(vcx, |app, _, cx| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.premium_option = Some(false);
+                session.payments.premium_option = Some(false);
             }
             app.update_gift_settings(|g| g.limited_gifts = false, cx);
         });
@@ -1100,7 +1100,7 @@ mod dispatch_tests {
             app.set_sensitive_content(true, cx);
         });
         app.read_with(vcx, |app, _| {
-            let data = &app.demo_session.as_ref().unwrap().privacy_data;
+            let data = &app.demo_session.as_ref().unwrap().settings.privacy_data;
             assert!(matches!(
                 data.new_chat,
                 Some(NewChatPrivacyState::Ready(s)) if s.allow_from_unknown
@@ -1110,12 +1110,12 @@ mod dispatch_tests {
         // Restricting needs Premium.
         app.update_in(vcx, |app, _, cx| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.premium_option = Some(false);
+                session.payments.premium_option = Some(false);
             }
             app.set_new_chat_allow(false, cx);
         });
         app.read_with(vcx, |app, _| {
-            let data = &app.demo_session.as_ref().unwrap().privacy_data;
+            let data = &app.demo_session.as_ref().unwrap().settings.privacy_data;
             assert!(matches!(
                 data.new_chat,
                 Some(NewChatPrivacyState::Ready(s)) if s.allow_from_unknown
@@ -1131,7 +1131,7 @@ mod dispatch_tests {
         let target = PrivacyEditorTarget::Rule(key);
         app.update_in(vcx, |app, _, cx| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.premium_option = Some(false);
+                session.payments.premium_option = Some(false);
             }
             app.set_privacy_target_who(target, PrivacyWho::Nobody, cx);
         });
@@ -1141,7 +1141,7 @@ mod dispatch_tests {
         );
         app.update_in(vcx, |app, _, cx| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.premium_option = Some(true);
+                session.payments.premium_option = Some(true);
             }
             app.set_privacy_target_who(target, PrivacyWho::Nobody, cx);
         });
@@ -1176,7 +1176,7 @@ mod dispatch_tests {
         });
         app.read_with(vcx, |app, _| {
             let session = app.demo_session.as_ref().unwrap();
-            let detail = |key| match session.privacy.get(&key) {
+            let detail = |key| match session.settings.privacy.get(&key) {
                 Some(PrivacyKeyState::Ready(d)) => d.clone(),
                 other => panic!("{other:?}"),
             };

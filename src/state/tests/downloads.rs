@@ -6,8 +6,8 @@ use crate::telegram::envelope::MediaPayload;
 #[test]
 fn sound_download_error_drops_pending_playback() {
     let (mut session, _sink) = session();
-    session.sound_file_ids.insert(91, 7);
-    session.pending_sound_downloads.insert(7);
+    session.settings.sound_file_ids.insert(91, 7);
+    session.settings.pending_sound_downloads.insert(7);
     session.upsert_file(
         ParsedFile {
             id: FileId(91),
@@ -23,10 +23,10 @@ fn sound_download_error_drops_pending_playback() {
         },
         true,
     );
-    assert!(!session.pending_sound_downloads.contains(&7));
-    assert!(session.pending_sound_plays.is_empty());
+    assert!(!session.settings.pending_sound_downloads.contains(&7));
+    assert!(session.settings.pending_sound_plays.is_empty());
     // The file→sound mapping itself stays (the list refetch prunes it).
-    assert_eq!(session.sound_file_ids.get(&91), Some(&7));
+    assert_eq!(session.settings.sound_file_ids.get(&91), Some(&7));
 }
 
 #[test]
@@ -228,18 +228,18 @@ fn auto_download_gate_respects_data_saver_and_chat_kind() {
         is_channel: true,
     };
     session.chats.insert(13, chat);
-    session.media_prefs.auto_download_channels = AUTO_DOWNLOAD_VIDEO;
+    session.settings.media_prefs.auto_download_channels = AUTO_DOWNLOAD_VIDEO;
     assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
     assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_VIDEO));
     // Data saver pauses everything, regardless of bucket.
-    session.media_prefs.data_saver = true;
+    session.settings.media_prefs.data_saver = true;
     assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_VIDEO));
-    session.media_prefs.data_saver = false;
+    session.settings.media_prefs.data_saver = false;
     // Groups bucket: basic groups.
     let mut group = placeholder_chat(ChatId(14));
     group.kind = ChatKind::BasicGroup { basic_group_id: 2 };
     session.chats.insert(14, group);
-    session.media_prefs.auto_download_groups = AUTO_DOWNLOAD_FILE;
+    session.settings.media_prefs.auto_download_groups = AUTO_DOWNLOAD_FILE;
     assert!(session.auto_download_allowed(ChatId(14), AUTO_DOWNLOAD_FILE));
     assert!(!session.auto_download_allowed(ChatId(14), AUTO_DOWNLOAD_PHOTO));
 }
@@ -284,15 +284,15 @@ fn auto_download_media_ids_follow_per_type_flags() {
     // Defaults: voice auto-downloads; video and file do not.
     assert_eq!(session.auto_download_media_file_ids(), vec![FileId(4)]);
     // Enabling video+file for private chats picks them up.
-    session.media_prefs.auto_download_private |= AUTO_DOWNLOAD_VIDEO | AUTO_DOWNLOAD_FILE;
+    session.settings.media_prefs.auto_download_private |= AUTO_DOWNLOAD_VIDEO | AUTO_DOWNLOAD_FILE;
     assert_eq!(
         session.auto_download_media_file_ids(),
         vec![FileId(4), FileId(5), FileId(9)]
     );
     // Data saver suppresses all automatic media.
-    session.media_prefs.data_saver = true;
+    session.settings.media_prefs.data_saver = true;
     assert!(session.auto_download_media_file_ids().is_empty());
-    session.media_prefs.data_saver = false;
+    session.settings.media_prefs.data_saver = false;
     // A spoiler video is never auto-downloaded.
     apply_json(
         &mut session,

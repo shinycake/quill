@@ -20,7 +20,7 @@ impl Session {
         if pending.map(|p| p.purpose) != Some(RequestPurpose::GetProxies) {
             return;
         }
-        let proxy = &mut self.proxy;
+        let proxy = &mut self.settings.proxy;
         proxy
             .pings
             .retain(|id, _| *id == LINK_PING_ID || proxies.iter().any(|p| p.id == *id));
@@ -38,9 +38,9 @@ impl Session {
     }
 
     fn proxy_mutation_succeeded(&mut self) {
-        self.proxy.mutating = false;
-        self.proxy.stale = true;
-        self.proxy.error = None;
+        self.settings.proxy.mutating = false;
+        self.settings.proxy.stale = true;
+        self.settings.proxy.error = None;
     }
 
     /// `pingProxy` answer, in seconds.
@@ -49,7 +49,10 @@ impl Session {
             pending.map(|p| p.purpose)
         {
             let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
-            self.proxy.pings.insert(proxy_id, PingStatus::Available(ms));
+            self.settings
+                .proxy
+                .pings
+                .insert(proxy_id, PingStatus::Available(ms));
         }
     }
 
@@ -58,7 +61,7 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::MutateProxy) => self.proxy_mutation_succeeded(),
             Some(RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { on })) => {
-                self.proxy.prefer_ipv6 = on
+                self.settings.proxy.prefer_ipv6 = on
             }
             _ => {}
         }
@@ -68,20 +71,24 @@ impl Session {
     pub(crate) fn apply_proxy_error(&mut self, purpose: RequestPurpose, err: &TdError) {
         match purpose {
             RequestPurpose::GetProxies => {
-                self.proxy.loading = false;
-                self.proxy.stale = false;
-                self.proxy.error = Some(sessions_error_line("load the proxy list", err));
+                self.settings.proxy.loading = false;
+                self.settings.proxy.stale = false;
+                self.settings.proxy.error = Some(sessions_error_line("load the proxy list", err));
             }
             RequestPurpose::MutateProxy => {
-                self.proxy.mutating = false;
-                self.proxy.error = Some(sessions_error_line("change the proxy", err));
+                self.settings.proxy.mutating = false;
+                self.settings.proxy.error = Some(sessions_error_line("change the proxy", err));
             }
             // A failed ping is the answer: the proxy is not available.
             RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id }) => {
-                self.proxy.pings.insert(proxy_id, PingStatus::Unavailable);
+                self.settings
+                    .proxy
+                    .pings
+                    .insert(proxy_id, PingStatus::Unavailable);
             }
             RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { .. }) => {
-                self.proxy.error = Some(sessions_error_line("change the IPv6 setting", err));
+                self.settings.proxy.error =
+                    Some(sessions_error_line("change the IPv6 setting", err));
             }
             _ => {}
         }

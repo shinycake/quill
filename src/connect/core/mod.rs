@@ -32,8 +32,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let was_ready = matches!(self.session.auth, AuthorizationState::Ready);
-        let active_call_before = self.session.active_call.as_ref().map(|call| call.id);
-        let active_group_call_before = self.session.active_group_call.as_ref().map(|call| call.id);
+        let active_call_before = self.session.calls.active_call.as_ref().map(|call| call.id);
+        let active_group_call_before = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .map(|call| call.id);
         let bridge_signaling = match &owned.envelope.payload {
             EnvelopePayload::Calls(CallsPayload::UpdateNewCallSignalingData { call_id, data }) => {
                 Some((*call_id, data.clone()))
@@ -477,8 +482,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .and_then(|pending| pending.chat_id),
             _ => None,
         };
-        let recent_packs = self.session.media_prefs.recent_emoji_packs.clone();
-        let recent_emoji = self.session.media_prefs.recent_custom_emoji_ids.clone();
+        let recent_packs = self.session.settings.media_prefs.recent_emoji_packs.clone();
+        let recent_emoji = self
+            .session
+            .settings
+            .media_prefs
+            .recent_custom_emoji_ids
+            .clone();
         let topic_chat = Self::possible_topic_chat(&owned.envelope.payload);
         let topic_refresh = Self::possible_topic_refresh(&owned.envelope.payload);
         let previous_seq = self.session.last_seq;
@@ -494,8 +504,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.last_seq != previous_seq {
             self.session.remember_emoji_pack_usage(&used_emoji);
         }
-        if (recent_packs != self.session.media_prefs.recent_emoji_packs
-            || recent_emoji != self.session.media_prefs.recent_custom_emoji_ids)
+        if (recent_packs != self.session.settings.media_prefs.recent_emoji_packs
+            || recent_emoji != self.session.settings.media_prefs.recent_custom_emoji_ids)
             && self.save_media_prefs().is_err()
         {
             self.session.chat_action_error =
@@ -504,8 +514,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice S4: persist per-network settings seeded from
         // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
         // filesystem, so it marks them dirty instead).
-        if self.session.data_storage_dirty {
-            self.session.data_storage_dirty = false;
+        if self.session.settings.data_storage_dirty {
+            self.session.settings.data_storage_dirty = false;
             let _ = self.save_data_storage_prefs();
         }
         if cleared_download_cache {
@@ -513,7 +523,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Batch 6: a finished reset / cancel / login-email step left the
         // cached password state out of date.
-        if std::mem::take(&mut self.session.twofa_flow.refetch) {
+        if std::mem::take(&mut self.session.auth_state.twofa_flow.refetch) {
             let _ = self.refresh_password_state();
         }
         if let Some(chat_id) = unpinned_all {
@@ -858,7 +868,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             &self.credentials,
             &self.paths,
             &self.database_key,
-            &self.session.language_prefs.system_language_code,
+            &self.session.settings.language_prefs.system_language_code,
         );
         // Contains api_hash — do not log `json`.
         let json = params.to_json(extra);

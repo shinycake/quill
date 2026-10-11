@@ -134,7 +134,15 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
         sent,
         "a higher price must never auto-submit"
     );
-    assert!(!driver.session.marketplace_gift.as_ref().unwrap().completed);
+    assert!(
+        !driver
+            .session
+            .payments
+            .marketplace_gift
+            .as_ref()
+            .unwrap()
+            .completed
+    );
     assert!(
         driver
             .buy_marketplace_gift(GiftPrice::Stars(25), "Hi", false)
@@ -145,7 +153,13 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
         json!({"@type":"giftResaleResultOk","received_gift_id":""}),
     );
     assert!(
-        !driver.session.marketplace_gift.as_ref().unwrap().completed,
+        !driver
+            .session
+            .payments
+            .marketplace_gift
+            .as_ref()
+            .unwrap()
+            .completed,
         "unsolicited success is ignored"
     );
     let retry = driver
@@ -155,8 +169,24 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
         &mut driver,
         json!({"@type":"error","@extra":retry.as_extra(),"code":400,"message":"GIFT_NOT_AVAILABLE"}),
     );
-    assert!(!driver.session.marketplace_gift.as_ref().unwrap().sending);
-    assert!(!driver.session.marketplace_gift.as_ref().unwrap().completed);
+    assert!(
+        !driver
+            .session
+            .payments
+            .marketplace_gift
+            .as_ref()
+            .unwrap()
+            .sending
+    );
+    assert!(
+        !driver
+            .session
+            .payments
+            .marketplace_gift
+            .as_ref()
+            .unwrap()
+            .completed
+    );
     let success = driver
         .buy_marketplace_gift(GiftPrice::Stars(40), "Hi", false)
         .unwrap();
@@ -169,7 +199,13 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
         json!({"@type":"giftResaleResultOk","@extra":success.as_extra(),"received_gift_id":""}),
     );
     assert!(
-        driver.session.marketplace_gift.as_ref().unwrap().completed,
+        driver
+            .session
+            .payments
+            .marketplace_gift
+            .as_ref()
+            .unwrap()
+            .completed,
         "receipt id is empty for gifts to other users"
     );
     assert!(
@@ -191,6 +227,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
     assert!(
         driver
             .session
+            .payments
             .marketplace_gift
             .as_ref()
             .unwrap()
@@ -225,6 +262,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
     assert!(
         driver
             .session
+            .payments
             .marketplace_gift
             .as_ref()
             .unwrap()
@@ -243,10 +281,19 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
         &mut driver,
         json!({"@type":"upgradedGift","@extra":bad_quote.as_extra(),"name":null}),
     );
-    assert!(!driver.session.marketplace_gift.as_ref().unwrap().loading);
+    assert!(
+        !driver
+            .session
+            .payments
+            .marketplace_gift
+            .as_ref()
+            .unwrap()
+            .loading
+    );
     assert!(
         driver
             .session
+            .payments
             .marketplace_gift
             .as_ref()
             .unwrap()

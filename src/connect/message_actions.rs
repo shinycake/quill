@@ -44,7 +44,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // skips cached and in-flight ones.
         for (chat_id, story_id) in self.session.reply_story_candidates() {
             self.session
-                .story_reply_attempted
+                .stories
+                .reply_attempted
                 .insert((chat_id.0, story_id));
             self.get_story(chat_id, story_id)?;
         }
@@ -488,7 +489,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Mode Off (or a send failure) means the caller opens the URL in
         // the browser directly — never a fake reader.
         if !matches!(
-            self.session.media_prefs.instant_view_mode,
+            self.session.settings.media_prefs.instant_view_mode,
             InstantViewMode::Telegram | InstantViewMode::All
         ) {
             return InstantViewOutcome::Browser;

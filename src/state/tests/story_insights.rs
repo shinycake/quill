@@ -20,7 +20,7 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
             stats.0
         ),
     );
-    let state = session.story_insights.as_ref().unwrap();
+    let state = session.stories.insights.as_ref().unwrap();
     assert!(matches!(state.statistics, StoryStatsFetch::Loaded(_)));
 
     let page = |extra: u64, offset: &str| {
@@ -32,7 +32,7 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
     apply_json(&mut session, &seq, &sink, &page(first.0, "n"));
     let second = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(second.0, ""));
-    let state = session.story_insights.as_ref().unwrap();
+    let state = session.stories.insights.as_ref().unwrap();
     assert_eq!(state.forwards.len(), 2);
     assert_eq!(state.forwards_total, 3);
     assert!(state.forwards_next_offset.is_empty());
@@ -41,7 +41,15 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
     session.begin_story_insights(11, 6);
     let late = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(late.0, "z"));
-    assert!(session.story_insights.as_ref().unwrap().forwards.is_empty());
+    assert!(
+        session
+            .stories
+            .insights
+            .as_ref()
+            .unwrap()
+            .forwards
+            .is_empty()
+    );
 }
 
 #[test]
@@ -59,7 +67,7 @@ fn statistics_error_is_kept_for_the_panel() {
             stats.0
         ),
     );
-    let state = session.story_insights.as_ref().unwrap();
+    let state = session.stories.insights.as_ref().unwrap();
     assert!(matches!(state.statistics, StoryStatsFetch::Failed(_)));
 }
 
@@ -85,11 +93,11 @@ fn found_stories_fill_the_cache_and_page() {
             story(2, 22)
         ),
     );
-    let search = session.story_search.as_ref().unwrap();
+    let search = session.stories.search.as_ref().unwrap();
     assert_eq!(search.stories, vec![(21, 1), (22, 2)]);
     assert_eq!(search.next_offset, "p2");
     assert!(!search.loading);
-    assert!(session.stories.contains_key(&(22, 2)));
+    assert!(session.stories.stories.contains_key(&(22, 2)));
 
     session.story_search_page_requested();
     let extra = session.request(RequestPurpose::SearchPublicStories, None);
@@ -104,7 +112,7 @@ fn found_stories_fill_the_cache_and_page() {
             story(3, 23)
         ),
     );
-    let search = session.story_search.as_ref().unwrap();
+    let search = session.stories.search.as_ref().unwrap();
     assert_eq!(search.stories, vec![(21, 1), (22, 2), (23, 3)]);
     assert!(search.next_offset.is_empty());
 }
@@ -124,7 +132,7 @@ fn search_error_lands_in_the_panel() {
             extra.0
         ),
     );
-    let search = session.story_search.as_ref().unwrap();
+    let search = session.stories.search.as_ref().unwrap();
     assert!(!search.loading);
     assert!(search.error.is_some());
 }

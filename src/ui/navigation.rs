@@ -193,7 +193,7 @@ impl QuillApp {
                 if self.session().and_then(|s| s.open_chat).is_some() {
                     let busy = self
                         .session()
-                        .and_then(|s| s.marketplace_gift.as_ref())
+                        .and_then(|s| s.payments.marketplace_gift.as_ref())
                         .is_some_and(|g| g.loading || g.sending);
                     if !busy {
                         self.payments
@@ -205,9 +205,9 @@ impl QuillApp {
                         self.payments.marketplace_private = true;
                         self.payments.marketplace_error = None;
                         if let Some(live) = self.live.as_mut() {
-                            live.driver.session.marketplace_gift = None;
+                            live.driver.session.payments.marketplace_gift = None;
                         } else if let Some(session) = self.demo_session.as_mut() {
-                            session.marketplace_gift = None;
+                            session.payments.marketplace_gift = None;
                         }
                     }
                     self.payments.marketplace_open = true;

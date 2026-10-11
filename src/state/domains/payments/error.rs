@@ -22,62 +22,64 @@ impl Session {
                 | RequestPurpose::ValidateOrderInfo
                 | RequestPurpose::SendPaymentForm,
             ) => {
-                self.payment_form_loading = false;
-                self.payment_sending = false;
-                self.payment_note = Some(format!("Payment failed: {}", error_reason(err)));
+                self.payments.form_loading = false;
+                self.payments.sending = false;
+                self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
             }
             Some(RequestPurpose::GetPaymentReceipt) => {
-                self.payment_receipt_error = Some(format!("Receipt failed: {}", error_reason(err)));
+                self.payments.receipt_error =
+                    Some(format!("Receipt failed: {}", error_reason(err)));
             }
             Some(RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift) => {
-                if let Some(gift) = self.marketplace_gift.as_mut() {
+                if let Some(gift) = self.payments.marketplace_gift.as_mut() {
                     gift.loading = false;
                     gift.sending = false;
                     gift.note = Some(format!("Gift request failed: {}", error_reason(err)));
                 }
             }
             Some(RequestPurpose::GetGiftTextLimit) => {
-                self.gift_text_length_max = None;
+                self.payments.gift_text_length_max = None;
             }
             // Slice `parity:bots-payment-recurring`: a subscriptions
             // request failed — surface the reason in the dialog
             // instead of spinning forever; a failed mutation also
             // releases the disabled buttons.
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { .. })) => {
-                self.hub.tx_loading = false;
-                self.hub.tx_error =
+                self.payments.hub.tx_loading = false;
+                self.payments.hub.tx_error =
                     Some(format!("Couldn't load transactions: {}", error_reason(err)));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
-                self.hub.gifts_loading = false;
-                self.hub.gifts_error = Some(format!("Couldn't load gifts: {}", error_reason(err)));
+                self.payments.hub.gifts_loading = false;
+                self.payments.hub.gifts_error =
+                    Some(format!("Couldn't load gifts: {}", error_reason(err)));
             }
             Some(
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })
                 | RequestPurpose::SellGift,
             ) => {
-                self.hub.gift_mutating = false;
-                self.hub.gift_convert_confirm = None;
-                self.hub.gifts_error =
+                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gift_convert_confirm = None;
+                self.payments.hub.gifts_error =
                     Some(format!("Couldn't update the gift: {}", error_reason(err)));
             }
             Some(RequestPurpose::GetPremiumFeatures) => {
-                self.hub.premium_loading = false;
-                self.hub.premium_error = Some(format!(
+                self.payments.hub.premium_loading = false;
+                self.payments.hub.premium_error = Some(format!(
                     "Couldn't load Premium features: {}",
                     error_reason(err)
                 ));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { .. })) => {
-                self.star_subscriptions_loading = false;
-                self.star_subscriptions_error = Some(format!(
+                self.payments.star_subscriptions_loading = false;
+                self.payments.star_subscriptions_error = Some(format!(
                     "Couldn't load subscriptions: {}",
                     error_reason(err)
                 ));
             }
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription) => {
-                self.star_subscriptions_mutating = false;
-                self.star_subscriptions_error = Some(format!(
+                self.payments.star_subscriptions_mutating = false;
+                self.payments.star_subscriptions_error = Some(format!(
                     "Couldn't update the subscription: {}",
                     error_reason(err)
                 ));

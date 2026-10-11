@@ -14,7 +14,8 @@ impl Session {
         &self,
         scope: NotificationSettingsScope,
     ) -> ScopeNotificationSettings {
-        self.scope_notification_settings
+        self.settings
+            .scope_notification_settings
             .get(&scope)
             .cloned()
             .unwrap_or_default()
@@ -105,10 +106,10 @@ impl Session {
             last_read_inbox_message_id: Some(chat.last_read_inbox_message_id),
             open_chat: self.open_chat,
             app_active: self.app_active,
-            hide_previews: self.hide_notification_previews,
+            hide_previews: self.settings.hide_notification_previews,
             chat_preview_allowed,
             pinned_allowed: self.effective_pinned_allowed(chat),
-            contact_joined_allowed: !self.disable_contact_registered_notifications,
+            contact_joined_allowed: !self.settings.disable_contact_registered_notifications,
         })
     }
 
@@ -122,12 +123,13 @@ impl Session {
         // Parity slice: in-app sounds toggle (tdesktop "Play sounds").
         // Client-side preference — when off, no sound is decided for
         // any notification.
-        if !self.inapp_sounds_enabled {
+        if !self.settings.inapp_sounds_enabled {
             return None;
         }
         let settings = &chat.notification_settings;
         let scope = scope_for_chat_kind(&chat.kind);
         let scope_sound_id = self
+            .settings
             .scope_notification_settings
             .get(&scope)
             .map(|s| s.sound_id);
@@ -147,9 +149,11 @@ impl Session {
         notification: OsNotification,
         sound: Option<notify::NotificationSoundKind>,
     ) {
-        self.shown_notification_chats.insert(notification.chat_id);
+        self.settings
+            .shown_notification_chats
+            .insert(notification.chat_id);
         notify::coalesce_notification_with_sound(
-            &mut self.pending_notifications,
+            &mut self.settings.pending_notifications,
             notification,
             sound,
         );
@@ -159,12 +163,13 @@ impl Session {
     /// notifications: drop what is still queued and ask the UI to
     /// withdraw anything already shown.
     pub(crate) fn clear_chat_notifications(&mut self, chat_id: ChatId) {
-        self.pending_notifications
+        self.settings
+            .pending_notifications
             .retain(|queued| queued.chat_id != chat_id);
-        if self.shown_notification_chats.remove(&chat_id)
-            && !self.pending_notification_clears.contains(&chat_id)
+        if self.settings.shown_notification_chats.remove(&chat_id)
+            && !self.settings.pending_notification_clears.contains(&chat_id)
         {
-            self.pending_notification_clears.push(chat_id);
+            self.settings.pending_notification_clears.push(chat_id);
         }
     }
 
@@ -177,11 +182,11 @@ impl Session {
         chat_id: ChatId,
         reaction: &crate::telegram::envelope::UnreadReaction,
     ) {
-        if !self.desktop_notifications {
+        if !self.settings.desktop_notifications {
             return;
         }
         let (Some(settings), Some(chat)) = (
-            self.reaction_notification_settings.as_ref(),
+            self.settings.reaction_notification_settings.as_ref(),
             self.chats.get(&chat_id.0),
         ) else {
             return;
@@ -200,7 +205,7 @@ impl Session {
             sender_name: sender_name.as_deref(),
             sender_is_contact,
             emoji: reaction.reaction_type.emoji_text(),
-            show_preview: settings.show_preview && !self.hide_notification_previews,
+            show_preview: settings.show_preview && !self.settings.hide_notification_previews,
             chat_muted: self.effective_muted(chat),
             app_active: self.app_active,
             open_chat: self.open_chat,
@@ -208,8 +213,9 @@ impl Session {
         if let Some(notification) = notification {
             // The reaction sound follows `reactionNotificationSettings`:
             // 0 = silent, anything else the default tone.
-            let sound = (self.inapp_sounds_enabled && settings.sound_id != 0 && !self.app_active)
-                .then_some(notify::NotificationSoundKind::Default);
+            let sound =
+                (self.settings.inapp_sounds_enabled && settings.sound_id != 0 && !self.app_active)
+                    .then_some(notify::NotificationSoundKind::Default);
             self.queue_notification_with_sound(notification, sound);
         }
     }

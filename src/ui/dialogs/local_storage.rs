@@ -104,8 +104,10 @@ impl QuillApp {
             })
             .map(|c| c.size)
             .sum();
-        let clearing = session.as_ref().is_some_and(|s| s.storage_clearing);
-        let freed = session.as_ref().and_then(|s| s.storage_freed);
+        let clearing = session
+            .as_ref()
+            .is_some_and(|s| s.settings.storage_clearing);
+        let freed = session.as_ref().and_then(|s| s.settings.storage_freed);
         section = section.child(self.local_storage_actions(
             cx,
             &categories_selected(self),
@@ -255,8 +257,8 @@ impl QuillApp {
             // dialog (the S3 pattern).
             let _ = live.driver.clear_storage(&types, &chats);
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.storage_stats = None;
-            demo.storage_freed = Some(54_525_952);
+            demo.settings.storage_stats = None;
+            demo.settings.storage_freed = Some(54_525_952);
         }
         cx.notify();
     }
@@ -326,7 +328,10 @@ impl QuillApp {
 
     /// "Total size limit" and "Clear files older than" as chips.
     pub(super) fn local_storage_limits(&self, cx: &mut Context<Self>) -> Div {
-        let limits = self.session().map(|s| s.storage_limits).unwrap_or_default();
+        let limits = self
+            .session()
+            .map(|s| s.settings.storage_limits)
+            .unwrap_or_default();
         let size = limits.size_limit();
         let keep = limits.keep_for();
         let mut sizes = div().flex().flex_wrap().gap_1();
@@ -412,7 +417,7 @@ impl QuillApp {
                         quill::telegram::envelope::OptionValue::Integer(n)
                     }
                 };
-                demo.storage_limits.apply_option(name, &value);
+                demo.settings.storage_limits.apply_option(name, &value);
             }
         }
         cx.notify();

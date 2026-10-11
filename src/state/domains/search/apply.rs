@@ -40,10 +40,10 @@ impl Session {
                     for message in &messages {
                         self.remember_files(&message.files);
                     }
-                    self.recent_calls.extend(messages);
-                    self.recent_calls_offset = next_offset;
-                    self.recent_calls_loading = false;
-                    self.recent_calls_error = false;
+                    self.calls.recent_calls.extend(messages);
+                    self.calls.recent_calls_offset = next_offset;
+                    self.calls.recent_calls_loading = false;
+                    self.calls.recent_calls_error = false;
                 }
             }
             // `searchPublicPosts` answer: posts of public channels; an

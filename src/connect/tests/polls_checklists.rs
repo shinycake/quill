@@ -255,10 +255,10 @@ fn checklist_toggle_and_add_need_premium_and_permission() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = poll_driver();
     ingest(&mut driver, &seq, &dyn_sink, CHECKLIST_JSON);
     // Without Premium nothing is sent.
-    driver.session.premium_option = Some(false);
+    driver.session.payments.premium_option = Some(false);
     assert_invalid(driver.toggle_checklist_task(ChatId(7), MessageId(130), 4));
     assert_invalid(driver.add_checklist_tasks(ChatId(7), MessageId(130), &["Pack".into()]));
-    driver.session.premium_option = Some(true);
+    driver.session.payments.premium_option = Some(true);
     // Not a checklist / unknown task.
     assert_invalid(driver.toggle_checklist_task(ChatId(7), MessageId(106), 4));
     assert_invalid(driver.toggle_checklist_task(ChatId(7), MessageId(130), 99));
@@ -297,7 +297,7 @@ fn checklist_toggle_and_add_need_premium_and_permission() {
 fn checklist_mutation_errors_surface_a_note() {
     let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = poll_driver();
     ingest(&mut driver, &seq, &dyn_sink, CHECKLIST_JSON);
-    driver.session.premium_option = Some(true);
+    driver.session.payments.premium_option = Some(true);
     let extra = driver
         .toggle_checklist_task(ChatId(7), MessageId(130), 4)
         .unwrap();
@@ -326,9 +326,9 @@ fn send_checklist_draft_is_premium_gated() {
         others_can_add_tasks: true,
         others_can_mark_tasks_as_done: false,
     };
-    driver.session.premium_option = Some(false);
+    driver.session.payments.premium_option = Some(false);
     assert_invalid(driver.send_checklist_draft(ChatId(7), &draft, None));
-    driver.session.premium_option = Some(true);
+    driver.session.payments.premium_option = Some(true);
     let invalid = ChecklistDraft {
         title: "  ".into(),
         ..draft.clone()

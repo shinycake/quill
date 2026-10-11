@@ -1689,7 +1689,7 @@ impl QuillApp {
         let mode = self
             .live
             .as_ref()
-            .map(|live| live.driver.session.media_prefs.instant_view_mode);
+            .map(|live| live.driver.session.settings.media_prefs.instant_view_mode);
         let try_iv = matches!(mode, Some(quill::settings::InstantViewMode::All))
             || (preview.instant_view_version > 0
                 && matches!(mode, Some(quill::settings::InstantViewMode::Telegram)));

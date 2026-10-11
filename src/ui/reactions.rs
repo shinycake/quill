@@ -214,7 +214,10 @@ impl QuillApp {
     /// messages").
     pub(super) fn corner_button_switches(&self, cx: &mut Context<Self>) -> AnyElement {
         let (reply, react) = self.session().map_or((true, true), |s| {
-            (s.media_prefs.corner_reply, s.media_prefs.corner_reaction)
+            (
+                s.settings.media_prefs.corner_reply,
+                s.settings.media_prefs.corner_reaction,
+            )
         });
         let row = || div().flex().items_center().gap_2().px_2().py_1();
         div()
@@ -526,7 +529,7 @@ impl QuillApp {
         if options.allow_custom_emoji
             && let Some(s) = session.filter(|s| s.my_is_premium())
         {
-            for id in &s.media_prefs.recent_custom_emoji_ids {
+            for id in &s.settings.media_prefs.recent_custom_emoji_ids {
                 let choice = ReactionChoice::CustomEmoji(*id);
                 if !choices.contains(&choice) {
                     choices.push(choice);

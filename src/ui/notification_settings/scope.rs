@@ -20,6 +20,7 @@ impl QuillApp {
             let Some(mut settings) = live
                 .driver
                 .session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
@@ -39,12 +40,16 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
             let mut settings = session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
                 .unwrap_or_default();
             settings.sound_id = sound_id;
-            session.scope_notification_settings.insert(scope, settings);
+            session
+                .settings
+                .scope_notification_settings
+                .insert(scope, settings);
             self.connection.status_note = "default sound updated".into();
         }
         cx.notify();
@@ -64,6 +69,7 @@ impl QuillApp {
             let Some(mut settings) = live
                 .driver
                 .session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
@@ -83,12 +89,16 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
                 .unwrap_or_default();
             settings.mute_for = mute_for;
-            session.scope_notification_settings.insert(scope, settings);
+            session
+                .settings
+                .scope_notification_settings
+                .insert(scope, settings);
             self.connection.status_note = "default mute updated".into();
         }
         cx.notify();
@@ -108,6 +118,7 @@ impl QuillApp {
             let Some(mut settings) = live
                 .driver
                 .session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
@@ -126,12 +137,16 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
                 .unwrap_or_default();
             settings.show_preview = show_preview;
-            session.scope_notification_settings.insert(scope, settings);
+            session
+                .settings
+                .scope_notification_settings
+                .insert(scope, settings);
             self.connection.status_note = "default preview updated".into();
         }
         cx.notify();
@@ -152,6 +167,7 @@ impl QuillApp {
             let Some(mut settings) = live
                 .driver
                 .session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
@@ -170,12 +186,16 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
                 .unwrap_or_default();
             settings.mute_stories = mute_stories;
-            session.scope_notification_settings.insert(scope, settings);
+            session
+                .settings
+                .scope_notification_settings
+                .insert(scope, settings);
             self.connection.status_note = "story notification default updated".into();
         }
         cx.notify();
@@ -196,6 +216,7 @@ impl QuillApp {
             let Some(mut settings) = live
                 .driver
                 .session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
@@ -214,12 +235,16 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
                 .unwrap_or_default();
             settings.disable_mention_notifications = !notify;
-            session.scope_notification_settings.insert(scope, settings);
+            session
+                .settings
+                .scope_notification_settings
+                .insert(scope, settings);
             self.connection.status_note = "default mention notifications updated".into();
         }
         cx.notify();
@@ -240,6 +265,7 @@ impl QuillApp {
             let Some(mut settings) = live
                 .driver
                 .session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
@@ -258,12 +284,16 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
                 .unwrap_or_default();
             settings.show_story_poster = show_story_poster;
-            session.scope_notification_settings.insert(scope, settings);
+            session
+                .settings
+                .scope_notification_settings
+                .insert(scope, settings);
             self.connection.status_note = "story poster default updated".into();
         }
         cx.notify();
@@ -284,6 +314,7 @@ impl QuillApp {
             let Some(mut settings) = live
                 .driver
                 .session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
@@ -302,12 +333,16 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
+                .settings
                 .scope_notification_settings
                 .get(&scope)
                 .cloned()
                 .unwrap_or_default();
             settings.disable_pinned_message_notifications = !notify;
-            session.scope_notification_settings.insert(scope, settings);
+            session
+                .settings
+                .scope_notification_settings
+                .insert(scope, settings);
             self.connection.status_note = "default pinned-message notifications updated".into();
         }
         cx.notify();
@@ -322,11 +357,11 @@ impl QuillApp {
     ) -> AnyElement {
         let settings: ScopeNotificationSettings = self
             .session()
-            .and_then(|s| s.scope_notification_settings.get(&scope).cloned())
+            .and_then(|s| s.settings.scope_notification_settings.get(&scope).cloned())
             .unwrap_or_default();
         let loaded = self
             .session()
-            .is_some_and(|s| s.scope_notification_settings.contains_key(&scope));
+            .is_some_and(|s| s.settings.scope_notification_settings.contains_key(&scope));
         let muted = settings.mute_for > 0;
         let sound_label = match settings.sound_id {
             -1 => "Default".to_string(),
@@ -556,10 +591,10 @@ impl QuillApp {
         // open; "Loading…" while the request is in flight.
         let exceptions = self
             .session()
-            .and_then(|s| s.notification_exceptions.get(&scope));
+            .and_then(|s| s.settings.notification_exceptions.get(&scope));
         let exceptions_loading = self
             .session()
-            .is_some_and(|s| s.notification_exceptions_loading.contains(&scope));
+            .is_some_and(|s| s.settings.notification_exceptions_loading.contains(&scope));
         let exceptions_label = match (exceptions, exceptions_loading) {
             (Some(ids), _) => {
                 if ids.len() == 1 {
@@ -620,10 +655,10 @@ impl QuillApp {
         let session = self.session();
         let cached: Option<&Vec<i64>> = session
             .as_ref()
-            .and_then(|s| s.notification_exceptions.get(&scope));
+            .and_then(|s| s.settings.notification_exceptions.get(&scope));
         let loading = session
             .as_ref()
-            .is_some_and(|s| s.notification_exceptions_loading.contains(&scope));
+            .is_some_and(|s| s.settings.notification_exceptions_loading.contains(&scope));
         let mut list = div().flex().flex_col().gap_1().px_2().py_1();
         let Some(ids) = cached else {
             // Fetch failed or never fired — the next dialog open retries.
@@ -699,7 +734,7 @@ impl QuillApp {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.notification_settings = ChatNotificationSettings::default();
             }
-            for list in session.notification_exceptions.values_mut() {
+            for list in session.settings.notification_exceptions.values_mut() {
                 list.retain(|id| *id != chat_id.0);
             }
             self.connection.status_note = "exception reset".into();

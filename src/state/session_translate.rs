@@ -88,7 +88,7 @@ impl Session {
 
     /// Whether the account has Telegram Premium (`is_premium` option).
     pub fn is_premium(&self) -> bool {
-        self.premium_option.unwrap_or(false)
+        self.payments.premium_option.unwrap_or(false)
     }
 
     /// Register a translation job and the TDLib request that serves it.

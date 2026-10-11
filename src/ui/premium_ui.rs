@@ -95,9 +95,9 @@ fn fact_row(label: &str, value: String, cx: &App) -> Div {
 impl QuillApp {
     fn hub_mut(&mut self) -> Option<&mut PremiumHub> {
         if let Some(live) = self.live.as_mut() {
-            Some(&mut live.driver.session.hub)
+            Some(&mut live.driver.session.payments.hub)
         } else {
-            self.demo_session.as_mut().map(|s| &mut s.hub)
+            self.demo_session.as_mut().map(|s| &mut s.payments.hub)
         }
     }
 
@@ -105,7 +105,7 @@ impl QuillApp {
 
     pub(super) fn open_stars(&mut self, cx: &mut Context<Self>) {
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.hub.stars_open = true;
+            live.driver.session.payments.hub.stars_open = true;
             live.driver.maybe_fetch_star_transactions()
         });
         if let Some(Err(_)) = sent {
@@ -154,7 +154,7 @@ impl QuillApp {
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
-            let hub = &session.hub;
+            let hub = &session.payments.hub;
             let muted = cx.theme().muted_foreground;
             let mut body = div().flex().flex_col().gap_3();
             if let Some(tx) = hub.selected_tx() {
@@ -332,7 +332,7 @@ impl QuillApp {
             let Some(session) = this.session() else {
                 return dialog.overlay(true).on_close(on_close);
             };
-            let hub = &session.hub;
+            let hub = &session.payments.hub;
             let mine = hub.gifts_are_mine(session.my_user_id);
             let title = if mine {
                 "My gifts".to_string()
@@ -413,7 +413,7 @@ impl QuillApp {
 
     pub(super) fn open_premium(&mut self, cx: &mut Context<Self>) {
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.hub.premium_open = true;
+            live.driver.session.payments.hub.premium_open = true;
             live.driver.maybe_fetch_premium()
         });
         if let Some(Err(_)) = sent {
@@ -446,7 +446,7 @@ impl QuillApp {
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
-            let hub = &session.hub;
+            let hub = &session.payments.hub;
             let muted = cx.theme().muted_foreground;
             let subscribed =
                 hub.premium_state.as_ref().is_some_and(|s| s.is_subscribed) || session.is_premium();
@@ -733,7 +733,7 @@ fn gift_details(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let muted = cx.theme().muted_foreground;
-    let hub = &session.hub;
+    let hub = &session.payments.hub;
     let mut col = div().flex().flex_col().gap_2();
     col = col
         .child(
@@ -997,21 +997,21 @@ crate::ui::shell::register_dialogs! {
     /// Stars balance and transaction history.
     Stars => DialogSpec::new(
         3800,
-        |app| app.session().is_some_and(|s| s.hub.stars_open),
+        |app| app.session().is_some_and(|s| s.payments.hub.stars_open),
         QuillApp::build_stars_dialog,
     ),
 
     /// Received gifts of a user or channel.
     ReceivedGifts => DialogSpec::new(
         3900,
-        |app| app.session().is_some_and(|s| s.hub.gifts_open),
+        |app| app.session().is_some_and(|s| s.payments.hub.gifts_open),
         QuillApp::build_gifts_dialog,
     ),
 
     /// Read-only Premium features explainer.
     PremiumFeatures => DialogSpec::new(
         4000,
-        |app| app.session().is_some_and(|s| s.hub.premium_open),
+        |app| app.session().is_some_and(|s| s.payments.hub.premium_open),
         QuillApp::build_premium_dialog,
     ),
 }

@@ -37,7 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             } => MessageSender::Chat { chat_id: chat_id.0 },
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        self.session.marketplace_gift = Some(GiftPurchase {
+        self.session.payments.marketplace_gift = Some(GiftPurchase {
             chat_id,
             recipient,
             recipient_name: chat.title.clone(),
@@ -49,7 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             completed: false,
             note: None,
         });
-        if self.session.gift_text_length_max.is_none()
+        if self.session.payments.gift_text_length_max.is_none()
             && !self
                 .session
                 .requests
@@ -66,7 +66,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             &crate::telegram::requests_payments::get_marketplace_gift(extra, name),
         );
         if result.is_err()
-            && let Some(gift) = self.session.marketplace_gift.as_mut()
+            && let Some(gift) = self.session.payments.marketplace_gift.as_mut()
         {
             gift.loading = false;
             gift.note = Some("Could not load the gift. Retry.".into());
@@ -90,12 +90,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let max = self.session.gift_text_length_max;
+        let max = self.session.payments.gift_text_length_max;
         if !comment.is_empty() && max.is_none_or(|limit| comment.chars().count() > limit) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let gift = self
             .session
+            .payments
             .marketplace_gift
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
@@ -122,7 +123,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 private,
             ),
         );
-        if let Some(gift) = self.session.marketplace_gift.as_mut() {
+        if let Some(gift) = self.session.payments.marketplace_gift.as_mut() {
             gift.sending = result.is_ok();
             gift.note = if result.is_ok() {
                 Some("Sending the gift…".into())

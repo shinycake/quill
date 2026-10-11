@@ -141,7 +141,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let existing = id.and_then(|id| self.session().and_then(|s| s.proxy.find(id).cloned()));
+        let existing = id.and_then(|id| {
+            self.session()
+                .and_then(|s| s.settings.proxy.find(id).cloned())
+        });
         let (kind, draft, comment) = match &existing {
             Some(entry) => (entry.proxy.kind, entry.proxy.clone(), entry.comment.clone()),
             None => (
@@ -216,7 +219,8 @@ impl QuillApp {
             }
         };
         let duplicate = self.session().is_some_and(|s| {
-            s.proxy
+            s.settings
+                .proxy
                 .entries()
                 .iter()
                 .any(|p| Some(p.id) != id && p.proxy.same_endpoint(&draft))
@@ -228,7 +232,7 @@ impl QuillApp {
         }
         let was_enabled = id.is_some_and(|id| {
             self.session()
-                .and_then(|s| s.proxy.find(id))
+                .and_then(|s| s.settings.proxy.find(id))
                 .is_some_and(|p| p.is_enabled)
         });
         let sent = self.proxy_driver(|driver| match id {
@@ -265,7 +269,7 @@ impl QuillApp {
     fn copy_proxy_link(&mut self, id: i32, cx: &mut Context<Self>) {
         let link = self
             .session()
-            .and_then(|s| s.proxy.find(id))
+            .and_then(|s| s.settings.proxy.find(id))
             .and_then(|p| p.proxy.share_link(false));
         match link {
             Some(link) => {
@@ -284,7 +288,8 @@ impl QuillApp {
         let links: Vec<String> = self
             .session()
             .map(|s| {
-                s.proxy
+                s.settings
+                    .proxy
                     .entries()
                     .iter()
                     .filter_map(|p| p.proxy.share_link(false))
@@ -310,7 +315,8 @@ impl QuillApp {
             Some(Err(issue)) => issue.message().to_string(),
             Some(Ok(draft)) => {
                 let exists = self.session().is_some_and(|s| {
-                    s.proxy
+                    s.settings
+                        .proxy
                         .entries()
                         .iter()
                         .any(|p| p.proxy.same_endpoint(&draft))
@@ -333,7 +339,8 @@ impl QuillApp {
     /// open the add box when the list is empty.
     fn use_custom_proxy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let preferred = self.session().and_then(|s| {
-            s.proxy
+            s.settings
+                .proxy
                 .entries()
                 .iter()
                 .max_by_key(|p| p.last_used_date)
@@ -352,7 +359,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let _ = self.proxy_driver(|driver| {
-            let prefs = &mut driver.session.proxy.prefs;
+            let prefs = &mut driver.session.settings.proxy.prefs;
             if let Some(on) = on {
                 prefs.auto_switch = on;
             }
@@ -360,7 +367,7 @@ impl QuillApp {
                 prefs.auto_switch_secs = secs;
             }
             // The clock restarts with the new settings.
-            driver.session.proxy.disconnected_since_ms = None;
+            driver.session.settings.proxy.disconnected_since_ms = None;
             driver.save_proxy_prefs()
         });
         cx.notify();
@@ -377,7 +384,12 @@ impl QuillApp {
             Ok(draft) => {
                 self.settings.proxy.link = Some(ProxyLinkBox { draft, warn: false });
                 if let Some(live) = self.live.as_mut() {
-                    live.driver.session.proxy.pings.remove(&LINK_PING_ID);
+                    live.driver
+                        .session
+                        .settings
+                        .proxy
+                        .pings
+                        .remove(&LINK_PING_ID);
                     let _ = live.driver.maybe_fetch_proxies();
                 }
             }
@@ -398,7 +410,8 @@ impl QuillApp {
             return;
         };
         let existing = self.session().and_then(|s| {
-            s.proxy
+            s.settings
+                .proxy
                 .entries()
                 .iter()
                 .find(|p| p.proxy.same_endpoint(&link.draft))
@@ -434,7 +447,7 @@ impl QuillApp {
     /// connected, a plain one while connecting.
     pub(super) fn proxy_shield_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.proxy.shield() {
+        if !session.settings.proxy.shield() {
             return None;
         }
         let connected = matches!(
@@ -548,7 +561,7 @@ impl QuillApp {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if this
                             .session()
-                            .and_then(|s| s.proxy.find(id))
+                            .and_then(|s| s.settings.proxy.find(id))
                             .is_some_and(|p| p.is_enabled)
                         {
                             this.disable_proxy_entry(cx);
@@ -617,11 +630,11 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let state = this
                 .session()
-                .map(|s| s.proxy.clone())
+                .map(|s| s.settings.proxy.clone())
                 .unwrap_or_default();
             let use_for_calls = this
                 .session()
-                .is_some_and(|s| s.call_prefs.use_proxy_for_calls);
+                .is_some_and(|s| s.calls.prefs.use_proxy_for_calls);
             let enabled = state.enabled().is_some();
             let mut body = div().flex().flex_col().gap_2();
             if let Some(error) = state.error.clone() {
@@ -1001,7 +1014,7 @@ impl QuillApp {
             let warn = link.warn;
             let ping = this
                 .session()
-                .and_then(|s| s.proxy.pings.get(&LINK_PING_ID).copied());
+                .and_then(|s| s.settings.proxy.pings.get(&LINK_PING_ID).copied());
             let mut body = div()
                 .flex()
                 .flex_col()

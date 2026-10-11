@@ -510,7 +510,7 @@ fn story_tray_update_replaces_and_hides_entries() {
         &tray_json(11, r#"{"@type":"storyListArchive"}"#, 10, 5, &[]),
     );
     assert!(session.ordered_story_tray().is_empty());
-    assert!(!session.story_tray.contains_key(&11));
+    assert!(!session.stories.tray.contains_key(&11));
 }
 
 #[test]
@@ -524,7 +524,7 @@ fn update_story_deleted_removes_cache_and_tray() {
         &sink,
         &tray_json(11, r#"{"@type":"storyListMain"}"#, 10, 0, &[5]),
     );
-    session.stories.insert(
+    session.stories.stories.insert(
         (11, 5),
         crate::telegram::envelope::ParsedStory {
             id: 5,
@@ -560,7 +560,7 @@ fn update_story_deleted_removes_cache_and_tray() {
         &sink,
         r#"{"@type":"updateStoryDeleted","story_poster_chat_id":11,"story_id":5}"#,
     );
-    assert!(!session.stories.contains_key(&(11, 5)));
+    assert!(!session.stories.stories.contains_key(&(11, 5)));
     // Tray no longer references the deleted story; without an unread
     // story left, the entry is dropped.
     assert!(session.ordered_story_tray().is_empty());
@@ -578,17 +578,18 @@ fn story_viewers_accumulate_pages_and_drop_stale() {
     };
     let extra1 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(extra1.0, "1"));
-    let state = session.story_viewers.as_ref().unwrap();
+    let state = session.stories.viewers.as_ref().unwrap();
     assert_eq!(state.rows.len(), 1);
     assert_eq!(state.next_offset, "1");
     assert!(!state.loading);
     // Second page appends.
     let extra2 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(extra2.0, ""));
-    assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 2);
+    assert_eq!(session.stories.viewers.as_ref().unwrap().rows.len(), 2);
     assert!(
         session
-            .story_viewers
+            .stories
+            .viewers
             .as_ref()
             .unwrap()
             .next_offset
@@ -598,7 +599,7 @@ fn story_viewers_accumulate_pages_and_drop_stale() {
     session.begin_story_viewers(11, 6);
     let extra3 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(extra3.0, "9"));
-    assert!(session.story_viewers.as_ref().unwrap().rows.is_empty());
+    assert!(session.stories.viewers.as_ref().unwrap().rows.is_empty());
     // Error lands on the current panel.
     let extra4 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 6);
     apply_json(
@@ -610,7 +611,7 @@ fn story_viewers_accumulate_pages_and_drop_stale() {
             extra4.0
         ),
     );
-    let state = session.story_viewers.as_ref().unwrap();
+    let state = session.stories.viewers.as_ref().unwrap();
     assert!(!state.loading);
     // The server message is classified by `error_reason` (native
     // text is never surfaced); the panel shows the failure.
@@ -636,15 +637,15 @@ fn story_viewers_reopen_resets_rows() {
     session.begin_story_viewers(11, 5);
     let extra1 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(extra1.0));
-    assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+    assert_eq!(session.stories.viewers.as_ref().unwrap().rows.len(), 1);
     // `begin_story_viewers` alone keeps the same story's rows —
     // which is why the UI clears on re-open.
     session.begin_story_viewers(11, 5);
-    assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+    assert_eq!(session.stories.viewers.as_ref().unwrap().rows.len(), 1);
     // Re-open (clear, then begin + fresh page-1) → no duplication.
     session.clear_story_viewers();
     session.begin_story_viewers(11, 5);
     let extra2 = session.request_for_story(RequestPurpose::GetStoryInteractions, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(extra2.0));
-    assert_eq!(session.story_viewers.as_ref().unwrap().rows.len(), 1);
+    assert_eq!(session.stories.viewers.as_ref().unwrap().rows.len(), 1);
 }

@@ -134,8 +134,8 @@ impl QuillApp {
     pub(super) fn network_usage_section(&self, cx: &mut Context<Self>) -> Div {
         let session = self.session();
         let usage: Option<NetworkUsage> =
-            session.and_then(|s| s.privacy_data.network_usage.clone());
-        let loading = session.is_some_and(|s| s.privacy_data.network_loading);
+            session.and_then(|s| s.settings.privacy_data.network_usage.clone());
+        let loading = session.is_some_and(|s| s.settings.privacy_data.network_loading);
         let mut section = div().flex().flex_col().gap_2();
         section = section.child(section_header("Network usage"));
         let Some(usage) = usage else {
@@ -220,7 +220,8 @@ impl QuillApp {
                                 if let Some(live) = this.live.as_mut() {
                                     let _ = live.driver.reset_network_statistics();
                                 } else if let Some(demo) = this.demo_session.as_mut() {
-                                    demo.privacy_data.network_usage = Some(NetworkUsage::default());
+                                    demo.settings.privacy_data.network_usage =
+                                        Some(NetworkUsage::default());
                                 }
                                 cx.notify();
                             })),

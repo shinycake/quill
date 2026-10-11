@@ -511,7 +511,7 @@ fn composer_suggestions_wait_for_installed_sets_and_keep_the_latest_emoji() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
+    driver.session.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
     let fetch = driver.update_sticker_suggestions("😀").unwrap().unwrap();
     assert!(driver.session.stickers.suggest_waiting_for_sets);
     assert_eq!(driver.update_sticker_suggestions("🔥").unwrap(), None);
@@ -542,7 +542,7 @@ fn composer_suggestions_wait_for_installed_sets_and_keep_the_latest_emoji() {
     driver.update_sticker_suggestions("plain text").unwrap();
     assert!(driver.session.stickers.suggestions.is_empty());
     let pending = driver.update_sticker_suggestions("😀").unwrap().unwrap();
-    driver.session.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
+    driver.session.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
     driver.update_sticker_suggestions("😀").unwrap();
     driver.ingest(copy_and_parse(&json!({"@type":"stickers","@extra":pending.as_extra(),"stickers":[sticker(9,"77")]}).to_string(),&seq,&sink).unwrap()).unwrap();
     assert!(driver.session.stickers.suggestions.is_empty());

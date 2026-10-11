@@ -194,7 +194,8 @@ impl QuillApp {
         };
         // tdesktop `Domain::maxAccounts`: three accounts, one more per
         // Premium account (this build only knows the connected one).
-        let premium = usize::from(self.session().and_then(|s| s.premium_option) == Some(true));
+        let premium =
+            usize::from(self.session().and_then(|s| s.payments.premium_option) == Some(true));
         if let Some(note) = quill::signin::add_account_blocker(list_accounts(&root).len(), premium)
         {
             self.account.accounts.error = Some(note);

@@ -96,7 +96,7 @@ fn driver_story_reaction_set_remove_and_gates() {
         "storyContentPhoto",
         r#""chosen_reaction_type":{"@type":"reactionTypeEmoji","emoji":"👍"},"#,
     );
-    let story = driver.session.stories.get(&(7, 5)).unwrap();
+    let story = driver.session.stories.stories.get(&(7, 5)).unwrap();
     assert_eq!(story.chosen_reaction_emoji.as_deref(), Some("👍"));
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -380,14 +380,14 @@ fn driver_manage_story_gated_on_cached_flags() {
     assert!(v["content"].is_null());
     assert!(v["areas"].is_null());
     assert_eq!(v["caption"]["text"], "new");
-    assert!(driver.session.story_manage.pending);
+    assert!(driver.session.stories.manage.pending);
 
     let extra = driver.edit_story_cover(ChatId(7), 6, 2.5).unwrap();
     let v: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
     assert_eq!(v["@type"], "editStoryCover");
     assert_eq!(v["@extra"], extra.0.to_string());
     assert_eq!(v["cover_frame_timestamp"], 2.5);
-    assert!(driver.session.story_manage.pending);
+    assert!(driver.session.stories.manage.pending);
 
     let extra = driver
         .set_story_privacy_settings(ChatId(7), 6, StoryPrivacy::Contacts.settings_json(&[]))
@@ -399,7 +399,7 @@ fn driver_manage_story_gated_on_cached_flags() {
         v["privacy_settings"]["@type"],
         "storyPrivacySettingsContacts"
     );
-    assert!(driver.session.story_manage.pending);
+    assert!(driver.session.stories.manage.pending);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -483,7 +483,7 @@ fn driver_get_story_available_reactions_dedupes_and_caches() {
                 .unwrap(),
             )
             .unwrap();
-    let cached = driver.session.story_available_reactions.clone().unwrap();
+    let cached = driver.session.stories.available_reactions.clone().unwrap();
     assert_eq!(cached.len(), 1);
     assert_eq!(
         cached[0].kind,
@@ -545,7 +545,8 @@ fn driver_fetch_story_custom_emoji_stickers_dedupes_and_caches() {
     assert!(
         driver
             .session
-            .story_custom_emoji_stickers
+            .stories
+            .custom_emoji_stickers
             .contains_key(&123)
     );
     assert!(
@@ -558,7 +559,7 @@ fn driver_fetch_story_custom_emoji_stickers_dedupes_and_caches() {
 
     // Cached metadata still needs its display file. The viewer uses the
     // automatic API, which dedupes before TDLib marks the download active.
-    let display_file = driver.session.story_custom_emoji_stickers[&123]
+    let display_file = driver.session.stories.custom_emoji_stickers[&123]
         .display_file_id()
         .unwrap();
     let download_extra = driver.download_file(display_file, 1).unwrap().unwrap();
@@ -740,19 +741,19 @@ fn driver_join_live_story_two_step_and_gates() {
     driver
         .ingest(copy_and_parse(&ready_video_call_json(), &seq, &dyn_sink).unwrap())
         .unwrap();
-    assert!(driver.session.active_call.is_some());
+    assert!(driver.session.calls.active_call.is_some());
     assert_eq!(
         driver.join_live_story(ChatId(7), 6),
         Err(ConnectSendError::InvalidRequest)
     );
-    driver.session.active_call = None;
+    driver.session.calls.active_call = None;
     // An existing tracked call refuses a competing live-story join.
-    driver.session.active_group_call = Some(tracked_group_call(false, false, false));
+    driver.session.calls.active_group_call = Some(tracked_group_call(false, false, false));
     assert_eq!(
         driver.join_live_story(ChatId(7), 6),
         Err(ConnectSendError::InvalidRequest)
     );
-    driver.session.active_group_call = None;
+    driver.session.calls.active_group_call = None;
     // Failed fetch clears the intent so the next tap can retry.
     let failed = driver.join_live_story(ChatId(7), 6).unwrap();
     driver
@@ -768,13 +769,14 @@ fn driver_join_live_story_two_step_and_gates() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.pending_live_story_join, None);
+    assert_eq!(driver.session.calls.pending_live_story_join, None);
     let extra = driver.join_live_story(ChatId(7), 6).unwrap();
     let get = sent_request(&recorder, "getGroupCall");
     assert_eq!(get["group_call_id"], 4242);
     assert_eq!(get["@extra"], extra.0.to_string());
     let intent = driver
         .session
+        .calls
         .pending_live_story_join
         .expect("pending live-story join recorded");
     assert_eq!(intent.group_call_id, 4242);
@@ -812,10 +814,11 @@ fn driver_join_live_story_two_step_and_gates() {
         .unwrap();
     let join = sent_request(&recorder, "joinLiveStory");
     assert_eq!(join["group_call_id"], 4242);
-    assert_eq!(driver.session.pending_live_story_join, None);
+    assert_eq!(driver.session.calls.pending_live_story_join, None);
     assert!(
         driver
             .session
+            .calls
             .active_group_call
             .as_ref()
             .unwrap()
@@ -824,6 +827,7 @@ fn driver_join_live_story_two_step_and_gates() {
     // Reconnect uses the same live-story method, not joinVideoChat.
     driver
         .session
+        .calls
         .active_group_call
         .as_mut()
         .unwrap()
@@ -864,7 +868,10 @@ fn driver_b14_close_friends_hide_profile_and_share() {
     let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
     assert_eq!(v["@type"], "setCloseFriends");
     assert_eq!(v["user_ids"], serde_json::json!([4, 8]));
-    assert_eq!(driver.session.close_friends_pending, Some(vec![4, 8]));
+    assert_eq!(
+        driver.session.stories.close_friends_pending,
+        Some(vec![4, 8])
+    );
 
     // Hide / unhide.
     driver
