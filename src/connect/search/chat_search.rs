@@ -442,6 +442,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if let Some(tab) = self
+            .session
+            .search
+            .history_calendar
+            .as_ref()
+            .and_then(|c| c.shared_tab)
+        {
+            self.jump_shared_media_to_day(tab, day_number)?;
+            return Ok(None);
+        }
         let Some(calendar) = self.session.search.history_calendar.take() else {
             return Ok(None);
         };

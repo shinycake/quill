@@ -35,6 +35,9 @@ pub struct HistoryCalendar {
     pub exhausted: bool,
     pub loading: bool,
     pub generation: u64,
+    /// Set when the box was opened from the shared-media gallery: a picked
+    /// day reloads that tab instead of jumping in the history.
+    pub shared_tab: Option<SharedMediaTab>,
 }
 
 impl HistoryCalendar {
@@ -48,6 +51,7 @@ impl HistoryCalendar {
             exhausted: media == SearchMediaKind::All,
             loading: false,
             generation,
+            shared_tab: None,
         }
     }
 

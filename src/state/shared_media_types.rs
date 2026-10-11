@@ -149,6 +149,9 @@ pub struct SharedMediaItem {
     /// viewer pages over these (tdesktop `SharedMediaWithLastSlice`).
     /// `None` for tabs the viewer never opens.
     pub message: Option<Box<HistoryMessage>>,
+    /// `message.date` (unix seconds); `0` when unknown. Groups the list
+    /// into month sections.
+    pub date: i32,
 }
 
 impl SharedMediaItem {
@@ -192,6 +195,7 @@ impl SharedMediaItem {
             glyph,
             label,
             message: message_copy,
+            date: message.date,
         }
     }
 }
@@ -221,6 +225,9 @@ pub struct SharedMediaTabState {
     /// An older page is in flight (the viewer pages toward the end of the
     /// list and asks for more).
     pub loading_more: bool,
+    /// Local day number the list starts at after a calendar jump; `None`
+    /// for the newest media.
+    pub anchor_day: Option<i64>,
 }
 
 impl SharedMediaTabState {
@@ -231,6 +238,7 @@ impl SharedMediaTabState {
         self.error.clear();
         self.next_from = MessageId(0);
         self.loading_more = false;
+        self.anchor_day = None;
     }
 
     /// Whether an older page exists and none is in flight.
@@ -297,7 +305,9 @@ impl SharedMediaState {
     /// returned generation on the request purpose so late answers drop.
     pub fn begin_fetch(&mut self, tab: SharedMediaTab) -> u64 {
         self.generation = self.generation.saturating_add(1);
-        self.tab_state(tab).status = SharedMediaTabStatus::Loading;
+        let state = self.tab_state(tab);
+        state.status = SharedMediaTabStatus::Loading;
+        state.anchor_day = None;
         self.generation
     }
 
@@ -316,6 +326,10 @@ impl SharedMediaState {
             return;
         }
         let state = self.tab_state(tab);
+        let items = match state.anchor_day {
+            Some(day) => trim_to_day(items, day),
+            None => items,
+        };
         state.items = items;
         state.total_count = total_count;
         state.next_from = next_from;
