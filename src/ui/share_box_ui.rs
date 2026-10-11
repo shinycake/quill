@@ -224,7 +224,9 @@ impl QuillApp {
         else {
             return;
         };
-        self.share_message_link(chat_id, message_id, cx);
+        if !self.share_viewer_link_at_time(chat_id, message_id, cx) {
+            self.share_message_link(chat_id, message_id, cx);
+        }
     }
 
     /// One destination chosen: open it with the forward bar above its

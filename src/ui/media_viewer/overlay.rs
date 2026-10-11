@@ -82,6 +82,7 @@ impl QuillApp {
                 caption_entities: Vec::new(),
                 duration_label: None,
                 natural_size: None,
+                quality_options: Vec::new(),
             });
         let (position, total) = self.viewer.state.position().unwrap_or((0, 0));
         let files: HashMap<i32, ParsedFile> = self
@@ -102,7 +103,7 @@ impl QuillApp {
         // loading status).
         let frame: Option<Arc<RenderImage>> =
             if item.kind.is_playable() && !self.viewer.video_frames.is_empty() {
-                self.viewer_render_frame()
+                self.viewer_oriented_frame()
             } else {
                 None
             };
@@ -331,6 +332,14 @@ impl QuillApp {
             let menu_can_report = can_report;
             let menu_playable = item.kind.is_playable();
             let menu_chat_source = self.viewer.state.source() == ViewerSource::Chat;
+            let menu_rotate_video = self.viewer_video_rotatable();
+            let menu_share_at: Option<String> = (self.viewer_can_share_at_time() && !protected)
+                .then(|| {
+                    format!(
+                        "Share at {}",
+                        quill::message_menu::timecode_text(f64::from(self.viewer_share_position()))
+                    )
+                });
             // `photo.has_stickers` / `video.has_stickers`: stickers were
             // added to the media (tdesktop "Attached Stickers").
             let menu_attached = self
@@ -452,6 +461,15 @@ impl QuillApp {
                                 .item(item("Copy Frame", |this, _, cx| this.copy_viewer_frame(cx)));
                         }
                     }
+                    if let Some(label) = menu_share_at.clone() {
+                        let view = menu_view.clone();
+                        menu =
+                            menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.share_viewer_video_at_time(window, cx)
+                                });
+                            }));
+                    }
                     if menu_attached {
                         menu = menu.item(item("Attached Stickers", |this, _, cx| {
                             this.show_viewer_attached_stickers(cx)
@@ -478,6 +496,11 @@ impl QuillApp {
                             .item(item("Flip Vertically", |this, _, cx| {
                                 this.flip_viewer_vertical(cx)
                             }));
+                    }
+                    if menu_rotate_video {
+                        menu = menu
+                            .item(PopupMenuItem::separator())
+                            .item(item("Rotate", |this, _, cx| this.rotate_viewer_video(cx)));
                     }
                     menu
                 })

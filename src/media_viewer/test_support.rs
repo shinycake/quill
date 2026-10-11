@@ -17,5 +17,6 @@ pub(super) fn item(kind: MediaViewerKind, message_id: i64) -> MediaViewerItem {
         caption_entities: Vec::new(),
         duration_label: None,
         natural_size: None,
+        quality_options: Vec::new(),
     }
 }

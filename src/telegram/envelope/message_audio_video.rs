@@ -165,6 +165,8 @@ pub struct VideoContent {
     pub thumb_file_id: Option<FileId>,
     pub thumb_width: i32,
     pub thumb_height: i32,
+    /// `messageVideo.alternative_videos`: other qualities of the clip.
+    pub alternatives: Vec<VideoAlternative>,
 }
 
 impl VideoContent {
@@ -312,6 +314,10 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
     } else {
         (None, 0, 0)
     };
+    let alternatives = super::video_alternatives::parse_video_alternatives(
+        value.get("alternative_videos"),
+        &mut files,
+    );
     files.retain(|file| file.id.0 != 0);
     (
         MessageContent::Video(VideoContent {
@@ -355,6 +361,7 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
             thumb_file_id,
             thumb_width,
             thumb_height,
+            alternatives,
         }),
         files,
     )

@@ -131,6 +131,9 @@ impl QuillApp {
         self.viewer.orientation = Default::default();
         self.viewer.rotated = None;
         self.playback.error = None;
+        self.viewer.extra.oriented_frame = None;
+        self.viewer.extra.share_at = None;
+        self.apply_viewer_quality_pref();
         self.viewer.extra.inactive_paused = false;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
