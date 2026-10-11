@@ -1015,7 +1015,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Profile photo from camera, emoji avatar builder and video avatar with frame choice <!-- parity:settings-photo-sources -->
 - [ ] Profile music (saved music) management <!-- parity:settings-profile-music -->
 - [x] Choose the main profile tab <!-- parity:settings-main-profile-tab -->
-- [ ] Phone number display and "Is this still your number?" suggestion <!-- parity:settings-phone-suggestion -->
+- [x] Phone number display and "Is this still your number?" suggestion <!-- parity:settings-phone-suggestion -->
 - [x] Ask a Question, FAQ, Features and Privacy Policy links <!-- parity:settings-support-links -->
 - [x] Version and changelog in the Settings footer <!-- parity:settings-version-footer -->
 
