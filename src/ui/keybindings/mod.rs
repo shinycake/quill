@@ -922,7 +922,13 @@ mod tests {
             .map(|binding| binding.keystrokes()[0].inner().unparse())
             .collect();
         chords.sort();
-        assert_eq!(chords, ["cmd-l", "ctrl-l"]);
+        // GPUI spells Cmd `super` off macOS: compare in its own spelling.
+        let mut expected: Vec<String> = ["cmd-l", "ctrl-l"]
+            .iter()
+            .map(|chord| Keystroke::parse(chord).unwrap().unparse())
+            .collect();
+        expected.sort();
+        assert_eq!(chords, expected);
         assert!(keybinding_for("focus-composer", "ctrl-shift-l").is_some());
     }
 

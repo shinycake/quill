@@ -36,6 +36,19 @@ jobs:
         run: cargo clippy --no-default-features --all-targets --locked -- -D warnings
       - name: tests (core + replay)
         run: cargo test --no-default-features --locked -- --nocapture
+      # UI integration tests: windows, dialogs and clicks against the demo
+      # app. GPUI's test platform is headless (no display, no-op text
+      # system), so no Xvfb; the packages are what the UI binary links.
+      - name: apt dependencies (UI build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config nasm \
+            zlib1g-dev libssl-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libxcb1-dev libx11-xcb-dev libxcb-xkb-dev libfontconfig-dev \
+            libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev libclang-dev
+      - name: tests (UI, headless)
+        run: cargo test --features demo-capture --locked --bin quill
       # The vendored X11 / Windows GPUI backends only build on their own OS;
       # their shared idle-frame decision is std-only and tested standalone.
       - name: tests (vendored GPUI frame idle)

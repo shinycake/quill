@@ -84,6 +84,8 @@ impl QuillApp {
         self.connection.status_note = live_status_for(&auth);
         self.auth_ui.demo_state = auth;
         live.attach_call_engine(&MemorySink::new());
+        // The auto-switch runs on screen; its settings are the app's.
+        live.driver.reload_proxy_prefs();
         self.live = Some(live);
         self.reload_account_keybindings(cx);
         self.spawn_poll_loop(cx);

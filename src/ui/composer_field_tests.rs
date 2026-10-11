@@ -207,7 +207,7 @@ fn a_custom_emoji_is_one_caret_stop() {
                 window.press("backspace", cx);
                 assert_eq!(input.read(cx).value().as_ref(), "ab");
                 assert!(input.read(cx).tokens().is_empty());
-                window.press("cmd-z", cx);
+                window.press("secondary-z", cx);
                 window.render_frame(cx);
                 assert_eq!(input.read(cx).value().as_ref(), text);
                 assert_eq!(field_doc(input.read(cx)).emoji, d.emoji);
@@ -315,7 +315,7 @@ fn a_mention_tag_survives_edits_around_and_inside_it() {
             let (_, entities) = quill::composer::parse_format_markup(&markup);
             assert_eq!(entities[0].kind, quill::composer::FormatKind::MentionName);
             // Undo walks back through the edits, tag included.
-            window.press("cmd-z", cx);
+            window.press("secondary-z", cx);
             window.render_frame(cx);
             assert_eq!(mention(&input, cx), [(6, 9)]);
             // Deleting the whole name removes the tag.
@@ -354,8 +354,8 @@ fn typed_markdown_becomes_formatting_and_backspace_takes_it_back() {
                 [DocSpan::new(4..6, ComposerTag::Bold)]
             );
             // Undo removes the "!", then puts the markers back.
-            window.press("cmd-z", cx);
-            window.press("cmd-z", cx);
+            window.press("secondary-z", cx);
+            window.press("secondary-z", cx);
             window.render_frame(cx);
             assert_eq!(input.read(cx).value().as_ref(), "say **hi**");
             assert!(input.read(cx).spans().is_empty());

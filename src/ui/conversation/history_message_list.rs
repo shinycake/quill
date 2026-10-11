@@ -483,10 +483,12 @@ impl QuillApp {
                                 .motion
                                 .start_reveal(prev_count, std::time::Instant::now());
                         }
-                        // A sent message turns a freeform wallpaper.
+                        // A sent message turns a freeform wallpaper. The
+                        // appended rows are in the new list; the stored one
+                        // is still the old, shorter list.
                         if following
                             && !newer_page
-                            && self.history.rows[prev_count.min(count)..count]
+                            && rows[prev_count.min(count)..count]
                                 .iter()
                                 .any(super::chat_palette::row_is_outgoing)
                         {
