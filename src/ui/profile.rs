@@ -67,6 +67,7 @@ impl QuillApp {
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title("Edit profile"));
+            this.photo_sources_prepare_render();
             let Some(body) = this.edit_profile_dialog_body(cx) else {
                 return dialog.on_close(on_close);
             };
@@ -379,6 +380,9 @@ impl QuillApp {
     /// dialog.
     pub(super) fn edit_profile_dialog_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.dialogs.edit_profile_dialog.as_ref()?;
+        if let Some(panel) = self.photo_sources_panel(cx) {
+            return Some(panel);
+        }
         let me = self.session().and_then(|s| s.my_user_id);
         let (active, disabled, editable) = me
             .and_then(|me| self.session().and_then(|s| s.user(me)))
@@ -556,7 +560,8 @@ impl QuillApp {
                                     )
                                 }),
                             ),
-                    ),
+                    )
+                    .child(self.photo_source_buttons(cx)),
             )
             .child(
                 div()
