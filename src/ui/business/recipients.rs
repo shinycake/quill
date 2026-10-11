@@ -1,9 +1,9 @@
-//! The recipients section of the greeting and away screens and its chat
+//! The recipients section of the greeting, away and chatbot screens and its chat
 //! picker (tdesktop `settings_recipients_helper.cpp` and the business mode
 //! of `edit_filter_chats_list.cpp`: private chats with users, not
 //! yourself, up to 100, plus the chat types).
 
-use super::{MessageKind, PickerDraft, View};
+use super::{PickerDraft, Recipients, View};
 use crate::ui::app::QuillApp;
 use crate::ui::chat_row::chat_avatar;
 use gpui_kit::assets::IconName;
@@ -12,13 +12,23 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::business_bots::{bot_set_excluded, bot_set_included};
 use quill::business_settings::{BusinessChats, BusinessRecipients, ChatType, RECIPIENT_CHATS_MAX};
 use quill::folder_picker::{filter_chats, picker_counter};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::ChatKind;
 
 const AVATAR: f32 = 28.;
+
+fn target_key(target: Recipients) -> &'static str {
+    match target {
+        Recipients::Greeting => "greeting",
+        Recipients::Away => "away",
+        Recipients::Bot => "bot",
+    }
+}
 
 fn type_key(kind: ChatType) -> &'static str {
     match kind {
@@ -30,19 +40,21 @@ fn type_key(kind: ChatType) -> &'static str {
 }
 
 impl QuillApp {
-    fn business_recipients(&self, kind: MessageKind) -> Option<&BusinessRecipients> {
+    pub(super) fn business_recipients(&self, target: Recipients) -> Option<&BusinessRecipients> {
         let d = self.dialogs.business_dialog.as_ref()?;
-        match kind {
-            MessageKind::Greeting => d.greeting.as_ref().map(|g| &g.recipients),
-            MessageKind::Away => d.away.as_ref().map(|a| &a.recipients),
+        match target {
+            Recipients::Greeting => d.greeting.as_ref().map(|g| &g.recipients),
+            Recipients::Away => d.away.as_ref().map(|a| &a.recipients),
+            Recipients::Bot => d.chatbot.as_ref().map(|b| &b.recipients),
         }
     }
 
-    fn business_recipients_mut(&mut self, kind: MessageKind) -> Option<&mut BusinessRecipients> {
+    fn business_recipients_mut(&mut self, target: Recipients) -> Option<&mut BusinessRecipients> {
         let d = self.business_mut()?;
-        match kind {
-            MessageKind::Greeting => d.greeting.as_mut().map(|g| &mut g.recipients),
-            MessageKind::Away => d.away.as_mut().map(|a| &mut a.recipients),
+        match target {
+            Recipients::Greeting => d.greeting.as_mut().map(|g| &mut g.recipients),
+            Recipients::Away => d.away.as_mut().map(|a| &mut a.recipients),
+            Recipients::Bot => d.chatbot.as_mut().map(|b| &mut b.recipients),
         }
     }
 
@@ -68,7 +80,7 @@ impl QuillApp {
             .map_or_else(|| format!("Chat {chat_id}"), |c| c.title.clone())
     }
 
-    fn business_avatar(&self, chat_id: i64, title: &str) -> AnyElement {
+    pub(super) fn business_avatar(&self, chat_id: i64, title: &str) -> AnyElement {
         let roots = self.media_display_roots();
         let photo = self
             .session()
@@ -80,7 +92,7 @@ impl QuillApp {
     /// Open the include or exclude picker on a copy of the current list.
     pub(super) fn open_business_picker(
         &mut self,
-        target: MessageKind,
+        target: Recipients,
         include: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -105,34 +117,52 @@ impl QuillApp {
         self.business_go(View::Picker, window, cx);
     }
 
+    /// Whether the picker offers chat types: always, except a bot's
+    /// exclusions in "Only Selected Chats" (tdesktop `usersOnly`).
+    pub(super) fn business_picker_types(&self) -> bool {
+        let Some(picker) = self
+            .dialogs
+            .business_dialog
+            .as_ref()
+            .and_then(|d| d.picker.as_ref())
+        else {
+            return true;
+        };
+        picker.include
+            || picker.target != Recipients::Bot
+            || self
+                .business_recipients(Recipients::Bot)
+                .is_some_and(|r| r.all_but_excluded)
+    }
+
     /// Done in the picker: tdesktop's save rules, then back.
     pub(super) fn finish_business_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(picker) = self.business_mut().and_then(|d| d.picker.take()) else {
             return;
         };
-        if let Some(recipients) = self.business_recipients_mut(picker.target) {
-            if picker.include {
-                recipients.set_included(picker.chats);
-            } else {
-                recipients.set_excluded(picker.chats);
+        let target = picker.target;
+        if let Some(recipients) = self.business_recipients_mut(target) {
+            match (target, picker.include) {
+                (Recipients::Bot, true) => bot_set_included(recipients, picker.chats),
+                (Recipients::Bot, false) => bot_set_excluded(recipients, picker.chats),
+                (_, true) => recipients.set_included(picker.chats),
+                (_, false) => recipients.set_excluded(picker.chats),
             }
         }
-        let back = match picker.target {
-            MessageKind::Greeting => View::Greeting,
-            MessageKind::Away => View::Away,
-        };
+        let back = View::Picker.parent(Some(target));
         self.business_go(back, window, cx);
     }
 
     pub(super) fn remove_business_entry(
         &mut self,
-        target: MessageKind,
+        target: Recipients,
+        excluded: bool,
         chat: Option<i64>,
         chat_type: Option<ChatType>,
         cx: &mut Context<Self>,
     ) {
         if let Some(r) = self.business_recipients_mut(target) {
-            let list = if r.all_but_excluded {
+            let list = if excluded {
                 &mut r.excluded
             } else {
                 &mut r.included
@@ -151,34 +181,108 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Recipients": the two radios and the chosen chats and types.
+    /// One list of the section: its title, the add button and the chosen
+    /// types and chats.
+    fn business_list_block(
+        &self,
+        target: Recipients,
+        excluded: bool,
+        list: BusinessChats,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let muted = cx.theme().muted_foreground;
+        let key = target_key(target);
+        let side = if excluded { "excluded" } else { "included" };
+        let (title, button) = if excluded {
+            ("Excluded chats", "Exclude Chats")
+        } else {
+            ("Included chats", "Select Chats")
+        };
+        let mut block = div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .pt_2()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(muted)
+                    .child(title),
+            )
+            .child(
+                div().flex().child(
+                    Button::new(SharedString::from(format!("business-{key}-pick-{side}")))
+                        .label(button)
+                        .icon(if excluded {
+                            IconName::Minus
+                        } else {
+                            IconName::Plus
+                        })
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_business_picker(target, !excluded, window, cx);
+                        })),
+                ),
+            );
+        for kind in list.types.chosen() {
+            block = block.child(self.business_entry_row(
+                target,
+                excluded,
+                format!("business-{key}-{side}-type-{}", type_key(kind)),
+                kind.label().to_string(),
+                None,
+                Some(kind),
+                cx,
+            ));
+        }
+        for chat_id in list.chat_ids {
+            let title = self.business_chat_title(chat_id);
+            block = block.child(self.business_entry_row(
+                target,
+                excluded,
+                format!("business-{key}-{side}-chat-{chat_id}"),
+                title,
+                Some(chat_id),
+                None,
+                cx,
+            ));
+        }
+        block
+    }
+
+    /// "Recipients" (or the bot's "Chats accessible for the bot"): the two
+    /// radios and the chosen chats and types.
     pub(super) fn business_recipients_section(
         &self,
-        target: MessageKind,
+        target: Recipients,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let Some(recipients) = self.business_recipients(target).cloned() else {
             return div().into_any_element();
         };
-        let key = match target {
-            MessageKind::Greeting => "greeting",
-            MessageKind::Away => "away",
-        };
+        let key = target_key(target);
         let all = recipients.all_but_excluded;
-        let about = match target {
-            MessageKind::Greeting => {
-                "Select chats or entire chat categories for sending greeting messages."
-            }
-            MessageKind::Away => {
-                "Select chats or entire chat categories for sending an away message."
-            }
+        let (title, about) = match target {
+            Recipients::Greeting => (
+                "Recipients",
+                "Select chats or entire chat categories for sending greeting messages.",
+            ),
+            Recipients::Away => (
+                "Recipients",
+                "Select chats or entire chat categories for sending an away message.",
+            ),
+            Recipients::Bot => (
+                "Chats accessible for the bot",
+                "Select chats or entire chat categories which the bot will not have access to.",
+            ),
         };
         let mut section = div()
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().text_sm().font_semibold().child("Recipients"))
+            .child(div().text_sm().font_semibold().child(title))
             .child(
                 RadioGroup::vertical(SharedString::from(format!("business-{key}-recipients")))
                     .selected_index(Some(if all { 0 } else { 1 }))
@@ -206,49 +310,20 @@ impl QuillApp {
                         cx.notify();
                     })),
             );
-        let (title, button, list) = if all {
-            ("Excluded chats", "Exclude Chats", recipients.excluded)
-        } else {
-            ("Included chats", "Select Chats", recipients.included)
-        };
-        section = section
-            .child(
-                div()
-                    .pt_2()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(muted)
-                    .child(title),
-            )
-            .child(
-                div().flex().child(
-                    Button::new(SharedString::from(format!("business-{key}-pick")))
-                        .label(button)
-                        .icon(if all { IconName::Minus } else { IconName::Plus })
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_business_picker(target, !all, window, cx);
-                        })),
-                ),
-            );
-        for kind in list.types.chosen() {
-            section = section.child(self.business_entry_row(
+        if !all {
+            section = section.child(self.business_list_block(
                 target,
-                format!("business-{key}-type-{}", type_key(kind)),
-                kind.label().to_string(),
-                None,
-                Some(kind),
+                false,
+                recipients.included.clone(),
                 cx,
             ));
         }
-        for chat_id in list.chat_ids {
-            let title = self.business_chat_title(chat_id);
-            section = section.child(self.business_entry_row(
+        // A bot's exclusions show in both modes.
+        if all || target == Recipients::Bot {
+            section = section.child(self.business_list_block(
                 target,
-                format!("business-{key}-chat-{chat_id}"),
-                title,
-                Some(chat_id),
-                None,
+                true,
+                recipients.excluded.clone(),
                 cx,
             ));
         }
@@ -257,9 +332,11 @@ impl QuillApp {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn business_entry_row(
         &self,
-        target: MessageKind,
+        target: Recipients,
+        excluded: bool,
         id: String,
         title: String,
         chat: Option<i64>,
@@ -300,7 +377,7 @@ impl QuillApp {
                     .tooltip("Remove")
                     .accessibility_label(format!("Remove {title}"))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.remove_business_entry(target, chat, chat_type, cx);
+                        this.remove_business_entry(target, excluded, chat, chat_type, cx);
                     })),
             )
             .into_any_element()
@@ -393,11 +470,12 @@ impl QuillApp {
                     ),
             );
         }
+        let show_types = self.business_picker_types();
         div()
             .flex()
             .flex_col()
             .gap_3()
-            .child(types)
+            .when(show_types, |this| this.child(types))
             .child(
                 div()
                     .flex()

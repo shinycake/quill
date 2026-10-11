@@ -1,0 +1,2 @@
+# Business settings part 2: start page, links to chat, chatbots, ads (completes part 1, #687)
+parity:business-away-greeting

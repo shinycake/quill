@@ -224,6 +224,8 @@ pub struct BusinessInfo {
     pub greeting: Option<crate::business_settings::GreetingSettings>,
     /// The own account's away message; `None` when off or not ours.
     pub away: Option<crate::business_settings::AwaySettings>,
+    /// The custom start page shown in empty chats.
+    pub start_page: Option<crate::business_start_page::StartPage>,
 }
 
 impl BusinessInfo {
@@ -232,6 +234,7 @@ impl BusinessInfo {
             && self.opening_hours.is_none()
             && self.greeting.is_none()
             && self.away.is_none()
+            && self.start_page.is_none()
     }
 
     /// Whether the two schedules differ, which is when the "local time" /
@@ -323,6 +326,7 @@ pub fn parse_business_info(value: Option<&Value>) -> Option<BusinessInfo> {
         next_close_in: int("next_close_in"),
         greeting: crate::business_settings::parse_greeting(value.get("greeting_message_settings")),
         away: crate::business_settings::parse_away(value.get("away_message_settings")),
+        start_page: crate::business_start_page::parse_start_page(value.get("start_page")),
     };
     (!info.is_empty()).then_some(info)
 }

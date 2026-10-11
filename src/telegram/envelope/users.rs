@@ -113,6 +113,9 @@ pub struct ParsedUser {
     /// `userTypeBot.can_manage_bots`: the bot may create managed bots
     /// (tdesktop `botInfo->canManageBots`).
     pub can_manage_bots: bool,
+    /// `userTypeBot.can_connect_to_business`: the bot can be a Telegram
+    /// Business chatbot (tdesktop `botInfo->supportsBusiness`).
+    pub can_connect_to_business: bool,
     pub status: UserStatusKind,
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
@@ -312,6 +315,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     let can_be_added_to_attachment_menu = bot_flag("can_be_added_to_attachment_menu");
     let can_be_edited = bot_flag("can_be_edited");
     let can_manage_bots = bot_flag("can_manage_bots");
+    let can_connect_to_business = bot_flag("can_connect_to_business");
     let status = parse_user_status(value.get("status"));
     let photo_small_file_id = i32::try_from(int53_or_zero(
         value
@@ -387,6 +391,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         can_be_added_to_attachment_menu,
         can_be_edited,
         can_manage_bots,
+        can_connect_to_business,
         status,
         photo_small_file_id,
         accent_color_id,

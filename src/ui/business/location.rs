@@ -3,7 +3,7 @@
 //! has no map picker, so it edits the address and can keep or drop a point
 //! set on another device, with tdesktop's fallback note for the map.
 
-use super::{LocationDraft, View};
+use super::{Leave, LocationDraft};
 use crate::ui::app::QuillApp;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::switch::Switch;
@@ -109,7 +109,8 @@ impl QuillApp {
         })
     }
 
-    pub(super) fn save_business_location(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Save of the location screen (when it is left).
+    pub(super) fn save_business_location(&mut self, cx: &mut Context<Self>) -> Leave {
         let Some((address, point)) = self
             .dialogs
             .business_dialog
@@ -117,31 +118,14 @@ impl QuillApp {
             .and_then(|d| d.location.as_ref())
             .map(|l| (l.address.read(cx).value().to_string(), l.point_e6))
         else {
-            return;
+            return Leave::Go(None);
         };
-        if address.trim().chars().count() > ADDRESS_MAX {
-            self.business_error(
-                format!("The address can have at most {ADDRESS_MAX} characters."),
-                cx,
-            );
-            return;
-        }
         let wanted = location_to_save(&address, point);
         if wanted == self.my_business().location {
-            self.business_go(View::Hub, window, cx);
-            return;
+            return Leave::Go(None);
         }
-        if !self.business_live(cx) {
-            return;
-        }
-        let sent = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.save_business_location(wanted.as_ref()));
-        if !matches!(sent, Some(Ok(()))) {
-            self.business_error("Could not send the location.", cx);
-            return;
-        }
-        self.business_go(View::Hub, window, cx);
+        self.business_send("location", |driver| {
+            driver.save_business_location(wanted.as_ref()).is_ok()
+        })
     }
 }

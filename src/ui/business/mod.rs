@@ -1,144 +1,46 @@
-//! Settings -> Telegram Business: the hub and its greeting message, away
-//! message, opening hours and location screens, with the shared
-//! recipients picker. Rules and requests: `quill::business_settings` and
-//! `quill::business_hours_edit`. Behaviour follows tdesktop's
+//! Settings -> Telegram Business: the hub and its screens (greeting and
+//! away messages, opening hours, location, start page, links to chat,
+//! chatbots), with the shared recipients picker. Rules and requests:
+//! `quill::business_settings`, `quill::business_hours_edit`,
+//! `quill::business_start_page`, `quill::business_chat_links` and
+//! `quill::business_bots`. Behaviour follows tdesktop's
 //! `settings/sections/settings_business.cpp` and `settings/business/`;
-//! see `docs/decisions/codex-business-settings.md`.
+//! see `docs/decisions/codex-business-settings.md` and `-2.md`.
 //!
+//! Like tdesktop, a screen saves when it is left (Back, Close, Esc).
 //! Quick replies keep their own dialog: the greeting and away messages
 //! open it on the `hello` / `away` shortcut, above this one, and closing
 //! it comes back here.
 
 mod build;
+mod chat_links;
+mod chatbots;
 mod hours;
+mod intro_view;
 mod location;
 mod messages;
 mod recipients;
+mod start_page;
+mod state;
 #[cfg(all(test, feature = "demo-capture"))]
 mod tests;
 
+pub(crate) use state::{
+    AwayDraft, BusinessDialog, ChatbotDraft, DayRow, GreetingDraft, HoursDraft, LinkEditDraft,
+    LocationDraft, MessageKind, PickerDraft, Recipients, ScheduleChoice, StartPageDraft, View,
+};
+
 use super::app::QuillApp;
-use gpui_kit::component::date_picker::DatePickerState;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::time_field::TimeFieldState;
 use gpui_kit::*;
-use quill::business_hours_edit::Interval;
 use quill::business_info::BusinessInfo;
-use quill::business_settings::{BusinessChats, BusinessRecipients};
 
-/// Which screen of the dialog is showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum View {
-    Hub,
-    Greeting,
-    Away,
-    Hours,
-    /// The editor of one weekday (Monday 0).
-    Day(usize),
-    TimeZone,
-    Location,
-    /// The include / exclude chats picker of the greeting or away screen.
-    Picker,
-}
-
-impl View {
-    /// Where Back goes.
-    fn parent(self, picker_for: Option<MessageKind>) -> View {
-        match self {
-            View::Day(_) | View::TimeZone => View::Hours,
-            View::Picker => match picker_for {
-                Some(MessageKind::Away) => View::Away,
-                _ => View::Greeting,
-            },
-            _ => View::Hub,
-        }
-    }
-}
-
-/// The greeting or the away message: both have messages in a quick reply
-/// shortcut and a recipients list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MessageKind {
-    Greeting,
-    Away,
-}
-
-impl MessageKind {
-    pub(super) fn shortcut(self) -> &'static str {
-        match self {
-            Self::Greeting => quill::business_settings::GREETING_SHORTCUT,
-            Self::Away => quill::business_settings::AWAY_SHORTCUT,
-        }
-    }
-
-    pub(super) fn setting(self) -> quill::business_settings::BusinessSettingKind {
-        match self {
-            Self::Greeting => quill::business_settings::BusinessSettingKind::Greeting,
-            Self::Away => quill::business_settings::BusinessSettingKind::Away,
-        }
-    }
-}
-
-/// tdesktop's away schedule radio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ScheduleChoice {
-    Always,
-    OutsideHours,
-    Custom,
-}
-
-pub(super) struct GreetingDraft {
-    pub(super) enabled: bool,
-    pub(super) recipients: BusinessRecipients,
-    pub(super) days: i32,
-}
-
-pub(super) struct AwayDraft {
-    pub(super) enabled: bool,
-    pub(super) recipients: BusinessRecipients,
-    pub(super) schedule: ScheduleChoice,
-    pub(super) start: Entity<DatePickerState>,
-    pub(super) end: Entity<DatePickerState>,
-    pub(super) offline_only: bool,
-}
-
-pub(super) struct HoursDraft {
-    pub(super) enabled: bool,
-    /// Minutes of the week, normalized.
-    pub(super) week: Vec<Interval>,
-    /// Empty until a zone is known; the closest zone is shown then.
-    pub(super) time_zone_id: String,
-}
-
-/// One set of hours in the day editor: opening and closing clock times.
-pub(super) struct DayRow {
-    pub(super) open: Entity<TimeFieldState>,
-    pub(super) close: Entity<TimeFieldState>,
-}
-
-pub(super) struct LocationDraft {
-    pub(super) address: Entity<InputState>,
-    /// The saved map point, kept until it is switched off.
-    pub(super) point_e6: Option<(i32, i32)>,
-}
-
-pub(super) struct PickerDraft {
-    pub(super) target: MessageKind,
-    pub(super) include: bool,
-    pub(super) chats: BusinessChats,
-    pub(super) search: Entity<InputState>,
-}
-
-pub(crate) struct BusinessDialog {
-    pub(super) view: View,
-    pub(super) greeting: Option<GreetingDraft>,
-    pub(super) away: Option<AwayDraft>,
-    pub(super) hours: Option<HoursDraft>,
-    pub(super) day_rows: Vec<DayRow>,
-    pub(super) location: Option<LocationDraft>,
-    pub(super) picker: Option<PickerDraft>,
-    pub(super) zone_search: Entity<InputState>,
-    pub(super) local_error: Option<String>,
+/// Whether a screen may be left after its save ran.
+pub(super) enum Leave {
+    /// Leave; the optional line shows on the next screen.
+    Go(Option<String>),
+    /// Stay: a problem the person has to fix is shown.
+    Stay,
 }
 
 /// A text field whose edits re-render the dialog (search filters, the
@@ -158,6 +60,37 @@ pub(super) fn live_input(
     input
 }
 
+/// A text field that keeps at most `max` characters (tdesktop's
+/// `setMaxLength`).
+pub(super) fn limited_input(
+    window: &mut Window,
+    cx: &mut Context<QuillApp>,
+    placeholder: &'static str,
+    value: &str,
+    max: usize,
+) -> Entity<InputState> {
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+    let start: String = value.chars().take(max).collect();
+    input.update(cx, |input, cx| input.set_value(start, window, cx));
+    cx.subscribe_in(
+        &input,
+        window,
+        move |_, input, event: &InputEvent, window, cx| {
+            if !matches!(event, InputEvent::Change) {
+                return;
+            }
+            let text = input.read(cx).value().to_string();
+            if text.chars().count() > max {
+                let cut: String = text.chars().take(max).collect();
+                input.update(cx, |input, cx| input.set_value(cut, window, cx));
+            }
+            cx.notify();
+        },
+    )
+    .detach();
+    input
+}
+
 impl QuillApp {
     pub(super) fn open_business(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let zone_search = live_input(window, cx, "Search");
@@ -169,8 +102,14 @@ impl QuillApp {
             day_rows: Vec::new(),
             location: None,
             picker: None,
+            start_page: None,
+            link_edit: None,
+            link_qr: None,
+            confirm_delete: None,
+            chatbot: None,
             zone_search,
             local_error: None,
+            note: None,
         });
         let me = self.session().and_then(|s| s.my_user_id);
         if let Some(live) = self.live.as_mut() {
@@ -189,8 +128,36 @@ impl QuillApp {
         }
     }
 
+    /// The dialog is closing (Close, Esc, the close button or the
+    /// backdrop): the open screen saves first. With `can_stay` a problem
+    /// keeps the dialog open; otherwise it is reported in the status line.
+    pub(super) fn close_business_saving(
+        &mut self,
+        can_stay: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(view) = self.dialogs.business_dialog.as_ref().map(|d| d.view) else {
+            return true;
+        };
+        if let Leave::Stay = self.business_leave(view, window, cx) {
+            if can_stay {
+                return false;
+            }
+            if let Some(line) = self.business_mut().and_then(|d| d.local_error.take()) {
+                self.connection.status_note = line;
+            }
+        }
+        self.close_business(cx);
+        true
+    }
+
     pub(super) fn business_mut(&mut self) -> Option<&mut BusinessDialog> {
         self.dialogs.business_dialog.as_mut()
+    }
+
+    pub(super) fn business_view(&self) -> Option<View> {
+        self.dialogs.business_dialog.as_ref().map(|d| d.view)
     }
 
     /// The own account's business info (empty when none is set or the
@@ -208,21 +175,22 @@ impl QuillApp {
 
     /// Show another screen, building its draft from the saved values.
     pub(super) fn business_go(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
+        let missing = self.business_draft_missing(view);
         match view {
-            View::Greeting if self.business_draft_missing(view) => {
+            View::Greeting if missing => {
                 let draft = self.new_greeting_draft();
                 if let Some(d) = self.business_mut() {
                     d.greeting = Some(draft);
                 }
             }
-            View::Away if self.business_draft_missing(view) => {
+            View::Away if missing => {
                 let draft = self.new_away_draft(window, cx);
                 if let Some(d) = self.business_mut() {
                     d.away = Some(draft);
                 }
             }
             View::Hours => {
-                if self.business_draft_missing(view) {
+                if missing {
                     let draft = self.new_hours_draft();
                     if let Some(d) = self.business_mut() {
                         d.hours = Some(draft);
@@ -239,25 +207,54 @@ impl QuillApp {
                     search.update(cx, |input, cx| input.set_value("", window, cx));
                 }
             }
-            View::Location if self.business_draft_missing(view) => {
+            View::Location if missing => {
                 let draft = self.new_location_draft(window, cx);
                 if let Some(d) = self.business_mut() {
                     d.location = Some(draft);
                 }
             }
+            View::StartPage if missing => {
+                let draft = self.new_start_page_draft(window, cx);
+                if let Some(d) = self.business_mut() {
+                    d.start_page = Some(draft);
+                }
+            }
+            View::StickerPick => self.open_start_page_stickers(cx),
+            View::ChatLinks => {
+                if let Some(live) = self.live.as_mut() {
+                    let _ = live.driver.ensure_chat_links();
+                }
+            }
+            View::Chatbots if missing => {
+                let draft = self.new_chatbot_draft(window, cx);
+                if let Some(d) = self.business_mut() {
+                    d.chatbot = Some(draft);
+                }
+                self.business_bot_watch(window, cx);
+            }
             _ => {}
         }
         if let Some(d) = self.business_mut() {
-            // Leaving an editor for the hub drops its unsaved draft.
+            // Back on the hub, every draft is gone.
             if view == View::Hub {
                 d.greeting = None;
                 d.away = None;
                 d.hours = None;
                 d.location = None;
                 d.picker = None;
+                d.start_page = None;
+                d.chatbot = None;
             }
+            if !matches!(view, View::LinkEdit) {
+                d.link_edit = None;
+            }
+            if !matches!(view, View::LinkQr) {
+                d.link_qr = None;
+            }
+            d.confirm_delete = None;
             d.view = view;
             d.local_error = None;
+            d.note = None;
         }
         cx.notify();
     }
@@ -271,7 +268,27 @@ impl QuillApp {
             View::Away => d.away.is_none(),
             View::Hours => d.hours.is_none(),
             View::Location => d.location.is_none(),
+            View::StartPage => d.start_page.is_none(),
+            View::Chatbots => d.chatbot.is_none(),
             _ => false,
+        }
+    }
+
+    /// Save the screen being left.
+    pub(super) fn business_leave(
+        &mut self,
+        view: View,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Leave {
+        match view {
+            View::Greeting => self.save_business_greeting(cx),
+            View::Away => self.save_business_away(cx),
+            View::Hours => self.save_business_hours(cx),
+            View::Location => self.save_business_location(cx),
+            View::StartPage => self.save_business_start_page(cx),
+            View::Chatbots => self.save_business_chatbot(window, cx),
+            _ => Leave::Go(None),
         }
     }
 
@@ -279,13 +296,27 @@ impl QuillApp {
         let Some(d) = self.dialogs.business_dialog.as_ref() else {
             return;
         };
-        let parent = d.view.parent(d.picker.as_ref().map(|p| p.target));
-        if d.view == View::Picker
+        let view = d.view;
+        let parent = view.parent(d.picker.as_ref().map(|p| p.target));
+        let note = if view.saves_on_leave() {
+            match self.business_leave(view, window, cx) {
+                Leave::Stay => return,
+                Leave::Go(note) => note,
+            }
+        } else {
+            None
+        };
+        if view == View::Picker
             && let Some(d) = self.business_mut()
         {
             d.picker = None;
         }
         self.business_go(parent, window, cx);
+        if note.is_some()
+            && let Some(d) = self.business_mut()
+        {
+            d.note = note;
+        }
     }
 
     pub(super) fn business_error(&mut self, line: impl Into<String>, cx: &mut Context<Self>) {
@@ -295,24 +326,45 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Saving needs a live session; demo mode says so.
-    pub(super) fn business_live(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.live.is_some() {
-            return true;
+    pub(super) fn business_note(&mut self, line: impl Into<String>, cx: &mut Context<Self>) {
+        if let Some(d) = self.business_mut() {
+            d.note = Some(line.into());
         }
-        self.business_error("Business settings need a live session.", cx);
-        false
+        cx.notify();
     }
 
+    /// Send a changed setting; demo mode and a refused send leave with a
+    /// line saying so.
+    pub(super) fn business_send(
+        &mut self,
+        what: &str,
+        send: impl FnOnce(&mut quill::connect::ConnectDriver<quill::connect::LiveSender>) -> bool,
+    ) -> Leave {
+        match self.live.as_mut() {
+            None => Leave::Go(Some(Self::DEMO_LINE.into())),
+            Some(live) => {
+                if send(&mut live.driver) {
+                    Leave::Go(None)
+                } else {
+                    Leave::Go(Some(format!("Could not send the {what}.")))
+                }
+            }
+        }
+    }
+
+    /// The line shown when a save cannot be sent in demo mode.
+    pub(super) const DEMO_LINE: &'static str = "Business settings need a live session.";
+
     /// A hub row was chosen. Without Premium tdesktop shows the Premium
-    /// screen instead (it opens above this dialog).
+    /// screen instead (it opens above this dialog); the chatbots row works
+    /// without it.
     pub(super) fn business_open_feature(
         &mut self,
         view: Option<View>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.business_premium() {
+        if view != Some(View::Chatbots) && !self.business_premium() {
             self.open_premium(cx);
             return;
         }

@@ -13,6 +13,7 @@ impl Session {
     ) {
         if self.apply_quick_replies_error(err, pending.map(|p| p.purpose))
             || self.apply_business_error(err, pending.map(|p| p.purpose))
+            || self.apply_business_extra_error(err, pending.map(|p| p.purpose))
         {
             return;
         }

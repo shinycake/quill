@@ -460,6 +460,7 @@ pub enum BusinessSettingKind {
     Away,
     OpeningHours,
     Location,
+    StartPage,
 }
 
 impl BusinessSettingKind {
@@ -469,6 +470,7 @@ impl BusinessSettingKind {
             Self::Away => "away message",
             Self::OpeningHours => "business hours",
             Self::Location => "location",
+            Self::StartPage => "start page",
         }
     }
 }
@@ -526,6 +528,16 @@ impl TimeZone {
             self.name
         )
     }
+}
+
+/// `toggleHasSponsoredMessagesEnabled` (the hub's "Do Not Hide Ads").
+pub fn toggle_sponsored_request(extra: &str, enabled: bool) -> String {
+    json!({
+        "@type": "toggleHasSponsoredMessagesEnabled",
+        "@extra": extra,
+        "has_sponsored_messages_enabled": enabled,
+    })
+    .to_string()
 }
 
 pub fn get_time_zones_request(extra: &str) -> String {

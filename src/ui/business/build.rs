@@ -1,4 +1,5 @@
-//! The Telegram Business dialog: the hub and the frame of every screen.
+//! The Telegram Business dialog: the hub (with "Ads in Channels") and the
+//! frame of every screen.
 
 use super::View;
 use crate::ui::app::QuillApp;
@@ -6,6 +7,8 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::link::Link;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -14,7 +17,7 @@ use std::rc::Rc;
 
 /// One hub row: what it opens (`None` is Quick Replies, its own dialog),
 /// icon, title and description, in tdesktop's fallback order.
-const FEATURES: [(Option<View>, IconName, &str, &str); 5] = [
+const FEATURES: [(Option<View>, IconName, &str, &str); 8] = [
     (
         Some(View::Greeting),
         IconName::Hand,
@@ -29,7 +32,7 @@ const FEATURES: [(Option<View>, IconName, &str, &str); 5] = [
     ),
     (
         None,
-        IconName::Reply,
+        IconName::Zap,
         "Quick Replies",
         "Set up shortcuts with rich text and media to respond to messages faster.",
     ),
@@ -41,13 +44,33 @@ const FEATURES: [(Option<View>, IconName, &str, &str); 5] = [
     ),
     (
         Some(View::Location),
-        IconName::Map,
+        IconName::MapPin,
         "Location",
         "Display the location of your business on your account.",
     ),
+    (
+        Some(View::ChatLinks),
+        IconName::Link,
+        "Links to Chat",
+        "Create links that start a chat with you, suggesting the first message.",
+    ),
+    (
+        Some(View::StartPage),
+        IconName::MessageSquareHeart,
+        "Custom Intro",
+        "Customize the message people see before they start a chat with you.",
+    ),
+    (
+        Some(View::Chatbots),
+        IconName::Bot,
+        "Chatbots",
+        "Add any third party chatbots that will process customer interactions.",
+    ),
 ];
 
-fn title_of(view: View, include: bool) -> String {
+const ADS_URL: &str = "https://ads.telegram.org";
+
+fn title_of(view: View, include: bool, link_edit_is_new: bool) -> String {
     match view {
         View::Hub => "Telegram Business".into(),
         View::Greeting => "Greeting Message".into(),
@@ -58,10 +81,75 @@ fn title_of(view: View, include: bool) -> String {
         View::Location => "Location".into(),
         View::Picker if include => "Include Chats".into(),
         View::Picker => "Exclude Chats".into(),
+        View::StartPage => "Start Page".into(),
+        View::StickerPick => "Choose Sticker".into(),
+        View::ChatLinks => "Links to Chat".into(),
+        View::LinkEdit if link_edit_is_new => "New Link".into(),
+        View::LinkEdit => "Edit Link".into(),
+        View::LinkQr => "Chat Link QR Code".into(),
+        View::Chatbots => "Chat Automation".into(),
     }
 }
 
 impl QuillApp {
+    /// tdesktop's "Ads in Channels" section, for Premium accounts.
+    fn business_ads_section(&self, cx: &mut Context<Self>) -> Div {
+        let muted = cx.theme().muted_foreground;
+        let on = self
+            .session()
+            .and_then(|s| s.my_user_id.and_then(|me| s.user_full_info(me)))
+            .is_some_and(|info| info.extras.sponsored_enabled);
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .pt_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(div().text_sm().font_semibold().child("Ads in Channels"))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_sm().child("Do Not Hide Ads"))
+                    .child(
+                        Switch::new("business-ads")
+                            .checked(on)
+                            .accessibility_label("Do Not Hide Ads")
+                            .on_click(cx.listener(|this, &next: &bool, _, cx| {
+                                match this.live.as_mut() {
+                                    Some(live) => {
+                                        let _ = live.driver.set_sponsored_enabled(next);
+                                    }
+                                    None => this.business_error(Self::DEMO_LINE, cx),
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_0p5()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(
+                        "As a Premium subscriber, you don't see any ads on Telegram, but you can \
+                         turn them on, for example, to view your own ads that you launched on the",
+                    )
+                    .child(
+                        Link::new("business-ads-platform")
+                            .on_click(|_, _, _| {
+                                quill::platform::open_external_url(ADS_URL);
+                            })
+                            .child("Telegram Ad Platform"),
+                    ),
+            )
+    }
+
     fn business_hub_body(&mut self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         let premium = self.business_premium();
@@ -113,7 +201,9 @@ impl QuillApp {
                     })),
             );
         }
-        if !premium {
+        if premium {
+            body = body.child(self.business_ads_section(cx));
+        } else {
             body = body.child(
                 div()
                     .text_xs()
@@ -136,44 +226,39 @@ impl QuillApp {
                 .ghost()
                 .on_click(cx.listener(|this, _, window, cx| this.business_back(window, cx)))
         };
-        let save = |id: &'static str, label: &'static str| Button::new(id).label(label).primary();
+        let primary =
+            |id: &'static str, label: &'static str| Button::new(id).label(label).primary();
         let footer = div().flex().justify_end().gap_2();
         match view {
             View::Hub => footer.child(Button::new("business-close").label("Close").on_click(
                 cx.listener(|this, _, window, cx| {
-                    this.close_business(cx);
-                    this.close_kit_dialog_if_done(DialogKind::Business, window, cx);
+                    if this.close_business_saving(true, window, cx) {
+                        this.close_kit_dialog_if_done(DialogKind::Business, window, cx);
+                    }
                 }),
             )),
-            View::TimeZone => footer.child(back("Back")),
-            View::Picker => {
-                footer
-                    .child(back("Cancel"))
-                    .child(save("business-picker-done", "Done").on_click(cx.listener(
-                        |this, _, window, cx| {
-                            this.finish_business_picker(window, cx);
-                        },
-                    )))
-            }
+            View::Picker => footer.child(back("Cancel")).child(
+                primary("business-picker-done", "Done").on_click(
+                    cx.listener(|this, _, window, cx| this.finish_business_picker(window, cx)),
+                ),
+            ),
             View::Day(day) => {
                 footer
                     .child(back("Cancel"))
-                    .child(save("business-day-save", "Save").on_click(cx.listener(
-                        move |this, _, window, cx| {
-                            this.save_business_day(day, window, cx);
-                        },
+                    .child(primary("business-day-save", "Save").on_click(cx.listener(
+                        move |this, _, window, cx| this.save_business_day(day, window, cx),
                     )))
             }
-            View::Greeting | View::Away | View::Hours | View::Location => footer
-                .child(back("Cancel"))
-                .child(save("business-save", "Save").on_click(cx.listener(
-                    move |this, _, window, cx| match view {
-                        View::Greeting => this.save_business_greeting(window, cx),
-                        View::Away => this.save_business_away(window, cx),
-                        View::Hours => this.save_business_hours(window, cx),
-                        _ => this.save_business_location(window, cx),
-                    },
-                ))),
+            View::LinkEdit => {
+                footer
+                    .child(back("Cancel"))
+                    .child(primary("business-link-save", "Save").on_click(
+                        cx.listener(|this, _, window, cx| this.save_business_link(window, cx)),
+                    ))
+            }
+            // The screens save when they are left; the time zone list,
+            // sticker panel, links and QR code have nothing to save.
+            _ => footer.child(back("Back")),
         }
     }
 
@@ -183,17 +268,22 @@ impl QuillApp {
         dialog: Dialog,
         cx: &mut App,
     ) -> Dialog {
+        // Esc, the close button and the backdrop save the open screen too
+        // (the kit already closed the dialog, so a problem is reported in
+        // the status line).
         let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::Business, |this, _, cx| {
-                this.close_business(cx);
+            QuillShell::on_close_kind(app, shell, DialogKind::Business, |this, window, cx| {
+                this.close_business_saving(false, window, cx);
             });
         app.update(cx, |this, cx| {
-            let Some((view, include, local_error)) =
+            let Some((view, include, new_link, local_error, note)) =
                 this.dialogs.business_dialog.as_ref().map(|d| {
                     (
                         d.view,
                         d.picker.as_ref().is_some_and(|p| p.include),
+                        d.link_edit.as_ref().is_none_or(|e| e.link.is_none()),
                         d.local_error.clone(),
+                        d.note.clone(),
                     )
                 })
             else {
@@ -208,7 +298,22 @@ impl QuillApp {
                 View::TimeZone => this.business_zone_body(cx),
                 View::Location => this.business_location_body(cx),
                 View::Picker => this.business_picker_body(cx),
+                View::StartPage => this.business_start_page_body(cx),
+                View::StickerPick => this.business_sticker_pick_body(cx),
+                View::ChatLinks => this.business_chat_links_body(cx),
+                View::LinkEdit => this.business_link_edit_body(cx),
+                View::LinkQr => this.business_link_qr_body(cx),
+                View::Chatbots => this.business_chatbots_body(cx),
             };
+            if let Some(note) = note {
+                body = body.child(
+                    div()
+                        .id("business-note")
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(note),
+                );
+            }
             let server_error = this
                 .session()
                 .and_then(|s| s.settings.business.error.clone());
@@ -232,7 +337,9 @@ impl QuillApp {
             let content = Rc::new(RefCell::new(Some(content)));
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title(title_of(view, include)))
+                .title(crate::ui::shell::dialog_title(title_of(
+                    view, include, new_link,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |slot, _, _| {
                         let body = content

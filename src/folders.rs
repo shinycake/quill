@@ -325,6 +325,7 @@ mod tests {
             can_be_added_to_attachment_menu: false,
             can_be_edited: false,
             can_manage_bots: false,
+            can_connect_to_business: false,
             status: UserStatusKind::Empty,
             photo_small_file_id: 0,
             accent_color_id: 0,
