@@ -610,3 +610,42 @@ pub(crate) fn parse_star_subscriptions(value: &Value) -> Option<StarSubscription
         next_offset: json_field_str(value, "next_offset"),
     })
 }
+
+/// `bankCardInfo`: the card issuer's title and its `bankCardActionOpenUrl`
+/// entries (a text and a URL each).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BankCardInfoData {
+    pub title: String,
+    pub actions: Vec<BankCardAction>,
+}
+
+/// One `bankCardActionOpenUrl`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BankCardAction {
+    pub text: String,
+    pub url: String,
+}
+
+impl BankCardInfoData {
+    pub(crate) fn parse(value: &serde_json::Value) -> Self {
+        Self {
+            title: json_field_str(value, "title"),
+            actions: value
+                .get("actions")
+                .and_then(serde_json::Value::as_array)
+                .map(|actions| {
+                    actions
+                        .iter()
+                        .filter_map(|action| {
+                            let url = json_field_str(action, "url");
+                            (!url.is_empty()).then(|| BankCardAction {
+                                text: json_field_str(action, "text"),
+                                url,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+}

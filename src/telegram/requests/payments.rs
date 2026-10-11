@@ -188,3 +188,13 @@ pub fn reuse_star_subscription(extra: RequestId, subscription_id: &str) -> Strin
     })
     .to_string()
 }
+
+/// `getBankCardInfo`. Response is `bankCardInfo`.
+pub fn get_bank_card_info(extra: RequestId, number: &str) -> String {
+    json!({
+        "@type": "getBankCardInfo",
+        "@extra": extra.as_extra(),
+        "bank_card_number": number,
+    })
+    .to_string()
+}

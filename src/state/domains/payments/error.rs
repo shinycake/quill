@@ -37,6 +37,13 @@ impl Session {
                     gift.note = Some(format!("Gift request failed: {}", error_reason(err)));
                 }
             }
+            // No card info: the menu keeps only "Copy Card Number".
+            Some(RequestPurpose::GetBankCardInfo) => {
+                if let Some(lookup) = self.payments.bank_card.as_mut() {
+                    lookup.loading = false;
+                    lookup.info = None;
+                }
+            }
             Some(RequestPurpose::GetGiftTextLimit) => {
                 self.payments.gift_text_length_max = None;
             }

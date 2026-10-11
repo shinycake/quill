@@ -13,6 +13,14 @@ impl Session {
         _seq: u64,
     ) {
         match payload {
+            PaymentsPayload::BankCardInfo(info) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBankCardInfo)
+                    && let Some(lookup) = self.payments.bank_card.as_mut()
+                {
+                    lookup.loading = false;
+                    lookup.info = Some(info);
+                }
+            }
             PaymentsPayload::PaymentForm(form) => {
                 // Slice P1: `getPaymentForm` answer to our own Buy press
                 // (matched by `@extra`). Opens the checkout dialog.

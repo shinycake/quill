@@ -2,6 +2,7 @@
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
 use crate::state::*;
+use crate::telegram::envelope::BankCardInfoData;
 
 pub struct PaymentsState {
     /// Slice P1: the in-flight payment request context (`getPaymentForm`,
@@ -69,6 +70,17 @@ pub struct PaymentsState {
     /// TDLib's `is_premium` option: the account's current Premium state.
     /// `None` until the option arrives.
     pub premium_option: Option<bool>,
+    /// The card number the user tapped and what `getBankCardInfo` said.
+    pub bank_card: Option<BankCardLookup>,
+}
+
+/// A tapped bank card number and the lookup's progress.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BankCardLookup {
+    pub number: String,
+    /// `None` while loading or after a failure.
+    pub info: Option<BankCardInfoData>,
+    pub loading: bool,
 }
 
 impl PaymentsState {
@@ -97,6 +109,7 @@ impl PaymentsState {
             hub: crate::premium_hub::PremiumHub::default(),
             subscription_cancel_confirm: None,
             premium_option: None,
+            bank_card: None,
         }
     }
 }

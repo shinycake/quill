@@ -334,3 +334,20 @@ fn star_subscriptions_balance_uses_schema_star_count() {
         0
     );
 }
+
+#[test]
+fn bank_card_info_parses_title_and_actions() {
+    let env = parse_envelope(
+        r#"{"@type":"bankCardInfo","title":"Example Bank","actions":[{"@type":"bankCardActionOpenUrl","text":"Website","url":"https://bank.example"},{"@type":"bankCardActionOpenUrl","text":"Empty","url":""}]}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Payments(PaymentsPayload::BankCardInfo(info)) => {
+            assert_eq!(info.title, "Example Bank");
+            assert_eq!(info.actions.len(), 1);
+            assert_eq!(info.actions[0].text, "Website");
+            assert_eq!(info.actions[0].url, "https://bank.example");
+        }
+        other => panic!("{other:?}"),
+    }
+}
