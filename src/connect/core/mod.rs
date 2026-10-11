@@ -57,7 +57,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && owned.envelope.extra.is_some_and(|id| {
                 self.session.requests.purpose(id) == Some(RequestPurpose::LoadArchiveChats)
             });
-        let main_was_exhausted = self.session.chats_exhausted;
+        let main_was_exhausted = self.session.chat_list.chats_exhausted;
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
         // Captured before `apply` takes the pending request.
@@ -508,7 +508,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             || recent_emoji != self.session.settings.media_prefs.recent_custom_emoji_ids)
             && self.save_media_prefs().is_err()
         {
-            self.session.chat_action_error =
+            self.session.chats_state.chat_action_error =
                 Some("Could not save emoji pack order. Retry in settings.".into());
         }
         // Slice S4: persist per-network settings seeded from
@@ -550,19 +550,27 @@ impl<S: JsonSender> ConnectDriver<S> {
                 | RequestPurpose::Threads(ThreadsPurpose::ToggleForumTopicPinned { .. })
                 | RequestPurpose::Threads(ThreadsPurpose::DeleteForumTopic { .. })
                 | RequestPurpose::ToggleGeneralForumTopicHidden
-                    if !self.session.forum_topics.contains_key(&chat_id.0) =>
+                    if !self.session.threads.forum_topics.contains_key(&chat_id.0) =>
                 {
                     let _ = self.refresh_forum_topics(chat_id);
                 }
                 RequestPurpose::AddChatWelcomeMessage
                 | RequestPurpose::Groups(GroupsPurpose::EditChatWelcomeMessage { .. })
                 | RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage { .. })
-                    if !self.session.welcome_messages.contains_key(&chat_id.0) =>
+                    if !self
+                        .session
+                        .groups
+                        .welcome_messages
+                        .contains_key(&chat_id.0) =>
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);
                 }
                 RequestPurpose::BoostChat
-                    if !self.session.chat_boost_status.contains_key(&chat_id.0) =>
+                    if !self
+                        .session
+                        .groups
+                        .chat_boost_status
+                        .contains_key(&chat_id.0) =>
                 {
                     let _ = self.fetch_chat_boost_status(chat_id);
                 }
@@ -593,6 +601,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(community_id) = community_mutation_refetch
             && !self
                 .session
+                .groups
                 .community_full_infos
                 .contains_key(&community_id)
         {
@@ -602,7 +611,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }
-        if load_archive_ok || (!main_was_exhausted && self.session.chats_exhausted) {
+        if load_archive_ok || (!main_was_exhausted && self.session.chat_list.chats_exhausted) {
             self.maybe_load_archive_chats()?;
         }
         if let Some(folder_id) = folder_load_ok {

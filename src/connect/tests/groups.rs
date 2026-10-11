@@ -62,7 +62,7 @@ fn driver_toggle_sign_messages_sends_and_rolls_back() {
     assert_eq!(value["show_message_sender"], true);
     // Optimistic state.
     assert_eq!(
-        driver.session.supergroup_sign_messages.get(&13),
+        driver.session.groups.supergroup_sign_messages.get(&13),
         Some(&true)
     );
     // In flight → no-op.
@@ -79,11 +79,15 @@ fn driver_toggle_sign_messages_sends_and_rolls_back() {
         ),
     );
     assert_eq!(
-        driver.session.supergroup_sign_messages.get(&13),
+        driver.session.groups.supergroup_sign_messages.get(&13),
         Some(&false)
     );
     assert_eq!(
-        driver.session.supergroup_show_message_sender.get(&13),
+        driver
+            .session
+            .groups
+            .supergroup_show_message_sender
+            .get(&13),
         Some(&false)
     );
     // A non-channel supergroup is not eligible at all.
@@ -142,7 +146,7 @@ fn driver_toggle_anti_spam_gated_on_full_info_capability() {
     assert_eq!(value["supergroup_id"], 13);
     assert_eq!(value["has_aggressive_anti_spam_enabled"], true);
     assert_eq!(
-        driver.session.supergroup_anti_spam_enabled.get(&13),
+        driver.session.groups.supergroup_anti_spam_enabled.get(&13),
         Some(&true)
     );
     ingest_json(
@@ -153,7 +157,7 @@ fn driver_toggle_anti_spam_gated_on_full_info_capability() {
         ),
     );
     assert_eq!(
-        driver.session.supergroup_anti_spam_enabled.get(&13),
+        driver.session.groups.supergroup_anti_spam_enabled.get(&13),
         Some(&false)
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -276,9 +280,9 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"is_forum":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_manage_topics":true,"can_send_welcome_messages":true}}}}"#,
     );
     // Seed the caches the way the dialogs load them before mutating.
-    driver.session.forum_topics.insert(13, vec![]);
-    driver.session.welcome_messages.insert(13, vec![]);
-    driver.session.chat_boost_status.insert(13, (0, 0));
+    driver.session.threads.forum_topics.insert(13, vec![]);
+    driver.session.groups.welcome_messages.insert(13, vec![]);
+    driver.session.groups.chat_boost_status.insert(13, (0, 0));
     let sent_types = || {
         recorder
             .snapshot()
@@ -304,14 +308,14 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
             extra.0
         ),
     );
-    assert!(!driver.session.forum_topics.contains_key(&13));
+    assert!(!driver.session.threads.forum_topics.contains_key(&13));
     assert!(
         sent_types().iter().any(|t| t == "getForumTopics"),
         "forum list refetched after confirmed create"
     );
 
     // Forum create failed: cache kept, nothing refetched.
-    driver.session.forum_topics.insert(13, vec![]);
+    driver.session.threads.forum_topics.insert(13, vec![]);
     let refetches_before = sent_types()
         .iter()
         .filter(|t| *t == "getForumTopics")
@@ -327,7 +331,7 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
             extra.0
         ),
     );
-    assert!(driver.session.forum_topics.contains_key(&13));
+    assert!(driver.session.threads.forum_topics.contains_key(&13));
     assert_eq!(
         sent_types()
             .iter()
@@ -346,7 +350,7 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
         &mut driver,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!driver.session.welcome_messages.contains_key(&13));
+    assert!(!driver.session.groups.welcome_messages.contains_key(&13));
     assert!(
         sent_types().iter().any(|t| t == "loadChatWelcomeMessages"),
         "welcome pack reloaded after confirmed add"
@@ -376,7 +380,7 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
             boost_extra.0
         ),
     );
-    assert!(!driver.session.chat_boost_status.contains_key(&13));
+    assert!(!driver.session.groups.chat_boost_status.contains_key(&13));
     assert!(
         sent_types().iter().any(|t| t == "getChatBoostStatus"),
         "boost status refetched after confirmed boost"
@@ -439,7 +443,7 @@ fn driver_boost_chain_sends_slots_then_boost() {
     let value: Value = serde_json::from_str(&boost).unwrap();
     assert_eq!(value["chat_id"], 13);
     assert_eq!(value["slot_ids"], serde_json::json!([3]));
-    assert_eq!(driver.session.boost_intent, None);
+    assert_eq!(driver.session.groups.boost_intent, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

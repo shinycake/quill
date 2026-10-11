@@ -1268,7 +1268,7 @@ impl QuillApp {
 
     /// Slice (communities-search-filter): community filter chips at the top of
     /// the typed-search panel — "All chats" (null filter) plus one chip per
-    /// accessible community from `SessionState.communities` (fed by
+    /// accessible community from `SessionState.groups.communities` (fed by
     /// `updateCommunity`; TDLib 1.8.67 has no list-communities method, and
     /// `searchMessagesChatTypeFilterCommunity` requires a `community_id`,
     /// schema line 6344). Omitted when there is nothing to filter by.
@@ -1280,6 +1280,7 @@ impl QuillApp {
         let session = self.session()?;
         let selected = session.search.community_filter;
         let mut communities: Vec<(i64, String)> = session
+            .groups
             .communities
             .iter()
             .filter(|(_, community)| community.have_access)

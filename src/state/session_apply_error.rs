@@ -51,10 +51,14 @@ impl Session {
                 previous,
             }) => match previous {
                 Some(flag) => {
-                    self.supergroup_join_by_request.insert(supergroup_id, flag);
+                    self.groups
+                        .supergroup_join_by_request
+                        .insert(supergroup_id, flag);
                 }
                 None => {
-                    self.supergroup_join_by_request.remove(&supergroup_id);
+                    self.groups
+                        .supergroup_join_by_request
+                        .remove(&supergroup_id);
                 }
             },
             Some(RequestRollback::SupergroupUsername {
@@ -62,10 +66,12 @@ impl Session {
                 previous,
             }) => match previous {
                 Some(username) => {
-                    self.supergroup_usernames.insert(supergroup_id, username);
+                    self.groups
+                        .supergroup_usernames
+                        .insert(supergroup_id, username);
                 }
                 None => {
-                    self.supergroup_usernames.remove(&supergroup_id);
+                    self.groups.supergroup_usernames.remove(&supergroup_id);
                 }
             },
             // Slice G2: restore the pre-toggle sign/show flags.
@@ -76,19 +82,24 @@ impl Session {
             }) => {
                 match previous_sign {
                     Some(flag) => {
-                        self.supergroup_sign_messages.insert(supergroup_id, flag);
+                        self.groups
+                            .supergroup_sign_messages
+                            .insert(supergroup_id, flag);
                     }
                     None => {
-                        self.supergroup_sign_messages.remove(&supergroup_id);
+                        self.groups.supergroup_sign_messages.remove(&supergroup_id);
                     }
                 }
                 match previous_show {
                     Some(flag) => {
-                        self.supergroup_show_message_sender
+                        self.groups
+                            .supergroup_show_message_sender
                             .insert(supergroup_id, flag);
                     }
                     None => {
-                        self.supergroup_show_message_sender.remove(&supergroup_id);
+                        self.groups
+                            .supergroup_show_message_sender
+                            .remove(&supergroup_id);
                     }
                 }
             }
@@ -105,11 +116,14 @@ impl Session {
                 previous,
             }) => match previous {
                 Some(flag) => {
-                    self.supergroup_anti_spam_enabled
+                    self.groups
+                        .supergroup_anti_spam_enabled
                         .insert(supergroup_id, flag);
                 }
                 None => {
-                    self.supergroup_anti_spam_enabled.remove(&supergroup_id);
+                    self.groups
+                        .supergroup_anti_spam_enabled
+                        .remove(&supergroup_id);
                 }
             },
             // B7: restore the group admin toggles the server refused.
@@ -123,10 +137,12 @@ impl Session {
             }
             Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
                 Some(setting) => {
-                    self.chat_available_reactions.insert(chat_id, setting);
+                    self.chats_state
+                        .chat_available_reactions
+                        .insert(chat_id, setting);
                 }
                 None => {
-                    self.chat_available_reactions.remove(&chat_id);
+                    self.chats_state.chat_available_reactions.remove(&chat_id);
                 }
             },
             // Slice CL1: restore the pre-toggle pinned /
@@ -166,7 +182,7 @@ impl Session {
             // Slice CL2: drop the refused archive-settings flip;
             // the panel re-fetches the truth on next open.
             Some(RequestRollback::ArchiveChatListSettings { previous }) => {
-                self.archive_chat_list_settings = previous;
+                self.chat_list.archive_chat_list_settings = previous;
             }
             None => {}
         }

@@ -23,20 +23,20 @@ impl Session {
                 | RequestPurpose::DeleteChatBackground
                 | RequestPurpose::SetChatTheme,
             ) => {
-                self.background_error = Some(error_reason(err));
+                self.chats_state.background_error = Some(error_reason(err));
             }
             // Slice CL3: refused report / block surfaces in the
             // status note — never shown as success.
             Some(RequestPurpose::ReportChat) => {
-                self.chat_action_error =
+                self.chats_state.chat_action_error =
                     Some(format!("could not report the chat (error {})", err.code));
             }
             Some(RequestPurpose::RemoveChatActionBar) => {
-                self.chat_action_error =
+                self.chats_state.chat_action_error =
                     Some(format!("could not hide the bar (error {})", err.code));
             }
             Some(RequestPurpose::CreatePrivateChat) => {
-                self.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error = Some(format!(
                     "could not open Saved Messages (error {})",
                     err.code
                 ));
@@ -53,7 +53,7 @@ impl Session {
                 | RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation }),
             ) => {
                 let stale = !matches!(
-                    &self.deep_link,
+                    &self.chats_state.deep_link,
                     Some(
                         DeepLinkState::ResolvingInfo {
                             generation: slot
@@ -65,8 +65,8 @@ impl Session {
                     ) if *slot == generation
                 );
                 if !stale {
-                    let text = deep_link_error_text(self.deep_link.as_ref(), err.code);
-                    self.deep_link = Some(DeepLinkState::ShowText(text));
+                    let text = deep_link_error_text(self.chats_state.deep_link.as_ref(), err.code);
+                    self.chats_state.deep_link = Some(DeepLinkState::ShowText(text));
                 }
             }
             _ => {}

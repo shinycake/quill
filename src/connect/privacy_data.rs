@@ -236,7 +236,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self.session.requests.take(extra);
                     return Err(err);
                 }
-                self.session.suggestions.actions.remove(action);
+                self.session.chat_list.suggestions.actions.remove(action);
                 if action == crate::chatlist_suggestions::ACTION_PASSWORD {
                     self.session.settings.privacy_data.check_password_suggested = false;
                 }
@@ -250,7 +250,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self.session.requests.take(extra);
                     return Err(err);
                 }
-                self.session.suggestions.birthdays_hidden = true;
+                self.session.chat_list.suggestions.birthdays_hidden = true;
                 Ok(extra)
             }
         }

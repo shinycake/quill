@@ -55,14 +55,14 @@ fn parses_bot_topic_flags_and_forum_tabs() {
         &sink,
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true,"has_forum_tabs":true}}"#,
     );
-    assert!(session.forum_tabs_supergroups.contains(&16));
+    assert!(session.threads.forum_tabs_supergroups.contains(&16));
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true,"has_forum_tabs":false}}"#,
     );
-    assert!(!session.forum_tabs_supergroups.contains(&16));
+    assert!(!session.threads.forum_tabs_supergroups.contains(&16));
 }
 
 #[test]

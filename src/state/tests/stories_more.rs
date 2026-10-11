@@ -530,7 +530,7 @@ fn per_message_updates_reach_loaded_topic_histories() {
     ] {
         apply_json(&mut session, &seq, &sink, update);
     }
-    let topic = &session.topic_histories[&(16, 2)];
+    let topic = &session.threads.topic_histories[&(16, 2)];
     let row = &topic.messages[&50];
     assert!(
         matches!(&row.content, MessageContent::Text(text) if text.text == "after"),

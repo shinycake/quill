@@ -6,17 +6,17 @@ impl Session {
     pub fn set_chat_action_bar(&mut self, chat_id: i64, bar: Option<ChatActionBar>) {
         match bar {
             Some(bar) => {
-                self.chat_action_bars.insert(chat_id, bar);
+                self.chats_state.chat_action_bars.insert(chat_id, bar);
             }
             None => {
-                self.chat_action_bars.remove(&chat_id);
+                self.chats_state.chat_action_bars.remove(&chat_id);
             }
         }
     }
 
     /// Batch 8: the chat's current action bar, if any.
     pub fn chat_action_bar(&self, chat_id: ChatId) -> Option<&ChatActionBar> {
-        self.chat_action_bars.get(&chat_id.0)
+        self.chats_state.chat_action_bars.get(&chat_id.0)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -130,10 +130,10 @@ impl Session {
             && let Some(DeepLinkState::ResolvingChat {
                 action,
                 generation: slot_generation,
-            }) = self.deep_link.as_ref()
+            }) = self.chats_state.deep_link.as_ref()
             && *slot_generation == generation
         {
-            self.deep_link = Some(DeepLinkState::ChatReady {
+            self.chats_state.deep_link = Some(DeepLinkState::ChatReady {
                 chat_id,
                 action: action.clone(),
             });
@@ -175,7 +175,8 @@ impl Session {
         });
         // Slice G2: `chat.has_welcome_messages` (schema 1.8.67,
         // line 3627).
-        self.chat_has_welcome_messages
+        self.groups
+            .chat_has_welcome_messages
             .insert(chat_id.0, has_welcome_messages);
         // Phase B1: secret chats — `updateSecretChat` arrives before
         // `updateNewChat` (schema 1.8.67, line 10740), so a state
@@ -223,45 +224,58 @@ impl Session {
         self.set_supergroup_forum(supergroup_id, is_forum);
         self.set_supergroup_username(supergroup_id, username);
         // Phase A1: own member status drives the slow-mode bypass.
-        self.supergroup_member_status.insert(supergroup_id, status);
+        self.groups
+            .supergroup_member_status
+            .insert(supergroup_id, status);
         self.adopt_supergroup_status(supergroup_id);
         // Phase A1: `can_restrict_members` gates the slow-mode
         // admin control; absent = unknown → treated as lacking.
-        self.supergroup_restrict_right
+        self.groups
+            .supergroup_restrict_right
             .insert(supergroup_id, can_restrict_members.unwrap_or(false));
         // Phase D3a: `can_invite_users` gates invite-link /
         // join-request management; absent = unknown → lacking.
-        self.supergroup_invite_right
+        self.groups
+            .supergroup_invite_right
             .insert(supergroup_id, can_invite_users.unwrap_or(false));
         // Phase D3b: `can_promote_members` gates admin
         // management; absent = unknown → lacking.
-        self.supergroup_promote_right
+        self.groups
+            .supergroup_promote_right
             .insert(supergroup_id, can_promote_members.unwrap_or(false));
         // Slice G1: `can_manage_tags` gates custom-title
         // changes for other members.
-        self.supergroup_manage_tags_right
+        self.groups
+            .supergroup_manage_tags_right
             .insert(supergroup_id, can_manage_tags.unwrap_or(false));
         // Slice G2: forum-topic / sign-messages / welcome-message
         // rights; absent = unknown → treated as lacking.
-        self.supergroup_manage_topics_right
+        self.groups
+            .supergroup_manage_topics_right
             .insert(supergroup_id, can_manage_topics.unwrap_or(false));
-        self.supergroup_change_info_right
+        self.groups
+            .supergroup_change_info_right
             .insert(supergroup_id, can_change_info.unwrap_or(false));
-        self.supergroup_send_welcome_right
+        self.groups
+            .supergroup_send_welcome_right
             .insert(supergroup_id, can_send_welcome_messages.unwrap_or(false));
         // Slice G1: `supergroup.join_by_request` (schema 1.8.67,
         // lines 2733/2746) drives the "Approve new members"
         // toggle; `supergroup.is_broadcast_group` (lines
         // 2736/2746) drives the broadcast-group toggle.
-        self.supergroup_join_by_request
+        self.groups
+            .supergroup_join_by_request
             .insert(supergroup_id, join_by_request);
-        self.supergroup_is_broadcast
+        self.groups
+            .supergroup_is_broadcast
             .insert(supergroup_id, is_broadcast_group);
         // Slice G2: `supergroup.sign_messages` /
         // `show_message_sender` (schema 1.8.67, lines 2731/2746).
-        self.supergroup_sign_messages
+        self.groups
+            .supergroup_sign_messages
             .insert(supergroup_id, sign_messages);
-        self.supergroup_show_message_sender
+        self.groups
+            .supergroup_show_message_sender
             .insert(supergroup_id, show_message_sender);
     }
     #[allow(clippy::too_many_arguments)]
@@ -290,40 +304,53 @@ impl Session {
             self.set_supergroup_forum(supergroup_id, is_forum);
             self.set_supergroup_username(supergroup_id, username);
             // Phase A1: own member status drives the slow-mode bypass.
-            self.supergroup_member_status.insert(supergroup_id, status);
+            self.groups
+                .supergroup_member_status
+                .insert(supergroup_id, status);
             self.adopt_supergroup_status(supergroup_id);
-            self.supergroup_restrict_right
+            self.groups
+                .supergroup_restrict_right
                 .insert(supergroup_id, can_restrict_members.unwrap_or(false));
             // Phase D3a: `can_invite_users` gates invite-link /
             // join-request management.
-            self.supergroup_invite_right
+            self.groups
+                .supergroup_invite_right
                 .insert(supergroup_id, can_invite_users.unwrap_or(false));
             // Phase D3b: `can_promote_members` gates admin management.
-            self.supergroup_promote_right
+            self.groups
+                .supergroup_promote_right
                 .insert(supergroup_id, can_promote_members.unwrap_or(false));
             // Slice G1: `can_manage_tags` gates custom-title
             // changes for other members.
-            self.supergroup_manage_tags_right
+            self.groups
+                .supergroup_manage_tags_right
                 .insert(supergroup_id, can_manage_tags.unwrap_or(false));
             // Slice G2: forum-topic / sign-messages /
             // welcome-message rights.
-            self.supergroup_manage_topics_right
+            self.groups
+                .supergroup_manage_topics_right
                 .insert(supergroup_id, can_manage_topics.unwrap_or(false));
-            self.supergroup_change_info_right
+            self.groups
+                .supergroup_change_info_right
                 .insert(supergroup_id, can_change_info.unwrap_or(false));
-            self.supergroup_send_welcome_right
+            self.groups
+                .supergroup_send_welcome_right
                 .insert(supergroup_id, can_send_welcome_messages.unwrap_or(false));
             // Slice G1: join-by-request + broadcast flags (schema
             // 1.8.67, lines 2733/2736/2746).
-            self.supergroup_join_by_request
+            self.groups
+                .supergroup_join_by_request
                 .insert(supergroup_id, join_by_request);
-            self.supergroup_is_broadcast
+            self.groups
+                .supergroup_is_broadcast
                 .insert(supergroup_id, is_broadcast_group);
             // Slice G2: sign/show flags (schema 1.8.67, lines
             // 2731/2746).
-            self.supergroup_sign_messages
+            self.groups
+                .supergroup_sign_messages
                 .insert(supergroup_id, sign_messages);
-            self.supergroup_show_message_sender
+            self.groups
+                .supergroup_show_message_sender
                 .insert(supergroup_id, show_message_sender);
         }
     }
@@ -346,7 +373,7 @@ impl Session {
             && let Some(chat_id) = pending.chat_id
         {
             let is_create = pending.purpose == RequestPurpose::CreateChatInviteLink;
-            match self.invite_links.entry(chat_id.0) {
+            match self.groups.invite_links.entry(chat_id.0) {
                 std::collections::hash_map::Entry::Occupied(mut entry) => {
                     match entry.get_mut() {
                         InviteLinkFetch::Loaded(list) => {
@@ -393,7 +420,8 @@ impl Session {
     pub(crate) fn apply_revoke_answer(&mut self, chat: i64, links: Vec<ParsedChatInviteLink>) {
         for link in links {
             if link.is_revoked {
-                if let Some(InviteLinkFetch::Loaded(list)) = self.invite_links.get_mut(&chat) {
+                if let Some(InviteLinkFetch::Loaded(list)) = self.groups.invite_links.get_mut(&chat)
+                {
                     let before = list.links.len();
                     list.links.retain(|e| e.invite_link != link.invite_link);
                     if list.links.len() < before {
@@ -401,13 +429,15 @@ impl Session {
                     }
                 }
                 if let Some(InviteLinkFetch::Loaded(list)) =
-                    self.revoked_invite_links.get_mut(&chat)
+                    self.groups.revoked_invite_links.get_mut(&chat)
                     && !list.links.iter().any(|e| e.invite_link == link.invite_link)
                 {
                     list.links.insert(0, link);
                     list.total_count = list.total_count.saturating_add(1);
                 }
-            } else if let Some(InviteLinkFetch::Loaded(list)) = self.invite_links.get_mut(&chat) {
+            } else if let Some(InviteLinkFetch::Loaded(list)) =
+                self.groups.invite_links.get_mut(&chat)
+            {
                 if link.is_primary {
                     list.links.retain(|e| !e.is_primary);
                 }
@@ -451,7 +481,7 @@ impl Session {
             && let Some(pending) = pending
             && let Some(supergroup_id) = pending.supergroup_id
         {
-            self.supergroup_full_infos.insert(
+            self.groups.supergroup_full_infos.insert(
                 supergroup_id,
                 SupergroupFullInfoData {
                     description,
@@ -475,9 +505,11 @@ impl Session {
             );
             // Slice G2: anti-spam state for the manage-dialog
             // toggle.
-            self.supergroup_anti_spam_enabled
+            self.groups
+                .supergroup_anti_spam_enabled
                 .insert(supergroup_id, has_aggressive_anti_spam_enabled);
-            self.supergroup_can_toggle_anti_spam
+            self.groups
+                .supergroup_can_toggle_anti_spam
                 .insert(supergroup_id, can_toggle_aggressive_anti_spam);
         }
     }
@@ -502,7 +534,7 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        self.supergroup_full_infos.insert(
+        self.groups.supergroup_full_infos.insert(
             supergroup_id,
             SupergroupFullInfoData {
                 description,
@@ -521,9 +553,11 @@ impl Session {
             },
         );
         // Slice G2: anti-spam state for the manage-dialog toggle.
-        self.supergroup_anti_spam_enabled
+        self.groups
+            .supergroup_anti_spam_enabled
             .insert(supergroup_id, has_aggressive_anti_spam_enabled);
-        self.supergroup_can_toggle_anti_spam
+        self.groups
+            .supergroup_can_toggle_anti_spam
             .insert(supergroup_id, can_toggle_aggressive_anti_spam);
     }
 
@@ -571,7 +605,8 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderChatsToLeave)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
-            self.folder_chats_to_leave
+            self.chat_list
+                .folder_chats_to_leave
                 .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
@@ -580,16 +615,17 @@ impl Session {
         {
             let ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
             if ids.is_empty() {
-                self.folder_new_chats.remove(&folder_id);
+                self.chat_list.folder_new_chats.remove(&folder_id);
             } else {
-                self.folder_new_chats.insert(folder_id, ids);
+                self.chat_list.folder_new_chats.insert(folder_id, ids);
             }
             return;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsForFolderInviteLink)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
-            self.folder_link_chats
+            self.chat_list
+                .folder_link_chats
                 .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
         }
         // B10: profile panel lists (groups in common, similar channels,

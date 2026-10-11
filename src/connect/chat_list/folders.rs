@@ -21,7 +21,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(None);
         }
-        if self.session.folder_chats_exhausted.contains(&folder_id) {
+        if self
+            .session
+            .chat_list
+            .folder_chats_exhausted
+            .contains(&folder_id)
+        {
             return Ok(None);
         }
         if self
@@ -74,7 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.folder_specs.remove(&folder_id);
+        self.session.chat_list.folder_specs.remove(&folder_id);
         let extra = self
             .session
             .request_for_folder(RequestPurpose::EditChatFolder, folder_id);
@@ -139,6 +144,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(|(i, id)| (*id, i))
             .collect();
         self.session
+            .chat_list
             .chat_folders
             .sort_by_key(|f| order.get(&f.id).copied().unwrap_or(usize::MAX));
         Ok(extra)
@@ -164,7 +170,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.are_folder_tags_enabled = enabled;
+        self.session.chat_list.are_folder_tags_enabled = enabled;
         Ok(extra)
     }
 
@@ -313,14 +319,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if !self
             .session
+            .chat_list
             .folder_remove_queue
             .contains(&(chat_id, folder_id))
         {
-            self.session.folder_remove_queue.push((chat_id, folder_id));
+            self.session
+                .chat_list
+                .folder_remove_queue
+                .push((chat_id, folder_id));
         }
         // Skip the fetch when the spec is already cached (the edit dialog
         // keeps it fresh); otherwise the edit waits for `getChatFolder`.
-        if !self.session.folder_specs.contains_key(&folder_id) {
+        if !self.session.chat_list.folder_specs.contains_key(&folder_id) {
             self.fetch_chat_folder(folder_id)?;
         }
         self.maybe_finish_folder_removals()?;
@@ -330,10 +340,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Send `editChatFolder` for queued remove-from-folder intents whose
     /// full spec is cached and which have no edit already in flight.
     pub(crate) fn maybe_finish_folder_removals(&mut self) -> Result<(), ConnectSendError> {
-        let queue = std::mem::take(&mut self.session.folder_remove_queue);
+        let queue = std::mem::take(&mut self.session.chat_list.folder_remove_queue);
         let mut still_pending = Vec::new();
         for (chat_id, folder_id) in queue {
-            let Some(spec) = self.session.folder_specs.get(&folder_id).cloned() else {
+            let Some(spec) = self.session.chat_list.folder_specs.get(&folder_id).cloned() else {
                 still_pending.push((chat_id, folder_id));
                 continue;
             };
@@ -365,11 +375,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // Restore the current intent so a transient send failure
                 // retries on the next ingest instead of silently dropping it.
                 still_pending.push((chat_id, folder_id));
-                self.session.folder_remove_queue = still_pending;
+                self.session.chat_list.folder_remove_queue = still_pending;
                 return Err(err);
             }
         }
-        self.session.folder_remove_queue = still_pending;
+        self.session.chat_list.folder_remove_queue = still_pending;
         Ok(())
     }
 }

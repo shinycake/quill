@@ -55,6 +55,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::GetCommunityFullInfo;
         if self
             .session
+            .groups
             .community_full_infos
             .contains_key(&community_id)
             || self
@@ -140,6 +141,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// method").
     fn accessible_community(&self, community_id: i64) -> Option<&ParsedCommunity> {
         self.session
+            .groups
             .communities
             .get(&community_id)
             .filter(|community| community.have_access)

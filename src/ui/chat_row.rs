@@ -291,11 +291,12 @@ impl QuillApp {
         self.session()
             .map(|s| {
                 (
-                    s.chat_folders
+                    s.chat_list
+                        .chat_folders
                         .iter()
                         .map(|f| (f.id, f.name.clone(), f.color_id))
                         .collect::<Vec<_>>(),
-                    s.are_folder_tags_enabled,
+                    s.chat_list.are_folder_tags_enabled,
                 )
             })
             .unwrap_or_default()

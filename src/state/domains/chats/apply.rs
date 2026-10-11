@@ -14,7 +14,7 @@ impl Session {
     ) {
         match payload {
             ChatsPayload::UpdateChatAccentColors { chat_id, accent } => {
-                self.chat_accents.insert(chat_id, accent);
+                self.chats_state.chat_accents.insert(chat_id, accent);
             }
             ChatsPayload::UpdateNewChat {
                 chat_id,
@@ -57,7 +57,7 @@ impl Session {
                 if let Some(view_as_topics) = view_as_topics {
                     self.set_chat_view_as_topics(chat_id.0, view_as_topics);
                 }
-                self.chat_accents.insert(chat_id.0, accent);
+                self.chats_state.chat_accents.insert(chat_id.0, accent);
                 if let Some(silent) = default_disable_notification {
                     self.sync.set_default_silent(chat_id.0, silent);
                 }
@@ -65,7 +65,9 @@ impl Session {
                 self.set_chat_theme_name(chat_id.0, theme_name);
                 self.set_chat_protected(chat_id.0, has_protected_content);
                 if let Some(setting) = available_reactions {
-                    self.chat_available_reactions.insert(chat_id.0, setting);
+                    self.chats_state
+                        .chat_available_reactions
+                        .insert(chat_id.0, setting);
                 }
                 // B7: the answer to `upgradeBasicGroupChatToSupergroupChat`
                 // is the new supergroup chat; remember `old -> new`.
@@ -73,7 +75,7 @@ impl Session {
                     && pending.purpose == RequestPurpose::UpgradeBasicGroup
                     && let Some(old) = pending.chat_id
                 {
-                    self.chat_upgrades.push((old.0, chat_id.0));
+                    self.chats_state.chat_upgrades.push((old.0, chat_id.0));
                 }
                 self.set_chat_has_scheduled(chat_id.0, has_scheduled_messages);
                 self.set_chat_message_sender(chat_id.0, message_sender);
@@ -177,8 +179,8 @@ impl Session {
                 // Slice A12: palette + settable ids for the edit-profile
                 // accent picker. Replaces wholesale — the update is the
                 // full server state.
-                self.profile_accent_colors = colors;
-                self.available_accent_color_ids = available_ids;
+                self.chats_state.profile_accent_colors = colors;
+                self.chats_state.available_accent_color_ids = available_ids;
             }
             ChatsPayload::UpdateAccentColors {
                 colors,
@@ -187,7 +189,7 @@ impl Session {
                 // Server name-color palette (ids 7+); the renderer reads it
                 // through the process-wide table.
                 crate::telegram::name_accent::set_palette(&colors);
-                self.name_accent_colors = colors;
+                self.chats_state.name_accent_colors = colors;
             }
             ChatsPayload::UpdateChatHasProtectedContent {
                 chat_id,
@@ -198,7 +200,8 @@ impl Session {
                 chat_id,
                 available_reactions,
             } => {
-                self.chat_available_reactions
+                self.chats_state
+                    .chat_available_reactions
                     .insert(chat_id, available_reactions);
                 // An open reaction picker for this chat refetches.
                 if self
@@ -348,7 +351,7 @@ impl Session {
             ChatsPayload::ReportChatResult(outcome) => {
                 match pending.map(|p| p.purpose) {
                     Some(RequestPurpose::ReportChat) => {
-                        self.report_chat_outcome = Some(match outcome {
+                        self.chats_state.report_chat_outcome = Some(match outcome {
                             ReportChatOutcome::Ok => "chat reported".to_string(),
                             _ => "report needs a reason or messages — the chat list only sends simple spam reports".to_string(),
                         });
@@ -377,7 +380,7 @@ impl Session {
                         self.upsert_file(file.clone(), false);
                     }
                 }
-                self.installed_backgrounds = Some(list);
+                self.chats_state.installed_backgrounds = Some(list);
             }
             ChatsPayload::Background(background) => {
                 if let Some(file) = &background.file {
@@ -388,11 +391,12 @@ impl Session {
                         RequestPurpose::SetDefaultBackground
                         | RequestPurpose::SetDefaultBackgroundLocal,
                     ) => {
-                        self.default_backgrounds
-                            .insert(self.background_set_for_dark, background);
+                        self.chats_state
+                            .default_backgrounds
+                            .insert(self.chats_state.background_set_for_dark, background);
                     }
                     Some(RequestPurpose::SearchBackground) => {
-                        self.searched_background = Some(background);
+                        self.chats_state.searched_background = Some(background);
                     }
                     _ => {}
                 }
@@ -415,7 +419,7 @@ impl Session {
                         }
                     }
                 }
-                self.emoji_chat_themes = themes;
+                self.chats_state.emoji_chat_themes = themes;
             }
             ChatsPayload::UpdateDefaultBackground {
                 for_dark_theme,
@@ -424,7 +428,9 @@ impl Session {
                 if let Some(file) = &background.file {
                     self.upsert_file(file.clone(), false);
                 }
-                self.default_backgrounds.insert(for_dark_theme, background);
+                self.chats_state
+                    .default_backgrounds
+                    .insert(for_dark_theme, background);
             }
             ChatsPayload::ChatPhotos {
                 total_count,
@@ -440,20 +446,22 @@ impl Session {
                 chat_id,
                 online_member_count,
             } => {
-                self.chat_online_counts.insert(chat_id, online_member_count);
+                self.chats_state
+                    .chat_online_counts
+                    .insert(chat_id, online_member_count);
             }
             ChatsPayload::InternalLinkType(link) => {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType {
                     generation,
                 })) = pending.map(|p| p.purpose)
                     && matches!(
-                        &self.deep_link,
+                        &self.chats_state.deep_link,
                         Some(DeepLinkState::ResolvingInfo { generation: slot }) if *slot == generation
                     )
                 {
                     use crate::deep_link_types::{LinkRoute, route};
-                    let original = std::mem::take(&mut self.deep_link_original);
-                    self.deep_link = Some(match route(&link, &original) {
+                    let original = std::mem::take(&mut self.chats_state.deep_link_original);
+                    self.chats_state.deep_link = Some(match route(&link, &original) {
                         LinkRoute::Resolve(action) => DeepLinkState::Info {
                             text: String::new(),
                             need_update: false,
@@ -475,14 +483,14 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.deep_link,
+                        &self.chats_state.deep_link,
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::MessageLink { .. },
                             generation: slot,
                         }) if *slot == generation
                     )
                 {
-                    self.deep_link = Some(if chat_id == 0 {
+                    self.chats_state.deep_link = Some(if chat_id == 0 {
                         DeepLinkState::ShowText(
                             "This message is in a chat you can't see. Join it first.".into(),
                         )
@@ -505,14 +513,14 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.deep_link,
+                        &self.chats_state.deep_link,
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::BoostLink { .. },
                             generation: slot,
                         }) if *slot == generation
                     )
                 {
-                    self.deep_link = Some(if chat_id == 0 {
+                    self.chats_state.deep_link = Some(if chat_id == 0 {
                         DeepLinkState::ShowText("This boost link is broken.".into())
                     } else {
                         DeepLinkState::Info {
@@ -537,14 +545,14 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.deep_link,
+                        &self.chats_state.deep_link,
                         Some(DeepLinkState::ResolvingInfo {
                             generation: slot
                         }) if *slot == generation
                     )
                 {
                     let action = crate::connect::parse_deep_link_action(&entities);
-                    self.deep_link = Some(DeepLinkState::Info {
+                    self.chats_state.deep_link = Some(DeepLinkState::Info {
                         text,
                         need_update,
                         action,

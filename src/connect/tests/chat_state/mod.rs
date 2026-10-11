@@ -92,7 +92,10 @@ fn forum_flow_topics_then_topic_history() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.forum_topics.get(&16).unwrap().len(), 1);
+    assert_eq!(
+        driver.session.threads.forum_topics.get(&16).unwrap().len(),
+        1
+    );
     // Selecting the topic fetches per-topic history.
     driver.select_topic(2).unwrap();
     assert_eq!(driver.session.open_topic, Some(2));
@@ -125,7 +128,12 @@ fn forum_flow_topics_then_topic_history() {
                 .unwrap(),
             )
             .unwrap();
-    let history = driver.session.topic_histories.get(&(16, 2)).unwrap();
+    let history = driver
+        .session
+        .threads
+        .topic_histories
+        .get(&(16, 2))
+        .unwrap();
     assert!(history.loaded_complete);
     assert!(history.messages.contains_key(&50));
     // Back to the topic list.

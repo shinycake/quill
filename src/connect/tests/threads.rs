@@ -62,7 +62,7 @@ fn comments_thread_open_load_send_and_close() {
     assert_eq!(sent[0]["message_id"], 101);
     assert_eq!(sent[0]["@extra"], extra.0.to_string());
     assert_eq!(
-        driver.session.thread.as_ref().unwrap().status,
+        driver.session.threads.thread.as_ref().unwrap().status,
         ThreadStatus::Resolving
     );
     // A second click on the same post does not resend.
@@ -81,7 +81,7 @@ fn comments_thread_open_load_send_and_close() {
         ),
     );
     {
-        let thread = driver.session.thread.as_ref().unwrap();
+        let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.chat_id, ChatId(14));
         assert_eq!(thread.thread_id, 501);
         assert_eq!(thread.status, ThreadStatus::LoadingHistory);
@@ -125,7 +125,7 @@ fn comments_thread_open_load_send_and_close() {
         ),
     );
     {
-        let thread = driver.session.thread.as_ref().unwrap();
+        let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.status, ThreadStatus::Ready);
         assert!(thread.history.loaded_complete, "the root ends the thread");
         let ids: Vec<i64> = thread.ordered().iter().map(|m| m.id.0).collect();
@@ -149,7 +149,7 @@ fn comments_thread_open_load_send_and_close() {
         ),
     );
     {
-        let thread = driver.session.thread.as_ref().unwrap();
+        let thread = driver.session.threads.thread.as_ref().unwrap();
         assert!(thread.history.messages.contains_key(&505));
         assert!(!thread.history.messages.contains_key(&600));
     }
@@ -158,7 +158,10 @@ fn comments_thread_open_load_send_and_close() {
         &mut driver,
         r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":101,"interaction_info":{"@type":"messageInteractionInfo","view_count":9,"forward_count":0,"reply_info":{"@type":"messageReplyInfo","reply_count":4,"recent_replier_ids":[],"last_read_inbox_message_id":502,"last_read_outbox_message_id":0,"last_message_id":505},"reactions":null}}"#,
     );
-    assert_eq!(driver.session.thread.as_ref().unwrap().reply_count, 4);
+    assert_eq!(
+        driver.session.threads.thread.as_ref().unwrap().reply_count,
+        4
+    );
 
     // 6. Sending goes into the thread, replying to the root by default.
     let snap = crate::composer::ComposerSnapshot::capture(
@@ -197,7 +200,7 @@ fn comments_thread_open_load_send_and_close() {
 
     // 9. Back returns to the channel and drops the thread.
     assert_eq!(driver.close_thread(), Some(ChatId(13)));
-    assert!(driver.session.thread.is_none());
+    assert!(driver.session.threads.thread.is_none());
     driver.select_chat(ChatId(13)).unwrap();
     assert_eq!(driver.session.open_chat, Some(ChatId(13)));
     let _ = std::fs::remove_dir_all(&dir);
@@ -238,7 +241,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
         ),
     );
     assert!(matches!(
-        driver.session.thread.as_ref().unwrap().status,
+        driver.session.threads.thread.as_ref().unwrap().status,
         ThreadStatus::Failed(_)
     ));
     let extra = driver.retry_thread().unwrap().unwrap();
@@ -250,7 +253,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
             text_message(40, 14, 40, "root")
         ),
     );
-    let thread = driver.session.thread.as_ref().unwrap();
+    let thread = driver.session.threads.thread.as_ref().unwrap();
     assert!(!thread.needs_chat_switch, "same chat");
     assert!(!thread.is_comments());
     assert_eq!(thread.subtitle(), "1 reply");
@@ -271,6 +274,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
     assert!(
         !driver
             .session
+            .threads
             .thread
             .as_ref()
             .unwrap()
@@ -291,6 +295,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
     assert!(
         driver
             .session
+            .threads
             .thread
             .as_ref()
             .unwrap()
@@ -342,7 +347,13 @@ fn forum_topic_thread_routes_sends_into_the_topic() {
     );
     driver.start_thread_in_open_chat().unwrap();
     assert_eq!(
-        driver.session.thread.as_ref().unwrap().forum_topic_id,
+        driver
+            .session
+            .threads
+            .thread
+            .as_ref()
+            .unwrap()
+            .forum_topic_id,
         Some(7)
     );
     let send = crate::telegram::requests::send_text(

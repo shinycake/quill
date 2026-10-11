@@ -151,6 +151,7 @@ impl QuillApp {
             let switch_to = live
                 .driver
                 .session
+                .threads
                 .thread
                 .as_ref()
                 .filter(|thread| thread.needs_chat_switch)
@@ -168,6 +169,7 @@ impl QuillApp {
             let complete = live
                 .driver
                 .session
+                .threads
                 .thread
                 .as_ref()
                 .is_none_or(|thread| thread.history.loaded_complete);
@@ -194,6 +196,7 @@ impl QuillApp {
         let origin = live
             .driver
             .session
+            .threads
             .thread
             .as_ref()
             .map(|thread| thread.origin_message_id);
@@ -218,6 +221,7 @@ impl QuillApp {
         let root = live
             .driver
             .session
+            .threads
             .thread
             .as_ref()
             .map(|thread| MessageId(thread.thread_id));
@@ -234,7 +238,7 @@ impl QuillApp {
     pub(super) fn jump_to_thread_root(&mut self, cx: &mut Context<Self>) {
         let complete = self
             .session()
-            .and_then(|s| s.thread.as_ref())
+            .and_then(|s| s.threads.thread.as_ref())
             .is_none_or(|thread| thread.history.loaded_complete);
         if complete {
             self.history.scroller.update(cx, |state, cx| {
@@ -327,7 +331,7 @@ impl QuillApp {
     pub(super) fn thread_status_pane(&self, cx: &mut Context<Self>) -> AnyElement {
         let status = self
             .session()
-            .and_then(|s| s.thread.as_ref())
+            .and_then(|s| s.threads.thread.as_ref())
             .map(|thread| thread.status.clone());
         let failed = match &status {
             Some(ThreadStatus::Failed(message)) => Some(message.clone()),

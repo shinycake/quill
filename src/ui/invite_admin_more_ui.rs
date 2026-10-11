@@ -52,7 +52,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_admin_invite_links(chat_id);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.admin_invite_links.remove(&chat_id.0);
+            session.groups.admin_invite_links.remove(&chat_id.0);
         }
         cx.notify();
     }
@@ -151,7 +151,12 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let state = self.session()?.admin_invite_links.get(&chat_id.0)?.clone();
+        let state = self
+            .session()?
+            .groups
+            .admin_invite_links
+            .get(&chat_id.0)?
+            .clone();
         let admin = state.creator_user_id;
         let name = self.contact_display_name(admin);
         let muted = cx.theme().muted_foreground;
@@ -238,7 +243,7 @@ impl QuillApp {
     ) {
         let open = self
             .session()
-            .and_then(|s| s.link_join_requests.get(&chat_id.0))
+            .and_then(|s| s.groups.link_join_requests.get(&chat_id.0))
             .is_some_and(|state| state.invite_link == invite_link);
         if let Some(live) = self.live.as_mut() {
             if open {
@@ -247,7 +252,7 @@ impl QuillApp {
                 let _ = live.driver.open_link_join_requests(chat_id, invite_link);
             }
         } else if open && let Some(session) = self.demo_session.as_mut() {
-            session.link_join_requests.remove(&chat_id.0);
+            session.groups.link_join_requests.remove(&chat_id.0);
         }
         cx.notify();
     }
@@ -279,6 +284,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let state = self
             .session()?
+            .groups
             .link_join_requests
             .get(&chat_id.0)
             .filter(|state| state.invite_link == invite_link)?

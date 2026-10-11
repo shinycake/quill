@@ -122,11 +122,18 @@ impl Session {
         let mut ids = Vec::new();
         // The open Saved Messages sublist / tag filter keeps its own rows.
         let saved_rows = self
+            .threads
             .saved
             .sublist
             .iter()
             .map(|view| &view.history)
-            .chain(self.saved.tag_search.iter().map(|search| &search.history))
+            .chain(
+                self.threads
+                    .saved
+                    .tag_search
+                    .iter()
+                    .map(|search| &search.history),
+            )
             .flat_map(|history| history.messages.values());
         for message in self
             .open_chat

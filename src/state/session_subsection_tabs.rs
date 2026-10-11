@@ -52,9 +52,9 @@ impl Session {
     /// Record `supergroup.has_forum_tabs` (`updateSupergroup` / `getSupergroup`).
     pub fn set_supergroup_forum_tabs(&mut self, supergroup_id: i64, has_forum_tabs: bool) {
         if has_forum_tabs {
-            self.forum_tabs_supergroups.insert(supergroup_id);
+            self.threads.forum_tabs_supergroups.insert(supergroup_id);
         } else {
-            self.forum_tabs_supergroups.remove(&supergroup_id);
+            self.threads.forum_tabs_supergroups.remove(&supergroup_id);
         }
     }
 
@@ -90,6 +90,7 @@ impl Session {
         if let Some(bot) = self.bot_topics(chat_id) {
             return bot.allows_users_to_create_topics
                 || self
+                    .threads
                     .forum_topics
                     .get(&chat_id.0)
                     .is_some_and(|topics| !topics.is_empty());
@@ -101,7 +102,9 @@ impl Session {
             ChatKind::Supergroup {
                 supergroup_id,
                 is_channel: false,
-            } => chat.is_forum_chat() && self.forum_tabs_supergroups.contains(&supergroup_id),
+            } => {
+                chat.is_forum_chat() && self.threads.forum_tabs_supergroups.contains(&supergroup_id)
+            }
             _ => false,
         }
     }
@@ -150,15 +153,18 @@ impl Session {
         if !self.chat_has_topics(chat_id) {
             return 0;
         }
-        self.forum_topics.get(&chat_id.0).map_or(0, |topics| {
-            topics
-                .iter()
-                .map(|topic| match self.topic_badge(chat_id, topic) {
-                    TopicBadge::Count(n) => n.max(0),
-                    _ => 0,
-                })
-                .fold(0, i32::saturating_add)
-        })
+        self.threads
+            .forum_topics
+            .get(&chat_id.0)
+            .map_or(0, |topics| {
+                topics
+                    .iter()
+                    .map(|topic| match self.topic_badge(chat_id, topic) {
+                        TopicBadge::Count(n) => n.max(0),
+                        _ => 0,
+                    })
+                    .fold(0, i32::saturating_add)
+            })
     }
 
     /// The chat-list row's topic line for a chat with topics: topic names in
@@ -187,6 +193,7 @@ impl Session {
         }
         let topic = self.open_topic_info(chat_id)?;
         let count = self
+            .threads
             .topic_histories
             .get(&(chat_id.0, topic.forum_topic_id))
             .map_or(0, |h| h.total_count);
@@ -230,7 +237,7 @@ impl Session {
     /// topic (a bot creating one). New topics go first, as the newest
     /// activity does in Telegram's topic order.
     pub(crate) fn apply_update_forum_topic_info(&mut self, info: ForumTopicInfoUpdate) {
-        let Some(topics) = self.forum_topics.get_mut(&info.chat_id) else {
+        let Some(topics) = self.threads.forum_topics.get_mut(&info.chat_id) else {
             // Not loaded yet: the first `getForumTopics` brings it.
             return;
         };
@@ -279,6 +286,7 @@ impl Session {
     /// up to TDLib's last message clears the badge right away.
     pub(crate) fn apply_update_forum_topic(&mut self, update: ForumTopicUpdate) {
         let Some(topic) = self
+            .threads
             .forum_topics
             .get_mut(&update.chat_id)
             .and_then(|topics| {
@@ -308,7 +316,7 @@ impl Session {
         let Some(topic_id) = message.topic_id else {
             return;
         };
-        let Some(topics) = self.forum_topics.get_mut(&message.chat_id.0) else {
+        let Some(topics) = self.threads.forum_topics.get_mut(&message.chat_id.0) else {
             return;
         };
         let top = topics.iter().map(|t| t.order).max().unwrap_or(0);
@@ -325,7 +333,7 @@ impl Session {
     /// A `getForumTopic` answer: TDLib's state for one topic replaces the
     /// cached entry (or adds it).
     pub(crate) fn replace_forum_topic(&mut self, chat_id: ChatId, mut topic: ForumTopic) {
-        let Some(topics) = self.forum_topics.get_mut(&chat_id.0) else {
+        let Some(topics) = self.threads.forum_topics.get_mut(&chat_id.0) else {
             return;
         };
         settle_topic_unread(&mut topic);
@@ -342,11 +350,16 @@ impl Session {
     /// Optimistic "Mark as read" for one topic (the server's
     /// `updateForumTopic` confirms it).
     pub fn mark_forum_topic_read_locally(&mut self, chat_id: ChatId, forum_topic_id: i32) {
-        if let Some(topic) = self.forum_topics.get_mut(&chat_id.0).and_then(|topics| {
-            topics
-                .iter_mut()
-                .find(|t| t.forum_topic_id == forum_topic_id)
-        }) {
+        if let Some(topic) = self
+            .threads
+            .forum_topics
+            .get_mut(&chat_id.0)
+            .and_then(|topics| {
+                topics
+                    .iter_mut()
+                    .find(|t| t.forum_topic_id == forum_topic_id)
+            })
+        {
             topic.unread_count = 0;
             topic.last_read_inbox_message_id =
                 topic.last_read_inbox_message_id.max(topic.last_message_id);

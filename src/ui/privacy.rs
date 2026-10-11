@@ -1511,11 +1511,12 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     session.settings.privacy_data.check_password_suggested = true;
     session.settings.privacy_data.inactive_session_ttl_days = Some(180);
     session.settings.read_date_show = Some(true);
-    session.archive_chat_list_settings = Some(quill::telegram::requests::ArchiveChatListSettings {
-        archive_and_mute_new_chats_from_unknown_users: true,
-        keep_unmuted_chats_archived: false,
-        keep_chats_from_folders_archived: true,
-    });
+    session.chat_list.archive_chat_list_settings =
+        Some(quill::telegram::requests::ArchiveChatListSettings {
+            archive_and_mute_new_chats_from_unknown_users: true,
+            keep_unmuted_chats_archived: false,
+            keep_chats_from_folders_archived: true,
+        });
     session.calls.privacy_allow_calls = Some(PrivacyWho::Contacts);
     session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
     session.settings.blocked_senders = Some(vec![63]);

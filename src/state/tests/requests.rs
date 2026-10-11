@@ -24,8 +24,11 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
             v = value,
         ),
     );
-    let ChatStatisticsFetch::Loaded(boxed) =
-        session.chat_statistics.get(&13).expect("statistics loaded")
+    let ChatStatisticsFetch::Loaded(boxed) = session
+        .groups
+        .chat_statistics
+        .get(&13)
+        .expect("statistics loaded")
     else {
         panic!("expected loaded channel statistics");
     };
@@ -55,8 +58,11 @@ fn chat_statistics_fetch_flow_error_marks_failed() {
             extra.0
         ),
     );
-    let ChatStatisticsFetch::Failed(message) =
-        session.chat_statistics.get(&13).expect("statistics failed")
+    let ChatStatisticsFetch::Failed(message) = session
+        .groups
+        .chat_statistics
+        .get(&13)
+        .expect("statistics failed")
     else {
         panic!("expected failed statistics");
     };
@@ -104,7 +110,7 @@ fn optimistic_mutations_roll_back_on_error() {
     assert!(!chat.can_send_basic_messages);
 
     // Join-by-request: previous flag restored.
-    session.supergroup_join_by_request.insert(21, true);
+    session.groups.supergroup_join_by_request.insert(21, true);
     let extra = session.request(
         RequestPurpose::ToggleSupergroupJoinByRequest,
         Some(ChatId(21)),
@@ -115,7 +121,7 @@ fn optimistic_mutations_roll_back_on_error() {
             previous: Some(true),
         });
     }
-    session.supergroup_join_by_request.insert(21, false);
+    session.groups.supergroup_join_by_request.insert(21, false);
     apply_json(
         &mut session,
         &seq,
@@ -125,10 +131,16 @@ fn optimistic_mutations_roll_back_on_error() {
             extra.0
         ),
     );
-    assert_eq!(session.supergroup_join_by_request.get(&21), Some(&true));
+    assert_eq!(
+        session.groups.supergroup_join_by_request.get(&21),
+        Some(&true)
+    );
 
     // Username: absent stays absent, present is restored.
-    session.supergroup_usernames.insert(22, "oldname".into());
+    session
+        .groups
+        .supergroup_usernames
+        .insert(22, "oldname".into());
     let extra = session.request(RequestPurpose::SetSupergroupUsername, Some(ChatId(22)));
     if let Some(pending) = session.requests.pending_mut(extra) {
         pending.rollback = Some(RequestRollback::SupergroupUsername {
@@ -137,6 +149,7 @@ fn optimistic_mutations_roll_back_on_error() {
         });
     }
     session
+        .groups
         .supergroup_usernames
         .insert(22, "newname".to_string());
     apply_json(
@@ -149,7 +162,11 @@ fn optimistic_mutations_roll_back_on_error() {
         ),
     );
     assert_eq!(
-        session.supergroup_usernames.get(&22).map(String::as_str),
+        session
+            .groups
+            .supergroup_usernames
+            .get(&22)
+            .map(String::as_str),
         Some("oldname")
     );
 }
@@ -245,7 +262,7 @@ fn load_chats_404_marks_exhaustion() {
             extra.0
         ),
     );
-    assert!(session.chats_exhausted);
+    assert!(session.chat_list.chats_exhausted);
     assert!(!sink.rendered().contains("Not Found"));
 }
 
@@ -275,12 +292,15 @@ fn chat_list_paging_restarts_after_logout_and_login() {
                 ),
             );
         }
-        session.folder_chats_exhausted.insert(2);
-        assert!(session.chats_exhausted && session.archive_chats_exhausted);
+        session.chat_list.folder_chats_exhausted.insert(2);
+        assert!(session.chat_list.chats_exhausted && session.chat_list.archive_chats_exhausted);
         apply_json(&mut session, &seq, &sink, &auth(leaving));
-        assert!(!session.chats_exhausted, "{leaving}");
-        assert!(!session.archive_chats_exhausted, "{leaving}");
-        assert!(session.folder_chats_exhausted.is_empty(), "{leaving}");
+        assert!(!session.chat_list.chats_exhausted, "{leaving}");
+        assert!(!session.chat_list.archive_chats_exhausted, "{leaving}");
+        assert!(
+            session.chat_list.folder_chats_exhausted.is_empty(),
+            "{leaving}"
+        );
     }
 }
 
@@ -633,6 +653,7 @@ fn chat_can_invite_users_gate() {
     };
     session.chats.insert(14, creator_group);
     session
+        .groups
         .supergroup_member_status
         .insert(14, ChannelMemberStatus::Creator);
     assert!(session.chat_can_invite_users(ChatId(14)));
@@ -644,12 +665,13 @@ fn chat_can_invite_users_gate() {
     };
     session.chats.insert(15, admin_group);
     session
+        .groups
         .supergroup_member_status
         .insert(15, ChannelMemberStatus::Administrator);
-    session.supergroup_invite_right.insert(15, true);
+    session.groups.supergroup_invite_right.insert(15, true);
     assert!(session.chat_can_invite_users(ChatId(15)));
 
-    session.supergroup_invite_right.insert(15, false);
+    session.groups.supergroup_invite_right.insert(15, false);
     assert!(!session.chat_can_invite_users(ChatId(15)));
 
     let mut member_group = placeholder_chat(ChatId(16));
@@ -659,6 +681,7 @@ fn chat_can_invite_users_gate() {
     };
     session.chats.insert(16, member_group);
     session
+        .groups
         .supergroup_member_status
         .insert(16, ChannelMemberStatus::Member);
     assert!(!session.chat_can_invite_users(ChatId(16)));
@@ -683,7 +706,11 @@ fn cl_chat_preview_cached_for_unopened_chat() {
             extra.0
         ),
     );
-    let fetch = session.chat_preview_fetch.as_ref().expect("preview fetch");
+    let fetch = session
+        .chat_list
+        .chat_preview_fetch
+        .as_ref()
+        .expect("preview fetch");
     assert_eq!(fetch.chat_id, ChatId(12));
     assert_eq!(fetch.messages.len(), 1);
     assert_eq!(fetch.failed, None);
@@ -704,7 +731,11 @@ fn cl_chat_preview_cached_for_unopened_chat() {
             extra.0
         ),
     );
-    let fetch = session.chat_preview_fetch.as_ref().expect("preview fetch");
+    let fetch = session
+        .chat_list
+        .chat_preview_fetch
+        .as_ref()
+        .expect("preview fetch");
     assert!(
         fetch
             .failed

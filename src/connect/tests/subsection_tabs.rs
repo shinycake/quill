@@ -215,7 +215,7 @@ fn bot_private_chat_topic_select_sends_exact_request() {
     );
     assert_eq!(driver.session.open_topic, Some(12));
     assert!(
-        driver.session.topic_histories[&(41, 12)]
+        driver.session.threads.topic_histories[&(41, 12)]
             .messages
             .contains_key(&700)
     );

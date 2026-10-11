@@ -86,43 +86,45 @@ fn wait_text(secs: i32) -> String {
 impl Session {
     /// A `canTransferOwnership` request went out.
     pub fn begin_ownership_check(&mut self) {
-        self.ownership.can_transfer = None;
-        self.ownership.check_in_flight = true;
-        self.ownership.check_error = None;
+        self.groups.ownership.can_transfer = None;
+        self.groups.ownership.check_in_flight = true;
+        self.groups.ownership.check_error = None;
     }
 
     pub(crate) fn accept_can_transfer_ownership(&mut self, result: CanTransferOwnershipResult) {
-        self.ownership.can_transfer = Some(result);
-        self.ownership.check_in_flight = false;
-        self.ownership.check_error = None;
+        self.groups.ownership.can_transfer = Some(result);
+        self.groups.ownership.check_in_flight = false;
+        self.groups.ownership.check_error = None;
     }
 
     /// The transfer left for TDLib; clears any earlier failure.
     pub fn begin_ownership_transfer(&mut self, chat_id: i64, user_id: i64) {
-        self.ownership.transfer_in_flight = Some(OwnershipTransfer { chat_id, user_id });
-        self.ownership.transfer_error = None;
+        self.groups.ownership.transfer_in_flight = Some(OwnershipTransfer { chat_id, user_id });
+        self.groups.ownership.transfer_error = None;
     }
 
     pub(crate) fn finish_ownership_transfer(&mut self, user_id: i64, chat_id: Option<i64>) {
         let done = self
+            .groups
             .ownership
             .transfer_in_flight
             .take()
             .or_else(|| chat_id.map(|chat_id| OwnershipTransfer { chat_id, user_id }));
-        self.ownership.transferred = done;
+        self.groups.ownership.transferred = done;
         // The viewer is now a plain admin; TDLib confirms with
         // `updateChatMember`, but the cached admin list is stale already.
         if let Some(done) = done {
-            self.admin_lists.remove(&done.chat_id);
-            self.supergroup_members
+            self.groups.admin_lists.remove(&done.chat_id);
+            self.groups
+                .supergroup_members
                 .retain(|(id, _), _| *id != done.chat_id);
-            self.basic_group_members.remove(&done.chat_id);
+            self.groups.basic_group_members.remove(&done.chat_id);
         }
     }
 
     pub(crate) fn fail_ownership_transfer(&mut self, err: &TdError) {
-        self.ownership.transfer_in_flight = None;
-        self.ownership.transfer_error = Some(ownership_error_line(err));
+        self.groups.ownership.transfer_in_flight = None;
+        self.groups.ownership.transfer_error = Some(ownership_error_line(err));
     }
 
     /// The admin's `deleteMessageReactionsFromSender` was confirmed: the
@@ -151,19 +153,21 @@ impl Session {
 
     /// Mark the "who inherits" lookup of `chat_id` as running.
     pub fn begin_owner_lookup(&mut self, chat_id: i64) {
-        self.ownership
+        self.groups
+            .ownership
             .owner_after_leaving
             .insert(chat_id, OwnerLookup::Loading);
     }
 
     pub(crate) fn accept_owner_after_leaving(&mut self, chat_id: i64, user_id: i64) {
-        self.ownership
+        self.groups
+            .ownership
             .owner_after_leaving
             .insert(chat_id, OwnerLookup::Loaded(user_id));
     }
 
     pub(crate) fn fail_owner_lookup(&mut self, chat_id: i64, err: &TdError) {
-        self.ownership.owner_after_leaving.insert(
+        self.groups.ownership.owner_after_leaving.insert(
             chat_id,
             OwnerLookup::Failed(format!(
                 "Could not find the next owner: {}",

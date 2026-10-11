@@ -245,6 +245,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         let previous = self
             .session
+            .chats_state
             .chat_available_reactions
             .insert(chat_id.0, setting);
         if let Some(pending) = self.session.requests.pending_mut(extra) {
@@ -428,7 +429,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         if !matches!(result, Ok(Some(_))) {
-            self.session.chat_action_error = Some(if linking {
+            self.session.chats_state.chat_action_error = Some(if linking {
                 "could not link the discussion group".to_string()
             } else {
                 "the group was upgraded, but the setting could not be applied; \

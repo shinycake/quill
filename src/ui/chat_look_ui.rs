@@ -134,7 +134,7 @@ impl QuillApp {
         if !chat_look_allowed(is_private.is_some(), is_self) {
             return;
         }
-        let theme = session.chat_theme_names.get(&chat_id).cloned();
+        let theme = session.chats_state.chat_theme_names.get(&chat_id).cloned();
         self.dialogs.chat_look_dialog = Some(ChatLookDialog {
             target: LookTarget::Chat(chat_id),
             theme,
@@ -153,7 +153,7 @@ impl QuillApp {
     /// `bg/<name>` links: search the background and preview it.
     pub(super) fn open_background_link(&mut self, name: String, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.background_error = None;
+            live.driver.session.chats_state.background_error = None;
             if live.driver.search_background(&name).is_err() {
                 self.connection.status_note = "could not open the wallpaper link".into();
                 return;
@@ -176,8 +176,8 @@ impl QuillApp {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_mut(),
         } {
-            session.searched_background = None;
-            session.background_error = None;
+            session.chats_state.searched_background = None;
+            session.chats_state.background_error = None;
         }
         cx.notify();
     }
@@ -193,8 +193,8 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let current_theme = session.chat_theme_names.get(&chat_id).cloned();
-        let has_own = session.chat_backgrounds.contains_key(&chat_id);
+        let current_theme = session.chats_state.chat_theme_names.get(&chat_id).cloned();
+        let has_own = session.chats_state.chat_backgrounds.contains_key(&chat_id);
         let changes = plan_changes(current_theme.as_deref(), has_own, &dialog);
         let premium = session.my_is_premium();
         let only_for_self = !(dialog.both && premium);
@@ -207,8 +207,8 @@ impl QuillApp {
                     self.close_chat_look_dialog(cx);
                     return;
                 }
-                live.driver.session.background_error = None;
-                let base = live.driver.session.chat_look_oks;
+                live.driver.session.chats_state.background_error = None;
+                let base = live.driver.session.chats_state.chat_look_oks;
                 let mut sent = 0u32;
                 for change in changes {
                     let result = match change {
@@ -226,7 +226,7 @@ impl QuillApp {
                     match result {
                         Ok(_) => sent += 1,
                         Err(err) => {
-                            live.driver.session.background_error =
+                            live.driver.session.chats_state.background_error =
                                 Some(format!("could not send the change ({err:?})"));
                         }
                     }
@@ -235,7 +235,7 @@ impl QuillApp {
                     d.awaiting = (sent > 0).then_some(LookWait { base, sent });
                 }
                 // Nothing in flight and no error: nothing to wait for.
-                if sent == 0 && live.driver.session.background_error.is_none() {
+                if sent == 0 && live.driver.session.chats_state.background_error.is_none() {
                     self.close_chat_look_dialog(cx);
                     return;
                 }
@@ -251,6 +251,7 @@ impl QuillApp {
                                 .set_chat_theme_name(chat_id, (!name.is_empty()).then_some(name)),
                             LookChange::Wallpaper(id) => {
                                 let found = session
+                                    .chats_state
                                     .installed_backgrounds
                                     .iter()
                                     .flatten()
@@ -293,8 +294,8 @@ impl QuillApp {
         };
         match look_progress(
             wait,
-            session.chat_look_oks,
-            session.background_error.as_deref(),
+            session.chats_state.chat_look_oks,
+            session.chats_state.background_error.as_deref(),
         ) {
             LookProgress::Waiting => false,
             LookProgress::Done => {
@@ -314,7 +315,10 @@ impl QuillApp {
     /// Apply the previewed `bg/` link as the account wallpaper for the
     /// current theme.
     fn apply_background_link(&mut self, cx: &mut Context<Self>) {
-        let Some(background) = self.session().and_then(|s| s.searched_background.clone()) else {
+        let Some(background) = self
+            .session()
+            .and_then(|s| s.chats_state.searched_background.clone())
+        else {
             return;
         };
         let dark = cx.theme().is_dark();
@@ -327,7 +331,10 @@ impl QuillApp {
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.default_backgrounds.insert(dark, background);
+                    session
+                        .chats_state
+                        .default_backgrounds
+                        .insert(dark, background);
                 }
             }
         }
@@ -475,7 +482,7 @@ impl QuillApp {
                 }))
                 .child("None"),
         );
-        if session.emoji_chat_themes.is_empty() {
+        if session.chats_state.emoji_chat_themes.is_empty() {
             return div()
                 .flex()
                 .flex_col()
@@ -489,7 +496,7 @@ impl QuillApp {
                 )
                 .into_any_element();
         }
-        for (index, theme) in session.emoji_chat_themes.iter().enumerate() {
+        for (index, theme) in session.chats_state.emoji_chat_themes.iter().enumerate() {
             let selected = dialog.theme.as_deref() == Some(theme.name.as_str());
             let settings = theme.settings(dark);
             let name = theme.name.clone();
@@ -540,7 +547,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let Some(list) = self.session().and_then(|s| s.installed_backgrounds.clone()) else {
+        let Some(list) = self
+            .session()
+            .and_then(|s| s.chats_state.installed_backgrounds.clone())
+        else {
             return div()
                 .text_xs()
                 .text_color(muted)
@@ -604,12 +614,12 @@ impl QuillApp {
                         .map(|c| c.title.clone())
                         .unwrap_or_default();
                     let premium = session.is_some_and(|s| s.my_is_premium());
-                    let has_own = session.is_some_and(|s| s.chat_backgrounds.contains_key(&chat_id));
+                    let has_own = session.is_some_and(|s| s.chats_state.chat_backgrounds.contains_key(&chat_id));
                     // The preview: pending wallpaper, else the chat's own,
                     // else the pending theme's, else the account's.
                     let pending_theme = session.and_then(|s| {
                         state.theme.as_ref().and_then(|n| {
-                            s.emoji_chat_themes.iter().find(|t| &t.name == n)
+                            s.chats_state.emoji_chat_themes.iter().find(|t| &t.name == n)
                         })
                     });
                     let outgoing_fill = pending_theme.map(|t| t.settings(dark).outgoing_bubble_color());
@@ -617,12 +627,12 @@ impl QuillApp {
                     let mut dimming = 0;
                     if let Some(id) = state.background {
                         wallpaper = session.and_then(|s| {
-                            let bg = s.installed_backgrounds.iter().flatten().find(|b| b.id == id)?;
+                            let bg = s.chats_state.installed_backgrounds.iter().flatten().find(|b| b.id == id)?;
                             session_wallpaper(s, bg)
                         });
                     } else if !state.remove_wallpaper
                         && let Some(s) = session
-                        && let Some((bg, dim)) = s.chat_backgrounds.get(&chat_id).map(|c| (&c.background, c.dark_theme_dimming))
+                        && let Some((bg, dim)) = s.chats_state.chat_backgrounds.get(&chat_id).map(|c| (&c.background, c.dark_theme_dimming))
                     {
                         wallpaper = session_wallpaper(s, bg);
                         dimming = if dark { dim.clamp(0, 100) as u8 } else { 0 };
@@ -698,7 +708,7 @@ impl QuillApp {
                                 .into_any_element()
                         });
                     }
-                    if let Some(error) = session.and_then(|s| s.background_error.clone()) {
+                    if let Some(error) = session.and_then(|s| s.chats_state.background_error.clone()) {
                         wall = wall.child(
                             div()
                                 .id("chat-look-error")
@@ -711,7 +721,7 @@ impl QuillApp {
                     let changed = {
                         let current_theme = this
                             .session()
-                            .and_then(|s| s.chat_theme_names.get(&chat_id).cloned());
+                            .and_then(|s| s.chats_state.chat_theme_names.get(&chat_id).cloned());
                         !plan_changes(current_theme.as_deref(), has_own, &state).is_empty()
                     };
                     let footer = div()
@@ -742,8 +752,8 @@ impl QuillApp {
                 }
                 LookTarget::Link { name } => {
                     let session = this.session();
-                    let found = session.and_then(|s| s.searched_background.clone());
-                    let error = session.and_then(|s| s.background_error.clone());
+                    let found = session.and_then(|s| s.chats_state.searched_background.clone());
+                    let error = session.and_then(|s| s.chats_state.background_error.clone());
                     let wallpaper = found.as_ref().and_then(|bg| {
                         session.and_then(|s| session_wallpaper(s, bg))
                     });

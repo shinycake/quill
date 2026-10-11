@@ -57,7 +57,7 @@ impl Session {
             && pending.purpose == RequestPurpose::GetChatPreview
             && let Some(chat_id) = pending.chat_id
         {
-            self.chat_preview_fetch = Some(PreviewHistoryFetch {
+            self.chat_list.chat_preview_fetch = Some(PreviewHistoryFetch {
                 chat_id,
                 messages: messages.to_vec(),
                 failed: None,
@@ -277,6 +277,7 @@ impl Session {
                     self.index_poll(row);
                 }
                 let entry = self
+                    .threads
                     .topic_histories
                     .entry((chat_id.0, forum_topic_id))
                     .or_default();
@@ -516,12 +517,15 @@ impl Session {
             self.remember_files(&message.files);
             if let Some(topic_id) = message.topic_id
                 && self
+                    .threads
                     .topic_histories
                     .contains_key(&(message.chat_id.0, topic_id))
             {
                 let chat_id = message.chat_id;
                 let row = history_message(message, false);
-                if let Some(topic_history) = self.topic_histories.get_mut(&(chat_id.0, topic_id)) {
+                if let Some(topic_history) =
+                    self.threads.topic_histories.get_mut(&(chat_id.0, topic_id))
+                {
                     topic_history.upsert(row);
                 }
             }

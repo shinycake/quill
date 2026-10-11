@@ -22,7 +22,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || message_id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.thread.as_ref().is_some_and(|thread| {
+        if self.session.threads.thread.as_ref().is_some_and(|thread| {
             thread.origin_chat_id == chat_id
                 && thread.origin_message_id == message_id
                 && !matches!(thread.status, ThreadStatus::Failed(_))
@@ -40,7 +40,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_message_thread(extra, chat_id, message_id))
         {
             self.session.requests.take(extra);
-            self.session.thread = None;
+            self.session.threads.thread = None;
             return Err(err);
         }
         Ok(Some(extra))
@@ -50,13 +50,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn retry_thread(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let Some((chat_id, message_id)) = self
             .session
+            .threads
             .thread
             .as_ref()
             .map(|thread| (thread.origin_chat_id, thread.origin_message_id))
         else {
             return Ok(None);
         };
-        self.session.thread = None;
+        self.session.threads.thread = None;
         self.open_thread(chat_id, message_id)
     }
 
@@ -67,6 +68,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn switch_to_thread_chat(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let Some(chat_id) = self
             .session
+            .threads
             .thread
             .as_ref()
             .filter(|thread| thread.needs_chat_switch)
@@ -75,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         };
         if !self.session.chats.contains_key(&chat_id.0) {
-            if let Some(thread) = self.session.thread.as_mut() {
+            if let Some(thread) = self.session.threads.thread.as_mut() {
                 thread.needs_chat_switch = false;
                 thread.status = ThreadStatus::Failed("The discussion group is unavailable.".into());
             }
@@ -86,7 +88,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.draft_clock = DraftSaveClock::idle();
         self.pending_draft = None;
         self.session.open_chat(chat_id);
-        if let Some(thread) = self.session.thread.as_mut() {
+        if let Some(thread) = self.session.threads.thread.as_mut() {
             thread.needs_chat_switch = false;
         }
         self.send_open_chat(chat_id)?;
@@ -99,6 +101,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn start_thread_in_open_chat(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let Some(chat_id) = self
             .session
+            .threads
             .thread
             .as_ref()
             .filter(|thread| !thread.needs_chat_switch && thread.thread_id != 0)
@@ -115,7 +118,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     fn begin_thread_reading(&mut self, chat_id: ChatId) {
         self.session.prepare_thread_marks(chat_id);
-        if let Some(thread) = self.session.thread.as_mut() {
+        if let Some(thread) = self.session.threads.thread.as_mut() {
             thread.reading_started = true;
         }
     }
@@ -123,7 +126,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Whether the open thread still needs its chat opened or its first
     /// page requested (the UI polls this each frame).
     pub fn thread_needs_start(&self) -> bool {
-        self.session.thread.as_ref().is_some_and(|thread| {
+        self.session.threads.thread.as_ref().is_some_and(|thread| {
             thread.thread_id != 0
                 && matches!(thread.status, ThreadStatus::LoadingHistory)
                 && !thread.reading_started
@@ -137,7 +140,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(thread) = self.session.thread.as_ref() else {
+        let Some(thread) = self.session.threads.thread.as_ref() else {
             return Ok(None);
         };
         if thread.thread_id == 0 || thread.history.loaded_complete {

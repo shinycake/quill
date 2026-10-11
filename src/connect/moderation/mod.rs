@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.ownership.check_in_flight {
+        if self.session.groups.ownership.check_in_flight {
             return Ok(None);
         }
         self.session.begin_ownership_check();
@@ -44,7 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::CanTransferOwnership, None);
         if let Err(err) = self.sender.send_json(&can_transfer_ownership(extra)) {
             self.session.requests.take(extra);
-            self.session.ownership.check_in_flight = false;
+            self.session.groups.ownership.check_in_flight = false;
             return Err(err);
         }
         Ok(Some(extra))
@@ -67,8 +67,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.chats.get(&chat_id.0).map(|c| &c.kind),
             Some(ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. })
         ) && self.session.chat_is_owner(chat_id)
-            && self.session.ownership.can_transfer == Some(CanTransferOwnershipResult::Ok)
-            && self.session.ownership.transfer_in_flight.is_none()
+            && self.session.groups.ownership.can_transfer == Some(CanTransferOwnershipResult::Ok)
+            && self.session.groups.ownership.transfer_in_flight.is_none()
             && !password.is_empty()
             && self.session.my_user_id != Some(user_id)
             && !self.session.is_bot_user(user_id);
@@ -84,7 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id.0, user_id, password,
         )) {
             self.session.requests.take(extra);
-            self.session.ownership.transfer_in_flight = None;
+            self.session.groups.ownership.transfer_in_flight = None;
             return Err(err);
         }
         Ok(Some(extra))
@@ -107,7 +107,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if matches!(
-            self.session.ownership.owner_after_leaving.get(&chat_id.0),
+            self.session
+                .groups
+                .ownership
+                .owner_after_leaving
+                .get(&chat_id.0),
             Some(OwnerLookup::Loading | OwnerLookup::Loaded(_))
         ) {
             return Ok(None);
@@ -122,6 +126,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.session.requests.take(extra);
             self.session
+                .groups
                 .ownership
                 .owner_after_leaving
                 .remove(&chat_id.0);
@@ -259,10 +264,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // error arm can roll back.
         let previous = self
             .session
+            .groups
             .supergroup_join_by_request
             .get(&supergroup_id)
             .copied();
         self.session
+            .groups
             .supergroup_join_by_request
             .insert(supergroup_id, join_by_request);
         if let Some(pending) = self.session.requests.pending_mut(extra) {
@@ -312,6 +319,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the error arm can roll back.
         let previous = self
             .session
+            .groups
             .supergroup_usernames
             .get(&supergroup_id)
             .cloned();

@@ -62,7 +62,7 @@ fn driver_new_chats_folder_read_and_premium_limit() {
     driver
         .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.folder_new_chats[&5], vec![41, 42]);
+    assert_eq!(driver.session.chat_list.folder_new_chats[&5], vec![41, 42]);
     assert_eq!(driver.fetch_folder_new_chats(5), Ok(None));
 
     // Joining sends the chosen chats and drops the bar at once.
@@ -70,7 +70,7 @@ fn driver_new_chats_folder_read_and_premium_limit() {
     let last: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
     assert_eq!(last["@type"], "processChatFolderNewChats");
     assert_eq!(last["added_chat_ids"], serde_json::json!([41]));
-    assert!(!driver.session.folder_new_chats.contains_key(&5));
+    assert!(!driver.session.chat_list.folder_new_chats.contains_key(&5));
 
     // Nothing unread in folder 5: no `readChatList`.
     assert_eq!(driver.mark_folder_as_read(5), Ok(None));

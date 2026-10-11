@@ -81,7 +81,11 @@ fn session_with_community() -> Session {
 
 fn filtered_ids(session: &Session, community_id: Option<i64>) -> Vec<i64> {
     let mut chats: Vec<ChatSummary> = session.ordered_chats().into_iter().cloned().collect();
-    retain_community_chats(&mut chats, community_id, &session.community_full_infos);
+    retain_community_chats(
+        &mut chats,
+        community_id,
+        &session.groups.community_full_infos,
+    );
     chats.iter().map(|c| c.id.0).collect()
 }
 
@@ -97,7 +101,7 @@ fn community_filter_includes_hidden_member_chats() {
     // drop the chat: the mode only narrows the already-visible main
     // list, and the hub lists owned communities.
     let session = session_with_community();
-    let members = community_member_ids(session.community_full_infos.get(&42));
+    let members = community_member_ids(session.groups.community_full_infos.get(&42));
     assert!(members.contains(&13));
     assert!(filtered_ids(&session, Some(42)).contains(&13));
 }

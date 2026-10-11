@@ -59,7 +59,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.forum_topics.remove(&chat_id.0);
+        self.session.threads.forum_topics.remove(&chat_id.0);
         self.maybe_fetch_forum_topics(chat_id)
     }
 
@@ -74,7 +74,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chat_has_topics(chat_id) {
             return Ok(());
         }
-        if self.session.forum_topics.contains_key(&chat_id.0) {
+        if self.session.threads.forum_topics.contains_key(&chat_id.0) {
             return Ok(());
         }
         if self
@@ -119,6 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // chat kind (bots with topics, forums).
         let known_topic = self
             .session
+            .threads
             .forum_topics
             .get(&chat_id.0)
             .is_some_and(|topics| topics.iter().any(|t| t.forum_topic_id == forum_topic_id));
@@ -150,6 +151,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let key = (chat_id.0, forum_topic_id);
         if self
             .session
+            .threads
             .topic_histories
             .get(&key)
             .is_some_and(|h| h.loaded_complete)
@@ -165,6 +167,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let from = self
             .session
+            .threads
             .topic_histories
             .get(&key)
             .map(|h| h.next_from_message_id)

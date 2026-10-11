@@ -107,7 +107,12 @@ impl Session {
     /// follows join/leave. Admin rights stay with `getChatMember`, so an
     /// administrator status never overwrites a resolved chat.
     pub(crate) fn adopt_supergroup_status(&mut self, supergroup_id: i64) {
-        let Some(status) = self.supergroup_member_status.get(&supergroup_id).copied() else {
+        let Some(status) = self
+            .groups
+            .supergroup_member_status
+            .get(&supergroup_id)
+            .copied()
+        else {
             return;
         };
         if status == ChannelMemberStatus::Unknown {

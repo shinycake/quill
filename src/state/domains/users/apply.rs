@@ -89,11 +89,11 @@ impl Session {
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::UserPhone { draft, .. },
                         generation: slot,
-                    }) = self.deep_link.clone()
+                    }) = self.chats_state.deep_link.clone()
                     && slot == generation
                 {
                     // `searchUserByPhoneNumber` answer: open the private chat.
-                    self.deep_link = Some(DeepLinkState::Info {
+                    self.chats_state.deep_link = Some(DeepLinkState::Info {
                         text: String::new(),
                         need_update: false,
                         action: Some(DeepLinkAction::OpenUserDraft { user_id, draft }),

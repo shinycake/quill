@@ -37,9 +37,13 @@ impl QuillApp {
         // Slice G1: a fresh dialog open clears the last action error —
         // stale failures from a previous open must not linger.
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.member_action_error.remove(&chat_id.0);
+            live.driver
+                .session
+                .groups
+                .member_action_error
+                .remove(&chat_id.0);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.member_action_error.remove(&chat_id.0);
+            session.groups.member_action_error.remove(&chat_id.0);
         }
         cx.notify();
         self.refresh_member_dialog(cx);
@@ -49,9 +53,13 @@ impl QuillApp {
         if let Some(dialog) = self.admin.member_dialog.take() {
             let chat_id = dialog.chat_id;
             if let Some(live) = self.live.as_mut() {
-                live.driver.session.add_members_failed.remove(&chat_id.0);
+                live.driver
+                    .session
+                    .groups
+                    .add_members_failed
+                    .remove(&chat_id.0);
             } else if let Some(session) = self.demo_session.as_mut() {
-                session.add_members_failed.remove(&chat_id.0);
+                session.groups.add_members_failed.remove(&chat_id.0);
             }
         }
         cx.notify();
@@ -208,7 +216,7 @@ impl QuillApp {
             ));
             if let Some(error) = this
                 .session()
-                .and_then(|session| session.member_action_error.get(&chat_id.0))
+                .and_then(|session| session.groups.member_action_error.get(&chat_id.0))
                 .cloned()
             {
                 body = body.child(
@@ -340,7 +348,7 @@ impl QuillApp {
                 if add_open {
                     if let Some(failed) = this
                         .session()
-                        .and_then(|session| session.add_members_failed.get(&chat_id.0))
+                        .and_then(|session| session.groups.add_members_failed.get(&chat_id.0))
                         .copied()
                         .filter(|count| *count > 0)
                     {
@@ -363,6 +371,7 @@ impl QuillApp {
                                                 if let Some(live) = this.live.as_mut() {
                                                     live.driver
                                                         .session
+                                                        .groups
                                                         .add_members_failed
                                                         .remove(&chat_id.0);
                                                 }
@@ -514,7 +523,11 @@ impl QuillApp {
         let dialog = self.admin.member_dialog.as_ref()?;
         let session = self.session()?;
         if dialog.is_basic_group {
-            session.basic_group_members.get(&dialog.chat_id.0).cloned()
+            session
+                .groups
+                .basic_group_members
+                .get(&dialog.chat_id.0)
+                .cloned()
         } else {
             let query = dialog.search_input.read(cx).value();
             let filter = match dialog.tab.filter() {
@@ -535,6 +548,7 @@ impl QuillApp {
                 filter
             };
             session
+                .groups
                 .supergroup_members
                 .get(&(dialog.chat_id.0, filter))
                 .cloned()

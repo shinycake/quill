@@ -35,7 +35,7 @@ impl Session {
                         "status: unread totals messages list={list:?} unread_count={unread_count} unread_unmuted_count={unread_unmuted_count}"
                     );
                 }
-                if let Some(totals) = self.unread_totals.list_mut(&list) {
+                if let Some(totals) = self.chat_list.unread_totals.list_mut(&list) {
                     totals.messages = Some(UnreadPair {
                         all: unread_count,
                         unmuted: unread_unmuted_count,
@@ -60,9 +60,9 @@ impl Session {
                     unmuted: unread_unmuted_count,
                 };
                 if let ChatList::Folder(id) = &list {
-                    self.folder_unread_chats.insert(*id, pair);
+                    self.chat_list.folder_unread_chats.insert(*id, pair);
                 }
-                if let Some(totals) = self.unread_totals.list_mut(&list) {
+                if let Some(totals) = self.chat_list.unread_totals.list_mut(&list) {
                     totals.chats = Some(pair);
                 }
             }
@@ -102,17 +102,22 @@ impl Session {
                 are_tags_enabled,
             } => {
                 // The update carries the full ordered list — replace.
-                self.chat_folders = folders;
-                self.are_folder_tags_enabled = are_tags_enabled;
+                self.chat_list.chat_folders = folders;
+                self.chat_list.are_folder_tags_enabled = are_tags_enabled;
             }
             ChatListPayload::ChatFolderInfo(info) => {
                 // Parity slice: `createChatFolder` / `editChatFolder`
                 // response — upsert into the tab list so the UI reflects the
                 // change without waiting for `updateChatFolders` (which
                 // stays the source of truth).
-                match self.chat_folders.iter_mut().find(|f| f.id == info.id) {
+                match self
+                    .chat_list
+                    .chat_folders
+                    .iter_mut()
+                    .find(|f| f.id == info.id)
+                {
                     Some(existing) => *existing = info,
-                    None => self.chat_folders.push(info),
+                    None => self.chat_list.chat_folders.push(info),
                 }
             }
             ChatListPayload::ChatFolder { spec } => {
@@ -120,14 +125,18 @@ impl Session {
                 // spec for the edit dialog prefill / remove-from-folder
                 // chain (correlated via `PendingRequest::folder_id`).
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
-                    self.folder_specs.insert(folder_id, spec);
+                    self.chat_list.folder_specs.insert(folder_id, spec);
                 }
             }
             ChatListPayload::ChatFolderInviteLink(link) => {
                 // `createChatFolderInviteLink` / `editChatFolderInviteLink`:
                 // upsert into the folder's cached link list.
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
-                    let links = self.folder_invite_links.entry(folder_id).or_default();
+                    let links = self
+                        .chat_list
+                        .folder_invite_links
+                        .entry(folder_id)
+                        .or_default();
                     match links
                         .iter_mut()
                         .find(|existing| existing.invite_link == link.invite_link)
@@ -135,16 +144,21 @@ impl Session {
                         Some(existing) => *existing = link,
                         None => links.push(link),
                     }
-                    if let Some(info) = self.chat_folders.iter_mut().find(|f| f.id == folder_id) {
+                    if let Some(info) = self
+                        .chat_list
+                        .chat_folders
+                        .iter_mut()
+                        .find(|f| f.id == folder_id)
+                    {
                         info.is_shareable = true;
                         info.has_my_invite_links = true;
                     }
-                    self.folder_link_saved = true;
+                    self.chat_list.folder_link_saved = true;
                 }
             }
             ChatListPayload::ChatFolderInviteLinks(links) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
-                    self.folder_invite_links.insert(folder_id, links);
+                    self.chat_list.folder_invite_links.insert(folder_id, links);
                 }
             }
             ChatListPayload::PremiumLimit {
@@ -152,15 +166,18 @@ impl Session {
                 default_value,
                 premium_value,
             } => {
-                self.folder_limits
-                    .apply_premium_limit(&type_name, default_value, premium_value);
+                self.chat_list.folder_limits.apply_premium_limit(
+                    &type_name,
+                    default_value,
+                    premium_value,
+                );
             }
             ChatListPayload::RecommendedChatFolders(folders) => {
-                self.recommended_folders = Some(folders);
+                self.chat_list.recommended_folders = Some(folders);
             }
             ChatListPayload::ChatFolderInviteLinkInfo(info) => {
                 if pending.is_some_and(|p| p.purpose == RequestPurpose::CheckChatFolderInviteLink) {
-                    self.folder_invite_info = Some(info);
+                    self.chat_list.folder_invite_info = Some(info);
                 }
             }
             ChatListPayload::ChatLists { lists } => {
@@ -168,7 +185,7 @@ impl Session {
                 // chat for the folder picker (correlated via
                 // `PendingRequest::chat_id`).
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.chat_lists_for_add.insert(chat_id.0, lists);
+                    self.chat_list.chat_lists_for_add.insert(chat_id.0, lists);
                 }
             }
             ChatListPayload::Chats { chat_ids, .. } => {
@@ -178,8 +195,8 @@ impl Session {
                 // Slice CL2: `getArchiveChatListSettings` answer — only
                 // our own in-flight request writes the cache.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchiveChatListSettings) {
-                    self.archive_chat_list_settings = Some(settings);
-                    self.archive_settings_loading = false;
+                    self.chat_list.archive_chat_list_settings = Some(settings);
+                    self.chat_list.archive_settings_loading = false;
                 }
             }
         }

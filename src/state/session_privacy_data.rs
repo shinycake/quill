@@ -88,10 +88,10 @@ impl Session {
             }
             SettingsPayload::UpdateSuggestedActions { added, removed } => {
                 for name in added {
-                    self.suggestions.actions.insert(name.clone());
+                    self.chat_list.suggestions.actions.insert(name.clone());
                 }
                 for name in removed {
-                    self.suggestions.actions.remove(name);
+                    self.chat_list.suggestions.actions.remove(name);
                 }
                 const CHECK: &str = "suggestedActionCheckPassword";
                 if added.iter().any(|name| name == CHECK) {
@@ -126,16 +126,19 @@ impl Session {
     pub(crate) fn apply_privacy_data_error(&mut self, purpose: RequestPurpose, err: &TdError) {
         match purpose {
             RequestPurpose::Settings(SettingsPurpose::HideSuggestedAction { action }) => {
-                self.suggestions.actions.insert(action.to_string());
-                self.chat_action_error = Some(format!(
+                self.chat_list
+                    .suggestions
+                    .actions
+                    .insert(action.to_string());
+                self.chats_state.chat_action_error = Some(format!(
                     "could not hide the suggestion (error {})",
                     err.code
                 ));
                 return;
             }
             RequestPurpose::HideContactCloseBirthdays => {
-                self.suggestions.birthdays_hidden = false;
-                self.chat_action_error = Some(format!(
+                self.chat_list.suggestions.birthdays_hidden = false;
+                self.chats_state.chat_action_error = Some(format!(
                     "could not hide the suggestion (error {})",
                     err.code
                 ));

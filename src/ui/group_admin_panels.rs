@@ -151,7 +151,7 @@ impl QuillApp {
         }
         let status = self
             .session()
-            .and_then(|session| session.chat_boost_status.get(&chat_id.0).copied());
+            .and_then(|session| session.groups.chat_boost_status.get(&chat_id.0).copied());
         let in_flight = self.session().is_some_and(|session| {
             session
                 .requests
@@ -228,7 +228,11 @@ impl QuillApp {
     /// Slice G2: re-request the boost status (bypasses the cache).
     pub(super) fn refresh_boost_status(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.chat_boost_status.remove(&chat_id.0);
+            live.driver
+                .session
+                .groups
+                .chat_boost_status
+                .remove(&chat_id.0);
             if live.driver.fetch_chat_boost_status(chat_id).is_err() {
                 self.connection.status_note = "could not load boost status".into();
             }
@@ -256,11 +260,13 @@ impl QuillApp {
                     .and_then(|chat| match chat.kind {
                         ChatKind::Supergroup { supergroup_id, .. } => Some((
                             session
+                                .groups
                                 .supergroup_sign_messages
                                 .get(&supergroup_id)
                                 .copied()
                                 .unwrap_or(false),
                             session
+                                .groups
                                 .supergroup_show_message_sender
                                 .get(&supergroup_id)
                                 .copied()
@@ -546,6 +552,7 @@ impl QuillApp {
                         .get(&chat_id.0)
                         .and_then(|chat| match chat.kind {
                             ChatKind::Supergroup { supergroup_id, .. } => session
+                                .groups
                                 .supergroup_anti_spam_enabled
                                 .get(&supergroup_id)
                                 .copied(),
@@ -567,6 +574,7 @@ impl QuillApp {
                                 .get(&chat_id.0)
                                 .and_then(|chat| match chat.kind {
                                     ChatKind::Supergroup { supergroup_id, .. } => session
+                                        .groups
                                         .supergroup_anti_spam_enabled
                                         .get(&supergroup_id)
                                         .copied(),
@@ -605,7 +613,13 @@ impl QuillApp {
         if session.is_some_and(|session| session.chat_can_send_welcome_messages(chat_id)) {
             let has_welcome = session
                 .as_ref()
-                .and_then(|session| session.chat_has_welcome_messages.get(&chat_id.0).copied())
+                .and_then(|session| {
+                    session
+                        .groups
+                        .chat_has_welcome_messages
+                        .get(&chat_id.0)
+                        .copied()
+                })
                 .unwrap_or(false);
             section = section.child(
                 action_row(
@@ -718,7 +732,7 @@ impl QuillApp {
         }
         let fetch = self
             .session()
-            .and_then(|session| session.invite_links.get(&chat_id.0))
+            .and_then(|session| session.groups.invite_links.get(&chat_id.0))
             .cloned();
         let mut section = div().flex().flex_col().w_full().gap_1().child(
             div()
@@ -992,13 +1006,19 @@ impl QuillApp {
         }
         let fetch = self
             .session()
-            .and_then(|session| session.join_requests.get(&chat_id.0))
+            .and_then(|session| session.groups.join_requests.get(&chat_id.0))
             .cloned();
         let pending_count = match &fetch {
             Some(JoinRequestFetch::Loaded(list)) => list.total_count,
             _ => self
                 .session()
-                .and_then(|session| session.pending_join_request_counts.get(&chat_id.0).copied())
+                .and_then(|session| {
+                    session
+                        .groups
+                        .pending_join_request_counts
+                        .get(&chat_id.0)
+                        .copied()
+                })
                 .unwrap_or(0),
         };
         let mut header = div().flex().items_center().w_full().gap_1().child(
@@ -1151,7 +1171,7 @@ impl QuillApp {
         }
         let fetch = self
             .session()
-            .and_then(|session| session.admin_lists.get(&chat_id.0))
+            .and_then(|session| session.groups.admin_lists.get(&chat_id.0))
             .cloned();
         let mut section = div().flex().flex_col().w_full().gap_1().child(
             div()

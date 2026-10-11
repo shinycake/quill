@@ -106,7 +106,7 @@ fn driver_load_folder_chats_pages_chat_list_folder() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.folder_chats_exhausted.contains(&2));
+    assert!(driver.session.chat_list.folder_chats_exhausted.contains(&2));
     assert_eq!(
         driver.maybe_load_folder_chats(2).unwrap(),
         None,
@@ -193,7 +193,12 @@ fn driver_edit_and_delete_folder_flow() {
                 .unwrap(),
             )
             .unwrap();
-    let cached = driver.session.folder_specs.get(&5).expect("cached spec");
+    let cached = driver
+        .session
+        .chat_list
+        .folder_specs
+        .get(&5)
+        .expect("cached spec");
     assert_eq!(cached.name, "Work");
     assert_eq!(cached.included_chat_ids, vec![7]);
 
@@ -235,8 +240,8 @@ fn driver_edit_and_delete_folder_flow() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.chat_folders.is_empty());
-    assert!(!driver.session.folder_specs.contains_key(&5));
+    assert!(driver.session.chat_list.chat_folders.is_empty());
+    assert!(!driver.session.chat_list.folder_specs.contains_key(&5));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -268,7 +273,13 @@ fn driver_reorder_chat_folders_optimistic() {
     assert_eq!(v["@type"], "reorderChatFolders");
     assert_eq!(v["chat_folder_ids"], serde_json::json!([2, 1]));
     assert_eq!(v["main_chat_list_position"], 0);
-    let ids: Vec<i32> = driver.session.chat_folders.iter().map(|f| f.id).collect();
+    let ids: Vec<i32> = driver
+        .session
+        .chat_list
+        .chat_folders
+        .iter()
+        .map(|f| f.id)
+        .collect();
     assert_eq!(ids, vec![2, 1], "optimistic reorder");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -290,7 +301,7 @@ fn driver_toggle_chat_folder_tags() {
     let v: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "toggleChatFolderTags");
     assert_eq!(v["are_tags_enabled"], true);
-    assert!(driver.session.are_folder_tags_enabled);
+    assert!(driver.session.chat_list.are_folder_tags_enabled);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -335,6 +346,7 @@ fn driver_get_chat_lists_to_add_chat_caches() {
             .unwrap();
     let cached = driver
         .session
+        .chat_list
         .chat_lists_for_add
         .get(&7)
         .expect("cached lists");
@@ -410,7 +422,7 @@ fn driver_remove_chat_from_folder_edits_spec() {
         .remove_chat_from_folder(ChatId(7), 5)
         .expect("remove");
     assert!(
-        driver.session.folder_remove_queue.is_empty(),
+        driver.session.chat_list.folder_remove_queue.is_empty(),
         "spec was cached — edit sent immediately"
     );
     let json = recorder
@@ -449,7 +461,10 @@ fn driver_remove_chat_from_folder_waits_for_spec() {
     driver
         .remove_chat_from_folder(ChatId(7), 5)
         .expect("remove");
-    assert_eq!(driver.session.folder_remove_queue, vec![(ChatId(7), 5)]);
+    assert_eq!(
+        driver.session.chat_list.folder_remove_queue,
+        vec![(ChatId(7), 5)]
+    );
     assert!(
         recorder
             .snapshot()
@@ -483,7 +498,7 @@ fn driver_remove_chat_from_folder_waits_for_spec() {
             )
             .unwrap();
     assert!(
-        driver.session.folder_remove_queue.is_empty(),
+        driver.session.chat_list.folder_remove_queue.is_empty(),
         "edit completed on spec arrival"
     );
     let json = recorder

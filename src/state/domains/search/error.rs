@@ -13,13 +13,13 @@ impl Session {
     ) {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveRecentlyFoundChat) => {
-                self.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error = Some(format!(
                     "could not remove the recent search (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::RemoveTopChat | RequestPurpose::SetTopChatsDisabled) => {
-                self.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error = Some(format!(
                     "could not update frequent contacts (error {})",
                     err.code
                 ));

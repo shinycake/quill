@@ -158,7 +158,7 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.deep_link,
+                        &self.chats_state.deep_link,
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::StickerSet { .. },
                             generation: slot,
@@ -167,7 +167,7 @@ impl Session {
                 {
                     // `addstickers` / `addemoji` link: hand the set id to the
                     // preview dialog (`getStickerSet` loads its stickers).
-                    self.deep_link = Some(DeepLinkState::Ui(
+                    self.chats_state.deep_link = Some(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::StickerSet { set_id: id },
                     ));
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {

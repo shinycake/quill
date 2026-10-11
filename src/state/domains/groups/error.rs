@@ -24,8 +24,8 @@ impl Session {
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
-                self.ownership.check_in_flight = false;
-                self.ownership.check_error = Some(format!(
+                self.groups.ownership.check_in_flight = false;
+                self.groups.ownership.check_error = Some(format!(
                     "Could not check whether you can transfer ownership: {}",
                     error_reason(err)
                 ));
@@ -55,7 +55,7 @@ impl Session {
                     }
                     _ => "Could not delete the community",
                 };
-                self.community_error = Some(format!("{action}: {}", error_reason(err)));
+                self.groups.community_error = Some(format!("{action}: {}", error_reason(err)));
             }
             // B7: refused group admin changes were rolled back above; say
             // so instead of showing the old value as if nothing happened.
@@ -69,7 +69,7 @@ impl Session {
                 | RequestPurpose::SetChatDiscussionGroup
                 | RequestPurpose::UpgradeBasicGroup,
             ) => {
-                self.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error = Some(format!(
                     "could not change the group setting (error {})",
                     err.code
                 ));
@@ -78,7 +78,7 @@ impl Session {
                 RequestPurpose::SetSupergroupStickerSet
                 | RequestPurpose::SetSupergroupCustomEmojiStickerSet,
             ) => {
-                self.chat_action_error = Some(call_request_error_line(
+                self.chats_state.chat_action_error = Some(call_request_error_line(
                     err,
                     "Could not change the group's sticker pack",
                 ));
@@ -88,7 +88,7 @@ impl Session {
             // error instead of spinning forever.
             Some(RequestPurpose::GetChatStatistics) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.chat_statistics.insert(
+                    self.groups.chat_statistics.insert(
                         chat_id.0,
                         ChatStatisticsFetch::Failed(call_request_error_line(
                             err,
@@ -102,7 +102,7 @@ impl Session {
             // error instead of spinning forever.
             Some(RequestPurpose::GetChatInviteLinks) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.invite_links.insert(
+                    self.groups.invite_links.insert(
                         chat_id.0,
                         InviteLinkFetch::Failed(call_request_error_line(
                             err,
@@ -115,21 +115,21 @@ impl Session {
                 // Slice G1 fix-up: a failed mutation must not wipe
                 // the previously loaded list — surface the error in
                 // the status note and keep the last good data.
-                self.invite_link_error =
+                self.groups.invite_link_error =
                     Some(call_request_error_line(err, "Could not create invite link"));
             }
             Some(RequestPurpose::EditChatInviteLink) => {
-                self.invite_link_error =
+                self.groups.invite_link_error =
                     Some(call_request_error_line(err, "Could not edit invite link"));
             }
             Some(RequestPurpose::RevokeChatInviteLink) => {
-                self.invite_link_error =
+                self.groups.invite_link_error =
                     Some(call_request_error_line(err, "Could not revoke invite link"));
             }
             // Slice G1: failed primary-link replacement — keep the
             // last good list, surface the error in the note.
             Some(RequestPurpose::ReplacePrimaryChatInviteLink) => {
-                self.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error = Some(call_request_error_line(
                     err,
                     "Could not replace primary invite link",
                 ));
@@ -141,12 +141,12 @@ impl Session {
                     && let Some(chat) = self.chats.get(&chat_id.0)
                     && let ChatKind::Supergroup { supergroup_id, .. } = chat.kind
                 {
-                    self.supergroup_is_broadcast.remove(&supergroup_id);
+                    self.groups.supergroup_is_broadcast.remove(&supergroup_id);
                 }
             }
             Some(RequestPurpose::GetChatJoinRequests) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.join_requests.insert(
+                    self.groups.join_requests.insert(
                         chat_id.0,
                         JoinRequestFetch::Failed(call_request_error_line(
                             err,
@@ -159,22 +159,22 @@ impl Session {
             // last good data and surface the error line.
             Some(RequestPurpose::GetMoreChatJoinRequests) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.join_request_latest.remove(&chat_id.0);
+                    self.groups.join_request_latest.remove(&chat_id.0);
                 }
-                self.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error = Some(call_request_error_line(
                     err,
                     "Could not load more join requests",
                 ));
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { .. })) => {
-                self.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error = Some(call_request_error_line(
                     err,
                     "Could not process join requests",
                 ));
             }
             Some(RequestPurpose::GetRevokedChatInviteLinks) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.revoked_invite_links.insert(
+                    self.groups.revoked_invite_links.insert(
                         chat_id.0,
                         InviteLinkFetch::Failed(call_request_error_line(
                             err,
@@ -185,7 +185,7 @@ impl Session {
             }
             Some(RequestPurpose::GetChatInviteLinkCounts) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.invite_link_counts.insert(
+                    self.groups.invite_link_counts.insert(
                         chat_id.0,
                         InviteLinkCountsFetch::Failed(call_request_error_line(
                             err,
@@ -197,7 +197,7 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::GetChatInviteLinkMembers { .. })) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.invite_link_members.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.invite_link_members.get_mut(&chat_id.0)
                     && state.request == Some(pending.id)
                 {
                     state.loading = false;
@@ -208,7 +208,7 @@ impl Session {
             Some(RequestPurpose::GetAdminChatInviteLinks { revoked }) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.admin_invite_links.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.admin_invite_links.get_mut(&chat_id.0)
                 {
                     let failed = InviteLinkFetch::Failed(call_request_error_line(
                         err,
@@ -226,7 +226,7 @@ impl Session {
             Some(RequestPurpose::GetLinkJoinRequests { .. }) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.link_join_requests.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.link_join_requests.get_mut(&chat_id.0)
                     && state.request == Some(pending.id)
                 {
                     state.loading = false;
@@ -236,7 +236,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { .. })) => {
-                self.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error = Some(call_request_error_line(
                     err,
                     "Could not process join requests",
                 ));
@@ -244,7 +244,7 @@ impl Session {
             Some(RequestPurpose::GetChatBoosts { .. }) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.chat_boost_lists.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.chat_boost_lists.get_mut(&chat_id.0)
                     && state.request == Some(pending.id)
                 {
                     state.loading = false;
@@ -253,34 +253,34 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetChatBoostLink) => {
-                self.chat_action_error =
+                self.chats_state.chat_action_error =
                     Some(call_request_error_line(err, "Could not get the boost link"));
             }
             Some(
                 RequestPurpose::ToggleSupergroupUsername
                 | RequestPurpose::ReorderSupergroupUsernames,
             ) => {
-                self.chat_action_error = Some(call_request_error_line(
+                self.chats_state.chat_action_error = Some(call_request_error_line(
                     err,
                     "Could not change the usernames",
                 ));
             }
             Some(RequestPurpose::DeleteRevokedChatInviteLink) => {
                 if let Some(pending) = pending {
-                    self.revoked_link_deletions.remove(&pending.id);
+                    self.groups.revoked_link_deletions.remove(&pending.id);
                 }
-                self.invite_link_error =
+                self.groups.invite_link_error =
                     Some(call_request_error_line(err, "Could not delete invite link"));
             }
             Some(RequestPurpose::DeleteAllRevokedChatInviteLinks) => {
-                self.invite_link_error = Some(call_request_error_line(
+                self.groups.invite_link_error = Some(call_request_error_line(
                     err,
                     "Could not delete revoked links",
                 ));
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { .. })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.join_requests.insert(
+                    self.groups.join_requests.insert(
                         chat_id.0,
                         JoinRequestFetch::Failed(call_request_error_line(
                             err,
@@ -294,7 +294,7 @@ impl Session {
             // instead of spinning forever.
             Some(RequestPurpose::GetChatAdministrators) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.admin_lists.insert(
+                    self.groups.admin_lists.insert(
                         chat_id.0,
                         AdminListFetch::Failed(call_request_error_line(
                             err,
@@ -310,8 +310,11 @@ impl Session {
                     // the member-list fetch states, not
                     // `admin_lists`, so the failure is also parked
                     // where the action was taken.
-                    self.member_action_error.insert(chat_id.0, line.clone());
-                    self.admin_lists
+                    self.groups
+                        .member_action_error
+                        .insert(chat_id.0, line.clone());
+                    self.groups
+                        .admin_lists
                         .insert(chat_id.0, AdminListFetch::Failed(line));
                 }
             }
@@ -323,14 +326,17 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { .. })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     let line = call_request_error_line(err, "Could not set custom title");
-                    self.member_action_error.insert(chat_id.0, line.clone());
-                    self.admin_lists
+                    self.groups
+                        .member_action_error
+                        .insert(chat_id.0, line.clone());
+                    self.groups
+                        .admin_lists
                         .insert(chat_id.0, AdminListFetch::Failed(line));
                 }
             }
             Some(RequestPurpose::GetBasicGroupFullInfo) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.basic_group_members.insert(
+                    self.groups.basic_group_members.insert(
                         chat_id.0,
                         SupergroupMembersFetch::Failed(call_request_error_line(
                             err,
@@ -347,12 +353,12 @@ impl Session {
             // honest.
             Some(RequestPurpose::AddChatMembers | RequestPurpose::AddChatMember) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    *self.add_members_failed.entry(chat_id.0).or_insert(0) += 1;
+                    *self.groups.add_members_failed.entry(chat_id.0).or_insert(0) += 1;
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.supergroup_members.insert(
+                    self.groups.supergroup_members.insert(
                         (chat_id.0, filter),
                         SupergroupMembersFetch::Failed(call_request_error_line(
                             err,
@@ -369,11 +375,11 @@ impl Session {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
                     && (from_event_id == 0
                         || !matches!(
-                            self.event_logs.get(&chat_id.0),
+                            self.groups.event_logs.get(&chat_id.0),
                             Some(ChatEventLogFetch::Loaded(_))
                         ))
                 {
-                    self.event_logs.insert(
+                    self.groups.event_logs.insert(
                         chat_id.0,
                         ChatEventLogFetch::Failed(call_request_error_line(
                             err,
@@ -384,7 +390,7 @@ impl Session {
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.admin_rights.insert(
+                    self.groups.admin_rights.insert(
                         (chat_id.0, user_id),
                         AdminRightsFetch::Failed(call_request_error_line(
                             err,
@@ -400,7 +406,7 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChatWelcomeMessages)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.welcome_message_fetches.insert(
+            self.groups.welcome_message_fetches.insert(
                 chat_id.0,
                 WelcomeMessagesFetch::Failed(call_request_error_line(
                     err,
@@ -411,7 +417,7 @@ impl Session {
         // Slice G2: the slots half of a boost failed — the chain
         // cannot continue; drop the intent.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost) {
-            self.boost_intent = None;
+            self.groups.boost_intent = None;
         }
     }
 }

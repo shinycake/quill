@@ -91,7 +91,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(None);
         }
-        if self.session.chats_exhausted {
+        if self.session.chat_list.chats_exhausted {
             return Ok(None);
         }
         if self.session.requests.has_purpose(RequestPurpose::LoadChats) {
@@ -108,7 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// positions only for the loaded part of the list (Telegram X
     /// `TdlibChatList.loadMore`).
     pub fn maybe_load_archive_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() || self.session.archive_chats_exhausted {
+        if !self.chats_path_active() || self.session.chat_list.archive_chats_exhausted {
             return Ok(None);
         }
         if self

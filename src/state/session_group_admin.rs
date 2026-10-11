@@ -102,7 +102,7 @@ impl Session {
     /// `supergroup.join_to_send_messages` (false while unknown).
     pub fn chat_join_to_send(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup(chat_id)
-            .and_then(|id| self.supergroup_join_to_send.get(&id).copied())
+            .and_then(|id| self.groups.supergroup_join_to_send.get(&id).copied())
             .unwrap_or(false)
     }
 
@@ -111,7 +111,8 @@ impl Session {
     /// or not fetched yet.
     pub fn chat_linked_chat(&self, chat_id: ChatId) -> Option<ChatId> {
         let id = self.chat_supergroup(chat_id)?;
-        self.supergroup_full_infos
+        self.groups
+            .supergroup_full_infos
             .get(&id)
             .map(|info| info.linked_chat_id)
             .filter(|linked| *linked != 0)
@@ -121,7 +122,7 @@ impl Session {
     /// The cached allowed-reactions setting; `None` until the chat arrives
     /// with one.
     pub fn chat_available_reactions(&self, chat_id: ChatId) -> Option<&ChatAvailableReactions> {
-        self.chat_available_reactions.get(&chat_id.0)
+        self.chats_state.chat_available_reactions.get(&chat_id.0)
     }
 
     /// The emoji reactions a picker can offer: the server's active list
@@ -169,7 +170,7 @@ impl Session {
         let mut controls = match chat.kind {
             ChatKind::BasicGroup { basic_group_id } => {
                 // An upgraded group is deactivated: nothing to manage.
-                if self.basic_group_active.get(&basic_group_id) == Some(&false) {
+                if self.groups.basic_group_active.get(&basic_group_id) == Some(&false) {
                     return GroupAdminControls::default();
                 }
                 let too_few = self.chat_member_total(chat_id) < FORUM_MIN_MEMBERS;
@@ -206,14 +207,16 @@ impl Session {
                 is_channel: false,
             } => {
                 let broadcast = self
+                    .groups
                     .supergroup_is_broadcast
                     .get(&supergroup_id)
                     .copied()
                     .unwrap_or(false);
-                let full = self.supergroup_full_infos.get(&supergroup_id);
+                let full = self.groups.supergroup_full_infos.get(&supergroup_id);
                 let linked = self.chat_linked_chat(chat_id);
                 let is_forum = chat.is_forum_chat();
                 let public = self
+                    .groups
                     .supergroup_usernames
                     .get(&supergroup_id)
                     .is_some_and(|name| !name.is_empty());
@@ -280,15 +283,18 @@ impl Session {
         value: bool,
     ) -> Option<bool> {
         match toggle {
-            GroupToggle::JoinToSend => self.supergroup_join_to_send.insert(supergroup_id, value),
+            GroupToggle::JoinToSend => self
+                .groups
+                .supergroup_join_to_send
+                .insert(supergroup_id, value),
             GroupToggle::HistoryVisible => {
-                let info = self.supergroup_full_infos.get_mut(&supergroup_id)?;
+                let info = self.groups.supergroup_full_infos.get_mut(&supergroup_id)?;
                 let previous = info.admin.is_all_history_available;
                 info.admin.is_all_history_available = value;
                 Some(previous)
             }
             GroupToggle::HiddenMembers => {
-                let info = self.supergroup_full_infos.get_mut(&supergroup_id)?;
+                let info = self.groups.supergroup_full_infos.get_mut(&supergroup_id)?;
                 let previous = info.admin.has_hidden_members;
                 info.admin.has_hidden_members = value;
                 Some(previous)
@@ -305,18 +311,20 @@ impl Session {
     ) {
         match (toggle, previous) {
             (GroupToggle::JoinToSend, Some(flag)) => {
-                self.supergroup_join_to_send.insert(supergroup_id, flag);
+                self.groups
+                    .supergroup_join_to_send
+                    .insert(supergroup_id, flag);
             }
             (GroupToggle::JoinToSend, None) => {
-                self.supergroup_join_to_send.remove(&supergroup_id);
+                self.groups.supergroup_join_to_send.remove(&supergroup_id);
             }
             (GroupToggle::HistoryVisible, Some(flag)) => {
-                if let Some(info) = self.supergroup_full_infos.get_mut(&supergroup_id) {
+                if let Some(info) = self.groups.supergroup_full_infos.get_mut(&supergroup_id) {
                     info.admin.is_all_history_available = flag;
                 }
             }
             (GroupToggle::HiddenMembers, Some(flag)) => {
-                if let Some(info) = self.supergroup_full_infos.get_mut(&supergroup_id) {
+                if let Some(info) = self.groups.supergroup_full_infos.get_mut(&supergroup_id) {
                     info.admin.has_hidden_members = flag;
                 }
             }
@@ -332,30 +340,32 @@ impl Session {
         supergroup_id: i64,
         admin: crate::telegram::envelope::SupergroupFullAdmin,
     ) {
-        if let Some(info) = self.supergroup_full_infos.get_mut(&supergroup_id) {
+        if let Some(info) = self.groups.supergroup_full_infos.get_mut(&supergroup_id) {
             info.admin = admin;
         }
     }
 
     /// Queue a step that runs when request `request` succeeds.
     pub fn queue_admin_followup(&mut self, request: RequestId, followup: AdminFollowup) {
-        self.admin_followups.push((request, followup));
+        self.groups.admin_followups.push((request, followup));
     }
 
     /// Take the step waiting for `request`, if any (success or not: a
     /// failed request must not leave it behind).
     pub fn take_admin_followup(&mut self, request: RequestId) -> Option<AdminFollowup> {
         let index = self
+            .groups
             .admin_followups
             .iter()
             .position(|(id, _)| *id == request)?;
-        Some(self.admin_followups.remove(index).1)
+        Some(self.groups.admin_followups.remove(index).1)
     }
 
     /// The supergroup chat a basic group became (recorded when
     /// `upgradeBasicGroupChatToSupergroupChat` answers).
     pub fn upgraded_chat_for(&self, old: ChatId) -> Option<ChatId> {
-        self.chat_upgrades
+        self.chats_state
+            .chat_upgrades
             .iter()
             .find(|(from, _)| *from == old.0)
             .map(|(_, to)| ChatId(*to))
@@ -363,7 +373,7 @@ impl Session {
 
     /// Drain the finished upgrades (the UI opens the new chat).
     pub fn take_chat_upgrades(&mut self) -> Vec<(ChatId, ChatId)> {
-        std::mem::take(&mut self.chat_upgrades)
+        std::mem::take(&mut self.chats_state.chat_upgrades)
             .into_iter()
             .map(|(from, to)| (ChatId(from), ChatId(to)))
             .collect()

@@ -1028,7 +1028,7 @@ impl QuillApp {
         let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
         let topic_history = match (open, open_topic) {
             (Some(id), Some(topic_id)) => {
-                session.and_then(|s| s.topic_histories.get(&(id.0, topic_id)))
+                session.and_then(|s| s.threads.topic_histories.get(&(id.0, topic_id)))
             }
             _ => None,
         };
@@ -2392,9 +2392,9 @@ impl QuillApp {
     pub(super) fn maybe_auto_load_newer(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
             && live.driver.session.open_topic.is_none()
-            && live.driver.session.thread.is_none()
-            && live.driver.session.saved.sublist.is_none()
-            && live.driver.session.saved.tag_search.is_none()
+            && live.driver.session.threads.thread.is_none()
+            && live.driver.session.threads.saved.sublist.is_none()
+            && live.driver.session.threads.saved.tag_search.is_none()
             && live.driver.fetch_history_newer().ok().flatten().is_some()
         {
             cx.notify();
@@ -2443,11 +2443,11 @@ impl QuillApp {
     pub(super) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.
-            let sent = if live.driver.session.saved.tag_search.is_some() {
+            let sent = if live.driver.session.threads.saved.tag_search.is_some() {
                 live.driver.fetch_saved_tag_page()
-            } else if live.driver.session.saved.sublist.is_some() {
+            } else if live.driver.session.threads.saved.sublist.is_some() {
                 live.driver.fetch_saved_sublist_history()
-            } else if live.driver.session.thread.is_some() {
+            } else if live.driver.session.threads.thread.is_some() {
                 live.driver.fetch_thread_history()
             } else if live.driver.session.open_topic.is_some() {
                 live.driver.fetch_topic_history()

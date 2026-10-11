@@ -77,12 +77,12 @@ impl QuillApp {
     /// `getArchiveChatListSettings` on open).
     pub(super) fn open_archive_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.archive_settings_open = true;
+            live.driver.session.chat_list.archive_settings_open = true;
             if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
                 self.connection.status_note = format!("archive settings failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.archive_settings_open = true;
+            session.chat_list.archive_settings_open = true;
         }
         cx.notify();
     }
@@ -93,7 +93,8 @@ impl QuillApp {
     /// kit Phase 6: write the requested value (was: flip the bit).
     pub(super) fn set_archive_setting(&mut self, index: usize, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let Some(mut settings) = live.driver.session.archive_chat_list_settings else {
+            let Some(mut settings) = live.driver.session.chat_list.archive_chat_list_settings
+            else {
                 self.connection.status_note = "archive settings still loading…".into();
                 cx.notify();
                 return;
@@ -103,10 +104,10 @@ impl QuillApp {
                 self.connection.status_note = format!("archive setting failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut()
-            && let Some(mut settings) = session.archive_chat_list_settings
+            && let Some(mut settings) = session.chat_list.archive_chat_list_settings
         {
             archive_setting_set(&mut settings, index, on);
-            session.archive_chat_list_settings = Some(settings);
+            session.chat_list.archive_chat_list_settings = Some(settings);
         }
         cx.notify();
     }
@@ -134,8 +135,12 @@ impl QuillApp {
                 this.set_archive_settings_open(false)
             });
         app.update(cx, |this, cx| {
-            let settings = this.session().and_then(|s| s.archive_chat_list_settings);
-            let loading = this.session().is_some_and(|s| s.archive_settings_loading);
+            let settings = this
+                .session()
+                .and_then(|s| s.chat_list.archive_chat_list_settings);
+            let loading = this
+                .session()
+                .is_some_and(|s| s.chat_list.archive_settings_loading);
             let mut body = div().flex().flex_col().gap_3();
             if loading {
                 body = body.child(
@@ -232,9 +237,9 @@ impl QuillApp {
     /// session.
     pub(super) fn set_archive_settings_open(&mut self, open: bool) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.archive_settings_open = open;
+            live.driver.session.chat_list.archive_settings_open = open;
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.archive_settings_open = open;
+            session.chat_list.archive_settings_open = open;
         }
     }
 
@@ -866,8 +871,8 @@ impl QuillApp {
     /// including the one for chats from folders, inline.
     pub(super) fn archive_privacy_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let settings = session.and_then(|s| s.archive_chat_list_settings);
-        let loading = session.is_some_and(|s| s.archive_settings_loading);
+        let settings = session.and_then(|s| s.chat_list.archive_chat_list_settings);
+        let loading = session.is_some_and(|s| s.chat_list.archive_settings_loading);
         let mut section = div().flex().flex_col().gap_1().child(
             div()
                 .text_sm()
@@ -930,7 +935,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ArchiveSettings => DialogSpec::new(
         500,
-        |app| app.session().is_some_and(|s| s.archive_settings_open),
+        |app| app.session().is_some_and(|s| s.chat_list.archive_settings_open),
         QuillApp::build_archive_settings_dialog,
     ),
 

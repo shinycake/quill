@@ -114,14 +114,15 @@ impl Session {
         // Phase 5.1: switching chats leaves the topic view.
         self.open_topic = None;
         // ... and the Saved Messages sublist / tag filter.
-        self.saved.close_views();
+        self.threads.saved.close_views();
         // ... and any comment thread that lives elsewhere.
         if self
+            .threads
             .thread
             .as_ref()
             .is_some_and(|thread| thread.chat_id != chat_id)
         {
-            self.thread = None;
+            self.threads.thread = None;
         }
         self.view_generation.bump();
         let history = self.histories.entry(chat_id.0).or_default();
@@ -287,7 +288,8 @@ impl Session {
 
     /// Phase 7.1: display name of a folder tab, from `updateChatFolders`.
     pub fn folder_name(&self, folder_id: i32) -> Option<&str> {
-        self.chat_folders
+        self.chat_list
+            .chat_folders
             .iter()
             .find(|f| f.id == folder_id)
             .map(|f| f.name.as_str())

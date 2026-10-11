@@ -11,7 +11,7 @@ impl Session {
         if self.open_chat == Some(chat_id) && self.chat_has_topics(chat_id) {
             view.forum_topic_id = self.open_topic;
         }
-        self.thread = Some(view);
+        self.threads.thread = Some(view);
         self.view_generation.bump();
     }
 
@@ -19,12 +19,13 @@ impl Session {
     /// the origin chat.
     pub fn close_thread(&mut self) -> Option<ThreadView> {
         self.view_generation.bump();
-        self.thread.take()
+        self.threads.thread.take()
     }
 
     /// The thread whose replies are shown in `chat_id` (the open chat).
     pub fn thread_for_chat(&self, chat_id: ChatId) -> Option<&ThreadView> {
-        self.thread
+        self.threads
+            .thread
             .as_ref()
             .filter(|thread| thread.chat_id == chat_id && thread.thread_id != 0)
     }
@@ -32,7 +33,7 @@ impl Session {
     /// A thread is open but cannot show messages: still resolving, moving
     /// to its chat, or failed to load.
     pub fn thread_unavailable(&self) -> bool {
-        self.thread.as_ref().is_some_and(|thread| {
+        self.threads.thread.as_ref().is_some_and(|thread| {
             matches!(thread.status, ThreadStatus::Failed(_))
                 || self
                     .open_chat
@@ -68,7 +69,7 @@ impl Session {
             self.remember_files(&message.files);
         }
         let open_chat = self.open_chat;
-        let Some(thread) = self.thread.as_mut() else {
+        let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
         if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
@@ -111,7 +112,7 @@ impl Session {
         for message in &messages {
             self.remember_files(&message.files);
         }
-        let Some(thread) = self.thread.as_mut() else {
+        let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
         if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
@@ -156,7 +157,7 @@ impl Session {
             return;
         };
         let origin_chat = pending.and_then(|p| p.chat_id);
-        if let Some(thread) = self.thread.as_mut()
+        if let Some(thread) = self.threads.thread.as_mut()
             && Some(thread.origin_chat_id) == origin_chat
             && thread.origin_message_id.0 == message_id
             && thread.status != ThreadStatus::Ready
@@ -173,7 +174,7 @@ impl Session {
         message_id: MessageId,
         reply: Option<&MessageReplyInfo>,
     ) {
-        let Some(thread) = self.thread.as_mut() else {
+        let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
         let is_origin = chat_id == thread.origin_chat_id && message_id == thread.origin_message_id;
@@ -189,14 +190,14 @@ impl Session {
     /// A thread message arrived (update or own send): add it to the open
     /// thread's rows.
     pub(crate) fn thread_upsert(&mut self, row: HistoryMessage) {
-        if let Some(thread) = self.thread.as_mut() {
+        if let Some(thread) = self.threads.thread.as_mut() {
             thread.history.upsert(row);
         }
     }
 
     /// Rows removed by `updateDeleteMessages`.
     pub(crate) fn thread_remove(&mut self, chat_id: ChatId, ids: &[MessageId]) {
-        if let Some(thread) = self.thread.as_mut()
+        if let Some(thread) = self.threads.thread.as_mut()
             && thread.chat_id == chat_id
         {
             for id in ids {
@@ -207,7 +208,8 @@ impl Session {
 
     /// Whether `message` belongs to the open thread.
     pub(crate) fn thread_accepts(&self, message: &ParsedMessage) -> bool {
-        self.thread
+        self.threads
+            .thread
             .as_ref()
             .is_some_and(|thread| thread.accepts(message))
     }

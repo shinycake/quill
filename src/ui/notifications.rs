@@ -334,6 +334,7 @@ impl QuillApp {
             && !live
                 .driver
                 .session
+                .chat_list
                 .chat_folders
                 .iter()
                 .any(|f| f.id == folder_id)
@@ -471,7 +472,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.chat_action_error.take())
+            .and_then(|live| live.driver.session.chats_state.chat_action_error.take())
         {
             self.connection.status_note = err;
             progressed = true;
@@ -511,7 +512,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.community_error.take())
+            .and_then(|live| live.driver.session.groups.community_error.take())
         {
             self.connection.status_note = err;
             progressed = true;
@@ -522,7 +523,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.invite_link_error.take())
+            .and_then(|live| live.driver.session.groups.invite_link_error.take())
         {
             self.connection.status_note = err;
             progressed = true;
@@ -547,7 +548,7 @@ impl QuillApp {
         if let Some(note) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.report_chat_outcome.take())
+            .and_then(|live| live.driver.session.chats_state.report_chat_outcome.take())
         {
             self.connection.status_note = note;
             progressed = true;
@@ -558,7 +559,7 @@ impl QuillApp {
         let stale_chats: Vec<i64> = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.member_list_stale))
+            .map(|live| std::mem::take(&mut live.driver.session.groups.member_list_stale))
             .unwrap_or_default();
         if self
             .admin

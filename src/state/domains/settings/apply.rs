@@ -234,8 +234,8 @@ impl Session {
             }
             SettingsPayload::UpdateContactCloseBirthdays { users } => {
                 // A new list (also an empty one) re-enables the suggestion.
-                self.suggestions.close_birthdays = users;
-                self.suggestions.birthdays_hidden = false;
+                self.chat_list.suggestions.close_birthdays = users;
+                self.chat_list.suggestions.birthdays_hidden = false;
             }
             SettingsPayload::AddedProxies { proxies } => {
                 self.apply_added_proxies(pending, proxies);

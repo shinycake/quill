@@ -701,7 +701,12 @@ pub(super) fn session_history_row(
     // The community name resolves from the session's `updateCommunity`
     // cache; unknown communities fall back to the nameless TGX forms.
     let community_name = |community_id: i64| {
-        session.and_then(|s| s.communities.get(&community_id).map(|c| c.name.clone()))
+        session.and_then(|s| {
+            s.groups
+                .communities
+                .get(&community_id)
+                .map(|c| c.name.clone())
+        })
     };
     let community_service_row = |text: String| {
         service_pill(("community-service-row", message.id.0 as u64), text, cx).into_any_element()
@@ -1028,7 +1033,8 @@ pub(super) fn session_history_row(
             // Edit Name, Remove Tag).
             row = row.child(if are_tags {
                 let named = session.is_some_and(|s| {
-                    s.saved
+                    s.threads
+                        .saved
                         .tags
                         .iter()
                         .any(|entry| entry.tag == tag_type && !entry.label.is_empty())

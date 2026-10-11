@@ -51,7 +51,7 @@ impl Session {
     /// The username lists of the supergroup behind `chat_id`, if known.
     pub fn chat_usernames(&self, chat_id: ChatId) -> Option<&SupergroupUsernames> {
         self.chat_supergroup(chat_id)
-            .and_then(|id| self.supergroup_username_lists.get(&id))
+            .and_then(|id| self.groups.supergroup_username_lists.get(&id))
     }
 
     /// Own admin status in a supergroup or channel; `getChatBoosts` and
@@ -72,9 +72,10 @@ impl Session {
         usernames: SupergroupUsernames,
     ) {
         if usernames == SupergroupUsernames::default() {
-            self.supergroup_username_lists.remove(&supergroup_id);
+            self.groups.supergroup_username_lists.remove(&supergroup_id);
         } else {
-            self.supergroup_username_lists
+            self.groups
+                .supergroup_username_lists
                 .insert(supergroup_id, usernames);
         }
     }

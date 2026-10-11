@@ -268,10 +268,10 @@ impl QuillApp {
         let channel = self.is_channel_for_boosts(chat_id);
         let session = self.session();
         let list = session
-            .and_then(|s| s.chat_boost_lists.get(&chat_id.0))
+            .and_then(|s| s.groups.chat_boost_lists.get(&chat_id.0))
             .cloned();
         let only_gifts = list.as_ref().is_some_and(|l| l.only_gifts);
-        let level = session.and_then(|s| s.chat_boost_status.get(&chat_id.0).copied());
+        let level = session.and_then(|s| s.groups.chat_boost_status.get(&chat_id.0).copied());
         let mut body = div().flex().flex_col().gap_1().px_2();
         if let Some((level, count)) = level {
             body = body.child(
@@ -384,7 +384,7 @@ impl QuillApp {
                 }
             }
         }
-        if let Some((link, _)) = session.and_then(|s| s.chat_boost_links.get(&chat_id.0)) {
+        if let Some((link, _)) = session.and_then(|s| s.groups.chat_boost_links.get(&chat_id.0)) {
             let copy = link.clone();
             body = body
                 .child(

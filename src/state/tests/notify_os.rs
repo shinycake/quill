@@ -92,7 +92,7 @@ fn folder_chat_counts_feed_the_tab_badge() {
         &sink,
         r#"{"@type":"updateUnreadChatCount","chat_list":{"@type":"chatListFolder","chat_folder_id":5},"total_count":9,"unread_count":4,"unread_unmuted_count":1,"marked_as_unread_count":0,"marked_as_unread_unmuted_count":0}"#,
     );
-    let pair = session.folder_unread_chats[&5];
+    let pair = session.chat_list.folder_unread_chats[&5];
     assert_eq!(
         pair.folder_badge(true),
         Some(FolderBadge {

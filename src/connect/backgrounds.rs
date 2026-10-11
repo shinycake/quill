@@ -49,7 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.background_set_for_dark = for_dark_theme;
+        self.session.chats_state.background_set_for_dark = for_dark_theme;
         let extra = self
             .session
             .request(RequestPurpose::SetDefaultBackground, None);
@@ -83,7 +83,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.default_backgrounds.remove(&for_dark_theme);
+        self.session
+            .chats_state
+            .default_backgrounds
+            .remove(&for_dark_theme);
         Ok(extra)
     }
 
@@ -105,7 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        if let Some(list) = self.session.installed_backgrounds.as_mut() {
+        if let Some(list) = self.session.chats_state.installed_backgrounds.as_mut() {
             list.retain(|b| b.id != background_id);
         }
         Ok(extra)
@@ -120,7 +123,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || path.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.background_set_for_dark = for_dark_theme;
+        self.session.chats_state.background_set_for_dark = for_dark_theme;
         let extra = self
             .session
             .request(RequestPurpose::SetDefaultBackgroundLocal, None);
@@ -140,7 +143,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || name.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.searched_background = None;
+        self.session.chats_state.searched_background = None;
         let extra = self.session.request(RequestPurpose::SearchBackground, None);
         if let Err(err) = self.sender.send_json(&search_background(extra, name)) {
             self.session.requests.take(extra);
@@ -225,12 +228,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// and (while a picker is open) every emoji theme's.
     pub fn download_chat_look_files(&mut self, chat_id: i64, all_themes: bool) {
         let mut files: Vec<&crate::telegram::envelope::ParsedFile> = Vec::new();
-        if let Some(own) = self.session.chat_backgrounds.get(&chat_id) {
+        if let Some(own) = self.session.chats_state.chat_backgrounds.get(&chat_id) {
             files.extend(own.background.file.as_ref());
         }
-        let themes =
-            self.session.emoji_chat_themes.iter().filter(|t| {
-                all_themes || self.session.chat_theme_names.get(&chat_id) == Some(&t.name)
+        let themes = self
+            .session
+            .chats_state
+            .emoji_chat_themes
+            .iter()
+            .filter(|t| {
+                all_themes
+                    || self.session.chats_state.chat_theme_names.get(&chat_id) == Some(&t.name)
             });
         for theme in themes {
             for settings in [&theme.light, &theme.dark] {
@@ -260,10 +268,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn download_background_files(&mut self) {
         let ids: Vec<FileId> = self
             .session
+            .chats_state
             .installed_backgrounds
             .iter()
             .flatten()
-            .chain(self.session.default_backgrounds.values())
+            .chain(self.session.chats_state.default_backgrounds.values())
             .filter(|b| b.needs_file())
             .filter_map(|b| b.file.as_ref())
             .filter(|f| {

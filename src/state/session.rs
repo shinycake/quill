@@ -1,6 +1,5 @@
 //! The Session reducer: central client state and constructor.
 use super::*;
-use crate::telegram::envelope::{ChatAccent, ChatBackground, EmojiChatTheme};
 
 /// MED4b: composer `getLinkPreview` prefetch state (TGX `LinkPreview`).
 #[derive(Debug, Clone, Default)]
@@ -41,88 +40,12 @@ pub struct Session {
     pub chats: HashMap<i64, ChatSummary>,
     pub main_order: Vec<ChatId>,
     pub archive_order: Vec<ChatId>,
-    /// Phase 7.1: folder list from `updateChatFolders` (schema 1.8.67 line
-    /// 10606). Empty until TDLib pushes the update (after authorization).
-    pub chat_folders: Vec<ChatFolderInfo>,
-    /// Parity slice: `are_tags_enabled` from `updateChatFolders` (schema
-    /// 1.8.67 line 10606). When true, chat rows render folder-name tag
-    /// chips; toggled via `toggleChatFolderTags` (`:13376`).
-    pub are_folder_tags_enabled: bool,
-    /// Parity slice: cached full `chatFolder` specs from `getChatFolder`
-    /// responses (keyed by folder id) — edit dialog prefill and the
-    /// remove-from-folder chain. Stale entries are dropped when the folder
-    /// is edited or deleted.
-    pub folder_specs: HashMap<i32, ChatFolderSpec>,
-    /// Parity slice: `getChatListsToAddChat` results per chat id — the chat
-    /// lists a chat may be added to. Drives the per-chat folder picker as
-    /// the schema intends (`:13347` doc comment).
-    pub chat_lists_for_add: HashMap<i64, Vec<ChatList>>,
-    /// Parity slice: folder ids whose `loadChats(chatListFolder)` paging hit
-    /// 404 — no "load more" for these folders.
-    pub folder_chats_exhausted: HashSet<i32>,
-    /// Parity slice: queued remove-from-folder intents `(chat_id,
-    /// folder_id)`. The driver sends `getChatFolder`, then `editChatFolder`
-    /// with the chat dropped from the spec — there is no
-    /// `removeChatFromList` in 1.8.67.
-    pub folder_remove_queue: Vec<(ChatId, i32)>,
-    /// Parity slice: `getChatFolderChatsToLeave` results per folder id —
-    /// chats the delete-confirm dialog offers to leave with the folder.
-    pub folder_chats_to_leave: HashMap<i32, Vec<i64>>,
-    /// `getChatFolderInviteLinks` results (and creates/edits applied on top)
-    /// per folder id — the Share Folder dialog's link list.
-    pub folder_invite_links: HashMap<i32, Vec<ChatFolderInviteLink>>,
-    /// `getChatsForChatFolderInviteLink` results per folder id — the chats a
-    /// link may include.
-    pub folder_link_chats: HashMap<i32, Vec<i64>>,
-    /// `getRecommendedChatFolders` result; `None` until fetched.
-    pub recommended_folders: Option<Vec<RecommendedChatFolder>>,
-    /// One-shot: a folder link create/edit was applied (the dialog returns
-    /// to its list). Drained by the UI.
-    pub folder_link_saved: bool,
-    /// One-shot: a Share Folder / recommended-folder request failed; the
-    /// text is shown in the dialog. Drained by the UI.
-    pub folder_share_error: Option<String>,
-    /// The `addlist` link being checked by the "Add folder" dialog.
-    pub folder_invite_link: Option<String>,
-    /// `checkChatFolderInviteLink` answer for `folder_invite_link`.
-    pub folder_invite_info: Option<ChatFolderInviteLinkInfo>,
-    /// The "Add folder" dialog's failure text (check or add).
-    pub folder_invite_error: Option<String>,
-    /// `addChatFolderByInviteLink` confirmed.
-    pub folder_invite_done: bool,
-    /// `getChatFolderNewChats` answers per shared folder: chats its owner
-    /// added since the user last looked (the "N new chats" bar).
-    pub folder_new_chats: HashMap<i32, Vec<i64>>,
-    /// When each folder's new chats were last asked for (TDLib wants one
-    /// call per `chat_folder_new_chats_update_period`).
-    pub folder_new_chats_asked: HashMap<i32, std::time::Instant>,
-    /// Folder limits from TDLib options and `getPremiumLimit`.
-    pub folder_limits: crate::folder_limits::FolderLimits,
-    /// One-shot: a folder request failed on a limit; the UI shows the box.
-    /// Drained by the UI.
-    pub folder_limit_hit: Option<crate::folder_limits::FolderLimitKind>,
-    /// `getInstalledBackgrounds` answer for the current theme; `None` until
-    /// fetched.
-    pub installed_backgrounds: Option<Vec<Background>>,
-    /// The account's default wallpaper per theme (`false` light, `true`
-    /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
-    pub default_backgrounds: HashMap<bool, Background>,
-    /// Which theme the pending `setDefaultBackground` was for.
-    pub background_set_for_dark: bool,
-    /// `chat.background` / `updateChatBackground`, by chat id.
-    pub chat_backgrounds: HashMap<i64, ChatBackground>,
-    /// `chat.theme` (emoji theme name) / `updateChatTheme`, by chat id.
-    pub chat_theme_names: HashMap<i64, String>,
-    /// `updateEmojiChatThemes`: the themes a private chat can pick.
-    pub emoji_chat_themes: Vec<EmojiChatTheme>,
-    /// `searchBackground` answer for a `bg/` link; `None` until it arrives.
-    pub searched_background: Option<Background>,
-    /// One-shot: a wallpaper request failed; shown in Appearance.
-    pub background_error: Option<String>,
-    /// Acknowledged (`ok`) chat-look requests (`setChatTheme`,
-    /// `setChatBackground`, `deleteChatBackground`); the chat colors dialog
-    /// waits for them before it closes.
-    pub chat_look_oks: u32,
+    /// The chat list: folders, archive, unread counts, limits, suggestions and previews.
+    /// Declared in `src/state/domains/chat_list/state.rs`.
+    pub chat_list: ChatListState,
+    /// Chat-level look and actions: backgrounds, themes, accents, action bars, deep links, reactions, send-as.
+    /// Declared in `src/state/domains/chats/state.rs`.
+    pub chats_state: ChatsState,
     pub histories: HashMap<i64, HistoryState>,
     /// History page requests issued for a window that has since been
     /// replaced (`reset_history_window`): their answers are dropped so an
@@ -164,16 +87,9 @@ pub struct Session {
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
     pub message_action_note: Option<String>,
-    /// Transfer-ownership gate, transfer progress and the "next owner" lookup.
-    pub ownership: OwnershipState,
-    /// Own status and admin rights in each basic group (`updateBasicGroup`).
-    pub basic_group_own: HashMap<i64, BasicGroupOwn>,
-    /// Member counts from `updateSupergroup` / `updateBasicGroup` (the
-    /// header's fallback before full info loads), keyed by group id.
-    pub supergroup_member_counts: HashMap<i64, i32>,
-    pub basic_group_member_counts: HashMap<i64, i32>,
-    /// `updateChatOnlineMemberCount`, keyed by chat id.
-    pub chat_online_counts: HashMap<i64, i32>,
+    /// Groups and channels: members, admins, rights, invite links, join requests, boosts, communities, event logs.
+    /// Declared in `src/state/domains/groups/state.rs`.
+    pub groups: GroupsState,
     /// M1: parsed `messageLink.link` from the last `getMessageLink` response
     /// (one-shot; the UI copies it to the clipboard and clears it).
     pub message_link_result: Option<String>,
@@ -210,23 +126,6 @@ pub struct Session {
     /// into several messages at this size (tdesktop `CutPart`); edits over
     /// it are refused.
     pub message_text_length_max: i32,
-    /// Slice CL1: `getOption("pinned_chat_count_max")` /
-    /// `getOption("pinned_archived_chat_count_max")` via `updateOption`
-    /// (schema 1.8.67, line 13674). Defaults 5 / 100 are TDLib's
-    /// compiled defaults; the server raises them for Premium. Used for
-    /// the client-side pin-limit pre-check (TGX `ChatsController`
-    /// `PinTooMuchWarn` / `ErrorPinnedChatsLimit` behavior).
-    pub pinned_chat_count_max: i32,
-    pub pinned_archived_chat_count_max: i32,
-    /// Slice CL1: one-shot error from a refused chat-list action
-    /// (`toggleChatIsPinned`, `toggleChatIsMarkedAsUnread`,
-    /// `deleteChatHistory`). The UI drains it into the status note so a
-    /// refused action never looks like it worked.
-    pub chat_action_error: Option<String>,
-    /// Slice CL3: one-shot `reportChat` outcome (`reportChatResultOk`
-    /// vs option/text/messages required). The UI drains it into the
-    /// status note next to `chat_action_error`.
-    pub report_chat_outcome: Option<String>,
     /// MED4: one-shot `getWebPageInstantView` answer for the IV reader.
     /// The UI drains it (opens the reader) and clears it.
     pub instant_view: Option<InstantViewPage>,
@@ -259,10 +158,6 @@ pub struct Session {
     /// user action (send, edit, join, ...) hit a rate limit. The UI drains
     /// it into the status note; the composer text is left untouched.
     pub flood_notice: Option<String>,
-    /// Slice G1 fix-up: one-shot; set when an invite-link mutation
-    /// (create/edit/revoke/replace-primary) errors. The UI drains it into
-    /// the status note — the previously loaded list is kept, not wiped.
-    pub invite_link_error: Option<String>,
     /// M1: `getChatScheduledMessages` results — the chat's scheduled sends,
     /// with `scheduling_state` showing the planned send time.
     pub scheduled_messages: Vec<ParsedMessage>,
@@ -295,17 +190,9 @@ pub struct Session {
     /// One-to-one calls, group calls, recent calls and call privacy.
     /// Declared in `src/state/domains/calls/state.rs`.
     pub calls: CallsState,
-    /// What the chat-list suggestions block shows from.
-    pub suggestions: crate::chatlist_suggestions::SuggestionFacts,
     /// `getSupportUser` answer waiting for the driver to open the chat
     /// (Settings > Ask a Question).
     pub support_user_ready: Option<i64>,
-    /// TDLib's authoritative unread totals for the main and archive chat
-    /// lists (`updateUnreadMessageCount` / `updateUnreadChatCount`); the
-    /// badge uses these instead of summing the (paginated) loaded chats.
-    pub unread_totals: UnreadTotals,
-    /// `updateUnreadChatCount` for each chat folder (tab counters).
-    pub folder_unread_chats: HashMap<i32, UnreadPair>,
     /// Replied-to messages outside the loaded window, keyed by the
     /// replying message `(chat_id, message_id)`.
     pub reply_targets: HashMap<(i64, i64), ReplyTarget>,
@@ -314,20 +201,9 @@ pub struct Session {
     pub open_topic: Option<i32>,
     pub pending_bot_messages: HashMap<(i64, i32), PendingBotMessage>,
     pub pending_bot_period_secs: u64,
-    /// Phase 5.1: cached `forumTopics` per forum chat id (first page only).
-    pub forum_topics: HashMap<i64, Vec<ForumTopic>>,
-    /// Phase 5.1: per-topic histories keyed by `(chat_id, forum_topic_id)`.
-    pub topic_histories: HashMap<(i64, i32), TopicHistory>,
-    /// `chat.view_as_topics` / `updateChatViewAsTopics`, by chat id: a
-    /// forum shown as topics, Saved Messages shown as chats.
-    pub chat_view_as_topics: HashMap<i64, bool>,
-    /// `getForumTopicDefaultIcons`: the custom emoji a topic may use.
-    pub forum_topic_icons: Vec<StickerItem>,
-    /// Saved Messages sublists, tags and the open sublist / tag filter.
-    pub saved: SavedMessagesState,
-    /// Subsection tabs: supergroup ids with `supergroup.has_forum_tabs`
-    /// (schema 1.8.67, line 2746), from `updateSupergroup` / `getSupergroup`.
-    pub forum_tabs_supergroups: HashSet<i64>,
+    /// Forum topics, comment threads and Saved Messages.
+    /// Declared in `src/state/domains/threads/state.rs`.
+    pub threads: ThreadsState,
     /// `poll.id` → `(chat_id, message_id)` of rows loaded with that poll,
     /// so `updatePoll` (which carries no chat or message id) touches only
     /// its rows. Entries can be stale; `apply_update_poll` re-checks and
@@ -335,10 +211,6 @@ pub struct Session {
     pub(crate) poll_messages: HashMap<i64, HashSet<(i64, i64)>>,
     pub view_generation: ViewGeneration,
     pub requests: RequestRegistry,
-    pub chats_exhausted: bool,
-    /// `loadChats(chatListArchive)` answered 404 — the archive is fully
-    /// loaded (paging starts once the main list is exhausted).
-    pub archive_chats_exhausted: bool,
     pub shutdown: ShutdownPhase,
     pub last_seq: u64,
     /// In-flight `forwardMessages` (dest / source / requested count).
@@ -346,11 +218,6 @@ pub struct Session {
     /// Further `forwardMessages` in flight while the share box sends to
     /// several chats at once (`in_flight_forward` holds the first).
     pub queued_forward_flights: Vec<ForwardFlight>,
-    /// `chat.message_sender_id` / `updateChatMessageSender`: the "send as"
-    /// identity selected per chat (absent when the user cannot change it).
-    pub chat_message_sender: HashMap<i64, MessageSender>,
-    /// `getChatAvailableMessageSenders` answers per chat.
-    pub send_as_options: HashMap<i64, Vec<AvailableMessageSender>>,
     /// Share box search (local `searchChats` + `searchChatsOnServer`).
     pub share_search: ShareSearch,
     /// Last `forwardMessages` outcome for the dest picker success surface.
@@ -509,27 +376,9 @@ pub struct Session {
     pub my_user_id: Option<i64>,
     /// Static map tiles of location / venue messages.
     pub map_thumbs: MapThumbs,
-    /// Slice CL2: archive auto-settings from `getArchiveChatListSettings`
-    /// (schema 1.8.67, line 13421). `None` until the first fetch; the
-    /// archive-settings panel fetches on open (TGX
-    /// `SettingsArchiveChatListController` does the same).
-    pub archive_chat_list_settings: Option<ArchiveChatListSettings>,
-    /// Slice CL2: the archive-settings panel is fetching its truth.
-    pub archive_settings_loading: bool,
-    /// Slice CL2: the archive-settings panel is open.
-    pub archive_settings_open: bool,
     /// Phase 6: user directory from `updateUser`, keyed by user id. Feeds
     /// the contacts list and the user info panel.
     pub users: HashMap<i64, ParsedUser>,
-    /// Slice A12: accent palette from `updateProfileAccentColors`
-    /// (schema 1.8.67, line 10964) — full `profileAccentColor` entries
-    /// for swatch rendering.
-    pub profile_accent_colors: Vec<ProfileAccentColor>,
-    /// Name-color palette from `updateAccentColors` (sender names).
-    pub name_accent_colors: Vec<crate::telegram::NameAccentColor>,
-    /// Slice A12: ids `setProfileAccentColor` accepts, in server order —
-    /// the edit-profile accent picker rows.
-    pub available_accent_color_ids: Vec<i32>,
     /// Phase 6: `getContacts` result — user ids, in server order. `None`
     /// until the first `users` response; `contacts_error` records a failed
     /// fetch so the UI can offer a retry.
@@ -546,173 +395,18 @@ pub struct Session {
     /// Message counts per `searchMessagesFilter*` (index into
     /// `MEDIA_COUNT_FILTERS`) for chats whose info panel was opened.
     pub chat_media_counts: HashMap<i64, HashMap<u8, i32>>,
-    /// Phase 6: cached `getSupergroupFullInfo`, keyed by supergroup id.
-    /// Presence records "fetched".
-    pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
-    /// Slice (communities backend core): communities by id, fed by
-    /// `updateCommunity` (schema 1.8.67, line 10726),
-    /// create-on-first-sight.
-    pub communities: HashMap<i64, ParsedCommunity>,
-    /// Slice (communities backend core): `communityFullInfo` cache, keyed
-    /// by community id, fed by the `getCommunityFullInfo` answer and
-    /// `updateCommunityFullInfo` (TDLib 1.8.68). Presence records
-    /// "fetched".
-    pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
-    /// TDLib 1.8.68 community management: one-shot; set when
-    /// `setCommunityName` / `setCommunityPhoto` / `setCommunityPermissions`
-    /// / `deleteCommunity` errors. The UI drains it into the status note.
-    pub community_error: Option<String>,
-    /// Phase D2: `getChatStatistics` fetch state, keyed by chat id.
-    pub chat_statistics: HashMap<i64, ChatStatisticsFetch>,
-    /// Phase D3a: `getChatInviteLinks` fetch state, keyed by chat id.
-    pub invite_links: HashMap<i64, InviteLinkFetch>,
-    /// Phase D3a: `getChatJoinRequests` fetch state, keyed by chat id.
-    pub join_requests: HashMap<i64, JoinRequestFetch>,
-    /// B8: the search query the cached `join_requests` list was fetched
-    /// with (absent = no query), keyed by chat id.
-    pub join_request_queries: HashMap<i64, String>,
-    /// B8: newest join-request page request per chat; replies with any
-    /// other id are stale (an older search) and dropped.
-    pub join_request_latest: HashMap<i64, RequestId>,
-    /// B8: `getChatInviteLinks` with `is_revoked = true`, keyed by chat id.
-    pub revoked_invite_links: HashMap<i64, InviteLinkFetch>,
-    /// Another admin's invite links (owner only), by chat id.
-    pub admin_invite_links: HashMap<i64, AdminLinksState>,
-    /// Pending join requests of the invite link whose details are open.
-    pub link_join_requests: HashMap<i64, LinkRequestsState>,
-    /// `getChatBoosts` list of the open tab, by chat id.
-    pub chat_boost_lists: HashMap<i64, BoostsListState>,
-    /// `getChatBoostLink` answer `(link, is_public)`, by chat id.
-    pub chat_boost_links: HashMap<i64, (String, bool)>,
-    /// `supergroup.usernames`, by supergroup id.
-    pub supergroup_username_lists: HashMap<i64, crate::telegram::envelope::SupergroupUsernames>,
-    /// B8: `getChatInviteLinkCounts` (owner only), keyed by chat id.
-    pub invite_link_counts: HashMap<i64, InviteLinkCountsFetch>,
-    /// B8: members of the invite link whose details are open, by chat id.
-    pub invite_link_members: HashMap<i64, InviteLinkMembersState>,
-    /// B8: in-flight `deleteRevokedChatInviteLink` requests, request id to
-    /// `(chat id, link)`; a purpose is `Copy` so the link rides here.
-    pub revoked_link_deletions: HashMap<RequestId, (i64, String)>,
-    /// Phase D3a: latest `updateChatPendingJoinRequests` total per chat
-    /// (schema 1.8.67, line 10555). The full request list still needs
-    /// `getChatJoinRequests`; this is only the badge count.
-    pub pending_join_request_counts: HashMap<i64, i32>,
-    /// Batch 8: `chatJoinRequestsInfo.user_ids` (the newest requesters)
-    /// from the same update, for the requests bar's avatars.
-    pub pending_join_request_users: HashMap<i64, Vec<i64>>,
-    /// Batch 8: `chat.action_bar` / `updateChatActionBar` per chat — the
-    /// Add contact / Block / Report spam / Share phone strip.
-    pub chat_action_bars: HashMap<i64, ChatActionBar>,
-    /// Phase D3c: `getChatEventLog` fetch state, keyed by chat id.
-    pub event_logs: HashMap<i64, ChatEventLogFetch>,
-    /// Slice G2: per-chat event-log filters (`chatEventLogFilters`,
-    /// schema 1.8.67, line 7956). Absent = all event types (the schema's
-    /// `null`).
-    pub event_log_filters: HashMap<i64, ChatEventLogFilterSet>,
-    /// Slice G2: per-chat event-log text search (the `query` parameter of
-    /// `getChatEventLog`, schema 1.8.67, line 15252). Absent = no search.
-    pub event_log_queries: HashMap<i64, String>,
-    /// Per-chat admin filter: the `user_ids` of `getChatEventLog` (the server
-    /// filters, so the admin list stays complete). Empty or absent = everyone.
-    pub event_log_users: HashMap<i64, Vec<i64>>,
-    /// Slice G2: `supergroup.sign_messages` (schema 1.8.67, line 2746),
-    /// keyed by supergroup id. Drives the channel "Sign messages" toggle.
-    pub supergroup_sign_messages: HashMap<i64, bool>,
-    /// Slice G2: `supergroup.show_message_sender` (schema 1.8.67, line
-    /// 2746), keyed by supergroup id. Drives the "Show authors" toggle.
-    pub supergroup_show_message_sender: HashMap<i64, bool>,
-    /// Slice G2: `supergroupFullInfo.has_aggressive_anti_spam_enabled`
-    /// (schema 1.8.67, line 2792), keyed by supergroup id.
-    pub supergroup_anti_spam_enabled: HashMap<i64, bool>,
-    /// Slice G2: `supergroupFullInfo.can_toggle_aggressive_anti_spam`
-    /// (schema 1.8.67, line 2792), keyed by supergroup id. Gates the
-    /// anti-spam toggle.
-    pub supergroup_can_toggle_anti_spam: HashMap<i64, bool>,
-    /// Slice G2: the viewer's `rights.can_manage_topics` per supergroup
-    /// (schema 1.8.67, line 1092). Gates forum topic management.
-    pub supergroup_manage_topics_right: HashMap<i64, bool>,
-    /// Slice G2: the viewer's `rights.can_change_info` per supergroup
-    /// (schema 1.8.67, line 1092). `toggleSupergroupSignMessages`
-    /// requires this right.
-    pub supergroup_change_info_right: HashMap<i64, bool>,
-    /// Slice G2: the viewer's `rights.can_send_welcome_messages` per
-    /// supergroup (schema 1.8.67, line 1090). Gates welcome-message
-    /// management.
-    pub supergroup_send_welcome_right: HashMap<i64, bool>,
-    /// Slice G2: `chat.has_welcome_messages` (schema 1.8.67, line 3627)
-    /// / `updateChatHasWelcomeMessages` (line 10600), keyed by chat id.
-    pub chat_has_welcome_messages: HashMap<i64, bool>,
-    /// Chats whose content is protected (`chat.has_protected_content`,
-    /// schema 1.8.67 line 3598): no saving, forwarding or copying.
-    pub protected_chats: HashSet<i64>,
-    /// Chats with scheduled messages (`chat.has_scheduled_messages`,
-    /// `updateChatHasScheduledMessages`); drives the composer's
-    /// scheduled-messages button.
-    pub scheduled_chats: HashSet<i64>,
     /// Translation state (`translateText` / `translateMessageText`, the
     /// chat translate bar).
     pub translate: TranslateState,
     /// Bot reply keyboards as TDLib reports them, and recent inline bots.
     pub reply_keyboards: ReplyKeyboardState,
-    /// Slice G2: the welcome-message pack per chat
-    /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
-    pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
-    /// Slice G2: `loadChatWelcomeMessages` fetch state, keyed by chat id.
-    pub welcome_message_fetches: HashMap<i64, WelcomeMessagesFetch>,
-    /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
-    /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
-    pub chat_boost_status: HashMap<i64, (i32, i32)>,
-    /// Name color and reply emoji of chats that have one
-    /// (`chat.accent_color_id`, `updateChatAccentColors`).
-    pub chat_accents: HashMap<i64, ChatAccent>,
     /// Stories, the story tray, albums, archive, posting, viewers and close friends.
     /// Declared in `src/state/domains/stories/state.rs`.
     pub stories: StoriesState,
-    /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
-    /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
-    /// them to chain `boostChat` once per boost intent.
-    pub boost_slots_by_chat: HashMap<i64, Vec<i32>>,
-    /// Slice G2: the chat id of a pending user boost intent — set by
-    /// `request_chat_boost`, consumed by the driver's `boostChat` chain.
-    pub boost_intent: Option<i64>,
-    /// Slice G2: channel-comments viewer — the latest
-    /// `getMessageThreadHistory` result (channel post → comment thread).
-    pub thread: Option<ThreadView>,
-    /// Slice CL: chat-list peek preview — the latest `getChatHistory`
-    /// result for one unopened chat (`parity:chatlist-chat-preview`).
-    pub chat_preview_fetch: Option<PreviewHistoryFetch>,
     /// `parity:platform-chat-export` — in-progress chat history export.
     /// The driver pages `getChatHistory` into this; the UI surfaces the
     /// result (path or error) and clears it.
     pub chat_export: Option<crate::chat_export::ChatExportState>,
-    /// Parity slice: first active username per supergroup (`supergroup`
-    /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
-    /// supergroup id. Feeds the channel/supergroup header's @username.
-    pub supergroup_usernames: HashMap<i64, String>,
-    /// Chat-row title badge: `supergroup.verification_status` per
-    /// supergroup (`updateSupergroup`), keyed by supergroup id.
-    pub supergroup_verification: HashMap<i64, crate::peer_badge::VerificationStatus>,
-    /// Phase A1: the viewer's own `chatMemberStatus*` per supergroup
-    /// (`supergroup.status` / `updateSupergroup`, schema 1.8.67 line 2746).
-    /// Drives the slow-mode bypass (admins/creators are exempt) and gates
-    /// the admin slow-mode control. Absent = unknown (gated, no bypass).
-    pub supergroup_member_status: HashMap<i64, ChannelMemberStatus>,
-    /// Phase A1: the viewer's `rights.can_restrict_members` per supergroup
-    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, lines
-    /// 2500/`chatAdministratorRights` 1092). `setChatSlowModeDelay` requires
-    /// 13551). Absent = unknown, treated as lacking the right.
-    pub supergroup_restrict_right: HashMap<i64, bool>,
-    /// Phase D3a: the viewer's `rights.can_invite_users` per supergroup
-    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, line
-    /// 1092). Invite-link management requires this right (or creator
-    /// status). Absent = unknown, treated as lacking the right.
-    pub supergroup_invite_right: HashMap<i64, bool>,
-    /// Phase D3b: `getChatAdministrators` fetch state, keyed by chat id.
-    pub admin_lists: HashMap<i64, AdminListFetch>,
-    /// Phase D3b / slice G1: `getSupergroupMembers` fetch state for the
-    /// promote member picker and the member-management dialog, keyed by
-    /// (chat id, filter). One page per filter.
-    pub supergroup_members: HashMap<(i64, MemberListFilter), SupergroupMembersFetch>,
     /// B4: `getPollVoters` fetch state for the poll-voters dialog, keyed
     /// by (chat id, message id, 0-based option index). One page per key.
     pub poll_voters: HashMap<(i64, i64, i32), PollVotersFetch>,
@@ -730,75 +424,8 @@ pub struct Session {
     /// Bots slice: generation counter for `ResolveInlineBot` request
     /// correlation (bumped per resolve; see the purpose docs).
     pub inline_bot_resolve_seq: u64,
-    /// `parity:platform-deep-links`: the single active deep-link flow
-    /// (launch link → `getDeepLinkInfo` → follow-up → open chat).
-    pub deep_link: Option<DeepLinkState>,
-    /// Generation counter for deep-link request correlation.
-    pub deep_link_seq: u64,
-    /// The link text being resolved by `getInternalLinkType` (the proxy
-    /// hand-off needs it back).
-    pub deep_link_original: String,
-    /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
-    /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
-    /// (Loading / Loaded / Failed).
-    pub basic_group_members: HashMap<i64, SupergroupMembersFetch>,
-    /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
-    /// 2733/2746), keyed by supergroup id. Drives the "Approve new
-    /// members" toggle.
-    pub supergroup_join_by_request: HashMap<i64, bool>,
-    /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line 2746),
-    /// keyed by supergroup id.
-    pub supergroup_join_to_send: HashMap<i64, bool>,
-    /// B7: the viewer's own `basicGroup.status`, keyed by basic group id.
-    pub basic_group_status: HashMap<i64, ChannelMemberStatus>,
-    /// B7: `can_change_info` of the viewer's administrator status in a
-    /// basic group.
-    pub basic_group_change_info_right: HashMap<i64, bool>,
-    /// B7: `basicGroup.is_active` (false after the upgrade).
-    pub basic_group_active: HashMap<i64, bool>,
-    /// B7: `chat.available_reactions` / `updateChatAvailableReactions`,
-    /// keyed by chat id.
-    pub chat_available_reactions: HashMap<i64, crate::telegram::envelope::ChatAvailableReactions>,
     /// B7: `updateActiveEmojiReactions` — the emoji usable as reactions.
     pub active_emoji_reactions: Vec<String>,
-    /// B7: steps waiting for a group-admin request to succeed.
-    pub admin_followups: Vec<(RequestId, AdminFollowup)>,
-    /// B7: finished basic group upgrades, `(old chat id, new chat id)`.
-    pub chat_upgrades: Vec<(i64, i64)>,
-    /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67, lines
-    /// 2736/2746), keyed by supergroup id. Set by
-    /// `toggleSupergroupIsBroadcastGroup` (one-way upgrade).
-    pub supergroup_is_broadcast: HashMap<i64, bool>,
-    /// Slice G1: `addChatMembers` failure count from the last add
-    /// attempt — `failedToAddMembers.failed_to_add_members.len()` for the
-    /// bulk path (schema 1.8.67, line 3640), or the accumulated per-user
-    /// `addChatMember` `failedToAddMembers` counts plus error responses
-    /// for basic groups — keyed by chat id.
-    /// Reset when a new add starts; cleared when the dialog closes.
-    pub add_members_failed: HashMap<i64, i32>,
-    /// Slice G1 fix-up: chat ids whose member-list caches were dropped by
-    /// an `updateChatMember` while a member dialog may be open. One-shot;
-    /// the UI drains it and refetches the open dialog's page.
-    pub member_list_stale: Vec<i64>,
-    /// Slice G1: last member-action failure for the member-management
-    /// dialog (`setChatMemberTag` / `setChatMemberStatus`), keyed by
-    /// chat id. The dialog reads the member-list fetch states, not
-    /// `admin_lists`, so action failures need their own slot to be
-    /// visible where the action was taken. Cleared when the dialog
-    /// opens.
-    pub member_action_error: HashMap<i64, String>,
-    /// Phase D3b: one administrator's parsed `chatAdministratorRights`
-    /// fetch state, keyed by (chat_id, user_id). Filled by `getChatMember`
-    /// (purpose `GetAdminRights`); drives the edit-rights dialog.
-    pub admin_rights: HashMap<(i64, i64), AdminRightsFetch>,
-    /// Phase D3b: the viewer's `rights.can_promote_members` per supergroup
-    /// from own `chatMemberStatusAdministrator` (schema 1.8.67, line
-    /// 1092). Admin management requires this right (or creator status).
-    /// Absent = unknown, treated as lacking the right.
-    pub supergroup_promote_right: HashMap<i64, bool>,
-    /// Slice G1: own `rights.can_manage_tags` per supergroup (schema
-    /// 1.8.67, line 1092) — gates custom-title changes for others.
-    pub supergroup_manage_tags_right: HashMap<i64, bool>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// A5: latest `checkChatUsername` verdict for the edit-profile

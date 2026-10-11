@@ -57,6 +57,7 @@ fn event_log_gate() {
     session.chats.insert(14, group);
     assert!(!session.chat_can_view_event_log(ChatId(14)));
     session
+        .groups
         .supergroup_member_status
         .insert(14, ChannelMemberStatus::Administrator);
     assert!(session.chat_can_view_event_log(ChatId(14)));
@@ -94,7 +95,8 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         Some(ChatId(13)),
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[300, 299]));
-    let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded") else {
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    else {
         panic!("expected loaded event log");
     };
     assert_eq!(
@@ -111,7 +113,8 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         Some(ChatId(13)),
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &full));
-    let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded") else {
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    else {
         panic!("expected loaded event log");
     };
     let ids: Vec<i64> = loaded.events.iter().map(|e| e.id).collect();
@@ -126,7 +129,8 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         Some(ChatId(13)),
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[199]));
-    let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded") else {
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    else {
         panic!("expected loaded event log");
     };
     assert_eq!(loaded.events.len(), 102);
@@ -138,7 +142,8 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         Some(ChatId(13)),
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[500]));
-    let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded") else {
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    else {
         panic!("expected loaded event log");
     };
     assert_eq!(
@@ -167,7 +172,8 @@ fn event_log_failure_states() {
             extra.0
         ),
     );
-    let ChatEventLogFetch::Failed(message) = session.event_logs.get(&13).expect("log failed")
+    let ChatEventLogFetch::Failed(message) =
+        session.groups.event_logs.get(&13).expect("log failed")
     else {
         panic!("expected failed event log");
     };
@@ -200,7 +206,8 @@ fn event_log_failure_states() {
             extra.0
         ),
     );
-    let ChatEventLogFetch::Loaded(loaded) = session.event_logs.get(&13).expect("log loaded") else {
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    else {
         panic!("expected loaded event log");
     };
     assert_eq!(loaded.events.len(), 1);
@@ -252,7 +259,7 @@ fn admin_list_fetch_caches() {
         ),
     );
 
-    let AdminListFetch::Loaded(admins) = session.admin_lists.get(&13).unwrap() else {
+    let AdminListFetch::Loaded(admins) = session.groups.admin_lists.get(&13).unwrap() else {
         panic!("admin list was not loaded");
     };
     assert_eq!(admins.len(), 2);
@@ -266,7 +273,7 @@ fn admin_list_fetch_caches() {
         &sink,
         r#"{"@type":"chatAdministrators","@extra":"99999","administrators":[]}"#,
     );
-    let AdminListFetch::Loaded(admins) = session.admin_lists.get(&13).unwrap() else {
+    let AdminListFetch::Loaded(admins) = session.groups.admin_lists.get(&13).unwrap() else {
         panic!("admin list was not loaded");
     };
     assert_eq!(admins.len(), 2);
@@ -279,7 +286,7 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
     // `updateChatMember`.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.admin_lists.insert(
+    session.groups.admin_lists.insert(
         13,
         AdminListFetch::Loaded(vec![ChatAdministratorEntry {
             user_id: 888,
@@ -301,7 +308,7 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.admin_lists.contains_key(&13));
+    assert!(!session.groups.admin_lists.contains_key(&13));
 }
 
 #[test]
@@ -318,7 +325,7 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
         is_channel: true,
     };
     session.chats.insert(13, channel);
-    session.admin_lists.insert(
+    session.groups.admin_lists.insert(
         13,
         AdminListFetch::Loaded(vec![ChatAdministratorEntry {
             user_id: 888,
@@ -334,7 +341,7 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
         &sink,
         r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":777,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusMember","member_until_date":0}}}"#,
     );
-    assert!(!session.admin_lists.contains_key(&13));
+    assert!(!session.groups.admin_lists.contains_key(&13));
 
     // Own promotion to administrator with the promote right.
     apply_json(
@@ -371,7 +378,8 @@ fn get_admin_rights_response_caches_rights() {
             extra.0
         ),
     );
-    let AdminRightsFetch::Loaded(rights) = session.admin_rights.get(&(13, 888)).unwrap() else {
+    let AdminRightsFetch::Loaded(rights) = session.groups.admin_rights.get(&(13, 888)).unwrap()
+    else {
         panic!("admin rights were not loaded");
     };
     assert!(rights.can_promote_members);
@@ -403,6 +411,7 @@ fn supergroup_members_fetch_caches() {
         members,
         total_count,
     } = session
+        .groups
         .supergroup_members
         .get(&(13, MemberListFilter::Recent))
         .unwrap()
@@ -434,7 +443,7 @@ fn basic_group_full_info_caches_members() {
     let SupergroupMembersFetch::Loaded {
         members,
         total_count,
-    } = session.basic_group_members.get(&13).unwrap()
+    } = session.groups.basic_group_members.get(&13).unwrap()
     else {
         panic!("basic-group members were not loaded");
     };
@@ -467,11 +476,26 @@ fn g2_update_supergroup_caches_sign_flags_and_rights() {
         &sink,
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"sign_messages":true,"show_message_sender":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true,"can_manage_topics":true,"can_send_welcome_messages":true}}}}"#,
     );
-    assert_eq!(session.supergroup_sign_messages.get(&25), Some(&true));
-    assert_eq!(session.supergroup_show_message_sender.get(&25), Some(&true));
-    assert_eq!(session.supergroup_manage_topics_right.get(&25), Some(&true));
-    assert_eq!(session.supergroup_change_info_right.get(&25), Some(&true));
-    assert_eq!(session.supergroup_send_welcome_right.get(&25), Some(&true));
+    assert_eq!(
+        session.groups.supergroup_sign_messages.get(&25),
+        Some(&true)
+    );
+    assert_eq!(
+        session.groups.supergroup_show_message_sender.get(&25),
+        Some(&true)
+    );
+    assert_eq!(
+        session.groups.supergroup_manage_topics_right.get(&25),
+        Some(&true)
+    );
+    assert_eq!(
+        session.groups.supergroup_change_info_right.get(&25),
+        Some(&true)
+    );
+    assert_eq!(
+        session.groups.supergroup_send_welcome_right.get(&25),
+        Some(&true)
+    );
     assert!(session.chat_can_manage_topics(ChatId(13)));
     assert!(session.chat_can_change_info(ChatId(13)));
     assert!(session.chat_can_send_welcome_messages(ChatId(13)));
@@ -563,11 +587,15 @@ fn g2_welcome_pack_and_flag_cached() {
         &sink,
         r#"{"@type":"updateChatWelcomeMessages","chat_id":13,"messages":[{"id":7,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"welcome","entities":[]}}}]}"#,
     );
-    let pack = session.welcome_messages.get(&13).expect("welcome pack");
+    let pack = session
+        .groups
+        .welcome_messages
+        .get(&13)
+        .expect("welcome pack");
     assert_eq!(pack.len(), 1);
     assert_eq!(pack[0].id, 7);
     assert_eq!(
-        session.welcome_message_fetches.get(&13),
+        session.groups.welcome_message_fetches.get(&13),
         Some(&WelcomeMessagesFetch::Loaded)
     );
     apply_json(
@@ -630,7 +658,7 @@ fn g2_chat_boost_status_cached() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_boost_status.get(&13), Some(&(3, 42)));
+    assert_eq!(session.groups.chat_boost_status.get(&13), Some(&(3, 42)));
 }
 
 #[test]
@@ -649,7 +677,10 @@ fn g2_boost_slots_stashed_for_chain() {
             extra.0
         ),
     );
-    assert_eq!(session.boost_slots_by_chat.get(&13), Some(&vec![3, 7]));
+    assert_eq!(
+        session.groups.boost_slots_by_chat.get(&13),
+        Some(&vec![3, 7])
+    );
 }
 
 #[test]
@@ -658,8 +689,11 @@ fn g2_sign_toggle_error_rolls_back() {
     // previous flags when TDLib answers `error`.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.supergroup_sign_messages.insert(25, false);
-    session.supergroup_show_message_sender.insert(25, false);
+    session.groups.supergroup_sign_messages.insert(25, false);
+    session
+        .groups
+        .supergroup_show_message_sender
+        .insert(25, false);
     let extra = session.request(
         RequestPurpose::ToggleSupergroupSignMessages,
         Some(ChatId(13)),
@@ -673,8 +707,11 @@ fn g2_sign_toggle_error_rolls_back() {
         previous_sign: Some(false),
         previous_show: Some(false),
     });
-    session.supergroup_sign_messages.insert(25, true);
-    session.supergroup_show_message_sender.insert(25, true);
+    session.groups.supergroup_sign_messages.insert(25, true);
+    session
+        .groups
+        .supergroup_show_message_sender
+        .insert(25, true);
     apply_json(
         &mut session,
         &seq,
@@ -684,9 +721,12 @@ fn g2_sign_toggle_error_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.supergroup_sign_messages.get(&25), Some(&false));
     assert_eq!(
-        session.supergroup_show_message_sender.get(&25),
+        session.groups.supergroup_sign_messages.get(&25),
+        Some(&false)
+    );
+    assert_eq!(
+        session.groups.supergroup_show_message_sender.get(&25),
         Some(&false)
     );
 }
@@ -697,7 +737,10 @@ fn g2_anti_spam_toggle_error_rolls_back() {
     // flag when TDLib answers `error`.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.supergroup_anti_spam_enabled.insert(25, false);
+    session
+        .groups
+        .supergroup_anti_spam_enabled
+        .insert(25, false);
     let extra = session.request(
         RequestPurpose::ToggleSupergroupAggressiveAntiSpam,
         Some(ChatId(13)),
@@ -710,7 +753,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
         supergroup_id: 25,
         previous: Some(false),
     });
-    session.supergroup_anti_spam_enabled.insert(25, true);
+    session.groups.supergroup_anti_spam_enabled.insert(25, true);
     apply_json(
         &mut session,
         &seq,
@@ -720,7 +763,10 @@ fn g2_anti_spam_toggle_error_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.supergroup_anti_spam_enabled.get(&25), Some(&false));
+    assert_eq!(
+        session.groups.supergroup_anti_spam_enabled.get(&25),
+        Some(&false)
+    );
 }
 
 #[test]
@@ -740,7 +786,7 @@ fn g2_welcome_fetch_error_marks_failed() {
         ),
     );
     assert!(matches!(
-        session.welcome_message_fetches.get(&13),
+        session.groups.welcome_message_fetches.get(&13),
         Some(WelcomeMessagesFetch::Failed(_))
     ));
 }
@@ -751,7 +797,7 @@ fn g2_create_forum_topic_answer_invalidates_topics() {
     // drops the cached topic list so the UI refetches it.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.forum_topics.insert(13, Vec::new());
+    session.threads.forum_topics.insert(13, Vec::new());
     let extra = session.request(RequestPurpose::CreateForumTopic, Some(ChatId(13)));
     apply_json(
         &mut session,
@@ -762,7 +808,7 @@ fn g2_create_forum_topic_answer_invalidates_topics() {
             extra.0
         ),
     );
-    assert!(!session.forum_topics.contains_key(&13));
+    assert!(!session.threads.forum_topics.contains_key(&13));
 }
 
 #[test]
@@ -771,7 +817,7 @@ fn g2_forum_mutation_ok_drops_topic_cache() {
     // cached topic list so the UI refetches it.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.forum_topics.insert(13, Vec::new());
+    session.threads.forum_topics.insert(13, Vec::new());
     let extra = session.request(
         RequestPurpose::Threads(ThreadsPurpose::DeleteForumTopic { forum_topic_id: 5 }),
         Some(ChatId(13)),
@@ -782,7 +828,7 @@ fn g2_forum_mutation_ok_drops_topic_cache() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.forum_topics.contains_key(&13));
+    assert!(!session.threads.forum_topics.contains_key(&13));
 }
 
 #[test]
@@ -791,8 +837,9 @@ fn g2_welcome_delete_ok_drops_pack() {
     // the cached pack so the dialog refetches it.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.welcome_messages.insert(13, Vec::new());
+    session.groups.welcome_messages.insert(13, Vec::new());
     session
+        .groups
         .welcome_message_fetches
         .insert(13, WelcomeMessagesFetch::Loaded);
     let extra = session.request(
@@ -807,8 +854,8 @@ fn g2_welcome_delete_ok_drops_pack() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.welcome_messages.contains_key(&13));
-    assert!(!session.welcome_message_fetches.contains_key(&13));
+    assert!(!session.groups.welcome_messages.contains_key(&13));
+    assert!(!session.groups.welcome_message_fetches.contains_key(&13));
 }
 
 #[test]
@@ -843,7 +890,7 @@ fn pending_join_request_updates_keep_requester_ids() {
         r#"{"@type":"updateChatPendingJoinRequests","chat_id":13,"pending_join_requests":{"@type":"chatJoinRequestsInfo","total_count":2,"user_ids":[7001,7002]}}"#,
     );
     assert_eq!(
-        session.pending_join_request_users.get(&13),
+        session.groups.pending_join_request_users.get(&13),
         Some(&vec![7001, 7002])
     );
     apply_json(
@@ -852,8 +899,11 @@ fn pending_join_request_updates_keep_requester_ids() {
         &sink,
         r#"{"@type":"updateChatPendingJoinRequests","chat_id":13,"pending_join_requests":{"@type":"chatJoinRequestsInfo","total_count":0,"user_ids":[]}}"#,
     );
-    assert_eq!(session.pending_join_request_counts.get(&13), Some(&0));
-    assert!(!session.pending_join_request_users.contains_key(&13));
+    assert_eq!(
+        session.groups.pending_join_request_counts.get(&13),
+        Some(&0)
+    );
+    assert!(!session.groups.pending_join_request_users.contains_key(&13));
 }
 
 #[test]

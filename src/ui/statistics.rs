@@ -199,7 +199,7 @@ impl QuillApp {
                         "Group statistics"
                     }),
             );
-        match session.and_then(|s| s.chat_statistics.get(&chat_id).cloned()) {
+        match session.and_then(|s| s.groups.chat_statistics.get(&chat_id).cloned()) {
             None | Some(ChatStatisticsFetch::Loading) => {
                 body = body.child(
                     div()

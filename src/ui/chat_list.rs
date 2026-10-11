@@ -290,7 +290,7 @@ impl QuillApp {
     ) -> impl IntoElement {
         let name = self
             .session()
-            .and_then(|s| s.communities.get(&community_id))
+            .and_then(|s| s.groups.communities.get(&community_id))
             .map(|c| c.name.clone())
             .unwrap_or_else(|| "Community".to_string());
         div()
@@ -641,11 +641,12 @@ impl QuillApp {
             };
             let ids = session.pinned_chat_ids(drag.archived);
             let names: Vec<(i32, String, i32)> = session
+                .chat_list
                 .chat_folders
                 .iter()
                 .map(|f| (f.id, f.name.clone(), f.color_id))
                 .collect();
-            let tags = session.are_folder_tags_enabled;
+            let tags = session.chat_list.are_folder_tags_enabled;
             let viewing = self.folders.tab;
             let lines = self.appearance.preview_lines;
             let heights = ids
@@ -813,9 +814,9 @@ impl QuillApp {
         let secret = matches!(chat.kind, ChatKind::Secret { .. });
         if !pinned {
             let limit = if archived {
-                session.pinned_archived_chat_count_max
+                session.chat_list.pinned_archived_chat_count_max
             } else {
-                session.pinned_chat_count_max
+                session.chat_list.pinned_chat_count_max
             };
             let pinned_count = session
                 .chats
@@ -1089,7 +1090,7 @@ impl QuillApp {
                             community_mode::retain_community_chats(
                                 &mut chats,
                                 Some(community_id),
-                                &session.community_full_infos,
+                                &session.groups.community_full_infos,
                             );
                         }
                         // Slice CL3: multi-select mode — rows toggle the
@@ -1184,7 +1185,8 @@ impl QuillApp {
                             );
                         }
                         if show_main_list && chats.is_empty() {
-                            let loading = self.session().is_some_and(|s| !s.chats_exhausted);
+                            let loading =
+                                self.session().is_some_and(|s| !s.chat_list.chats_exhausted);
                             list = if loading && folder.is_none() {
                                 // kit Phase 9: skeleton rows while the first
                                 // chat batch is still loading.
@@ -1206,7 +1208,9 @@ impl QuillApp {
                                         // loaded chats is the genuine empty
                                         // state, never a crash.
                                         if self.session().is_some_and(|s| {
-                                            !s.community_full_infos.contains_key(&community_id)
+                                            !s.groups
+                                                .community_full_infos
+                                                .contains_key(&community_id)
                                         }) {
                                             (
                                                 "⏳",

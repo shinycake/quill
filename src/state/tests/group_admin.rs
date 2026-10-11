@@ -273,7 +273,11 @@ fn hide_members_follows_the_server_capability() {
         r#","can_hide_members":true,"has_hidden_members":true"#,
     );
     assert!(session.group_admin_controls(ChatId(13)).hide_members);
-    assert!(session.supergroup_full_infos[&sg].admin.has_hidden_members);
+    assert!(
+        session.groups.supergroup_full_infos[&sg]
+            .admin
+            .has_hidden_members
+    );
 }
 
 #[test]
@@ -526,7 +530,7 @@ fn refused_toggles_roll_back_and_report() {
     let previous = session.set_group_toggle(sg, GroupToggle::HistoryVisible, true);
     assert_eq!(previous, Some(false));
     assert!(
-        session.supergroup_full_infos[&sg]
+        session.groups.supergroup_full_infos[&sg]
             .admin
             .is_all_history_available
     );
@@ -549,12 +553,12 @@ fn refused_toggles_roll_back_and_report() {
         ),
     );
     assert!(
-        !session.supergroup_full_infos[&sg]
+        !session.groups.supergroup_full_infos[&sg]
             .admin
             .is_all_history_available
     );
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not change the group setting (error 400)")
     );
 
@@ -591,7 +595,7 @@ fn refused_protected_content_and_reactions_roll_back() {
     );
     assert!(!session.chat_has_protected_content(ChatId(13)));
 
-    session.chat_available_reactions.insert(
+    session.chats_state.chat_available_reactions.insert(
         13,
         ChatAvailableReactions::All {
             max_reaction_count: 11,
@@ -606,6 +610,7 @@ fn refused_protected_content_and_reactions_roll_back() {
             }),
         });
     session
+        .chats_state
         .chat_available_reactions
         .insert(13, ChatAvailableReactions::none());
     apply_json(

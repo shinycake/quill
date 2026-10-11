@@ -32,7 +32,7 @@ fn launch_links_resolve_locally_instead_of_get_deep_link_info() {
     // tg://resolve and t.me/<user> go straight to searchPublicChat; TDLib's
     // getDeepLinkInfo answers 404 for them.
     for link in ["tg://resolve?domain=durov", "https://t.me/durov"] {
-        driver.session.deep_link = None;
+        driver.session.chats_state.deep_link = None;
         let extra = driver.request_deep_link_info(link).unwrap().unwrap();
         assert_eq!(
             sent_request(&recorder, "searchPublicChat")["username"],
@@ -54,14 +54,14 @@ fn launch_links_resolve_locally_instead_of_get_deep_link_info() {
                 "type": {"@type": "chatTypePrivate", "user_id": 42}, "unread_count": 0}),
         );
         assert!(matches!(
-            driver.session.deep_link,
+            driver.session.chats_state.deep_link,
             Some(DeepLinkState::ChatReady { chat_id, action: DeepLinkAction::OpenUsername { ref domain, .. } })
                 if chat_id.0 == 42 && domain == "durov"
         ));
     }
 
     // Invites (web `+hash`) go through the checked preview, never auto-join.
-    driver.session.deep_link = None;
+    driver.session.chats_state.deep_link = None;
     driver
         .request_deep_link_info("https://t.me/+AbCd")
         .unwrap()
@@ -72,7 +72,7 @@ fn launch_links_resolve_locally_instead_of_get_deep_link_info() {
     );
 
     // A link with no local form still asks TDLib.
-    driver.session.deep_link = None;
+    driver.session.chats_state.deep_link = None;
     driver
         .request_deep_link_info("tg://proxy?server=x&port=1")
         .unwrap()
@@ -92,7 +92,7 @@ fn failed_links_use_tdesktop_wording() {
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let mut fail = |link: &str, code: i32, msg: &str| {
-        driver.session.deep_link = None;
+        driver.session.chats_state.deep_link = None;
         let extra = driver.request_deep_link_info(link).unwrap().unwrap();
         feed(
             &mut driver,
@@ -100,7 +100,7 @@ fn failed_links_use_tdesktop_wording() {
             &sink,
             json!({"@type": "error", "@extra": extra.as_extra(), "code": code, "message": msg}),
         );
-        match driver.session.deep_link.clone() {
+        match driver.session.chats_state.deep_link.clone() {
             Some(DeepLinkState::ShowText(text)) => text,
             other => panic!("unexpected {other:?}"),
         }
@@ -132,12 +132,12 @@ fn open_with(
     link: &str,
     answer: serde_json::Value,
 ) -> Option<DeepLinkState> {
-    driver.session.deep_link = None;
+    driver.session.chats_state.deep_link = None;
     let extra = driver.request_deep_link_info(link).unwrap().unwrap();
     let mut answer = answer;
     answer["@extra"] = json!(extra.as_extra());
     feed(driver, seq, sink, answer);
-    driver.session.deep_link.clone()
+    driver.session.chats_state.deep_link.clone()
 }
 
 fn info_action(state: Option<DeepLinkState>) -> DeepLinkAction {
@@ -184,7 +184,7 @@ fn typed_links_route_through_get_internal_link_type() {
             "is_installed":false,"stickers":[]}),
     );
     assert_eq!(
-        driver.session.deep_link,
+        driver.session.chats_state.deep_link,
         Some(DeepLinkState::Ui(DeepLinkUi::StickerSet { set_id: 777 }))
     );
 
@@ -217,7 +217,7 @@ fn typed_links_route_through_get_internal_link_type() {
             "message":{"@type":"message","id":3145728},"media_timestamp":30,
             "topic_id":{"@type":"messageTopicThread","message_thread_id":2097152}}),
     );
-    let action = info_action(driver.session.deep_link.clone());
+    let action = info_action(driver.session.chats_state.deep_link.clone());
     assert_eq!(
         action,
         DeepLinkAction::OpenChatById {
@@ -237,7 +237,7 @@ fn typed_links_route_through_get_internal_link_type() {
             "type":{"@type":"chatTypeSupergroup","supergroup_id":1001,"is_channel":false},"unread_count":0}),
     );
     assert!(matches!(
-        driver.session.deep_link,
+        driver.session.chats_state.deep_link,
         Some(DeepLinkState::ChatReady { chat_id, .. }) if chat_id.0 == -1001
     ));
 
@@ -260,7 +260,7 @@ fn typed_links_route_through_get_internal_link_type() {
         json!({"@type":"messageLinkInfo","@extra":extra.as_extra(),"chat_id":0}),
     );
     assert!(matches!(
-        driver.session.deep_link,
+        driver.session.chats_state.deep_link,
         Some(DeepLinkState::ShowText(_))
     ));
 
@@ -291,7 +291,7 @@ fn typed_links_route_through_get_internal_link_type() {
         json!({"@type":"chatBoostLinkInfo","@extra":extra.as_extra(),"is_public":false,"chat_id":-1001}),
     );
     assert_eq!(
-        info_action(driver.session.deep_link.clone()),
+        info_action(driver.session.chats_state.deep_link.clone()),
         DeepLinkAction::OpenChannelBoost { chat_id: -1001 }
     );
     // A link that names no channel is explained, not opened.
@@ -313,7 +313,7 @@ fn typed_links_route_through_get_internal_link_type() {
         json!({"@type":"chatBoostLinkInfo","@extra":extra.as_extra(),"is_public":false,"chat_id":0}),
     );
     assert!(matches!(
-        driver.session.deep_link,
+        driver.session.chats_state.deep_link,
         Some(DeepLinkState::ShowText(_))
     ));
 
@@ -338,7 +338,7 @@ fn typed_links_route_through_get_internal_link_type() {
         json!({"@type":"user","@extra":extra.as_extra(),"id":4242,"first_name":"Ann"}),
     );
     assert_eq!(
-        info_action(driver.session.deep_link.clone()),
+        info_action(driver.session.chats_state.deep_link.clone()),
         DeepLinkAction::OpenUserDraft {
             user_id: 4242,
             draft: "hi".into()
@@ -475,7 +475,7 @@ fn typed_link_failures_use_clear_wording() {
         json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"PHONE_NOT_OCCUPIED"}),
     );
     assert_eq!(
-        driver.session.deep_link,
+        driver.session.chats_state.deep_link,
         Some(DeepLinkState::ShowText(
             "The phone number +1555000 is not on Telegram yet.".into()
         ))
@@ -502,7 +502,7 @@ fn bot_links_resolve_the_bot_with_search_public_chat() {
         "chessbot"
     );
     assert!(matches!(
-        driver.session.deep_link,
+        driver.session.chats_state.deep_link,
         Some(DeepLinkState::ResolvingChat { ref action, .. }) if *action == game
     ));
 

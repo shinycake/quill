@@ -86,6 +86,7 @@ impl Fixture {
         if manage {
             self.driver
                 .session
+                .groups
                 .supergroup_manage_topics_right
                 .insert(16, true);
         }
@@ -261,7 +262,7 @@ fn saved_sublists_load_open_page_pin_and_delete() {
         "loadSavedMessagesTopics",
         r#"{"@type":"error","@extra":"EXTRA","code":404,"message":"Not Found"}"#,
     );
-    assert!(f.driver.session.saved.topics_exhausted);
+    assert!(f.driver.session.threads.saved.topics_exhausted);
     assert!(f.driver.load_saved_topics().unwrap().is_none());
 
     f.driver.open_saved_sublist(77).unwrap();
@@ -292,8 +293,8 @@ fn saved_sublists_load_open_page_pin_and_delete() {
         "deleteSavedMessagesTopicHistory",
         r#"{"@type":"ok","@extra":"EXTRA"}"#,
     );
-    assert!(f.driver.session.saved.topics.is_empty());
-    assert!(f.driver.session.saved.sublist.is_none());
+    assert!(f.driver.session.threads.saved.topics.is_empty());
+    assert!(f.driver.session.threads.saved.sublist.is_none());
 }
 
 #[test]
@@ -322,7 +323,7 @@ fn tag_label_needs_premium_and_filter_searches_saved_messages() {
     assert_eq!(sent[0]["tag"]["@type"], "reactionTypeEmoji");
     // 12 characters at most, and the bar shows the name at once.
     assert!(sent[0]["label"].as_str().unwrap().chars().count() <= 12);
-    assert_eq!(f.driver.session.saved.tags[0].label, "A very long");
+    assert_eq!(f.driver.session.threads.saved.tags[0].label, "A very long");
 
     // Filter by tag: searchSavedMessages over all of Saved Messages.
     f.driver.filter_saved_by_tag(tag.clone()).unwrap();
@@ -335,7 +336,7 @@ fn tag_label_needs_premium_and_filter_searches_saved_messages() {
             r#"{{"@type":"foundChatMessages","@extra":"EXTRA","total_count":1,"messages":[{{"id":9,"chat_id":{ME},"date":1,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"tagged","entities":[]}}}}}}],"next_from_message_id":0}}"#
         ),
     );
-    let found = f.driver.session.saved.tag_search.as_ref().unwrap();
+    let found = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
     assert_eq!(found.history.messages.len(), 1);
     assert!(found.history.loaded_complete);
     // Inside a sublist the same filter is scoped to that sublist.

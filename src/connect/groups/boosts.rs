@@ -17,7 +17,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        if self.session.chat_boost_status.contains_key(&chat_id.0)
+        if self
+            .session
+            .groups
+            .chat_boost_status
+            .contains_key(&chat_id.0)
             || self
                 .session
                 .requests
@@ -55,7 +59,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        if self.session.boost_intent == Some(chat_id.0)
+        if self.session.groups.boost_intent == Some(chat_id.0)
             || self
                 .session
                 .requests
@@ -73,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.boost_intent = Some(chat_id.0);
+        self.session.groups.boost_intent = Some(chat_id.0);
         Ok(Some(extra))
     }
 
@@ -82,13 +86,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// An empty slot list (or a failed slots request) just drops the
     /// intent; `boostChat` errors are reported by the reducer.
     pub(crate) fn maybe_continue_boost(&mut self) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.boost_intent else {
+        let Some(chat_id) = self.session.groups.boost_intent else {
             return Ok(());
         };
-        let Some(slots) = self.session.boost_slots_by_chat.remove(&chat_id) else {
+        let Some(slots) = self.session.groups.boost_slots_by_chat.remove(&chat_id) else {
             return Ok(());
         };
-        self.session.boost_intent = None;
+        self.session.groups.boost_intent = None;
         let Some(slot_id) = slots.into_iter().next() else {
             return Ok(());
         };

@@ -88,7 +88,7 @@ impl QuillApp {
     ) {
         let cached = self
             .session()
-            .and_then(|session| session.admin_rights.get(&(chat_id.0, user_id)))
+            .and_then(|session| session.groups.admin_rights.get(&(chat_id.0, user_id)))
             .and_then(|fetch| match fetch {
                 AdminRightsFetch::Loaded(rights) => Some(*rights),
                 _ => None,
@@ -729,7 +729,12 @@ impl QuillApp {
                 } if prefix == "admin-edit-right" => {
                     let cached = self
                         .session()
-                        .and_then(|session| session.admin_rights.get(&(dialog.chat_id.0, *user_id)))
+                        .and_then(|session| {
+                            session
+                                .groups
+                                .admin_rights
+                                .get(&(dialog.chat_id.0, *user_id))
+                        })
                         .and_then(|fetch| match fetch {
                             AdminRightsFetch::Loaded(rights) => Some(*rights),
                             _ => None,
@@ -780,7 +785,7 @@ impl QuillApp {
     ) -> AnyElement {
         let admin_ids: std::collections::HashSet<i64> = self
             .session()
-            .and_then(|session| session.admin_lists.get(&chat_id.0))
+            .and_then(|session| session.groups.admin_lists.get(&chat_id.0))
             .and_then(|fetch| match fetch {
                 AdminListFetch::Loaded(list) => Some(list),
                 _ => None,
@@ -797,6 +802,7 @@ impl QuillApp {
                 MemberListFilter::Search
             };
             session
+                .groups
                 .supergroup_members
                 .get(&(chat_id.0, filter))
                 .cloned()
@@ -975,7 +981,7 @@ impl QuillApp {
             .unwrap_or_else(|| format!("User {user_id}"));
         let cached = self
             .session()
-            .and_then(|session| session.admin_rights.get(&(chat_id.0, user_id)))
+            .and_then(|session| session.groups.admin_rights.get(&(chat_id.0, user_id)))
             .and_then(|fetch| match fetch {
                 AdminRightsFetch::Loaded(rights) => Some(*rights),
                 _ => None,

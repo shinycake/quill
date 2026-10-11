@@ -679,8 +679,8 @@ impl QuillApp {
             .session()
             .map(|s| {
                 (
-                    s.available_accent_color_ids.clone(),
-                    s.profile_accent_colors.clone(),
+                    s.chats_state.available_accent_color_ids.clone(),
+                    s.chats_state.profile_accent_colors.clone(),
                 )
             })
             .unwrap_or_default();

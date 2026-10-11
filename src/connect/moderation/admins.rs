@@ -20,7 +20,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if matches!(
-            self.session.admin_lists.get(&chat_id.0),
+            self.session.groups.admin_lists.get(&chat_id.0),
             Some(AdminListFetch::Loading | AdminListFetch::Loaded(_))
         ) || self
             .session
@@ -30,6 +30,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.session
+            .groups
             .admin_lists
             .insert(chat_id.0, AdminListFetch::Loading);
         let extra = self
@@ -40,7 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_administrators(extra, chat_id.0))
         {
             self.session.requests.take(extra);
-            self.session.admin_lists.remove(&chat_id.0);
+            self.session.groups.admin_lists.remove(&chat_id.0);
             return Err(err);
         }
         Ok(Some(extra))
@@ -52,7 +53,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.admin_lists.remove(&chat_id.0);
+        self.session.groups.admin_lists.remove(&chat_id.0);
         self.fetch_chat_administrators(chat_id)
     }
 
@@ -76,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.event_logs.remove(&chat_id.0);
+        self.session.groups.event_logs.remove(&chat_id.0);
         self.fetch_chat_event_log(chat_id)
     }
 
@@ -87,9 +88,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn set_chat_event_log_query(&mut self, chat_id: ChatId, query: &str) {
         let query = query.trim().to_string();
         if query.is_empty() {
-            self.session.event_log_queries.remove(&chat_id.0);
+            self.session.groups.event_log_queries.remove(&chat_id.0);
         } else {
-            self.session.event_log_queries.insert(chat_id.0, query);
+            self.session
+                .groups
+                .event_log_queries
+                .insert(chat_id.0, query);
         }
     }
 
@@ -98,21 +102,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn toggle_chat_event_log_user(&mut self, chat_id: ChatId, user_id: i64) {
         let mut users = self
             .session
+            .groups
             .event_log_users
             .get(&chat_id.0)
             .cloned()
             .unwrap_or_default();
         crate::admin_extras::toggle_event_log_user(&mut users, user_id);
         if users.is_empty() {
-            self.session.event_log_users.remove(&chat_id.0);
+            self.session.groups.event_log_users.remove(&chat_id.0);
         } else {
-            self.session.event_log_users.insert(chat_id.0, users);
+            self.session.groups.event_log_users.insert(chat_id.0, users);
         }
     }
 
     /// Show every admin again.
     pub fn clear_chat_event_log_users(&mut self, chat_id: ChatId) {
-        self.session.event_log_users.remove(&chat_id.0);
+        self.session.groups.event_log_users.remove(&chat_id.0);
     }
 
     /// Slice G2: flip one event-log filter category for the chat
@@ -125,15 +130,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) {
         let mut set = self
             .session
+            .groups
             .event_log_filters
             .get(&chat_id.0)
             .copied()
             .unwrap_or_default();
         toggle(&mut set);
         if set.any_enabled() {
-            self.session.event_log_filters.insert(chat_id.0, set);
+            self.session.groups.event_log_filters.insert(chat_id.0, set);
         } else {
-            self.session.event_log_filters.remove(&chat_id.0);
+            self.session.groups.event_log_filters.remove(&chat_id.0);
         }
     }
 
@@ -145,7 +151,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let from_event_id = match self.session.event_logs.get(&chat_id.0) {
+        let from_event_id = match self.session.groups.event_logs.get(&chat_id.0) {
             Some(ChatEventLogFetch::Loaded(page)) if page.has_more => {
                 page.events.last().map(|event| event.id).unwrap_or(0)
             }
@@ -172,7 +178,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if from_event_id == 0
             && matches!(
-                self.session.event_logs.get(&chat_id.0),
+                self.session.groups.event_logs.get(&chat_id.0),
                 Some(ChatEventLogFetch::Loading | ChatEventLogFetch::Loaded(_))
             )
         {
@@ -183,23 +189,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if from_event_id == 0 {
             self.session
+                .groups
                 .event_logs
                 .insert(chat_id.0, ChatEventLogFetch::Loading);
         }
         let filters = self
             .session
+            .groups
             .event_log_filters
             .get(&chat_id.0)
             .copied()
             .filter(|filters| filters.any_enabled());
         let query = self
             .session
+            .groups
             .event_log_queries
             .get(&chat_id.0)
             .cloned()
             .unwrap_or_default();
         let user_ids = self
             .session
+            .groups
             .event_log_users
             .get(&chat_id.0)
             .cloned()
@@ -219,7 +229,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )) {
             self.session.requests.take(extra);
             if from_event_id == 0 {
-                self.session.event_logs.remove(&chat_id.0);
+                self.session.groups.event_logs.remove(&chat_id.0);
             }
             return Err(err);
         }
@@ -295,7 +305,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // caller can bypass it. Unknown/unloaded list → allow and let
         // TDLib reject as the backstop.
         let is_owner = matches!(
-            self.session.admin_lists.get(&chat_id.0),
+            self.session.groups.admin_lists.get(&chat_id.0),
             Some(AdminListFetch::Loaded(list))
                 if list.iter().any(|e| e.user_id == user_id && e.is_owner)
         );
@@ -322,7 +332,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if matches!(
-            self.session.admin_rights.get(&(chat_id.0, user_id)),
+            self.session.groups.admin_rights.get(&(chat_id.0, user_id)),
             Some(AdminRightsFetch::Loading | AdminRightsFetch::Loaded(_))
         ) {
             return Ok(None);
@@ -332,6 +342,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.session
+            .groups
             .admin_rights
             .insert((chat_id.0, user_id), AdminRightsFetch::Loading);
         let extra = self.session.request(purpose, Some(chat_id));
@@ -340,7 +351,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_member(extra, chat_id, user_id))
         {
             self.session.requests.take(extra);
-            self.session.admin_rights.remove(&(chat_id.0, user_id));
+            self.session
+                .groups
+                .admin_rights
+                .remove(&(chat_id.0, user_id));
             return Err(err);
         }
         Ok(Some(extra))
@@ -353,7 +367,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         user_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.admin_rights.remove(&(chat_id.0, user_id));
+        self.session
+            .groups
+            .admin_rights
+            .remove(&(chat_id.0, user_id));
         self.fetch_admin_rights(chat_id, user_id)
     }
 }

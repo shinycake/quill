@@ -92,7 +92,7 @@ impl QuillApp {
         }
         let fetch = self
             .session()
-            .and_then(|session| session.event_logs.get(&chat_id.0))
+            .and_then(|session| session.groups.event_logs.get(&chat_id.0))
             .cloned();
         let mut section = div()
             .id("event-log-section")
@@ -159,14 +159,14 @@ impl QuillApp {
         section = section.child(controls);
         let active_filters = self
             .session()
-            .and_then(|session| session.event_log_filters.get(&chat_id.0).copied())
+            .and_then(|session| session.groups.event_log_filters.get(&chat_id.0).copied())
             .unwrap_or_default();
         section = section.child(self.event_log_filter_chips(chat_id, active_filters, cx));
         // The admin filter is server side (`getChatEventLog.user_ids`), so
         // the chips come from the administrator list, not the loaded page.
         let selected_admins = self
             .session()
-            .and_then(|session| session.event_log_users.get(&chat_id.0).cloned())
+            .and_then(|session| session.groups.event_log_users.get(&chat_id.0).cloned())
             .unwrap_or_default();
         let filtered_by_admin = !selected_admins.is_empty();
         let admins = self.event_log_admin_ids(chat_id, fetch.as_ref());
@@ -248,7 +248,7 @@ impl QuillApp {
     ) -> Vec<i64> {
         let from_list =
             self.session()
-                .and_then(|session| match session.admin_lists.get(&chat_id.0) {
+                .and_then(|session| match session.groups.admin_lists.get(&chat_id.0) {
                     Some(AdminListFetch::Loaded(entries)) => Some(
                         entries
                             .iter()
@@ -434,7 +434,11 @@ impl QuillApp {
     /// refetch (empty selection = all types).
     pub(super) fn clear_event_log_filters(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.event_log_filters.remove(&chat_id.0);
+            live.driver
+                .session
+                .groups
+                .event_log_filters
+                .remove(&chat_id.0);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
                 self.connection.status_note = "could not clear filters".into();
             }

@@ -182,6 +182,7 @@ impl QuillApp {
             .filter(|u| u.profile_accent_color_id >= 0)
             .and_then(|u| {
                 session
+                    .chats_state
                     .profile_accent_colors
                     .iter()
                     .find(|color| color.id == u.profile_accent_color_id)

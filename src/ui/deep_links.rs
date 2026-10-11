@@ -59,24 +59,24 @@ impl QuillApp {
         }
         // One flow at a time: a link waits until the previous one has been
         // consumed (an invite preview stays up until the user decides).
-        if live.driver.session.deep_link.is_none()
+        if live.driver.session.chats_state.deep_link.is_none()
             && let Some(link) = self.pending_deep_link.take()
         {
             let _ = live.driver.request_deep_link_info(&link);
         }
         // Consume terminal states once, retaining the invite preview until a decision.
-        let state = live.driver.session.deep_link.take();
+        let state = live.driver.session.chats_state.deep_link.take();
         if !deep_link_step_redraws(state.as_ref(), self.links.deep_link_invite.as_ref()) {
             // Nothing new (this runs on every poll, ~8×/s when idle): put
             // the state back and don't redraw.
-            live.driver.session.deep_link = state;
+            live.driver.session.chats_state.deep_link = state;
             return;
         }
         match state {
             None
             | Some(DeepLinkState::ResolvingInfo { .. })
             | Some(DeepLinkState::ResolvingChat { .. }) => {
-                live.driver.session.deep_link = state;
+                live.driver.session.chats_state.deep_link = state;
             }
             Some(DeepLinkState::Info {
                 text,
@@ -102,7 +102,7 @@ impl QuillApp {
             }
             Some(preview @ DeepLinkState::InvitePreview { .. }) => {
                 self.links.deep_link_invite = Some(preview.clone());
-                live.driver.session.deep_link = Some(preview);
+                live.driver.session.chats_state.deep_link = Some(preview);
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
                 self.links.pending_deep_link_open = Some((chat_id, action));
@@ -204,9 +204,9 @@ impl QuillApp {
         if let Some(DeepLinkState::InvitePreview { generation, .. }) =
             self.links.deep_link_invite.take()
             && let Some(live) = self.live.as_mut()
-            && matches!(live.driver.session.deep_link, Some(DeepLinkState::InvitePreview { generation: slot, .. }) if slot == generation)
+            && matches!(live.driver.session.chats_state.deep_link, Some(DeepLinkState::InvitePreview { generation: slot, .. }) if slot == generation)
         {
-            live.driver.session.deep_link = None;
+            live.driver.session.chats_state.deep_link = None;
         }
         cx.notify();
     }

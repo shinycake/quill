@@ -137,7 +137,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             delete_chat_folder_invite_link(extra, folder_id, invite_link),
         )?;
-        if let Some(links) = self.session.folder_invite_links.get_mut(&folder_id) {
+        if let Some(links) = self
+            .session
+            .chat_list
+            .folder_invite_links
+            .get_mut(&folder_id)
+        {
             links.retain(|link| link.invite_link != invite_link);
         }
         Ok(sent)
@@ -152,10 +157,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.folder_invite_link = Some(invite_link.to_string());
-        self.session.folder_invite_info = None;
-        self.session.folder_invite_error = None;
-        self.session.folder_invite_done = false;
+        self.session.chat_list.folder_invite_link = Some(invite_link.to_string());
+        self.session.chat_list.folder_invite_info = None;
+        self.session.chat_list.folder_invite_error = None;
+        self.session.chat_list.folder_invite_done = false;
         let extra = self
             .session
             .request(RequestPurpose::CheckChatFolderInviteLink, None);
@@ -198,7 +203,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.folder_invite_error = None;
+        self.session.chat_list.folder_invite_error = None;
         let extra = self
             .session
             .request(RequestPurpose::AddChatFolderByInviteLink, None);
@@ -220,6 +225,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let shared = self
             .session
+            .chat_list
             .chat_folders
             .iter()
             .any(|f| f.id == folder_id && f.is_shareable);
@@ -232,10 +238,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let period = std::time::Duration::from_secs(
-            u64::try_from(self.session.folder_limits.new_chats_period_secs()).unwrap_or(3600),
+            u64::try_from(self.session.chat_list.folder_limits.new_chats_period_secs())
+                .unwrap_or(3600),
         );
         if self
             .session
+            .chat_list
             .folder_new_chats_asked
             .get(&folder_id)
             .is_some_and(|asked| asked.elapsed() < period)
@@ -243,6 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.session
+            .chat_list
             .folder_new_chats_asked
             .insert(folder_id, std::time::Instant::now());
         let extra = self
@@ -269,7 +278,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             process_chat_folder_new_chats(extra, folder_id, chat_ids),
         )?;
-        self.session.folder_new_chats.remove(&folder_id);
+        self.session.chat_list.folder_new_chats.remove(&folder_id);
         Ok(sent)
     }
 
@@ -312,7 +321,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         };
         let code = kind.request_code();
-        if self.session.folder_limits.has_premium_pair(kind)
+        if self.session.chat_list.folder_limits.has_premium_pair(kind)
             || self
                 .session
                 .requests

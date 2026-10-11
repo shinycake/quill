@@ -560,16 +560,18 @@ impl QuillApp {
     /// Slice G1: cached join-by-request flag for a supergroup chat.
     pub(super) fn chat_join_by_request(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup_id(chat_id).is_some_and(|id| {
-            self.session()
-                .is_some_and(|session| session.supergroup_join_by_request.get(&id) == Some(&true))
+            self.session().is_some_and(|session| {
+                session.groups.supergroup_join_by_request.get(&id) == Some(&true)
+            })
         })
     }
 
     /// Slice G1: cached broadcast-group flag for a supergroup chat.
     pub(super) fn chat_is_broadcast(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup_id(chat_id).is_some_and(|id| {
-            self.session()
-                .is_some_and(|session| session.supergroup_is_broadcast.get(&id) == Some(&true))
+            self.session().is_some_and(|session| {
+                session.groups.supergroup_is_broadcast.get(&id) == Some(&true)
+            })
         })
     }
 
@@ -731,7 +733,7 @@ impl QuillApp {
     ) {
         let current = self
             .session()
-            .and_then(|s| s.communities.get(&community_id))
+            .and_then(|s| s.groups.communities.get(&community_id))
             .map(|community| community.name.clone())
             .unwrap_or_default();
         // `chat_id` is unused for `CommunityName`; the community id
@@ -827,6 +829,7 @@ impl QuillApp {
             .and_then(|s| {
                 s.chats.get(&chat_id.0).and_then(|chat| match chat.kind {
                     ChatKind::Supergroup { supergroup_id, .. } => s
+                        .groups
                         .supergroup_full_infos
                         .get(&supergroup_id)
                         .map(|info| info.description.clone()),
@@ -1752,7 +1755,7 @@ impl QuillApp {
                         let name = this
                             .session()
                             .and_then(|s| {
-                                s.forum_topics.get(&dialog_state.chat_id.0).and_then(|topics| {
+                                s.threads.forum_topics.get(&dialog_state.chat_id.0).and_then(|topics| {
                                     topics
                                         .iter()
                                         .find(|t| t.forum_topic_id == forum_topic_id)
@@ -1770,7 +1773,7 @@ impl QuillApp {
                         let name = this
                             .session()
                             .and_then(|s| {
-                                s.saved
+                                s.threads.saved
                                     .topics
                                     .get(&topic_id)
                                     .map(|topic| s.saved_topic_title(topic))
@@ -1821,7 +1824,7 @@ impl QuillApp {
                     GroupConfirmAction::DeleteCommunity { community_id } => {
                         let name = this
                             .session()
-                            .and_then(|s| s.communities.get(&community_id))
+                            .and_then(|s| s.groups.communities.get(&community_id))
                             .map(|c| c.name.clone())
                             .unwrap_or_else(|| "this community".to_string());
                         (

@@ -46,18 +46,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the error arm can roll back.
         let previous_sign = self
             .session
+            .groups
             .supergroup_sign_messages
             .get(&supergroup_id)
             .copied();
         let previous_show = self
             .session
+            .groups
             .supergroup_show_message_sender
             .get(&supergroup_id)
             .copied();
         self.session
+            .groups
             .supergroup_sign_messages
             .insert(supergroup_id, sign_messages);
         self.session
+            .groups
             .supergroup_show_message_sender
             .insert(supergroup_id, sign_messages && show_message_sender);
         if let Some(pending) = self.session.requests.pending_mut(extra) {
@@ -115,10 +119,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the error arm can roll back.
         let previous = self
             .session
+            .groups
             .supergroup_anti_spam_enabled
             .get(&supergroup_id)
             .copied();
         self.session
+            .groups
             .supergroup_anti_spam_enabled
             .insert(supergroup_id, enabled);
         if let Some(pending) = self.session.requests.pending_mut(extra) {

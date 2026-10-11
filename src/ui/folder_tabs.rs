@@ -123,7 +123,8 @@ impl QuillApp {
         let folders: Vec<(i32, String, String)> = self
             .session()
             .map(|s| {
-                s.chat_folders
+                s.chat_list
+                    .chat_folders
                     .iter()
                     .map(|f| (f.id, f.name.clone(), f.icon_name.clone()))
                     .collect()
@@ -134,8 +135,10 @@ impl QuillApp {
             let include_muted = session.settings.badge_prefs.include_muted_folders;
             for slot in &mut slots {
                 let pair = match slot.kind {
-                    FolderSlotKind::All => session.unread_totals.main.chats,
-                    FolderSlotKind::Folder(id) => session.folder_unread_chats.get(&id).copied(),
+                    FolderSlotKind::All => session.chat_list.unread_totals.main.chats,
+                    FolderSlotKind::Folder(id) => {
+                        session.chat_list.folder_unread_chats.get(&id).copied()
+                    }
                     FolderSlotKind::Unread | FolderSlotKind::Archived => None,
                 };
                 slot.badge = pair.and_then(|pair| pair.folder_badge(include_muted));

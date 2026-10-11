@@ -19,27 +19,27 @@ fn unread_totals_are_stored_per_list() {
         apply_json(&mut session, &seq, &sink, json);
     }
     assert_eq!(
-        session.unread_totals.main.messages,
+        session.chat_list.unread_totals.main.messages,
         Some(UnreadPair {
             all: 44,
             unmuted: 13
         })
     );
     assert_eq!(
-        session.unread_totals.main.chats,
+        session.chat_list.unread_totals.main.chats,
         Some(UnreadPair {
             all: 20,
             unmuted: 6
         })
     );
     assert_eq!(
-        session.unread_totals.archive.messages,
+        session.chat_list.unread_totals.archive.messages,
         Some(UnreadPair {
             all: 30,
             unmuted: 0
         })
     );
-    assert_eq!(session.unread_totals.archive.chats, None);
+    assert_eq!(session.chat_list.unread_totals.archive.chats, None);
 }
 
 #[test]
@@ -135,6 +135,6 @@ fn badge_adds_forum_topic_unreads_on_top_of_totals() {
         count_messages: false,
         ..BadgePrefs::default()
     };
-    session.unread_totals.main.chats = Some(UnreadPair { all: 3, unmuted: 3 });
+    session.chat_list.unread_totals.main.chats = Some(UnreadPair { all: 3, unmuted: 3 });
     assert_eq!(badge_count(&session, &chats), 4);
 }

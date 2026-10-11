@@ -107,7 +107,12 @@ impl QuillApp {
     ) {
         self.folders.share = Some(FolderShareDialog::new(window, cx, folder_id));
         if let Some(live) = self.live.as_mut() {
-            if !live.driver.session.folder_specs.contains_key(&folder_id)
+            if !live
+                .driver
+                .session
+                .chat_list
+                .folder_specs
+                .contains_key(&folder_id)
                 && let Err(err) = live.driver.fetch_chat_folder(folder_id)
             {
                 self.connection.status_note = format!("could not load folder: {err:?}");
@@ -127,7 +132,7 @@ impl QuillApp {
     /// Chats a link may include, in the list's order.
     fn folder_link_choices(&self, folder_id: i32) -> Vec<i64> {
         self.session()
-            .and_then(|s| s.folder_link_chats.get(&folder_id).cloned())
+            .and_then(|s| s.chat_list.folder_link_chats.get(&folder_id).cloned())
             .unwrap_or_default()
     }
 
@@ -143,8 +148,14 @@ impl QuillApp {
         // tdesktop `FilterLinksLimitBox`: a folder has a few links at most.
         if link.is_none() {
             let full = self.session().is_some_and(|s| {
-                let count = s.folder_invite_links.get(&folder_id).map_or(0, Vec::len);
-                s.folder_limits.links_full(count, s.my_is_premium())
+                let count = s
+                    .chat_list
+                    .folder_invite_links
+                    .get(&folder_id)
+                    .map_or(0, Vec::len);
+                s.chat_list
+                    .folder_limits
+                    .links_full(count, s.my_is_premium())
             });
             if full {
                 self.show_folder_limit(quill::folder_limits::FolderLimitKind::InviteLinks, cx);
@@ -248,7 +259,11 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let links = session.folder_invite_links.entry(folder_id).or_default();
+        let links = session
+            .chat_list
+            .folder_invite_links
+            .entry(folder_id)
+            .or_default();
         match link {
             Some(url) => {
                 if let Some(existing) = links.iter_mut().find(|l| l.invite_link == url) {
@@ -262,7 +277,12 @@ impl QuillApp {
                 chat_ids,
             }),
         }
-        if let Some(info) = session.chat_folders.iter_mut().find(|f| f.id == folder_id) {
+        if let Some(info) = session
+            .chat_list
+            .chat_folders
+            .iter_mut()
+            .find(|f| f.id == folder_id)
+        {
             info.is_shareable = true;
             info.has_my_invite_links = true;
         }
@@ -279,7 +299,7 @@ impl QuillApp {
                 .map(|_| ()),
             None => {
                 if let Some(session) = self.demo_session.as_mut()
-                    && let Some(links) = session.folder_invite_links.get_mut(&folder_id)
+                    && let Some(links) = session.chat_list.folder_invite_links.get_mut(&folder_id)
                 {
                     links.retain(|l| l.invite_link != link);
                 }
@@ -309,8 +329,8 @@ impl QuillApp {
     pub(super) fn drain_folder_share(&mut self, cx: &mut Context<Self>) -> bool {
         let (saved, error) = match self.session_mut_any() {
             Some(session) => (
-                std::mem::take(&mut session.folder_link_saved),
-                session.folder_share_error.take(),
+                std::mem::take(&mut session.chat_list.folder_link_saved),
+                session.chat_list.folder_share_error.take(),
             ),
             None => return false,
         };
@@ -358,7 +378,7 @@ impl QuillApp {
             let folder_id = state.folder_id;
             let name = this
                 .session()
-                .and_then(|s| s.chat_folders.iter().find(|f| f.id == folder_id))
+                .and_then(|s| s.chat_list.chat_folders.iter().find(|f| f.id == folder_id))
                 .map(|f| f.name.clone())
                 .unwrap_or_default();
             let editing = matches!(state.view, FolderShareView::Edit { .. });
@@ -396,10 +416,10 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let spec = self
             .session()
-            .and_then(|s| s.folder_specs.get(&folder_id).cloned());
+            .and_then(|s| s.chat_list.folder_specs.get(&folder_id).cloned());
         let links = self
             .session()
-            .and_then(|s| s.folder_invite_links.get(&folder_id).cloned());
+            .and_then(|s| s.chat_list.folder_invite_links.get(&folder_id).cloned());
         let mut body = div().flex().flex_col().gap_3();
         if let Some(error) = state.error.clone() {
             body = body.child(
@@ -569,7 +589,7 @@ impl QuillApp {
         let choices = self.folder_link_choices(folder_id);
         let loaded = self
             .session()
-            .is_some_and(|s| s.folder_link_chats.contains_key(&folder_id));
+            .is_some_and(|s| s.chat_list.folder_link_chats.contains_key(&folder_id));
         if loaded && choices.is_empty() {
             body = body.child(
                 div()
@@ -734,10 +754,10 @@ impl QuillApp {
     pub(super) fn close_folder_invite(&mut self, cx: &mut Context<Self>) {
         self.folders.invite = None;
         if let Some(session) = self.session_mut_any() {
-            session.folder_invite_link = None;
-            session.folder_invite_info = None;
-            session.folder_invite_error = None;
-            session.folder_invite_done = false;
+            session.chat_list.folder_invite_link = None;
+            session.chat_list.folder_invite_info = None;
+            session.chat_list.folder_invite_error = None;
+            session.chat_list.folder_invite_done = false;
         }
         cx.notify();
     }
@@ -750,7 +770,10 @@ impl QuillApp {
             return false;
         }
         let (info, done) = match self.session() {
-            Some(s) => (s.folder_invite_info.clone(), s.folder_invite_done),
+            Some(s) => (
+                s.chat_list.folder_invite_info.clone(),
+                s.chat_list.folder_invite_done,
+            ),
             None => return false,
         };
         let mut changed = false;
@@ -794,7 +817,7 @@ impl QuillApp {
             && self
                 .live
                 .as_ref()
-                .is_some_and(|l| l.driver.session.folder_invite_error.is_some())
+                .is_some_and(|l| l.driver.session.chat_list.folder_invite_error.is_some())
         {
             dialog.adding = false;
             changed = true;
@@ -813,7 +836,9 @@ impl QuillApp {
         }) else {
             return;
         };
-        let info = self.session().and_then(|s| s.folder_invite_info.clone());
+        let info = self
+            .session()
+            .and_then(|s| s.chat_list.folder_invite_info.clone());
         let Some(info) = info else { return };
         // A new folder keeps every chat of the link; chats already joined
         // are part of it whatever was ticked.
@@ -832,7 +857,7 @@ impl QuillApp {
                 }
                 Err(err) => {
                     if let Some(session) = self.session_mut_any() {
-                        session.folder_invite_error =
+                        session.chat_list.folder_invite_error =
                             Some(format!("Couldn't add the folder: {err:?}"));
                     }
                 }
@@ -840,7 +865,7 @@ impl QuillApp {
             None => {
                 // Screenshot demo: finish without a server.
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.folder_invite_done = true;
+                    session.chat_list.folder_invite_done = true;
                 }
             }
         }
@@ -866,8 +891,8 @@ impl QuillApp {
             };
             let muted = cx.theme().muted_foreground;
             let session = this.session();
-            let info = session.and_then(|s| s.folder_invite_info.clone());
-            let error = session.and_then(|s| s.folder_invite_error.clone());
+            let info = session.and_then(|s| s.chat_list.folder_invite_info.clone());
+            let error = session.and_then(|s| s.chat_list.folder_invite_error.clone());
             let close_btn = |label: &'static str, cx: &mut Context<QuillApp>| {
                 Button::new("folder-invite-close")
                     .label(label)

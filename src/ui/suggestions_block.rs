@@ -12,7 +12,7 @@ use quill::chatlist_suggestions::{Suggestion, copy, pick};
 
 impl QuillApp {
     fn current_suggestion(&self) -> Option<Suggestion> {
-        let facts = &self.session()?.suggestions;
+        let facts = &self.session()?.chat_list.suggestions;
         let today = quill::local_time::civil_local(quill::local_time::now_unix());
         pick(facts, today.month, today.day)
     }
@@ -29,9 +29,9 @@ impl QuillApp {
                 if let Some(demo) = self.demo_session.as_mut() {
                     match quill::chatlist_suggestions::dismiss_action(suggestion) {
                         Some(action) => {
-                            demo.suggestions.actions.remove(action);
+                            demo.chat_list.suggestions.actions.remove(action);
                         }
-                        None => demo.suggestions.birthdays_hidden = true,
+                        None => demo.chat_list.suggestions.birthdays_hidden = true,
                     }
                 }
             }
@@ -69,7 +69,7 @@ impl QuillApp {
     /// tomorrow, from `updateContactCloseBirthdays`. A tap opens the chat.
     pub(super) fn birthday_contacts_block(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let list = &session.suggestions.close_birthdays;
+        let list = &session.chat_list.suggestions.close_birthdays;
         if list.is_empty() {
             return None;
         }

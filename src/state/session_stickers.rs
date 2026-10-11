@@ -6,7 +6,7 @@ impl Session {
         [&self.stickers.stickers, &self.stickers.recent, &self.stickers.favorites,
             &self.stickers.found_stickers, &self.stickers.suggestions].into_iter()
             .flatten().any(|sticker| sticker.file_id == file_id && sticker.requires_premium)
-            || self.histories.values().flat_map(|history| history.messages.values()).chain(self.topic_histories.values().flat_map(|history| history.messages.values())).any(|message| {
+            || self.histories.values().flat_map(|history| history.messages.values()).chain(self.threads.topic_histories.values().flat_map(|history| history.messages.values())).any(|message| {
                 matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium)
             })
     }

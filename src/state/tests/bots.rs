@@ -71,7 +71,7 @@ fn b2_start_and_similar_bots_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not start the bot (error 400)")
     );
     let extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
@@ -85,7 +85,7 @@ fn b2_start_and_similar_bots_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not load similar bots (error 403)")
     );
 }

@@ -193,7 +193,7 @@ fn refused_profile_edits_surface_as_a_notice() {
         RequestPurpose::SetPersonalChat,
         RequestPurpose::SetUserNote,
     ] {
-        session.chat_action_error = None;
+        session.chats_state.chat_action_error = None;
         let extra = session.request(purpose, None);
         apply_json(
             &mut session,
@@ -205,7 +205,7 @@ fn refused_profile_edits_surface_as_a_notice() {
             ),
         );
         assert_eq!(
-            session.chat_action_error.as_deref(),
+            session.chats_state.chat_action_error.as_deref(),
             Some("could not save the change (error 400)")
         );
     }
@@ -267,7 +267,7 @@ fn refused_report_and_personal_photo_surface_as_notices() {
             "could not save the change (error 400)",
         ),
     ] {
-        session.chat_action_error = None;
+        session.chats_state.chat_action_error = None;
         let extra = session.request(purpose, None);
         apply_json(
             &mut session,
@@ -278,6 +278,9 @@ fn refused_report_and_personal_photo_surface_as_notices() {
                 extra.0
             ),
         );
-        assert_eq!(session.chat_action_error.as_deref(), Some(expected));
+        assert_eq!(
+            session.chats_state.chat_action_error.as_deref(),
+            Some(expected)
+        );
     }
 }

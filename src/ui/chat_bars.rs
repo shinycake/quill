@@ -502,6 +502,7 @@ impl QuillApp {
     fn join_requests_bar(&self, chat_id: ChatId, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let count = session
+            .groups
             .pending_join_request_counts
             .get(&chat_id.0)
             .copied()
@@ -510,6 +511,7 @@ impl QuillApp {
             return None;
         }
         let users = session
+            .groups
             .pending_join_request_users
             .get(&chat_id.0)
             .cloned()
@@ -590,7 +592,11 @@ impl QuillApp {
             _search_subscription: subscription,
         });
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.join_request_queries.remove(&chat_id.0);
+            live.driver
+                .session
+                .groups
+                .join_request_queries
+                .remove(&chat_id.0);
             let _ = live.driver.refresh_chat_join_requests(chat_id);
         }
         cx.notify();
@@ -605,6 +611,7 @@ impl QuillApp {
         let current = live
             .driver
             .session
+            .groups
             .join_request_queries
             .get(&chat_id.0)
             .map(String::as_str)
@@ -723,13 +730,13 @@ impl QuillApp {
             };
             let fetch = this
                 .session()
-                .and_then(|s| s.join_requests.get(&chat_id.0))
+                .and_then(|s| s.groups.join_requests.get(&chat_id.0))
                 .cloned();
             let mut title = "Join requests".to_string();
             let mut body = div().flex().flex_col().gap_2();
             let searching = this
                 .session()
-                .and_then(|s| s.join_request_queries.get(&chat_id.0))
+                .and_then(|s| s.groups.join_request_queries.get(&chat_id.0))
                 .is_some_and(|q| !q.is_empty());
             body = body.child(
                 Textarea::new(&search)
