@@ -401,7 +401,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Groups in common list <!-- parity:profile-groups-in-common -->
 - [x] Similar channels and bots list on a profile <!-- parity:profile-similar-channels -->
 - [x] Personal channel on a profile <!-- parity:profile-personal-channel -->
-- [ ] Business hours and location rows <!-- parity:profile-business-hours -->
+- [x] Business hours and location rows <!-- parity:profile-business-hours -->
 - [ ] Shared media tabs: separate Photos and Videos, round videos, Polls, Stories, Gifts, Saved Music <!-- parity:profile-media-tabs -->
 - [ ] Shared media calendar and jump by month <!-- parity:profile-media-calendar -->
 - [ ] Members list inline in the group info panel with online first and admin badges <!-- parity:profile-members-inline -->
@@ -411,7 +411,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Bot "Open App" main mini-app button <!-- parity:profile-bot-open-app -->
 - [ ] Profile action row: Message, Mute, Call, Video, Gift, More <!-- parity:profile-action-row -->
 - [x] Unofficial-client warning on a profile <!-- parity:profile-unofficial-warning -->
-- [ ] Fragment number note in the phone context menu <!-- parity:profile-fragment-note -->
+- [x] Fragment number note in the phone context menu <!-- parity:profile-fragment-note -->
 - [x] Topic and thread info panels <!-- parity:profile-topic-info -->
 
 ### Media

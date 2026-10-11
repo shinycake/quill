@@ -1,2 +1,0 @@
-parity:profile-business-hours
-parity:profile-fragment-note
