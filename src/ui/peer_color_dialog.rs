@@ -2,8 +2,9 @@
 //! account's name color, reply icon, profile color and profile icon, with a
 //! live preview. Applying needs Telegram Premium; without it the button
 //! opens Premium and sends nothing, like tdesktop's `ShowPremiumPreview`.
-//! Collectible (unique gift) colors are not offered: Quill does not read
-//! `upgradedGiftColors` yet.
+//! The Name tab also lists gifts whose colors can be worn
+//! (`getReceivedGifts` with `exclude_without_colors`), applied with
+//! `setUpgradedGiftColors`.
 
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
@@ -38,9 +39,26 @@ impl QuillApp {
         Some(PeerColorDraft {
             name_color_id: user.accent_color_id,
             name_emoji_id: user.background_custom_emoji_id,
+            gift_colors_id: user.upgraded_gift_colors_id,
             profile_color_id: user.profile_accent_color_id,
             profile_emoji_id: user.profile_background_custom_emoji_id,
         })
+    }
+
+    /// Appearance settings entry (tdesktop `settings_chat.cpp` "Your color").
+    pub(super) fn appearance_peer_color_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.appearance_section(
+            cx,
+            "Your color",
+            "Name color, profile color and the icons on your replies and profile.",
+            Button::new("appearance-your-color")
+                .label("Your color…")
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.open_peer_color_dialog(PeerColorTab::Name, cx);
+                }))
+                .into_any_element(),
+        )
     }
 
     pub(super) fn open_peer_color_dialog(&mut self, tab: PeerColorTab, cx: &mut Context<Self>) {
@@ -52,6 +70,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.users_state.profile_edit_error = None;
             let _ = live.driver.load_background_emoji_icons();
+            let _ = live.driver.load_wearable_gifts();
         }
         self.dialogs.peer_color_dialog = Some(PeerColorDialog {
             tab,
@@ -103,10 +122,13 @@ impl QuillApp {
                 live.driver.session.users_state.profile_edit_error = None;
                 let mut failed = false;
                 if name {
-                    failed |= live
-                        .driver
-                        .set_accent_color(draft.name_color_id, draft.name_emoji_id)
-                        .is_err();
+                    failed |= if draft.gift_colors_id != 0 {
+                        live.driver.set_upgraded_gift_colors(draft.gift_colors_id)
+                    } else {
+                        live.driver
+                            .set_accent_color(draft.name_color_id, draft.name_emoji_id)
+                    }
+                    .is_err();
                 }
                 if profile {
                     failed |= live
@@ -143,6 +165,7 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title("Color preview"));
             if let Some(live) = this.live.as_mut() {
                 live.driver.download_background_emoji_icons();
+                live.driver.download_wearable_gift_stickers();
             }
             let Some(body) = this.peer_color_body(cx) else {
                 return dialog.on_close(on_close);
@@ -337,7 +360,21 @@ impl QuillApp {
             .unwrap_or_default();
         let profile_swatch_rows = profile_swatches(&profile_ids, &profile_palette);
 
-        let name_color: Hsla = super::chat_theme::peer_name_color(draft.name_color_id);
+        let worn_gift = (draft.gift_colors_id != 0)
+            .then(|| {
+                session.and_then(|s| {
+                    s.users_state
+                        .wearable_gifts
+                        .iter()
+                        .filter_map(|gift| gift.gift.colors.as_ref())
+                        .find(|colors| colors.id == draft.gift_colors_id)
+                })
+            })
+            .flatten();
+        let name_color: Hsla = match worn_gift {
+            Some(colors) => rgb_to_hsla(colors.accent(dark)),
+            None => super::chat_theme::peer_name_color(draft.name_color_id),
+        };
         let profile_rgb = profile_swatch_rows
             .iter()
             .find(|s| s.id == draft.profile_color_id)
@@ -476,9 +513,14 @@ impl QuillApp {
                         format!("peer-color-name-{id}"),
                         swatch.rgb,
                         "",
-                        draft.name_color_id == id,
+                        draft.gift_colors_id == 0 && draft.name_color_id == id,
                         cx,
-                        move |this, cx| this.edit_peer_color(cx, |d, _| d.name_color_id = id),
+                        move |this, cx| {
+                            this.edit_peer_color(cx, |d, _| {
+                                d.name_color_id = id;
+                                d.gift_colors_id = 0;
+                            })
+                        },
                     ));
                 }
             }
@@ -545,8 +587,15 @@ impl QuillApp {
                 ),
             );
         }
+        panel = panel.child(div().text_xs().text_color(muted).child(about));
+        if tab == PeerColorTab::Name {
+            panel = panel.child(self.peer_color_gift_row(draft.gift_colors_id, cx));
+        }
+        // A worn gift brings its own icon, so the picker hides.
+        if tab == PeerColorTab::Name && draft.gift_colors_id != 0 {
+            return Some(self.peer_color_finish(panel, premium, status, muted));
+        }
         panel = panel
-            .child(div().text_xs().text_color(muted).child(about))
             .child(div().font_semibold().child(icon_title))
             .child(self.peer_color_icon_grid(selected_icon, cx))
             .when(icons_empty && !icons_failed, |this| {
@@ -561,6 +610,17 @@ impl QuillApp {
                 )
             })
             .child(div().text_xs().text_color(muted).child(icon_about));
+        Some(self.peer_color_finish(panel, premium, status, muted))
+    }
+
+    /// The closing notes shared by every layout of the body.
+    fn peer_color_finish(
+        &self,
+        mut panel: Stateful<Div>,
+        premium: bool,
+        status: Option<(String, bool)>,
+        muted: Hsla,
+    ) -> AnyElement {
         if !premium {
             panel = panel.child(
                 div()
@@ -577,7 +637,95 @@ impl QuillApp {
                     .child(text),
             );
         }
-        Some(panel.into_any_element())
+        panel.into_any_element()
+    }
+
+    /// Collectible gifts whose colors can be worn: one tile each.
+    fn peer_color_gift_row(&self, worn: i64, cx: &mut Context<Self>) -> AnyElement {
+        let Some(session) = self.session() else {
+            return div().into_any_element();
+        };
+        let roots = self.media_display_roots();
+        let mut row = div()
+            .id("peer-color-gifts")
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .role(Role::List)
+            .aria_label("Collectible gifts");
+        let mut count = 0;
+        for (ix, gift) in session.users_state.wearable_gifts.iter().enumerate() {
+            let Some(colors) = gift.gift.colors.clone() else {
+                continue;
+            };
+            count += 1;
+            let selected = worn == colors.id;
+            let backdrop = match gift.gift.backdrop {
+                Some((center, edge)) => div().bg(linear_gradient(
+                    180.,
+                    linear_color_stop(rgb(center), 0.),
+                    linear_color_stop(rgb(edge), 1.),
+                )),
+                None => div().bg(cx.theme().muted),
+            };
+            row = row.child(
+                backdrop
+                    .id(("peer-color-gift", ix))
+                    .w(px(110.))
+                    .h(px(92.))
+                    .rounded_lg()
+                    .border_2()
+                    .border_color(if selected {
+                        cx.theme().primary
+                    } else {
+                        Hsla::from(rgba(0x0000_0000))
+                    })
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .role(Role::Button)
+                    .aria_label(format!(
+                        "Wear {}{}",
+                        gift.headline(),
+                        if selected { ", selected" } else { "" }
+                    ))
+                    .tab_index(0)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let colors = colors.clone();
+                        this.edit_peer_color(cx, move |d, _| {
+                            d.gift_colors_id = colors.id;
+                            d.name_emoji_id = colors.model_emoji_id;
+                        });
+                    }))
+                    .child(super::premium_ui::sticker_tile(
+                        ("peer-color-gift-sticker", ix as u64),
+                        gift.gift.sticker.as_ref(),
+                        &session.media.files,
+                        &roots,
+                        52.,
+                        "\u{1F381}",
+                    ))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(gpui_kit::white())
+                            .child(gift.headline()),
+                    ),
+            );
+        }
+        if count == 0 {
+            return div().into_any_element();
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(div().font_semibold().child("Wear a collectible"))
+            .child(row)
+            .into_any_element()
     }
 }
 

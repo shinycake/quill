@@ -146,3 +146,15 @@ pub fn get_default_background_custom_emoji_stickers(extra: RequestId) -> String 
     })
     .to_string()
 }
+
+/// `setUpgradedGiftColors upgraded_gift_colors_id:int64 = Ok;` (TDLib
+/// 1.8.68, `schema/td_api.tl:15209`): wear the colors of an owned or
+/// hosted collectible gift; Telegram Premium only.
+pub fn set_upgraded_gift_colors(extra: RequestId, upgraded_gift_colors_id: i64) -> String {
+    json!({
+        "@type": "setUpgradedGiftColors",
+        "@extra": extra.as_extra(),
+        "upgraded_gift_colors_id": upgraded_gift_colors_id,
+    })
+    .to_string()
+}

@@ -31,7 +31,8 @@ impl Session {
                 | RequestPurpose::SetProfilePhoto
                 | RequestPurpose::DeleteProfilePhoto
                 | RequestPurpose::SetProfileAccentColor
-                | RequestPurpose::SetAccentColor,
+                | RequestPurpose::SetAccentColor
+                | RequestPurpose::SetUpgradedGiftColors,
             ) => {
                 self.users_state.profile_edit_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));

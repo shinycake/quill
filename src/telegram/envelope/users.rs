@@ -131,6 +131,9 @@ pub struct ParsedUser {
     /// line 2403) — preserved when `setProfileAccentColor` changes the
     /// color; 0 if none.
     pub profile_background_custom_emoji_id: i64,
+    /// `user.upgraded_gift_colors.id` (schema 1.8.68, line 2712): the
+    /// collectible gift whose colors the user wears; 0 if none.
+    pub upgraded_gift_colors_id: i64,
     /// Rich-text premium gate: `user.is_premium` (schema 1.8.67, line
     /// 2403) — whether the user has Telegram Premium (gates
     /// `premiumFeatureRichMessages`, "The ability to send rich messages").
@@ -332,6 +335,10 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     // TDLib JSON writes int64 as a string.
     let profile_background_custom_emoji_id =
         int64(value.get("profile_background_custom_emoji_id")).unwrap_or(0);
+    let upgraded_gift_colors_id = value
+        .get("upgraded_gift_colors")
+        .and_then(crate::gift_colors::parse_upgraded_gift_colors)
+        .map_or(0, |colors| colors.id);
     let is_premium = value
         .get("is_premium")
         .and_then(Value::as_bool)
@@ -386,6 +393,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         background_custom_emoji_id,
         profile_accent_color_id,
         profile_background_custom_emoji_id,
+        upgraded_gift_colors_id,
         is_premium,
         verification,
         emoji_status_id,

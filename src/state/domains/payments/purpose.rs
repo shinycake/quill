@@ -43,6 +43,9 @@ pub enum PaymentsPurpose {
     GetReceivedGifts {
         append: bool,
     },
+    /// `getReceivedGifts` filtered to gifts with wearable colors, for the
+    /// color editor's collectible row.
+    GetWearableGifts,
     /// `toggleGiftIsSaved` for the gift in `PremiumHub::gift_selected`.
     ToggleGiftSaved {
         saved: bool,

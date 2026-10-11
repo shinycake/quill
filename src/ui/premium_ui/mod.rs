@@ -29,7 +29,7 @@ use std::rc::Rc;
 const GRID_TILE: f32 = 132.0;
 
 /// A gift/giveaway sticker (or a fallback glyph until it is downloaded).
-fn sticker_tile(
+pub(in crate::ui) fn sticker_tile(
     id: (&'static str, u64),
     sticker: Option<&StickerContent>,
     files: &HashMap<i32, ParsedFile>,

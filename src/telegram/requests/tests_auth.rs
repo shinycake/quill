@@ -414,3 +414,15 @@ fn set_accent_color_request_shape_matches_1_8_68() {
     assert_eq!(v["@type"], "getDefaultBackgroundCustomEmojiStickers");
     assert_eq!(v["@extra"], "81");
 }
+
+#[test]
+fn set_upgraded_gift_colors_request_shape_matches_1_8_68() {
+    let v: serde_json::Value = serde_json::from_str(&set_upgraded_gift_colors(
+        RequestId(82),
+        5_368_324_170_671_202_286,
+    ))
+    .unwrap();
+    assert_eq!(v["@type"], "setUpgradedGiftColors");
+    assert_eq!(v["@extra"], "82");
+    assert_eq!(v["upgraded_gift_colors_id"], 5_368_324_170_671_202_286_i64);
+}

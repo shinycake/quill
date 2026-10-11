@@ -39,7 +39,8 @@ fn settings_action(target: SettingsTarget) -> Option<NavigationAction> {
         SettingsTarget::NewChannel => Some(NavigationAction::Channel),
         SettingsTarget::SavedMessages => Some(NavigationAction::Saved),
         SettingsTarget::Premium => Some(NavigationAction::Premium),
-        SettingsTarget::Root
+        SettingsTarget::PeerColor(_)
+        | SettingsTarget::Root
         | SettingsTarget::Unsupported
         | SettingsTarget::PrivacyPolicy
         | SettingsTarget::Language => None,
@@ -69,6 +70,9 @@ impl QuillApp {
             DeepLinkUi::Background { name } => self.open_background_link(name, cx),
             DeepLinkUi::GiftCode { code } => self.open_gift_code_link(code, cx),
             DeepLinkUi::LanguagePack { id } => self.open_language_pack_link(id, cx),
+            DeepLinkUi::Settings(SettingsTarget::PeerColor(tab)) => {
+                self.open_peer_color_dialog(tab, cx);
+            }
             DeepLinkUi::Settings(target) => {
                 match settings_action(target) {
                     Some(action) => self.navigate(action, window, cx),

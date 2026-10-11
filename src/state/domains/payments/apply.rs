@@ -156,6 +156,21 @@ impl Session {
             }
             PaymentsPayload::ReceivedGifts(page) => {
                 if let Some(p) = pending
+                    && p.purpose == RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)
+                {
+                    let files: Vec<ParsedFile> = page
+                        .gifts
+                        .iter()
+                        .flat_map(|gift| gift.gift.files.iter().cloned())
+                        .collect();
+                    self.remember_files(&files);
+                    self.users_state.wearable_gifts = page
+                        .gifts
+                        .into_iter()
+                        .filter(|gift| gift.gift.colors.is_some())
+                        .collect();
+                    self.users_state.wearable_gifts_loaded = true;
+                } else if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
                         p.purpose
                     && p.id.0 == self.payments.hub.gifts_request

@@ -140,6 +140,9 @@ pub enum SettingsTarget {
     NewGroup,
     NewChannel,
     SavedMessages,
+    /// The "Your color" box (`profile-color` and `your-color` subsections
+    /// of the appearance and edit-profile sections) on a tab.
+    PeerColor(crate::peer_color::PeerColorTab),
     /// The Telegram Premium page (`internalLinkTypePremiumFeaturesPage`).
     Premium,
     /// "Privacy Policy": a web page, so Quill says where it is.
@@ -209,7 +212,29 @@ fn flag(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn settings_target(section: Option<&str>) -> SettingsTarget {
+/// tdesktop's `profile-color[/profile|/name[/...]]`, `your-color[/...]`
+/// subsections open the color box; `name` picks its tab.
+fn peer_color_target(section: &str, subsection: &str) -> Option<SettingsTarget> {
+    let in_section = matches!(
+        section,
+        "settingsSectionAppearance" | "settingsSectionEditProfile"
+    );
+    let color = subsection.starts_with("profile-color") || subsection.starts_with("your-color");
+    if !in_section || !color {
+        return None;
+    }
+    let tab = if subsection.split('/').nth(1) == Some("name") {
+        crate::peer_color::PeerColorTab::Name
+    } else {
+        crate::peer_color::PeerColorTab::Profile
+    };
+    Some(SettingsTarget::PeerColor(tab))
+}
+
+fn settings_target(section: Option<&str>, subsection: &str) -> SettingsTarget {
+    if let Some(target) = section.and_then(|section| peer_color_target(section, subsection)) {
+        return target;
+    }
     match section.unwrap_or("settingsSectionFeatures") {
         "settingsSectionAppearance" => SettingsTarget::Appearance,
         "settingsSectionChatFolders" => SettingsTarget::ChatFolders,
@@ -307,6 +332,11 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
                 .get("section")
                 .and_then(|s| s.get("@type"))
                 .and_then(Value::as_str),
+            value
+                .get("section")
+                .and_then(|s| s.get("subsection"))
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
         )),
         "ContactsPage" => InternalLink::Settings(SettingsTarget::Contacts),
         "CallsPage" => InternalLink::Settings(SettingsTarget::Calls),

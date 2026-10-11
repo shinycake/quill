@@ -66,6 +66,30 @@ pub fn get_received_gifts(
     .to_string()
 }
 
+/// `getReceivedGifts` for the gifts whose colors the account can wear
+/// (`exclude_without_colors`): the "Name" tab's collectible row.
+pub fn get_wearable_gifts(extra: RequestId, owner_id: MessageSender, limit: i32) -> String {
+    json!({
+        "@type": "getReceivedGifts",
+        "@extra": extra.as_extra(),
+        "business_connection_id": "",
+        "owner_id": owner(owner_id),
+        "collection_id": 0,
+        "exclude_unsaved": false,
+        "exclude_saved": false,
+        "exclude_unlimited": false,
+        "exclude_upgradable": false,
+        "exclude_non_upgradable": false,
+        "exclude_upgraded": false,
+        "exclude_without_colors": true,
+        "exclude_hosted": false,
+        "sort_by_price": false,
+        "offset": "",
+        "limit": limit,
+    })
+    .to_string()
+}
+
 /// `toggleGiftIsSaved`: show (`true`) or hide a received gift on the
 /// profile. Only valid for the user's own gifts.
 pub fn toggle_gift_is_saved(extra: RequestId, received_gift_id: &str, is_saved: bool) -> String {
@@ -111,6 +135,20 @@ mod tests {
 
     fn v(s: &str) -> Value {
         serde_json::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn wearable_gifts_request_only_asks_for_colored_gifts() {
+        let req = v(&get_wearable_gifts(
+            RequestId(3),
+            MessageSender::User { user_id: 7 },
+            50,
+        ));
+        assert_eq!(req["@type"], "getReceivedGifts");
+        assert_eq!(req["exclude_without_colors"], true);
+        assert_eq!(req["exclude_hosted"], false);
+        assert_eq!(req["owner_id"]["user_id"], 7);
+        assert_eq!(req["limit"], 50);
     }
 
     #[test]
