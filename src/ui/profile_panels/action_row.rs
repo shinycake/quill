@@ -178,7 +178,7 @@ impl QuillApp {
                     IconName::Gift,
                     "Gift",
                     cx.listener(|this, _, window, cx| {
-                        this.navigate(NavigationAction::Gift, window, cx)
+                        this.navigate(NavigationAction::SendGift, window, cx)
                     }),
                     cx,
                 )

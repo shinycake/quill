@@ -7,9 +7,10 @@ use crate::premium_hub::TxFilter;
 use crate::state::PaymentsPurpose;
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::MessageSender;
+use crate::telegram::requests_gifts::get_received_gifts_in;
 use crate::telegram::requests_premium::{
-    get_premium_features, get_premium_state, get_premium_sticker_examples, get_received_gifts,
-    get_star_transactions, sell_gift, toggle_gift_is_saved,
+    get_premium_features, get_premium_state, get_premium_sticker_examples, get_star_transactions,
+    sell_gift, toggle_gift_is_saved,
 };
 
 /// Rows per `getStarTransactions` page.
@@ -112,6 +113,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         hub.gift_convert_confirm = None;
         hub.gift_mutating = false;
         hub.gifts_stale = false;
+        self.begin_gift_manage(owner);
         self.fetch_received_gifts_page(false)
     }
 
@@ -128,7 +130,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_received_gifts_page(true).map(Some)
     }
 
-    fn fetch_received_gifts_page(&mut self, append: bool) -> Result<RequestId, ConnectSendError> {
+    pub(super) fn fetch_received_gifts_page(
+        &mut self,
+        append: bool,
+    ) -> Result<RequestId, ConnectSendError> {
         let owner = self
             .session
             .payments
@@ -146,7 +151,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         self.session.payments.hub.gifts_loading = true;
         self.session.payments.hub.gifts_request = extra.0;
-        let json = get_received_gifts(extra, owner, &offset, GIFT_PAGE);
+        let collection = self.session.payments.gifts_manage.active_collection;
+        let json = get_received_gifts_in(extra, owner, collection, &offset, GIFT_PAGE);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.payments.hub.gifts_loading = false;
             return Err(err);

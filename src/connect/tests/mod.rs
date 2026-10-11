@@ -25,6 +25,7 @@ mod find_in_history;
 mod flood_retry;
 mod folder_followups;
 mod forum_saved;
+mod gift_manage;
 mod giveaways;
 mod group_admin;
 mod group_calls;

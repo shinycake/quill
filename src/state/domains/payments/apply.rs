@@ -81,6 +81,8 @@ impl Session {
             PaymentsPayload::GiftTextLimit(limit) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGiftTextLimit) {
                     self.payments.gift_text_length_max = usize::try_from(limit).ok();
+                } else {
+                    self.apply_gift_option(limit, pending);
                 }
             }
             PaymentsPayload::GiftPurchaseResult(result) => {
@@ -219,6 +221,7 @@ impl Session {
                     packs.options = options;
                 }
             }
+            PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 self.payments.hub.balance = Some(amount);
             }

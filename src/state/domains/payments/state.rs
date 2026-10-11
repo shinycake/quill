@@ -64,6 +64,8 @@ pub struct PaymentsState {
     pub subscriptions_open: bool,
     /// Premium / Stars / received-gifts hub state (`crate::premium_hub`).
     pub hub: crate::premium_hub::PremiumHub,
+    /// Gift management and the send-gift dialog (`crate::gift_manage`).
+    pub gifts_manage: crate::gift_manage::GiftManageState,
     /// Slice `parity:bots-payment-recurring`: subscription id awaiting
     /// cancel confirmation in the dialog.
     pub subscription_cancel_confirm: Option<String>,
@@ -117,6 +119,7 @@ impl PaymentsState {
             star_subscriptions_mutating: false,
             subscriptions_open: false,
             hub: crate::premium_hub::PremiumHub::default(),
+            gifts_manage: Default::default(),
             subscription_cancel_confirm: None,
             premium_option: None,
             premium_available: None,
