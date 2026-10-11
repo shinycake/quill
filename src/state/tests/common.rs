@@ -101,7 +101,7 @@ pub(crate) fn seed_slow_mode_group(
             extra.0, full_info_fields
         ),
     );
-    session.supergroup_full_infos[&chat_id].fetched_at_ms
+    session.groups.supergroup_full_infos[&chat_id].fetched_at_ms
 }
 
 pub(crate) const SLOW_MODE_FIELDS: &str = r#""slow_mode_delay":30,"slow_mode_delay_expires_in":25.0,"my_boost_count":0,"unrestrict_boost_count":0"#;

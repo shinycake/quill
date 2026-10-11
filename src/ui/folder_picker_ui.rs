@@ -37,8 +37,9 @@ impl QuillApp {
             PickerMode::Include => FolderLimitKind::ChatsIncluded,
             PickerMode::Exclude => FolderLimitKind::ChatsExcluded,
         };
-        self.session()
-            .map_or(0, |s| s.folder_limits.current(kind, s.my_is_premium()))
+        self.session().map_or(0, |s| {
+            s.chat_list.folder_limits.current(kind, s.my_is_premium())
+        })
     }
 
     fn folder_avatar(&self, chat_id: i64, title: &str) -> AnyElement {

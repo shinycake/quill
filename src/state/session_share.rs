@@ -129,10 +129,10 @@ impl Session {
     pub(crate) fn set_chat_message_sender(&mut self, chat_id: i64, sender: Option<MessageSender>) {
         match sender {
             Some(sender) => {
-                self.chat_message_sender.insert(chat_id, sender);
+                self.chats_state.chat_message_sender.insert(chat_id, sender);
             }
             None => {
-                self.chat_message_sender.remove(&chat_id);
+                self.chats_state.chat_message_sender.remove(&chat_id);
             }
         }
     }
@@ -140,18 +140,24 @@ impl Session {
     /// The "send as" identity selected in the chat; `None` when the user
     /// cannot change it (the picker is hidden then).
     pub fn selected_message_sender(&self, chat_id: ChatId) -> Option<MessageSender> {
-        self.chat_message_sender.get(&chat_id.0).copied()
+        self.chats_state
+            .chat_message_sender
+            .get(&chat_id.0)
+            .copied()
     }
 
     /// Whether the composer shows the send-as button: TDLib reported a
     /// selectable sender for the chat (`chat.message_sender_id`).
     pub fn can_choose_message_sender(&self, chat_id: ChatId) -> bool {
-        self.chat_message_sender.contains_key(&chat_id.0)
+        self.chats_state
+            .chat_message_sender
+            .contains_key(&chat_id.0)
     }
 
     /// The loaded `getChatAvailableMessageSenders` list, if any.
     pub fn available_message_senders(&self, chat_id: ChatId) -> &[AvailableMessageSender] {
-        self.send_as_options
+        self.chats_state
+            .send_as_options
             .get(&chat_id.0)
             .map(Vec::as_slice)
             .unwrap_or(&[])

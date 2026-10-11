@@ -177,7 +177,7 @@ impl Session {
             },
             Some(MessageSender::Chat { chat_id }) => (
                 self.chats.get(&chat_id).map(|chat| chat.title.clone()),
-                Some(self.chat_accents.get(&chat_id).map_or_else(
+                Some(self.chats_state.chat_accents.get(&chat_id).map_or_else(
                     || chat_id.rem_euclid(7) as i32,
                     |accent| accent.accent_color_id,
                 )),
@@ -191,7 +191,10 @@ impl Session {
         let id = match sender? {
             MessageSender::User { user_id } => self.user(user_id)?.background_custom_emoji_id,
             MessageSender::Chat { chat_id } => {
-                self.chat_accents.get(&chat_id)?.background_custom_emoji_id
+                self.chats_state
+                    .chat_accents
+                    .get(&chat_id)?
+                    .background_custom_emoji_id
             }
         };
         (id > 0).then_some(id)
@@ -473,7 +476,8 @@ impl Session {
             .into_iter()
             .flat_map(|history| history.messages.values())
             .chain(
-                self.topic_histories
+                self.threads
+                    .topic_histories
                     .iter()
                     .filter(|((chat, _), _)| *chat == open.0)
                     .flat_map(|(_, topic)| topic.messages.values()),

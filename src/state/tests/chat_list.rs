@@ -325,7 +325,7 @@ fn supergroup_username_and_linked_chat_cached() {
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"usernames":null,"is_forum":false,"is_channel":true}}"#,
     );
     assert_eq!(session.supergroup_username(13), Some(""));
-    assert!(session.supergroup_usernames.contains_key(&13));
+    assert!(session.groups.supergroup_usernames.contains_key(&13));
 }
 
 #[test]
@@ -372,7 +372,7 @@ fn chat_folders_update_replaces_list() {
         &sink,
         r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
     );
-    assert_eq!(session.chat_folders.len(), 1);
+    assert_eq!(session.chat_list.chat_folders.len(), 1);
     assert_eq!(session.folder_name(3), Some("Work"));
     apply_json(
         &mut session,
@@ -380,7 +380,7 @@ fn chat_folders_update_replaces_list() {
         &sink,
         r#"{"@type":"updateChatFolders","chat_folders":[],"main_chat_list_position":0,"are_tags_enabled":false}"#,
     );
-    assert!(session.chat_folders.is_empty());
+    assert!(session.chat_list.chat_folders.is_empty());
     assert_eq!(session.folder_name(3), None);
 }
 
@@ -474,16 +474,19 @@ fn folder_chats_to_leave_cached_per_folder() {
         extra.0
     );
     apply_json(&mut session, &seq, &sink, &json);
-    assert_eq!(session.folder_chats_to_leave.get(&3), Some(&vec![5, 6]));
+    assert_eq!(
+        session.chat_list.folder_chats_to_leave.get(&3),
+        Some(&vec![5, 6])
+    );
     // Same payload shape, different purpose: cache untouched.
     let extra2 = session.request(RequestPurpose::SearchChats, None);
     let json2 = json.replace(
         &format!("\"@extra\":\"{}\"", extra.0),
         &format!("\"@extra\":\"{}\"", extra2.0),
     );
-    session.folder_chats_to_leave.clear();
+    session.chat_list.folder_chats_to_leave.clear();
     apply_json(&mut session, &seq, &sink, &json2);
-    assert!(!session.folder_chats_to_leave.contains_key(&3));
+    assert!(!session.chat_list.folder_chats_to_leave.contains_key(&3));
 }
 
 #[test]
@@ -515,7 +518,7 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
     );
     assert!(!session.chats.get(&11).expect("chat").is_pinned);
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not pin the chat (error 400)")
     );
 }
@@ -556,7 +559,7 @@ fn cl1_marked_as_unread_update_and_rollback() {
     );
     assert!(session.chats.get(&12).expect("chat").is_marked_as_unread);
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not change read state (error 400)")
     );
 }
@@ -593,7 +596,7 @@ fn cl1_clear_history_error_surfaces() {
         ),
     );
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not clear history (error 400)")
     );
 }
@@ -625,8 +628,8 @@ fn cl1_pin_limit_options_tracked() {
     // line 13674) feeds the client-side pin pre-check.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    assert_eq!(session.pinned_chat_count_max, 5);
-    assert_eq!(session.pinned_archived_chat_count_max, 100);
+    assert_eq!(session.chat_list.pinned_chat_count_max, 5);
+    assert_eq!(session.chat_list.pinned_archived_chat_count_max, 100);
     apply_json(
         &mut session,
         &seq,
@@ -639,8 +642,8 @@ fn cl1_pin_limit_options_tracked() {
         &sink,
         r#"{"@type":"updateOption","name":"pinned_archived_chat_count_max","value":{"@type":"optionValueInteger","value":200}}"#,
     );
-    assert_eq!(session.pinned_chat_count_max, 10);
-    assert_eq!(session.pinned_archived_chat_count_max, 200);
+    assert_eq!(session.chat_list.pinned_chat_count_max, 10);
+    assert_eq!(session.chat_list.pinned_archived_chat_count_max, 200);
 }
 
 #[test]
@@ -692,7 +695,7 @@ fn cl3_report_chat_result_ok_and_more_info() {
         &format!(r#"{{"@type":"reportChatResultOk","@extra":"{}"}}"#, extra.0),
     );
     assert_eq!(
-        session.report_chat_outcome.as_deref(),
+        session.chats_state.report_chat_outcome.as_deref(),
         Some("chat reported")
     );
 
@@ -707,7 +710,7 @@ fn cl3_report_chat_result_ok_and_more_info() {
         ),
     );
     assert_eq!(
-        session.report_chat_outcome.as_deref(),
+        session.chats_state.report_chat_outcome.as_deref(),
         Some("report needs a reason or messages — the chat list only sends simple spam reports")
     );
 }

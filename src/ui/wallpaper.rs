@@ -256,7 +256,7 @@ impl QuillApp {
         use gpui_kit::component::theme::ActiveTheme;
         let dark = cx.theme().is_dark();
         let telegram = self.session().and_then(|s| {
-            let background = s.default_backgrounds.get(&dark)?;
+            let background = s.chats_state.default_backgrounds.get(&dark)?;
             session_wallpaper(s, background)
         });
         resolve_wallpaper(

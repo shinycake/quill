@@ -105,7 +105,11 @@ impl SendRights {
         let (group, status) = match chat.kind {
             ChatKind::BasicGroup { basic_group_id } => (
                 true,
-                session.basic_group_status.get(&basic_group_id).copied(),
+                session
+                    .groups
+                    .basic_group_status
+                    .get(&basic_group_id)
+                    .copied(),
             ),
             // Broadcast channels: only admins post, the channel footer owns it.
             ChatKind::Supergroup {

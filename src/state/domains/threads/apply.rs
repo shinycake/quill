@@ -19,7 +19,7 @@ impl Session {
             } => self.set_chat_view_as_topics(chat_id.0, view_as_topics),
             ThreadsPayload::UpdateSavedMessagesTopic(topic) => self.apply_saved_topic(*topic),
             ThreadsPayload::UpdateSavedMessagesTopicCount { topic_count } => {
-                self.saved.topic_count = topic_count;
+                self.threads.saved.topic_count = topic_count;
             }
             ThreadsPayload::UpdateSavedMessagesTags {
                 saved_messages_topic_id,
@@ -50,14 +50,14 @@ impl Session {
                             topic,
                         );
                     }
-                    self.forum_topics.insert(chat_id.0, topics);
+                    self.threads.forum_topics.insert(chat_id.0, topics);
                 }
             }
             // Slice G2: `createForumTopic` answers `forumTopicInfo` —
             // drop the cached topic list so the UI refetches it.
             ThreadsPayload::ForumTopic { chat_id } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::CreateForumTopic) {
-                    self.forum_topics.remove(&chat_id);
+                    self.threads.forum_topics.remove(&chat_id);
                 }
             }
             ThreadsPayload::UpdateForumTopicInfo(info) => {

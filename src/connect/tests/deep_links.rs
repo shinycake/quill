@@ -30,7 +30,7 @@ fn invite_check_confirm_cancel_and_stale_answers() {
             .iter()
             .any(|j| j.contains("joinChatByInviteLink"))
     );
-    let generation = driver.session.deep_link_seq;
+    let generation = driver.session.chats_state.deep_link_seq;
     assert_eq!(driver.confirm_deep_link_invite(generation).unwrap(), None);
     let preview = |extra: crate::ids::RequestId| {
         json!({
@@ -44,7 +44,7 @@ fn invite_check_confirm_cancel_and_stale_answers() {
         .ingest(copy_and_parse(&preview(extra), &seq, &sink).unwrap())
         .unwrap();
     assert!(
-        matches!(driver.session.deep_link, Some(DeepLinkState::InvitePreview {
+        matches!(driver.session.chats_state.deep_link, Some(DeepLinkState::InvitePreview {
         ref title, member_count: 1248, creates_join_request: true, is_channel: true, ..
     }) if title == "Rust Community")
     );
@@ -73,7 +73,7 @@ fn invite_check_confirm_cancel_and_stale_answers() {
         )
         .unwrap();
     assert!(
-        matches!(driver.session.deep_link, Some(DeepLinkState::ShowText(ref text)) if text.contains("Join request sent"))
+        matches!(driver.session.chats_state.deep_link, Some(DeepLinkState::ShowText(ref text)) if text.contains("Join request sent"))
     );
 
     let old = driver.resolve_deep_link(action.clone()).unwrap().unwrap();
@@ -82,18 +82,18 @@ fn invite_check_confirm_cancel_and_stale_answers() {
         .ingest(copy_and_parse(&preview(old), &seq, &sink).unwrap())
         .unwrap();
     assert!(matches!(
-        driver.session.deep_link,
+        driver.session.chats_state.deep_link,
         Some(DeepLinkState::ResolvingChat { .. })
     ));
     driver
         .ingest(copy_and_parse(&preview(current), &seq, &sink).unwrap())
         .unwrap();
     // Cancel clears the retained preview; a later confirmation cannot join.
-    driver.session.deep_link = None;
+    driver.session.chats_state.deep_link = None;
     let before = recorder.snapshot().len();
     assert_eq!(
         driver
-            .confirm_deep_link_invite(driver.session.deep_link_seq)
+            .confirm_deep_link_invite(driver.session.chats_state.deep_link_seq)
             .unwrap(),
         None
     );

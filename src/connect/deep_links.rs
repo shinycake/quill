@@ -243,7 +243,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.deep_link.is_some() {
+        if self.session.chats_state.deep_link.is_some() {
             return Ok(None);
         }
         // Like tdesktop's `openLocalUrl`, route the link by its shape
@@ -279,9 +279,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         link: &str,
         internal: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.deep_link_seq = self.session.deep_link_seq.wrapping_add(1);
-        let generation = self.session.deep_link_seq;
-        self.session.deep_link = Some(DeepLinkState::ResolvingInfo { generation });
+        self.session.chats_state.deep_link_seq =
+            self.session.chats_state.deep_link_seq.wrapping_add(1);
+        let generation = self.session.chats_state.deep_link_seq;
+        self.session.chats_state.deep_link = Some(DeepLinkState::ResolvingInfo { generation });
         let (purpose, build): (_, fn(RequestId, &str) -> String) = if internal {
             (
                 RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation }),
@@ -294,7 +295,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             )
         };
         if internal {
-            self.session.deep_link_original = link.to_string();
+            self.session.chats_state.deep_link_original = link.to_string();
         }
         let extra = self.session.request(purpose, None);
         let json = build(extra, link);
@@ -302,7 +303,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.deep_link =
+                self.session.chats_state.deep_link =
                     Some(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }
@@ -321,7 +322,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             hash,
             generation: slot,
             ..
-        }) = self.session.deep_link.clone()
+        }) = self.session.chats_state.deep_link.clone()
         else {
             return Ok(None);
         };
@@ -333,7 +334,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         let json = join_chat_by_invite_link(extra, &format!("https://t.me/+{hash}"));
-        self.session.deep_link = Some(DeepLinkState::ResolvingChat {
+        self.session.chats_state.deep_link = Some(DeepLinkState::ResolvingChat {
             action: DeepLinkAction::JoinInvite { hash },
             generation,
         });
@@ -341,7 +342,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.deep_link =
+                self.session.chats_state.deep_link =
                     Some(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }
@@ -362,8 +363,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || matches!(action, DeepLinkAction::ShareDraft { .. }) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.deep_link_seq = self.session.deep_link_seq.wrapping_add(1);
-        let generation = self.session.deep_link_seq;
+        self.session.chats_state.deep_link_seq =
+            self.session.chats_state.deep_link_seq.wrapping_add(1);
+        let generation = self.session.chats_state.deep_link_seq;
         let purpose = match &action {
             DeepLinkAction::JoinInvite { .. } => {
                 RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation })
@@ -400,12 +402,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_chat(extra, ChatId(-1_000_000_000_000 - channel_id))
             }
         };
-        self.session.deep_link = Some(DeepLinkState::ResolvingChat { action, generation });
+        self.session.chats_state.deep_link =
+            Some(DeepLinkState::ResolvingChat { action, generation });
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.deep_link =
+                self.session.chats_state.deep_link =
                     Some(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }

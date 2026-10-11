@@ -1484,14 +1484,26 @@ impl QuillApp {
         };
         match folder_id {
             Some(id) => {
-                if let Some(info) = session.chat_folders.iter_mut().find(|f| f.id == id) {
+                if let Some(info) = session
+                    .chat_list
+                    .chat_folders
+                    .iter_mut()
+                    .find(|f| f.id == id)
+                {
                     info.name = spec.name.clone();
                 }
-                session.folder_specs.insert(id, spec);
+                session.chat_list.folder_specs.insert(id, spec);
             }
             None => {
-                let id = session.chat_folders.iter().map(|f| f.id).max().unwrap_or(0) + 1;
-                session.chat_folders.push(ChatFolderInfo {
+                let id = session
+                    .chat_list
+                    .chat_folders
+                    .iter()
+                    .map(|f| f.id)
+                    .max()
+                    .unwrap_or(0)
+                    + 1;
+                session.chat_list.chat_folders.push(ChatFolderInfo {
                     id,
                     name: spec.name.clone(),
                     icon_name: spec.icon_name.clone().unwrap_or_default(),
@@ -1499,7 +1511,7 @@ impl QuillApp {
                     is_shareable: false,
                     has_my_invite_links: false,
                 });
-                session.folder_specs.insert(id, spec);
+                session.chat_list.folder_specs.insert(id, spec);
             }
         }
     }
@@ -1509,10 +1521,10 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        session.chat_folders.retain(|f| f.id != folder_id);
-        session.folder_specs.remove(&folder_id);
-        session.folder_chats_to_leave.remove(&folder_id);
-        session.folder_chats_exhausted.remove(&folder_id);
+        session.chat_list.chat_folders.retain(|f| f.id != folder_id);
+        session.chat_list.folder_specs.remove(&folder_id);
+        session.chat_list.folder_chats_to_leave.remove(&folder_id);
+        session.chat_list.folder_chats_exhausted.remove(&folder_id);
     }
 
     /// Parity slice: screenshot-demo folder reorder.
@@ -1522,6 +1534,7 @@ impl QuillApp {
         };
         let order: HashMap<i32, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
         session
+            .chat_list
             .chat_folders
             .sort_by_key(|f| order.get(&f.id).copied().unwrap_or(usize::MAX));
     }

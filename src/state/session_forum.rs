@@ -57,18 +57,20 @@ impl Session {
     /// the topic (or choosing another) closes it.
     fn close_topic_thread_unless(&mut self, topic: Option<i32>) {
         if self
+            .threads
             .thread
             .as_ref()
             .is_some_and(|thread| thread.forum_topic_id.is_some() && thread.forum_topic_id != topic)
         {
-            self.thread = None;
+            self.threads.thread = None;
         }
     }
 
     /// Phase 5.1: cached info for the open topic, if any.
     pub fn open_topic_info(&self, chat_id: ChatId) -> Option<ForumTopic> {
         let topic_id = self.open_topic?;
-        self.forum_topics
+        self.threads
+            .forum_topics
             .get(&chat_id.0)?
             .iter()
             .find(|t| t.forum_topic_id == topic_id)
@@ -79,6 +81,7 @@ impl Session {
     /// (schema: "Topics must be sorted by the order in descending order").
     pub fn ordered_forum_topics(&self, chat_id: ChatId) -> Vec<ForumTopic> {
         let mut topics: Vec<ForumTopic> = self
+            .threads
             .forum_topics
             .get(&chat_id.0)
             .cloned()
@@ -115,14 +118,17 @@ impl Session {
     /// supergroup; server-pushed `updateSupergroup` still refreshes it.
     /// Render sites must filter empty before display.
     pub fn set_supergroup_username(&mut self, supergroup_id: i64, username: String) {
-        self.supergroup_usernames.insert(supergroup_id, username);
+        self.groups
+            .supergroup_usernames
+            .insert(supergroup_id, username);
     }
 
     /// Parity slice: cached first active username for a supergroup, if any.
     /// May be an empty sentinel when the supergroup has no username —
     /// callers should filter empty before rendering.
     pub fn supergroup_username(&self, supergroup_id: i64) -> Option<&str> {
-        self.supergroup_usernames
+        self.groups
+            .supergroup_usernames
             .get(&supergroup_id)
             .map(String::as_str)
     }
@@ -221,6 +227,7 @@ impl Session {
             _ => return None,
         };
         let linked = self
+            .groups
             .supergroup_full_infos
             .get(&supergroup_id)?
             .linked_chat_id;

@@ -1717,7 +1717,8 @@ impl QuillApp {
         let actions = actions?;
         // The sender's standing, when the admin list is loaded; a plain
         // member otherwise (TDLib rejects a ban it does not allow).
-        let (sender_status, sender_can_be_edited) = match session.admin_lists.get(&chat_id.0) {
+        let (sender_status, sender_can_be_edited) = match session.groups.admin_lists.get(&chat_id.0)
+        {
             Some(quill::state::AdminListFetch::Loaded(list)) => list
                 .iter()
                 .find(|entry| entry.user_id == user_id)

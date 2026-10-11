@@ -120,11 +120,12 @@ fn join_request_search_drops_stale_replies_and_pages_with_offset() {
         .unwrap();
     rig.ingest(&requests_json(first, 9, &[1, 2]));
     assert!(matches!(
-        rig.driver.session.join_requests.get(&13),
+        rig.driver.session.groups.join_requests.get(&13),
         Some(JoinRequestFetch::Loading)
     ));
     rig.ingest(&requests_json(second, 3, &[5, 6]));
-    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.join_requests.get(&13) else {
+    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
+    else {
         panic!("loaded");
     };
     assert_eq!(list.requests.len(), 2);
@@ -148,7 +149,8 @@ fn join_request_search_drops_stale_replies_and_pages_with_offset() {
             .is_none()
     );
     rig.ingest(&requests_json(more, 3, &[7]));
-    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.join_requests.get(&13) else {
+    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
+    else {
         panic!("loaded");
     };
     assert_eq!(
@@ -189,13 +191,18 @@ fn process_all_join_requests_clears_the_list_on_ok() {
             .is_none()
     );
     rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0));
-    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.join_requests.get(&13) else {
+    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
+    else {
         panic!("loaded");
     };
     assert!(list.requests.is_empty());
     assert_eq!(list.total_count, 0);
     assert_eq!(
-        rig.driver.session.pending_join_request_counts.get(&13),
+        rig.driver
+            .session
+            .groups
+            .pending_join_request_counts
+            .get(&13),
         Some(&0)
     );
 }
@@ -219,10 +226,10 @@ fn process_all_failure_keeps_the_list_and_reports() {
         extra.0
     ));
     assert!(matches!(
-        rig.driver.session.join_requests.get(&13),
+        rig.driver.session.groups.join_requests.get(&13),
         Some(JoinRequestFetch::Loaded(_))
     ));
-    assert!(rig.driver.session.invite_link_error.is_some());
+    assert!(rig.driver.session.groups.invite_link_error.is_some());
 }
 
 #[test]
@@ -289,7 +296,7 @@ fn link_counts_are_owner_only() {
         extra.0
     ));
     let Some(InviteLinkCountsFetch::Loaded(counts)) =
-        owner.driver.session.invite_link_counts.get(&13)
+        owner.driver.session.groups.invite_link_counts.get(&13)
     else {
         panic!("loaded");
     };
@@ -328,11 +335,11 @@ fn link_members_page_and_ignore_replies_for_a_previous_link() {
         .unwrap()
         .unwrap();
     rig.ingest(&members_json(first, 5, &[1, 2]));
-    let state = &rig.driver.session.invite_link_members[&13];
+    let state = &rig.driver.session.groups.invite_link_members[&13];
     assert!(state.members.is_empty());
     assert!(state.loading);
     rig.ingest(&members_json(second, 3, &[7, 8]));
-    let state = &rig.driver.session.invite_link_members[&13];
+    let state = &rig.driver.session.groups.invite_link_members[&13];
     assert_eq!(state.invite_link, "https://t.me/+b");
     assert_eq!(state.members.len(), 2);
     assert_eq!(state.total_count, 3);
@@ -347,7 +354,7 @@ fn link_members_page_and_ignore_replies_for_a_previous_link() {
     assert_eq!(sent["offset_member"]["joined_chat_date"], 2008);
     assert_eq!(sent["invite_link"], "https://t.me/+b");
     rig.ingest(&members_json(more, 3, &[9]));
-    let state = &rig.driver.session.invite_link_members[&13];
+    let state = &rig.driver.session.groups.invite_link_members[&13];
     assert_eq!(
         state.members.iter().map(|m| m.user_id).collect::<Vec<_>>(),
         vec![7, 8, 9]
@@ -359,7 +366,13 @@ fn link_members_page_and_ignore_replies_for_a_previous_link() {
             .is_none()
     );
     rig.driver.close_chat_invite_link_members(ChatId(13));
-    assert!(!rig.driver.session.invite_link_members.contains_key(&13));
+    assert!(
+        !rig.driver
+            .session
+            .groups
+            .invite_link_members
+            .contains_key(&13)
+    );
 }
 
 fn link_json(link: &str, revoked: bool, primary: bool) -> String {
@@ -403,13 +416,15 @@ fn revoke_moves_the_link_and_deletes_remove_it_from_the_revoked_list() {
         revoke.0,
         link_json("https://t.me/+one", true, false)
     ));
-    let Some(InviteLinkFetch::Loaded(active)) = rig.driver.session.invite_links.get(&13) else {
+    let Some(InviteLinkFetch::Loaded(active)) = rig.driver.session.groups.invite_links.get(&13)
+    else {
         panic!("active loaded");
     };
     assert_eq!(active.links.len(), 1);
     assert_eq!(active.links[0].invite_link, "https://t.me/+two");
     assert_eq!(active.total_count, 1);
-    let Some(InviteLinkFetch::Loaded(gone)) = rig.driver.session.revoked_invite_links.get(&13)
+    let Some(InviteLinkFetch::Loaded(gone)) =
+        rig.driver.session.groups.revoked_invite_links.get(&13)
     else {
         panic!("revoked loaded");
     };
@@ -425,15 +440,16 @@ fn revoke_moves_the_link_and_deletes_remove_it_from_the_revoked_list() {
         "https://t.me/+one"
     );
     rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, delete.0));
-    let Some(InviteLinkFetch::Loaded(gone)) = rig.driver.session.revoked_invite_links.get(&13)
+    let Some(InviteLinkFetch::Loaded(gone)) =
+        rig.driver.session.groups.revoked_invite_links.get(&13)
     else {
         panic!("revoked loaded");
     };
     assert!(gone.links.is_empty());
-    assert!(rig.driver.session.revoked_link_deletions.is_empty());
+    assert!(rig.driver.session.groups.revoked_link_deletions.is_empty());
 
     // Delete-all empties a populated list on ok.
-    rig.driver.session.revoked_invite_links.insert(
+    rig.driver.session.groups.revoked_invite_links.insert(
         13,
         InviteLinkFetch::Loaded(InviteLinkList {
             total_count: 1,
@@ -456,7 +472,8 @@ fn revoke_moves_the_link_and_deletes_remove_it_from_the_revoked_list() {
         rig.driver.session.my_user_id.unwrap_or(0)
     );
     rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, all.0));
-    let Some(InviteLinkFetch::Loaded(gone)) = rig.driver.session.revoked_invite_links.get(&13)
+    let Some(InviteLinkFetch::Loaded(gone)) =
+        rig.driver.session.groups.revoked_invite_links.get(&13)
     else {
         panic!("revoked loaded");
     };
@@ -493,7 +510,8 @@ fn subscription_links_are_for_channel_admins_and_use_the_monthly_period() {
         r#"{{"@type":"chatInviteLink","@extra":"{}","invite_link":"https://t.me/+vip","name":"VIP","creator_user_id":777,"date":1,"edit_date":0,"expiration_date":0,"subscription_pricing":{{"@type":"starSubscriptionPricing","period":2592000,"star_count":250}},"member_limit":0,"member_count":0,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false}}"#,
         extra.0
     ));
-    let Some(InviteLinkFetch::Loaded(list)) = channel.driver.session.invite_links.get(&13) else {
+    let Some(InviteLinkFetch::Loaded(list)) = channel.driver.session.groups.invite_links.get(&13)
+    else {
         panic!("loaded");
     };
     assert_eq!(

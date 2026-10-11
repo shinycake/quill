@@ -116,9 +116,9 @@ impl QuillApp {
         if !session.is_saved_messages(chat_id) {
             return None;
         }
-        if session.saved.tag_search.is_some() {
+        if session.threads.saved.tag_search.is_some() {
             Some(SavedMode::Tag)
-        } else if session.saved.sublist.is_some() {
+        } else if session.threads.saved.sublist.is_some() {
             Some(SavedMode::Sublist)
         } else if session.chat_views_as_topics(chat_id) {
             Some(SavedMode::Sublists)
@@ -133,8 +133,9 @@ impl QuillApp {
         match self.saved_mode()? {
             SavedMode::Sublists => None,
             SavedMode::Sublist => {
-                let view = session.saved.sublist.as_ref()?;
+                let view = session.threads.saved.sublist.as_ref()?;
                 let title = session
+                    .threads
                     .saved
                     .topics
                     .get(&view.topic_id)
@@ -142,10 +143,10 @@ impl QuillApp {
                 Some((title, count_line(view.history.messages.len() as i32)))
             }
             SavedMode::Tag => {
-                let search = session.saved.tag_search.as_ref()?;
+                let search = session.threads.saved.tag_search.as_ref()?;
                 let label = tag_name(
                     &session.saved_tag_choices(),
-                    &session.saved.tags,
+                    &session.threads.saved.tags,
                     &search.tag,
                 );
                 Some((
@@ -163,6 +164,7 @@ impl QuillApp {
             SavedMode::Sublists => None,
             SavedMode::Sublist => Some(
                 session
+                    .threads
                     .saved
                     .sublist
                     .as_ref()?
@@ -174,6 +176,7 @@ impl QuillApp {
             ),
             SavedMode::Tag => Some(
                 session
+                    .threads
                     .saved
                     .tag_search
                     .as_ref()?
@@ -202,7 +205,9 @@ impl QuillApp {
     }
 
     pub(super) fn saved_back(&mut self, cx: &mut Context<Self>) {
-        let tag = self.session().is_some_and(|s| s.saved.tag_search.is_some());
+        let tag = self
+            .session()
+            .is_some_and(|s| s.threads.saved.tag_search.is_some());
         if let Some(live) = self.live.as_mut() {
             if tag {
                 live.driver.clear_saved_tag_filter();
@@ -282,7 +287,12 @@ impl QuillApp {
             (Some(live), None) => live.driver.clear_saved_tag_filter(),
             (None, Some(tag)) => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    let topic = session.saved.sublist.as_ref().map_or(0, |v| v.topic_id);
+                    let topic = session
+                        .threads
+                        .saved
+                        .sublist
+                        .as_ref()
+                        .map_or(0, |v| v.topic_id);
                     session.begin_saved_tag_search(topic, tag);
                 }
             }
@@ -309,7 +319,7 @@ impl QuillApp {
             return;
         }
         let session = &live.driver.session;
-        if !session.saved.tags_loaded
+        if !session.threads.saved.tags_loaded
             && !session
                 .requests
                 .has_purpose(quill::state::RequestPurpose::GetSavedMessagesTags { topic_id: 0 })
@@ -318,8 +328,8 @@ impl QuillApp {
         }
         let session = &live.driver.session;
         if session.chat_views_as_topics(chat_id)
-            && !session.saved.topics_requested
-            && !session.saved.topics_exhausted
+            && !session.threads.saved.topics_requested
+            && !session.threads.saved.topics_exhausted
         {
             let _ = live.driver.load_saved_topics();
         }
@@ -332,9 +342,9 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return div().into_any_element();
         };
-        let topics = session.saved.ordered_topics();
+        let topics = session.threads.saved.ordered_topics();
         if topics.is_empty() {
-            let loading = !session.saved.topics_exhausted;
+            let loading = !session.threads.saved.topics_exhausted;
             return pane_placeholder(
                 if loading {
                     "Loading saved chats"
@@ -373,9 +383,9 @@ impl QuillApp {
             };
             list = list.child(self.saved_sublist_row(topic, title, photo, &now, cx));
         }
-        let more = !session.saved.topics_exhausted
-            && (session.saved.topic_count == 0
-                || session.saved.topics.len() < session.saved.topic_count as usize);
+        let more = !session.threads.saved.topics_exhausted
+            && (session.threads.saved.topic_count == 0
+                || session.threads.saved.topics.len() < session.threads.saved.topic_count as usize);
         if more {
             list = list.child(
                 Button::new("saved-sublists-more")
@@ -528,7 +538,12 @@ impl QuillApp {
         if tags.is_empty() {
             return None;
         }
-        let active = session.saved.tag_search.as_ref().map(|s| s.tag.clone());
+        let active = session
+            .threads
+            .saved
+            .tag_search
+            .as_ref()
+            .map(|s| s.tag.clone());
         let premium = session
             .my_user_id
             .and_then(|id| session.user(id))
@@ -643,7 +658,8 @@ impl QuillApp {
         let current = self
             .session()
             .and_then(|s| {
-                s.saved
+                s.threads
+                    .saved
                     .tags
                     .iter()
                     .find(|entry| entry.tag == tag)
@@ -706,7 +722,7 @@ impl QuillApp {
                 .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))
                 .is_some_and(|u| u.is_premium);
             let named = this.session().is_some_and(|s| {
-                s.saved
+                s.threads.saved
                     .tags
                     .iter()
                     .any(|entry| entry.tag == state.tag && !entry.label.is_empty())

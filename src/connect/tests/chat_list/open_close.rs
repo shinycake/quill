@@ -259,7 +259,7 @@ fn driver_folder_share_requests_and_optimistic_delete() {
         1
     );
 
-    driver.session.folder_invite_links.insert(
+    driver.session.chat_list.folder_invite_links.insert(
         5,
         vec![crate::telegram::envelope::ChatFolderInviteLink {
             invite_link: "https://t.me/addlist/a".into(),
@@ -270,13 +270,13 @@ fn driver_folder_share_requests_and_optimistic_delete() {
     driver
         .delete_folder_invite_link(5, "https://t.me/addlist/a")
         .expect("delete");
-    assert!(driver.session.folder_invite_links[&5].is_empty());
+    assert!(driver.session.chat_list.folder_invite_links[&5].is_empty());
 
     driver
         .check_folder_invite_link("https://t.me/addlist/b")
         .expect("check");
     assert_eq!(
-        driver.session.folder_invite_link.as_deref(),
+        driver.session.chat_list.folder_invite_link.as_deref(),
         Some("https://t.me/addlist/b")
     );
     driver

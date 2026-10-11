@@ -1003,6 +1003,7 @@ impl QuillApp {
             .unwrap_or_default();
         let fetch = session.and_then(|session| {
             session
+                .chat_list
                 .chat_preview_fetch
                 .as_ref()
                 .filter(|fetch| fetch.chat_id == chat_id)

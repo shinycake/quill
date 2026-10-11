@@ -488,9 +488,13 @@ impl QuillApp {
     /// member-management dialog.
     pub(super) fn dismiss_member_action_error(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.member_action_error.remove(&chat_id.0);
+            live.driver
+                .session
+                .groups
+                .member_action_error
+                .remove(&chat_id.0);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.member_action_error.remove(&chat_id.0);
+            session.groups.member_action_error.remove(&chat_id.0);
         }
         cx.notify();
     }

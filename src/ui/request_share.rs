@@ -88,6 +88,7 @@ impl QuillApp {
             } => {
                 facts.is_channel = is_channel;
                 facts.has_username = session
+                    .groups
                     .supergroup_usernames
                     .get(&supergroup_id)
                     .is_some_and(|name| !name.is_empty());

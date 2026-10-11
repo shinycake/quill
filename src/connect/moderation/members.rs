@@ -32,13 +32,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let key = (chat_id.0, filter);
         let purpose = RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter });
         if matches!(
-            self.session.supergroup_members.get(&key),
+            self.session.groups.supergroup_members.get(&key),
             Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
         ) || self.session.requests.has_purpose_for_chat(purpose, chat_id)
         {
             return Ok(None);
         }
         self.session
+            .groups
             .supergroup_members
             .insert(key, SupergroupMembersFetch::Loading);
         let extra = self.session.request(purpose, Some(chat_id));
@@ -57,7 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             200,
         )) {
             self.session.requests.take(extra);
-            self.session.supergroup_members.remove(&key);
+            self.session.groups.supergroup_members.remove(&key);
             return Err(err);
         }
         Ok(Some(extra))
@@ -71,7 +72,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         filter: MemberListFilter,
         query: &str,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.supergroup_members.remove(&(chat_id.0, filter));
+        self.session
+            .groups
+            .supergroup_members
+            .remove(&(chat_id.0, filter));
         self.fetch_supergroup_members(chat_id, filter, query)
     }
 
@@ -94,13 +98,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let purpose = RequestPurpose::GetBasicGroupFullInfo;
         if matches!(
-            self.session.basic_group_members.get(&chat_id.0),
+            self.session.groups.basic_group_members.get(&chat_id.0),
             Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
         ) || self.session.requests.has_purpose_for_chat(purpose, chat_id)
         {
             return Ok(None);
         }
         self.session
+            .groups
             .basic_group_members
             .insert(chat_id.0, SupergroupMembersFetch::Loading);
         let extra = self.session.request(purpose, Some(chat_id));
@@ -109,7 +114,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_basic_group_full_info(extra, basic_group_id))
         {
             self.session.requests.take(extra);
-            self.session.basic_group_members.remove(&chat_id.0);
+            self.session.groups.basic_group_members.remove(&chat_id.0);
             return Err(err);
         }
         Ok(Some(extra))
@@ -157,7 +162,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Slice G1: a new add attempt resets the failure count — errors
         // from a previous attempt must not linger into this one.
-        self.session.add_members_failed.remove(&chat_id.0);
+        self.session.groups.add_members_failed.remove(&chat_id.0);
         // Basic groups need one `addChatMember` per user; supergroups and
         // channels take a single bulk `addChatMembers`.
         let mut first_extra = None;

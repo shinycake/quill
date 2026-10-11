@@ -11,10 +11,12 @@ impl Session {
                 if let Some(file) = &background.background.file {
                     self.upsert_file(file.clone(), false);
                 }
-                self.chat_backgrounds.insert(chat_id, background);
+                self.chats_state
+                    .chat_backgrounds
+                    .insert(chat_id, background);
             }
             None => {
-                self.chat_backgrounds.remove(&chat_id);
+                self.chats_state.chat_backgrounds.remove(&chat_id);
             }
         }
     }
@@ -23,10 +25,10 @@ impl Session {
     pub fn set_chat_theme_name(&mut self, chat_id: i64, name: Option<String>) {
         match name {
             Some(name) => {
-                self.chat_theme_names.insert(chat_id, name);
+                self.chats_state.chat_theme_names.insert(chat_id, name);
             }
             None => {
-                self.chat_theme_names.remove(&chat_id);
+                self.chats_state.chat_theme_names.remove(&chat_id);
             }
         }
     }
@@ -34,8 +36,11 @@ impl Session {
     /// The emoji theme a chat uses, once `updateEmojiChatThemes` has
     /// delivered its description.
     pub fn chat_emoji_theme(&self, chat_id: i64) -> Option<&EmojiChatTheme> {
-        let name = self.chat_theme_names.get(&chat_id)?;
-        self.emoji_chat_themes.iter().find(|t| &t.name == name)
+        let name = self.chats_state.chat_theme_names.get(&chat_id)?;
+        self.chats_state
+            .emoji_chat_themes
+            .iter()
+            .find(|t| &t.name == name)
     }
 
     /// The theme's settings for the light or dark interface.
@@ -47,7 +52,7 @@ impl Session {
     /// wallpaper first, else the theme's (tdesktop keeps the peer's wallpaper
     /// over the theme's background).
     pub fn chat_wallpaper(&self, chat_id: i64, dark: bool) -> Option<(&Background, i32)> {
-        if let Some(own) = self.chat_backgrounds.get(&chat_id) {
+        if let Some(own) = self.chats_state.chat_backgrounds.get(&chat_id) {
             return Some((&own.background, own.dark_theme_dimming));
         }
         self.chat_theme_settings(chat_id, dark)

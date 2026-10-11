@@ -116,13 +116,20 @@ impl Session {
         use crate::telegram::envelope::ChatKind;
         let members = match chat.kind {
             ChatKind::Supergroup { supergroup_id, .. } => self
+                .groups
                 .supergroup_full_infos
                 .get(&supergroup_id)
                 .map(|info| info.member_count)
                 .filter(|count| *count > 0)
-                .or_else(|| self.supergroup_member_counts.get(&supergroup_id).copied())
+                .or_else(|| {
+                    self.groups
+                        .supergroup_member_counts
+                        .get(&supergroup_id)
+                        .copied()
+                })
                 .unwrap_or(0),
             ChatKind::BasicGroup { basic_group_id } => self
+                .groups
                 .basic_group_member_counts
                 .get(&basic_group_id)
                 .copied()
@@ -130,6 +137,7 @@ impl Session {
             _ => return None,
         };
         let online = self
+            .chats_state
             .chat_online_counts
             .get(&chat.id.0)
             .copied()
@@ -178,7 +186,8 @@ impl Session {
                 Some((user.verification, user.is_premium, user.emoji_status_id))
             }
             ChatKind::Supergroup { supergroup_id, .. } => Some((
-                self.supergroup_verification
+                self.groups
+                    .supergroup_verification
                     .get(&supergroup_id)
                     .copied()
                     .unwrap_or_default(),
@@ -200,13 +209,16 @@ impl Session {
 
     /// Phase 6: cached `supergroupFullInfo`, if fetched.
     pub fn supergroup_full_info(&self, supergroup_id: i64) -> Option<&SupergroupFullInfoData> {
-        self.supergroup_full_infos.get(&supergroup_id)
+        self.groups.supergroup_full_infos.get(&supergroup_id)
     }
 
     /// Phase A1: the viewer's own `chatMemberStatus*` in a supergroup
     /// (`supergroup.status`, schema 1.8.67 line 2746), if seen yet.
     pub fn supergroup_own_status(&self, supergroup_id: i64) -> Option<ChannelMemberStatus> {
-        self.supergroup_member_status.get(&supergroup_id).copied()
+        self.groups
+            .supergroup_member_status
+            .get(&supergroup_id)
+            .copied()
     }
 
     /// Phase A1: whether the viewer's own administrator rights in a
@@ -216,7 +228,8 @@ impl Session {
     /// `supergroup_own_status` for that. Absent = unknown, treated as
     /// lacking the right (the admin control stays hidden).
     pub fn supergroup_can_restrict_members(&self, supergroup_id: i64) -> bool {
-        self.supergroup_restrict_right
+        self.groups
+            .supergroup_restrict_right
             .get(&supergroup_id)
             .copied()
             .unwrap_or(false)
@@ -228,7 +241,8 @@ impl Session {
     /// implicitly — check `supergroup_own_status` for that. Absent =
     /// unknown, treated as lacking the right.
     pub fn supergroup_can_invite_users(&self, supergroup_id: i64) -> bool {
-        self.supergroup_invite_right
+        self.groups
+            .supergroup_invite_right
             .get(&supergroup_id)
             .copied()
             .unwrap_or(false)
@@ -240,7 +254,8 @@ impl Session {
     /// implicitly — check `supergroup_own_status` for that. Absent =
     /// unknown, treated as lacking the right.
     pub fn supergroup_can_promote_members(&self, supergroup_id: i64) -> bool {
-        self.supergroup_promote_right
+        self.groups
+            .supergroup_promote_right
             .get(&supergroup_id)
             .copied()
             .unwrap_or(false)
@@ -252,7 +267,8 @@ impl Session {
     /// hold all rights implicitly — check `supergroup_own_status` for
     /// that. Absent = unknown, treated as lacking the right.
     pub fn supergroup_can_manage_tags(&self, supergroup_id: i64) -> bool {
-        self.supergroup_manage_tags_right
+        self.groups
+            .supergroup_manage_tags_right
             .get(&supergroup_id)
             .copied()
             .unwrap_or(false)
@@ -290,6 +306,7 @@ impl Session {
             } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self
+                        .groups
                         .supergroup_manage_topics_right
                         .get(&supergroup_id)
                         .copied()
@@ -316,6 +333,7 @@ impl Session {
             ChatKind::Supergroup { supergroup_id, .. } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self
+                        .groups
                         .supergroup_change_info_right
                         .get(&supergroup_id)
                         .copied()
@@ -323,8 +341,10 @@ impl Session {
             }
             // B7: basic group creator or administrator with the right.
             ChatKind::BasicGroup { basic_group_id } => {
-                self.basic_group_status.get(&basic_group_id) == Some(&ChannelMemberStatus::Creator)
+                self.groups.basic_group_status.get(&basic_group_id)
+                    == Some(&ChannelMemberStatus::Creator)
                     || self
+                        .groups
                         .basic_group_change_info_right
                         .get(&basic_group_id)
                         .copied()
@@ -348,6 +368,7 @@ impl Session {
             ChatKind::Supergroup { supergroup_id, .. } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self
+                        .groups
                         .supergroup_send_welcome_right
                         .get(&supergroup_id)
                         .copied()
@@ -361,7 +382,8 @@ impl Session {
     /// 2746). Absent = unknown → shown off.
     pub fn chat_sign_messages(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.supergroup_sign_messages
+            self.groups
+                .supergroup_sign_messages
                 .get(&id)
                 .copied()
                 .unwrap_or(false)
@@ -372,7 +394,8 @@ impl Session {
     /// line 2746).
     pub fn chat_show_message_sender(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.supergroup_show_message_sender
+            self.groups
+                .supergroup_show_message_sender
                 .get(&id)
                 .copied()
                 .unwrap_or(false)
@@ -384,7 +407,8 @@ impl Session {
     /// 1.8.67, line 2792).
     pub fn chat_anti_spam_enabled(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.supergroup_anti_spam_enabled
+            self.groups
+                .supergroup_anti_spam_enabled
                 .get(&id)
                 .copied()
                 .unwrap_or(false)
@@ -396,7 +420,8 @@ impl Session {
     /// 1.8.67, line 2792) — the only gate for the anti-spam toggle.
     pub fn chat_can_toggle_anti_spam(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.supergroup_can_toggle_anti_spam
+            self.groups
+                .supergroup_can_toggle_anti_spam
                 .get(&id)
                 .copied()
                 .unwrap_or(false)
@@ -408,7 +433,8 @@ impl Session {
     /// False while the full info hasn't been fetched (fail closed).
     pub fn chat_can_set_sticker_set(&self, chat_id: ChatId) -> bool {
         self.chat_supergroup(chat_id).is_some_and(|id| {
-            self.supergroup_full_infos
+            self.groups
+                .supergroup_full_infos
                 .get(&id)
                 .is_some_and(|info| info.can_set_sticker_set)
         })
@@ -444,7 +470,7 @@ impl Session {
     /// Whether the chat's content is protected from saving, forwarding
     /// and copying (`chat.has_protected_content`).
     pub fn chat_has_protected_content(&self, chat_id: ChatId) -> bool {
-        self.protected_chats.contains(&chat_id.0)
+        self.chats_state.protected_chats.contains(&chat_id.0)
     }
 
     /// `editMessageSchedulingState` succeeded: "Send now" drops the entry
@@ -493,29 +519,30 @@ impl Session {
     /// Whether the chat has scheduled messages
     /// (`chat.has_scheduled_messages`, `updateChatHasScheduledMessages`).
     pub fn chat_has_scheduled_messages(&self, chat_id: ChatId) -> bool {
-        self.scheduled_chats.contains(&chat_id.0)
+        self.chats_state.scheduled_chats.contains(&chat_id.0)
     }
 
     pub(crate) fn set_chat_has_scheduled(&mut self, chat_id: i64, has: bool) {
         if has {
-            self.scheduled_chats.insert(chat_id);
+            self.chats_state.scheduled_chats.insert(chat_id);
         } else {
-            self.scheduled_chats.remove(&chat_id);
+            self.chats_state.scheduled_chats.remove(&chat_id);
         }
     }
 
     pub(crate) fn set_chat_protected(&mut self, chat_id: i64, protected: bool) {
         if protected {
-            self.protected_chats.insert(chat_id);
+            self.chats_state.protected_chats.insert(chat_id);
         } else {
-            self.protected_chats.remove(&chat_id);
+            self.chats_state.protected_chats.remove(&chat_id);
         }
     }
 
     /// Slice G2: cached `chat.has_welcome_messages` (schema 1.8.67, line
     /// 3627).
     pub fn chat_has_welcome_messages_flag(&self, chat_id: ChatId) -> bool {
-        self.chat_has_welcome_messages
+        self.groups
+            .chat_has_welcome_messages
             .get(&chat_id.0)
             .copied()
             .unwrap_or(false)
@@ -588,6 +615,7 @@ impl Session {
                     || self.supergroup_can_promote_members(supergroup_id)
             }
             ChatKind::BasicGroup { basic_group_id } => self
+                .groups
                 .basic_group_own
                 .get(&basic_group_id)
                 .is_some_and(|own| {
@@ -621,6 +649,7 @@ impl Session {
                     || self.supergroup_can_restrict_members(supergroup_id)
             }
             ChatKind::BasicGroup { basic_group_id } => self
+                .groups
                 .basic_group_own
                 .get(&basic_group_id)
                 .is_some_and(|own| {
@@ -645,6 +674,7 @@ impl Session {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
             }
             ChatKind::BasicGroup { basic_group_id } => self
+                .groups
                 .basic_group_own
                 .get(&basic_group_id)
                 .is_some_and(|own| own.status == ChannelMemberStatus::Creator),
@@ -703,7 +733,7 @@ impl Session {
             } => supergroup_id,
             _ => return None,
         };
-        let info = self.supergroup_full_infos.get(&supergroup_id)?;
+        let info = self.groups.supergroup_full_infos.get(&supergroup_id)?;
         if info.slow_mode_delay <= 0 {
             return None;
         }

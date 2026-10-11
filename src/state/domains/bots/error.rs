@@ -15,15 +15,15 @@ impl Session {
             // Slice B2: refused `sendBotStartMessage` / `getBotSimilarBots` —
             // a refusal is never shown as success.
             Some(RequestPurpose::SendBotStartMessage) => {
-                self.chat_action_error =
+                self.chats_state.chat_action_error =
                     Some(format!("could not start the bot (error {})", err.code));
             }
             Some(RequestPurpose::GetBotSimilarBots) => {
-                self.chat_action_error =
+                self.chats_state.chat_action_error =
                     Some(format!("could not load similar bots (error {})", err.code));
             }
             Some(RequestPurpose::ShareWithBot) => {
-                self.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error = Some(format!(
                     "the bot could not receive what you shared (error {})",
                     err.code
                 ));

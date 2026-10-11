@@ -104,7 +104,7 @@ impl QuillApp {
             let folder_id = confirm.folder_id;
             let suggested: Vec<i64> = if confirm.shared {
                 this.session()
-                    .and_then(|s| s.folder_chats_to_leave.get(&folder_id).cloned())
+                    .and_then(|s| s.chat_list.folder_chats_to_leave.get(&folder_id).cloned())
                     .unwrap_or_default()
             } else {
                 Vec::new()
@@ -269,11 +269,14 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let session = this.session();
-            let tags_enabled = session.as_ref().is_some_and(|s| s.are_folder_tags_enabled);
+            let tags_enabled = session
+                .as_ref()
+                .is_some_and(|s| s.chat_list.are_folder_tags_enabled);
             let folders: Vec<(i32, String, usize, String)> = session
                 .as_ref()
                 .map(|s| {
-                    s.chat_folders
+                    s.chat_list
+                        .chat_folders
                         .iter()
                         .map(|f| {
                             let count = s
@@ -290,7 +293,7 @@ impl QuillApp {
             // (tdesktop hides a recommendation once it is added).
             let recommended: Vec<(usize, String, String, String)> = session
                 .as_ref()
-                .and_then(|s| s.recommended_folders.as_ref())
+                .and_then(|s| s.chat_list.recommended_folders.as_ref())
                 .map(|list| {
                     list.iter()
                         .enumerate()
@@ -737,8 +740,9 @@ impl QuillApp {
     /// Making one more folder would pass the account's limit.
     fn folders_full(&self) -> bool {
         self.session().is_some_and(|s| {
-            s.folder_limits
-                .folders_full(s.chat_folders.len(), s.my_is_premium())
+            s.chat_list
+                .folder_limits
+                .folders_full(s.chat_list.chat_folders.len(), s.my_is_premium())
         })
     }
 
@@ -751,7 +755,7 @@ impl QuillApp {
         }
         let Some(spec) = self
             .session()
-            .and_then(|s| s.recommended_folders.as_ref())
+            .and_then(|s| s.chat_list.recommended_folders.as_ref())
             .and_then(|list| list.get(ix))
             .map(|r| r.spec.clone())
         else {
@@ -809,7 +813,7 @@ impl QuillApp {
         // otherwise fetch the full folder for the prefill.
         let cached = self
             .session()
-            .and_then(|s| s.folder_specs.get(&folder_id).cloned());
+            .and_then(|s| s.chat_list.folder_specs.get(&folder_id).cloned());
         let mut dialog = FolderEditorDialog::new(window, cx, Some(folder_id));
         if let Some(spec) = cached {
             dialog.prefill_from_spec(&spec, window, cx);
@@ -838,7 +842,7 @@ impl QuillApp {
         };
         let Some(spec) = self
             .session()
-            .and_then(|s| s.folder_specs.get(&folder_id).cloned())
+            .and_then(|s| s.chat_list.folder_specs.get(&folder_id).cloned())
         else {
             return;
         };
@@ -869,7 +873,7 @@ impl QuillApp {
         let Some(spec) = spec else { return };
         // tdesktop checks the chosen-chat limits before saving.
         let over = self.session().and_then(|s| {
-            s.folder_limits.chats_over(
+            s.chat_list.folder_limits.chats_over(
                 spec.pinned_chat_ids.len() + spec.included_chat_ids.len(),
                 spec.excluded_chat_ids.len(),
                 s.my_is_premium(),
@@ -912,7 +916,7 @@ impl QuillApp {
     pub(super) fn open_folder_delete(&mut self, folder_id: i32, cx: &mut Context<Self>) {
         let info = self
             .session()
-            .and_then(|s| s.chat_folders.iter().find(|f| f.id == folder_id))
+            .and_then(|s| s.chat_list.chat_folders.iter().find(|f| f.id == folder_id))
             .map(|f| (f.name.clone(), f.is_shareable, f.has_my_invite_links));
         let (name, shared, has_links) =
             info.unwrap_or_else(|| (format!("Folder {folder_id}"), false, false));
@@ -939,7 +943,12 @@ impl QuillApp {
         };
         let leave: Vec<i64> = if confirm.shared {
             self.session()
-                .and_then(|s| s.folder_chats_to_leave.get(&confirm.folder_id).cloned())
+                .and_then(|s| {
+                    s.chat_list
+                        .folder_chats_to_leave
+                        .get(&confirm.folder_id)
+                        .cloned()
+                })
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|id| !confirm.keep.contains(id))
@@ -971,7 +980,12 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let mut ids: Vec<i32> = session.chat_folders.iter().map(|f| f.id).collect();
+        let mut ids: Vec<i32> = session
+            .chat_list
+            .chat_folders
+            .iter()
+            .map(|f| f.id)
+            .collect();
         let Some(pos) = ids.iter().position(|&id| id == folder_id) else {
             return;
         };
@@ -997,13 +1011,13 @@ impl QuillApp {
     pub(super) fn toggle_folder_tags_ui(&mut self, cx: &mut Context<Self>) {
         let enabled = self
             .session()
-            .map(|s| !s.are_folder_tags_enabled)
+            .map(|s| !s.chat_list.are_folder_tags_enabled)
             .unwrap_or(true);
         let result = match self.live.as_mut() {
             Some(live) => live.driver.toggle_chat_folder_tags(enabled).map(|_| ()),
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.are_folder_tags_enabled = enabled;
+                    session.chat_list.are_folder_tags_enabled = enabled;
                 }
                 Ok(())
             }
@@ -1038,7 +1052,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .map_or_else(|| "Chat".to_string(), |c| c.title.clone());
         let folder = session
-            .and_then(|s| s.chat_folders.iter().find(|f| f.id == folder_id))
+            .and_then(|s| s.chat_list.chat_folders.iter().find(|f| f.id == folder_id))
             .map_or_else(|| format!("Folder {folder_id}"), |f| f.name.clone());
         quill::folders::folder_membership_toast(&chat, &folder, added)
     }
@@ -1130,13 +1144,14 @@ impl QuillApp {
         };
         let folder_name = |id: i32| {
             session
+                .chat_list
                 .chat_folders
                 .iter()
                 .find(|f| f.id == id)
                 .map(|f| f.name.clone())
                 .unwrap_or_else(|| format!("Folder {id}"))
         };
-        let Some(lists) = session.chat_lists_for_add.get(&chat_id.0) else {
+        let Some(lists) = session.chat_list.chat_lists_for_add.get(&chat_id.0) else {
             return panel
                 .child(
                     div()

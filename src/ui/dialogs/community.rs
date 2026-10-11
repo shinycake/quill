@@ -228,7 +228,7 @@ pub fn build_create_community_dialog(
 }
 
 /// Slice G10: kit dialog builder for the communities hub — the owned
-/// communities from `session.communities` with per-row "Info" buttons
+/// communities from `session.groups.communities` with per-row "Info" buttons
 /// opening the info panel. No per-row state, so the hub is a bare
 /// `hub_open` flag.
 pub fn build_community_hub_dialog(
@@ -250,6 +250,7 @@ pub fn build_community_hub_dialog(
                 // right after `deleteCommunity`) can't be passed to any
                 // method, so it has no place in the hub.
                 let mut rows: Vec<(i64, String)> = session
+                    .groups
                     .communities
                     .values()
                     .filter(|community| community.have_access)
@@ -338,7 +339,8 @@ pub fn render_community_info_panel(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let session = app.session();
-    let Some(community) = session.and_then(|s| s.communities.get(&community_id).cloned()) else {
+    let Some(community) = session.and_then(|s| s.groups.communities.get(&community_id).cloned())
+    else {
         return div()
             .text_sm()
             .text_color(cx.theme().muted_foreground)
@@ -346,7 +348,7 @@ pub fn render_community_info_panel(
             .into_any_element();
     };
     let full_info = session
-        .and_then(|s| s.community_full_infos.get(&community_id))
+        .and_then(|s| s.groups.community_full_infos.get(&community_id))
         .cloned();
     let mut body = div()
         .flex()

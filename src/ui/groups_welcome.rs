@@ -140,12 +140,16 @@ impl QuillApp {
             };
             let chat_id = dialog_state.chat_id;
             let editing = dialog_state.editing;
-            let fetch = this
-                .session()
-                .and_then(|session| session.welcome_message_fetches.get(&chat_id.0).cloned());
+            let fetch = this.session().and_then(|session| {
+                session
+                    .groups
+                    .welcome_message_fetches
+                    .get(&chat_id.0)
+                    .cloned()
+            });
             let messages: Vec<ParsedWelcomeMessage> = this
                 .session()
-                .and_then(|session| session.welcome_messages.get(&chat_id.0).cloned())
+                .and_then(|session| session.groups.welcome_messages.get(&chat_id.0).cloned())
                 .unwrap_or_default();
             let mut body = div().flex().flex_col().gap_2().child(
                 div()
@@ -315,7 +319,7 @@ impl QuillApp {
                                 let text = this
                                     .session()
                                     .and_then(|session| {
-                                        session.welcome_messages.get(&chat_id.0).and_then(
+                                        session.groups.welcome_messages.get(&chat_id.0).and_then(
                                             |messages| messages.iter().find(|m| m.id == welcome_id),
                                         )
                                     })

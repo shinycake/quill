@@ -20,7 +20,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if matches!(
-            self.session.invite_links.get(&chat_id.0),
+            self.session.groups.invite_links.get(&chat_id.0),
             Some(InviteLinkFetch::Loading | InviteLinkFetch::Loaded(_))
         ) || self
             .session
@@ -30,6 +30,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.session
+            .groups
             .invite_links
             .insert(chat_id.0, InviteLinkFetch::Loading);
         let extra = self
@@ -42,7 +43,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id.0, creator, false, 0, "", 100,
         )) {
             self.session.requests.take(extra);
-            self.session.invite_links.remove(&chat_id.0);
+            self.session.groups.invite_links.remove(&chat_id.0);
             return Err(err);
         }
         Ok(Some(extra))
@@ -54,7 +55,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.invite_links.remove(&chat_id.0);
+        self.session.groups.invite_links.remove(&chat_id.0);
         self.fetch_chat_invite_links(chat_id)
     }
 
@@ -199,7 +200,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if matches!(
-            self.session.join_requests.get(&chat_id.0),
+            self.session.groups.join_requests.get(&chat_id.0),
             Some(JoinRequestFetch::Loading | JoinRequestFetch::Loaded(_))
         ) || self
             .session
@@ -209,6 +210,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.session
+            .groups
             .join_requests
             .insert(chat_id.0, JoinRequestFetch::Loading);
         let extra = self
@@ -219,7 +221,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_join_requests(extra, chat_id.0, "", "", 50))
         {
             self.session.requests.take(extra);
-            self.session.join_requests.remove(&chat_id.0);
+            self.session.groups.join_requests.remove(&chat_id.0);
             return Err(err);
         }
         Ok(Some(extra))
@@ -231,7 +233,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.join_requests.remove(&chat_id.0);
+        self.session.groups.join_requests.remove(&chat_id.0);
         self.fetch_chat_join_requests(chat_id)
     }
 

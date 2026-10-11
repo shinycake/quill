@@ -48,21 +48,21 @@ impl Session {
                 | RequestPurpose::SetUserNote
                 | RequestPurpose::SetUserPersonalPhoto,
             ) => {
-                self.chat_action_error =
+                self.chats_state.chat_action_error =
                     Some(format!("could not save the change (error {})", err.code));
             }
             Some(RequestPurpose::ReportChatPhoto) => {
-                self.chat_action_error =
+                self.chats_state.chat_action_error =
                     Some(format!("could not send the report (error {})", err.code));
             }
             Some(RequestPurpose::SharePhoneNumber) => {
-                self.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error = Some(format!(
                     "could not share your phone number (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { .. })) => {
-                self.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error = Some(format!(
                     "could not change the block state (error {})",
                     err.code
                 ));

@@ -18,7 +18,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn cycle_subsection_tabs_mode(&mut self, chat_id: ChatId) -> SubsectionTabsMode {
         let mode = self.session.cycle_subsection_tabs_mode(chat_id);
         if self.save_media_prefs().is_err() {
-            self.session.chat_action_error = Some("Could not save the tab layout.".into());
+            self.session.chats_state.chat_action_error =
+                Some("Could not save the tab layout.".into());
         }
         mode
     }
@@ -72,7 +73,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some((chat_id, forum_topic_id)) = target else {
             return;
         };
-        if !self.chats_path_active() || !self.session.forum_topics.contains_key(&chat_id.0) {
+        if !self.chats_path_active() || !self.session.threads.forum_topics.contains_key(&chat_id.0)
+        {
             return;
         }
         let purpose = RequestPurpose::Threads(ThreadsPurpose::GetForumTopic { forum_topic_id });
@@ -101,6 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let Some(last) = self
             .session
+            .threads
             .forum_topics
             .get(&chat_id.0)
             .and_then(|topics| topics.iter().find(|t| t.forum_topic_id == forum_topic_id))
@@ -142,6 +145,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let Some(topic) = self
             .session
+            .threads
             .forum_topics
             .get_mut(&chat_id.0)
             .and_then(|topics| {
@@ -174,6 +178,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             if let Some(topic) = self
                 .session
+                .threads
                 .forum_topics
                 .get_mut(&chat_id.0)
                 .and_then(|t| t.iter_mut().find(|t| t.forum_topic_id == forum_topic_id))

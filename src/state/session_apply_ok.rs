@@ -24,7 +24,7 @@ impl Session {
                 RequestPurpose::SetChatTheme
                 | RequestPurpose::SetChatBackground
                 | RequestPurpose::DeleteChatBackground,
-            ) => self.chat_look_oks = self.chat_look_oks.wrapping_add(1),
+            ) => self.chats_state.chat_look_oks = self.chats_state.chat_look_oks.wrapping_add(1),
             Some(RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
                 message_id,
                 scheduling,
@@ -362,7 +362,7 @@ impl Session {
                 | RequestPurpose::ToggleGeneralForumTopicHidden,
             ) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.forum_topics.remove(&chat_id.0);
+                    self.threads.forum_topics.remove(&chat_id.0);
                 }
             }
             // Slice G2: welcome-message mutations confirmed —
@@ -373,8 +373,8 @@ impl Session {
                 | RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage { .. }),
             ) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.welcome_messages.remove(&chat_id.0);
-                    self.welcome_message_fetches.remove(&chat_id.0);
+                    self.groups.welcome_messages.remove(&chat_id.0);
+                    self.groups.welcome_message_fetches.remove(&chat_id.0);
                 }
             }
             // Slice (communities backend core): a
@@ -383,7 +383,7 @@ impl Session {
             // name itself arrives via `updateCommunity`.
             Some(RequestPurpose::SetCommunityName) => {
                 if let Some(community_id) = pending.and_then(|p| p.community_id) {
-                    self.community_full_infos.remove(&community_id);
+                    self.groups.community_full_infos.remove(&community_id);
                 }
             }
             // TDLib 1.8.68: a deleted community is gone for everyone —
@@ -392,8 +392,8 @@ impl Session {
             // `have_access = false` is filtered out of the hub.)
             Some(RequestPurpose::DeleteCommunity) => {
                 if let Some(community_id) = pending.and_then(|p| p.community_id) {
-                    self.communities.remove(&community_id);
-                    self.community_full_infos.remove(&community_id);
+                    self.groups.communities.remove(&community_id);
+                    self.groups.community_full_infos.remove(&community_id);
                 }
             }
             // Phase 9.5: a posted-story management call landed —
@@ -532,12 +532,12 @@ impl Session {
             // Parity slice: `deleteChatFolder` confirmed — drop the
             // tab and any cached spec. `updateChatFolders` stays the
             // source of truth and will confirm.
-            self.chat_folders.retain(|f| f.id != folder_id);
-            self.folder_specs.remove(&folder_id);
-            self.folder_chats_exhausted.remove(&folder_id);
+            self.chat_list.chat_folders.retain(|f| f.id != folder_id);
+            self.chat_list.folder_specs.remove(&folder_id);
+            self.chat_list.folder_chats_exhausted.remove(&folder_id);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatFolderByInviteLink) {
-            self.folder_invite_done = true;
+            self.chat_list.folder_invite_done = true;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ToggleHasSponsoredMessagesEnabled)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -560,7 +560,7 @@ impl Session {
             ))
         ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.admin_lists.remove(&chat_id.0);
+            self.groups.admin_lists.remove(&chat_id.0);
             // Slice G1: restrict/ban/unban change the member
             // lists too — drop all cached pages for this chat.
             if matches!(
@@ -573,9 +573,10 @@ impl Session {
                     ..
                 }))
             ) {
-                self.supergroup_members
+                self.groups
+                    .supergroup_members
                     .retain(|(id, _), _| *id != chat_id.0);
-                self.basic_group_members.remove(&chat_id.0);
+                self.groups.basic_group_members.remove(&chat_id.0);
             }
         }
         // Slice G1: `setChatMemberTag` confirmed — the custom
@@ -589,9 +590,10 @@ impl Session {
             ))
         ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.supergroup_members
+            self.groups
+                .supergroup_members
                 .retain(|(id, _), _| *id != chat_id.0);
-            self.basic_group_members.remove(&chat_id.0);
+            self.groups.basic_group_members.remove(&chat_id.0);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveChat)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -609,10 +611,11 @@ impl Session {
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             self.chats.remove(&chat_id.0);
-            self.supergroup_members
+            self.groups
+                .supergroup_members
                 .retain(|(id, _), _| *id != chat_id.0);
-            self.admin_lists.remove(&chat_id.0);
-            self.add_members_failed.remove(&chat_id.0);
+            self.groups.admin_lists.remove(&chat_id.0);
+            self.groups.add_members_failed.remove(&chat_id.0);
         }
         // Phase D3a: `processChatJoinRequest` confirmed — drop the
         // processed request from the cached list. The count is
@@ -622,14 +625,14 @@ impl Session {
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
             && let Some(JoinRequestFetch::Loaded(list)) =
-                self.join_requests.get(&chat_id.0).cloned()
+                self.groups.join_requests.get(&chat_id.0).cloned()
         {
             let requests: Vec<ParsedChatJoinRequest> = list
                 .requests
                 .into_iter()
                 .filter(|r| r.user_id != user_id)
                 .collect();
-            self.join_requests.insert(
+            self.groups.join_requests.insert(
                 chat_id.0,
                 JoinRequestFetch::Loaded(JoinRequestList {
                     total_count: list.total_count.saturating_sub(1),
@@ -641,7 +644,7 @@ impl Session {
         if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-            && let Some(state) = self.link_join_requests.get_mut(&chat_id.0)
+            && let Some(state) = self.groups.link_join_requests.get_mut(&chat_id.0)
         {
             let before = state.requests.len();
             state.requests.retain(|r| r.user_id != user_id);
@@ -656,33 +659,33 @@ impl Session {
                 _,
                 Some(chat_id),
             )) => {
-                if let Some(state) = self.link_join_requests.get_mut(&chat_id.0) {
+                if let Some(state) = self.groups.link_join_requests.get_mut(&chat_id.0) {
                     state.requests.clear();
                     state.total_count = 0;
                 }
                 // The requests list and badge may now be stale; refetch.
-                self.join_requests.remove(&chat_id.0);
+                self.groups.join_requests.remove(&chat_id.0);
             }
             Some((
                 RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { .. }),
                 _,
                 Some(chat_id),
             )) => {
-                self.join_requests.insert(
+                self.groups.join_requests.insert(
                     chat_id.0,
                     JoinRequestFetch::Loaded(JoinRequestList {
                         total_count: 0,
                         requests: Vec::new(),
                     }),
                 );
-                self.join_request_queries.remove(&chat_id.0);
-                self.pending_join_request_counts.insert(chat_id.0, 0);
-                self.pending_join_request_users.remove(&chat_id.0);
+                self.groups.join_request_queries.remove(&chat_id.0);
+                self.groups.pending_join_request_counts.insert(chat_id.0, 0);
+                self.groups.pending_join_request_users.remove(&chat_id.0);
             }
             Some((RequestPurpose::DeleteRevokedChatInviteLink, id, Some(chat_id))) => {
-                if let Some((_, link)) = self.revoked_link_deletions.remove(&id)
+                if let Some((_, link)) = self.groups.revoked_link_deletions.remove(&id)
                     && let Some(InviteLinkFetch::Loaded(list)) =
-                        self.revoked_invite_links.get_mut(&chat_id.0)
+                        self.groups.revoked_invite_links.get_mut(&chat_id.0)
                 {
                     let before = list.links.len();
                     list.links.retain(|e| e.invite_link != link);
@@ -695,16 +698,16 @@ impl Session {
                 if pending.and_then(|p| p.user_id).is_some() =>
             {
                 // Another admin's revoked links were deleted.
-                if let Some(state) = self.admin_invite_links.get_mut(&chat_id.0) {
+                if let Some(state) = self.groups.admin_invite_links.get_mut(&chat_id.0) {
                     state.revoked = InviteLinkFetch::Loaded(InviteLinkList {
                         total_count: 0,
                         links: Vec::new(),
                     });
                 }
-                self.invite_link_counts.remove(&chat_id.0);
+                self.groups.invite_link_counts.remove(&chat_id.0);
             }
             Some((RequestPurpose::DeleteAllRevokedChatInviteLinks, _, Some(chat_id))) => {
-                self.revoked_invite_links.insert(
+                self.groups.revoked_invite_links.insert(
                     chat_id.0,
                     InviteLinkFetch::Loaded(InviteLinkList {
                         total_count: 0,

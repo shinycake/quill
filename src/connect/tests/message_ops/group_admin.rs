@@ -46,7 +46,7 @@ fn driver_fetch_basic_group_members_shape() {
                 .unwrap(),
             )
             .unwrap();
-    let fetch = driver.session.basic_group_members.get(&9).unwrap();
+    let fetch = driver.session.groups.basic_group_members.get(&9).unwrap();
     match fetch {
         SupergroupMembersFetch::Loaded { members, .. } => assert_eq!(members.len(), 1),
         other => panic!("unexpected {other:?}"),
@@ -334,7 +334,7 @@ fn driver_group_sticker_set_gates_and_shape() {
     // Negative id → invalid request.
     assert!(driver.set_supergroup_sticker_set(ChatId(10), -1).is_err());
     // Seed the capability, then sends.
-    driver.session.supergroup_full_infos.insert(
+    driver.session.groups.supergroup_full_infos.insert(
         10,
         SupergroupFullInfoData {
             can_set_sticker_set: true,
@@ -421,6 +421,7 @@ fn driver_group_sticker_set_gates_and_shape() {
     assert!(
         driver
             .session
+            .chats_state
             .chat_action_error
             .as_deref()
             .is_some_and(|e| e.contains("Could not change") && !e.contains("private body"))
@@ -520,7 +521,7 @@ fn driver_community_create_rename_refetch_chain() {
                 .unwrap(),
             )
             .unwrap();
-    assert!(driver.session.communities.contains_key(&42));
+    assert!(driver.session.groups.communities.contains_key(&42));
     driver
         .ingest(
             copy_and_parse(
@@ -560,6 +561,7 @@ fn driver_community_create_rename_refetch_chain() {
     assert_eq!(
         driver
             .session
+            .groups
             .community_full_infos
             .get(&42)
             .map(|info| info.administrator_count),
@@ -593,7 +595,7 @@ fn driver_community_create_rename_refetch_chain() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.community_full_infos.contains_key(&42));
+    assert!(!driver.session.groups.community_full_infos.contains_key(&42));
     let sent = recorder.snapshot().last().cloned().expect("request");
     let v: Value = serde_json::from_str(&sent).unwrap();
     assert_eq!(v["@type"], "getCommunityFullInfo");
@@ -674,6 +676,7 @@ fn driver_community_management_rights_and_delete() {
     );
     let err = driver
         .session
+        .groups
         .community_error
         .take()
         .expect("error surfaced");
@@ -694,7 +697,7 @@ fn driver_community_management_rights_and_delete() {
     let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
     assert_eq!(v["@type"], "deleteCommunity");
     assert_eq!(v["community_id"], 42);
-    driver.session.community_full_infos.insert(
+    driver.session.groups.community_full_infos.insert(
         42,
         crate::telegram::envelope::ParsedCommunityFullInfo {
             chats: Vec::new(),
@@ -707,8 +710,8 @@ fn driver_community_management_rights_and_delete() {
         &mut driver,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!driver.session.communities.contains_key(&42));
-    assert!(!driver.session.community_full_infos.contains_key(&42));
-    assert!(driver.session.communities.contains_key(&43));
+    assert!(!driver.session.groups.communities.contains_key(&42));
+    assert!(!driver.session.groups.community_full_infos.contains_key(&42));
+    assert!(driver.session.groups.communities.contains_key(&43));
     let _ = std::fs::remove_dir_all(&dir);
 }

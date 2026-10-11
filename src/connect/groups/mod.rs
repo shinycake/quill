@@ -76,6 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 ChatKind::Supergroup { supergroup_id, .. }
                     if !self
                         .session
+                        .groups
                         .supergroup_usernames
                         .contains_key(&supergroup_id) =>
                 {
@@ -275,6 +276,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
+            .groups
             .supergroup_full_infos
             .contains_key(&supergroup_id)
             || self
@@ -316,9 +318,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .and_then(|chat| match chat.kind {
-                ChatKind::Supergroup { supergroup_id, .. } => {
-                    self.session.supergroup_full_infos.get(&supergroup_id)
-                }
+                ChatKind::Supergroup { supergroup_id, .. } => self
+                    .session
+                    .groups
+                    .supergroup_full_infos
+                    .get(&supergroup_id),
                 _ => None,
             })
             .is_some_and(|info| info.can_get_statistics);
@@ -326,7 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if matches!(
-            self.session.chat_statistics.get(&chat_id.0),
+            self.session.groups.chat_statistics.get(&chat_id.0),
             Some(ChatStatisticsFetch::Loading | ChatStatisticsFetch::Loaded(_))
         ) || self
             .session
@@ -336,6 +340,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.session
+            .groups
             .chat_statistics
             .insert(chat_id.0, ChatStatisticsFetch::Loading);
         let extra = self
@@ -346,7 +351,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_statistics(extra, chat_id.0, is_dark))
         {
             self.session.requests.take(extra);
-            self.session.chat_statistics.remove(&chat_id.0);
+            self.session.groups.chat_statistics.remove(&chat_id.0);
             return Err(err);
         }
         Ok(Some(extra))
@@ -359,7 +364,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         is_dark: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.chat_statistics.remove(&chat_id.0);
+        self.session.groups.chat_statistics.remove(&chat_id.0);
         self.fetch_chat_statistics(chat_id, is_dark)
     }
 
@@ -443,6 +448,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chat_is_owner(chat_id)
             || self
                 .session
+                .groups
                 .supergroup_is_broadcast
                 .get(&supergroup_id)
                 .is_some_and(|b| *b)
@@ -464,6 +470,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Optimistic: the toggle is one-way, so a sent request means the
         // group becomes a broadcast group barring a TDLib error.
         self.session
+            .groups
             .supergroup_is_broadcast
             .insert(supergroup_id, true);
         Ok(Some(extra))
@@ -623,7 +630,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
-        self.session.chat_preview_fetch = None;
+        self.session.chat_list.chat_preview_fetch = None;
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&get_chat_history(
             extra,

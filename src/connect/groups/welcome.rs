@@ -18,7 +18,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        if self.session.welcome_messages.contains_key(&chat_id.0)
+        if self
+            .session
+            .groups
+            .welcome_messages
+            .contains_key(&chat_id.0)
             || self
                 .session
                 .requests
@@ -37,6 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session
+            .groups
             .welcome_message_fetches
             .insert(chat_id.0, WelcomeMessagesFetch::Loading);
         Ok(Some(extra))

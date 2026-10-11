@@ -74,10 +74,14 @@ impl QuillApp {
         self.admin.ownership_dialog = Some(OwnershipDialog::new(window, cx, chat_id, stage));
         if let Some(live) = self.live.as_mut() {
             let session = &mut live.driver.session;
-            session.ownership.transfer_error = None;
-            session.ownership.transferred = None;
+            session.groups.ownership.transfer_error = None;
+            session.groups.ownership.transferred = None;
             // Asked once per dialog so a stale answer never decides.
-            session.ownership.owner_after_leaving.remove(&chat_id.0);
+            session
+                .groups
+                .ownership
+                .owner_after_leaving
+                .remove(&chat_id.0);
             let _ = live.driver.check_can_transfer_ownership();
             let _ = live.driver.fetch_chat_owner_after_leaving(chat_id);
             let _ = live.driver.refresh_supergroup_members(
@@ -106,13 +110,13 @@ impl QuillApp {
         let mut pool: Vec<ParsedChatMember> = Vec::new();
         for filter in [MemberListFilter::Administrators, MemberListFilter::Recent] {
             if let Some(SupergroupMembersFetch::Loaded { members, .. }) =
-                session.supergroup_members.get(&(chat_id.0, filter))
+                session.groups.supergroup_members.get(&(chat_id.0, filter))
             {
                 pool.extend(members.iter().cloned());
             }
         }
         if let Some(SupergroupMembersFetch::Loaded { members, .. }) =
-            session.basic_group_members.get(&chat_id.0)
+            session.groups.basic_group_members.get(&chat_id.0)
         {
             pool.extend(members.iter().cloned());
         }
@@ -135,7 +139,7 @@ impl QuillApp {
             dialog.stage = stage;
         }
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.ownership.transfer_error = None;
+            live.driver.session.groups.ownership.transfer_error = None;
         }
         cx.notify();
     }
@@ -190,7 +194,7 @@ impl QuillApp {
         let Some(done) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.ownership.transferred.take())
+            .and_then(|live| live.driver.session.groups.ownership.transferred.take())
         else {
             return false;
         };
@@ -250,7 +254,7 @@ impl QuillApp {
                 .unwrap_or_default();
             let ownership = this
                 .session()
-                .map(|s| s.ownership.clone())
+                .map(|s| s.groups.ownership.clone())
                 .unwrap_or_default();
             let muted = cx.theme().muted_foreground;
             let mut body = div().flex().flex_col().gap_3();

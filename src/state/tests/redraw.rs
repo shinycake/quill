@@ -104,7 +104,7 @@ fn chat_row_updates_of_other_chats_only_touch_the_chat_list() {
 fn the_comment_thread_counts_as_shown() {
     let mut session = two_chats();
     session.open_chat = Some(ChatId(12));
-    session.thread = Some(ThreadView {
+    session.threads.thread = Some(ThreadView {
         origin_chat_id: ChatId(12),
         origin_message_id: MessageId(1),
         chat_id: ChatId(77),

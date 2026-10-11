@@ -142,9 +142,9 @@ fn forum_topics_extra(session: &Session, prefs: &BadgePrefs, archive: bool) -> u
 
 fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
     let totals = if archive {
-        &session.unread_totals.archive
+        &session.chat_list.unread_totals.archive
     } else {
-        &session.unread_totals.main
+        &session.chat_list.unread_totals.main
     };
     let pair = if prefs.count_messages {
         totals.messages

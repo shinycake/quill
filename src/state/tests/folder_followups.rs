@@ -17,7 +17,10 @@ fn new_chats_answer_is_cached_and_an_empty_one_clears_it() {
             extra.0
         ),
     );
-    assert_eq!(session.folder_new_chats.get(&4), Some(&vec![8, 9]));
+    assert_eq!(
+        session.chat_list.folder_new_chats.get(&4),
+        Some(&vec![8, 9])
+    );
     let extra = session.request_for_folder(RequestPurpose::GetChatFolderNewChats, 4);
     apply_json(
         &mut session,
@@ -28,7 +31,7 @@ fn new_chats_answer_is_cached_and_an_empty_one_clears_it() {
             extra.0
         ),
     );
-    assert!(!session.folder_new_chats.contains_key(&4));
+    assert!(!session.chat_list.folder_new_chats.contains_key(&4));
 }
 
 #[test]
@@ -43,6 +46,7 @@ fn folder_limit_options_and_premium_limits_are_folded() {
     );
     assert_eq!(
         session
+            .chat_list
             .folder_limits
             .current(FolderLimitKind::Folders, false),
         7
@@ -59,6 +63,7 @@ fn folder_limit_options_and_premium_limits_are_folded() {
     );
     assert_eq!(
         session
+            .chat_list
             .folder_limits
             .premium_value(FolderLimitKind::Folders),
         20
@@ -81,10 +86,10 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
         ),
     );
     assert_eq!(
-        session.folder_limit_hit.take(),
+        session.chat_list.folder_limit_hit.take(),
         Some(FolderLimitKind::SharedFolders)
     );
-    assert!(session.folder_invite_error.is_none());
+    assert!(session.chat_list.folder_invite_error.is_none());
     // Too many folders when creating one.
     let extra = session.request(RequestPurpose::CreateChatFolder, None);
     apply_json(
@@ -97,7 +102,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
         ),
     );
     assert_eq!(
-        session.folder_limit_hit.take(),
+        session.chat_list.folder_limit_hit.take(),
         Some(FolderLimitKind::Folders)
     );
     // Too many included chats when saving.
@@ -112,7 +117,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
         ),
     );
     assert_eq!(
-        session.folder_limit_hit.take(),
+        session.chat_list.folder_limit_hit.take(),
         Some(FolderLimitKind::ChatsIncluded)
     );
     // Any other failure is still an ordinary error.
@@ -126,6 +131,6 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
             extra.0
         ),
     );
-    assert!(session.folder_limit_hit.is_none());
-    assert!(session.folder_invite_error.is_some());
+    assert!(session.chat_list.folder_limit_hit.is_none());
+    assert!(session.chat_list.folder_invite_error.is_some());
 }

@@ -109,8 +109,8 @@ fn saved_sublists_sort_by_order_and_name_themselves() {
         &sink,
         r#"{"@type":"updateSavedMessagesTopicCount","topic_count":2}"#,
     );
-    assert_eq!(session.saved.topic_count, 2);
-    let ordered = session.saved.ordered_topics();
+    assert_eq!(session.threads.saved.topic_count, 2);
+    let ordered = session.threads.saved.ordered_topics();
     assert_eq!(ordered[0].id, 77);
     assert!(ordered[0].is_pinned);
     assert_eq!(ordered[1].kind, SavedTopicKind::FromChat(-1001));
@@ -122,8 +122,8 @@ fn saved_sublists_sort_by_order_and_name_themselves() {
         &sink,
         &topic_json(77, 77, false, 5, "later"),
     );
-    assert_eq!(session.saved.ordered_topics()[0].id, -1001);
-    assert_eq!(session.saved.topics.len(), 2);
+    assert_eq!(session.threads.saved.ordered_topics()[0].id, -1001);
+    assert_eq!(session.threads.saved.topics.len(), 2);
 }
 
 #[test]
@@ -142,6 +142,7 @@ fn my_notes_and_hidden_author_use_tdesktop_names() {
         r#"{"@type":"updateSavedMessagesTopic","topic":{"@type":"savedMessagesTopic","id":"0","type":{"@type":"savedMessagesTopicTypeAuthorHidden"},"is_pinned":false,"order":"2"}}"#,
     );
     let titles: Vec<String> = session
+        .threads
         .saved
         .ordered_topics()
         .into_iter()
@@ -167,7 +168,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
             message_json(20, "older")
         ),
     );
-    let view = session.saved.sublist.as_ref().unwrap();
+    let view = session.threads.saved.sublist.as_ref().unwrap();
     assert_eq!(view.history.messages.len(), 2);
     assert_eq!(view.history.next_from_message_id, MessageId(20));
     assert!(!view.history.loaded_complete);
@@ -184,6 +185,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
     );
     assert!(
         session
+            .threads
             .saved
             .sublist
             .as_ref()
@@ -206,6 +208,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
     );
     assert!(
         session
+            .threads
             .saved
             .sublist
             .as_ref()
@@ -240,6 +243,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
     );
     assert!(
         session
+            .threads
             .saved
             .sublist
             .as_ref()
@@ -255,10 +259,10 @@ fn leaving_the_saved_chat_closes_sublist_and_tag_filter() {
     let (mut session, _sink, _seq) = saved_session();
     session.open_saved_sublist(77);
     session.begin_saved_tag_search(77, ReactionType::emoji("\u{2764}"));
-    assert!(session.saved.tag_search.is_some());
+    assert!(session.threads.saved.tag_search.is_some());
     session.open_chat(ChatId(5));
-    assert!(session.saved.sublist.is_none());
-    assert!(session.saved.tag_search.is_none());
+    assert!(session.threads.saved.sublist.is_none());
+    assert!(session.threads.saved.tag_search.is_none());
 }
 
 #[test]
@@ -270,8 +274,8 @@ fn tag_updates_and_sublist_tag_names() {
         &sink,
         r#"{"@type":"updateSavedMessagesTags","saved_messages_topic_id":"0","tags":{"@type":"savedMessagesTags","tags":[{"tag":{"@type":"reactionTypeEmoji","emoji":"❤"},"label":"Love","count":4},{"tag":{"@type":"reactionTypeEmoji","emoji":"🔥"},"label":"","count":1}]}}"#,
     );
-    assert!(session.saved.tags_loaded);
-    assert_eq!(session.saved.tags[0].label, "Love");
+    assert!(session.threads.saved.tags_loaded);
+    assert_eq!(session.threads.saved.tags[0].label, "Love");
     session.open_saved_sublist(77);
     let extra = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 77 }, None);
     apply_json(
@@ -307,13 +311,13 @@ fn tag_search_pages_land_in_the_filter() {
             message_json(8, "b")
         ),
     );
-    let search = session.saved.tag_search.as_ref().unwrap();
+    let search = session.threads.saved.tag_search.as_ref().unwrap();
     assert!(search.loaded);
     assert_eq!(search.tag, tag);
     assert_eq!(search.history.messages.len(), 2);
     assert!(search.history.loaded_complete);
     session.clear_saved_tag_search();
-    assert!(session.saved.tag_search.is_none());
+    assert!(session.threads.saved.tag_search.is_none());
 }
 
 #[test]
@@ -329,8 +333,8 @@ fn load_topics_404_marks_the_list_complete() {
             extra.0
         ),
     );
-    assert!(session.saved.topics_exhausted);
-    assert!(session.chat_action_error.is_none());
+    assert!(session.threads.saved.topics_exhausted);
+    assert!(session.chats_state.chat_action_error.is_none());
 }
 
 #[test]
@@ -353,8 +357,8 @@ fn delete_sublist_history_removes_the_row_and_leaves_the_sublist() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.saved.topics.is_empty());
-    assert!(session.saved.sublist.is_none());
+    assert!(session.threads.saved.topics.is_empty());
+    assert!(session.threads.saved.sublist.is_none());
 }
 
 fn forum_with_pins(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
@@ -456,6 +460,9 @@ fn default_icons_keep_only_custom_emoji_stickers() {
             sticker(6, 0)
         ),
     );
-    assert_eq!(session.forum_topic_icons.len(), 1);
-    assert_eq!(session.forum_topic_icons[0].custom_emoji_id, Some(5005));
+    assert_eq!(session.threads.forum_topic_icons.len(), 1);
+    assert_eq!(
+        session.threads.forum_topic_icons[0].custom_emoji_id,
+        Some(5005)
+    );
 }

@@ -29,9 +29,9 @@ impl Session {
                 AuthorizationState::LoggingOut | AuthorizationState::Closed
             )
         {
-            self.chats_exhausted = false;
-            self.archive_chats_exhausted = false;
-            self.folder_chats_exhausted.clear();
+            self.chat_list.chats_exhausted = false;
+            self.chat_list.archive_chats_exhausted = false;
+            self.chat_list.folder_chats_exhausted.clear();
         }
         if matches!(state, AuthorizationState::Closed) {
             self.shutdown = ShutdownPhase::Closed;
@@ -45,8 +45,8 @@ impl Session {
             self.chat_search.close();
             self.in_flight_forward = None;
             self.queued_forward_flights.clear();
-            self.chat_message_sender.clear();
-            self.send_as_options.clear();
+            self.chats_state.chat_message_sender.clear();
+            self.chats_state.send_as_options.clear();
             self.share_search = ShareSearch::default();
             self.last_forward = None;
         }
@@ -183,7 +183,8 @@ impl Session {
         // reads `topic_histories`, never the chat's main history). Missing
         // entries are left alone so the paging cursor stays fetch-owned.
         if let Some(topic_id) = topic_id
-            && let Some(topic_history) = self.topic_histories.get_mut(&(chat_id.0, topic_id))
+            && let Some(topic_history) =
+                self.threads.topic_histories.get_mut(&(chat_id.0, topic_id))
         {
             topic_history.upsert(row);
         }
@@ -209,7 +210,7 @@ impl Session {
             edit(message);
             found = true;
         }
-        for ((topic_chat_id, _), topic) in self.topic_histories.iter_mut() {
+        for ((topic_chat_id, _), topic) in self.threads.topic_histories.iter_mut() {
             if *topic_chat_id == chat_id.0
                 && let Some(message) = topic.messages.get_mut(&message_id.0)
             {
@@ -217,7 +218,7 @@ impl Session {
                 found = true;
             }
         }
-        if let Some(thread) = self.thread.as_mut()
+        if let Some(thread) = self.threads.thread.as_mut()
             && thread.chat_id == chat_id
             && let Some(message) = thread.history.messages.get_mut(&message_id.0)
         {
@@ -226,6 +227,7 @@ impl Session {
         }
         if self.my_user_id == Some(chat_id.0) {
             if let Some(message) = self
+                .threads
                 .saved
                 .sublist
                 .as_mut()
@@ -235,6 +237,7 @@ impl Session {
                 found = true;
             }
             if let Some(message) = self
+                .threads
                 .saved
                 .tag_search
                 .as_mut()

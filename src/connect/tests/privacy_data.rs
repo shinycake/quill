@@ -316,7 +316,7 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
         &mut f,
         r#"{"@type":"updateContactCloseBirthdays","close_birthday_users":[{"@type":"closeBirthdayUser","user_id":9,"birthdate":{"@type":"birthdate","day":14,"month":3,"year":1990}}]}"#,
     );
-    let facts = &f.1.session.suggestions;
+    let facts = &f.1.session.chat_list.suggestions;
     assert!(facts.actions.contains(ACTION_PHOTO));
     assert_eq!(facts.close_birthdays.len(), 1);
     assert_eq!(facts.close_birthdays[0].year, Some(1990));
@@ -326,7 +326,13 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
     let request = last_request(&f);
     assert_eq!(request["@type"], "hideSuggestedAction");
     assert_eq!(request["action"]["@type"], "suggestedActionSetProfilePhoto");
-    assert!(!f.1.session.suggestions.actions.contains(ACTION_PHOTO));
+    assert!(
+        !f.1.session
+            .chat_list
+            .suggestions
+            .actions
+            .contains(ACTION_PHOTO)
+    );
     // A refusal puts it back and says so.
     ingest(
         &mut f,
@@ -335,9 +341,15 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
             extra_of(&request)
         ),
     );
-    assert!(f.1.session.suggestions.actions.contains(ACTION_PHOTO));
+    assert!(
+        f.1.session
+            .chat_list
+            .suggestions
+            .actions
+            .contains(ACTION_PHOTO)
+    );
     assert_eq!(
-        f.1.session.chat_action_error.as_deref(),
+        f.1.session.chats_state.chat_action_error.as_deref(),
         Some("could not hide the suggestion (error 400)")
     );
 
@@ -345,12 +357,12 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
     f.1.hide_suggestion(&Suggestion::Birthdays(vec![9]))
         .unwrap();
     assert_eq!(last_request(&f)["@type"], "hideContactCloseBirthdays");
-    assert!(f.1.session.suggestions.birthdays_hidden);
+    assert!(f.1.session.chat_list.suggestions.birthdays_hidden);
     // A fresh list from TDLib shows them again.
     ingest(
         &mut f,
         r#"{"@type":"updateContactCloseBirthdays","close_birthday_users":[]}"#,
     );
-    assert!(!f.1.session.suggestions.birthdays_hidden);
+    assert!(!f.1.session.chat_list.suggestions.birthdays_hidden);
     cleanup(f);
 }

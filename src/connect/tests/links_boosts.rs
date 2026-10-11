@@ -104,7 +104,13 @@ fn other_admin_links_load_active_and_revoked_for_the_creator() {
     // Answers can come in any order.
     rig.ingest(&links_json(revoked, &[link_json("https://t.me/+old", 3)]));
     rig.ingest(&links_json(first.0, &[link_json("https://t.me/+a", 1)]));
-    let state = rig.driver.session.admin_invite_links.get(&13).unwrap();
+    let state = rig
+        .driver
+        .session
+        .groups
+        .admin_invite_links
+        .get(&13)
+        .unwrap();
     let InviteLinkFetch::Loaded(active) = &state.active else {
         panic!("active loaded");
     };
@@ -150,11 +156,23 @@ fn a_stale_admin_reply_is_dropped_after_switching_admin() {
         .unwrap()
         .unwrap();
     rig.ingest(&links_json(first.0, &[link_json("https://t.me/+nine", 1)]));
-    let state = rig.driver.session.admin_invite_links.get(&13).unwrap();
+    let state = rig
+        .driver
+        .session
+        .groups
+        .admin_invite_links
+        .get(&13)
+        .unwrap();
     assert_eq!(state.creator_user_id, 10);
     assert!(matches!(state.active, InviteLinkFetch::Loading));
     rig.ingest(&links_json(second.0, &[link_json("https://t.me/+ten", 1)]));
-    let state = rig.driver.session.admin_invite_links.get(&13).unwrap();
+    let state = rig
+        .driver
+        .session
+        .groups
+        .admin_invite_links
+        .get(&13)
+        .unwrap();
     assert!(matches!(state.active, InviteLinkFetch::Loaded(_)));
 }
 
@@ -172,12 +190,24 @@ fn deleting_an_admins_revoked_links_sends_their_id_and_clears_only_their_list() 
         9
     );
     rig.ingest(&ok_json(extra));
-    let state = rig.driver.session.admin_invite_links.get(&13).unwrap();
+    let state = rig
+        .driver
+        .session
+        .groups
+        .admin_invite_links
+        .get(&13)
+        .unwrap();
     assert!(matches!(
         &state.revoked,
         InviteLinkFetch::Loaded(list) if list.links.is_empty()
     ));
-    assert!(!rig.driver.session.revoked_invite_links.contains_key(&13));
+    assert!(
+        !rig.driver
+            .session
+            .groups
+            .revoked_invite_links
+            .contains_key(&13)
+    );
 }
 
 fn requests_json(extra: u64, total: i32, ids: &[i64]) -> String {
@@ -221,6 +251,7 @@ fn link_join_requests_filter_by_link_page_and_process_in_place() {
     assert_eq!(
         rig.driver
             .session
+            .groups
             .link_join_requests
             .get(&13)
             .unwrap()
@@ -235,7 +266,13 @@ fn link_join_requests_filter_by_link_page_and_process_in_place() {
         .unwrap()
         .unwrap();
     rig.ingest(&ok_json(one));
-    let state = rig.driver.session.link_join_requests.get(&13).unwrap();
+    let state = rig
+        .driver
+        .session
+        .groups
+        .link_join_requests
+        .get(&13)
+        .unwrap();
     assert_eq!(state.requests.len(), 2);
     assert_eq!(state.total_count, 2);
     // Bulk for the link only.
@@ -248,7 +285,13 @@ fn link_join_requests_filter_by_link_page_and_process_in_place() {
     assert_eq!(sent["invite_link"], "https://t.me/+x");
     assert_eq!(sent["approve"], false);
     rig.ingest(&ok_json(all));
-    let state = rig.driver.session.link_join_requests.get(&13).unwrap();
+    let state = rig
+        .driver
+        .session
+        .groups
+        .link_join_requests
+        .get(&13)
+        .unwrap();
     assert!(state.requests.is_empty());
     assert_eq!(state.total_count, 0);
 }
@@ -265,7 +308,13 @@ fn a_late_link_requests_page_for_another_link_is_ignored() {
         .open_link_join_requests(ChatId(13), "https://t.me/+b")
         .unwrap();
     rig.ingest(&requests_json(old.0, 1, &[5]));
-    let state = rig.driver.session.link_join_requests.get(&13).unwrap();
+    let state = rig
+        .driver
+        .session
+        .groups
+        .link_join_requests
+        .get(&13)
+        .unwrap();
     assert_eq!(state.invite_link, "https://t.me/+b");
     assert!(state.requests.is_empty());
     assert!(state.loading);
@@ -305,7 +354,7 @@ fn boosts_page_with_the_server_offset_and_switch_tabs() {
         .unwrap();
     assert_eq!(rig.last_sent("getChatBoosts")["offset"], "n1");
     rig.ingest(&boosts_json(more.0, 3, "", &[7]));
-    let state = rig.driver.session.chat_boost_lists.get(&13).unwrap();
+    let state = rig.driver.session.groups.chat_boost_lists.get(&13).unwrap();
     assert_eq!(state.boosts.len(), 3);
     assert!(state.next_offset.is_empty());
     // The last page ends paging.
@@ -327,6 +376,7 @@ fn boosts_page_with_the_server_offset_and_switch_tabs() {
     assert!(
         rig.driver
             .session
+            .groups
             .chat_boost_lists
             .get(&13)
             .unwrap()
@@ -337,6 +387,7 @@ fn boosts_page_with_the_server_offset_and_switch_tabs() {
     assert!(
         !rig.driver
             .session
+            .groups
             .chat_boost_lists
             .get(&13)
             .unwrap()
@@ -358,7 +409,7 @@ fn boost_link_is_fetched_once_and_cached() {
         extra.0
     ));
     assert_eq!(
-        rig.driver.session.chat_boost_links.get(&13),
+        rig.driver.session.groups.chat_boost_links.get(&13),
         Some(&("https://t.me/boost/rustaceans".to_string(), true))
     );
     assert!(
@@ -484,5 +535,5 @@ fn a_refused_username_change_reports_an_error() {
         r#"{{"@type":"error","@extra":"{}","code":400,"message":"USERNAMES_ACTIVE_TOO_MUCH"}}"#,
         extra.0
     ));
-    assert!(rig.driver.session.chat_action_error.is_some());
+    assert!(rig.driver.session.chats_state.chat_action_error.is_some());
 }

@@ -16,9 +16,9 @@ impl Session {
             // sublists were loaded; it is not a failure.
             Some(RequestPurpose::LoadSavedMessagesTopics) => {
                 if err.code == 404 {
-                    self.saved.topics_exhausted = true;
+                    self.threads.saved.topics_exhausted = true;
                 } else {
-                    self.chat_action_error =
+                    self.chats_state.chat_action_error =
                         Some(call_request_error_line(err, "Could not load saved chats"));
                 }
             }
@@ -39,7 +39,7 @@ impl Session {
                 | RequestPurpose::GetSavedMessagesTopicHistory { .. }
                 | RequestPurpose::SearchSavedMessages { .. },
             ) => {
-                self.chat_action_error = Some(call_request_error_line(
+                self.chats_state.chat_action_error = Some(call_request_error_line(
                     err,
                     "Could not complete that action",
                 ));

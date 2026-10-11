@@ -26,7 +26,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self.session.open_chat == Some(chat_id) {
             // Re-selecting the open chat leaves its reply thread.
-            if self.session.thread.is_some() {
+            if self.session.threads.thread.is_some() {
                 self.session.close_thread();
             }
             self.maybe_probe_channel_membership()?;
@@ -403,7 +403,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetArchiveChatListSettings;
-        if self.session.archive_chat_list_settings.is_some()
+        if self.session.chat_list.archive_chat_list_settings.is_some()
             || self.session.requests.has_purpose(purpose)
         {
             return Ok(None);
@@ -416,7 +416,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.archive_settings_loading = true;
+        self.session.chat_list.archive_settings_loading = true;
         Ok(Some(extra))
     }
 
@@ -435,7 +435,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        let Some(current) = self.session.archive_chat_list_settings else {
+        let Some(current) = self.session.chat_list.archive_chat_list_settings else {
             return Err(ConnectSendError::InvalidRequest);
         };
         if current == settings {
@@ -449,7 +449,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.archive_chat_list_settings = Some(settings);
+        self.session.chat_list.archive_chat_list_settings = Some(settings);
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::ArchiveChatListSettings {
                 previous: Some(current),

@@ -38,7 +38,7 @@ fn replay_admin_list_load_and_gate() {
             list_extra.0
         )],
     );
-    let list = match session.admin_lists.get(&13) {
+    let list = match session.groups.admin_lists.get(&13) {
         Some(AdminListFetch::Loaded(list)) => list,
         other => panic!("expected loaded admin list, got {other:?}"),
     };
@@ -80,7 +80,7 @@ fn replay_admin_list_load_and_gate() {
             promote_extra.0
         )],
     );
-    assert!(!session.admin_lists.contains_key(&13));
+    assert!(!session.groups.admin_lists.contains_key(&13));
 }
 
 /// Phase D3b: any `updateChatMember` invalidates the cached admin list,
@@ -116,7 +116,7 @@ fn replay_admin_update_member_invalidates_and_own_gate() {
         )],
     );
     assert!(matches!(
-        session.admin_lists.get(&13),
+        session.groups.admin_lists.get(&13),
         Some(AdminListFetch::Loaded(_))
     ));
 
@@ -129,7 +129,7 @@ fn replay_admin_update_member_invalidates_and_own_gate() {
             r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":1,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":9},"status":{"@type":"chatMemberStatusMember"}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":9},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{"@type":"chatAdministratorRights","can_promote_members":false}}}}"#,
         ],
     );
-    assert!(!session.admin_lists.contains_key(&13));
+    assert!(!session.groups.admin_lists.contains_key(&13));
 
     // Own membership: gate opens with can_promote_members=true…
     let me_extra = session.request(RequestPurpose::GetMe, None);
@@ -189,7 +189,7 @@ fn replay_admin_rights_lookup_and_demote() {
             rights_extra.0
         )],
     );
-    let rights = match session.admin_rights.get(&(13, 2)) {
+    let rights = match session.groups.admin_rights.get(&(13, 2)) {
         Some(AdminRightsFetch::Loaded(rights)) => rights,
         other => panic!("expected loaded admin rights, got {other:?}"),
     };
@@ -206,7 +206,10 @@ fn replay_admin_rights_lookup_and_demote() {
         }),
         Some(chat_id),
     );
-    session.admin_lists.insert(13, AdminListFetch::Loading);
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading);
     apply_all_seq(
         &mut session,
         &sink,
@@ -216,7 +219,7 @@ fn replay_admin_rights_lookup_and_demote() {
             demote_extra.0
         )],
     );
-    assert!(!session.admin_lists.contains_key(&13));
+    assert!(!session.groups.admin_lists.contains_key(&13));
 }
 
 /// Phase D3b: `getSupergroupMembers` populates the promote picker's
@@ -255,6 +258,7 @@ fn replay_supergroup_members_picker_cache() {
         )],
     );
     let page = match session
+        .groups
         .supergroup_members
         .get(&(13, MemberListFilter::Recent))
     {
@@ -291,6 +295,7 @@ fn replay_supergroup_members_picker_cache() {
     );
     assert!(matches!(
         session
+            .groups
             .supergroup_members
             .get(&(13, MemberListFilter::Recent)),
         Some(SupergroupMembersFetch::Failed(_))

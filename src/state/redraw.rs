@@ -155,6 +155,7 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
 fn shows_chat(session: &Session, chat_id: ChatId) -> bool {
     session.open_chat == Some(chat_id)
         || session
+            .threads
             .thread
             .as_ref()
             .is_some_and(|thread| thread.chat_id == chat_id || thread.origin_chat_id == chat_id)

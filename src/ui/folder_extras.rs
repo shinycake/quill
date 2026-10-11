@@ -290,6 +290,7 @@ impl QuillApp {
         let folder_id = self.folders.tab?;
         let count = self
             .session()?
+            .chat_list
             .folder_new_chats
             .get(&folder_id)
             .map_or(0, Vec::len);
@@ -366,7 +367,7 @@ impl QuillApp {
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.folder_new_chats.remove(&folder_id);
+                    session.chat_list.folder_new_chats.remove(&folder_id);
                 }
             }
         }
@@ -376,7 +377,7 @@ impl QuillApp {
     pub(super) fn open_folder_new_chats(&mut self, folder_id: i32, cx: &mut Context<Self>) {
         let ids: Vec<i64> = self
             .session()
-            .and_then(|s| s.folder_new_chats.get(&folder_id).cloned())
+            .and_then(|s| s.chat_list.folder_new_chats.get(&folder_id).cloned())
             .unwrap_or_default();
         self.folders.new_chats_dialog = Some(FolderNewChatsDialog {
             folder_id,
@@ -411,7 +412,7 @@ impl QuillApp {
             },
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.folder_new_chats.remove(&dialog.folder_id);
+                    session.chat_list.folder_new_chats.remove(&dialog.folder_id);
                 }
             }
         }
@@ -439,12 +440,12 @@ impl QuillApp {
             let folder_id = state.folder_id;
             let folder_name = this
                 .session()
-                .and_then(|s| s.chat_folders.iter().find(|f| f.id == folder_id))
+                .and_then(|s| s.chat_list.chat_folders.iter().find(|f| f.id == folder_id))
                 .map(|f| f.name.clone())
                 .unwrap_or_default();
             let chats: Vec<i64> = this
                 .session()
-                .and_then(|s| s.folder_new_chats.get(&folder_id).cloned())
+                .and_then(|s| s.chat_list.folder_new_chats.get(&folder_id).cloned())
                 .unwrap_or_default();
             let all_selected =
                 !chats.is_empty() && chats.iter().all(|id| state.selected.contains(id));
@@ -575,11 +576,11 @@ impl QuillApp {
     /// frees the dialog that was waiting for the answer.
     pub(super) fn drain_folder_limit(&mut self, cx: &mut Context<Self>) -> bool {
         let hit = match self.live.as_mut() {
-            Some(live) => live.driver.session.folder_limit_hit.take(),
+            Some(live) => live.driver.session.chat_list.folder_limit_hit.take(),
             None => self
                 .demo_session
                 .as_mut()
-                .and_then(|s| s.folder_limit_hit.take()),
+                .and_then(|s| s.chat_list.folder_limit_hit.take()),
         };
         let Some(kind) = hit else {
             return false;
@@ -617,8 +618,8 @@ impl QuillApp {
                 .session()
                 .map(|s| {
                     (
-                        s.folder_limits.current(kind, premium),
-                        s.folder_limits.premium_value(kind),
+                        s.chat_list.folder_limits.current(kind, premium),
+                        s.chat_list.folder_limits.premium_value(kind),
                     )
                 })
                 .unwrap_or((0, 0));
@@ -651,7 +652,7 @@ impl QuillApp {
                 };
                 let free = this
                     .session()
-                    .map_or(current, |s| s.folder_limits.default_value(kind));
+                    .map_or(current, |s| s.chat_list.folder_limits.default_value(kind));
                 let plus = premium_value;
                 body = body.child(
                     div()
@@ -702,7 +703,8 @@ impl QuillApp {
     fn choose_folder_tag_color(&mut self, color_id: i32, cx: &mut Context<Self>) {
         let (premium, tags_enabled) = (
             self.is_premium(),
-            self.session().is_some_and(|s| s.are_folder_tags_enabled),
+            self.session()
+                .is_some_and(|s| s.chat_list.are_folder_tags_enabled),
         );
         if !tag_choice_allowed(premium, tags_enabled) {
             self.show_folder_limit(FolderLimitKind::Tags, cx);
@@ -720,7 +722,9 @@ impl QuillApp {
     pub(super) fn folder_tag_picker(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.folders.editor.as_ref()?;
         let premium = self.is_premium();
-        let tags_enabled = self.session().is_some_and(|s| s.are_folder_tags_enabled);
+        let tags_enabled = self
+            .session()
+            .is_some_and(|s| s.chat_list.are_folder_tags_enabled);
         if !tag_picker_visible(premium, tags_enabled) {
             return None;
         }

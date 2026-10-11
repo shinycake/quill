@@ -27,7 +27,7 @@ impl Session {
             // ignored, never an error.
             CommonPayload::UpdateOption { name, value } => {
                 self.settings.storage_limits.apply_option(&name, &value);
-                self.folder_limits.apply_option(&name, &value);
+                self.chat_list.folder_limits.apply_option(&name, &value);
                 self.apply_privacy_option(&name, &value);
                 if name == "disable_contact_registered_notifications"
                     && let OptionValue::Boolean(off) = &value
@@ -113,9 +113,9 @@ impl Session {
                 {
                     let limit = limit.max(0).min(i64::from(i32::MAX)) as i32;
                     if name == "pinned_chat_count_max" {
-                        self.pinned_chat_count_max = limit;
+                        self.chat_list.pinned_chat_count_max = limit;
                     } else {
-                        self.pinned_archived_chat_count_max = limit;
+                        self.chat_list.pinned_archived_chat_count_max = limit;
                     }
                 }
             }

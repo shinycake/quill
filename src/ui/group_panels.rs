@@ -322,7 +322,7 @@ impl QuillApp {
         if let Some(chat_id) = invite_panel_chat_id {
             let query = self
                 .session()
-                .and_then(|session| session.event_log_queries.get(&chat_id.0).cloned())
+                .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
                 .unwrap_or_default();
             if let Some(input) = self.admin.event_log_search.clone() {
                 input.update(cx, |state, cx| state.set_value(&query, window, cx));
@@ -910,7 +910,7 @@ impl QuillApp {
                 )
             });
         let info = session
-            .and_then(|s| s.supergroup_full_infos.get(&supergroup_id))
+            .and_then(|s| s.groups.supergroup_full_infos.get(&supergroup_id))
             .cloned();
         let description = info
             .as_ref()
@@ -1126,7 +1126,7 @@ impl QuillApp {
             .unwrap_or_else(|| (format!("Group {basic_group_id}"), ChatId(basic_group_id)));
         let member_count = self
             .session()
-            .and_then(|s| s.basic_group_members.get(&chat_id.0))
+            .and_then(|s| s.groups.basic_group_members.get(&chat_id.0))
             .and_then(|fetch| match fetch {
                 SupergroupMembersFetch::Loaded { total_count, .. } => Some(*total_count),
                 _ => None,

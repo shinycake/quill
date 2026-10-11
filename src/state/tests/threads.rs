@@ -102,7 +102,7 @@ fn thread_routes_edits_deletes_and_sends() {
         &sink,
         r#"{"@type":"updateMessageContent","chat_id":14,"message_id":502,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"first (edited)","entities":[]}}}"#,
     );
-    let row = &session.thread.as_ref().unwrap().history.messages[&502];
+    let row = &session.threads.thread.as_ref().unwrap().history.messages[&502];
     assert!(matches!(
         &row.content,
         MessageContent::Text(text) if text.text == "first (edited)"
@@ -117,6 +117,7 @@ fn thread_routes_edits_deletes_and_sends() {
     );
     assert!(
         session
+            .threads
             .thread
             .as_ref()
             .unwrap()
@@ -133,7 +134,7 @@ fn thread_routes_edits_deletes_and_sends() {
             msg(510, 14, 501, "mine").replace("\"is_outgoing\":false", "\"is_outgoing\":true")
         ),
     );
-    let thread = session.thread.as_ref().unwrap();
+    let thread = session.threads.thread.as_ref().unwrap();
     assert!(!thread.history.messages.contains_key(&-7));
     assert!(thread.history.messages.contains_key(&510));
 
@@ -146,6 +147,7 @@ fn thread_routes_edits_deletes_and_sends() {
     );
     assert!(
         !session
+            .threads
             .thread
             .as_ref()
             .unwrap()
@@ -210,7 +212,10 @@ fn unread_thread_places_the_divider_anchor_and_failed_pages_keep_ready() {
             older.0
         ),
     );
-    assert_eq!(session.thread.as_ref().unwrap().status, ThreadStatus::Ready);
+    assert_eq!(
+        session.threads.thread.as_ref().unwrap().status,
+        ThreadStatus::Ready
+    );
 }
 
 #[test]
@@ -231,9 +236,9 @@ fn thread_labels_follow_tdesktop() {
 #[test]
 fn opening_another_chat_leaves_the_thread() {
     let (mut session, _, _) = resolved();
-    assert!(session.thread.is_some());
+    assert!(session.threads.thread.is_some());
     session.open_chat(ChatId(14));
-    assert!(session.thread.is_some(), "its own chat keeps it");
+    assert!(session.threads.thread.is_some(), "its own chat keeps it");
     session.open_chat(ChatId(13));
-    assert!(session.thread.is_none(), "another chat drops it");
+    assert!(session.threads.thread.is_none(), "another chat drops it");
 }

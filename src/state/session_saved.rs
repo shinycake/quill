@@ -12,7 +12,9 @@ pub const SAVED_TOPICS_PAGE: i32 = 50;
 impl Session {
     /// `chat.view_as_topics` / `updateChatViewAsTopics`.
     pub fn set_chat_view_as_topics(&mut self, chat_id: i64, view_as_topics: bool) {
-        self.chat_view_as_topics.insert(chat_id, view_as_topics);
+        self.threads
+            .chat_view_as_topics
+            .insert(chat_id, view_as_topics);
         self.view_generation.bump();
     }
 
@@ -20,7 +22,7 @@ impl Session {
     /// message history. Saved Messages shows its sublists only when TDLib
     /// said so.
     pub fn chat_views_as_topics(&self, chat_id: ChatId) -> bool {
-        let explicit = self.chat_view_as_topics.get(&chat_id.0).copied();
+        let explicit = self.threads.chat_view_as_topics.get(&chat_id.0).copied();
         if self.is_saved_messages(chat_id) {
             return explicit.unwrap_or(false);
         }
@@ -60,7 +62,7 @@ impl Session {
     /// Reorder the cached pinned topics right away (the server confirms
     /// with `updateForumTopic`).
     pub(crate) fn apply_pinned_forum_order(&mut self, chat_id: ChatId, ids: &[i32]) {
-        let Some(topics) = self.forum_topics.get_mut(&chat_id.0) else {
+        let Some(topics) = self.threads.forum_topics.get_mut(&chat_id.0) else {
             return;
         };
         let mut orders: Vec<i64> = topics
@@ -83,11 +85,16 @@ impl Session {
         forum_topic_id: i32,
         mentions: bool,
     ) {
-        if let Some(topic) = self.forum_topics.get_mut(&chat_id.0).and_then(|topics| {
-            topics
-                .iter_mut()
-                .find(|t| t.forum_topic_id == forum_topic_id)
-        }) {
+        if let Some(topic) = self
+            .threads
+            .forum_topics
+            .get_mut(&chat_id.0)
+            .and_then(|topics| {
+                topics
+                    .iter_mut()
+                    .find(|t| t.forum_topic_id == forum_topic_id)
+            })
+        {
             if mentions {
                 topic.unread_mention_count = 0;
             } else {
@@ -98,7 +105,7 @@ impl Session {
 
     /// `getForumTopicDefaultIcons` answered.
     pub(crate) fn accept_topic_default_icons(&mut self, stickers: Vec<StickerItem>) {
-        self.forum_topic_icons = stickers
+        self.threads.forum_topic_icons = stickers
             .into_iter()
             .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
             .collect();
@@ -108,17 +115,17 @@ impl Session {
 
     /// `updateSavedMessagesTopic`.
     pub(crate) fn apply_saved_topic(&mut self, topic: SavedMessagesTopic) {
-        self.saved.topics.insert(topic.id, topic);
+        self.threads.saved.topics.insert(topic.id, topic);
         self.view_generation.bump();
     }
 
     /// `updateSavedMessagesTags` / `getSavedMessagesTags`.
     pub(crate) fn apply_saved_tags(&mut self, topic_id: i64, tags: Vec<SavedMessagesTag>) {
         if topic_id == 0 {
-            self.saved.tags = tags;
-            self.saved.tags_loaded = true;
+            self.threads.saved.tags = tags;
+            self.threads.saved.tags_loaded = true;
         } else {
-            self.saved.topic_tags.insert(topic_id, tags);
+            self.threads.saved.topic_tags.insert(topic_id, tags);
         }
         self.view_generation.bump();
     }
@@ -150,8 +157,8 @@ impl Session {
 
     /// Enter a sublist (the history loads next).
     pub fn open_saved_sublist(&mut self, topic_id: i64) {
-        self.saved.tag_search = None;
-        self.saved.sublist = Some(SavedSublistView {
+        self.threads.saved.tag_search = None;
+        self.threads.saved.sublist = Some(SavedSublistView {
             topic_id,
             history: TopicHistory::default(),
         });
@@ -160,13 +167,13 @@ impl Session {
 
     /// Leave the sublist and any tag filter, back to the sublist list.
     pub fn close_saved_sublist(&mut self) {
-        self.saved.close_views();
+        self.threads.saved.close_views();
         self.view_generation.bump();
     }
 
     /// Start (or replace) a tag filter over `topic_id` (0 = everything).
     pub fn begin_saved_tag_search(&mut self, topic_id: i64, tag: ReactionType) {
-        self.saved.tag_search = Some(SavedTagSearch {
+        self.threads.saved.tag_search = Some(SavedTagSearch {
             topic_id,
             tag,
             history: TopicHistory::default(),
@@ -177,7 +184,7 @@ impl Session {
 
     /// Clear the tag filter ("All" in the tags bar).
     pub fn clear_saved_tag_search(&mut self) {
-        self.saved.tag_search = None;
+        self.threads.saved.tag_search = None;
         self.view_generation.bump();
     }
 
@@ -196,6 +203,7 @@ impl Session {
             self.remember_files(&message.files);
         }
         let Some(view) = self
+            .threads
             .saved
             .sublist
             .as_mut()
@@ -244,6 +252,7 @@ impl Session {
             self.remember_files(&message.files);
         }
         let Some(search) = self
+            .threads
             .saved
             .tag_search
             .as_mut()
@@ -269,15 +278,16 @@ impl Session {
 
     /// `deleteSavedMessagesTopicHistory` succeeded: the sublist is gone.
     pub(crate) fn remove_saved_topic(&mut self, topic_id: i64) {
-        self.saved.topics.remove(&topic_id);
-        self.saved.topic_tags.remove(&topic_id);
+        self.threads.saved.topics.remove(&topic_id);
+        self.threads.saved.topic_tags.remove(&topic_id);
         if self
+            .threads
             .saved
             .sublist
             .as_ref()
             .is_some_and(|view| view.topic_id == topic_id)
         {
-            self.saved.close_views();
+            self.threads.saved.close_views();
         }
         self.view_generation.bump();
     }
@@ -288,12 +298,12 @@ impl Session {
         if !self.is_saved_messages(chat_id) {
             return;
         }
-        if let Some(view) = self.saved.sublist.as_mut() {
+        if let Some(view) = self.threads.saved.sublist.as_mut() {
             for id in ids {
                 view.history.messages.remove(&id.0);
             }
         }
-        if let Some(search) = self.saved.tag_search.as_mut() {
+        if let Some(search) = self.threads.saved.tag_search.as_mut() {
             for id in ids {
                 search.history.messages.remove(&id.0);
             }
@@ -303,10 +313,11 @@ impl Session {
     /// The tags the bar offers for the current context: the open sublist's
     /// own tags (named from the global list) or all tags.
     pub fn saved_tag_choices(&self) -> Vec<SavedMessagesTag> {
-        let Some(view) = &self.saved.sublist else {
-            return self.saved.tags.clone();
+        let Some(view) = &self.threads.saved.sublist else {
+            return self.threads.saved.tags.clone();
         };
-        self.saved
+        self.threads
+            .saved
             .topic_tags
             .get(&view.topic_id)
             .map(|tags| {
@@ -314,8 +325,12 @@ impl Session {
                     .map(|tag| {
                         let mut tag = tag.clone();
                         if tag.label.is_empty()
-                            && let Some(named) =
-                                self.saved.tags.iter().find(|other| other.tag == tag.tag)
+                            && let Some(named) = self
+                                .threads
+                                .saved
+                                .tags
+                                .iter()
+                                .find(|other| other.tag == tag.tag)
                         {
                             tag.label = named.label.clone();
                         }

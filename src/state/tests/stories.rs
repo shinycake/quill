@@ -243,7 +243,7 @@ fn topic_history_response_is_stored_per_topic() {
             extra.0
         ),
     );
-    let history = session.topic_histories.get(&(16, 2)).unwrap();
+    let history = session.threads.topic_histories.get(&(16, 2)).unwrap();
     assert_eq!(history.messages.len(), 2);
     assert_eq!(history.next_from_message_id, MessageId(40));
     assert!(!history.loaded_complete);
@@ -261,6 +261,7 @@ fn topic_history_response_is_stored_per_topic() {
     );
     assert_eq!(
         session
+            .threads
             .topic_histories
             .get(&(16, 2))
             .unwrap()
@@ -268,7 +269,7 @@ fn topic_history_response_is_stored_per_topic() {
             .len(),
         2
     );
-    let other = session.topic_histories.get(&(16, 3)).unwrap();
+    let other = session.threads.topic_histories.get(&(16, 3)).unwrap();
     assert!(other.loaded_complete);
     assert!(other.messages.is_empty());
     // next_from_message_id 0 completes the first topic's history.
@@ -282,7 +283,7 @@ fn topic_history_response_is_stored_per_topic() {
             extra2.0
         ),
     );
-    let history = session.topic_histories.get(&(16, 2)).unwrap();
+    let history = session.threads.topic_histories.get(&(16, 2)).unwrap();
     assert!(history.loaded_complete);
     assert_eq!(history.messages.len(), 3);
 }
@@ -311,7 +312,7 @@ fn deleted_messages_leave_loaded_topic_histories() {
         &sink,
         r#"{"@type":"updateDeleteMessages","chat_id":16,"message_ids":[40],"is_permanent":true,"from_cache":false}"#,
     );
-    let ids: Vec<i64> = session.topic_histories[&(16, 2)]
+    let ids: Vec<i64> = session.threads.topic_histories[&(16, 2)]
         .messages
         .keys()
         .copied()
@@ -341,7 +342,7 @@ fn topic_message_update_lands_in_loaded_topic_history() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":51,"chat_id":16,"is_outgoing":false,"topic_id":{"@type":"messageTopicForum","forum_topic_id":2},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_TOPIC_live","entities":[]}}}}"#,
     );
-    let topic = session.topic_histories.get(&(16, 2)).unwrap();
+    let topic = session.threads.topic_histories.get(&(16, 2)).unwrap();
     assert!(topic.messages.values().any(|m| m.id == MessageId(51)));
     // Still in the main history (unchanged behavior).
     assert!(session.histories.get(&16).unwrap().contains(MessageId(51)));
@@ -352,7 +353,7 @@ fn topic_message_update_lands_in_loaded_topic_history() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":52,"chat_id":16,"is_outgoing":false,"topic_id":{"@type":"messageTopicForum","forum_topic_id":9},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"unloaded","entities":[]}}}}"#,
     );
-    assert!(!session.topic_histories.contains_key(&(16, 9)));
+    assert!(!session.threads.topic_histories.contains_key(&(16, 9)));
     assert!(session.histories.get(&16).unwrap().contains(MessageId(52)));
     // A message with no topic stays a plain chat message.
     apply_json(
@@ -394,6 +395,7 @@ fn topic_send_succeeded_replaces_pending_row_in_topic_history() {
     );
     assert!(
         session
+            .threads
             .topic_histories
             .get(&(16, 2))
             .unwrap()
@@ -406,7 +408,7 @@ fn topic_send_succeeded_replaces_pending_row_in_topic_history() {
         &sink,
         r#"{"@type":"updateMessageSendSucceeded","message":{"id":60,"chat_id":16,"is_outgoing":true,"topic_id":{"@type":"messageTopicForum","forum_topic_id":2},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_TOPIC_send","entities":[]}}},"old_message_id":-1}"#,
     );
-    let topic = session.topic_histories.get(&(16, 2)).unwrap();
+    let topic = session.threads.topic_histories.get(&(16, 2)).unwrap();
     assert!(!topic.messages.contains_key(&-1));
     assert!(topic.messages.contains_key(&60));
 }
@@ -421,10 +423,16 @@ fn update_profile_accent_colors_stores_palette_and_ids() {
         &sink,
         r#"{"@type":"updateProfileAccentColors","colors":[{"@type":"profileAccentColor","id":3,"light_theme_colors":{"@type":"profileAccentColors","palette_colors":[43776,65280],"background_colors":[],"story_colors":[]},"dark_theme_colors":{"@type":"profileAccentColors","palette_colors":[262144],"background_colors":[],"story_colors":[]}}],"available_accent_color_ids":[1,3,5]}"#,
     );
-    assert_eq!(session.available_accent_color_ids, vec![1, 3, 5]);
-    assert_eq!(session.profile_accent_colors.len(), 1);
-    assert_eq!(session.profile_accent_colors[0].id, 3);
-    assert_eq!(session.profile_accent_colors[0].swatch_rgb(), 0xAB00);
+    assert_eq!(
+        session.chats_state.available_accent_color_ids,
+        vec![1, 3, 5]
+    );
+    assert_eq!(session.chats_state.profile_accent_colors.len(), 1);
+    assert_eq!(session.chats_state.profile_accent_colors[0].id, 3);
+    assert_eq!(
+        session.chats_state.profile_accent_colors[0].swatch_rgb(),
+        0xAB00
+    );
     // Replacement, not merge.
     apply_json(
         &mut session,
@@ -432,8 +440,8 @@ fn update_profile_accent_colors_stores_palette_and_ids() {
         &sink,
         r#"{"@type":"updateProfileAccentColors","colors":[],"available_accent_color_ids":[7]}"#,
     );
-    assert_eq!(session.available_accent_color_ids, vec![7]);
-    assert!(session.profile_accent_colors.is_empty());
+    assert_eq!(session.chats_state.available_accent_color_ids, vec![7]);
+    assert!(session.chats_state.profile_accent_colors.is_empty());
 }
 
 #[test]
@@ -446,8 +454,8 @@ fn update_accent_colors_stores_name_palette() {
         &sink,
         r#"{"@type":"updateAccentColors","colors":[{"@type":"accentColor","id":4242,"built_in_accent_color_id":3,"light_theme_colors":[1122867],"dark_theme_colors":[11189196],"min_channel_chat_boost_level":0}],"available_accent_color_ids":[4242]}"#,
     );
-    assert_eq!(session.name_accent_colors.len(), 1);
-    assert_eq!(session.name_accent_colors[0].id, 4242);
+    assert_eq!(session.chats_state.name_accent_colors.len(), 1);
+    assert_eq!(session.chats_state.name_accent_colors[0].id, 4242);
     // The renderer's lookup sees the server colors for a 7+ id.
     assert_eq!(
         crate::telegram::name_accent::name_color_rgb(4242, false),

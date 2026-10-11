@@ -167,7 +167,7 @@ impl QuillApp {
         }
         let state = self
             .session()
-            .and_then(|s| s.invite_link_members.get(&chat_id.0))
+            .and_then(|s| s.groups.invite_link_members.get(&chat_id.0))
             .filter(|state| state.invite_link == invite_link)
             .cloned();
         let muted = cx.theme().muted_foreground;
@@ -242,7 +242,7 @@ impl QuillApp {
         }
         let Some(InviteLinkCountsFetch::Loaded(counts)) = self
             .session()
-            .and_then(|s| s.invite_link_counts.get(&chat_id.0))
+            .and_then(|s| s.groups.invite_link_counts.get(&chat_id.0))
             .cloned()
         else {
             return None;
@@ -330,7 +330,7 @@ impl QuillApp {
         }
         let fetch = self
             .session()
-            .and_then(|s| s.revoked_invite_links.get(&chat_id.0))
+            .and_then(|s| s.groups.revoked_invite_links.get(&chat_id.0))
             .cloned();
         match fetch {
             None | Some(InviteLinkFetch::Loading) => {

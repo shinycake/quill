@@ -120,7 +120,13 @@ fn a_failed_ban_reports_the_error() {
         r#"{"@type":"error","code":400,"message":"USER_ADMIN_INVALID"}"#,
     );
     assert_eq!(count_sent(&recorder, "setChatMemberStatus"), 1);
-    assert!(driver.session.member_action_error.contains_key(&-100));
+    assert!(
+        driver
+            .session
+            .groups
+            .member_action_error
+            .contains_key(&-100)
+    );
 }
 
 #[test]
@@ -308,7 +314,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         .check_can_transfer_ownership()
         .unwrap()
         .expect("sent");
-    assert!(driver.session.ownership.check_in_flight);
+    assert!(driver.session.groups.ownership.check_in_flight);
     answer(
         &mut driver,
         &recorder,
@@ -318,7 +324,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         r#"{"@type":"canTransferOwnershipResultPasswordTooFresh","retry_after":86400}"#,
     );
     assert_eq!(
-        driver.session.ownership.can_transfer,
+        driver.session.groups.ownership.can_transfer,
         Some(CanTransferOwnershipResult::PasswordTooFresh { retry_after: 86400 })
     );
     assert_eq!(
@@ -353,7 +359,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
     assert_eq!(sent["user_id"], 8);
     assert_eq!(sent["password"], "hunter2");
     // The password lives only in the request JSON.
-    assert!(!format!("{:?}", driver.session.ownership).contains("hunter2"));
+    assert!(!format!("{:?}", driver.session.groups.ownership).contains("hunter2"));
     // A second tap while waiting sends nothing.
     assert_eq!(
         driver
@@ -370,17 +376,23 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         "transferChatOwnership",
         r#"{"@type":"error","code":400,"message":"PASSWORD_HASH_INVALID"}"#,
     );
-    assert!(driver.session.ownership.transfer_in_flight.is_none());
-    let error = driver.session.ownership.transfer_error.clone().unwrap();
+    assert!(driver.session.groups.ownership.transfer_in_flight.is_none());
+    let error = driver
+        .session
+        .groups
+        .ownership
+        .transfer_error
+        .clone()
+        .unwrap();
     assert!(error.contains("Wrong password"), "{error}");
     assert!(!error.contains("PASSWORD_HASH_INVALID"));
-    assert!(!format!("{:?}", driver.session.ownership).contains("hunter2"));
+    assert!(!format!("{:?}", driver.session.groups.ownership).contains("hunter2"));
 
     driver
         .transfer_chat_ownership(ChatId(-100), 8, "correct horse")
         .unwrap()
         .expect("retry");
-    assert!(driver.session.ownership.transfer_error.is_none());
+    assert!(driver.session.groups.ownership.transfer_error.is_none());
     answer(
         &mut driver,
         &recorder,
@@ -389,7 +401,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
         "transferChatOwnership",
         r#"{"@type":"ok"}"#,
     );
-    let done = driver.session.ownership.transferred.expect("done");
+    let done = driver.session.groups.ownership.transferred.expect("done");
     assert_eq!((done.chat_id, done.user_id), (-100, 8));
 }
 
@@ -429,7 +441,12 @@ fn the_next_owner_is_looked_up_once() {
         .unwrap()
         .expect("sent");
     assert_eq!(
-        driver.session.ownership.owner_after_leaving.get(&-100),
+        driver
+            .session
+            .groups
+            .ownership
+            .owner_after_leaving
+            .get(&-100),
         Some(&OwnerLookup::Loading)
     );
     assert_eq!(
@@ -445,7 +462,12 @@ fn the_next_owner_is_looked_up_once() {
         r#"{"@type":"user","id":8,"first_name":"Bo"}"#,
     );
     assert_eq!(
-        driver.session.ownership.owner_after_leaving.get(&-100),
+        driver
+            .session
+            .groups
+            .ownership
+            .owner_after_leaving
+            .get(&-100),
         Some(&OwnerLookup::Loaded(8))
     );
 }
@@ -463,7 +485,12 @@ fn a_failed_owner_lookup_is_reported() {
         r#"{"@type":"error","code":400,"message":"CHAT_ADMIN_REQUIRED"}"#,
     );
     assert!(matches!(
-        driver.session.ownership.owner_after_leaving.get(&-100),
+        driver
+            .session
+            .groups
+            .ownership
+            .owner_after_leaving
+            .get(&-100),
         Some(OwnerLookup::Failed(_))
     ));
 }

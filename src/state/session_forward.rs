@@ -42,7 +42,7 @@ impl Session {
                 found = true;
             }
             // The topic view reads only `topic_histories`.
-            for ((topic_chat_id, _), topic) in self.topic_histories.iter_mut() {
+            for ((topic_chat_id, _), topic) in self.threads.topic_histories.iter_mut() {
                 if *topic_chat_id == chat_id
                     && let Some(message) = topic.messages.get_mut(&message_id)
                     && replace(message)

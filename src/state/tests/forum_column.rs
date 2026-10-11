@@ -84,11 +84,17 @@ fn a_thread_opened_in_a_topic_remembers_the_topic() {
     session.open_chat(ChatId(16));
     session.select_topic(ChatId(16), 7);
     session.begin_thread(ChatId(16), MessageId(120));
-    assert_eq!(session.thread.as_ref().unwrap().forum_topic_id, Some(7));
+    assert_eq!(
+        session.threads.thread.as_ref().unwrap().forum_topic_id,
+        Some(7)
+    );
     // Outside a forum there is no topic.
     session.open_chat(ChatId(20));
     session.begin_thread(ChatId(20), MessageId(5));
-    assert_eq!(session.thread.as_ref().unwrap().forum_topic_id, None);
+    assert_eq!(
+        session.threads.thread.as_ref().unwrap().forum_topic_id,
+        None
+    );
 }
 
 #[test]
@@ -98,7 +104,7 @@ fn topic_thread_accepts_replies_to_replies_but_not_other_topics() {
     session.select_topic(ChatId(16), 7);
     session.begin_thread(ChatId(16), MessageId(120));
     {
-        let thread = session.thread.as_mut().unwrap();
+        let thread = session.threads.thread.as_mut().unwrap();
         thread.thread_id = 120;
         thread
             .history
@@ -116,10 +122,10 @@ fn leaving_or_switching_the_topic_closes_its_thread() {
     session.select_topic(ChatId(16), 7);
     session.begin_thread(ChatId(16), MessageId(120));
     session.select_topic(ChatId(16), 7);
-    assert!(session.thread.is_some(), "same topic keeps it");
+    assert!(session.threads.thread.is_some(), "same topic keeps it");
     session.select_topic(ChatId(16), 9);
-    assert!(session.thread.is_none());
+    assert!(session.threads.thread.is_none());
     session.begin_thread(ChatId(16), MessageId(121));
     session.deselect_topic();
-    assert!(session.thread.is_none());
+    assert!(session.threads.thread.is_none());
 }

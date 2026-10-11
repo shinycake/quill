@@ -89,7 +89,7 @@ fn owner_toggles_go_out_and_update_optimistically() {
         .unwrap()
         .expect("history toggle sent");
     assert!(
-        driver.session.supergroup_full_infos[&sg]
+        driver.session.groups.supergroup_full_infos[&sg]
             .admin
             .is_all_history_available
     );
@@ -111,18 +111,18 @@ fn owner_toggles_go_out_and_update_optimistically() {
         &sink,
     );
     assert!(
-        !driver.session.supergroup_full_infos[&sg]
+        !driver.session.groups.supergroup_full_infos[&sg]
             .admin
             .is_all_history_available
     );
-    assert!(driver.session.chat_action_error.is_some());
+    assert!(driver.session.chats_state.chat_action_error.is_some());
 
     driver
         .set_group_hidden_members(ChatId(13), true)
         .unwrap()
         .unwrap();
     assert!(
-        driver.session.supergroup_full_infos[&sg]
+        driver.session.groups.supergroup_full_infos[&sg]
             .admin
             .has_hidden_members
     );
@@ -340,7 +340,7 @@ fn a_failed_upgrade_drops_its_followup() {
         .set_group_history_visible(ChatId(30), true)
         .unwrap()
         .expect("upgrade sent");
-    assert_eq!(driver.session.admin_followups.len(), 1);
+    assert_eq!(driver.session.groups.admin_followups.len(), 1);
     ingest(
         &mut driver,
         &format!(
@@ -350,7 +350,7 @@ fn a_failed_upgrade_drops_its_followup() {
         &seq,
         &sink,
     );
-    assert!(driver.session.admin_followups.is_empty());
+    assert!(driver.session.groups.admin_followups.is_empty());
     assert_eq!(count(&recorder, "toggleSupergroupIsAllHistoryAvailable"), 0);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -469,7 +469,7 @@ fn followups_with_a_failed_history_step_still_try_the_link() {
         .unwrap()
         .unwrap();
     assert!(matches!(
-        driver.session.admin_followups.first(),
+        driver.session.groups.admin_followups.first(),
         Some((_, AdminFollowup::LinkAfterHistory { .. }))
     ));
     // Not an admin of the group: the history toggle fails, the link is

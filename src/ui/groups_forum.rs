@@ -158,11 +158,14 @@ impl QuillApp {
         }
         let general = editor.target.is_some_and(|id| {
             self.session().is_some_and(|s| {
-                s.forum_topics.get(&chat_id.0).is_some_and(|topics| {
-                    topics
-                        .iter()
-                        .any(|t| t.forum_topic_id == id && t.is_general)
-                })
+                s.threads
+                    .forum_topics
+                    .get(&chat_id.0)
+                    .is_some_and(|topics| {
+                        topics
+                            .iter()
+                            .any(|t| t.forum_topic_id == id && t.is_general)
+                    })
             })
         });
         if let Some(live) = self.live.as_mut() {
@@ -332,7 +335,8 @@ impl QuillApp {
         let roots = self.media_display_roots();
         let sticker_for = |id: i64| {
             session.and_then(|s| {
-                s.forum_topic_icons
+                s.threads
+                    .forum_topic_icons
                     .iter()
                     .find(|sticker| sticker.custom_emoji_id == Some(id))
             })
@@ -395,7 +399,7 @@ impl QuillApp {
                     .child(letter_icon(&name, editor.color, 28.)),
             );
         for (ix, sticker) in session
-            .map(|s| s.forum_topic_icons.as_slice())
+            .map(|s| s.threads.forum_topic_icons.as_slice())
             .unwrap_or_default()
             .iter()
             .enumerate()
@@ -421,7 +425,7 @@ impl QuillApp {
             );
         }
         let loading = session.is_some_and(|s| {
-            s.forum_topic_icons.is_empty()
+            s.threads.forum_topic_icons.is_empty()
                 && s.requests
                     .has_purpose(RequestPurpose::GetForumTopicDefaultIcons)
         });

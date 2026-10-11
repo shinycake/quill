@@ -921,12 +921,12 @@ impl QuillApp {
     fn appearance_telegram_wallpapers_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let dark = cx.theme().is_dark();
         let session = self.session();
-        let list = session.and_then(|s| s.installed_backgrounds.clone());
+        let list = session.and_then(|s| s.chats_state.installed_backgrounds.clone());
         let default_id = session
-            .and_then(|s| s.default_backgrounds.get(&dark))
+            .and_then(|s| s.chats_state.default_backgrounds.get(&dark))
             .map(|b| b.id)
             .filter(|_| self.appearance.telegram_wallpaper);
-        let error = session.and_then(|s| s.background_error.clone());
+        let error = session.and_then(|s| s.chats_state.background_error.clone());
         let muted = cx.theme().muted_foreground;
         let mut grid = div().flex().flex_wrap().gap_2();
         match &list {
@@ -1018,13 +1018,14 @@ impl QuillApp {
                 // Screenshot demo: apply locally.
                 if let Some(session) = self.demo_session.as_mut()
                     && let Some(bg) = session
+                        .chats_state
                         .installed_backgrounds
                         .iter()
                         .flatten()
                         .find(|b| b.id == background_id)
                         .cloned()
                 {
-                    session.default_backgrounds.insert(dark, bg);
+                    session.chats_state.default_backgrounds.insert(dark, bg);
                 }
             }
         }
@@ -1044,7 +1045,7 @@ impl QuillApp {
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut()
-                    && let Some(list) = session.installed_backgrounds.as_mut()
+                    && let Some(list) = session.chats_state.installed_backgrounds.as_mut()
                 {
                     list.retain(|b| b.id != background_id);
                 }
@@ -1058,7 +1059,13 @@ impl QuillApp {
     pub(crate) fn ensure_wallpapers_loaded(&mut self, cx: &mut Context<Self>) {
         let dark = cx.theme().is_dark();
         if let Some(live) = self.live.as_mut() {
-            if live.driver.session.installed_backgrounds.is_none() {
+            if live
+                .driver
+                .session
+                .chats_state
+                .installed_backgrounds
+                .is_none()
+            {
                 let _ = live.driver.fetch_installed_backgrounds(dark);
             }
             live.driver.download_background_files();

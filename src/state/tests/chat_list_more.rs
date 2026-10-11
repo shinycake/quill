@@ -36,7 +36,7 @@ fn cl3_report_and_block_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not report the chat (error 400)")
     );
     let extra = session.request(
@@ -53,7 +53,7 @@ fn cl3_report_and_block_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not change the block state (error 403)")
     );
 }
@@ -118,7 +118,7 @@ fn cl2_pin_order_error_rolls_back_and_surfaces() {
     assert_eq!(session.chats.get(&11).expect("chat").order, 300);
     assert_eq!(session.chats.get(&12).expect("chat").order, 200);
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not reorder pinned chats (error 400)")
     );
 }
@@ -132,7 +132,7 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
-    session.archive_settings_loading = true;
+    session.chat_list.archive_settings_loading = true;
     apply_json(
         &mut session,
         &seq,
@@ -143,23 +143,23 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
         ),
     );
     assert_eq!(
-        session.archive_chat_list_settings,
+        session.chat_list.archive_chat_list_settings,
         Some(ArchiveChatListSettings {
             archive_and_mute_new_chats_from_unknown_users: true,
             keep_unmuted_chats_archived: false,
             keep_chats_from_folders_archived: true,
         })
     );
-    assert!(!session.archive_settings_loading);
+    assert!(!session.chat_list.archive_settings_loading);
 
-    let old = session.archive_chat_list_settings;
+    let old = session.chat_list.archive_chat_list_settings;
     let extra = session.request(RequestPurpose::SetArchiveChatListSettings, None);
     session
         .requests
         .pending_mut(extra)
         .expect("pending")
         .rollback = Some(RequestRollback::ArchiveChatListSettings { previous: old });
-    session.archive_chat_list_settings = Some(ArchiveChatListSettings {
+    session.chat_list.archive_chat_list_settings = Some(ArchiveChatListSettings {
         keep_unmuted_chats_archived: true,
         ..old.unwrap_or_default()
     });
@@ -172,9 +172,9 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.archive_chat_list_settings, old);
+    assert_eq!(session.chat_list.archive_chat_list_settings, old);
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not save archive settings (error 400)")
     );
 }
@@ -196,7 +196,7 @@ fn cl2_mark_all_read_and_clear_recents_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not mark all chats as read (error 500)")
     );
     let extra = session.request(RequestPurpose::ClearRecentlyFoundChats, None);
@@ -210,7 +210,7 @@ fn cl2_mark_all_read_and_clear_recents_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.as_deref(),
         Some("could not clear recent searches (error 500)")
     );
 }
@@ -379,7 +379,7 @@ fn folder_icon_and_share_flags_parse_from_the_update() {
         &sink,
         r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":true,"has_my_invite_links":true}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
     );
-    let folder = &session.chat_folders[0];
+    let folder = &session.chat_list.chat_folders[0];
     assert_eq!(folder.icon_name, "Work");
     assert!(folder.is_shareable && folder.has_my_invite_links);
 }
@@ -405,8 +405,11 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.folder_invite_links[&3].len(), 1);
-    assert_eq!(session.folder_invite_links[&3][0].chat_ids, vec![5, 6]);
+    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 1);
+    assert_eq!(
+        session.chat_list.folder_invite_links[&3][0].chat_ids,
+        vec![5, 6]
+    );
     // A create adds a link and flips the one-shot + the folder flags.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
@@ -418,9 +421,9 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.folder_invite_links[&3].len(), 2);
-    assert!(session.folder_link_saved);
-    assert!(session.chat_folders[0].is_shareable);
+    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 2);
+    assert!(session.chat_list.folder_link_saved);
+    assert!(session.chat_list.chat_folders[0].is_shareable);
     // An edit replaces by link, never duplicates.
     let extra = session.request_for_folder(RequestPurpose::EditChatFolderInviteLink, 3);
     apply_json(
@@ -432,8 +435,8 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.folder_invite_links[&3].len(), 2);
-    assert_eq!(session.folder_invite_links[&3][1].name, "Renamed");
+    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 2);
+    assert_eq!(session.chat_list.folder_invite_links[&3][1].name, "Renamed");
     // Too many links opens the limit box rather than an error line.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
@@ -446,10 +449,10 @@ fn folder_invite_links_list_create_edit_and_errors() {
         ),
     );
     assert_eq!(
-        session.folder_limit_hit.take(),
+        session.chat_list.folder_limit_hit.take(),
         Some(crate::folder_limits::FolderLimitKind::InviteLinks)
     );
-    assert!(session.folder_share_error.is_none());
+    assert!(session.chat_list.folder_share_error.is_none());
     // Any other refusal surfaces for the dialog.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
@@ -461,7 +464,7 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert!(session.folder_share_error.is_some());
+    assert!(session.chat_list.folder_share_error.is_some());
 }
 
 #[test]
@@ -478,7 +481,11 @@ fn recommended_folders_and_addlist_check_are_cached() {
             extra.0
         ),
     );
-    let recommended = session.recommended_folders.as_ref().expect("cached");
+    let recommended = session
+        .chat_list
+        .recommended_folders
+        .as_ref()
+        .expect("cached");
     assert_eq!(recommended[0].spec.name, "Unread");
     assert_eq!(recommended[0].spec.icon_name.as_deref(), Some("Unread"));
     assert!(recommended[0].spec.exclude_read);
@@ -494,7 +501,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
             extra.0
         ),
     );
-    let info = session.folder_invite_info.as_ref().expect("info");
+    let info = session.chat_list.folder_invite_info.as_ref().expect("info");
     assert_eq!(info.folder.id, 0);
     assert_eq!(info.missing_chat_ids, vec![8, 9]);
     assert_eq!(info.added_chat_ids, vec![4]);
@@ -507,7 +514,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.folder_invite_done);
+    assert!(session.chat_list.folder_invite_done);
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
     apply_json(
         &mut session,
@@ -518,7 +525,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
             extra.0
         ),
     );
-    assert!(session.folder_invite_error.is_some());
+    assert!(session.chat_list.folder_invite_error.is_some());
 }
 
 #[test]
@@ -535,7 +542,10 @@ fn folder_link_chats_are_cached_per_folder() {
             extra.0
         ),
     );
-    assert_eq!(session.folder_link_chats.get(&3), Some(&vec![5, 6]));
+    assert_eq!(
+        session.chat_list.folder_link_chats.get(&3),
+        Some(&vec![5, 6])
+    );
 }
 
 #[test]
@@ -552,7 +562,11 @@ fn installed_backgrounds_and_default_updates_are_cached() {
             extra.0
         ),
     );
-    let list = session.installed_backgrounds.as_ref().expect("list");
+    let list = session
+        .chats_state
+        .installed_backgrounds
+        .as_ref()
+        .expect("list");
     assert_eq!(list.len(), 2);
     assert!(session.files.contains_key(&31), "photo file is tracked");
 
@@ -563,11 +577,11 @@ fn installed_backgrounds_and_default_updates_are_cached() {
         &sink,
         r#"{"@type":"updateDefaultBackground","for_dark_theme":true,"background":{"@type":"background","id":6,"is_default":true,"is_dark":true,"name":"night","type":{"@type":"backgroundTypeFill","fill":{"@type":"backgroundFillSolid","color":1}}}}"#,
     );
-    assert_eq!(session.default_backgrounds[&true].id, 6);
-    assert!(!session.default_backgrounds.contains_key(&false));
+    assert_eq!(session.chats_state.default_backgrounds[&true].id, 6);
+    assert!(!session.chats_state.default_backgrounds.contains_key(&false));
 
     // A set answer files under the theme it was sent for; errors surface.
-    session.background_set_for_dark = false;
+    session.chats_state.background_set_for_dark = false;
     let extra = session.request(RequestPurpose::SetDefaultBackground, None);
     apply_json(
         &mut session,
@@ -578,7 +592,7 @@ fn installed_backgrounds_and_default_updates_are_cached() {
             extra.0
         ),
     );
-    assert_eq!(session.default_backgrounds[&false].id, 5);
+    assert_eq!(session.chats_state.default_backgrounds[&false].id, 5);
     let extra = session.request(RequestPurpose::RemoveInstalledBackground, None);
     apply_json(
         &mut session,
@@ -589,7 +603,7 @@ fn installed_backgrounds_and_default_updates_are_cached() {
             extra.0
         ),
     );
-    assert!(session.background_error.is_some());
+    assert!(session.chats_state.background_error.is_some());
 }
 
 #[test]
@@ -658,8 +672,15 @@ fn searching_a_background_keeps_the_answer_without_installing_it() {
             extra.0
         ),
     );
-    assert_eq!(session.searched_background.as_ref().map(|b| b.id), Some(8));
-    assert!(session.default_backgrounds.is_empty());
+    assert_eq!(
+        session
+            .chats_state
+            .searched_background
+            .as_ref()
+            .map(|b| b.id),
+        Some(8)
+    );
+    assert!(session.chats_state.default_backgrounds.is_empty());
 }
 
 #[test]
@@ -679,15 +700,15 @@ fn chat_look_requests_count_acks_and_surface_errors() {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
     }
-    assert_eq!(session.chat_look_oks, 3);
-    assert!(session.background_error.is_none());
+    assert_eq!(session.chats_state.chat_look_oks, 3);
+    assert!(session.chats_state.background_error.is_none());
 
     for purpose in [
         RequestPurpose::SetChatTheme,
         RequestPurpose::SetChatBackground,
         RequestPurpose::DeleteChatBackground,
     ] {
-        session.background_error = None;
+        session.chats_state.background_error = None;
         let extra = session.request(purpose, Some(ChatId(7)));
         apply_json(
             &mut session,
@@ -698,7 +719,13 @@ fn chat_look_requests_count_acks_and_surface_errors() {
                 extra.0
             ),
         );
-        assert!(session.background_error.is_some(), "{purpose:?}");
+        assert!(
+            session.chats_state.background_error.is_some(),
+            "{purpose:?}"
+        );
     }
-    assert_eq!(session.chat_look_oks, 3, "errors are not acknowledgements");
+    assert_eq!(
+        session.chats_state.chat_look_oks, 3,
+        "errors are not acknowledgements"
+    );
 }

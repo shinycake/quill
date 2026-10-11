@@ -76,8 +76,11 @@ fn toggling_the_same_admin_twice_clears_the_filter() {
     let session = Session::new(AccountKey::primary(), dyn_sink);
     let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
     driver.toggle_chat_event_log_user(ChatId(13), 7);
-    assert_eq!(driver.session.event_log_users.get(&13), Some(&vec![7]));
+    assert_eq!(
+        driver.session.groups.event_log_users.get(&13),
+        Some(&vec![7])
+    );
     driver.toggle_chat_event_log_user(ChatId(13), 7);
-    assert!(driver.session.event_log_users.is_empty());
+    assert!(driver.session.groups.event_log_users.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }

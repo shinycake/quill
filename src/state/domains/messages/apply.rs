@@ -38,7 +38,7 @@ impl Session {
             } => self.set_chat_message_sender(chat_id, message_sender),
             MessagesPayload::ChatMessageSenders { senders } => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.send_as_options.insert(chat_id.0, senders);
+                    self.chats_state.send_as_options.insert(chat_id.0, senders);
                 }
             }
             MessagesPayload::UpdateChatIsTranslatable {
@@ -194,11 +194,11 @@ impl Session {
                 // topic).
                 if let Some(topic_id) = topic_id
                     && let Some(topic_history) =
-                        self.topic_histories.get_mut(&(chat_id.0, topic_id))
+                        self.threads.topic_histories.get_mut(&(chat_id.0, topic_id))
                 {
                     topic_history.replace_id(old_message_id, row.clone());
                 }
-                if let Some(thread) = self.thread.as_mut()
+                if let Some(thread) = self.threads.thread.as_mut()
                     && thread.chat_id == chat_id
                     && thread.history.messages.contains_key(&old_message_id.0)
                 {
@@ -241,11 +241,11 @@ impl Session {
                 // view too.
                 if let Some(topic_id) = topic_id
                     && let Some(topic_history) =
-                        self.topic_histories.get_mut(&(chat_id.0, topic_id))
+                        self.threads.topic_histories.get_mut(&(chat_id.0, topic_id))
                 {
                     topic_history.replace_id(old_message_id, row.clone());
                 }
-                if let Some(thread) = self.thread.as_mut()
+                if let Some(thread) = self.threads.thread.as_mut()
                     && thread.chat_id == chat_id
                     && thread.history.messages.contains_key(&old_message_id.0)
                 {
@@ -376,7 +376,7 @@ impl Session {
                 }
                 // Parity slice 4: the topic view reads only
                 // `topic_histories`, so deletions must reach its rows too.
-                for ((topic_chat_id, _), topic) in self.topic_histories.iter_mut() {
+                for ((topic_chat_id, _), topic) in self.threads.topic_histories.iter_mut() {
                     if *topic_chat_id == chat_id.0 {
                         for id in &message_ids {
                             topic.messages.remove(&id.0);

@@ -50,19 +50,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatJoinRequests, Some(chat_id));
-        self.session.join_request_latest.insert(chat_id.0, extra);
         self.session
+            .groups
+            .join_request_latest
+            .insert(chat_id.0, extra);
+        self.session
+            .groups
             .join_request_queries
             .insert(chat_id.0, query.clone());
         self.session
+            .groups
             .join_requests
             .insert(chat_id.0, JoinRequestFetch::Loading);
         let payload =
             get_chat_join_requests_page(extra, chat_id.0, "", &query, None, INVITE_ADMIN_PAGE_SIZE);
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.join_request_latest.remove(&chat_id.0);
-            self.session.join_requests.remove(&chat_id.0);
+            self.session.groups.join_request_latest.remove(&chat_id.0);
+            self.session.groups.join_requests.remove(&chat_id.0);
         }
         sent
     }
@@ -75,10 +80,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.invite_admin_ready(chat_id)? {
             return Ok(None);
         }
-        if self.session.join_request_latest.contains_key(&chat_id.0) {
+        if self
+            .session
+            .groups
+            .join_request_latest
+            .contains_key(&chat_id.0)
+        {
             return Ok(None);
         }
-        let Some(JoinRequestFetch::Loaded(list)) = self.session.join_requests.get(&chat_id.0)
+        let Some(JoinRequestFetch::Loaded(list)) =
+            self.session.groups.join_requests.get(&chat_id.0)
         else {
             return Ok(None);
         };
@@ -91,6 +102,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let offset = (last.user_id, last.date);
         let query = self
             .session
+            .groups
             .join_request_queries
             .get(&chat_id.0)
             .cloned()
@@ -98,7 +110,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetMoreChatJoinRequests, Some(chat_id));
-        self.session.join_request_latest.insert(chat_id.0, extra);
+        self.session
+            .groups
+            .join_request_latest
+            .insert(chat_id.0, extra);
         let payload = get_chat_join_requests_page(
             extra,
             chat_id.0,
@@ -109,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.join_request_latest.remove(&chat_id.0);
+            self.session.groups.join_request_latest.remove(&chat_id.0);
         }
         sent
     }
@@ -150,7 +165,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if matches!(
-            self.session.revoked_invite_links.get(&chat_id.0),
+            self.session.groups.revoked_invite_links.get(&chat_id.0),
             Some(InviteLinkFetch::Loading | InviteLinkFetch::Loaded(_))
         ) {
             return Ok(None);
@@ -159,13 +174,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetRevokedChatInviteLinks, Some(chat_id));
         self.session
+            .groups
             .revoked_invite_links
             .insert(chat_id.0, InviteLinkFetch::Loading);
         let creator = self.session.my_user_id.unwrap_or(0);
         let payload = get_chat_invite_links(extra, chat_id.0, creator, true, 0, "", 100);
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.revoked_invite_links.remove(&chat_id.0);
+            self.session.groups.revoked_invite_links.remove(&chat_id.0);
         }
         sent
     }
@@ -179,7 +195,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if matches!(
-            self.session.invite_link_counts.get(&chat_id.0),
+            self.session.groups.invite_link_counts.get(&chat_id.0),
             Some(InviteLinkCountsFetch::Loading | InviteLinkCountsFetch::Loaded(_))
         ) {
             return Ok(None);
@@ -188,11 +204,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetChatInviteLinkCounts, Some(chat_id));
         self.session
+            .groups
             .invite_link_counts
             .insert(chat_id.0, InviteLinkCountsFetch::Loading);
         let sent = self.send_invite_admin(extra, &get_chat_invite_link_counts(extra, chat_id.0));
         if sent.is_err() {
-            self.session.invite_link_counts.remove(&chat_id.0);
+            self.session.groups.invite_link_counts.remove(&chat_id.0);
         }
         sent
     }
@@ -218,7 +235,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.invite_admin_ready(chat_id)? {
             return Ok(None);
         }
-        let Some(state) = self.session.invite_link_members.get(&chat_id.0) else {
+        let Some(state) = self.session.groups.invite_link_members.get(&chat_id.0) else {
             return Ok(None);
         };
         if state.loading || state.members.len() as i32 >= state.total_count {
@@ -251,14 +268,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             error: None,
             request: Some(extra),
         };
-        match self.session.invite_link_members.get_mut(&chat_id.0) {
+        match self.session.groups.invite_link_members.get_mut(&chat_id.0) {
             Some(state) if append => {
                 state.loading = true;
                 state.error = None;
                 state.request = Some(extra);
             }
             _ => {
-                self.session.invite_link_members.insert(chat_id.0, fresh);
+                self.session
+                    .groups
+                    .invite_link_members
+                    .insert(chat_id.0, fresh);
             }
         }
         let payload = get_chat_invite_link_members(
@@ -271,14 +291,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.invite_link_members.remove(&chat_id.0);
+            self.session.groups.invite_link_members.remove(&chat_id.0);
         }
         sent
     }
 
     /// Drop the open link's member list (details closed).
     pub fn close_chat_invite_link_members(&mut self, chat_id: ChatId) {
-        self.session.invite_link_members.remove(&chat_id.0);
+        self.session.groups.invite_link_members.remove(&chat_id.0);
     }
 
     /// `deleteRevokedChatInviteLink`; the link leaves the revoked list on
@@ -295,6 +315,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::DeleteRevokedChatInviteLink, Some(chat_id));
         self.session
+            .groups
             .revoked_link_deletions
             .insert(extra, (chat_id.0, invite_link.to_owned()));
         let sent = self.send_invite_admin(
@@ -302,7 +323,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             &delete_revoked_chat_invite_link(extra, chat_id.0, invite_link),
         );
         if sent.is_err() {
-            self.session.revoked_link_deletions.remove(&extra);
+            self.session.groups.revoked_link_deletions.remove(&extra);
         }
         sent
     }

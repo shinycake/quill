@@ -62,7 +62,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `getForumTopicDefaultIcons` once; the answer fills
     /// `Session::forum_topic_icons`.
     pub fn load_forum_topic_icons(&mut self) -> Sent {
-        if !self.session.forum_topic_icons.is_empty()
+        if !self.session.threads.forum_topic_icons.is_empty()
             || self
                 .session
                 .requests
@@ -79,6 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn download_forum_topic_icons(&mut self) {
         let files: Vec<FileId> = self
             .session
+            .threads
             .forum_topic_icons
             .iter()
             .filter_map(|sticker| sticker.display_file_id())
@@ -223,7 +224,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Ask for more sublists (`loadSavedMessagesTopics`); deduped, and
     /// silent once TDLib said everything is loaded.
     pub fn load_saved_topics(&mut self) -> Sent {
-        if self.session.saved.topics_exhausted
+        if self.session.threads.saved.topics_exhausted
             || self
                 .session
                 .requests
@@ -231,7 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.saved.topics_requested = true;
+        self.session.threads.saved.topics_requested = true;
         self.send_purpose(RequestPurpose::LoadSavedMessagesTopics, None, |extra| {
             load_saved_messages_topics(extra, SAVED_TOPICS_PAGE)
         })
@@ -266,7 +267,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The next page of the open sublist.
     pub fn fetch_saved_sublist_history(&mut self) -> Sent {
-        let Some(view) = self.session.saved.sublist.as_ref() else {
+        let Some(view) = self.session.threads.saved.sublist.as_ref() else {
             return Ok(None);
         };
         if view.history.loaded_complete {
@@ -329,6 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The label shows right away; `updateSavedMessagesTags` confirms.
         if let Some(entry) = self
             .session
+            .threads
             .saved
             .tags
             .iter_mut()
@@ -347,6 +349,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let topic_id = self
             .session
+            .threads
             .saved
             .sublist
             .as_ref()
@@ -357,7 +360,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The next page of the tag filter.
     pub fn fetch_saved_tag_page(&mut self) -> Sent {
-        let Some(search) = self.session.saved.tag_search.as_ref() else {
+        let Some(search) = self.session.threads.saved.tag_search.as_ref() else {
             return Ok(None);
         };
         if search.history.loaded_complete {

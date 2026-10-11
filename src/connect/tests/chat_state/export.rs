@@ -252,7 +252,7 @@ fn clear_call_history_empties_the_list_only_on_ok() {
     assert_eq!(driver.session.calls.recent_calls.len(), 1);
     assert!(!driver.session.calls.recent_calls_clearing);
     assert_eq!(
-        driver.session.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.as_deref(),
         Some("could not clear the call history (error 500)")
     );
 

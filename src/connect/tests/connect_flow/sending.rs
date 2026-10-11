@@ -210,7 +210,7 @@ fn driver_loads_chats_after_ready_then_send_text() {
     )
     .unwrap();
     driver.ingest(err404).unwrap();
-    assert!(driver.session.chats_exhausted);
+    assert!(driver.session.chat_list.chats_exhausted);
     // The main list's 404 starts archive paging (one page in flight);
     // the main list itself pages no further.
     let main_loads = |recorder: &RecordingSender| {

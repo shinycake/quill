@@ -186,7 +186,7 @@ fn badge_count_marked_as_unread_counts_one_in_fallback() {
 fn with_totals(session: &mut Session) {
     // Loaded chats are a small slice; the server totals are what count.
     session.chats.insert(0, chat(0, 1));
-    session.unread_totals.main = ListUnreadTotals {
+    session.chat_list.unread_totals.main = ListUnreadTotals {
         messages: Some(UnreadPair {
             all: 44,
             unmuted: 13,
@@ -196,7 +196,7 @@ fn with_totals(session: &mut Session) {
             unmuted: 6,
         }),
     };
-    session.unread_totals.archive = ListUnreadTotals {
+    session.chat_list.unread_totals.archive = ListUnreadTotals {
         messages: Some(UnreadPair {
             all: 30,
             unmuted: 0,
@@ -233,7 +233,7 @@ fn badge_count_totals_fall_back_per_list() {
     // Only the main totals arrived: the archive sums its loaded chats.
     let mut session = Session::new(AccountKey("t-partial".into()), Arc::new(MemorySink::new()));
     session.chats.insert(1, archived_chat(1, 4));
-    session.unread_totals.main.messages = Some(UnreadPair {
+    session.chat_list.unread_totals.main.messages = Some(UnreadPair {
         all: 10,
         unmuted: 7,
     });

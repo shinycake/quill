@@ -24,12 +24,13 @@ fn custom_title_failure_surfaces_in_member_dialog() {
         ),
     );
     let message = session
+        .groups
         .member_action_error
         .get(&13)
         .expect("member action error recorded");
     assert!(message.contains("Could not set custom title"));
     assert!(matches!(
-        session.admin_lists.get(&13),
+        session.groups.admin_lists.get(&13),
         Some(AdminListFetch::Failed(_))
     ));
 }
@@ -64,7 +65,7 @@ fn basic_group_add_member_failures_accumulate() {
             ),
         );
     }
-    assert_eq!(session.add_members_failed.get(&13), Some(&1));
+    assert_eq!(session.groups.add_members_failed.get(&13), Some(&1));
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
     apply_json(
         &mut session,
@@ -75,7 +76,7 @@ fn basic_group_add_member_failures_accumulate() {
             extra.0
         ),
     );
-    assert_eq!(session.add_members_failed.get(&13), Some(&2));
+    assert_eq!(session.groups.add_members_failed.get(&13), Some(&2));
 }
 
 #[test]
@@ -100,7 +101,7 @@ fn bulk_add_members_response_replaces_count() {
             ),
         );
     }
-    assert_eq!(session.add_members_failed.get(&13), Some(&1));
+    assert_eq!(session.groups.add_members_failed.get(&13), Some(&1));
 }
 
 #[test]
@@ -112,7 +113,7 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
     // optimistic broadcast flag so the panel doesn't lie.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.invite_links.insert(
+    session.groups.invite_links.insert(
         13,
         InviteLinkFetch::Loaded(InviteLinkList {
             total_count: 1,
@@ -134,11 +135,12 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
         ),
     );
     assert!(matches!(
-        session.invite_links.get(&13),
+        session.groups.invite_links.get(&13),
         Some(InviteLinkFetch::Loaded(_))
     ));
     assert!(
         session
+            .groups
             .invite_link_error
             .as_ref()
             .is_some_and(|m| m.contains("Could not replace primary invite link"))
@@ -150,7 +152,7 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
         is_channel: false,
     };
     session.chats.insert(14, chat);
-    session.supergroup_is_broadcast.insert(14, true);
+    session.groups.supergroup_is_broadcast.insert(14, true);
     let extra = session.request(RequestPurpose::ToggleBroadcastGroup, Some(ChatId(14)));
     apply_json(
         &mut session,
@@ -161,7 +163,7 @@ fn invite_link_replace_failure_surfaces_and_broadcast_rolls_back() {
             extra.0
         ),
     );
-    assert!(!session.supergroup_is_broadcast.contains_key(&14));
+    assert!(!session.groups.supergroup_is_broadcast.contains_key(&14));
 }
 
 #[test]
@@ -207,9 +209,9 @@ fn forum_topics_response_is_cached_per_chat() {
         &format!("\"@extra\":\"{}\"", extra.0),
         &format!("\"@extra\":\"{}\"", extra2.0),
     );
-    session.forum_topics.clear();
+    session.threads.forum_topics.clear();
     apply_json(&mut session, &seq, &sink, &json2);
-    assert!(!session.forum_topics.contains_key(&16));
+    assert!(!session.threads.forum_topics.contains_key(&16));
 }
 
 #[test]
@@ -239,7 +241,7 @@ fn community_updates_apply_create_name_change_full_info_replace() {
     // `updateCommunityFullInfo` (line 10753) lands the full-info pack.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    assert!(!session.communities.contains_key(&42));
+    assert!(!session.groups.communities.contains_key(&42));
     apply_json(
         &mut session,
         &seq,
@@ -247,6 +249,7 @@ fn community_updates_apply_create_name_change_full_info_replace() {
         r#"{"@type":"updateCommunity","community":{"@type":"community","id":42,"have_access":true,"name":"Rustaceans","date":1759000000}}"#,
     );
     let community = session
+        .groups
         .communities
         .get(&42)
         .expect("created on first sight");
@@ -261,7 +264,10 @@ fn community_updates_apply_create_name_change_full_info_replace() {
         &sink,
         r#"{"@type":"updateCommunity","community":{"@type":"community","id":42,"have_access":true,"name":"Rustaceans+","date":1759000000}}"#,
     );
-    assert_eq!(session.communities.get(&42).unwrap().name, "Rustaceans+");
+    assert_eq!(
+        session.groups.communities.get(&42).unwrap().name,
+        "Rustaceans+"
+    );
     // Full info replaces the whole pack.
     apply_json(
         &mut session,
@@ -270,6 +276,7 @@ fn community_updates_apply_create_name_change_full_info_replace() {
         r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[{"@type":"communityChat","chat_id":7,"can_view_history":true,"is_hidden":true}],"administrator_count":3,"banned_count":1,"add_chat_request_count":2}}"#,
     );
     let info = session
+        .groups
         .community_full_infos
         .get(&42)
         .expect("full info cached");
@@ -284,12 +291,12 @@ fn community_updates_apply_create_name_change_full_info_replace() {
         &sink,
         r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[],"administrator_count":4,"banned_count":0,"add_chat_request_count":0}}"#,
     );
-    let info = session.community_full_infos.get(&42).unwrap();
+    let info = session.groups.community_full_infos.get(&42).unwrap();
     assert_eq!(info.administrator_count, 4);
     assert!(info.chats.is_empty());
     // Unrelated communities are untouched.
-    assert!(!session.communities.contains_key(&43));
-    assert!(!session.community_full_infos.contains_key(&43));
+    assert!(!session.groups.communities.contains_key(&43));
+    assert!(!session.groups.community_full_infos.contains_key(&43));
 }
 
 #[test]
@@ -300,7 +307,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
     // alone, so nothing refetches.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.community_full_infos.insert(
+    session.groups.community_full_infos.insert(
         42,
         ParsedCommunityFullInfo {
             chats: Vec::new(),
@@ -316,9 +323,9 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.community_full_infos.contains_key(&42));
+    assert!(!session.groups.community_full_infos.contains_key(&42));
     // Error path: the cache stays.
-    session.community_full_infos.insert(
+    session.groups.community_full_infos.insert(
         42,
         ParsedCommunityFullInfo {
             chats: Vec::new(),
@@ -337,7 +344,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
             extra.0
         ),
     );
-    assert!(session.community_full_infos.contains_key(&42));
+    assert!(session.groups.community_full_infos.contains_key(&42));
 }
 
 #[test]
@@ -552,7 +559,7 @@ fn invite_link_fetch_flow_loads_and_caches() {
         ),
     );
 
-    let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+    let InviteLinkFetch::Loaded(list) = session.groups.invite_links.get(&13).unwrap() else {
         panic!("invite links were not loaded");
     };
     assert_eq!(list.total_count, 2);
@@ -569,7 +576,7 @@ fn invite_link_fetch_flow_loads_and_caches() {
         ),
     );
 
-    let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+    let InviteLinkFetch::Loaded(list) = session.groups.invite_links.get(&13).unwrap() else {
         panic!("invite links were not loaded");
     };
     assert_eq!(list.total_count, 2);
@@ -607,7 +614,7 @@ fn invite_link_create_upsert_bumps_total() {
         ),
     );
 
-    let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+    let InviteLinkFetch::Loaded(list) = session.groups.invite_links.get(&13).unwrap() else {
         panic!("invite links were not loaded");
     };
     assert_eq!(list.total_count, 3);
@@ -646,7 +653,7 @@ fn invite_link_edit_replaces_in_place() {
         ),
     );
 
-    let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+    let InviteLinkFetch::Loaded(list) = session.groups.invite_links.get(&13).unwrap() else {
         panic!("invite links were not loaded");
     };
     assert_eq!(list.total_count, 2);
@@ -688,7 +695,7 @@ fn invite_link_revoke_removes_the_revoked_link() {
         ),
     );
 
-    let InviteLinkFetch::Loaded(list) = session.invite_links.get(&13).unwrap() else {
+    let InviteLinkFetch::Loaded(list) = session.groups.invite_links.get(&13).unwrap() else {
         panic!("invite links were not loaded");
     };
     assert_eq!(list.total_count, 1);
@@ -713,7 +720,7 @@ fn join_request_fetch_flow_loads_and_caches() {
         ),
     );
 
-    let JoinRequestFetch::Loaded(list) = session.join_requests.get(&13).unwrap() else {
+    let JoinRequestFetch::Loaded(list) = session.groups.join_requests.get(&13).unwrap() else {
         panic!("join requests were not loaded");
     };
     assert_eq!(list.total_count, 2);
@@ -747,7 +754,7 @@ fn join_request_update_prepends_and_dedupes() {
 
     apply_json(&mut session, &seq, &sink, &update);
 
-    let JoinRequestFetch::Loaded(list) = session.join_requests.get(&13).unwrap() else {
+    let JoinRequestFetch::Loaded(list) = session.groups.join_requests.get(&13).unwrap() else {
         panic!("join requests were not loaded");
     };
     assert_eq!(list.total_count, 3);
@@ -756,7 +763,7 @@ fn join_request_update_prepends_and_dedupes() {
 
     apply_json(&mut session, &seq, &sink, &update);
 
-    let JoinRequestFetch::Loaded(list) = session.join_requests.get(&13).unwrap() else {
+    let JoinRequestFetch::Loaded(list) = session.groups.join_requests.get(&13).unwrap() else {
         panic!("join requests were not loaded");
     };
     assert_eq!(list.total_count, 3);
@@ -773,7 +780,7 @@ fn join_request_update_prepends_and_dedupes() {
         ),
     );
 
-    assert!(!session.join_requests.contains_key(&14));
+    assert!(!session.groups.join_requests.contains_key(&14));
 }
 
 #[test]
@@ -789,7 +796,10 @@ fn update_chat_pending_join_requests_sets_count() {
         r#"{"@type":"updateChatPendingJoinRequests","chat_id":13,"pending_join_requests":{"@type":"chatJoinRequestsInfo","total_count":5,"user_ids":[7001]}}"#,
     );
 
-    assert_eq!(session.pending_join_request_counts.get(&13), Some(&5));
+    assert_eq!(
+        session.groups.pending_join_request_counts.get(&13),
+        Some(&5)
+    );
 }
 
 #[test]
@@ -820,7 +830,7 @@ fn process_join_request_ok_drops_from_list() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, process_extra.0),
     );
 
-    let JoinRequestFetch::Loaded(list) = session.join_requests.get(&13).unwrap() else {
+    let JoinRequestFetch::Loaded(list) = session.groups.join_requests.get(&13).unwrap() else {
         panic!("join requests were not loaded");
     };
     assert_eq!(list.total_count, 1);
@@ -881,6 +891,7 @@ fn can_manage_admins_gate() {
     };
     session.chats.insert(14, creator_group);
     session
+        .groups
         .supergroup_member_status
         .insert(14, ChannelMemberStatus::Creator);
     assert!(session.chat_can_manage_admins(ChatId(14)));
@@ -892,11 +903,12 @@ fn can_manage_admins_gate() {
     };
     session.chats.insert(15, admin_group);
     session
+        .groups
         .supergroup_member_status
         .insert(15, ChannelMemberStatus::Administrator);
-    session.supergroup_promote_right.insert(15, true);
+    session.groups.supergroup_promote_right.insert(15, true);
     assert!(session.chat_can_manage_admins(ChatId(15)));
 
-    session.supergroup_promote_right.insert(15, false);
+    session.groups.supergroup_promote_right.insert(15, false);
     assert!(!session.chat_can_manage_admins(ChatId(15)));
 }
