@@ -14,7 +14,6 @@
 1968 src/ui/message_text.rs
 1660 src/ui/profile_panels.rs
 1940 src/ui/search_ui.rs
-1685 src/ui/security.rs
 1236 src/ui/story_albums.rs
 2015 src/ui/story_viewer.rs
 1302 src/ui/translate_ui.rs
