@@ -409,7 +409,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Remove from group (kick) as distinct from ban <!-- parity:profile-remove-member -->
 - [x] Add a bot to a group or channel as admin with chosen rights <!-- parity:profile-add-bot-to-group -->
 - [x] Bot "Open App" main mini-app button <!-- parity:profile-bot-open-app -->
-- [ ] Profile action row: Message, Mute, Call, Video, Gift, More <!-- parity:profile-action-row -->
+- [x] Profile action row: Message, Mute, Call, Video, Gift, More <!-- parity:profile-action-row -->
 - [x] Unofficial-client warning on a profile <!-- parity:profile-unofficial-warning -->
 - [x] Fragment number note in the phone context menu <!-- parity:profile-fragment-note -->
 - [x] Topic and thread info panels <!-- parity:profile-topic-info -->
