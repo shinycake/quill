@@ -861,7 +861,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Signed gifts: custom signature on Marketplace gift purchase (blocked: no TDLib/raw API for a gift signature field — concept-level search: sendResoldGift/inputInvoiceStarGiftResale carry text/message only) <!-- parity:gifts-signed-signature -->
 - [x] Mini Apps in an in-app window (blocked: needs a per-platform web view; GPUI has none) <!-- parity:bots-miniapp-inline -->
 - [x] Add a bot to a group or channel with admin rights <!-- parity:bots-add-to-group -->
-- [ ] Bot verification badges and verify via bot <!-- parity:bots-verification-badge -->
+- [x] Bot verification badges and verify via bot <!-- parity:bots-verification-badge -->
 - [x] Share a game to a chat <!-- parity:bots-share-game -->
 - [x] Allow-messages consent for web apps (write access) <!-- parity:bots-allow-write -->
 - [x] Keys 1 to 9 press inline buttons <!-- parity:bots-fast-buttons -->
