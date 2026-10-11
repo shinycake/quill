@@ -30,30 +30,49 @@ impl Session {
                 _ => false,
             };
             if slot_ok {
+                // The grid shows these images; the download pass finds
+                // them through the stored results.
+                self.remember_files(&page.files);
                 let fetch = match (first_page, &self.bots.inline_query) {
                     (
                         false,
                         Some(InlineQuerySlot {
-                            fetch: InlineQueryFetch::Loaded { results: old, .. },
+                            fetch:
+                                InlineQueryFetch::Loaded {
+                                    results: old,
+                                    button: old_button,
+                                    ..
+                                },
                             ..
                         }),
                     ) => {
                         let mut results = old.clone();
+                        let before = results.len();
                         super::paging::append_new_by_id(&mut results, page.results, |r| {
                             r.id.clone()
                         });
+                        // tdesktop: a page that adds nothing ends the list.
+                        let next_offset = if results.len() == before {
+                            String::new()
+                        } else {
+                            page.next_offset
+                        };
                         InlineQueryFetch::Loaded {
                             inline_query_id: page.inline_query_id,
-                            button: page.button,
+                            button: page.button.or_else(|| old_button.clone()),
                             results,
-                            next_offset: page.next_offset,
+                            next_offset,
                         }
                     }
                     _ => InlineQueryFetch::Loaded {
                         inline_query_id: page.inline_query_id,
                         button: page.button,
+                        next_offset: if page.results.is_empty() {
+                            String::new()
+                        } else {
+                            page.next_offset
+                        },
                         results: page.results,
-                        next_offset: page.next_offset,
                     },
                 };
                 if let Some(slot) = self.bots.inline_query.as_mut() {

@@ -281,6 +281,18 @@ impl Session {
                 }
             }
         }
+        // The inline results panel shows each result's image.
+        if let Some(InlineQuerySlot {
+            fetch: InlineQueryFetch::Loaded { results, .. },
+            ..
+        }) = &self.bots.inline_query
+        {
+            for media in results.iter().filter_map(|result| result.media) {
+                if self.should_download(media.file_id) {
+                    ids.push(media.file_id);
+                }
+            }
+        }
         if self.stickers.gifs.open {
             for animation in self.stickers.gifs.visible_animations() {
                 let file_id = animation.thumb_file_id.filter(|id| id.0 != 0);

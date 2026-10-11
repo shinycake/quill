@@ -68,6 +68,7 @@ fn inline_query_pagination_appends() {
                 kind: "article".to_string(),
                 title: "An article".to_string(),
                 description: String::new(),
+                ..Default::default()
             }],
             next_offset: "25".to_string(),
         },
@@ -163,6 +164,7 @@ fn inline_query_pagination_error_keeps_loaded_page() {
                 kind: "article".to_string(),
                 title: "An article".to_string(),
                 description: String::new(),
+                ..Default::default()
             }],
             next_offset: "25".to_string(),
         },
@@ -773,4 +775,150 @@ fn pinned_list_fills_newest_first_and_drops_unpins() {
         .map(|message| message.id.0)
         .collect();
     assert_eq!(ids, vec![40]);
+}
+
+fn loaded_inline_slot(session: &mut Session, results: Vec<InlineQueryResultSummary>) {
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "cats".to_string(),
+        fetch: InlineQueryFetch::Loaded {
+            inline_query_id: 9001,
+            button: Some(InlineQueryResultsButton {
+                text: "Log in".into(),
+                kind: "start_bot".into(),
+                parameter: "auth".into(),
+                url: String::new(),
+            }),
+            results,
+            next_offset: "25".to_string(),
+        },
+    });
+}
+
+fn inline_next_page(session: &mut Session, sink: &Arc<MemorySink>, json_results: &str, next: &str) {
+    let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            first_page: false,
+        }),
+        Some(ChatId(1)),
+    );
+    apply_json(
+        session,
+        &seq,
+        sink,
+        &format!(
+            r#"{{"@type":"inlineQueryResults","@extra":"{}","inline_query_id":"9002","button":null,"results":{json_results},"next_offset":"{next}"}}"#,
+            extra.0,
+        ),
+    );
+}
+
+#[test]
+fn inline_next_page_stamps_its_own_query_id_and_keeps_the_button() {
+    let (mut session, sink) = session();
+    loaded_inline_slot(
+        &mut session,
+        vec![InlineQueryResultSummary {
+            id: "a1".into(),
+            kind: "article".into(),
+            query_id: 9001,
+            ..Default::default()
+        }],
+    );
+    inline_next_page(
+        &mut session,
+        &sink,
+        r#"[{"@type":"inlineQueryResultArticle","id":"a2","title":"B"}]"#,
+        "50",
+    );
+    let Some(InlineQuerySlot {
+        fetch:
+            InlineQueryFetch::Loaded {
+                results,
+                button,
+                next_offset,
+                ..
+            },
+        ..
+    }) = &session.bots.inline_query
+    else {
+        panic!("slot not loaded");
+    };
+    // Each result sends with the id of the page that returned it.
+    assert_eq!(
+        results.iter().map(|r| r.query_id).collect::<Vec<_>>(),
+        vec![9001, 9002]
+    );
+    assert_eq!(next_offset, "50");
+    assert_eq!(button.as_ref().map(|b| b.parameter.as_str()), Some("auth"));
+}
+
+#[test]
+fn inline_next_page_with_nothing_new_ends_the_list() {
+    let (mut session, sink) = session();
+    loaded_inline_slot(
+        &mut session,
+        vec![InlineQueryResultSummary {
+            id: "a1".into(),
+            kind: "article".into(),
+            ..Default::default()
+        }],
+    );
+    inline_next_page(
+        &mut session,
+        &sink,
+        r#"[{"@type":"inlineQueryResultArticle","id":"a1","title":"again"}]"#,
+        "50",
+    );
+    let Some(InlineQuerySlot {
+        fetch: InlineQueryFetch::Loaded { next_offset, .. },
+        ..
+    }) = &session.bots.inline_query
+    else {
+        panic!("slot not loaded");
+    };
+    assert!(next_offset.is_empty());
+}
+
+#[test]
+fn inline_result_images_are_queued_for_download() {
+    let (mut session, _sink) = session();
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "cats".to_string(),
+        fetch: InlineQueryFetch::Loaded {
+            inline_query_id: 1,
+            button: None,
+            results: vec![
+                InlineQueryResultSummary {
+                    id: "p".into(),
+                    kind: "photo".into(),
+                    media: Some(quill_media(7)),
+                    ..Default::default()
+                },
+                // A GIF whose thumbnail is unknown yet has nothing to fetch.
+                InlineQueryResultSummary {
+                    id: "g".into(),
+                    kind: "animation".into(),
+                    media: Some(quill_media(0)),
+                    ..Default::default()
+                },
+            ],
+            next_offset: String::new(),
+        },
+    });
+    assert_eq!(session.thumb_file_ids_to_download(), vec![FileId(7)]);
+}
+
+fn quill_media(file_id: i32) -> crate::telegram::envelope::InlineMedia {
+    crate::telegram::envelope::InlineMedia {
+        file_id: FileId(file_id),
+        width: 100,
+        height: 50,
+    }
 }

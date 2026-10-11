@@ -61,6 +61,7 @@ pub mod gift_colors;
 pub mod giveaway;
 pub mod icon_badge;
 pub mod ids;
+pub mod inline_grid;
 pub mod key_fingerprint;
 pub mod layout;
 pub mod lifecycle;

@@ -207,6 +207,7 @@ mod groups;
 mod groups_forum;
 mod groups_welcome;
 mod history;
+mod inline_grid;
 mod inline_mode;
 mod inline_playback;
 mod invite_admin_more_ui;
