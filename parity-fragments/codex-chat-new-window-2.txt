@@ -1,4 +1,0 @@
-# codex/chat-new-window-2 — a chat in its own window: header, history,
-# the full composer, its own menus, pickers, viewer and dialogs; forums
-# open with their topic list (docs/decisions/codex-chat-new-window-2.md).
-parity:platform-new-window
