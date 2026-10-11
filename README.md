@@ -387,7 +387,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Alphabetical section index bar on long peer lists (contacts, add members) <!-- parity:chatlist-contacts-index -->
 - [x] Clear all call history from the Calls list <!-- parity:chatlist-clear-calls -->
 - [x] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
-- [ ] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
+- [x] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
 - [x] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
 
 ### Profiles & shared media
@@ -1011,7 +1011,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] "Pull to next channel" chat setting <!-- parity:settings-pull-next-channel -->
 - [ ] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
 - [ ] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
-- [ ] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
+- [x] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
 - [ ] Profile photo from camera, emoji avatar builder and video avatar with frame choice <!-- parity:settings-photo-sources -->
 - [ ] Profile music (saved music) management <!-- parity:settings-profile-music -->
 - [x] Choose the main profile tab <!-- parity:settings-main-profile-tab -->
