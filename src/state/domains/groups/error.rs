@@ -66,6 +66,17 @@ impl Session {
                     call_request_error_line(err, "Could not change ads for the channel")
                 });
             }
+            // The unrestrict-boosts value was never applied; drop it so the
+            // slider shows the stored one again.
+            Some(RequestPurpose::SetSupergroupUnrestrictBoostCount) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.groups.unrestrict_boost_pending.remove(&chat_id.0);
+                }
+                self.chats_state.chat_action_error = Some(call_request_error_line(
+                    err,
+                    "Could not change the boosts needed to bypass restrictions",
+                ));
+            }
             // B7: refused group admin changes were rolled back above; say
             // so instead of showing the old value as if nothing happened.
             Some(

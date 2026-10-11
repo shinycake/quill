@@ -154,11 +154,19 @@ impl Session {
             }
             // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line
             // 13917) — correlated via the pending request's `chat_id`.
-            GroupsPayload::ChatBoostStatus { level, boost_count } => {
+            GroupsPayload::ChatBoostStatus(status) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.groups
                         .chat_boost_status
-                        .insert(chat_id.0, (level, boost_count));
+                        .insert(chat_id.0, (status.level, status.boost_count));
+                    self.groups.chat_boost_details.insert(chat_id.0, status);
+                }
+            }
+            // `getChatBoostFeatures` answer, kept for the chat it was
+            // asked for.
+            GroupsPayload::ChatBoostFeatures(features) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.groups.chat_boost_features.insert(chat_id.0, features);
                 }
             }
             // Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
@@ -178,6 +186,7 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.groups.chat_boost_status.remove(&chat_id.0);
+                    self.groups.chat_boost_details.remove(&chat_id.0);
                 }
             }
             // Phase D2: `getChatStatistics` answer — the response carries

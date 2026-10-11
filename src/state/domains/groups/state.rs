@@ -2,6 +2,7 @@
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
 use crate::state::*;
+use crate::telegram::envelope::{ParsedBoostFeatures, ParsedBoostStatus};
 
 pub struct GroupsState {
     /// Transfer-ownership gate, transfer progress and the "next owner" lookup.
@@ -117,6 +118,15 @@ pub struct GroupsState {
     /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
     /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
     pub chat_boost_status: HashMap<i64, (i32, i32)>,
+    /// Full `getChatBoostStatus` answer (progress to the next level,
+    /// Premium audience), keyed by chat id.
+    pub chat_boost_details: HashMap<i64, ParsedBoostStatus>,
+    /// `getChatBoostFeatures` level tables, keyed by chat id (the table
+    /// differs for channels and groups).
+    pub chat_boost_features: HashMap<i64, ParsedBoostFeatures>,
+    /// "Boosts needed to bypass restrictions" values sent and not yet
+    /// acknowledged, keyed by chat id.
+    pub unrestrict_boost_pending: HashMap<i64, i32>,
     /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
     /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
     /// them to chain `boostChat` once per boost intent.
@@ -251,6 +261,9 @@ impl GroupsState {
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),
+            chat_boost_details: HashMap::new(),
+            chat_boost_features: HashMap::new(),
+            unrestrict_boost_pending: HashMap::new(),
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
             supergroup_usernames: HashMap::new(),
