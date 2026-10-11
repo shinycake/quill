@@ -87,6 +87,7 @@ pub mod premium_hub;
 pub mod presence;
 pub mod privacy;
 pub mod profile_forms;
+pub mod profile_tab;
 pub mod proxy;
 pub mod quit_guard;
 pub mod reaction_who;

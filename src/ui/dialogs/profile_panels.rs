@@ -44,6 +44,8 @@ pub enum ProfileDialog {
     Birthday(BirthdayDialog),
     /// Pick (or remove) the personal channel.
     PersonalChannel,
+    /// Pick the tab your profile opens on.
+    MainTab,
     /// Pick the chat to share `user_id`'s contact into; `target` is the
     /// chosen chat awaiting the confirm step.
     ShareContact {

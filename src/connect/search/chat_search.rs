@@ -30,7 +30,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // active tab.
         let reopening = self.session.media.shared_media.open
             && self.session.media.shared_media.chat_id == Some(chat_id);
-        let tab = self.session.media.shared_media.open_for(chat_id);
+        let initial = self.session.main_profile_gallery_tab(chat_id);
+        let tab = self
+            .session
+            .media
+            .shared_media
+            .open_for_tab(chat_id, initial);
         if !reopening {
             self.fetch_shared_media(tab)?;
         }

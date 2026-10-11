@@ -258,12 +258,18 @@ impl SharedMediaState {
     /// Open the gallery for `chat_id`; returns the tab to fetch. Reopening
     /// for the same chat keeps already-fetched tabs.
     pub fn open_for(&mut self, chat_id: ChatId) -> SharedMediaTab {
+        self.open_for_tab(chat_id, SharedMediaTab::Media)
+    }
+
+    /// Like [`Self::open_for`], opening on `initial` (the profile's main
+    /// tab) when the gallery is not already open for this chat.
+    pub fn open_for_tab(&mut self, chat_id: ChatId, initial: SharedMediaTab) -> SharedMediaTab {
         if self.open && self.chat_id == Some(chat_id) {
             return self.active_tab;
         }
         self.open = true;
         self.chat_id = Some(chat_id);
-        self.active_tab = SharedMediaTab::Media;
+        self.active_tab = initial;
         self.generation = self.generation.saturating_add(1);
         for tab in self.tabs.iter_mut() {
             tab.clear();

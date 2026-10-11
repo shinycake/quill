@@ -589,6 +589,7 @@ impl QuillApp {
                     footer.into_any_element(),
                 ))
             }
+            ProfileDialog::MainTab => self.main_tab_dialog_parts(cx),
             ProfileDialog::ShareContact { user_id, target } => {
                 let (user_id, target) = (*user_id, *target);
                 let session = self.session()?;
