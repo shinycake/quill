@@ -42,6 +42,11 @@ pub enum PrivacySettingKey {
     /// `userPrivacySettingAllowPeerToPeerCalls` (tdesktop "Peer-to-peer in
     /// calls").
     PeerToPeer,
+    /// `userPrivacySettingAllowUnpaidMessages` (tdesktop "Remove Fee"):
+    /// the users and groups that may write for free to an account that
+    /// charges for messages. Not on the Privacy screen; the Messages
+    /// editor owns it, so it is left out of `all()`.
+    AllowUnpaidMessages,
 }
 
 impl PrivacySettingKey {
@@ -68,6 +73,7 @@ impl PrivacySettingKey {
             PrivacySettingKey::AutosaveGifts => "userPrivacySettingAutosaveGifts",
             PrivacySettingKey::AllowCalls => "userPrivacySettingAllowCalls",
             PrivacySettingKey::PeerToPeer => "userPrivacySettingAllowPeerToPeerCalls",
+            PrivacySettingKey::AllowUnpaidMessages => "userPrivacySettingAllowUnpaidMessages",
         }
     }
 
@@ -87,6 +93,7 @@ impl PrivacySettingKey {
             PrivacySettingKey::AutosaveGifts => "Gifts",
             PrivacySettingKey::AllowCalls => "Who can call me",
             PrivacySettingKey::PeerToPeer => "Peer-to-peer calls",
+            PrivacySettingKey::AllowUnpaidMessages => "Remove fee",
         }
     }
 
@@ -154,6 +161,7 @@ impl PrivacySettingKey {
             PrivacySettingKey::AutosaveGifts => "Who can display gifts on my profile",
             PrivacySettingKey::AllowCalls => "Who can call me",
             PrivacySettingKey::PeerToPeer => "Use peer-to-peer with",
+            PrivacySettingKey::AllowUnpaidMessages => "Who can message me for free",
         }
     }
 
@@ -184,6 +192,9 @@ impl PrivacySettingKey {
             }
             PrivacySettingKey::PeerToPeer => {
                 "Peer-to-peer in calls will or will not be used with these users regardless of the settings above."
+            }
+            PrivacySettingKey::AllowUnpaidMessages => {
+                "Add users or entire groups who won't be charged for sending messages to you."
             }
             _ => "Add users or groups to override the settings above.",
         }

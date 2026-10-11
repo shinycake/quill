@@ -31,6 +31,7 @@ impl QuillApp {
             link_preview_link: self.composer_ui.preview_link,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
+            paid_message_star_count: self.paid_stars_for_send(),
             ..SendOptions::default()
         }
     }

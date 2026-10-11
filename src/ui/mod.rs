@@ -253,6 +253,12 @@ mod notification_settings;
 mod notifications;
 mod onboarding;
 mod ownership;
+mod paid_messages_channel;
+mod paid_messages_privacy;
+mod paid_messages_send;
+mod paid_messages_state;
+#[cfg(all(test, feature = "demo-capture"))]
+mod paid_messages_tests;
 mod paid_reaction_chip;
 mod paid_reaction_state;
 mod paid_reaction_ui;

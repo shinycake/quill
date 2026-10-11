@@ -103,6 +103,11 @@ pub struct SendOptions {
     /// explicitly chose a sticker from an installed set so TDLib moves
     /// that set to the front of the installed order.
     pub update_order_of_installed_sticker_sets: bool,
+    /// `paid_message_star_count`: the Stars per message the user agreed to
+    /// pay (0 for a free chat). TDLib fails the send with
+    /// `required_paid_message_star_count` when it does not match the
+    /// chat's price.
+    pub paid_message_star_count: i64,
 }
 
 /// MED4b: media-size half of `linkPreviewOptions` (TDLib 1.8.67,

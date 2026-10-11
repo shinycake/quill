@@ -320,6 +320,7 @@ impl QuillApp {
                         .when(self.composer_ui.schedule_popup_open, |this| {
                             this.child(self.schedule_popup(cx))
                         })
+                        .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
                         .when_some(self.composer_options_row(cx), |this, row| this.child(row))
                         // MED4: detected-URL chip (send-time preview
                         // control) and caption bar ("Add a caption…",

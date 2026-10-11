@@ -17,7 +17,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::file_prefs::{self, OpenWarning};
-use quill::privacy::{GiftSettings, NewChatPrivacyState};
+use quill::privacy::GiftSettings;
 use quill::state::PasswordCheck;
 use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
@@ -148,125 +148,8 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(value),
             )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.privacy.editor = Some(PrivacyEditorTarget::NewChat);
-                this.privacy.exception_picker_open = false;
-                cx.notify();
-            }))
+            .on_click(cx.listener(|this, _, _, cx| this.open_new_chat_editor(cx)))
             .into_any_element()
-    }
-
-    /// Messages privacy editor (tdesktop `EditMessagesPrivacyBox`):
-    /// everybody, or contacts and Premium users only.
-    pub(super) fn new_chat_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.session();
-        let state = session.and_then(|s| s.settings.privacy_data.new_chat);
-        let premium = session.is_some_and(|s| s.payments.premium_option == Some(true));
-        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
-        let mut body = div().flex().flex_col().gap_1();
-        body = body.child(
-            div()
-                .text_xs()
-                .font_semibold()
-                .px_1()
-                .text_color(cx.theme().muted_foreground)
-                .child("Who can send me messages"),
-        );
-        match state {
-            Some(NewChatPrivacyState::Ready(settings)) => {
-                let everyone = settings.allow_from_unknown;
-                body = body
-                    .child(self.choice_row(
-                        cx,
-                        "privacy-new-chat-everyone".into(),
-                        "Everybody",
-                        None,
-                        everyone,
-                        |this, cx| this.set_new_chat_allow(true, cx),
-                    ))
-                    .child(
-                        self.choice_row(
-                            cx,
-                            "privacy-new-chat-restricted".into(),
-                            "My contacts and Premium users",
-                            Some(
-                                "Non-contacts can message you only if they have Telegram Premium."
-                                    .into(),
-                            ),
-                            !everyone,
-                            |this, cx| this.set_new_chat_allow(false, cx),
-                        ),
-                    );
-                if settings.incoming_paid_message_star_count > 0 {
-                    body = body.child(
-                        div()
-                            .text_xs()
-                            .px_2()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!(
-                                "Non-contacts pay {} Stars per message to write to you. Change the price in the Telegram mobile app.",
-                                settings.incoming_paid_message_star_count
-                            )),
-                    );
-                }
-                if !premium {
-                    body = body.child(
-                        div()
-                            .text_xs()
-                            .px_2()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Restricting new chats needs Telegram Premium."),
-                    );
-                }
-            }
-            Some(NewChatPrivacyState::Failed) => {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .px_2()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Couldn't load this setting."),
-                );
-            }
-            _ => {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .px_2()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Loading…"),
-                );
-            }
-        }
-        if let Some(line) = error {
-            body = body.child(div().text_xs().px_2().text_color(danger()).child(line));
-        }
-        self.privacy_shell(cx, "editor", "Who can message me", body.into_any_element())
-    }
-
-    /// Choose Everybody (`true`) or Contacts and Premium (`false`).
-    pub(super) fn set_new_chat_allow(&mut self, allow: bool, cx: &mut Context<Self>) {
-        let premium = self
-            .session()
-            .is_some_and(|s| s.payments.premium_option == Some(true));
-        if !allow && !premium {
-            self.connection.status_note = "Restricting new chats needs Telegram Premium.".into();
-            cx.notify();
-            return;
-        }
-        if let Some(live) = self.live.as_mut() {
-            if let Err(err) = live.driver.set_new_chat_privacy(allow) {
-                self.connection.status_note = format!("privacy update failed: {err:?}");
-            }
-        } else if let Some(demo) = self.demo_session.as_mut()
-            && let Some(NewChatPrivacyState::Ready(current)) = demo.settings.privacy_data.new_chat
-        {
-            demo.set_new_chat_privacy_local(quill::privacy::NewChatPrivacy {
-                allow_from_unknown: allow,
-                ..current
-            });
-        }
-        cx.notify();
     }
 
     /// The "find me by my number" choice under a hidden phone number.
@@ -1104,7 +987,7 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, cx| {
-            app.set_new_chat_allow(true, cx);
+            app.pick_messages_policy(quill::paid_messages::MessagesPolicy::Everybody, cx);
             app.set_sensitive_content(true, cx);
         });
         app.read_with(vcx, |app, _| {
@@ -1120,7 +1003,7 @@ mod dispatch_tests {
             if let Some(session) = app.demo_session.as_mut() {
                 session.payments.premium_option = Some(false);
             }
-            app.set_new_chat_allow(false, cx);
+            app.pick_messages_policy(quill::paid_messages::MessagesPolicy::ContactsAndPremium, cx);
         });
         app.read_with(vcx, |app, _| {
             let data = &app.demo_session.as_ref().unwrap().settings.privacy_data;

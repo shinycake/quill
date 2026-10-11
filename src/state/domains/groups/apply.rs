@@ -636,7 +636,12 @@ impl Session {
                 sign_messages,
                 show_message_sender,
                 join_to_send_messages,
+                paid_message_star_count,
             } => {
+                self.payments
+                    .paid_messages
+                    .dm_price
+                    .insert(supergroup_id, paid_message_star_count);
                 self.set_supergroup_usernames(supergroup_id, usernames);
                 self.groups
                     .supergroup_join_to_send

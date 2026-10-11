@@ -85,6 +85,8 @@ pub struct PaymentsState {
     pub giveaway: GiveawayState,
     /// Star reactions waiting for their Undo window to end.
     pub paid: crate::paid_reaction::PaidReactions,
+    /// Paid messages: prices, gates, trust and revenue.
+    pub paid_messages: crate::paid_messages::PaidMessages,
     /// The Star packs listed under "Buy more Stars".
     pub star_packs: crate::star_packs::StarPacksState,
     /// The Gift Stars dialog.
@@ -133,6 +135,7 @@ impl PaymentsState {
             gift_code: None,
             giveaway: GiveawayState::default(),
             paid: Default::default(),
+            paid_messages: Default::default(),
             star_packs: Default::default(),
             stars_gift: Default::default(),
         }

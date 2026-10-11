@@ -119,6 +119,10 @@ impl Session {
             Some(
                 purpose @ (RequestPurpose::GetNewChatPrivacy
                 | RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy { .. })
+                | RequestPurpose::CanSendMessageToUser
+                | RequestPurpose::GetPaidMessageRevenue
+                | RequestPurpose::AllowUnpaidMessages
+                | RequestPurpose::SetDirectMessagesGroup
                 | RequestPurpose::SetGiftSettings
                 | RequestPurpose::SetInactiveSessionTtl
                 | RequestPurpose::SetSensitiveContent

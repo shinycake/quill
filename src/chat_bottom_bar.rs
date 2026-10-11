@@ -20,6 +20,9 @@ pub enum BottomBar {
     MuteUnmute { muted: bool },
     /// A bot chat that has not been started.
     Start,
+    /// The user accepts messages only from contacts and Premium users,
+    /// and the viewer is neither (`EmptyChatLockedBox::PremiumRequired`).
+    PremiumRequired,
 }
 
 /// What the bar decision reads from the open chat.
@@ -35,6 +38,8 @@ pub struct BarFacts {
     /// A supergroup or channel (`None` for private chats and basic groups).
     pub channel: Option<ChannelFacts>,
     pub muted: bool,
+    /// The paid-messages gate says Premium is needed to write.
+    pub premium_required: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +56,9 @@ pub fn bottom_bar(facts: &BarFacts) -> Option<BottomBar> {
         return Some(BottomBar::Unblock {
             restart: facts.is_bot,
         });
+    }
+    if facts.premium_required {
+        return Some(BottomBar::PremiumRequired);
     }
     if let Some(channel) = facts.channel {
         match channel.membership {
@@ -84,6 +92,7 @@ impl BottomBar {
             BottomBar::MuteUnmute { muted: true } => "Unmute",
             BottomBar::MuteUnmute { muted: false } => "Mute",
             BottomBar::Start => "Start",
+            BottomBar::PremiumRequired => "Go Premium",
         }
     }
 }
@@ -103,6 +112,25 @@ mod tests {
             }),
             ..BarFacts::default()
         }
+    }
+
+    #[test]
+    fn premium_gate_replaces_the_composer_after_the_block() {
+        let gated = BarFacts {
+            can_send: true,
+            premium_required: true,
+            ..BarFacts::default()
+        };
+        assert_eq!(bottom_bar(&gated), Some(BottomBar::PremiumRequired));
+        assert_eq!(BottomBar::PremiumRequired.label(), "Go Premium");
+        let blocked = BarFacts {
+            blocked: true,
+            ..gated
+        };
+        assert_eq!(
+            bottom_bar(&blocked),
+            Some(BottomBar::Unblock { restart: false })
+        );
     }
 
     #[test]

@@ -247,6 +247,8 @@ impl Session {
             }
             SettingsPayload::AddedProxy { .. } => self.apply_added_proxy(pending),
             payload @ (SettingsPayload::NewChatPrivacySettings(_)
+            | SettingsPayload::CanSendMessageToUser(_)
+            | SettingsPayload::StarCount(_)
             | SettingsPayload::NetworkStatistics(_)
             | SettingsPayload::RecoveryEmailAddress
             | SettingsPayload::UpdateSuggestedActions { .. }) => {
