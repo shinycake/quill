@@ -2,6 +2,17 @@
 
 use super::*;
 
+/// The open thread's window, read once per render: it drives the unread
+/// divider, the jump button's badge, forward paging and scroll anchoring
+/// the way `HistoryState` does for the main history.
+struct ThreadWindow {
+    thread_id: i64,
+    unread_anchor: Option<MessageId>,
+    unread_count: i32,
+    has_newer: bool,
+    window_epoch: u64,
+}
+
 impl QuillApp {
     /// kit Phase 3: the shared history row list used by both chat history
     /// and per-topic history, virtualized through the kit `MessageScroller`
@@ -32,29 +43,35 @@ impl QuillApp {
         // before the state below is assigned.
         let thread_window = session
             .and_then(|s| s.open_chat.and_then(|chat| s.thread_for_chat(chat)))
-            .map(|thread| (thread.thread_id, thread.unread_anchor, thread.unread_count));
+            .map(|thread| ThreadWindow {
+                thread_id: thread.thread_id,
+                unread_anchor: thread.unread_anchor,
+                unread_count: thread.unread_count,
+                has_newer: thread.has_newer,
+                window_epoch: thread.window_epoch,
+            });
         let history_key = (
             session
                 .and_then(|s| s.open_chat)
                 .map(|chat| chat.0)
                 .unwrap_or(-1),
             session.and_then(|s| s.open_topic),
-            thread_window.map_or(0, |(thread_id, _, _)| thread_id),
+            thread_window.as_ref().map_or(0, |thread| thread.thread_id),
         );
-        // The main history's loaded window (topic views page their own
-        // history and have none of this).
-        let (unread_anchor, has_newer, window_epoch) = match thread_window {
-            // A thread loads from its newest page: no newer window, and its
-            // own read position places the divider.
-            Some((_, anchor, _)) => (anchor, false, 0),
+        // The loaded window: the thread's own (it opens around its read
+        // position and pages forward like the main history) or the main
+        // history's (topic views page their own history and have none of
+        // this).
+        let (unread_anchor, has_newer, window_epoch) = match &thread_window {
+            Some(thread) => (thread.unread_anchor, thread.has_newer, thread.window_epoch),
             None => session
                 .filter(|s| s.open_topic.is_none())
                 .and_then(|s| s.open_chat.and_then(|chat| s.histories.get(&chat.0)))
                 .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
                 .unwrap_or((None, false, 0)),
         };
-        let unread_count = match thread_window {
-            Some((_, _, count)) => count,
+        let unread_count = match &thread_window {
+            Some(thread) => thread.unread_count,
             None => chat.map_or(0, |chat| chat.unread_count),
         };
         if let Some(mut messages) = messages {

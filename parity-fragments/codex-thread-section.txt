@@ -1,0 +1,3 @@
+# codex/thread-section — reply threads as a full section: opens at the first
+# unread reply, pages forward, tracks unread replies locally, jump to latest.
+parity:thread-section

@@ -92,7 +92,8 @@ fn comments_thread_open_load_send_and_close() {
     }
     assert!(driver.thread_needs_start());
 
-    // 3. Switching opens the discussion group and requests the newest page.
+    // 3. Switching opens the discussion group and requests the first page
+    //    around the read position (two unread comments after 502).
     let page = driver
         .switch_to_thread_chat()
         .unwrap()
@@ -107,7 +108,9 @@ fn comments_thread_open_load_send_and_close() {
     assert_eq!(history.len(), 1);
     assert_eq!(history[0]["chat_id"], 13);
     assert_eq!(history[0]["message_id"], 101);
-    assert_eq!(history[0]["from_message_id"], 0);
+    assert_eq!(history[0]["from_message_id"], 502);
+    assert_eq!(history[0]["offset"], -25);
+    assert_eq!(history[0]["limit"], 50);
     assert!(!driver.thread_needs_start());
     // In flight: no duplicate page.
     assert_eq!(driver.fetch_thread_history().unwrap(), None);
@@ -368,5 +371,148 @@ fn forum_topic_thread_routes_sends_into_the_topic() {
     assert_eq!(routed["topic_id"]["@type"], "messageTopicForum");
     assert_eq!(routed["topic_id"]["forum_topic_id"], 7);
     assert_eq!(routed["reply_to"]["message_id"], 120);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Five unread replies: the first page loads around the read position, the
+/// window pages forward, and the jump-to-latest button replaces it with the
+/// newest page while the stale forward page is dropped.
+#[test]
+fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    driver.select_chat(ChatId(14)).unwrap();
+    let extra = driver
+        .open_thread(ChatId(14), MessageId(40))
+        .unwrap()
+        .unwrap();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":14,"message_thread_id":40,"reply_info":{{"@type":"messageReplyInfo","reply_count":9,"recent_replier_ids":[],"last_read_inbox_message_id":44,"last_read_outbox_message_id":0,"last_message_id":49}},"unread_message_count":5,"messages":[{}]}}"#,
+            extra.0,
+            text_message(40, 14, 40, "root")
+        ),
+    );
+    // 1. The first page is requested around the last read reply.
+    let page = driver
+        .start_thread_in_open_chat()
+        .unwrap()
+        .expect("first page");
+    let history = requests_of(&recorder, "getMessageThreadHistory");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0]["from_message_id"], 44);
+    assert_eq!(history[0]["offset"], -25);
+    assert_eq!(history[0]["limit"], 50);
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":4,"messages":[{},{},{},{}]}}"#,
+            page.0,
+            text_message(46, 14, 40, "d"),
+            text_message(45, 14, 40, "c"),
+            text_message(44, 14, 40, "b"),
+            text_message(43, 14, 40, "a"),
+        ),
+    );
+    assert!(driver.session.threads.thread.as_ref().unwrap().has_newer);
+    assert!(!driver.thread_needs_reload());
+
+    // 2. Scrolling down pages forward from the newest loaded reply; one
+    //    request at a time.
+    let newer = driver
+        .fetch_thread_history_newer()
+        .unwrap()
+        .expect("newer page");
+    let history = requests_of(&recorder, "getMessageThreadHistory");
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1]["from_message_id"], 46);
+    assert_eq!(history[1]["offset"], -49);
+    assert_eq!(history[1]["limit"], 50);
+    assert_eq!(driver.fetch_thread_history_newer().unwrap(), None);
+
+    // 3. Jump to latest: the window is replaced and the newest page
+    //    requested; the forward page still in flight is dropped.
+    let latest = driver
+        .thread_jump_to_latest()
+        .unwrap()
+        .expect("newest page requested");
+    let history = requests_of(&recorder, "getMessageThreadHistory");
+    assert_eq!(history.len(), 3);
+    assert_eq!(history[2]["from_message_id"], 0);
+    assert_eq!(history[2]["offset"], 0);
+    {
+        let thread = driver.session.threads.thread.as_ref().unwrap();
+        assert_eq!(thread.unread_anchor, None);
+        assert!(!thread.has_newer);
+        assert_eq!(thread.window_epoch, 1);
+    }
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{},{}]}}"#,
+            newer.0,
+            text_message(48, 14, 40, "stale"),
+            text_message(47, 14, 40, "stale"),
+        ),
+    );
+    assert!(
+        !driver
+            .session
+            .threads
+            .thread
+            .as_ref()
+            .unwrap()
+            .history
+            .messages
+            .contains_key(&48),
+        "stale forward page dropped"
+    );
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":3,"messages":[{},{},{}]}}"#,
+            latest.0,
+            text_message(49, 14, 40, "newest"),
+            text_message(48, 14, 40, "d"),
+            text_message(47, 14, 40, "c"),
+        ),
+    );
+    {
+        let thread = driver.session.threads.thread.as_ref().unwrap();
+        let ids: Vec<i64> = thread.ordered().iter().map(|m| m.id.0).collect();
+        assert_eq!(ids, vec![47, 48, 49]);
+        assert!(!thread.has_newer);
+        assert_eq!(thread.history.next_from_message_id, MessageId(47));
+    }
+    // With the newest replies shown, the button only scrolls.
+    assert_eq!(driver.thread_jump_to_latest().unwrap(), None);
+    // Viewing the newest rows reads the thread down to zero.
+    driver
+        .view_messages(ChatId(14), &[MessageId(48), MessageId(49)])
+        .unwrap();
+    let view = requests_of(&recorder, "viewMessages");
+    assert_eq!(
+        view.last().unwrap()["source"]["@type"],
+        "messageSourceMessageThreadHistory"
+    );
+    assert_eq!(
+        driver.session.threads.thread.as_ref().unwrap().unread_count,
+        0
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

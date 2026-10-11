@@ -811,13 +811,26 @@ fn g2_forum_topic_request_shapes_match_1_8_67() {
 fn g2_thread_boost_welcome_request_shapes_match_1_8_67() {
     // getMessageThreadHistory (schema 1.8.67, line 11839).
     let json =
-        get_message_thread_history(RequestId(3), ChatId(7), MessageId(101), MessageId(0), 50);
+        get_message_thread_history(RequestId(3), ChatId(7), MessageId(101), MessageId(0), 0, 50);
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "getMessageThreadHistory");
     assert_eq!(v["chat_id"], 7);
     assert_eq!(v["message_id"], 101);
     assert_eq!(v["from_message_id"], 0);
+    assert_eq!(v["offset"], 0);
     assert_eq!(v["limit"], 50);
+    // Around the read position / the newer page: a negative offset.
+    let json = get_message_thread_history(
+        RequestId(3),
+        ChatId(7),
+        MessageId(101),
+        MessageId(44),
+        -25,
+        50,
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["from_message_id"], 44);
+    assert_eq!(v["offset"], -25);
     // getChatBoostStatus (line 13917) / getAvailableChatBoostSlots
     // (line 13914) / boostChat (line 13922).
     let json = get_chat_boost_status(RequestId(3), ChatId(7));

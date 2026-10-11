@@ -2,7 +2,7 @@
 use super::*;
 use crate::composer::DraftSaveClock;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{RequestPurpose, ThreadStatus};
+use crate::state::{RequestPurpose, ThreadStatus, ThreadsPurpose};
 use crate::telegram::requests::{
     get_message_thread, get_message_thread_history, route_into_thread,
 };
@@ -133,9 +133,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
-    /// Load the next page of the open thread: the newest page first, then
-    /// older replies. Deduped while one is in flight; stops once the root
-    /// was reached.
+    /// Load the next page of the open thread's window towards the root:
+    /// the first page, then older replies. An unread thread opens around
+    /// its read position (tdesktop `ShowAtUnreadMsgId` →
+    /// `RepliesList::loadAround`): half the page newer than the last read
+    /// reply, half older; otherwise the newest page. Deduped while one is
+    /// in flight; stops once the root was reached.
     pub fn fetch_thread_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -147,7 +150,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let (origin_chat, origin_message) = (thread.origin_chat_id, thread.origin_message_id);
-        let from = thread.history.next_from_message_id;
+        let first_page = !thread.has_reply_rows() && thread.history.next_from_message_id.0 == 0;
+        let (from, offset) = match thread.unread_anchor {
+            Some(anchor) if first_page => (anchor, -(THREAD_PAGE / 2)),
+            _ => (thread.history.next_from_message_id, 0),
+        };
         let purpose = RequestPurpose::GetMessageThreadHistory {
             message_id: origin_message.0,
         };
@@ -164,12 +171,91 @@ impl<S: JsonSender> ConnectDriver<S> {
             origin_chat,
             origin_message,
             from,
+            offset,
+            THREAD_PAGE,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        if let Some(thread) = self.session.threads.thread.as_mut() {
+            thread.reload_needed = false;
+        }
+        Ok(Some(extra))
+    }
+
+    /// Load the page after the window's newest reply while the window
+    /// stops short of the thread's last reply (`ThreadView::has_newer`).
+    /// A negative offset returns `-offset` replies newer than `from` plus
+    /// `from` itself (schema `getMessageThreadHistory`).
+    pub fn fetch_thread_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(thread) = self
+            .session
+            .threads
+            .thread
+            .as_ref()
+            .filter(|thread| thread.thread_id != 0 && thread.has_newer && !thread.newer_failed)
+        else {
+            return Ok(None);
+        };
+        let Some(from) = thread.newest_loaded_id() else {
+            return Ok(None);
+        };
+        let (origin_chat, origin_message) = (thread.origin_chat_id, thread.origin_message_id);
+        let purpose = RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer {
+            message_id: origin_message.0,
+        });
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(purpose, origin_chat)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(origin_chat));
+        if let Err(err) = self.sender.send_json(&get_message_thread_history(
+            extra,
+            origin_chat,
+            origin_message,
+            from,
+            -(THREAD_PAGE - 1),
             THREAD_PAGE,
         )) {
             self.session.requests.take(extra);
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// The jump-to-latest button inside a thread: drop the unread divider
+    /// and, when the window stops short of the newest replies, replace it
+    /// with the newest page (the UI scrolls to the end once it lands).
+    /// `Ok(None)` when the window already shows the newest replies: the UI
+    /// only scrolls then.
+    pub fn thread_jump_to_latest(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(thread) = self.session.threads.thread.as_mut() else {
+            return Ok(None);
+        };
+        thread.unread_anchor = None;
+        if thread.has_newer {
+            self.session.reset_thread_window();
+        }
+        if !self.thread_needs_reload() {
+            return Ok(None);
+        }
+        self.fetch_thread_history()
+    }
+
+    /// The reducer replaced the thread window (an own send while newer
+    /// replies were unloaded) and the newest page is still to be requested.
+    pub fn thread_needs_reload(&self) -> bool {
+        self.session
+            .threads
+            .thread
+            .as_ref()
+            .is_some_and(|thread| thread.thread_id != 0 && thread.reload_needed)
     }
 
     /// Leave the thread view, back to where it was opened from. Returns the

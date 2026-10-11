@@ -198,6 +198,8 @@ impl Session {
                 history.visible.insert(id.0);
             }
         }
+        // Thread rows on screen also move the thread's own read position.
+        self.thread_read_till(chat_id, ids);
         true
     }
 

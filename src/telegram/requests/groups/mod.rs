@@ -708,12 +708,15 @@ pub fn toggle_general_forum_topic_hidden(
 /// from_message_id:int53 offset:int32 limit:int32 = Messages;`
 /// "Returns messages in a message thread of a message. ... Message
 /// thread of a channel message is in the channel's linked supergroup."
-/// Used for the channel-comments viewer.
+/// `offset` 0 pages older from `from_message_id`; a negative offset (down
+/// to -99, with `limit >= -offset`) also returns that many newer messages,
+/// which opens a thread around its read position and pages it forward.
 pub fn get_message_thread_history(
     extra: RequestId,
     chat_id: ChatId,
     message_id: MessageId,
     from_message_id: MessageId,
+    offset: i32,
     limit: i32,
 ) -> String {
     json!({
@@ -722,7 +725,7 @@ pub fn get_message_thread_history(
         "chat_id": chat_id.0,
         "message_id": message_id.0,
         "from_message_id": from_message_id.0,
-        "offset": 0,
+        "offset": offset.clamp(-99, 0),
         "limit": limit,
     })
     .to_string()
