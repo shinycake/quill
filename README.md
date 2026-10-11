@@ -364,7 +364,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Frequent contacts" row in search, with a setting to hide it <!-- parity:chatlist-frequent-contacts -->
 - [x] Remove a single recent search entry <!-- parity:chatlist-remove-recent-search -->
 - [x] Global search filters: private, groups, channels, archived, date range <!-- parity:chatlist-search-filters -->
-- [ ] Global search tabs: channels, apps, public posts, media, links, files, music, voice <!-- parity:chatlist-search-tabs -->
+- [x] Global search tabs: channels, apps, public posts, media, links, files, music, voice <!-- parity:chatlist-search-tabs -->
 - [x] Server-side chat and contact search <!-- parity:chatlist-search-server -->
 - [x] Tapping a hashtag searches this chat, my messages or public posts <!-- parity:chatlist-hashtag-search -->
 - [x] In-chat search: filter by sender, calendar, and "N of M" result counter <!-- parity:chatlist-inchat-search-from -->
