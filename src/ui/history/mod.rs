@@ -6,8 +6,8 @@ use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::message_checklist::checklist_body;
 use super::message_games::game_card;
 use super::message_media::{
-    ContactCardState, animation_attachment, audio_row, contact_row, dice_row, document_chip,
-    location_row, paid_media_card, photo_attachment, sticker_attachment, venue_row,
+    ContactCardState, animation_attachment, audio_row, call_card, contact_row, dice_row,
+    document_chip, location_row, paid_media_card, photo_attachment, sticker_attachment, venue_row,
     video_attachment, video_note_attachment, voice_note_row,
 };
 use super::message_media::{
@@ -614,6 +614,7 @@ impl QuillApp {}
 
 pub(in crate::ui) mod bubble_width;
 mod reaction_chip_row;
+pub(in crate::ui) mod text_measure;
 use reaction_chip_row::reaction_chip_row;
 mod session_history_row;
 mod wrap;

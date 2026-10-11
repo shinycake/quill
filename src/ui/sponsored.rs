@@ -218,6 +218,7 @@ pub(super) fn sponsored_message_row(
             // manager panel does); `None` hides it.
             None,
             Some((chat_id, message.message_id)),
+            false,
             cx,
         )),
         _ => None,

@@ -71,99 +71,223 @@ pub(in crate::ui) fn poll_min_width(plain: bool) -> Pixels {
     content_for_outer(FILE_MIN_WIDTH, plain)
 }
 
-thread_local! {
-    /// Glyph advances by font, size and character, as GPUI's own line
-    /// wrapper caches them; cleared when it grows past
-    /// [`CHAR_WIDTH_CACHE_CAP`] entries so a long session stays bounded.
-    static CHAR_WIDTHS: std::cell::RefCell<HashMap<(FontId, u32, char), Pixels>> =
-        std::cell::RefCell::new(HashMap::new());
-}
+pub(in crate::ui) use super::text_measure::longest_line_width;
 
-const CHAR_WIDTH_CACHE_CAP: usize = 16 * 1024;
-
-/// The width `c` takes in `font_id` at `font_size`.
-fn char_width(text_system: &TextSystem, font_id: FontId, font_size: Pixels, c: char) -> Pixels {
-    let key = (font_id, f32::from(font_size).to_bits(), c);
-    CHAR_WIDTHS.with(|cache| {
-        if let Some(width) = cache.borrow().get(&key) {
-            return *width;
-        }
-        let width = text_system.layout_width(font_id, font_size, c);
-        let mut cache = cache.borrow_mut();
-        if cache.len() >= CHAR_WIDTH_CACHE_CAP {
-            cache.clear();
-        }
-        cache.insert(key, width);
-        width
-    })
-}
-
-/// The unwrapped width of the longest line of `text` in the theme's font
-/// at `font_size` (`Ui::Text::String::maxWidth`): the sum of its glyph
-/// advances, which is also what GPUI's line wrapper adds up when it
-/// decides where the rendered text wraps. `last_line_extra` is added to
-/// the last line: the skip block the inline time takes there.
-pub(in crate::ui) fn longest_line_width(
-    cx: &App,
-    text: &str,
-    font_size: Pixels,
-    weight: FontWeight,
-    last_line_extra: i32,
-) -> i32 {
-    if text.is_empty() {
-        return 0;
-    }
-    let mut font = font(cx.theme().font_family.clone());
-    font.weight = weight;
-    let text_system = cx.text_system();
-    let font_id = text_system.resolve_font(&font);
-    let lines: Vec<&str> = text.lines().collect();
-    let last = lines.len().saturating_sub(1);
-    lines
-        .iter()
-        .enumerate()
-        .map(|(index, line)| {
-            let width: f32 = line
-                .chars()
-                .map(|c| f32::from(char_width(text_system, font_id, font_size, c)))
-                .sum();
-            let width = width.ceil() as i32;
-            if index == last {
-                width + last_line_extra
-            } else {
-                width
-            }
-        })
-        .max()
-        .unwrap_or(0)
-}
-
-/// The caption of a media message, empty for other content and for media
-/// without one.
-pub(in crate::ui) fn caption_of(content: &MessageContent) -> &str {
+/// A media message's caption and its entities, empty for other content
+/// and for media without one.
+pub(in crate::ui) fn caption_parts(content: &MessageContent) -> (&str, &[TextEntity]) {
     match content {
-        MessageContent::Photo(photo) => &photo.caption,
-        MessageContent::Video(video) => &video.caption,
-        MessageContent::Animation(animation) => &animation.caption,
-        MessageContent::Document(document) => &document.caption,
-        MessageContent::VoiceNote(note) => &note.caption,
-        MessageContent::Audio(audio) => &audio.caption,
-        _ => "",
+        MessageContent::Photo(photo) => (&photo.caption, &photo.caption_entities),
+        MessageContent::Video(video) => (&video.caption, &video.caption_entities),
+        MessageContent::Animation(animation) => (&animation.caption, &animation.caption_entities),
+        MessageContent::Document(document) => (&document.caption, &document.caption_entities),
+        MessageContent::VoiceNote(note) => (&note.caption, &note.caption_entities),
+        MessageContent::Audio(audio) => (&audio.caption, &audio.caption_entities),
+        _ => ("", &[]),
     }
 }
 
-/// `Element::textualMaxWidth`'s text part for a caption: its longest line
-/// plus, on the last line, the room the inline time takes
-/// (`skipBlockWidth`) when the caption ends the bubble. 0 without a
-/// caption.
+/// `Element::textualMaxWidth`'s text part for a caption: its longest
+/// line, bold and italic runs in their own faces and custom emoji at
+/// their placeholder's width, plus, on the last line, the room the inline
+/// time takes (`skipBlockWidth`) when `footer_reserve` is given, which the
+/// caller does only when the caption ends the bubble. 0 without a caption.
 pub(in crate::ui) fn caption_width(
     cx: &App,
-    caption: &str,
+    content: &MessageContent,
     font: Pixels,
     footer_reserve: Option<Pixels>,
 ) -> i32 {
+    let (caption, entities) = caption_parts(content);
     let extra = footer_reserve.map_or(0, |reserve| f32::from(reserve).ceil() as i32);
-    longest_line_width(cx, caption, font, FontWeight::NORMAL, extra)
+    super::text_measure::styled_longest_line(cx, caption, entities, font, extra)
+}
+
+/// What follows a caption in its bubble, for [`caption_ends_bubble`].
+#[derive(Clone, Copy, Debug, Default)]
+pub(in crate::ui) struct CaptionTail {
+    /// The caption sits above the media (`show_caption_above_media`).
+    pub(in crate::ui) above_media: bool,
+    /// An inline keyboard, reactions, a self-destruct or auto-delete
+    /// badge, or the comments / replies bar renders after it.
+    pub(in crate::ui) rows_after: bool,
+    /// The footer carries views or a signature and takes its own line.
+    pub(in crate::ui) footer_own_line: bool,
+    /// The caption's last line is right-to-left: the time goes under it.
+    pub(in crate::ui) ends_rtl: bool,
+    /// The message has a date to stamp.
+    pub(in crate::ui) dated: bool,
+}
+
+/// Whether the inline time shares the caption's last line, so the
+/// caption's width takes the skip block (Telegram Desktop keeps the skip
+/// block only on the text that ends the bubble).
+pub(in crate::ui) fn caption_ends_bubble(tail: CaptionTail) -> bool {
+    !tail.above_media && !tail.rows_after && !tail.footer_own_line && !tail.ends_rtl && tail.dated
+}
+
+/// [`CaptionTail`] for `message` from what it carries itself;
+/// `bottom_bar` says whether a comments / replies bar renders under it.
+pub(in crate::ui) fn caption_tail(
+    message: &HistoryMessage,
+    bottom_bar: bool,
+    now_ms: u64,
+) -> CaptionTail {
+    use quill::telegram::envelope::ReplyMarkup;
+    let keyboard = message
+        .ephemeral
+        .as_ref()
+        .and_then(|ephemeral| ephemeral.reply_markup.as_ref())
+        .or(message.reply_markup.as_ref())
+        .is_some_and(|markup| {
+            matches!(markup, ReplyMarkup::InlineKeyboard(keyboard)
+                if keyboard.rows.iter().any(|row| !row.is_empty()))
+        });
+    let views = message
+        .interaction_info
+        .as_ref()
+        .is_some_and(|info| info.view_count > 0);
+    let signature = message.author_signature.is_some() && message.forward_info.is_none();
+    let (caption, _) = caption_parts(&message.content);
+    CaptionTail {
+        above_media: crate::ui::message_text::caption_above_media(&message.content),
+        rows_after: keyboard
+            || bottom_bar
+            || !message.reaction_chips().is_empty()
+            || message.self_destruct_badge(now_ms).is_some()
+            || message.auto_delete_chip(now_ms).is_some(),
+        footer_own_line: views || signature,
+        ends_rtl: quill::text::last_line_is_rtl(caption),
+        dated: message.date > 0,
+    }
+}
+
+/// The widest a text bubble gets (`Message::_bubbleWidthLimit`):
+/// `msgMaxWidth`, or wider so a `pre` block of `monospace` width (its
+/// chrome included, `text_measure::widest_pre_block`) fits unwrapped
+/// (`monospaceMaxWidth`). The kit bubble's own share of the pane still
+/// caps it. `None` keeps the default limit.
+pub(in crate::ui) fn bubble_width_limit(monospace: i32, plain: bool) -> Option<Pixels> {
+    let outer = if plain {
+        monospace
+    } else {
+        monospace + PADDED_CHROME
+    };
+    (outer > MSG_MAX_WIDTH).then(|| px(outer as f32))
+}
+
+/// [`bubble_width_limit`] for a text message or a media caption.
+pub(in crate::ui) fn message_width_limit(
+    cx: &App,
+    content: &MessageContent,
+    font: Pixels,
+    plain: bool,
+) -> Option<Pixels> {
+    let (text, entities) = match content {
+        MessageContent::Text(text) => (text.text.as_str(), text.entities.as_slice()),
+        other => caption_parts(other),
+    };
+    let monospace = super::text_measure::monospace_width(cx, text, entities, font);
+    bubble_width_limit(monospace, plain)
+}
+
+/// Horizontal room the link preview card takes around its copy and media
+/// (`link_preview_card`: `px_2` on both sides and the 2 px accent bar).
+pub(in crate::ui) const PREVIEW_CARD_CHROME: i32 = 8 + 8 + 2;
+
+/// `webPagePhotoDelta`: the gap between an article's copy and its
+/// thumbnail (`gap_2`).
+pub(in crate::ui) const PREVIEW_PHOTO_DELTA: i32 = 8;
+
+/// The widest a link preview card's inside gets: the padded bubble at
+/// `msgMaxWidth`, less the card's own chrome.
+pub(in crate::ui) fn preview_inner_max() -> i32 {
+    MSG_MAX_WIDTH - PADDED_CHROME - PREVIEW_CARD_CHROME
+}
+
+/// `ArticleThumbWidth`: a thumbnail of `dims` in a box `height` tall
+/// keeps its proportions but is never wider than tall, nor under 1 px.
+pub(in crate::ui) fn article_thumb_width(dims: (i32, i32), height: i32) -> i32 {
+    let (w, h) = dims;
+    if h > 0 {
+        (height * w.max(0) / h).min(height).max(1)
+    } else {
+        1
+    }
+}
+
+/// An article preview's copy, for its thumbnail's box: the unwrapped
+/// widths of the site name (0 without one), the title (0 without one)
+/// and each description paragraph, and the line heights the card draws
+/// them at (the title's is the taller, Telegram Desktop's
+/// `UnitedLineHeight`).
+#[derive(Clone, Debug, Default)]
+pub(in crate::ui) struct ArticleCopy {
+    pub(in crate::ui) site: i32,
+    pub(in crate::ui) title: i32,
+    pub(in crate::ui) description: Vec<i32>,
+    pub(in crate::ui) title_line: f32,
+    pub(in crate::ui) small_line: f32,
+}
+
+impl ArticleCopy {
+    /// The heights of the copy's lines wrapped at `width`: the site name
+    /// on one line, the title on at most two, the description on what is
+    /// left of `linesMax` (5).
+    fn lines(&self, width: i32) -> Vec<f32> {
+        let wrapped = |text: i32| -> usize {
+            if text <= 0 {
+                0
+            } else {
+                ((text + width.max(1) - 1) / width.max(1)) as usize
+            }
+        };
+        let site = usize::from(self.site > 0);
+        let title = wrapped(self.title).min(2);
+        let description: usize = self.description.iter().map(|&w| wrapped(w).max(1)).sum();
+        let description = description.min(5usize.saturating_sub(site + title));
+        std::iter::repeat_n(self.small_line, site)
+            .chain(std::iter::repeat_n(self.title_line, title))
+            .chain(std::iter::repeat_n(self.small_line, description))
+            .collect()
+    }
+}
+
+/// `WebPage::countCurrentSize` for an article: the small thumbnail's
+/// box (width, height) beside `copy` in a card `inner` wide. It starts
+/// five lines tall and loses a line at a time while the copy beside it
+/// has fewer lines, down to one; its width is [`article_thumb_width`] for
+/// its height, and the copy wraps in what the thumbnail leaves. Telegram
+/// Desktop's lines are all `UnitedLineHeight` tall; Quill's site name
+/// and description lines are smaller than the title's, so the box takes
+/// the copy's real height over that many lines.
+pub(in crate::ui) fn article_thumb(dims: (i32, i32), copy: &ArticleCopy, inner: i32) -> (i32, i32) {
+    let line = copy.title_line.max(1.);
+    let floor = line.round() as i32;
+    for count in (1..=5usize).rev() {
+        let trial = (count as f32 * line).round() as i32;
+        let left = inner - PREVIEW_PHOTO_DELTA - article_thumb_width(dims, trial).max(floor);
+        let lines = copy.lines(left);
+        if lines.len() >= count || count == 1 {
+            let height = lines.iter().take(count).sum::<f32>().max(line).round() as i32;
+            return (article_thumb_width(dims, height).max(floor), height);
+        }
+    }
+    (floor, floor)
+}
+
+/// A link preview's large photo (`WebPage` with a `Photo` attach): the
+/// photo's own optimal width, capped at the card's inside at
+/// `msgMaxWidth`, and its frame there (`Photo::countCurrentSize`). The
+/// card draws it at least that wide and fills a wider card's inside at
+/// the same proportions.
+pub(in crate::ui) fn preview_photo_frame(dims: (i32, i32)) -> (i32, i32) {
+    use quill::bubble_layout::{Size, photo_current, photo_optimal};
+    let dims = Size::new(dims.0, dims.1);
+    let context = media_context(0, 0);
+    let width = photo_optimal(dims, context).w.min(preview_inner_max());
+    let frame = photo_current(dims, context, width);
+    (frame.w.min(width), frame.h)
 }
 
 /// What a picture in a bubble needs besides its pixels: the caption's
@@ -252,8 +376,9 @@ pub(in crate::ui) fn waveform_bars(values: &[u8], available: i32) -> Vec<WaveBar
 #[cfg(test)]
 mod tests {
     use super::{
-        WAVEFORM_MAX, WAVEFORM_MIN, content_for_outer, file_row_bounds, media_context,
-        poll_min_width, voice_row_width, waveform_bars,
+        ArticleCopy, CaptionTail, WAVEFORM_MAX, WAVEFORM_MIN, article_thumb, article_thumb_width,
+        bubble_width_limit, caption_ends_bubble, content_for_outer, file_row_bounds, media_context,
+        poll_min_width, preview_inner_max, preview_photo_frame, voice_row_width, waveform_bars,
     };
     use gpui_kit::px;
 
@@ -312,5 +437,107 @@ mod tests {
         assert!(context.has_bubble);
         assert_eq!(context.caption_width, 300);
         assert_eq!(context.info_width, 46);
+    }
+
+    #[test]
+    fn file_rows_in_the_plain_look_take_the_whole_bubble_widths() {
+        // No bubble padding to leave out: 268..430, not 242..404.
+        assert_eq!(file_row_bounds(true), (px(268.), px(430.)));
+        assert_eq!(file_row_bounds(false), (px(242.), px(404.)));
+    }
+
+    #[test]
+    fn a_wide_monospace_block_lifts_the_bubble_limit() {
+        // No block, or one that fits: msgMaxWidth stays.
+        assert_eq!(bubble_width_limit(0, false), None);
+        assert_eq!(bubble_width_limit(404, false), None);
+        // 500 px of code (its chrome included) and the 26 px bubble chrome.
+        assert_eq!(bubble_width_limit(500, false), Some(px(526.)));
+        assert_eq!(bubble_width_limit(500, true), Some(px(500.)));
+        assert_eq!(bubble_width_limit(430, true), None);
+    }
+
+    #[test]
+    fn the_skip_block_joins_a_caption_only_when_it_ends_the_bubble() {
+        let ends = CaptionTail {
+            dated: true,
+            ..CaptionTail::default()
+        };
+        assert!(caption_ends_bubble(ends));
+        for tail in [
+            CaptionTail {
+                above_media: true,
+                ..ends
+            },
+            // Reactions, a keyboard, badges or the replies bar follow.
+            CaptionTail {
+                rows_after: true,
+                ..ends
+            },
+            CaptionTail {
+                footer_own_line: true,
+                ..ends
+            },
+            CaptionTail {
+                ends_rtl: true,
+                ..ends
+            },
+            CaptionTail {
+                dated: false,
+                ..ends
+            },
+        ] {
+            assert!(!caption_ends_bubble(tail), "{tail:?}");
+        }
+    }
+
+    #[test]
+    fn article_thumbnails_are_at_most_square() {
+        assert_eq!(article_thumb_width((90, 90), 50), 50);
+        assert_eq!(article_thumb_width((200, 100), 50), 50);
+        assert_eq!(article_thumb_width((100, 200), 50), 25);
+        assert_eq!(article_thumb_width((10, 1000), 50), 1);
+        assert_eq!(article_thumb_width((0, 0), 50), 1);
+    }
+
+    #[test]
+    fn an_article_thumbnail_is_as_tall_as_the_copy_beside_it() {
+        let copy = ArticleCopy {
+            site: 50,
+            title: 80,
+            description: vec![200],
+            title_line: 19.6,
+            small_line: 16.8,
+        };
+        let inner = preview_inner_max();
+        assert_eq!(inner, 386);
+        // Site, title and one description line: 16.8 + 19.6 + 16.8.
+        assert_eq!(article_thumb((90, 90), &copy, inner), (53, 53));
+        // A portrait thumbnail keeps its proportions in that height.
+        assert_eq!(article_thumb((45, 90), &copy, inner), (26, 53));
+        // A long description fills the five lines (`linesMax`).
+        let long = ArticleCopy {
+            description: vec![2000],
+            ..copy.clone()
+        };
+        assert_eq!(article_thumb((90, 90), &long, inner), (87, 87));
+        // No copy: one line, never less.
+        let empty = ArticleCopy {
+            title_line: 19.6,
+            small_line: 16.8,
+            ..ArticleCopy::default()
+        };
+        assert_eq!(article_thumb((90, 90), &empty, inner), (20, 20));
+    }
+
+    #[test]
+    fn a_large_preview_photo_fills_the_cards_inside() {
+        // A landscape photo's optimal width is msgMaxWidth: the whole
+        // inside of the card at the widest bubble.
+        let (w, h) = preview_photo_frame((1100, 740));
+        assert_eq!(w, preview_inner_max());
+        assert_eq!(h, 259);
+        // A small one keeps `historyPhotoBubbleMinWidth`.
+        assert_eq!(preview_photo_frame((90, 90)).0, 200);
     }
 }

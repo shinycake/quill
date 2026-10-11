@@ -55,6 +55,8 @@ pub(in crate::ui) fn contact_row(
     contact: &quill::telegram::envelope::ContactContent,
     state: ContactCardState,
     photo: Option<PathBuf>,
+    // The plain look: the msgMaxWidth cap with no bubble padding to leave out.
+    plain: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let name = contact.display_name();
@@ -128,7 +130,7 @@ pub(in crate::ui) fn contact_row(
         .id(("contact-row", row_id))
         .flex()
         .flex_col()
-        .max_w(crate::ui::history::bubble_width::file_row_bounds(false).1)
+        .max_w(crate::ui::history::bubble_width::file_row_bounds(plain).1)
         .gap_2()
         .mt_2()
         .px_3()

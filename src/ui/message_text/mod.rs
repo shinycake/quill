@@ -503,6 +503,7 @@ pub(super) fn message_chrome(
         actions_span: px(34.),
         bottom_bar: None,
         media_width: None,
+        max_width: None,
     }
 }
 

@@ -238,23 +238,54 @@ pub(in crate::ui) fn rich_block_element(
     }
 }
 
+/// The box a link preview picture takes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::ui) enum ThumbFrame {
+    /// A fixed box: the article thumbnail, an album strip tile.
+    Fixed(Pixels, Pixels),
+    /// The large photo: the card's whole inside, at least `min_width`,
+    /// at `ratio` (width over height).
+    Fill { min_width: Pixels, ratio: f32 },
+}
+
+impl ThumbFrame {
+    /// The widest box the picture is drawn in, to decode it for.
+    fn decode_box(self) -> (Pixels, Pixels) {
+        match self {
+            Self::Fixed(w, h) => (w, h),
+            Self::Fill { min_width, ratio } => {
+                let widest = min_width.max(px(
+                    crate::ui::history::bubble_width::preview_inner_max() as f32,
+                ));
+                (widest, widest / ratio.max(0.01))
+            }
+        }
+    }
+
+    fn apply<E: Styled>(self, element: E) -> E {
+        match self {
+            Self::Fixed(w, h) => element.w(w).h(h).flex_shrink_0(),
+            Self::Fill { min_width, ratio } => {
+                element.w_full().min_w(min_width).aspect_ratio(ratio)
+            }
+        }
+    }
+}
+
 pub(in crate::ui) fn preview_thumb(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
-    large: bool,
+    frame: ThumbFrame,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
 ) -> AnyElement {
-    let (w, h) = if large {
-        (px(240.), px(140.))
-    } else {
-        (px(72.), px(72.))
-    };
     if let Some(path) = photo_display_path(photo, files, media_roots) {
-        return img(super::super::image_budget::sized_media(
+        // The box decides the size; the picture covers it. (An `img`
+        // sized by width alone would take its file's proportions.)
+        let picture = img(super::super::image_budget::sized_media(
             &path,
-            (w, h),
+            frame.decode_box(),
             photo
                 .largest_size()
                 .or_else(|| photo.thumb_size())
@@ -262,21 +293,23 @@ pub(in crate::ui) fn preview_thumb(
             super::super::image_budget::Fit::Cover,
         ))
         .id(("link-preview-img", row_id))
-        .w(w)
-        .h(h)
-        .aspect_ratio(w / h)
+        .absolute()
+        .inset_0()
+        .size_full()
         .rounded_md()
         .object_fit(ObjectFit::Cover)
-        .flex_shrink_0()
-        .with_fallback(move || {
+        .with_fallback(|| {
             div()
-                .w(w)
-                .h(h)
+                .size_full()
                 .rounded_md()
                 .bg(fill_muted())
                 .into_any_element()
-        })
-        .into_any_element();
+        });
+        return frame
+            .apply(div().relative())
+            .rounded_md()
+            .child(picture)
+            .into_any_element();
     }
     let file_id = photo
         .thumb_size()
@@ -287,14 +320,11 @@ pub(in crate::ui) fn preview_thumb(
     } else {
         "Preview"
     };
-    div()
-        .id(("link-preview-ph", row_id))
-        .w(w)
-        .h(h)
+    frame
+        .apply(div().id(("link-preview-ph", row_id)))
         .rounded_md()
         .bg(fill_muted())
         .flex()
-        .flex_shrink_0()
         .items_center()
         .justify_center()
         .child(div().text_xs().text_color(text_bright()).child(label))

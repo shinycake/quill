@@ -95,6 +95,9 @@ pub(in crate::ui) fn document_chip(
     // (user-initiated, listed) download; `Some(paused)` otherwise.
     paused: Option<bool>,
     sponsored: Option<(ChatId, i64)>,
+    // The plain (bubble-less) look: the row takes Telegram Desktop's
+    // bubble widths whole, with no padding to leave out.
+    plain: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = doc.file_id;
@@ -203,7 +206,7 @@ pub(in crate::ui) fn document_chip(
         None
     };
     // `msgFileMinWidth` to `msgMaxWidth`; the name widens the row between.
-    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(false);
+    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(plain);
     div()
         .id(("doc-chip", row_id))
         .mt_1()

@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 mod audio;
+mod call;
 mod cards;
 mod document;
 mod fixtures;
@@ -33,13 +34,14 @@ mod video_note;
 mod visual;
 
 pub(super) use audio::{audio_row, transcription_row, voice_note_row, waveform_row};
+pub(super) use call::call_card;
 pub(super) use cards::{ContactCardState, contact_row, dice_row, paid_media_card};
 pub(super) use document::{
     action_disc, bubble_accent, document_chip, download_display_name, format_bytes, inline_link,
 };
 pub(super) use layout::{
     MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, media_content_width, media_disc,
-    media_frame, media_frame_for, single_media_frame, single_media_width,
+    media_frame_for, single_media_frame, single_media_width,
 };
 pub(super) use location::{location_row, venue_row};
 pub(super) use sticker::sticker_attachment;
