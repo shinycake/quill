@@ -7,7 +7,8 @@ use crate::paid_reaction::PaidSender;
 use crate::state::{PaymentsPurpose, RequestPurpose};
 use crate::telegram::requests::{
     add_pending_paid_message_reaction, commit_pending_paid_message_reactions,
-    get_star_payment_options, remove_pending_paid_message_reactions,
+    get_chat_available_paid_message_reaction_senders, get_star_payment_options,
+    remove_pending_paid_message_reactions,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -87,6 +88,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         any
+    }
+
+    /// Asks which channels the account may send Stars as in a chat, once
+    /// per chat.
+    pub fn maybe_fetch_paid_reaction_senders(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.payments.paid.senders.as_ref().map(|(c, _)| *c) == Some(chat_id.0) {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetPaidReactionSenders, Some(chat_id));
+        let json = get_chat_available_paid_message_reaction_senders(extra, chat_id);
+        self.send_json_request(extra, &json).map(Some)
     }
 
     /// Fetches the Star packs once for the "Buy more Stars" list.

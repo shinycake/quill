@@ -55,6 +55,20 @@ pub fn remove_pending_paid_message_reactions(
     .to_string()
 }
 
+/// `getChatAvailablePaidMessageReactionSenders chat_id`: the channels the
+/// account may send Stars as.
+pub fn get_chat_available_paid_message_reaction_senders(
+    extra: RequestId,
+    chat_id: ChatId,
+) -> String {
+    json!({
+        "@type": "getChatAvailablePaidMessageReactionSenders",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
 /// `getStarPaymentOptions`: the Star packs for sale.
 pub fn get_star_payment_options(extra: RequestId) -> String {
     json!({"@type": "getStarPaymentOptions", "@extra": extra.as_extra()}).to_string()

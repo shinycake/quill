@@ -200,3 +200,76 @@ fn owned_star_count_updates_the_balance() {
         })
     );
 }
+
+#[test]
+fn the_star_cap_follows_the_option() {
+    let (mut driver, _recorder, sink, seq) = driver_parts();
+    assert_eq!(
+        driver.session.payments.paid.max(),
+        crate::paid_reaction::FALLBACK_MAX
+    );
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        r#"{"@type":"updateOption","name":"paid_reaction_star_count_max","value":{"@type":"optionValueInteger","value":"2500"}}"#,
+    );
+    assert_eq!(driver.session.payments.paid.max(), 2500);
+}
+
+#[test]
+fn channel_senders_load_once_per_chat() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    assert!(
+        driver
+            .maybe_fetch_paid_reaction_senders(ChatId(-100))
+            .unwrap()
+            .is_some()
+    );
+    let request = sent_request(&recorder, "getChatAvailablePaidMessageReactionSenders");
+    assert_eq!(request["chat_id"], -100);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({
+            "@type": "messageSenders", "@extra": request["@extra"], "total_count": 2,
+            "senders": [
+                {"@type": "messageSenderUser", "user_id": 1},
+                {"@type": "messageSenderChat", "chat_id": -777}
+            ]
+        })
+        .to_string(),
+    );
+    assert_eq!(driver.session.payments.paid.channels_for(-100), &[-777]);
+    assert!(driver.session.payments.paid.channels_for(-5).is_empty());
+    assert!(
+        driver
+            .maybe_fetch_paid_reaction_senders(ChatId(-100))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn star_reactions_are_enabled_only_when_listed() {
+    use crate::telegram::envelope::{ChatAvailableReactions, ReactionType};
+    let (mut driver, _recorder, _sink, _seq) = driver_parts();
+    let chats = &mut driver.session.chats_state.chat_available_reactions;
+    chats.insert(
+        -100,
+        ChatAvailableReactions::Some {
+            reactions: vec![ReactionType::emoji("❤"), ReactionType::Paid],
+            max_reaction_count: 11,
+        },
+    );
+    chats.insert(
+        -101,
+        ChatAvailableReactions::All {
+            max_reaction_count: 11,
+        },
+    );
+    assert!(driver.session.paid_reactions_enabled(ChatId(-100)));
+    assert!(!driver.session.paid_reactions_enabled(ChatId(-101)));
+    assert!(!driver.session.paid_reactions_enabled(ChatId(-102)));
+}

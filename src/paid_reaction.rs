@@ -128,6 +128,9 @@ pub struct PaidReactions {
     pub offered: Option<(i64, i64)>,
     /// `paid_reaction_star_count_max`, once known.
     pub max_stars: Option<i64>,
+    /// Channels the account may send Stars as in a chat
+    /// (`getChatAvailablePaidMessageReactionSenders`), for one chat.
+    pub senders: Option<(i64, Vec<i64>)>,
     /// The last refusal, shown in the status line.
     pub note: Option<String>,
 }
@@ -136,6 +139,27 @@ impl PaidReactions {
     /// The per-message cap.
     pub fn max(&self) -> i64 {
         self.max_stars.unwrap_or(FALLBACK_MAX).max(2)
+    }
+
+    /// Keeps the channel senders of `chat_id` (the account itself is the
+    /// regular choice and is not listed).
+    pub fn set_senders(&mut self, chat_id: i64, senders: &[MessageSender]) {
+        let channels = senders
+            .iter()
+            .filter_map(|sender| match sender {
+                MessageSender::Chat { chat_id } => Some(*chat_id),
+                MessageSender::User { .. } => None,
+            })
+            .collect();
+        self.senders = Some((chat_id, channels));
+    }
+
+    /// Channels to send as in `chat_id`.
+    pub fn channels_for(&self, chat_id: i64) -> &[i64] {
+        match &self.senders {
+            Some((chat, channels)) if *chat == chat_id => channels,
+            _ => &[],
+        }
     }
 
     /// Whether the picker for this message offers the Star reaction.

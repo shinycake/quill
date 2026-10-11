@@ -16,6 +16,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::paid_reaction::{
@@ -134,15 +135,18 @@ impl QuillApp {
         };
         let max = session.payments.paid.max();
         let amount = DEFAULT_AMOUNT.clamp(1, max);
-        let anonymous = session
+        // Start on how the account already shows on this message.
+        let sender = session
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .is_some_and(|message| {
-                message
-                    .paid_reactors()
-                    .iter()
-                    .any(|reactor| reactor.is_me && reactor.is_anonymous)
+            .and_then(|message| message.paid_reactors().iter().find(|r| r.is_me))
+            .map_or(PaidSender::Regular, |mine| match mine.sender {
+                _ if mine.is_anonymous => PaidSender::Anonymous,
+                Some(quill::telegram::envelope::MessageSender::Chat { chat_id }) => {
+                    PaidSender::Chat(chat_id)
+                }
+                _ => PaidSender::Regular,
             });
         let slider = cx.new(|_| {
             SliderState::new()
@@ -164,12 +168,14 @@ impl QuillApp {
             chat_id,
             message_id,
             amount,
-            anonymous,
+            sender,
             slider,
         });
         if let Some(live) = self.live.as_mut() {
             // The balance for the "Send" check.
             let _ = live.driver.maybe_fetch_star_transactions();
+            // Channels the Stars may be sent as.
+            let _ = live.driver.maybe_fetch_paid_reaction_senders(chat_id);
         }
         cx.notify();
     }
@@ -184,11 +190,7 @@ impl QuillApp {
             return;
         };
         let (chat_id, message_id, amount) = (boxed.chat_id, boxed.message_id, boxed.amount);
-        let sender = if boxed.anonymous {
-            PaidSender::Anonymous
-        } else {
-            PaidSender::Regular
-        };
+        let sender = boxed.sender;
         self.paid_reaction.boxed = None;
         self.add_paid(chat_id, message_id, amount, Some(sender), cx);
     }
@@ -335,17 +337,52 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Switch::new("paid-reaction-top")
-                            .checked(!boxed.anonymous)
+                            .checked(boxed.sender == PaidSender::Regular)
                             .accessibility_label("Show me in Top Senders")
                             .on_click(cx.listener(|this, on: &bool, _, cx| {
                                 if let Some(boxed) = this.paid_reaction.boxed.as_mut() {
-                                    boxed.anonymous = !*on;
+                                    boxed.sender = if *on {
+                                        PaidSender::Regular
+                                    } else {
+                                        PaidSender::Anonymous
+                                    };
                                 }
                                 cx.notify();
                             })),
                     )
                     .child(div().text_sm().child("Show me in Top Senders")),
             );
+            // Channels the account manages: send the Stars as one of them.
+            for (ix, channel_id) in session
+                .payments
+                .paid
+                .channels_for(boxed.chat_id.0)
+                .iter()
+                .enumerate()
+            {
+                let chosen = boxed.sender == PaidSender::Chat(*channel_id);
+                let channel_id = *channel_id;
+                let title = session.sender_label(quill::telegram::envelope::MessageSender::Chat {
+                    chat_id: channel_id,
+                });
+                body = body.child(
+                    Button::new(("paid-reaction-as", ix as u64))
+                        .label(format!("Send as {title}"))
+                        .small()
+                        .when(chosen, |b| b.primary())
+                        .when(!chosen, |b| b.ghost())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(boxed) = this.paid_reaction.boxed.as_mut() {
+                                boxed.sender = if boxed.sender == PaidSender::Chat(channel_id) {
+                                    PaidSender::Regular
+                                } else {
+                                    PaidSender::Chat(channel_id)
+                                };
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
             let reactors = message.map(|m| m.paid_reactors()).unwrap_or(&[]);
             if !reactors.is_empty() {
                 body = body.child(

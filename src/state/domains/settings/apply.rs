@@ -96,7 +96,11 @@ impl Session {
                 sender_ids,
                 senders,
             } => {
-                if let Some(RequestPurpose::Calls(
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaidReactionSenders) {
+                    if let Some(chat) = pending.and_then(|p| p.chat_id) {
+                        self.payments.paid.set_senders(chat.0, &senders);
+                    }
+                } else if let Some(RequestPurpose::Calls(
                     CallsPurpose::GetVideoChatAvailableParticipants { group_call_id },
                 )) = pending.map(|p| p.purpose)
                 {

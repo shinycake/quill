@@ -9,8 +9,8 @@ pub(crate) struct PaidBox {
     pub(super) chat_id: ChatId,
     pub(super) message_id: MessageId,
     pub(super) amount: i64,
-    /// Show as Anonymous in Top Senders.
-    pub(super) anonymous: bool,
+    /// How the Stars show in Top Senders.
+    pub(super) sender: quill::paid_reaction::PaidSender,
     pub(super) slider: Entity<SliderState>,
 }
 

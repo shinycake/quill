@@ -96,6 +96,9 @@ pub enum PaymentsPurpose {
     RemovePendingPaidReaction {
         message_id: i64,
     },
+    /// `getChatAvailablePaidMessageReactionSenders`. Response is
+    /// `messageSenders`.
+    GetPaidReactionSenders,
     /// `getStarGiveawayPaymentOptions`. Response is
     /// `starGiveawayPaymentOptions`.
     GetStarGiveawayOptions,
@@ -126,4 +129,5 @@ flat_purposes!(Payments(PaymentsPurpose) {
     GetStarGiveawayOptions,
     LaunchPrepaidGiveaway,
     GetStarPackOptions,
+    GetPaidReactionSenders,
 });

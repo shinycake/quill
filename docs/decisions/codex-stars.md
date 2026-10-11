@@ -42,13 +42,18 @@
   `inputInvoiceTelegram` path, so the list is read-only and the dialog still
   points to the official apps or @PremiumBot. Sending Stars as gifts is not
   in this change either. `parity:premium-stars-balance` stays open.
-- Sending as a managed channel (`getChatAvailablePaidMessageReactionSenders`):
-  only Regular and Anonymous are offered.
-- tdesktop adds an empty Star chip to messages that have other reactions in
-  channels with Star reactions on. Quill shows the chip once the message has
-  Stars, and offers the Star in the picker.
-- `paid_reaction_star_count_max` is not read; the 10,000 fallback applies and
-  TDLib refuses anything larger.
+- The empty Star chip follows tdesktop: shown when the message has other
+  reactions and the chat lists the Star reaction as allowed
+  (`chatAvailableReactionsSome` containing `reactionTypePaid`; `...All` never
+  includes it).
+- The chip count adds the Stars still waiting for their Undo window. If TDLib
+  already includes pending Stars in `updateMessageInteractionInfo`, the count
+  would be doubled for those 5.5 seconds; this was not checked against a live
+  account.
+- The cap comes from `updateOption paid_reaction_star_count_max` (10,000 until
+  it arrives).
+- The box offers "Send as <channel>" for the channels from
+  `getChatAvailablePaidMessageReactionSenders` (`paidReactionTypeChat`).
 - `updateChatBoost` is for bots only in TDLib, so nothing to apply for
   `parity:updates-stars-boosts` beyond the Star count.
 

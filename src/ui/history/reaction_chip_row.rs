@@ -26,9 +26,11 @@ pub(super) fn reaction_chip_row(
         .gap_1()
         .mt_1();
     // The Star reaction leads the row (tdesktop sorts it first).
-    if let Some(paid) = message.paid_reaction() {
+    if let Some(paid) =
+        super::super::paid_reaction_chip::row_paid_reaction(message, session, !chips.is_empty())
+    {
         row = row.child(super::super::paid_reaction_chip::paid_reaction_chip(
-            message, paid, cx,
+            message, &paid, cx,
         ));
     }
     for (index, chip) in chips.iter().enumerate() {
