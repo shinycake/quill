@@ -1,2 +1,0 @@
-parity:chatlist-row-menu-extras
-parity:chrome-header-menu

@@ -311,7 +311,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Top "now playing" bar for voice and music with play, prev, next, speed and close <!-- parity:chrome-now-playing-bar -->
 - [x] Emoji status and premium badge beside the chat title <!-- parity:chrome-header-status -->
 - [x] Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
-- [ ] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
+- [x] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
 - [x] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
 - [x] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
 - [x] Per-chat wallpaper and chat themes <!-- parity:chrome-chat-wallpaper -->
@@ -377,7 +377,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Folder limit boxes with a Premium upsell <!-- parity:chatlist-folder-limits -->
 - [x] Folder editor shows an "N chats" counter and include/exclude chat pickers with search <!-- parity:chatlist-folder-chat-picker -->
 - [x] Toast "{chat} added to {folder}" <!-- parity:chatlist-folder-toast -->
-- [ ] Chat row menu extras: view profile, open in new window, mark mentions or reactions or poll votes read, export chat, report with reasons <!-- parity:chatlist-row-menu-extras -->
+- [x] Chat row menu extras: view profile, open in new window, mark mentions or reactions or poll votes read, export chat, report with reasons <!-- parity:chatlist-row-menu-extras -->
 - [x] Active video chat badge on group avatars in the list <!-- parity:chatlist-call-badge -->
 - [x] Emoji status next to names in chat rows <!-- parity:chatlist-emoji-status -->
 - [x] Suggestions block: birthdays, set a photo, check phone or password, Premium <!-- parity:chatlist-suggestions -->
