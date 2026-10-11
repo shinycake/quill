@@ -51,6 +51,7 @@ mod native_video_rotate;
 mod nested_click;
 mod notify_state;
 mod payments_state;
+mod peer_color_dialog;
 mod photo_edit;
 mod photo_editor;
 mod pickers_state;

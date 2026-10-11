@@ -38,6 +38,7 @@ mod message_ops;
 mod messaging;
 mod owned_bots;
 mod payments;
+mod peer_color;
 mod polls_checklists;
 mod privacy_data;
 mod profile_panels;

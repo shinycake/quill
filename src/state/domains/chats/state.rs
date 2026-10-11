@@ -62,6 +62,9 @@ pub struct ChatsState {
     pub profile_accent_colors: Vec<ProfileAccentColor>,
     /// Name-color palette from `updateAccentColors` (sender names).
     pub name_accent_colors: Vec<crate::telegram::NameAccentColor>,
+    /// Ids `setAccentColor` accepts, in server order (`updateAccentColors`):
+    /// the name-color editor swatches. Empty until the update arrives.
+    pub available_name_accent_ids: Vec<i32>,
     /// Slice A12: ids `setProfileAccentColor` accepts, in server order —
     /// the edit-profile accent picker rows.
     pub available_accent_color_ids: Vec<i32>,
@@ -103,6 +106,7 @@ impl ChatsState {
             chat_accents: HashMap::new(),
             profile_accent_colors: Vec::new(),
             name_accent_colors: Vec::new(),
+            available_name_accent_ids: Vec::new(),
             available_accent_color_ids: Vec::new(),
             chat_available_reactions: HashMap::new(),
             chat_upgrades: Vec::new(),

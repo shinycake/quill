@@ -117,3 +117,32 @@ pub fn set_profile_accent_color(
     })
     .to_string()
 }
+
+/// `setAccentColor accent_color_id:int32 background_custom_emoji_id:int64
+/// = Ok;` (TDLib 1.8.68, `schema/td_api.tl:15205`): the name color and the
+/// reply-icon custom emoji of the current user; Telegram Premium only.
+/// Pass 0 for no icon.
+pub fn set_accent_color(
+    extra: RequestId,
+    accent_color_id: i32,
+    background_custom_emoji_id: i64,
+) -> String {
+    json!({
+        "@type": "setAccentColor",
+        "@extra": extra.as_extra(),
+        "accent_color_id": accent_color_id,
+        "background_custom_emoji_id": background_custom_emoji_id,
+    })
+    .to_string()
+}
+
+/// `getDefaultBackgroundCustomEmojiStickers = Stickers;` (TDLib 1.8.68,
+/// `schema/td_api.tl:15154`): the custom emoji offered as reply and
+/// profile background icons.
+pub fn get_default_background_custom_emoji_stickers(extra: RequestId) -> String {
+    json!({
+        "@type": "getDefaultBackgroundCustomEmojiStickers",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}

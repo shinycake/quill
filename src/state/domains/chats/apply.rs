@@ -185,12 +185,13 @@ impl Session {
             }
             ChatsPayload::UpdateAccentColors {
                 colors,
-                available_ids: _,
+                available_ids,
             } => {
                 // Server name-color palette (ids 7+); the renderer reads it
                 // through the process-wide table.
                 crate::telegram::name_accent::set_palette(&colors);
                 self.chats_state.name_accent_colors = colors;
+                self.chats_state.available_name_accent_ids = available_ids;
             }
             ChatsPayload::UpdateChatHasProtectedContent {
                 chat_id,

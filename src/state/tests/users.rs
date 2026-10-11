@@ -55,6 +55,20 @@ fn update_user_carries_profile_accent_fields() {
     assert_eq!(user.profile_accent_color_id, 3);
     assert_eq!(user.profile_background_custom_emoji_id, 536_870_912);
 
+    // TDLib JSON writes int64 ids as strings.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUser","user":{"id":33,"first_name":"Cy","type":{"@type":"userTypeRegular"},"accent_color_id":9,"background_custom_emoji_id":"5368324170671202286","profile_background_custom_emoji_id":"5368324170671202287"}}"#,
+    );
+    let user = session.user(33).unwrap();
+    assert_eq!(user.background_custom_emoji_id, 5_368_324_170_671_202_286);
+    assert_eq!(
+        user.profile_background_custom_emoji_id,
+        5_368_324_170_671_202_287
+    );
+
     apply_json(
         &mut session,
         &seq,
@@ -354,4 +368,33 @@ fn own_id_and_premium_come_from_tdlib_options() {
         r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueEmpty"}}"#,
     );
     assert!(!session.my_is_premium());
+}
+
+#[test]
+fn failed_color_requests_surface_the_error_and_icons_flag() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::SetAccentColor, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"PREMIUM_ACCOUNT_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.users_state.profile_edit_error.is_some());
+
+    let extra = session.request(RequestPurpose::GetBackgroundEmojiIcons, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.users_state.background_emoji_icons_failed);
 }

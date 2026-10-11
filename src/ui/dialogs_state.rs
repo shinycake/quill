@@ -20,6 +20,8 @@ pub(crate) struct DialogUi {
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,
+    /// "Your color": name color, reply icon, profile color and icon.
+    pub(super) peer_color_dialog: Option<super::peer_color_dialog::PeerColorDialog>,
     /// B10: a profile photo gallery whose list was requested; the viewer
     /// opens when it lands (checked by the poll loop).
     pub(super) pending_profile_gallery: Option<i64>,
@@ -63,6 +65,7 @@ impl DialogUi {
             bot_edit_dialog: None,
             bot_create_dialog: None,
             edit_profile_dialog: None,
+            peer_color_dialog: None,
             pending_profile_gallery: None,
             add_contact_dialog: None,
             import_contacts_dialog: None,

@@ -41,6 +41,7 @@ mod message_menu;
 mod messages;
 mod moderation;
 mod payments;
+mod peer_color;
 mod polls;
 mod premium_hub;
 mod privacy_data;
