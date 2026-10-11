@@ -2,7 +2,6 @@
 # They may shrink but not grow; remove a line once its file is under the
 # limit. See docs/contributing/structure.md.
 1273 src/main.rs
-1185 src/telegram/requests/messages.rs
 1199 src/ui/app_render.rs
 1386 src/ui/chat_row.rs
 1681 src/ui/demo.rs
