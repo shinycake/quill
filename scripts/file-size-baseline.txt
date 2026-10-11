@@ -10,7 +10,6 @@
 1681 src/ui/demo.rs
 1863 src/ui/history.rs
 1087 src/ui/keybindings.rs
-1374 src/ui/media_panel.rs
 2209 src/ui/message_actions.rs
 1805 src/ui/message_menu_ui.rs
 1968 src/ui/message_text.rs
