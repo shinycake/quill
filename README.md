@@ -1078,7 +1078,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
 - [ ] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
 - [ ] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
-- [ ] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
+- [x] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
 - [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
 - [x] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
 - [ ] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
