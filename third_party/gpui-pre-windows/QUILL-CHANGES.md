@@ -46,6 +46,29 @@ The Quill project changed it in 2026 so an idle window stops receiving a
   touchpad contact was handed to it in the last 5 s.
 - `src/gpui_windows.rs`: declares the new module.
 
+The Quill project also changed it in 2026 so a toast can carry the sender's
+picture and an inline reply field, which GPUI's `SystemNotification` (in the
+unvendored `gpui` crate) has no fields for:
+
+- `src/notification_extras.rs` (new, public, identical to
+  `third_party/gpui-pre-macos/src/notification_extras.rs`; unit tests run
+  with `scripts/test-notification-extras.sh`): `NotificationExtras { image,
+  text_input }` registered under the notification's tag with
+  `set_notification_extras` before `App::show_system_notification`, and
+  `take_reply_text(tag)` for the text typed into the field, parked by the
+  backend before the response is sent.
+- `src/system_notifications.rs`: `toast_document` takes the extras; the
+  image becomes `<image placement="appLogoOverride" hint-crop="circle"
+  src="file:///...">`, the action named in `text_input` an `<input
+  type="text">` with a send button (`hint-inputId`,
+  `activationType="background"`, as Telegram Desktop's `fastReply`). The
+  `Activated` handler reads that input from `UserInput()` into the side
+  channel when the send button fired.
+- `Cargo.toml`: adds the `Foundation_Collections` feature of `windows` for
+  `ValueSet` (`UserInput`).
+- `src/gpui_windows.rs`: declares the new module.
+
 Each changed source file starts with a comment saying so. The changes are
 licensed under Apache-2.0, like the rest of the crate. Background and what
-still needs a live check: `docs/decisions/codex-idle-frames-x11-windows.md`.
+still needs a live check: `docs/decisions/codex-idle-frames-x11-windows.md`;
+notifications: `docs/decisions/codex-notify-native.md`.

@@ -1040,7 +1040,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 ### Settings: notifications
 
-- [ ] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
+- [x] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
 - [x] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
 - [x] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
 - [ ] Desktop notification options: position, count, display, volume (partial: volume shipped; position, count and display only apply to custom notification windows, and Quill uses system notifications) <!-- parity:notify-desktop-options -->
@@ -1049,7 +1049,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
 - [x] Events: contact joined Telegram, pinned messages <!-- parity:notify-events -->
 - [x] Include muted chats in folder counters <!-- parity:notify-muted-counters -->
-- [ ] Sender avatar in OS notifications (partial: Linux shipped; macOS and Windows need an image field on GPUI SystemNotification) <!-- parity:notify-avatar -->
+- [x] Sender avatar in OS notifications (partial: Linux shipped; macOS and Windows need an image field on GPUI SystemNotification) <!-- parity:notify-avatar -->
 
 ### Settings: appearance & chat
 
@@ -1074,7 +1074,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
 - [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip (partial: all but "use system proxy", which TDLib has no hook for) <!-- parity:data-proxy-extras -->
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
-- [ ] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
+- [x] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
 - [ ] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
 - [ ] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
@@ -1099,7 +1099,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Autostart on login (OS-level; schema `autostart` is bot-start-only, no TDLib involvement) — Linux XDG Autostart `.desktop` + macOS LaunchAgents plist; Windows unsupported (registry Run key needs a Windows setup to verify; explicit follow-up) <!-- parity:platform-autostart -->
 - [x] Spellcheck in composer (on-device English dictionary, corrections panel and custom words) <!-- parity:platform-spellcheck -->
 - [x] Chat history export to file (JSON export of the full history to Downloads, via client-side `getChatHistory` paging — no exportHistory constructor in schema; per-message sender names absent by design, Quill plumbs no sender identity) <!-- parity:platform-history-export -->
-- [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
+- [x] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
 - [x] Check for updates automatically on launch against GitHub Releases (latest tag vs compiled-in `CARGO_PKG_VERSION`), with an opt-out toggle in Settings <!-- parity:platform-update-check-auto -->
 - [x] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
 - [x] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->

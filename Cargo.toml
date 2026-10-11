@@ -44,6 +44,8 @@ ui = [
     "dep:rusty-opus",
     "dep:resvg",
     "dep:futures-channel",
+    "dep:gpui_macos",
+    "dep:gpui_windows",
 ]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
@@ -143,6 +145,11 @@ core-video = { version = "0.5.2", optional = true }
 core-foundation = { version = "0.10.1", optional = true }
 # Badge authorization (the Dock draws badges only for apps allowed to badge).
 objc2-user-notifications = { version = "0.3", optional = true }
+# OS notifications: the inline reply field and the sender picture ride beside
+# GPUI's `SystemNotification` through the Quill patch in the vendored platform
+# crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
+# crate GPUI already links.
+gpui_macos = { package = "gpui-pre-macos", version = "=0.3.8", optional = true, default-features = false }
 # Lock-screen / media-key Now Playing (MPNowPlayingInfoCenter, MPRemoteCommandCenter).
 objc2-media-player = { version = "0.3.2", optional = true, default-features = false, features = ["std", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPMediaItem", "MPRemoteCommandEvent", "block2"] }
 
@@ -183,6 +190,11 @@ embed-resource = "3"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Registry", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Media", "Media_Playback", "Foundation"] }
+# OS notifications: the inline reply field and the sender picture ride beside
+# GPUI's `SystemNotification` through the Quill patch in the vendored platform
+# crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
+# crate GPUI already links.
+gpui_windows = { package = "gpui-pre-windows", version = "=0.3.8", optional = true, default-features = false }
 
 # Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
 # 0.7.1 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names

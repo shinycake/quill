@@ -2,7 +2,6 @@
 //! The GPUI binary lives in `src/main.rs` and is compiled with `--features ui`.
 
 pub mod about;
-pub mod account_export;
 pub mod admin_extras;
 pub mod album;
 pub mod animation;

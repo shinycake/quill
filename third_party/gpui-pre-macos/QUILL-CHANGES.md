@@ -28,6 +28,26 @@ The Quill project changed it in 2026 so an idle window stops costing CPU:
 - `Cargo.toml`: allows the `deprecated` lint, which the registry build caps
   anyway (the crate still uses the `cocoa` crate).
 
+The Quill project also changed it in 2026 so an OS notification can carry
+the sender's picture and an inline reply field, which GPUI's
+`SystemNotification` (in the unvendored `gpui` crate) has no fields for:
+
+- `src/notification_extras.rs` (new, public, identical to
+  `third_party/gpui-pre-windows/src/notification_extras.rs`; unit tests run
+  with `scripts/test-notification-extras.sh`): `NotificationExtras { image,
+  text_input }` registered under the notification's tag with
+  `set_notification_extras` before `App::show_system_notification`, and
+  `take_reply_text(tag)` for the text typed into the field, parked by the
+  backend before the response is sent.
+- `src/system_notifications.rs`: `show` takes the extras for the tag; the
+  action named in `text_input` becomes a `UNTextInputNotificationAction`
+  (categories are keyed by actions plus text input); the image is copied to
+  a temporary file and attached as a `UNNotificationAttachment` (the center
+  moves attached files into its own store). The delegate reads
+  `UNTextInputNotificationResponse.userText` into the side channel.
+- `src/gpui_macos.rs`: declares the new module.
+
 Each changed source file starts with a comment saying so. The changes are
 licensed under Apache-2.0, like the rest of the crate. Background and
-measurements: `docs/decisions/codex-idle-cpu.md`.
+measurements: `docs/decisions/codex-idle-cpu.md`; notifications:
+`docs/decisions/codex-notify-native.md`.

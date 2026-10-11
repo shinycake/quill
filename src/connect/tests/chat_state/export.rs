@@ -88,6 +88,70 @@ fn chat_export_worker_requests_flow_through_the_driver() {
 }
 
 #[test]
+fn account_export_worker_requests_flow_through_the_driver() {
+    // `parity:data-export-full`: the account export's requests go out tagged
+    // for it, one at a time, and answers reach the worker. With only
+    // sessions chosen it finishes after a handful of fixture answers.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &dyn_sink, prepared, &[]);
+    let seq = AtomicU64::new(100);
+
+    let mut settings = crate::export::AccountSettings::new(dir.clone());
+    settings.sections = crate::export::account::Sections::none();
+    assert!(driver.start_account_export(settings.clone()).is_err());
+    settings.sections =
+        crate::export::account::Sections::of(&[crate::export::account::Section::Sessions]);
+    driver.start_account_export(settings.clone()).unwrap();
+    assert!(driver.start_account_export(settings).is_err());
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut answered = 0;
+    loop {
+        assert!(std::time::Instant::now() < deadline, "export never settled");
+        driver.pump_account_export();
+        let export = driver.session.settings.account_export.as_ref().unwrap();
+        if export.finished.load(std::sync::atomic::Ordering::Acquire) {
+            break;
+        }
+        let sent: Vec<String> = recorder
+            .snapshot()
+            .into_iter()
+            .filter(|j| j.contains("quill_account_export"))
+            .collect();
+        if sent.len() > answered {
+            assert_eq!(sent.len(), answered + 1, "one request at a time");
+            let value: Value = serde_json::from_str(&sent[answered]).unwrap();
+            let extra = value["@extra"]["quill_account_export"].clone();
+            let body = match value["@type"].as_str().unwrap() {
+                "getMe" => r#""@type":"user","id":1,"first_name":"Fixture""#.to_string(),
+                "getActiveSessions" => r#""@type":"sessions","sessions":[]"#.to_string(),
+                "getConnectedWebsites" => {
+                    r#""@type":"connectedWebsites","websites":[]"#.to_string()
+                }
+                other => panic!("unexpected request {other}"),
+            };
+            let reply = format!(r#"{{{body},"@extra":{{"quill_account_export":{extra}}}}}"#);
+            driver
+                .ingest(copy_and_parse(&reply, &seq, &dyn_sink).unwrap())
+                .unwrap();
+            answered += 1;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(answered, 3);
+    let export = driver.session.settings.account_export.as_ref().unwrap();
+    let crate::export::account::AccountStage::Finished(summary) = export.progress().stage else {
+        panic!("export should finish: {:?}", export.progress());
+    };
+    assert!(summary.folder.join("export_results.html").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn chat_export_refuses_protected_chats() {
     // A chat with `has_protected_content` can't be saved or forwarded, so
     // the export never starts and no TDLib request goes out.

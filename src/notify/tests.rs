@@ -148,6 +148,7 @@ fn locked_notifications_reveal_no_sender_or_text() {
         &mut queue,
         OsNotification {
             chat_id: ChatId(7),
+            message_id: None,
             title: "Ada".into(),
             body: "my secret".into(),
         },
@@ -159,6 +160,7 @@ fn locked_notifications_reveal_no_sender_or_text() {
         &mut queue,
         OsNotification {
             chat_id: ChatId(7),
+            message_id: None,
             title: "Ada".into(),
             body: "more".into(),
         },
@@ -171,6 +173,7 @@ fn coalesce_bursts_into_summary() {
     let mut queue = Vec::new();
     let first = OsNotification {
         chat_id: ChatId(7),
+        message_id: None,
         title: "Ada".into(),
         body: "one".into(),
     };
@@ -179,6 +182,7 @@ fn coalesce_bursts_into_summary() {
         &mut queue,
         OsNotification {
             chat_id: ChatId(7),
+            message_id: None,
             title: "Ada".into(),
             body: "two".into(),
         },
@@ -187,6 +191,7 @@ fn coalesce_bursts_into_summary() {
         &mut queue,
         OsNotification {
             chat_id: ChatId(8),
+            message_id: None,
             title: "Noor".into(),
             body: "hi".into(),
         },
@@ -203,6 +208,7 @@ fn coalesce_bursts_into_summary() {
 fn linux_command_shape() {
     let notification = OsNotification {
         chat_id: ChatId(7),
+        message_id: None,
         title: "Ada".into(),
         body: "hello".into(),
     };
@@ -248,6 +254,7 @@ fn aumid_key_is_under_classes_appusermodelid() {
 fn native_backend_spawns_no_command() {
     let notification = OsNotification {
         chat_id: ChatId(7),
+        message_id: None,
         title: "Ada".into(),
         body: "hello".into(),
     };
@@ -262,6 +269,7 @@ fn native_backend_spawns_no_command() {
 fn linux_command_passes_the_avatar_icon_before_the_separator() {
     let notification = OsNotification {
         chat_id: ChatId(7),
+        message_id: None,
         title: "Ann".to_string(),
         body: "hi".to_string(),
     };
@@ -494,4 +502,56 @@ fn event_switches_do_not_gate_ordinary_messages() {
     ctx.contact_joined_allowed = false;
     assert!(decide_notify(&ctx).is_some());
     assert_eq!(notify_event(&message.content), None);
+}
+
+#[test]
+fn notification_carries_the_message_id_and_bursts_keep_the_newest() {
+    let first = test_message(7, 42, false, "one");
+    let notification = decide_notify(&input(&first, false, None)).expect("notify");
+    assert_eq!(notification.message_id, Some(MessageId(42)));
+    let mut queue = Vec::new();
+    coalesce_notification(&mut queue, notification);
+    let second = test_message(7, 43, false, "two");
+    coalesce_notification(
+        &mut queue,
+        decide_notify(&input(&second, false, None)).expect("notify"),
+    );
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].message_id, Some(MessageId(43)));
+    assert_eq!(queue[0].for_display().message_id, Some(MessageId(43)));
+    assert_eq!(
+        queue[0].for_locked_display().message_id,
+        Some(MessageId(43))
+    );
+}
+
+#[test]
+fn reaction_notifications_have_no_message_to_answer() {
+    let reaction =
+        decide_reaction_notify(&reaction_input(ReactionNotificationSource::All)).unwrap();
+    assert_eq!(reaction.message_id, None);
+}
+
+#[test]
+fn inline_reply_answers_the_message_in_groups_only() {
+    let group = plan_inline_reply("  on my way ", false, false, Some(MessageId(42))).unwrap();
+    assert_eq!(group.text, "on my way");
+    assert_eq!(group.reply_to, Some(MessageId(42)));
+    let private = plan_inline_reply("hi", false, true, Some(MessageId(42))).unwrap();
+    assert_eq!(private.reply_to, None);
+    let unknown = plan_inline_reply("hi", false, false, None).unwrap();
+    assert_eq!(unknown.reply_to, None);
+}
+
+#[test]
+fn inline_reply_sends_nothing_when_blank_or_locked() {
+    assert_eq!(
+        plan_inline_reply("   ", false, false, Some(MessageId(1))),
+        None
+    );
+    assert_eq!(plan_inline_reply("", false, true, None), None);
+    assert_eq!(
+        plan_inline_reply("hello", true, false, Some(MessageId(1))),
+        None
+    );
 }

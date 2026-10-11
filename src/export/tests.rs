@@ -147,6 +147,7 @@ fn export(fake: &mut Fake, settings: &ExportSettings, files_root: &Path) -> Run 
         files_root,
         offset_at: &|_| 0,
         report: &report,
+        me: None,
     };
     let result = run(&job, fake, &out);
     Run {
@@ -198,7 +199,7 @@ fn long_chats_split_into_numbered_files_oldest_first() {
     assert!(first.find("id=\"message1\"").unwrap() < first.find("id=\"message2\"").unwrap());
     let last = read(&run.out.join("messages3.html"));
     assert!(last.contains("id=\"message2300\""));
-    assert!(last.contains("href=\"messages.html#message5\">this message"));
+    assert!(last.contains("href=\"messages.html#go_to_message5\">this message"));
     assert!(last.contains("href=\"messages2.html\">Previous messages"));
     let result: Value = serde_json::from_str(&read(&run.out.join("result.json"))).unwrap();
     assert_eq!(result["messages"].as_array().unwrap().len(), 2300);
@@ -453,4 +454,81 @@ fn progress_labels_and_fraction() {
     assert!(!p.is_settled());
     p.stage = Stage::Cancelled;
     assert!(p.is_settled());
+}
+
+#[test]
+fn thumbnails_are_saved_next_to_their_file_and_used_as_posters() {
+    let dir = scratch("thumbs");
+    let td = dir.join("td");
+    std::fs::create_dir_all(&td).unwrap();
+    std::fs::write(td.join("v.mp4"), b"video").unwrap();
+    std::fs::write(td.join("t.jpg"), b"thumb").unwrap();
+    std::fs::write(td.join("d.pdf"), b"doc").unwrap();
+    let mut video = video_message(2, 1_700_000_200, 20, 5);
+    video["content"]["video"]["thumbnail"] = json!({"format": {"@type": "thumbnailFormatJpeg"},
+        "width": 90, "height": 50, "file": {"id": 21, "size": 5}});
+    video["content"]["video"]["width"] = json!(1280);
+    video["content"]["video"]["height"] = json!(720);
+    // A big document: left out, so its thumbnail is never fetched either.
+    let doc = json!({"id": 1, "date": 1_700_000_100, "is_outgoing": false, "can_be_saved": true,
+        "sender_id": {"@type": "messageSenderUser", "user_id": 2},
+        "content": {"@type": "messageDocument", "caption": {"text": ""},
+            "document": {"file_name": "d.pdf", "mime_type": "application/pdf",
+                "thumbnail": {"format": {"@type": "thumbnailFormatJpeg"}, "file": {"id": 31, "size": 5}},
+                "document": {"id": 30, "size": 99_000_000}}}});
+    let mut fake = Fake::new(vec![video, doc]);
+    fake.files.insert(20, td.join("v.mp4"));
+    fake.files.insert(21, td.join("t.jpg"));
+    fake.files.insert(30, td.join("d.pdf"));
+    fake.files.insert(31, td.join("t.jpg"));
+    let mut s = settings(&dir);
+    s.format = ExportFormat::HtmlAndJson;
+    s.media = MediaTypes::all();
+    let run = export(&mut fake, &s, &td);
+    let summary = run.result.unwrap();
+    assert_eq!((summary.files, summary.skipped), (1, 1));
+    assert_eq!(
+        std::fs::read(run.out.join("video_files/clip.mp4_thumb.jpg")).unwrap(),
+        b"thumb"
+    );
+    assert!(!run.out.join("files").exists());
+    // One download for the video, one for its thumbnail; none for the doc.
+    assert_eq!(fake.count("downloadFile"), 2);
+    let html = read(&run.out.join("messages.html"));
+    assert!(html.contains("poster=\"video_files/clip.mp4_thumb.jpg\""));
+    assert!(html.contains("width=\"520\" height=\"293\""));
+    assert!(run.out.join("js/script.js").exists());
+    let result: Value = serde_json::from_str(&read(&run.out.join("result.json"))).unwrap();
+    assert_eq!(
+        result["messages"][1]["thumbnail"],
+        "video_files/clip.mp4_thumb.jpg"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_empty_chat_says_so_on_its_page() {
+    let dir = scratch("empty");
+    let mut fake = Fake::new(Vec::new());
+    let s = settings(&dir);
+    let run = export(&mut fake, &s, &dir);
+    assert_eq!(run.result.unwrap().messages, 0);
+    assert!(read(&run.out.join("messages.html")).contains("No exported messages"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn replies_on_the_same_page_jump_with_the_script() {
+    let dir = scratch("reply-same-page");
+    let mut messages = history(3);
+    messages[0]["reply_to"] = json!({"@type": "messageReplyToMessage", "message_id": 1});
+    let mut fake = Fake::new(messages);
+    let s = settings(&dir);
+    let run = export(&mut fake, &s, &dir);
+    run.result.unwrap();
+    let html = read(&run.out.join("messages.html"));
+    assert!(html.contains(
+        "<a href=\"#go_to_message1\" onclick=\"return GoToMessage(1)\">this message</a>"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
 }

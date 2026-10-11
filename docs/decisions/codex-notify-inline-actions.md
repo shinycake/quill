@@ -50,3 +50,9 @@ parity fragment is written for `parity:notify-inline-actions`.
 ## Verified
 Read the code paths above and the tdesktop sources. Existing tests in
 `src/notify/tests.rs` cover action ids, button lists and the locked-app case.
+
+## Follow-up
+
+Done in `docs/decisions/codex-notify-native.md`: the GPUI patches on macOS
+and Windows (`notification_extras`), D-Bus `inline-reply` on Linux, and the
+Quill send path for the typed text.

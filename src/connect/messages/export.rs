@@ -1,44 +1,41 @@
 //! Connect driver: account and chat export request pumps.
 use super::*;
+use crate::export::handle::WorkerLink;
+use crate::state::Session;
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// `parity:data-export-full` / `parity:platform-data-export` — start
+    /// the full account export with the "Export Telegram data" box's
+    /// choices. Refuses while another account export is on screen.
     pub fn start_account_export(
         &mut self,
-        folder: &std::path::Path,
-        media: bool,
+        settings: crate::export::AccountSettings,
     ) -> std::io::Result<()> {
         if !self.chats_path_active() || self.session.settings.account_export.is_some() {
             return Err(std::io::Error::other(
-                "Account export is unavailable or already running",
+                "An export of your data is already running",
             ));
         }
-        self.session.settings.account_export = Some(crate::account_export::AccountExport::start(
-            folder,
+        if !settings.can_start() {
+            return Err(std::io::Error::other("Choose something to export"));
+        }
+        self.session.settings.account_export = Some(crate::export::AccountExport::start(
+            settings,
             self.tdlib_files().to_path_buf(),
-            media,
         )?);
         Ok(())
     }
+
+    /// Forward the account export worker's next TDLib request, if any.
+    /// Called from the app's poll loop; a no-op without an export.
     pub fn pump_account_export(&mut self) {
-        if let Some(mut request) = self
-            .session
-            .settings
-            .account_export
-            .as_ref()
-            .and_then(|export| export.next_request())
-        {
-            let extra = self.session.request(RequestPurpose::ExportAccount, None);
-            request["@extra"] = serde_json::json!({"quill_account_export":extra.as_extra()});
-            if let Some(export) = self.session.settings.account_export.as_mut() {
-                export.pending = Some(extra);
-            }
-            if self.sender.send_json(&request.to_string()).is_err() {
-                self.session.requests.take(extra);
-                if let Some(export) = self.session.settings.account_export.as_mut() {
-                    export.fail_send(extra);
-                }
-            }
-        }
+        self.pump_export(RequestPurpose::ExportAccount, |session| {
+            session
+                .settings
+                .account_export
+                .as_mut()
+                .map(|export| &mut export.link)
+        });
     }
 
     /// `parity:data-chat-export-html` — start exporting a chat's history to
@@ -74,25 +71,37 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Forward the chat export worker's next TDLib request, if any. Called
     /// from the app's poll loop; a no-op without an export.
     pub fn pump_chat_export(&mut self) {
-        let Some(mut request) = self
-            .session
-            .settings
-            .chat_export
-            .as_ref()
-            .filter(|export| export.pending.is_none())
-            .and_then(|export| export.next_request())
+        self.pump_export(RequestPurpose::ExportChat, |session| {
+            session
+                .settings
+                .chat_export
+                .as_mut()
+                .map(|export| &mut export.link)
+        });
+    }
+
+    /// Send a worker's waiting request tagged for `purpose`; the answer
+    /// comes back through `apply_common_payload`. One request at a time.
+    fn pump_export(
+        &mut self,
+        purpose: RequestPurpose,
+        link: fn(&mut Session) -> Option<&mut WorkerLink>,
+    ) {
+        let Some(mut request) = link(&mut self.session)
+            .filter(|link| link.pending.is_none())
+            .and_then(|link| link.next_request())
         else {
             return;
         };
-        let extra = self.session.request(RequestPurpose::ExportChat, None);
+        let extra = self.session.request(purpose, None);
         request["@extra"] = serde_json::json!({"quill_account_export": extra.as_extra()});
-        if let Some(export) = self.session.settings.chat_export.as_mut() {
-            export.pending = Some(extra);
+        if let Some(link) = link(&mut self.session) {
+            link.pending = Some(extra);
         }
         if self.sender.send_json(&request.to_string()).is_err() {
             self.session.requests.take(extra);
-            if let Some(export) = self.session.settings.chat_export.as_mut() {
-                export.fail_send(extra);
+            if let Some(link) = link(&mut self.session) {
+                link.fail_send(extra);
             }
         }
     }

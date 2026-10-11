@@ -199,7 +199,9 @@ pub struct SettingsState {
     /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
-    pub account_export: Option<crate::account_export::AccountExport>,
+    /// The running or just-finished account export ("Export Telegram
+    /// data"); the UI shows its progress and clears it.
+    pub account_export: Option<crate::export::AccountExport>,
     /// The running or just-finished chat export; the UI shows its progress
     /// and clears it.
     pub chat_export: Option<crate::export::ChatExport>,

@@ -15,6 +15,10 @@ pub(crate) struct NotifyUi {
     /// Phase 8.1: in-flight OS notification workers; capped so a message
     /// burst cannot stack threads.
     pub(super) notify_inflight: Arc<AtomicUsize>,
+    /// The message each chat's shown notification announces: an inline
+    /// reply typed into it answers that message
+    /// (`quill::notify::plan_inline_reply`).
+    pub(super) reply_targets: std::collections::HashMap<ChatId, quill::ids::MessageId>,
     pub(super) notification_sounds: super::audio::NotificationSounds,
     /// Redraws the TDLib poll asked for, batched by urgency
     /// (`notifications::PolledRedraw`).
@@ -60,6 +64,7 @@ impl NotifyUi {
         Self {
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notify_inflight: Arc::new(AtomicUsize::new(0)),
+            reply_targets: std::collections::HashMap::new(),
             notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             mute_menu_open: false,
