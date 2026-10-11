@@ -18,6 +18,7 @@ mod flood_retry;
 mod folder_links;
 mod forum_saved;
 mod gifs;
+mod giveaways;
 mod group_admin;
 mod group_calls;
 mod groups;

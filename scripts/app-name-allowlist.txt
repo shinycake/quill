@@ -11,3 +11,5 @@ src/telegram/envelope/sessions_tests.rs|Telegram Desktop
 src/state/tests/sessions.rs|Telegram Desktop
 # Sign-in copy: the Telegram service is the one that phones the user.
 src/signin.rs|Telegram will call
+# Giveaway wording: the Telegram service picks the winners.
+src/giveaway/tests.rs|Telegram will

@@ -2,10 +2,12 @@
 mod apply;
 mod error;
 mod gift_code;
+mod giveaway;
 mod purpose;
 mod state;
 
 pub use gift_code::*;
+pub use giveaway::*;
 pub use purpose::*;
 
 pub use state::*;

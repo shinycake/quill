@@ -79,6 +79,15 @@ pub(crate) fn parse_payments_payload(
         "premiumGiftCodeInfo" => Ok(EnvelopePayload::Payments(PaymentsPayload::GiftCodeInfo(
             GiftCodeInfoData::parse(value),
         ))),
+        "giveawayInfoOngoing" | "giveawayInfoCompleted" => Ok(EnvelopePayload::Payments(
+            PaymentsPayload::GiveawayInfo(GiveawayInfoData::parse(value)),
+        )),
+        "premiumGiveawayPaymentOptions" => Ok(EnvelopePayload::Payments(
+            PaymentsPayload::PremiumGiveawayOptions(parse_premium_giveaway_options(value)),
+        )),
+        "starGiveawayPaymentOptions" => Ok(EnvelopePayload::Payments(
+            PaymentsPayload::StarGiveawayOptions(parse_star_giveaway_options(value)),
+        )),
         "updateOwnedStarCount" => Ok(EnvelopePayload::Payments(
             PaymentsPayload::UpdateOwnedStarCount(crate::premium_hub::StarAmount::parse(
                 value.get("star_amount"),

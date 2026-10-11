@@ -35,7 +35,7 @@ fn sender_name(session: Option<&Session>, sender: MessageSender) -> String {
     }
 }
 
-fn info_row(label: &'static str, value: String) -> impl IntoElement {
+pub(super) fn info_row(label: &'static str, value: String) -> impl IntoElement {
     div()
         .flex()
         .justify_between()
@@ -45,7 +45,7 @@ fn info_row(label: &'static str, value: String) -> impl IntoElement {
         .child(div().text_right().child(value))
 }
 
-fn finish(
+pub(super) fn finish(
     dialog: Dialog,
     title: &'static str,
     body: AnyElement,

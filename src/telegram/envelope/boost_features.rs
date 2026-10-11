@@ -4,8 +4,7 @@
 use super::*;
 use serde_json::Value;
 
-/// `chatBoostStatus` (schema/td_api.tl:7278) without the slot ids and
-/// prepaid giveaways.
+/// `chatBoostStatus` (schema/td_api.tl:7278) without the slot ids.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedBoostStatus {
     pub level: i32,
@@ -17,6 +16,8 @@ pub struct ParsedBoostStatus {
     pub next_level_boost_count: i32,
     pub premium_member_count: i32,
     pub premium_member_percentage: f64,
+    /// Giveaways already paid for and waiting to be started.
+    pub prepaid_giveaways: Vec<ParsedPrepaidGiveaway>,
 }
 
 impl ParsedBoostStatus {
@@ -66,6 +67,7 @@ pub(crate) fn parse_boost_status(value: &Value) -> ParsedBoostStatus {
             .get("premium_member_percentage")
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
+        prepaid_giveaways: parse_prepaid_giveaways(value.get("prepaid_giveaways")),
     }
 }
 

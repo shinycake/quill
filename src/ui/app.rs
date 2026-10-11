@@ -93,6 +93,8 @@ pub struct QuillApp {
     pub(super) admin: super::admin_state::AdminUi,
     /// Deep links and bot link confirmations (`ui/links_state.rs`).
     pub(super) links: super::links_state::LinkUi,
+    /// The giveaway form (`ui/giveaway_state.rs`).
+    pub(super) giveaway: super::giveaway_state::GiveawayUi,
     /// `parity:platform-deep-links`: launch link from the CLI (`t.me` /
     /// `tg:`), set by `main.rs`. Fired once auth reaches Ready, then
     /// cleared (`pub(crate)` so the binary can set it).

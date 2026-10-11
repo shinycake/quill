@@ -453,6 +453,7 @@ impl QuillApp {
             slices: Default::default(),
             recording: super::recording_state::RecordingUi::new(),
             links: super::links_state::LinkUi::new(),
+            giveaway: super::giveaway_state::GiveawayUi::new(),
             pending_deep_link: None,
             viewer: super::viewer_state::ViewerUi::new(&audio_output),
             mini_apps: Default::default(),

@@ -326,6 +326,9 @@ pub(super) fn service_message_row(
         let roots = media_roots;
         super::premium_ui::gift_card_element(row_id, inner, card, session, files, roots, cx)
     });
+    let learn_more = super::premium_ui::gift_card_of(&message.content).and_then(|(_, card)| {
+        super::giveaway_info_ui::giveaway_learn_more(row_id, message.chat_id, message.id, card, cx)
+    });
     div()
         .id(("service-row", row_id))
         .flex()
@@ -352,6 +355,7 @@ pub(super) fn service_message_row(
         .when_some(photo, |this, photo| this.child(photo))
         .when_some(birthday, |this, birthday| this.child(birthday))
         .when_some(card, |this, card| this.child(card))
+        .when_some(learn_more, |this, button| this.child(button))
         .when_some(buttons, |this, buttons| this.child(buttons))
         .into_any_element()
 }

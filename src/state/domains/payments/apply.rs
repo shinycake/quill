@@ -181,6 +181,13 @@ impl Session {
                     self.payments.hub.premium_state = Some(info);
                 }
             }
+            PaymentsPayload::GiveawayInfo(info) => self.apply_giveaway_info(info, pending),
+            PaymentsPayload::PremiumGiveawayOptions(options) => {
+                self.apply_premium_giveaway_options(options, pending)
+            }
+            PaymentsPayload::StarGiveawayOptions(options) => {
+                self.apply_star_giveaway_options(options, pending)
+            }
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 self.payments.hub.balance = Some(amount);
             }

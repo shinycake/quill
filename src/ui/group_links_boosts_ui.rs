@@ -275,6 +275,7 @@ impl QuillApp {
         let level = session.and_then(|s| s.groups.chat_boost_status.get(&chat_id.0).copied());
         let mut body = div().flex().flex_col().gap_1().px_2();
         body = body.child(self.boosts_overview(chat_id, cx));
+        body = body.child(self.giveaway_boosts_section(chat_id, cx));
         if let Some((level, count)) = level.filter(|_| {
             session.is_some_and(|s| !s.groups.chat_boost_details.contains_key(&chat_id.0))
         }) {
