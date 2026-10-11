@@ -221,7 +221,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
 - [x] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
 - [x] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
-- [ ] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
+- [x] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
 - [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
 - [ ] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
 - [x] Similar channels carousel after joining a channel <!-- parity:render-similar-channels -->
