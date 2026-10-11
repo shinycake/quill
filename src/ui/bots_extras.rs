@@ -155,6 +155,9 @@ impl QuillApp {
         if let Some(row) = self.bot_verify_accounts_row(user_id, cx) {
             column = column.child(row);
         }
+        if let Some(row) = self.bot_edit_row(user_id, cx) {
+            column = column.child(row);
+        }
         let on = quill::fast_buttons::is_enabled(user_id);
         column = column.child(
             div()

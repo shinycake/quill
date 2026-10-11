@@ -77,6 +77,11 @@ impl Session {
             UsersPayload::Me { user_id } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
+                } else if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::Bots(BotsPurpose::CreateBot { .. }))
+                ) {
+                    self.apply_created_bot(user_id, pending);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {
                     self.users_state.support_user_ready = Some(user_id);
                 } else if pending.map(|p| p.purpose)
@@ -141,7 +146,10 @@ impl Session {
             // A5: `checkChatUsername` answer — the driver stashes the
             // verdict in `Session::username_check` before `apply` takes
             // the pending request; nothing to reduce here.
-            UsersPayload::CheckChatUsernameResult(_) => {}
+            UsersPayload::CheckChatUsernameResult(result) => {
+                // `checkBotUsername` answers with the same type.
+                self.apply_bot_username_check(result, pending);
+            }
             // Slice A6: `importedContacts` (schema 1.8.67, line 14517) —
             // the `importContacts` answer. Same invalidate + notice as
             // the `ok` of the other contact mutations; the user ids are

@@ -154,6 +154,9 @@ impl Session {
                         self.auth_state.guessed_country_iso = Some(iso);
                     }
                 }
+                Some(RequestPurpose::Bots(purpose @ BotsPurpose::GetBotEditText { .. })) => {
+                    self.apply_owned_bot_text(purpose, text);
+                }
                 Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })) => {
                     self.set_group_call_join_payload(group_call_id, text);
                 }

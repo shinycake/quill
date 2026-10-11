@@ -36,6 +36,7 @@ mod member_moderation;
 mod message_menu;
 mod message_ops;
 mod messaging;
+mod owned_bots;
 mod payments;
 mod polls_checklists;
 mod privacy_data;

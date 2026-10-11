@@ -127,6 +127,32 @@ pub enum BotsPurpose {
     /// from the owner's "Verify Accounts" list. Response is `ok`.
     SetMessageSenderBotVerification,
     RemoveMessageSenderBotVerification,
+    /// `getBotName` (`about` false) or `getBotInfoShortDescription` (`about`
+    /// true) for the owner's edit dialog; answers `text`.
+    GetBotEditText {
+        bot_user_id: i64,
+        about: bool,
+    },
+    /// `setBotName`, `setBotInfoShortDescription` and `setBotProfilePhoto`
+    /// from the edit dialog. Response is `ok`.
+    SetBotName {
+        bot_user_id: i64,
+    },
+    SetBotAbout {
+        bot_user_id: i64,
+    },
+    SetBotPhoto {
+        bot_user_id: i64,
+    },
+    /// `checkBotUsername` for the create dialog; `generation` drops stale
+    /// answers. Answers `checkChatUsernameResult*`.
+    CheckBotUsername {
+        generation: u64,
+    },
+    /// `createBot`; answers the new `user`.
+    CreateBot {
+        generation: u64,
+    },
 }
 
 flat_purposes!(Bots(BotsPurpose) {

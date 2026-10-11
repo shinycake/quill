@@ -11,6 +11,9 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        if self.apply_owned_bots_error(err, pending.map(|p| p.purpose)) {
+            return;
+        }
         match pending.map(|p| p.purpose) {
             // Slice B2: refused `sendBotStartMessage` / `getBotSimilarBots` —
             // a refusal is never shown as success.
