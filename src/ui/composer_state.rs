@@ -32,6 +32,11 @@ pub(crate) struct ComposerUi {
     pub(super) inline_results_selected: usize,
     pub(super) inline_query_token: u64,
     pub(super) inline_query_armed: Option<(String, String)>,
+    /// Scroll position of the inline results panel (`inline_grid.rs`).
+    pub(super) inline_scroll: gpui_kit::ScrollHandle,
+    /// The chat an inline results button left, to come back to
+    /// (`inline_return.rs`).
+    pub(super) inline_return: Option<super::inline_return::InlineReturn>,
     /// Local files the user explicitly attached (canonical paths via `pick`).
     /// One item sends with `sendMessage`. Two or more photos/videos send with
     /// `sendMessageAlbum`.
@@ -157,6 +162,8 @@ impl ComposerUi {
             inline_results_selected: 0,
             inline_query_token: 0,
             inline_query_armed: None,
+            inline_scroll: gpui_kit::ScrollHandle::new(),
+            inline_return: None,
             pending_attachments,
             self_destruct: None,
             caption_above: false,

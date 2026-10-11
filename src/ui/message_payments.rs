@@ -217,7 +217,10 @@ impl QuillApp {
                 self.open_user_chat(*user_id, window, cx);
             }
             InlineKeyboardButtonType::SwitchInline { query, .. } => {
-                self.insert_switch_inline_query(query, window, cx);
+                // Back to the chat an inline results button left, if any.
+                if !self.press_switch_inline_with_return(chat_id, query, window, cx) {
+                    self.insert_switch_inline_query(query, window, cx);
+                }
             }
             InlineKeyboardButtonType::CopyText { text } => self.copy_inline_text(text, cx),
             // Slice P1: the Buy button fetches the `paymentForm` and opens

@@ -849,6 +849,7 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
     }
 }
 
+mod inline_results_button;
 mod spawn_mini_app_window;
 
 #[cfg(test)]

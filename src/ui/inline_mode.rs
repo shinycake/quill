@@ -14,45 +14,51 @@
 //! composer/keystroke/render sites.
 
 use super::QuillApp;
-use super::pressable::PressableDiv;
-use gpui_kit::component::theme::ActiveTheme;
-use gpui_kit::gpui::{AnyElement, Context, Window, div, prelude::*};
+use gpui_kit::gpui::{AnyElement, Context, Window};
 use quill::composer::inline_query_trigger;
+use quill::inline_grid::layout_results;
 use quill::state::{InlineBotResolve, InlineQueryFetch};
-use quill::telegram::envelope::InlineQueryResultSummary;
+use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::time::Duration;
-/// One dropdown row: a status line, a result, or the "load more" row.
+
+/// What the results panel shows for the current `@bot query` trigger.
 #[derive(Clone)]
-enum InlineRow {
+pub(super) enum InlineView {
+    /// Resolving, loading, failed or empty: one line of text.
     Status(String),
-    Result {
-        query_id: i64,
-        result_id: String,
-        title: String,
-        subtitle: String,
-    },
-    More {
-        next_offset: String,
+    /// Loaded results in arrival order, with the bot's button.
+    Results {
+        results: Vec<InlineQueryResultSummary>,
+        button: Option<InlineQueryResultsButton>,
     },
 }
 
-/// Rows for the current trigger. `None` when there is no `@bot` trigger
-/// (the dropdown stays closed).
-fn inline_rows(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Vec<InlineRow>> {
+impl InlineView {
+    /// Result indices in the order the grid shows them, which is the order
+    /// Up/Down walk.
+    pub(super) fn display_order(&self) -> Vec<usize> {
+        match self {
+            Self::Status(_) => Vec::new(),
+            Self::Results { results, .. } => layout_results(results).order(),
+        }
+    }
+}
+
+/// The panel's content for the current trigger. `None` when there is no
+/// `@bot` trigger (the dropdown stays closed).
+pub(super) fn inline_view(app: &QuillApp, cx: &Context<QuillApp>) -> Option<InlineView> {
     let text = app.composer.read(cx).value().to_string();
     let (username, query) = inline_query_trigger(&text)?;
     let session = app.session()?;
-    let rows = match &session.bots.inline_bot_resolve {
+    let view = match &session.bots.inline_bot_resolve {
         None | Some(InlineBotResolve::Resolving { .. }) => {
-            vec![InlineRow::Status(format!("Resolving @{username}…"))]
+            InlineView::Status(format!("Resolving @{username}…"))
         }
-        Some(InlineBotResolve::Failed { reason, .. }) => vec![InlineRow::Status(reason.clone())],
+        Some(InlineBotResolve::Failed { reason, .. }) => InlineView::Status(reason.clone()),
         Some(InlineBotResolve::Resolved {
             is_inline: Some(false),
             ..
-        }) => vec![InlineRow::Status(format!(
-            "@{username} doesn't support inline mode"
-        ))],
+        }) => InlineView::Status(format!("@{username} doesn't support inline mode")),
         // `is_inline` is `Some(true)` (cache-verified) or `None`
         // (`searchPublicChat` answer without a user object — the query
         // attempt itself is the capability check).
@@ -63,56 +69,29 @@ fn inline_rows(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Vec<InlineRow>>
             });
             match slot.map(|slot| &slot.fetch) {
                 None | Some(InlineQueryFetch::Loading) => {
-                    vec![InlineRow::Status("Loading results…".to_string())]
+                    InlineView::Status("Loading results…".to_string())
                 }
-                Some(InlineQueryFetch::Failed(reason)) => vec![InlineRow::Status(reason.clone())],
+                Some(InlineQueryFetch::Failed(reason)) => InlineView::Status(reason.clone()),
                 Some(InlineQueryFetch::Loaded {
-                    inline_query_id,
-                    results,
-                    next_offset,
-                    ..
+                    results, button, ..
                 }) => {
-                    if results.is_empty() {
-                        vec![InlineRow::Status("No results".to_string())]
+                    // tdesktop keeps the panel for a button alone.
+                    let button = button
+                        .clone()
+                        .filter(|button| quill::inline_grid::button_action(button).is_some());
+                    if results.is_empty() && button.is_none() {
+                        InlineView::Status("No results".to_string())
                     } else {
-                        let mut rows: Vec<InlineRow> = results
-                            .iter()
-                            .map(|r| InlineRow::Result {
-                                query_id: *inline_query_id,
-                                result_id: r.id.clone(),
-                                title: result_title(r),
-                                subtitle: r.description.clone(),
-                            })
-                            .collect();
-                        if !next_offset.is_empty() {
-                            rows.push(InlineRow::More {
-                                next_offset: next_offset.clone(),
-                            });
+                        InlineView::Results {
+                            results: results.clone(),
+                            button,
                         }
-                        rows
                     }
                 }
             }
         }
     };
-    Some(rows)
-}
-
-/// Row title: the result title, falling back to a capitalized kind label
-/// (`sticker` results carry no title).
-fn result_title(result: &InlineQueryResultSummary) -> String {
-    if !result.title.is_empty() {
-        return result.title.clone();
-    }
-    let mut kind = result.kind.clone();
-    if let Some(first) = kind.get_mut(..1) {
-        first.make_ascii_uppercase();
-    }
-    if kind.is_empty() {
-        "Result".to_string()
-    } else {
-        kind
-    }
+    Some(view)
 }
 
 impl QuillApp {
@@ -211,6 +190,8 @@ impl QuillApp {
             return;
         }
         self.maybe_dispatch_inline_query(username, query, cx);
+        // A page that landed may still not fill the panel.
+        self.load_more_inline_results_if_needed(cx);
     }
 
     /// Resolve `@username`: local user-cache hit short-circuits (no
@@ -324,6 +305,14 @@ impl QuillApp {
                 let Some(chat_id) = this.open_chat_id() else {
                     return;
                 };
+                // A new query starts at the top of its results.
+                this.composer_ui.inline_results_selected = 0;
+                this.composer_ui
+                    .inline_scroll
+                    .set_offset(gpui_kit::gpui::point(
+                        gpui_kit::gpui::px(0.),
+                        gpui_kit::gpui::px(0.),
+                    ));
                 let Some(live) = this.live.as_mut() else {
                     return;
                 };
@@ -354,201 +343,88 @@ impl QuillApp {
         true
     }
 
-    /// Bots slice: Up/Down highlight across result + "more" rows.
+    /// Bots slice: Up/Down highlight across the shown results.
     /// Returns true when the dropdown consumed the key.
     pub(super) fn step_inline_results(&mut self, delta: i32, cx: &mut Context<Self>) -> bool {
-        let rows = inline_rows(self, cx).unwrap_or_default();
-        if !self.composer_ui.inline_results_open || rows.is_empty() {
+        let count = inline_view(self, cx)
+            .map(|view| view.display_order().len())
+            .unwrap_or(0);
+        if !self.composer_ui.inline_results_open || count == 0 {
             return false;
         }
-        self.composer_ui.inline_results_selected =
-            (self.composer_ui.inline_results_selected as i32 + delta).rem_euclid(rows.len() as i32)
-                as usize;
+        self.composer_ui.inline_results_selected = quill::inline_grid::step_selection(
+            self.composer_ui.inline_results_selected,
+            delta,
+            count,
+        );
+        self.scroll_inline_selection_into_view(cx);
         cx.notify();
         true
     }
 
     /// Bots slice: Enter with the dropdown open picks the highlighted
-    /// row. Returns true when Enter was consumed.
+    /// result. Returns true when Enter was consumed.
     pub(super) fn pick_inline_result_selection(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let rows = inline_rows(self, cx).unwrap_or_default();
-        if !self.composer_ui.inline_results_open || rows.is_empty() {
+        let Some(InlineView::Results { results, .. }) = inline_view(self, cx) else {
+            return false;
+        };
+        let order = layout_results(&results).order();
+        if !self.composer_ui.inline_results_open || order.is_empty() {
             return false;
         }
-        let index = self.composer_ui.inline_results_selected.min(rows.len() - 1);
-        self.pick_inline_row(&rows[index], window, cx);
+        let index = self
+            .composer_ui
+            .inline_results_selected
+            .min(order.len() - 1);
+        let result = &results[order[index]];
+        self.send_inline_pick(result.query_id, result.id.clone(), window, cx);
         true
     }
 
-    /// Bots slice: tap / Enter pick. A result row sends via
+    /// Bots slice: tap / Enter pick. Sends via
     /// `sendInlineQueryResultMessage` and clears the composer (the schema
-    /// always clears the chat draft on that call); the "more" row loads
-    /// the next page into the existing slot.
-    fn pick_inline_row(&mut self, row: &InlineRow, window: &mut Window, cx: &mut Context<Self>) {
-        match row {
-            InlineRow::Status(_) => {}
-            InlineRow::More { next_offset } => {
-                let text = self.composer.read(cx).value().to_string();
-                let Some((_, query)) = inline_query_trigger(&text) else {
-                    return;
-                };
-                let (user_id, chat_id, offset) = match (
-                    self.session()
-                        .and_then(|s| s.bots.inline_bot_resolve.as_ref())
-                        .and_then(|r| match r {
-                            InlineBotResolve::Resolved { user_id, .. } => Some(*user_id),
-                            _ => None,
-                        }),
-                    self.open_chat_id(),
-                ) {
-                    (Some(user_id), Some(chat_id)) => (user_id, chat_id, next_offset.clone()),
-                    _ => return,
-                };
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.inline_query(user_id, chat_id, query, &offset);
-                }
-                cx.notify();
-            }
-            InlineRow::Result {
-                query_id,
-                result_id,
-                ..
-            } => {
-                let query_id = *query_id;
-                let result_id = result_id.clone();
-                let Some(chat_id) = self.open_chat_id() else {
-                    return;
-                };
-                // Clear first: the schema clears the chat draft on send,
-                // so the composer must never show a stale `@bot query`
-                // after the round trip.
-                self.composer.update(cx, |input, cx| {
-                    input.set_value(String::new(), window, cx);
-                });
-                self.composer_ui.inline_results_open = false;
-                self.composer_ui.inline_results_selected = 0;
-                self.composer_ui.inline_query_armed = None;
-                if let Some(live) = self.live.as_mut()
-                    && live
-                        .driver
-                        .send_inline_query_result(chat_id, query_id, &result_id)
-                        .is_err()
-                {
-                    self.connection.status_note = "could not send the inline result".into();
-                }
-                cx.notify();
-            }
+    /// always clears the chat draft on that call).
+    pub(super) fn send_inline_pick(
+        &mut self,
+        query_id: i64,
+        result_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat_id) = self.open_chat_id() else {
+            return;
+        };
+        // Clear first: the schema clears the chat draft on send, so the
+        // composer must never show a stale `@bot query` after the round
+        // trip.
+        self.composer.update(cx, |input, cx| {
+            input.set_value(String::new(), window, cx);
+        });
+        self.composer_ui.inline_results_open = false;
+        self.composer_ui.inline_results_selected = 0;
+        self.composer_ui.inline_query_armed = None;
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .send_inline_query_result(chat_id, query_id, &result_id)
+                .is_err()
+        {
+            self.connection.status_note = "could not send the inline result".into();
         }
+        cx.notify();
     }
 
-    /// Bots slice: the inline-results dropdown above the composer.
-    /// Mirrors the `/` command menu's styling and click behavior.
+    /// Bots slice: the inline-results panel above the composer (see
+    /// `inline_grid.rs` for the grid and list rows).
     pub(super) fn inline_results_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.composer_ui.inline_results_open {
             return None;
         }
-        let rows = inline_rows(self, cx)?;
-        if rows.is_empty() {
-            return None;
-        }
-        let selected = self.composer_ui.inline_results_selected.min(rows.len() - 1);
-        let mut list = div()
-            .id("inline-results")
-            .flex()
-            .flex_col()
-            .mx_4()
-            .mb_2()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar);
-        for (index, row) in rows.iter().enumerate() {
-            let highlighted = index == selected;
-            match row {
-                InlineRow::Status(text) => {
-                    list = list.child(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(text.clone()),
-                    );
-                }
-                InlineRow::Result {
-                    title, subtitle, ..
-                } => {
-                    let row = row.clone();
-                    let label = if subtitle.is_empty() {
-                        title.clone()
-                    } else {
-                        format!("{title} — {subtitle}")
-                    };
-                    list = list.child(
-                        div()
-                            .id(("inline-result-item", index as u64))
-                            .w_full()
-                            .px_3()
-                            .py_2()
-                            .rounded_md()
-                            .role(gpui_kit::Role::Button)
-                            .aria_label(label.clone())
-                            .tab_index(0)
-                            .cursor_pointer()
-                            .pressable(cx.theme())
-                            .when(highlighted, |this| this.bg(cx.theme().selection))
-                            // On press: the composer's blur closes the
-                            // results before a click could land.
-                            .on_mouse_down(
-                                gpui_kit::MouseButton::Left,
-                                cx.listener(move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    window.prevent_default();
-                                    this.pick_inline_row(&row, window, cx);
-                                }),
-                            )
-                            .child(div().text_sm().child(label)),
-                    );
-                }
-                InlineRow::More { .. } => {
-                    let row = row.clone();
-                    list = list.child(
-                        div()
-                            .id(("inline-result-more", index as u64))
-                            .w_full()
-                            .px_3()
-                            .py_2()
-                            .rounded_md()
-                            .role(gpui_kit::Role::Button)
-                            .aria_label("Show more inline results")
-                            .tab_index(0)
-                            .cursor_pointer()
-                            .pressable(cx.theme())
-                            .when(highlighted, |this| this.bg(cx.theme().selection))
-                            // On press: the composer's blur closes the
-                            // results before a click could land.
-                            .on_mouse_down(
-                                gpui_kit::MouseButton::Left,
-                                cx.listener(move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    window.prevent_default();
-                                    this.pick_inline_row(&row, window, cx);
-                                }),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("More results…"),
-                            ),
-                    );
-                }
-            }
-        }
-        Some(list.into_any_element())
+        let view = inline_view(self, cx)?;
+        self.inline_results_panel(&view, cx)
     }
 }

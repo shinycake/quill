@@ -13,6 +13,8 @@ impl QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
+        // The inline results button's round trip back to its chat.
+        self.flush_inline_return(window, cx);
         // A topic or thread switch without a window at hand asked for the
         // new slot's draft to be restored into the composer.
         self.restore_draft_if_pending(window, cx);

@@ -11,18 +11,23 @@ pub(crate) fn parse_bots_payload(
 ) -> Result<Option<EnvelopePayload>, ParseError> {
     let payload = match type_name {
         // Bots slice: `inlineQueryResults` — the `getInlineQueryResults`
-        // answer (schema 1.8.67, line 7716). Missing fields degrade to
-        // empty strings; thumbnails are dropped (no URL on the wire).
+        // answer (schema 1.8.68, line 8051). Missing fields degrade to
+        // empty strings; the shown image's file rides along with each result.
         // Slice S9: `inlineQueryResultAnimation` entries (schema line
         // 7658) additionally yield parsed `AnimationItem`s (+ files) for
         // the GIF panel search; Loop 3's summaries are untouched.
         "inlineQueryResults" => {
+            // TDLib's JSON writes int64 as a string.
+            let inline_query_id = int64(value.get("inline_query_id")).unwrap_or(0);
             let mut results = Vec::new();
             let mut animations = Vec::new();
             let mut files: Vec<ParsedFile> = Vec::new();
             if let Some(entries) = value.get("results").and_then(Value::as_array) {
                 for entry in entries {
-                    results.push(parse_inline_query_result(entry));
+                    let (mut summary, result_files) = parse_inline_query_result(entry);
+                    summary.query_id = inline_query_id;
+                    files.extend(result_files);
+                    results.push(summary);
                     if entry.get("@type").and_then(Value::as_str)
                         == Some("inlineQueryResultAnimation")
                     {
@@ -34,13 +39,13 @@ pub(crate) fn parse_bots_payload(
                     }
                 }
             }
-            files.retain(|file| file.id.0 != 0);
+            // An animation's thumbnail arrives with its result and again
+            // with its GIF item.
+            let mut seen = std::collections::HashSet::new();
+            files.retain(|file| file.id.0 != 0 && seen.insert(file.id.0));
             Ok(EnvelopePayload::Bots(BotsPayload::InlineQueryResults(
                 InlineQueryResultsPage {
-                    inline_query_id: value
-                        .get("inline_query_id")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(0),
+                    inline_query_id,
                     button: value
                         .get("button")
                         .filter(|button| !button.is_null())

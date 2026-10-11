@@ -2,6 +2,11 @@
 use super::*;
 use crate::text::TextEntityKind;
 
+/// Clips of the inline results panel fetched for autoplay, and the
+/// largest one.
+const INLINE_CLIPS_PREFETCH: usize = 24;
+const INLINE_CLIP_MAX: i64 = 5 * 1024 * 1024;
+
 impl Session {
     pub(crate) fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
         if !from_file_update
@@ -278,6 +283,35 @@ impl Session {
                     && self.should_download(file_id)
                 {
                     ids.push(file_id);
+                }
+            }
+        }
+        // The inline results panel shows each result's image.
+        if let Some(InlineQuerySlot {
+            fetch: InlineQueryFetch::Loaded { results, .. },
+            ..
+        }) = &self.bots.inline_query
+        {
+            for media in results.iter().filter_map(|result| result.media) {
+                if self.should_download(media.file_id) {
+                    ids.push(media.file_id);
+                }
+            }
+            // Animation clips autoplay in the grid (tdesktop loads the
+            // GIFs of the panel): the first screens' worth, small ones.
+            let prefs = &self.settings.media_prefs;
+            if prefs.autoplay_gifs && !prefs.data_saver {
+                for clip in results
+                    .iter()
+                    .filter_map(|result| result.clip)
+                    .take(INLINE_CLIPS_PREFETCH)
+                {
+                    let small = self
+                        .file(clip)
+                        .is_none_or(|file| file.size.max(file.expected_size) <= INLINE_CLIP_MAX);
+                    if small && self.should_download(clip) {
+                        ids.push(clip);
+                    }
                 }
             }
         }
