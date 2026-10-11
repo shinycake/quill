@@ -3,16 +3,12 @@
 //! changes. The drawing is in `inline_members_view.rs`.
 
 use super::app::QuillApp;
-use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::inline_members::{MoreAction, next_more};
 use quill::state::{InfoPanelTarget, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::ChatKind;
-use std::time::Duration;
 
-/// Wait after the last keystroke before asking the server to search.
-const SEARCH_DELAY: Duration = Duration::from_millis(300);
 /// Rows are asked for when this close to the end of the list.
 const PREFETCH: f32 = 160.;
 
@@ -77,37 +73,14 @@ impl QuillApp {
     pub(super) fn inline_members_opened(
         &mut self,
         target: InfoPanelTarget,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(shape) = self.inline_members_shape(target) else {
             return;
         };
-        if self.inline_members.search.is_none() {
-            let input = cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .placeholder("Search members")
-                    .auto_grow(1, 1)
-                    .submit_on_enter(false)
-            });
-            cx.subscribe_in(
-                &input,
-                window,
-                |this, state, event: &InputEvent, _window, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        let text = state.read(cx).value().to_string();
-                        this.inline_members_changed(&text, cx);
-                    }
-                },
-            )
-            .detach();
-            self.inline_members.search = Some(input);
-        }
         if self.inline_members.chat != Some(shape.chat) {
             self.inline_members.reset(Some(shape.chat));
-            if let Some(input) = self.inline_members.search.clone() {
-                input.update(cx, |state, cx| state.set_value("", window, cx));
-            }
         }
         self.inline_members_fetch(shape, cx);
         cx.notify();
@@ -115,7 +88,6 @@ impl QuillApp {
 
     /// Ask for the page the block shows (deduped by the driver).
     fn inline_members_fetch(&mut self, shape: GroupShape, cx: &mut Context<Self>) {
-        let query = self.inline_members.query.clone();
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -123,13 +95,9 @@ impl QuillApp {
             live.driver
                 .fetch_basic_group_members(shape.chat)
                 .map(|_| ())
-        } else if query.is_empty() {
-            live.driver
-                .fetch_supergroup_members(shape.chat, MemberListFilter::Recent, "")
-                .map(|_| ())
         } else {
             live.driver
-                .refresh_supergroup_members(shape.chat, MemberListFilter::Search, &query)
+                .fetch_supergroup_members(shape.chat, MemberListFilter::Recent, "")
                 .map(|_| ())
         };
         if result.is_err() {
@@ -151,80 +119,21 @@ impl QuillApp {
         }
     }
 
-    /// The search text changed: narrow the list at once (basic groups) or
-    /// after a short pause (server search for supergroups).
-    pub(super) fn inline_members_changed(&mut self, text: &str, cx: &mut Context<Self>) {
-        let query = text.trim().to_string();
-        if query == self.inline_members.query {
-            return;
-        }
-        self.inline_members.query = query.clone();
-        self.inline_members.token += 1;
-        self.inline_members.shown = quill::inline_members::ROWS_STEP;
-        self.inline_members.failed_offset = None;
-        self.inline_members.scroll.set_offset(point(px(0.), px(0.)));
-        cx.notify();
-        let Some(shape) = self.inline_members_current() else {
-            return;
-        };
-        if shape.is_basic {
-            return;
-        }
-        if query.is_empty() {
-            self.inline_members_fetch(shape, cx);
-            return;
-        }
-        let token = self.inline_members.token;
-        self.arm_inline_members_search(token, cx);
-    }
-
-    fn arm_inline_members_search(&mut self, token: u64, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(SEARCH_DELAY).await;
-            let _ = this.update(cx, |this, cx| this.run_inline_members_search(token, cx));
-        })
-        .detach();
-    }
-
-    fn run_inline_members_search(&mut self, token: u64, cx: &mut Context<Self>) {
-        if token != self.inline_members.token {
-            return;
-        }
-        let Some(shape) = self.inline_members_current() else {
-            return;
-        };
-        // An earlier search is still running: look again once it is done,
-        // then send the latest text.
-        let busy = self.session().is_some_and(|session| {
-            matches!(
-                session
-                    .groups
-                    .supergroup_members
-                    .get(&(shape.chat.0, MemberListFilter::Search)),
-                Some(SupergroupMembersFetch::Loading)
-            )
-        });
-        if busy {
-            self.arm_inline_members_search(token, cx);
-            return;
-        }
-        self.inline_members_fetch(shape, cx);
-        cx.notify();
-    }
-
-    /// Show or hide the search box; hiding clears the query.
-    pub(super) fn toggle_inline_members_search(
+    /// The search button: the member dialog with its search box focused
+    /// (tdesktop opens its full members section with search started).
+    pub(super) fn inline_members_search(
         &mut self,
+        chat_id: ChatId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.inline_members.search_open = !self.inline_members.search_open;
-        if !self.inline_members.search_open {
-            if let Some(input) = self.inline_members.search.clone() {
-                input.update(cx, |state, cx| state.set_value("", window, cx));
-            }
-            self.inline_members_changed("", cx);
-        } else if let Some(input) = self.inline_members.search.clone() {
+        self.open_member_dialog(chat_id, window, cx);
+        if let Some(input) = self
+            .admin
+            .member_dialog
+            .as_ref()
+            .map(|dialog| dialog.search_input.clone())
+        {
             input.update(cx, |state, cx| state.focus(window, cx));
         }
         cx.notify();
@@ -251,6 +160,16 @@ impl QuillApp {
         let Some(shape) = self.inline_members_current() else {
             return;
         };
+        // Members hidden from the viewer: show the administrators.
+        if self.inline_members_filter(shape) == MemberListFilter::Administrators
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.fetch_supergroup_members(
+                shape.chat,
+                MemberListFilter::Administrators,
+                "",
+            );
+        }
         let Some((loaded, total, filter)) = self.inline_members_counts(shape) else {
             return;
         };
@@ -289,11 +208,10 @@ impl QuillApp {
                     return;
                 }
                 self.inline_members.failed_offset = Some(offset);
-                let query = self.inline_members.query.clone();
                 if let Some(live) = self.live.as_mut() {
                     let _ = live
                         .driver
-                        .fetch_supergroup_members_more(shape.chat, filter, &query, offset);
+                        .fetch_supergroup_members_more(shape.chat, filter, "", offset);
                 }
                 cx.notify();
             }
@@ -303,7 +221,7 @@ impl QuillApp {
     /// (members loaded, total on the server, filter) of the list shown.
     fn inline_members_counts(&self, shape: GroupShape) -> Option<(usize, i32, MemberListFilter)> {
         let session = self.session()?;
-        let filter = self.inline_members_filter();
+        let filter = self.inline_members_filter(shape);
         let fetch = if shape.is_basic {
             session.groups.basic_group_members.get(&shape.chat.0)
         } else {
@@ -321,12 +239,23 @@ impl QuillApp {
         }
     }
 
-    /// Which cached page backs the list: recent members, or the search.
-    pub(super) fn inline_members_filter(&self) -> MemberListFilter {
-        if self.inline_members.query.is_empty() {
-            MemberListFilter::Recent
+    /// Which cached page backs the list: recent members, or the
+    /// administrators when the viewer may not see the members (tdesktop
+    /// shows "Administrators" then).
+    pub(super) fn inline_members_filter(&self, shape: GroupShape) -> MemberListFilter {
+        let recent_failed = self.session().is_some_and(|session| {
+            matches!(
+                session
+                    .groups
+                    .supergroup_members
+                    .get(&(shape.chat.0, MemberListFilter::Recent)),
+                Some(SupergroupMembersFetch::Failed(_))
+            )
+        });
+        if !shape.is_basic && recent_failed {
+            MemberListFilter::Administrators
         } else {
-            MemberListFilter::Search
+            MemberListFilter::Recent
         }
     }
 }

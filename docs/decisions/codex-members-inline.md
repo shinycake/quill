@@ -20,9 +20,11 @@ participants box menu. Rows load 16 first, then 200 per page with an offset.
   the reducer appends the page to the cached one without repeats.
 - `src/ui/inline_members*.rs`: the block in the supergroup and basic-group
   panels. Rows reuse `member_menu_build` (mention, tag, promote, restrict,
-  ban, remove) and open the member's profile on click. Search is local for
-  basic groups and `getSupergroupMembers` with the search filter (300 ms
-  debounce) for supergroups. The list draws 20 rows and reveals more, then
+  ban, remove) and open the member's profile on click. The search button
+  opens the member dialog with its search box focused, as tdesktop opens its
+  full members section. When the viewer may not see the members (a channel),
+  the block lists the administrators instead, titled "Administrators". The
+  list draws 20 rows and reveals more, then
   fetches the next page, when scrolled near its end. Add opens the existing
   member dialog with its add section open. `updateChatMember` refetches the
   open panel's page; the last page stays on screen meanwhile.
@@ -31,17 +33,12 @@ participants box menu. Rows load 16 first, then 200 per page with an offset.
   `children(...)` lines in the panels.
 
 ## Differences
-tdesktop's search button opens the full members section; here it shows a
-search field in the block (requested). Channels whose member list the viewer
-cannot load show no block (tdesktop shows the admin list instead; Quill's
-administrators section covers that). The search page cache is shared with the
-member dialog.
+The search page cache is shared with the member dialog. Online sorting uses
+the same size cutoff as tdesktop's default `chatSizeMax`.
 
 ## Verified
 Unit tests (core, reducer, driver request shape). Visual check with a
 temporary demo (not committed): online members first, "admin", custom title
-and plain-text tags, header count, search and add buttons. gate.sh: core 3736
-pass; UI tests 3 fail (`chat_theme::high_contrast_roots_palette`, two
-`chat_window` tests), the ones being fixed in the CI work, not touched here.
+and plain-text tags, header count, search and add buttons. gate.sh: see the PR.
 Not verified: live scrolling to a second server page, right-click menus
 against a real group.

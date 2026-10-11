@@ -1,7 +1,6 @@
 //! The members block of the group info panel: search, paging and the last
 //! page shown while a refetch runs.
 
-use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::telegram::envelope::ParsedChatMember;
@@ -16,13 +15,6 @@ pub(super) struct MembersSnapshot {
 }
 
 pub(crate) struct InlineMembersUi {
-    /// The search field (created when a group panel first opens).
-    pub(super) search: Option<Entity<TextareaState>>,
-    pub(super) search_open: bool,
-    /// The text the list is narrowed by, trimmed.
-    pub(super) query: String,
-    /// Bumped on each keystroke; a debounce timer only acts on the latest.
-    pub(super) token: u64,
     /// Rows drawn so far; grows as the list scrolls.
     pub(super) shown: usize,
     pub(super) scroll: ScrollHandle,
@@ -36,10 +28,6 @@ pub(crate) struct InlineMembersUi {
 impl InlineMembersUi {
     pub(super) fn new() -> Self {
         Self {
-            search: None,
-            search_open: false,
-            query: String::new(),
-            token: 0,
             shown: quill::inline_members::ROWS_STEP,
             scroll: ScrollHandle::new(),
             chat: None,
@@ -48,11 +36,8 @@ impl InlineMembersUi {
         }
     }
 
-    /// Back to the first page with no search, for another group.
+    /// Back to the first page for another group.
     pub(super) fn reset(&mut self, chat: Option<ChatId>) {
-        self.search_open = false;
-        self.query.clear();
-        self.token += 1;
         self.shown = quill::inline_members::ROWS_STEP;
         self.chat = chat;
         self.failed_offset = None;

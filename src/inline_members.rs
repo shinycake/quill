@@ -2,7 +2,8 @@
 //!
 //! Telegram Desktop's profile has a members block under the group details
 //! (`info/profile/info_profile_members.cpp`): a header with the count, a
-//! search button once the group has 20 members and an add button, then the
+//! search button once the group has 20 members (it opens the full members
+//! dialog with search started) and an add button, then the
 //! rows. Basic groups and small supergroups are sorted online first by
 //! `ParticipantsOnlineSorter` (`boxes/peers/edit_participants_box.cpp`);
 //! a bigger supergroup keeps the server's "recent" order because only a
@@ -109,17 +110,6 @@ pub fn search_available(member_count: i32) -> bool {
     member_count >= SEARCH_AFTER_COUNT
 }
 
-/// Basic groups have no server search: a member matches when every word
-/// of the query starts a word of the name, or the username starts with it.
-pub fn matches_member(name: &str, username: &str, query: &str) -> bool {
-    let query = query.trim().trim_start_matches('@');
-    if query.is_empty() {
-        return true;
-    }
-    crate::contacts_index::matches_query(name, query)
-        || (!username.is_empty() && username.to_lowercase().starts_with(&query.to_lowercase()))
-}
-
 /// What the scroll position asks the panel to do next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoreAction {
@@ -172,9 +162,8 @@ pub fn merge_page<T, K: PartialEq>(
 #[cfg(test)]
 mod tests {
     use super::{
-        ChannelMemberStatus, MoreAction, UserStatusKind, matches_member, member_badge,
-        members_title, merge_page, next_more, online_sort_value, search_available,
-        sort_online_first, sorts_by_online,
+        ChannelMemberStatus, MoreAction, UserStatusKind, member_badge, members_title, merge_page,
+        next_more, online_sort_value, search_available, sort_online_first, sorts_by_online,
     };
 
     const NOW: i64 = 1_700_000_000;
@@ -267,16 +256,6 @@ mod tests {
         assert_eq!(members_title(12), "12 members");
         assert!(!search_available(19));
         assert!(search_available(20));
-    }
-
-    #[test]
-    fn local_search_matches_name_words_and_username() {
-        assert!(matches_member("Ada Lovelace", "", ""));
-        assert!(matches_member("Ada Lovelace", "", "lov"));
-        assert!(matches_member("Ada Lovelace", "", "ada lo"));
-        assert!(!matches_member("Ada Lovelace", "", "bab"));
-        assert!(matches_member("Ada", "countess", "@count"));
-        assert!(!matches_member("Ada", "", "@count"));
     }
 
     #[test]

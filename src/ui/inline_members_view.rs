@@ -8,17 +8,16 @@ use super::inline_members::GroupShape;
 use super::inline_members_state::MembersSnapshot;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::inline_members::{
-    matches_member, member_badge, members_title, online_sort_value, search_available,
-    sort_online_first, sorts_by_online,
+    member_badge, members_title, online_sort_value, search_available, sort_online_first,
+    sorts_by_online,
 };
 use quill::local_path::sandboxed_display_path;
-use quill::state::{InfoPanelTarget, SupergroupMembersFetch};
+use quill::state::{InfoPanelTarget, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChatKind, MessageSender, ParsedChatMember, UserStatusKind};
 
 /// One member with what the list needs from the user cache.
@@ -26,7 +25,6 @@ struct MemberRow {
     member: ParsedChatMember,
     user_id: Option<i64>,
     name: String,
-    username: String,
     status: UserStatusKind,
     is_bot: bool,
 }
@@ -37,6 +35,8 @@ struct MembersView {
     total: i32,
     loading: bool,
     failed: Option<String>,
+    /// The members are hidden from the viewer: this is the admin list.
+    admins_only: bool,
 }
 
 impl QuillApp {
@@ -53,7 +53,6 @@ impl QuillApp {
         if view.failed.is_some() && shape.is_channel && view.rows.is_empty() {
             return None;
         }
-        // The count in the header is the whole group, not the search hits.
         let group_total = if shape.is_basic {
             view.total
         } else {
@@ -62,9 +61,7 @@ impl QuillApp {
                 _ => view.total,
             }
         };
-        let query = self.inline_members.query.clone();
-        let searching = !query.is_empty();
-        let search_open = self.inline_members.search_open;
+        let admins_only = view.admins_only;
         let can_add = session.chat_can_add_members(chat_id);
         let roots = self.media_display_roots();
 
@@ -73,26 +70,22 @@ impl QuillApp {
                 .text_xs()
                 .font_semibold()
                 .text_color(cx.theme().muted_foreground)
-                .child(members_title(group_total)),
+                .child(if admins_only {
+                    "Administrators".to_string()
+                } else {
+                    members_title(group_total)
+                }),
         );
         let mut buttons = div().flex().items_center().gap_1();
-        if search_available(group_total) || search_open || searching {
+        if search_available(group_total) && !admins_only {
             buttons = buttons.child(
                 Button::new("inline-members-search")
-                    .icon(if search_open {
-                        IconName::X
-                    } else {
-                        IconName::Search
-                    })
+                    .icon(IconName::Search)
                     .ghost()
                     .xsmall()
-                    .accessibility_label(if search_open {
-                        "Close member search"
-                    } else {
-                        "Search members"
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_inline_members_search(window, cx);
+                    .accessibility_label("Search members")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.inline_members_search(chat_id, window, cx);
                     })),
             );
         }
@@ -119,13 +112,6 @@ impl QuillApp {
             .border_t_1()
             .border_color(cx.theme().border)
             .child(header);
-        if search_open && let Some(input) = self.inline_members.search.as_ref() {
-            block = block.child(
-                div()
-                    .px_2()
-                    .child(Textarea::new(input).aria_label("Search members").h(px(36.))),
-            );
-        }
 
         let shown = self.inline_members.shown;
         let mut list = div()
@@ -159,8 +145,6 @@ impl QuillApp {
         } else if view.rows.is_empty() {
             list = list.child(hint(if view.loading {
                 "Loading members…".to_string()
-            } else if searching {
-                "No members found".to_string()
             } else {
                 "No members".to_string()
             }));
@@ -190,12 +174,13 @@ impl QuillApp {
             total: 0,
             loading: true,
             failed: None,
+            admins_only: false,
         };
         let Some(session) = self.session() else {
             return empty;
         };
-        let query = self.inline_members.query.as_str();
-        let filter = self.inline_members_filter();
+        let filter = self.inline_members_filter(shape);
+        let admins_only = filter == MemberListFilter::Administrators;
         let fetch = if shape.is_basic {
             session.groups.basic_group_members.get(&shape.chat.0)
         } else {
@@ -209,7 +194,7 @@ impl QuillApp {
                 members,
                 total_count,
             }) => {
-                if query.is_empty() {
+                if !admins_only {
                     self.inline_members.snapshot.replace(Some(MembersSnapshot {
                         chat: shape.chat,
                         members: members.clone(),
@@ -225,7 +210,7 @@ impl QuillApp {
                 let snapshot = self.inline_members.snapshot.borrow();
                 match snapshot
                     .as_ref()
-                    .filter(|s| s.chat == shape.chat && query.is_empty())
+                    .filter(|s| s.chat == shape.chat && !admins_only)
                 {
                     Some(last) => (last.members.clone(), last.total, true, None),
                     None => (Vec::new(), 0, true, None),
@@ -247,7 +232,6 @@ impl QuillApp {
                 };
                 MemberRow {
                     user_id,
-                    username: user.map(|u| u.username.clone()).unwrap_or_default(),
                     status: user.map(|u| u.status).unwrap_or_default(),
                     is_bot: user.is_some_and(|u| u.is_bot),
                     name,
@@ -255,10 +239,6 @@ impl QuillApp {
                 }
             })
             .collect();
-        // Basic groups have no server search: narrow what is loaded.
-        if shape.is_basic && !query.is_empty() {
-            rows.retain(|row| matches_member(&row.name, &row.username, query));
-        }
         let count = if shape.is_basic {
             total
         } else {
@@ -275,6 +255,7 @@ impl QuillApp {
             total,
             loading,
             failed,
+            admins_only,
         }
     }
 
