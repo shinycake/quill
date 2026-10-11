@@ -171,8 +171,11 @@ pub fn clipboard_image_attachment(bytes: &[u8], extension: &str) -> Option<Compo
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
+    // A process-wide counter keeps two pastes in the same clock tick apart.
+    static PASTE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = PASTE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
-        "quill-paste-{stamp}-{}.{}",
+        "quill-paste-{stamp}-{seq}-{}.{}",
         std::process::id(),
         extension
     ));
@@ -227,7 +230,7 @@ mod tests {
     }
 
     /// Parity slice (platform-paste-image): distinct pastes get distinct temp
-    /// files (timestamp + pid in the name).
+    /// files (timestamp + sequence + pid in the name), even in the same clock tick.
     #[test]
     fn clipboard_image_attachment_names_are_unique() {
         let bytes: &[u8] = &[0x89, b'P', b'N', b'G'];
