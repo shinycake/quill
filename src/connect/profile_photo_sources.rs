@@ -9,22 +9,24 @@ use crate::profile_photo_sources::{
 use crate::state::RequestPurpose;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// An emoji on a gradient as the main profile photo.
-    pub fn set_profile_photo_emoji(
+    /// A custom emoji or sticker on a background as the main profile photo.
+    pub fn set_profile_photo_sticker(
         &mut self,
-        custom_emoji_id: i64,
+        sticker: PhotoSticker,
         colors: &[u32],
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || custom_emoji_id <= 0 || colors.is_empty() {
+        let valid = match sticker {
+            PhotoSticker::CustomEmoji { custom_emoji_id } => custom_emoji_id > 0,
+            PhotoSticker::RegularOrMask {
+                sticker_set_id,
+                sticker_id,
+            } => sticker_set_id > 0 && sticker_id > 0,
+        };
+        if !self.chats_path_active() || !valid || colors.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::SetProfilePhoto, None);
-        let json = set_profile_photo_sticker(
-            extra,
-            PhotoSticker::CustomEmoji { custom_emoji_id },
-            colors,
-            false,
-        );
+        let json = set_profile_photo_sticker(extra, sticker, colors, false);
         self.send_json_request(extra, &json)
     }
 

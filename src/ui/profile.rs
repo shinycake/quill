@@ -67,7 +67,7 @@ impl QuillApp {
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title("Edit profile"));
-            this.photo_sources_prepare_render();
+            this.photo_sources_prepare_render(cx);
             let Some(body) = this.edit_profile_dialog_body(cx) else {
                 return dialog.on_close(on_close);
             };
