@@ -3,7 +3,6 @@
 # limit. See docs/contributing/structure.md.
 1273 src/main.rs
 1199 src/ui/app_render.rs
-1681 src/ui/demo.rs
 1863 src/ui/history.rs
 1087 src/ui/keybindings.rs
 1968 src/ui/message_text.rs
