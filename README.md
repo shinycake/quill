@@ -306,7 +306,6 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Action bar for new chats: Add contact, Block, Report spam, Share my phone, Add to group <!-- parity:chrome-action-bar -->
 - [x] "N requested to join" bar with avatars that opens the requests list <!-- parity:chrome-join-requests-bar -->
 - [x] Translate bar at the top of a chat (partial: translate actions exist; no bar or per-chat toggle) <!-- parity:chrome-translate-bar -->
-- [ ] Similar channels suggestions after leaving a channel <!-- parity:chrome-similar-channels -->
 - [ ] Business bot manage bar <!-- parity:chrome-business-bot-bar -->
 - [x] Pinned bar unpin and hide-all confirmation wording <!-- parity:chrome-pinned-bar-confirm -->
 - [x] Top "now playing" bar for voice and music with play, prev, next, speed and close <!-- parity:chrome-now-playing-bar -->
