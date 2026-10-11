@@ -1011,7 +1011,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
 - [x] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
 - [x] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
-- [x] Profile photo from camera, emoji avatar builder and video avatar with frame choice (partial: all three shipped; live camera preview with crop, video trim, sticker tab and custom gradient editor left) <!-- parity:settings-photo-sources -->
+- [x] Profile photo from camera, emoji avatar builder and video avatar with frame choice <!-- parity:settings-photo-sources -->
 - [ ] Profile music (saved music) management <!-- parity:settings-profile-music -->
 - [x] Choose the main profile tab <!-- parity:settings-main-profile-tab -->
 - [x] Phone number display and "Is this still your number?" suggestion <!-- parity:settings-phone-suggestion -->
