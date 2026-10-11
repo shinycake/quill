@@ -788,7 +788,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Sticker set box: share link, copy link, report, archive <!-- parity:stickers-set-box-actions -->
 - [x] Tapping a sticker in a chat opens its set <!-- parity:stickers-tap-opens-set -->
 - [x] Tapping a custom emoji shows "This emoji is from X pack" with a View button <!-- parity:stickers-custom-emoji-toast -->
-- [ ] Masks tab and mask stickers <!-- parity:stickers-masks -->
+- [x] Masks tab and mask stickers <!-- parity:stickers-masks -->
 - [x] Emoji search by keyword in all languages <!-- parity:emoji-keyword-search -->
 - [ ] Emoji set style picker <!-- parity:emoji-set-style -->
 - [ ] "Replace emoji automatically" setting <!-- parity:emoji-replace-auto -->
