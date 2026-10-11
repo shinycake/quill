@@ -15,6 +15,8 @@ pub enum GroupToggle {
     JoinToSend,
     HistoryVisible,
     HiddenMembers,
+    /// Channel owner: sponsored messages on or off.
+    SponsoredMessages,
 }
 
 /// A step that runs once the request it waits for succeeds.
@@ -72,6 +74,8 @@ pub struct GroupAdminControls {
     /// Discussion group: members must join before they can write.
     pub join_to_send: bool,
     pub hide_members: bool,
+    /// Channel owner: "Switch Off Ads" (tdesktop `info_channel_earn_list`).
+    pub switch_off_ads: bool,
     pub protected_content: bool,
     pub discussion: Option<DiscussionControl>,
     pub reactions: bool,
@@ -165,6 +169,7 @@ impl Session {
             RequestPurpose::ToggleSupergroupIsAllHistoryAvailable,
             RequestPurpose::ToggleSupergroupJoinToSendMessages,
             RequestPurpose::ToggleSupergroupHasHiddenMembers,
+            RequestPurpose::ToggleSupergroupCanHaveSponsoredMessages,
             RequestPurpose::ToggleChatHasProtectedContent,
             RequestPurpose::SetChatAvailableReactions,
             RequestPurpose::SetChatDiscussionGroup,
@@ -212,8 +217,16 @@ impl Session {
                 }
             }
             ChatKind::Supergroup {
-                is_channel: true, ..
+                is_channel: true,
+                supergroup_id,
             } => GroupAdminControls {
+                // The flag is owner-only; wait for the full info so the
+                // switch doesn't flash a wrong value.
+                switch_off_ads: owner
+                    && self
+                        .groups
+                        .supergroup_full_infos
+                        .contains_key(&supergroup_id),
                 protected_content: owner,
                 reactions: can_change_info,
                 discussion: can_change_info.then(|| DiscussionControl::Channel {
@@ -318,6 +331,12 @@ impl Session {
                 info.admin.has_hidden_members = value;
                 Some(previous)
             }
+            GroupToggle::SponsoredMessages => {
+                let info = self.groups.supergroup_full_infos.get_mut(&supergroup_id)?;
+                let previous = info.admin.can_have_sponsored_messages;
+                info.admin.can_have_sponsored_messages = value;
+                Some(previous)
+            }
         }
     }
 
@@ -345,6 +364,11 @@ impl Session {
             (GroupToggle::HiddenMembers, Some(flag)) => {
                 if let Some(info) = self.groups.supergroup_full_infos.get_mut(&supergroup_id) {
                     info.admin.has_hidden_members = flag;
+                }
+            }
+            (GroupToggle::SponsoredMessages, Some(flag)) => {
+                if let Some(info) = self.groups.supergroup_full_infos.get_mut(&supergroup_id) {
+                    info.admin.can_have_sponsored_messages = flag;
                 }
             }
             _ => {}

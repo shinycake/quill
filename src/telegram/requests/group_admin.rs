@@ -77,6 +77,23 @@ pub fn toggle_supergroup_has_hidden_members(
     .to_string()
 }
 
+/// `toggleSupergroupCanHaveSponsoredMessages supergroup_id:int53
+/// can_have_sponsored_messages:Bool = Ok;` (schema 1.8.68, line 15603).
+/// Owner only; disabling needs a boost level.
+pub fn toggle_supergroup_can_have_sponsored_messages(
+    extra: RequestId,
+    supergroup_id: i64,
+    can_have_sponsored_messages: bool,
+) -> String {
+    json!({
+        "@type": "toggleSupergroupCanHaveSponsoredMessages",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+        "can_have_sponsored_messages": can_have_sponsored_messages,
+    })
+    .to_string()
+}
+
 /// `toggleChatHasProtectedContent chat_id:int53
 /// has_protected_content:Bool = Ok;` (line 13504). Owner only in groups
 /// and channels.

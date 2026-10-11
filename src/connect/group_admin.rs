@@ -11,9 +11,9 @@ use crate::state::{AdminFollowup, GroupToggle, ProfileChatsKind, RequestPurpose,
 use crate::telegram::envelope::{ChatAvailableReactions, ChatKind, EnvelopePayload};
 use crate::telegram::requests::{
     set_chat_available_reactions, set_chat_discussion_group, toggle_chat_has_protected_content,
-    toggle_supergroup_has_hidden_members, toggle_supergroup_is_all_history_available,
-    toggle_supergroup_is_forum, toggle_supergroup_join_to_send_messages,
-    upgrade_basic_group_chat_to_supergroup_chat,
+    toggle_supergroup_can_have_sponsored_messages, toggle_supergroup_has_hidden_members,
+    toggle_supergroup_is_all_history_available, toggle_supergroup_is_forum,
+    toggle_supergroup_join_to_send_messages, upgrade_basic_group_chat_to_supergroup_chat,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -50,6 +50,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             GroupToggle::JoinToSend => RequestPurpose::ToggleSupergroupJoinToSendMessages,
             GroupToggle::HistoryVisible => RequestPurpose::ToggleSupergroupIsAllHistoryAvailable,
             GroupToggle::HiddenMembers => RequestPurpose::ToggleSupergroupHasHiddenMembers,
+            GroupToggle::SponsoredMessages => {
+                RequestPurpose::ToggleSupergroupCanHaveSponsoredMessages
+            }
         };
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
@@ -64,6 +67,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             GroupToggle::HiddenMembers => {
                 toggle_supergroup_has_hidden_members(extra, supergroup_id, value)
+            }
+            GroupToggle::SponsoredMessages => {
+                toggle_supergroup_can_have_sponsored_messages(extra, supergroup_id, value)
             }
         };
         self.send_json_request(extra, &json)?;
@@ -106,6 +112,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.send_group_toggle(chat_id, GroupToggle::HiddenMembers, value)
+    }
+
+    /// `toggleSupergroupCanHaveSponsoredMessages` (owner of a channel).
+    pub fn set_channel_sponsored_messages(
+        &mut self,
+        chat_id: ChatId,
+        can_have: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.group_admin_controls(chat_id).switch_off_ads {
+            return Ok(None);
+        }
+        self.send_group_toggle(chat_id, GroupToggle::SponsoredMessages, can_have)
     }
 
     /// Chat history for new members. A basic group is upgraded first

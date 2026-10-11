@@ -664,3 +664,33 @@ fn upgrade_answer_records_the_new_chat_and_followups_queue() {
     );
     assert!(session.take_chat_upgrades().is_empty());
 }
+
+#[test]
+fn channel_owner_sees_switch_off_ads_once_full_info_is_in() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let sg = channel(&mut session, &seq, &sink, 21, CREATOR);
+    assert!(!session.group_admin_controls(ChatId(21)).switch_off_ads);
+    full_info(
+        &mut session,
+        &seq,
+        &sink,
+        sg,
+        r#","can_have_sponsored_messages":true"#,
+    );
+    assert!(session.group_admin_controls(ChatId(21)).switch_off_ads);
+    assert!(
+        session.groups.supergroup_full_infos[&sg]
+            .admin
+            .can_have_sponsored_messages
+    );
+    let admin = channel(
+        &mut session,
+        &seq,
+        &sink,
+        22,
+        &admin_status(r#""can_change_info":true"#),
+    );
+    full_info(&mut session, &seq, &sink, admin, "");
+    assert!(!session.group_admin_controls(ChatId(22)).switch_off_ads);
+}

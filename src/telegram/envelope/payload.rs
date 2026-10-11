@@ -23,6 +23,7 @@ pub(crate) fn parse_supergroup_full_admin(info: Option<&Value>) -> SupergroupFul
         has_hidden_members: flag("has_hidden_members"),
         is_all_history_available: flag("is_all_history_available"),
         can_enable_paid_reaction: flag("can_enable_paid_reaction"),
+        can_have_sponsored_messages: flag("can_have_sponsored_messages"),
     }
 }
 

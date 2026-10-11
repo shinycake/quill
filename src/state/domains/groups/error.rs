@@ -57,6 +57,15 @@ impl Session {
                 };
                 self.groups.community_error = Some(format!("{action}: {}", error_reason(err)));
             }
+            // Switching ads off needs a boost level; say so for the usual
+            // refusal (TDLib's message text is not kept, see `TdError`).
+            Some(RequestPurpose::ToggleSupergroupCanHaveSponsoredMessages) => {
+                self.chats_state.chat_action_error = Some(if err.code == 400 {
+                    "Could not switch off ads: the channel needs a higher boost level".to_string()
+                } else {
+                    call_request_error_line(err, "Could not change ads for the channel")
+                });
+            }
             // B7: refused group admin changes were rolled back above; say
             // so instead of showing the old value as if nothing happened.
             Some(

@@ -243,6 +243,9 @@ pub enum GroupsPurpose {
     ToggleSupergroupJoinToSendMessages,
     /// B7: `toggleSupergroupHasHiddenMembers` (line 15207). Optimistic.
     ToggleSupergroupHasHiddenMembers,
+    /// `toggleSupergroupCanHaveSponsoredMessages` (schema 1.8.68, line
+    /// 15603). Optimistic; needs owner rights and a boost level.
+    ToggleSupergroupCanHaveSponsoredMessages,
     /// B7: `toggleChatHasProtectedContent` (line 13504). Optimistic.
     ToggleChatHasProtectedContent,
     /// B7: `setChatAvailableReactions` (line 13527). Optimistic.
@@ -330,6 +333,7 @@ flat_purposes!(Groups(GroupsPurpose) {
     ToggleSupergroupIsAllHistoryAvailable,
     ToggleSupergroupJoinToSendMessages,
     ToggleSupergroupHasHiddenMembers,
+    ToggleSupergroupCanHaveSponsoredMessages,
     ToggleChatHasProtectedContent,
     SetChatAvailableReactions,
     SetChatDiscussionGroup,

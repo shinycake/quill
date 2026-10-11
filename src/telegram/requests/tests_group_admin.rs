@@ -2,14 +2,27 @@ use crate::ids::RequestId;
 use crate::telegram::envelope::{ChatAvailableReactions, ReactionType};
 use crate::telegram::requests::{
     get_suitable_discussion_chats, set_chat_available_reactions, set_chat_discussion_group,
-    toggle_chat_has_protected_content, toggle_supergroup_has_hidden_members,
-    toggle_supergroup_is_all_history_available, toggle_supergroup_is_forum,
-    toggle_supergroup_join_to_send_messages, upgrade_basic_group_chat_to_supergroup_chat,
+    toggle_chat_has_protected_content, toggle_supergroup_can_have_sponsored_messages,
+    toggle_supergroup_has_hidden_members, toggle_supergroup_is_all_history_available,
+    toggle_supergroup_is_forum, toggle_supergroup_join_to_send_messages,
+    upgrade_basic_group_chat_to_supergroup_chat,
 };
 use serde_json::Value;
 
 fn parse(json: &str) -> Value {
     serde_json::from_str(json).unwrap()
+}
+
+#[test]
+fn sponsored_messages_toggle_request() {
+    let v = parse(&toggle_supergroup_can_have_sponsored_messages(
+        RequestId(2),
+        42,
+        false,
+    ));
+    assert_eq!(v["@type"], "toggleSupergroupCanHaveSponsoredMessages");
+    assert_eq!(v["supergroup_id"], 42);
+    assert_eq!(v["can_have_sponsored_messages"], false);
 }
 
 #[test]

@@ -355,6 +355,9 @@ pub struct SupergroupFullAdmin {
     pub is_all_history_available: bool,
     /// `can_enable_paid_reaction` — channels only.
     pub can_enable_paid_reaction: bool,
+    /// `can_have_sponsored_messages` — only reported to the channel owner;
+    /// false means ads are switched off.
+    pub can_have_sponsored_messages: bool,
 }
 
 /// A chat's name color and reply emoji (`chat.accent_color_id`,

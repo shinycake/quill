@@ -118,6 +118,9 @@ impl QuillApp {
             }
             GroupSettingsAction::JoinToSend(on) => driver.set_group_join_to_send(chat_id, on),
             GroupSettingsAction::HiddenMembers(on) => driver.set_group_hidden_members(chat_id, on),
+            GroupSettingsAction::SponsoredMessages(on) => {
+                driver.set_channel_sponsored_messages(chat_id, on)
+            }
             GroupSettingsAction::ProtectedContent(on) => {
                 driver.set_chat_protected_content(chat_id, on)
             }
@@ -397,6 +400,26 @@ impl QuillApp {
                 "Switch this on to hide the list of members in this group. Admins will remain visible."
                     .into(),
                 GroupSettingsAction::HiddenMembers(!on),
+                cx,
+            ));
+        }
+        if controls.switch_off_ads {
+            let can_have = session
+                .and_then(|s| {
+                    s.chat_supergroup(chat_id)
+                        .and_then(|id| s.supergroup_full_info(id))
+                        .map(|info| info.admin.can_have_sponsored_messages)
+                })
+                .unwrap_or(true);
+            body = body.child(self.settings_switch(
+                "ads-switch-off",
+                IconName::EyeOff,
+                "Switch Off Ads",
+                !can_have,
+                !busy,
+                "Sponsored messages won't be shown in this channel. The channel needs enough boosts."
+                    .into(),
+                GroupSettingsAction::SponsoredMessages(!can_have),
                 cx,
             ));
         }
