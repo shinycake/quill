@@ -728,7 +728,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Pause screen sharing <!-- parity:calls-screen-share-pause -->
 - [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls <!-- parity:calls-conference -->
 - [x] Detect when you speak in a group call and show it to others <!-- parity:calls-speaking-detection -->
-- [ ] Call window options: stay on top, device settings inside the call <!-- parity:calls-window-options -->
+- [x] Call window options: stay on top, device settings inside the call <!-- parity:calls-window-options -->
 - [ ] Battery-low and microphone-off indicators for the other person <!-- parity:calls-peer-indicators -->
 - [ ] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
 - [ ] Watch channel live streams (RTMP) (deferred: low impact) <!-- parity:calls-rtmp-viewing -->
