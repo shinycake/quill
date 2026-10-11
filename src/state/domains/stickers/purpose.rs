@@ -73,6 +73,25 @@ pub enum StickersPurpose {
     /// Slice S8: `reorderInstalledStickerSets`. Response is `ok`; same
     /// installed-sets invalidation as change.
     ReorderInstalledStickerSets,
+    /// `getInstalledStickerSets` with `stickerTypeMask`. Response is `stickerSets`.
+    GetInstalledMaskSets,
+    /// `getArchivedStickerSets` with `stickerTypeMask`. Response is `stickerSets`.
+    GetArchivedMaskSets {
+        first_page: bool,
+    },
+    /// `changeStickerSet` on a mask set (install, archive or remove). Response is `ok`.
+    ChangeMaskSet {
+        set_id: i64,
+        installed: bool,
+        archived: bool,
+    },
+    /// `reorderInstalledStickerSets` with `stickerTypeMask`. Response is `ok`.
+    ReorderInstalledMaskSets,
+    /// `getStickerSet` for one installed mask set, for the photo editor's
+    /// Masks strip. Response is `stickerSet`.
+    GetMaskSet {
+        set_id: i64,
+    },
     /// Slice S10: `setEmojiStatus` (td_api.tl:14850). Response is `ok`.
     SetEmojiStatus,
     /// Slice S10: `getRecentEmojiStatuses` (td_api.tl:13957). Response is `emojiStatuses`.

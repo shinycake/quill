@@ -91,10 +91,12 @@ pub enum StickersPayload {
     /// — TDLib's authoritative new order of installed set ids after a
     /// reorder (manual, or usage-driven via `update_order_of_installed_
     /// sticker_sets` on a sticker send). `is_regular` selects the sticker
-    /// panel's sets; other types route to the emoji panel's installed sets.
+    /// panel's sets, `is_mask` the mask sets; custom emoji is neither.
     UpdateInstalledStickerSets {
         sticker_set_ids: Vec<i64>,
         is_regular: bool,
+        /// `sticker_type` is `stickerTypeMask`.
+        is_mask: bool,
     },
     /// `updateRecentStickers` (schema 1.8.67, line 10938): the recent
     /// stickers changed (possibly on another device). The ids are not

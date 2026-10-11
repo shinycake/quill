@@ -623,10 +623,13 @@ impl QuillApp {
                 .ghost()
                 .selected(mode == target)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if target == EditorMode::Stickers
-                        && let Some(live) = this.live.as_mut()
-                    {
-                        let _ = live.driver.fetch_editor_stickers();
+                    if let Some(live) = this.live.as_mut() {
+                        if target == EditorMode::Stickers {
+                            let _ = live.driver.fetch_editor_stickers();
+                            let _ = live.driver.load_editor_masks();
+                        } else {
+                            live.driver.release_editor_masks();
+                        }
                     }
                     this.photo_editor_mut(|editor| editor.mode = target, cx);
                 }))
@@ -920,6 +923,7 @@ impl QuillApp {
                         }))
                 }),
             ))
+            .child(self.photo_editor_mask_strip(cx))
             .when(has_selection, |this| {
                 this.child(
                     Button::new("photo-editor-delete-item")
@@ -937,7 +941,7 @@ impl QuillApp {
 
     /// Place a sticker's still picture, downloading the sticker first if
     /// needed (click again once it has arrived).
-    fn place_editor_sticker(
+    pub(super) fn place_editor_sticker(
         &mut self,
         file_id: quill::ids::FileId,
         format: quill::telegram::envelope::StickerFormat,

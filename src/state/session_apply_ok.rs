@@ -315,6 +315,7 @@ impl Session {
                 self.stickers.stickers.stickers.clear();
             }
         }
+        self.finish_mask_mutation(pending.map(|p| p.purpose));
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
         self.invalidate_emoji_caches(pending.map(|p| p.purpose));
         // Slice S9: a saved-GIF mutation (`addSavedAnimation` /

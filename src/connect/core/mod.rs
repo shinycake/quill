@@ -122,6 +122,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 owned.envelope.payload,
                 EnvelopePayload::Stickers(StickersPayload::UpdateInstalledStickerSets {
                     is_regular: false,
+                    is_mask: false,
                     ..
                 })
             );
@@ -744,6 +745,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if emoji_catalog_changed {
             self.refresh_emoji_pack_catalog()?;
         }
+        self.refresh_open_mask_lists()?;
         self.maybe_resolve_emoji_status_choices()?;
         self.maybe_resolve_message_custom_emoji()?;
         if !self.session.stickers.emoji.custom_emoji_stickers.is_empty() {

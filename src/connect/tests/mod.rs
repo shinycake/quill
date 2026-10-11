@@ -28,6 +28,7 @@ mod invite_admin;
 mod link_info;
 mod links_boosts;
 mod live_location;
+mod masks;
 mod media_library;
 mod member_moderation;
 mod message_menu;

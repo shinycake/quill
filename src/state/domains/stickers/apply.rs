@@ -37,6 +37,15 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
                     // Slice S8: `searchStickerSets` answers with `stickerSets`.
                     self.accept_found_sticker_sets(sets);
+                } else if pending.map(|p| p.purpose)
+                    == Some(StickersPurpose::GetInstalledMaskSets.into())
+                {
+                    self.accept_installed_mask_sets(sets);
+                } else if let Some(RequestPurpose::Stickers(
+                    StickersPurpose::GetArchivedMaskSets { first_page },
+                )) = pending.map(|p| p.purpose)
+                {
+                    self.accept_archived_mask_sets(sets, first_page);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledEmojiSets)
                 {
                     // Slice S10: emoji `stickerSets` land in the emoji panel (see emoji.rs).
@@ -58,8 +67,13 @@ impl Session {
             StickersPayload::UpdateInstalledStickerSets {
                 sticker_set_ids,
                 is_regular,
+                is_mask,
             } => {
-                self.apply_installed_sticker_set_order(&sticker_set_ids, is_regular);
+                if is_mask {
+                    self.apply_mask_order(&sticker_set_ids);
+                } else {
+                    self.apply_installed_sticker_set_order(&sticker_set_ids, is_regular);
+                }
             }
             // B11: other devices changed recents, favorites, trending or the
             // reaction lists; mark the loaded caches stale (the driver
@@ -198,6 +212,12 @@ impl Session {
                     if !title.is_empty() {
                         self.stickers.emoji_pack_titles.insert(set_id, title);
                     }
+                } else if let Some(RequestPurpose::Stickers(StickersPurpose::GetMaskSet {
+                    set_id,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.remember_files(&files);
+                    self.accept_mask_set(set_id, stickers);
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::LoadLibrarySet {
                     set_id,
                 })) = pending.map(|p| p.purpose)

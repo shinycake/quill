@@ -189,7 +189,7 @@ impl Session {
         let sets = if is_regular {
             &mut self.stickers.stickers.sets
         } else {
-            // Non-regular types (custom emoji; mask sets are never fetched)
+            // Custom emoji (mask updates are routed away before this call)
             // route to the emoji panel's installed sets.
             &mut self.stickers.emoji.installed_sets
         };

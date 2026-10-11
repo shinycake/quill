@@ -204,6 +204,7 @@ mod link_info_boxes;
 mod live_location_tick;
 mod main_menu_extras;
 mod marketplace;
+mod masks_ui;
 mod media_panel;
 mod media_viewer;
 mod member_moderation;

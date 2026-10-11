@@ -22,6 +22,8 @@ pub struct StickersState {
     /// Installed regular sticker sets + the loaded `stickerSet` for the picker.
     pub stickers: StickerPanel,
     pub emoji: EmojiPanel,
+    /// Mask sticker sets: the manage dialog and the photo editor's strip.
+    pub masks: MasksPanel,
     /// Saved animations (`getSavedAnimations`) for the GIF picker.
     pub gifs: GifPanel,
     /// B7: `updateActiveEmojiReactions` — the emoji usable as reactions.
@@ -40,6 +42,7 @@ impl StickersState {
             emoji_pack_titles: HashMap::new(),
             stickers: StickerPanel::default(),
             emoji: EmojiPanel::default(),
+            masks: MasksPanel::default(),
             gifs: GifPanel::default(),
             active_emoji_reactions: Vec::new(),
         }
