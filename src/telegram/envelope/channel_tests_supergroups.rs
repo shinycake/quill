@@ -13,6 +13,7 @@ fn supergroup_full_info_parsed() {
             description,
             member_count,
             linked_chat_id,
+            direct_messages_chat_id,
             slow_mode_delay,
             slow_mode_delay_expires_in,
             my_boost_count,
@@ -31,6 +32,7 @@ fn supergroup_full_info_parsed() {
             assert_eq!(member_count, 1234);
             // Parity slice: no `linked_chat_id` → 0 (no discussion group).
             assert_eq!(linked_chat_id, 0);
+            assert_eq!(direct_messages_chat_id, 0);
             assert!(!can_set_sticker_set);
             assert_eq!(sticker_set_id, 0);
             assert_eq!(custom_emoji_sticker_set_id, 0);

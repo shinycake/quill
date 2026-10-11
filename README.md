@@ -318,7 +318,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Per-chat wallpaper and chat themes <!-- parity:chrome-chat-wallpaper -->
 - [x] "What can this bot do?" intro in an empty bot chat <!-- parity:chrome-bot-intro -->
 - [x] Composer state buttons: Unblock, Start, Join, Apply to join, Mute and Unmute (partial: Join and Mute exist; Unblock and Apply to join unverified) <!-- parity:chrome-composer-states -->
-- [ ] "Discuss" and "Direct messages" buttons in the channel bottom bar <!-- parity:chrome-discuss-buttons -->
+- [x] "Discuss" and "Direct messages" buttons in the channel bottom bar <!-- parity:chrome-discuss-buttons -->
 - [x] Middle-click autoscroll in history <!-- parity:chrome-middle-click-scroll -->
 - [x] PageUp, PageDown, Home and End scroll the history <!-- parity:chrome-page-keys -->
 - [x] Window title shows the chat name or unread count <!-- parity:chrome-window-title -->

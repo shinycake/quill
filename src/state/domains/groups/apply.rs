@@ -17,6 +17,7 @@ impl Session {
                 description,
                 member_count,
                 linked_chat_id,
+                direct_messages_chat_id,
                 slow_mode_delay,
                 slow_mode_delay_expires_in,
                 my_boost_count,
@@ -51,6 +52,7 @@ impl Session {
                     seq,
                 );
                 if let Some(supergroup_id) = full_info_group {
+                    self.set_direct_messages_chat(supergroup_id, direct_messages_chat_id);
                     self.merge_full_admin(supergroup_id, admin);
                 }
             }
@@ -62,6 +64,7 @@ impl Session {
                 description,
                 member_count,
                 linked_chat_id,
+                direct_messages_chat_id,
                 slow_mode_delay,
                 slow_mode_delay_expires_in,
                 my_boost_count,
@@ -93,6 +96,7 @@ impl Session {
                     extra,
                     seq,
                 );
+                self.set_direct_messages_chat(supergroup_id, direct_messages_chat_id);
                 self.merge_full_admin(supergroup_id, admin);
             }
             // Slice (communities backend core): `communityId` (schema 1.8.67,
