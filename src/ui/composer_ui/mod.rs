@@ -582,15 +582,18 @@ impl QuillApp {
                         return menu;
                     }
                     menu = menu.separator();
-                    for (bot_id, name) in attach_bots.iter().cloned() {
+                    for entry in attach_bots.iter().cloned() {
                         let owner = owner.clone();
-                        menu = menu.item(PopupMenuItem::new(name).icon(IconName::Bot).on_click(
-                            move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.open_attachment_menu_bot(bot_id, cx)
-                                });
-                            },
-                        ));
+                        let bot_id = entry.bot_id;
+                        let item = PopupMenuItem::new(entry.name);
+                        let item = match entry.icon_svg {
+                            Some(svg) => item.icon(Icon::default().data(&svg)),
+                            None => item.icon(IconName::Bot),
+                        };
+                        menu = menu.item(item.on_click(move |_, _, cx| {
+                            let _ = owner
+                                .update(cx, |this, cx| this.open_attachment_menu_bot(bot_id, cx));
+                        }));
                     }
                     menu
                 })

@@ -352,3 +352,41 @@ fn named_app_links_search_first() {
     assert!(h.driver.close_web_app(9).unwrap().is_some());
     assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 9);
 }
+
+#[test]
+fn attachment_menu_bot_icons_download_and_resolve() {
+    let mut h = Harness::ready();
+    h.ingest(
+        r#"{"@type":"updateAttachmentMenuBots","bots":[{"@type":"attachmentMenuBot","bot_user_id":42,"name":"Shop","supports_user_chats":true,"is_added":true,"show_in_attachment_menu":true,"default_icon":{"@type":"file","id":77,"size":900,"expected_size":900,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false},"remote":{"@type":"remoteFile","id":"x","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":900}}},{"@type":"attachmentMenuBot","bot_user_id":43,"name":"Side","is_added":true,"show_in_attachment_menu":false,"default_icon":{"@type":"file","id":78,"local":{"can_be_downloaded":true}}}]}"#,
+    );
+    let sent = h.last("downloadFile");
+    assert_eq!(sent["file_id"], 77, "only the attach menu bot's icon");
+    assert!(h.driver.session.attach_bot_icon_path(42).is_none());
+    h.ingest(
+        r#"{"@type":"updateFile","file":{"@type":"file","id":77,"size":900,"expected_size":900,"local":{"@type":"localFile","path":"/tmp/shop.svg","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":true},"remote":{"@type":"remoteFile","id":"x","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":900}}}"#,
+    );
+    assert_eq!(
+        h.driver.session.attach_bot_icon_path(42),
+        Some("/tmp/shop.svg")
+    );
+    assert!(h.driver.session.attach_bot_icons_to_download().is_empty());
+}
+
+#[test]
+fn attachment_menu_launch_sends_the_chat_context() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    h.driver
+        .open_web_app(ChatId(5), 42, "", LaunchSource::AttachmentMenu, &theme)
+        .expect("sent");
+    let sent = h.last("openWebApp");
+    assert_eq!(sent["chat_id"], 5);
+    assert_eq!(sent["bot_user_id"], 42);
+    assert_eq!(sent["url"], "");
+    h.driver
+        .toggle_bot_in_attachment_menu(42, false, false)
+        .expect("sent");
+    let sent = h.last("toggleBotIsAddedToAttachmentMenu");
+    assert_eq!(sent["is_added"], false);
+    assert_eq!(sent["allow_write_access"], false);
+}

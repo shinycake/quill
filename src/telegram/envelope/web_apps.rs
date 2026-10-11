@@ -3,10 +3,12 @@
 //! `mainWebApp` (1146), `customRequestResult`.
 
 use super::json_helpers::{int53_or_zero, json_field_str};
+use super::message_media::{ParsedFile, parse_file};
 use serde_json::Value;
 
-/// A bot in the attachment or side menu. The icons are left out: Quill
-/// draws the bot's name.
+/// A bot in the attachment or side menu. Only `default_icon` is kept, the
+/// one tdesktop shows (`default_static`); the platform icon variants are
+/// left out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentMenuBot {
     pub bot_user_id: i64,
@@ -23,6 +25,8 @@ pub struct AttachmentMenuBot {
     pub is_added: bool,
     pub show_in_attachment_menu: bool,
     pub show_in_side_menu: bool,
+    /// `default_icon`: an SVG file, downloaded for the menu entry.
+    pub icon: Option<ParsedFile>,
 }
 
 /// `foundWebApp`: a named app (`t.me/bot/app`), with what the open box
@@ -57,6 +61,9 @@ pub(crate) fn parse_attachment_menu_bot(value: &Value) -> Option<AttachmentMenuB
         is_added: flag(value, "is_added"),
         show_in_attachment_menu: flag(value, "show_in_attachment_menu"),
         show_in_side_menu: flag(value, "show_in_side_menu"),
+        icon: parse_file(value.get("default_icon"))
+            .ok()
+            .filter(|file| file.id.0 != 0),
     })
 }
 
@@ -124,7 +131,7 @@ mod tests {
             "supports_user_chats": true, "supports_group_chats": true,
             "request_write_access": true, "is_added": false,
             "show_in_attachment_menu": true, "show_in_side_menu": false,
-            "default_icon": {"@type": "file", "id": 7}
+            "default_icon": {"@type": "file", "id": 7, "local": {"path": "/tmp/i.svg", "is_downloading_completed": true}}
         });
         let bot = parse_attachment_menu_bot(&value).unwrap();
         assert_eq!(bot.bot_user_id, 42);
@@ -135,6 +142,15 @@ mod tests {
         assert!(!bot.supports_chat(AttachChatKind::SelfChat));
         assert!(bot.request_write_access);
         assert!(!bot.is_added);
+        let icon = bot.icon.as_ref().unwrap();
+        assert_eq!(icon.id.0, 7);
+        assert_eq!(icon.usable_path(), Some("/tmp/i.svg"));
+        assert!(
+            parse_attachment_menu_bot(&json!({"bot_user_id": 1}))
+                .unwrap()
+                .icon
+                .is_none()
+        );
         assert!(parse_attachment_menu_bot(&json!({"name": "x"})).is_none());
         let list = parse_attachment_menu_bots(&json!({"bots": [value, {"bot_user_id": 0}]}));
         assert_eq!(list.len(), 1);
