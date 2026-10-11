@@ -205,6 +205,8 @@ pub struct MessageActions {
     pub can_edit_scheduling_state: bool,
     /// B15: `getPollVoteStatistics` works (poll creator / admin view).
     pub can_get_poll_vote_statistics: bool,
+    /// `getMessageStatistics` / `getMessagePublicForwards` work.
+    pub can_get_statistics: bool,
     /// "Reply in Another Chat" is offered.
     pub can_be_replied_in_another_chat: bool,
     /// An admin may add or edit a fact check (`setMessageFactCheck`).

@@ -99,6 +99,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// both keep the target in `Session`; the UI then fetches the panel
     /// data through the driver.
     pub fn set_info_panel(&mut self, target: Option<InfoPanelTarget>) {
+        // The statistics panel opens on the chat overview.
+        if let Some(InfoPanelTarget::Statistics(chat_id)) = target {
+            self.session.groups.stats.reset(chat_id);
+        }
         self.session.users_state.open_info_panel = target;
     }
 

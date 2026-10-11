@@ -15,6 +15,7 @@ pub mod requests_group_stickers;
 pub mod requests_payments;
 pub mod requests_premium;
 pub mod requests_privacy;
+pub mod requests_statistics;
 pub mod requests_story;
 pub mod requests_story_insights;
 pub mod story_areas;

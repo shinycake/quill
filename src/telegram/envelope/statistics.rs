@@ -180,6 +180,21 @@ pub struct SupergroupStatistics {
     pub top_inviters: Vec<ChatStatisticsInviterInfo>,
 }
 
+/// `messageStatistics` (schema line 10617): the two charts of a channel
+/// post.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageStatisticsView {
+    pub interaction_graph: StatisticalGraph,
+    pub reaction_graph: StatisticalGraph,
+}
+
+pub(crate) fn parse_message_statistics(value: &Value) -> Result<MessageStatisticsView, ParseError> {
+    Ok(MessageStatisticsView {
+        interaction_graph: parse_statistical_graph(value.get("message_interaction_graph"))?,
+        reaction_graph: parse_statistical_graph(value.get("message_reaction_graph"))?,
+    })
+}
+
 /// Phase D2: `ChatStatistics` (TDLib 1.8.67) — the `getChatStatistics`
 /// response (`schema/td_api.tl:15760`). Revenue/star variants stay out of
 /// this slice.

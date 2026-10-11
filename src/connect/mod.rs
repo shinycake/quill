@@ -65,6 +65,7 @@ mod settings;
 mod settings_account;
 mod share;
 mod share_content;
+mod stats;
 mod stickers;
 mod stories;
 mod story_insights;

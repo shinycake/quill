@@ -147,6 +147,7 @@ pub mod spell_download;
 pub mod spell_win;
 pub mod spellcheck;
 pub mod star_packs;
+pub mod stat_chart;
 pub mod state;
 pub mod sticker_playback;
 pub mod sticker_set_box;

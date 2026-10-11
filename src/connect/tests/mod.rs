@@ -64,6 +64,7 @@ mod share_content;
 mod shared_media_tabs;
 mod signin_polish;
 mod sponsored;
+mod stats;
 mod sticker_tabs;
 mod stories;
 mod story_insights;

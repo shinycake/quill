@@ -31,6 +31,8 @@ pub mod order {
     /// "Add Fact Check" / "Edit Fact Check" follows Edit.
     pub const FACT_CHECK: u8 = 21;
     pub const PIN: u8 = 30;
+    /// "Statistics" of a channel post follows Pin (tdesktop).
+    pub const STATISTICS: u8 = 31;
     /// First slot of the media block; each action adds its index.
     pub const MEDIA: u8 = 32;
     pub const COPY_TEXT: u8 = 40;

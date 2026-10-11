@@ -545,6 +545,23 @@ impl QuillApp {
                 }
             );
         }
+        // "Statistics" of a channel post (tdesktop `AddViewStatisticsAction`;
+        // TDLib allows it when `messageProperties.can_get_statistics`).
+        if message.id.0 > 0 && allows(false, |a| a.can_get_statistics) {
+            item!(
+                quill::message_menu::order::STATISTICS,
+                gpui_kit::assets::IconName::ChartPie,
+                "menu-statistics",
+                "Statistics",
+                this,
+                window,
+                cx,
+                {
+                    this.message_ui.menu = None;
+                    this.open_message_statistics_panel(chat_id, message_id, window, cx);
+                }
+            );
+        }
         // Channel-post comments and group reply threads: `getMessageThread`
         // (schema 1.8.67, line 11566) gated by
         // `messageProperties.can_get_message_thread`.

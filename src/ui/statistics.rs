@@ -1,13 +1,24 @@
-//! channel statistics panel.
+//! The statistics panel of a channel or group: overview numbers with
+//! their change, every chart TDLib returns, recent posts (channels) or
+//! top members (groups); a post or story opens its own page
+//! (`statistics_posts.rs`). tdesktop: `info/statistics/`.
 
 use super::app::QuillApp;
-use super::*;
+use super::chat_row::chat_avatar;
+use super::chat_theme::text_muted;
+use super::statistics_graph::{OverviewCell, overview_grid, stat_graph_block};
 use gpui_kit::component::button::*;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::state::ChatStatisticsFetch;
-use quill::telegram::envelope::{ChatKind, ChatStatistics, StatisticalGraph, StatisticalValue};
+use quill::local_path::sandboxed_display_path;
+use quill::stat_chart::{ChartKind, day_month_year, percent_label};
+use quill::state::{ChatStatisticsFetch, InfoPanelTarget, StatsPage};
+use quill::telegram::envelope::{
+    ChannelStatistics, ChatKind, ChatStatistics, StatisticalGraph, SupergroupStatistics,
+};
 
 /// Compact view-count formatting for broadcast posts (`👁 1.2K`, `👁 3.4M`).
 pub(super) fn format_view_count(count: i32) -> String {
@@ -35,377 +46,483 @@ pub(super) fn format_stat_count(value: f64) -> String {
     }
 }
 
-/// Phase D2: one statistics row — muted label, value with growth vs the
-/// previous period, e.g. "12.4K (+5.6%)".
-pub(super) fn stats_value_row(label: &str, value: &StatisticalValue) -> Div {
-    div()
-        .flex()
-        .flex_row()
-        .justify_between()
-        .gap_2()
-        .child(
-            div()
-                .text_sm()
-                .text_color(text_muted())
-                .child(label.to_string()),
-        )
-        .child(div().text_sm().child(format!(
-            "{} ({:+.1}%)",
-            format_stat_count(value.value),
-            value.growth_rate_percentage
-        )))
-}
-
-/// Phase D2: "Sep 19" from a unix timestamp (TDLib `dateRange`), UTC.
-pub(super) fn format_statistics_day(unix: i32) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    // Howard Hinnant's civil_from_days, epoch-shifted to 1970-01-01.
-    let days = (unix as i64).div_euclid(86400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    format!("{} {d}", MONTHS[(m - 1) as usize])
-}
-
-/// Phase D2: trend sparkline from a `statisticalGraphData` `json_data`
-/// payload. TDLib graph JSON:
-/// `{"columns":[["x",t1,...],["y0",v1,...],...],"types":{"x":"x","y0":"line"}}`.
-/// Takes the first non-"x" numeric column. `None` when there is no usable
-/// series — the graph row is then omitted, never a placeholder.
-pub(super) fn sparkline_from_graph_json(json_data: &str) -> Option<String> {
-    const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let parsed: serde_json::Value = serde_json::from_str(json_data).ok()?;
-    let columns = parsed.get("columns")?.as_array()?;
-    let series = columns.iter().find_map(|column| {
-        let column = column.as_array()?;
-        let name = column.first()?.as_str()?;
-        if name == "x" {
-            return None;
-        }
-        let values: Vec<f64> = column[1..].iter().filter_map(|v| v.as_f64()).collect();
-        (!values.is_empty()).then_some(values)
-    })?;
-    let min = series.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = series.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let span = (max - min).max(f64::EPSILON);
-    Some(
-        series
-            .iter()
-            .map(|value| {
-                let level = ((value - min) / span * 7.0).round() as usize;
-                BLOCKS[level.min(7)]
-            })
-            .collect(),
-    )
-}
-
-/// Phase D2: one labeled graph row. `Data` with a usable series renders a
-/// sparkline; `Async` is still processing server-side; `Error` shows the
-/// server text; a `Data` payload without a usable series is omitted
-/// (`None`).
+/// A graph outside the statistics panel, drawn as a line chart (poll
+/// votes; tdesktop draws those as `Linear`).
 pub(super) fn stats_graph_row(
     label: &str,
     graph: &StatisticalGraph,
-    cx: &mut Context<QuillApp>,
-) -> Option<Div> {
-    let status: Option<String> = match graph {
-        StatisticalGraph::Data {
-            json_data,
-            zoom_token: _,
-        } => {
-            return sparkline_from_graph_json(json_data).map(|spark| {
-                div()
-                    .flex()
-                    .flex_row()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(text_muted())
-                            .child(label.to_string()),
-                    )
-                    .child(div().text_xs().child(spark))
-            });
-        }
-        StatisticalGraph::Async { token: _ } => {
-            Some("Still processing — check back later.".to_string())
-        }
-        StatisticalGraph::Error { error_message } => Some(format!("Graph error: {error_message}")),
-    };
-    status.map(|text| {
-        div()
-            .flex()
-            .flex_row()
-            .justify_between()
-            .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(text_muted())
-                    .child(label.to_string()),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(text),
-            )
-    })
+    _cx: &mut Context<QuillApp>,
+) -> Option<AnyElement> {
+    let id = format!("graph-{}", label.to_lowercase().replace(' ', "-"));
+    stat_graph_block(&id, label, graph, ChartKind::Linear)
+}
+
+/// `1 message` / `2 messages`.
+pub(super) fn plural(count: i32, one: &str, other: &str) -> String {
+    let count_text = quill::stat_chart::format_decimal(i64::from(count));
+    if count == 1 {
+        format!("{count_text} {one}")
+    } else {
+        format!("{count_text} {other}")
+    }
+}
+
+/// tdesktop `FormatText`: the non-zero parts joined with commas.
+fn join_counts(parts: &[(i32, &str, &str)]) -> String {
+    parts
+        .iter()
+        .filter(|(count, _, _)| *count > 0)
+        .map(|(count, one, other)| plural(*count, one, other))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub(super) fn section_title(text: impl Into<SharedString>) -> Div {
+    div().text_sm().font_semibold().child(text.into())
+}
+
+pub(super) fn divider(cx: &App) -> Div {
+    div().h(px(1.)).w_full().bg(cx.theme().border)
 }
 
 impl QuillApp {
-    /// Phase D2: the channel/group statistics view (`getChatStatistics`,
-    /// schema 1.8.67 line 15760), opened from the info panel when
-    /// `supergroupFullInfo.can_get_statistics` is true. Honest about
-    /// absent data: loading / error / still-processing states render as
-    /// text, and graphs without a usable series are omitted — no
-    /// placeholder numbers anywhere.
+    /// The statistics panel of `chat_id`: the overview, or the page of a
+    /// post or story opened from it.
     pub(super) fn chat_statistics_panel(&self, chat_id: i64, cx: &mut Context<Self>) -> AnyElement {
+        let page = self
+            .session()
+            .map(|s| s.groups.stats.page(chat_id))
+            .unwrap_or_default();
+        let body = match page {
+            StatsPage::Overview => self.statistics_overview(chat_id, cx),
+            StatsPage::Message(message_id) => self.message_stats_page(chat_id, message_id, cx),
+            StatsPage::Story(story_id) => self.story_stats_page(chat_id, story_id, cx),
+        };
+        div()
+            .id("statistics-panel")
+            .flex()
+            .flex_col()
+            .gap_4()
+            .p_3()
+            .child(body)
+            .into_any_element()
+    }
+
+    fn statistics_overview(&self, chat_id: i64, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let (title, is_channel) = session
+        let is_channel = session
             .and_then(|s| s.chats.get(&chat_id))
-            .map(|chat| {
-                let is_channel = matches!(
+            .is_some_and(|chat| {
+                matches!(
                     chat.kind,
                     ChatKind::Supergroup {
                         is_channel: true,
                         ..
                     }
-                );
-                (chat.title.clone(), is_channel)
-            })
-            .unwrap_or_else(|| (format!("Chat {chat_id}"), false));
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .p_4()
-            .child(div().text_lg().font_semibold().child(title))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if is_channel {
-                        "Channel statistics"
-                    } else {
-                        "Group statistics"
-                    }),
-            );
+                )
+            });
         match session.and_then(|s| s.groups.chat_statistics.get(&chat_id).cloned()) {
-            None | Some(ChatStatisticsFetch::Loading) => {
-                body = body.child(
+            None | Some(ChatStatisticsFetch::Loading) => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap_2()
+                .py_6()
+                .child(Spinner::new())
+                .child(div().text_sm().font_semibold().child("Loading statistics…"))
+                .child(
                     div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Loading statistics…"),
-                );
-            }
-            Some(ChatStatisticsFetch::Failed(message)) => {
-                let retry_chat = chat_id;
-                body = body.child(div().text_sm().child(message)).child(
+                        .text_xs()
+                        .text_color(text_muted())
+                        .text_center()
+                        .child("It can take a few moments to put your statistics together."),
+                )
+                .into_any_element(),
+            Some(ChatStatisticsFetch::Failed(message)) => div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().text_sm().child(message))
+                .child(
                     Button::new("statistics-retry")
                         .label("Retry")
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.refresh_statistics(retry_chat, cx);
+                            this.refresh_statistics(chat_id, cx);
                         })),
-                );
-            }
-            Some(ChatStatisticsFetch::Loaded(statistics)) => {
-                body = self.statistics_body(chat_id, &statistics, is_channel, cx);
-            }
+                )
+                .into_any_element(),
+            Some(ChatStatisticsFetch::Loaded(statistics)) => self
+                .statistics_body(chat_id, &statistics, is_channel, cx)
+                .into_any_element(),
         }
-        body.into_any_element()
     }
 
-    /// Phase D2: the loaded-statistics body, shared by the channel and
-    /// supergroup variants.
-    pub(super) fn statistics_body(
+    /// The loaded statistics, channel or group.
+    fn statistics_body(
         &self,
         chat_id: i64,
         statistics: &ChatStatistics,
         is_channel: bool,
         cx: &mut Context<Self>,
     ) -> Div {
-        let session = self.session();
-        let display_name = |user_id: i64| -> String {
-            session
-                .and_then(|s| s.user(user_id))
-                .map(|u| u.display_name())
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| format!("User {user_id}"))
+        let (start, end) = match statistics {
+            ChatStatistics::Channel(s) => (s.period_start, s.period_end),
+            ChatStatistics::Supergroup(s) => (s.period_start, s.period_end),
         };
-        let noun = if is_channel { "Subscribers" } else { "Members" };
-        let mut body = div();
-        let (period_start, period_end, values, graphs, footer) = match statistics {
-            ChatStatistics::Channel(stats) => {
-                let values = vec![
-                    (noun, stats.member_count),
-                    ("Mean views", stats.mean_message_view_count),
-                    ("Mean shares", stats.mean_message_share_count),
-                    ("Mean reactions", stats.mean_message_reaction_count),
-                    ("Mean story views", stats.mean_story_view_count),
-                    ("Mean story shares", stats.mean_story_share_count),
-                    ("Mean story reactions", stats.mean_story_reaction_count),
-                ];
-                let graphs: Vec<(&str, &StatisticalGraph)> = vec![
-                    ("Members", &stats.member_count_graph),
-                    ("Joins", &stats.join_graph),
-                    ("Views by hour", &stats.view_count_by_hour_graph),
-                    ("Message interactions", &stats.message_interaction_graph),
-                ];
-                let mut footer: Vec<String> = stats
-                    .recent_interactions
-                    .iter()
-                    .map(|info| {
-                        let kind = match info.object {
-                            quill::telegram::envelope::ChatStatisticsObject::Message {
-                                message_id,
-                            } => format!("Post {message_id}"),
-                            quill::telegram::envelope::ChatStatisticsObject::Story { story_id } => {
-                                format!("Story {story_id}")
-                            }
-                        };
-                        format!(
-                            "{kind} — {} views · {} forwards · {} reactions",
-                            format_stat_count(info.view_count as f64),
-                            format_stat_count(info.forward_count as f64),
-                            format_stat_count(info.reaction_count as f64),
-                        )
-                    })
-                    .collect();
-                if footer.is_empty() {
-                    footer.push("No recent interactions yet.".to_string());
-                }
-                (
-                    stats.period_start,
-                    stats.period_end,
-                    values,
-                    graphs,
-                    ("Recent interactions".to_string(), footer),
+        let mut body = div().flex().flex_col().gap_4().child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(section_title("Overview"))
+                        .when(start > 0 && end > 0, |d| {
+                            d.child(div().text_xs().text_color(text_muted()).child(format!(
+                                "{} \u{2014} {}",
+                                day_month_year(i64::from(start)),
+                                day_month_year(i64::from(end))
+                            )))
+                        }),
                 )
+                .child(overview_grid(overview_cells(statistics, is_channel))),
+        );
+        if let ChatStatistics::Channel(stats) = statistics {
+            body = body.child(overview_grid(channel_story_cells(stats)));
+        }
+        for (id, title, graph, kind) in chart_slots(statistics) {
+            if let Some(section) = self.stat_graph_section(
+                chat_id,
+                &format!("stats-{chat_id}-{id}"),
+                title,
+                graph,
+                kind,
+                cx,
+            ) {
+                body = body.child(divider(cx)).child(section);
+            }
+        }
+        match statistics {
+            ChatStatistics::Channel(stats) => {
+                if let Some(section) = self.recent_posts_section(chat_id, stats, cx) {
+                    body = body.child(divider(cx)).child(section);
+                }
             }
             ChatStatistics::Supergroup(stats) => {
-                let values = vec![
-                    (noun, stats.member_count),
-                    ("Messages", stats.message_count),
-                    ("Viewers", stats.viewer_count),
-                    ("Senders", stats.sender_count),
-                ];
-                let graphs: Vec<(&str, &StatisticalGraph)> = vec![
-                    ("Members", &stats.member_count_graph),
-                    ("Joins", &stats.join_graph),
-                    ("Messages by day", &stats.day_graph),
-                    ("Messages by week", &stats.week_graph),
-                ];
-                let mut footer: Vec<String> = Vec::new();
-                for sender in &stats.top_senders {
-                    footer.push(format!(
-                        "{} — {} messages",
-                        display_name(sender.user_id),
-                        format_stat_count(sender.sent_message_count as f64),
-                    ));
+                for section in self.top_member_sections(stats, cx) {
+                    body = body.child(divider(cx)).child(section);
                 }
-                for admin in &stats.top_administrators {
-                    footer.push(format!(
-                        "{} — {} deleted · {} banned · {} restricted",
-                        display_name(admin.user_id),
-                        admin.deleted_message_count,
-                        admin.banned_user_count,
-                        admin.restricted_user_count,
-                    ));
-                }
-                for inviter in &stats.top_inviters {
-                    footer.push(format!(
-                        "{} — {} added",
-                        display_name(inviter.user_id),
-                        inviter.added_member_count,
-                    ));
-                }
-                if footer.is_empty() {
-                    footer.push("No top contributors yet.".to_string());
-                }
-                (
-                    stats.period_start,
-                    stats.period_end,
-                    values,
-                    graphs,
-                    (
-                        "Top senders · administrators · inviters".to_string(),
-                        footer,
-                    ),
-                )
-            }
-        };
-        body = body.child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(format!(
-                    "{} – {}",
-                    format_statistics_day(period_start),
-                    format_statistics_day(period_end)
-                )),
-        );
-        for (label, value) in values {
-            body = body.child(stats_value_row(label, &value));
-        }
-        body = body.child(
-            div()
-                .text_xs()
-                .font_semibold()
-                .text_color(cx.theme().muted_foreground)
-                .child("Notifications enabled")
-                .child(div().text_sm().child(match statistics {
-                    ChatStatistics::Channel(stats) => {
-                        format!("{:.1}%", stats.enabled_notifications_percentage)
-                    }
-                    ChatStatistics::Supergroup(_) => "—".to_string(),
-                })),
-        );
-        for (label, graph) in graphs {
-            if let Some(row) = stats_graph_row(label, graph, cx) {
-                body = body.child(row);
             }
         }
-        let (footer_title, footer_lines) = footer;
-        let mut footer_div = div().flex().flex_col().gap_1().child(
-            div()
-                .text_xs()
-                .font_semibold()
-                .text_color(cx.theme().muted_foreground)
-                .child(footer_title),
-        );
-        for line in footer_lines {
-            footer_div = footer_div.child(div().text_sm().child(line));
-        }
-        body = body.child(footer_div);
-        let refresh_chat = chat_id;
         body.child(
             Button::new("statistics-refresh")
                 .label("Refresh")
                 .ghost()
+                .small()
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.refresh_statistics(refresh_chat, cx);
+                    this.refresh_statistics(chat_id, cx);
                 })),
         )
+    }
+
+    /// "Top members", "Top admins", "Top inviters" of a group; a row
+    /// opens the member's profile.
+    fn top_member_sections(
+        &self,
+        stats: &SupergroupStatistics,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let senders: Vec<(i64, String)> = stats
+            .top_senders
+            .iter()
+            .map(|s| {
+                (
+                    s.user_id,
+                    join_counts(&[
+                        (s.sent_message_count, "message", "messages"),
+                        (
+                            s.average_character_count,
+                            "symbol per message",
+                            "symbols per message",
+                        ),
+                    ]),
+                )
+            })
+            .collect();
+        let admins: Vec<(i64, String)> = stats
+            .top_administrators
+            .iter()
+            .map(|a| {
+                (
+                    a.user_id,
+                    join_counts(&[
+                        (a.deleted_message_count, "deletion", "deletions"),
+                        (a.banned_user_count, "ban", "bans"),
+                        (a.restricted_user_count, "restriction", "restrictions"),
+                    ]),
+                )
+            })
+            .collect();
+        let inviters: Vec<(i64, String)> = stats
+            .top_inviters
+            .iter()
+            .map(|i| {
+                (
+                    i.user_id,
+                    plural(i.added_member_count, "invitation", "invitations"),
+                )
+            })
+            .collect();
+        [
+            ("top-members", "Top members", senders),
+            ("top-admins", "Top admins", admins),
+            ("top-inviters", "Top inviters", inviters),
+        ]
+        .into_iter()
+        .filter(|(_, _, rows)| !rows.is_empty())
+        .map(|(id, title, rows)| self.member_list(id, title, rows, cx))
+        .collect()
+    }
+
+    fn member_list(
+        &self,
+        id: &'static str,
+        title: &'static str,
+        rows: Vec<(i64, String)>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let session = self.session();
+        let roots = self.media_display_roots();
+        let mut list = div().flex().flex_col().gap_1().child(section_title(title));
+        for (index, (user_id, status)) in rows.into_iter().enumerate() {
+            let name = session
+                .and_then(|s| s.user(user_id))
+                .map(|u| u.display_name())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| format!("User {user_id}"));
+            let photo = session
+                .and_then(|s| s.user_photo_path(user_id))
+                .and_then(|path| sandboxed_display_path(path, &roots));
+            list = list.child(
+                stats_row(SharedString::from(format!("{id}-{index}")), cx)
+                    .aria_label(SharedString::from(name.clone()))
+                    .child(chat_avatar(&name, photo.as_deref(), 32.))
+                    .child(row_text(name, status))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_info_panel_target(InfoPanelTarget::User(user_id), window, cx);
+                    })),
+            );
+        }
+        list.into_any_element()
     }
 
     /// Phase D2: explicit statistics refresh — clears the cached result
     /// and re-sends `getChatStatistics`.
     pub(super) fn refresh_statistics(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+        let is_dark = super::chat_theme::is_dark_palette();
         if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.refresh_chat_statistics(ChatId(chat_id), false)
+            && let Err(err) = live
+                .driver
+                .refresh_chat_statistics(ChatId(chat_id), is_dark)
         {
             self.connection.status_note = format!("statistics refresh failed: {err:?}");
         }
         cx.notify();
+    }
+}
+
+/// A clickable row of a statistics list: avatar or preview, then text.
+pub(super) fn stats_row(id: SharedString, cx: &App) -> Stateful<Div> {
+    let selector = id.to_string();
+    div()
+        .id(ElementId::Name(id))
+        .debug_selector(|| selector)
+        .role(gpui_kit::Role::Button)
+        .tab_index(0)
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_1()
+        .py_1()
+        .rounded_md()
+        .hover(|style| style.bg(cx.theme().secondary_hover))
+}
+
+/// Name over a muted status line, truncating.
+pub(super) fn row_text(title: impl Into<SharedString>, status: impl Into<SharedString>) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w_0()
+        .child(
+            div()
+                .text_sm()
+                .truncate()
+                .child(super::bidi_line::one_line_plain(title.into().to_string())),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(text_muted())
+                .truncate()
+                .child(status.into()),
+        )
+}
+
+/// The first overview: followers, notifications, views per post and
+/// per story for a channel; members, messages, viewing and posting
+/// members for a group.
+fn overview_cells(statistics: &ChatStatistics, is_channel: bool) -> Vec<OverviewCell> {
+    match statistics {
+        ChatStatistics::Channel(s) => vec![
+            OverviewCell::stat(
+                &s.member_count,
+                if is_channel { "Followers" } else { "Members" },
+            ),
+            OverviewCell::plain(
+                percent_label(s.enabled_notifications_percentage),
+                "Enabled notifications",
+            ),
+            OverviewCell::stat(&s.mean_message_view_count, "Views per post"),
+            OverviewCell::stat(&s.mean_story_view_count, "Views per story"),
+        ],
+        ChatStatistics::Supergroup(s) => vec![
+            OverviewCell::stat(&s.member_count, "Members"),
+            OverviewCell::stat(&s.message_count, "Messages"),
+            OverviewCell::stat(&s.viewer_count, "Viewing members"),
+            OverviewCell::stat(&s.sender_count, "Posting members"),
+        ],
+    }
+}
+
+/// A channel's second overview: shares and reactions per post and per
+/// story (reactions per post only when the channel has any).
+fn channel_story_cells(s: &ChannelStatistics) -> Vec<OverviewCell> {
+    let post_reactions = s.mean_message_reaction_count.value != 0.0
+        || s.mean_message_reaction_count.previous_value != 0.0;
+    let mut cells = vec![
+        OverviewCell::stat(&s.mean_message_share_count, "Shares per post"),
+        OverviewCell::stat(&s.mean_story_share_count, "Shares per story"),
+    ];
+    if post_reactions {
+        cells.push(OverviewCell::stat(
+            &s.mean_message_reaction_count,
+            "Reactions per post",
+        ));
+    }
+    cells.push(OverviewCell::stat(
+        &s.mean_story_reaction_count,
+        "Reactions per story",
+    ));
+    cells
+}
+
+/// Every chart of the statistics, with its title and how tdesktop draws
+/// it (`FillStatistic`).
+fn chart_slots(
+    statistics: &ChatStatistics,
+) -> Vec<(&'static str, &'static str, &StatisticalGraph, ChartKind)> {
+    use ChartKind::*;
+    match statistics {
+        ChatStatistics::Channel(s) => vec![
+            ("growth", "Growth", &s.member_count_graph, Linear),
+            ("followers", "Followers", &s.join_graph, Linear),
+            ("mute", "Notifications", &s.mute_graph, Linear),
+            (
+                "hours",
+                "Views by hours (UTC)",
+                &s.view_count_by_hour_graph,
+                Linear,
+            ),
+            (
+                "view-sources",
+                "Views by source",
+                &s.view_count_by_source_graph,
+                StackBar,
+            ),
+            (
+                "join-sources",
+                "New followers by source",
+                &s.join_by_source_graph,
+                StackBar,
+            ),
+            ("languages", "Languages", &s.language_graph, StackLinear),
+            (
+                "interactions",
+                "Interactions",
+                &s.message_interaction_graph,
+                DoubleLinear,
+            ),
+            (
+                "iv",
+                "IV interactions",
+                &s.instant_view_interaction_graph,
+                DoubleLinear,
+            ),
+            ("reactions", "Reactions", &s.message_reaction_graph, Bar),
+            (
+                "story-interactions",
+                "Story interactions",
+                &s.story_interaction_graph,
+                DoubleLinear,
+            ),
+            (
+                "story-reactions",
+                "Story reactions",
+                &s.story_reaction_graph,
+                Bar,
+            ),
+        ],
+        ChatStatistics::Supergroup(s) => vec![
+            ("growth", "Growth", &s.member_count_graph, Linear),
+            ("members", "Group members", &s.join_graph, Linear),
+            (
+                "join-sources",
+                "New members by source",
+                &s.join_by_source_graph,
+                StackBar,
+            ),
+            (
+                "languages",
+                "Members' primary language",
+                &s.language_graph,
+                StackLinear,
+            ),
+            ("messages", "Messages", &s.message_content_graph, StackBar),
+            ("actions", "Actions", &s.action_graph, DoubleLinear),
+            ("hours", "Views by hours", &s.day_graph, Linear),
+            ("weekdays", "Top days of week", &s.week_graph, StackLinear),
+        ],
+    }
+}
+
+#[cfg(all(test, feature = "demo-capture"))]
+#[path = "statistics_fixture.rs"]
+pub(crate) mod fixture;
+
+#[cfg(all(test, feature = "demo-capture"))]
+#[path = "statistics_tests.rs"]
+mod ui_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::{join_counts, plural};
+
+    #[test]
+    fn member_rows_join_the_non_zero_counts() {
+        assert_eq!(plural(1, "ban", "bans"), "1 ban");
+        assert_eq!(plural(1200, "ban", "bans"), "1,200 bans");
+        assert_eq!(
+            join_counts(&[
+                (3, "deletion", "deletions"),
+                (0, "ban", "bans"),
+                (1, "restriction", "restrictions")
+            ]),
+            "3 deletions, 1 restriction"
+        );
+        assert_eq!(join_counts(&[(0, "ban", "bans")]), "");
     }
 }

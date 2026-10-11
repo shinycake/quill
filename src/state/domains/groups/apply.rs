@@ -202,6 +202,24 @@ impl Session {
                         .insert(chat_id.0, ChatStatisticsFetch::Loaded(Box::new(statistics)));
                 }
             }
+            GroupsPayload::MessageStatistics { statistics } => {
+                if let Some(RequestPurpose::Groups(GroupsPurpose::GetMessageStatistics {
+                    chat_id,
+                    message_id,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.groups
+                        .stats
+                        .accept_message_statistics(chat_id, message_id, statistics);
+                }
+            }
+            GroupsPayload::StatisticalGraph { graph } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStatisticalGraph)
+                    && let Some(extra) = extra
+                {
+                    self.groups.stats.accept_graph(extra, graph);
+                }
+            }
             // Phase D3a: `createChatInviteLink` / `editChatInviteLink`
             // answer — the created/updated link, correlated via the
             // pending request's `chat_id`. Upserts into the cached list;

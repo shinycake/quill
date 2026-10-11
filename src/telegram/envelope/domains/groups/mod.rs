@@ -278,6 +278,12 @@ pub enum GroupsPayload {
     /// response carries no chat id; it is resolved from the pending
     /// request in `Session::apply`.
     ChatStatistics { statistics: ChatStatistics },
+    /// `messageStatistics` — the `getMessageStatistics` answer (no ids;
+    /// correlated through the pending request).
+    MessageStatistics { statistics: MessageStatisticsView },
+    /// A bare `StatisticalGraph` — the `getStatisticalGraph` answer for
+    /// an async or zoomed graph.
+    StatisticalGraph { graph: StatisticalGraph },
     /// Phase D3a: `chatInviteLink` response (TDLib 1.8.67, line 2627) —
     /// the created/edited link from `createChatInviteLink` /
     /// `editChatInviteLink`. Correlated to the chat by the request's

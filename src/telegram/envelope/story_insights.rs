@@ -38,6 +38,18 @@ pub enum PublicForwardKind {
 pub struct PublicForwardView {
     pub kind: PublicForwardKind,
     pub date: i32,
+    /// Views of the forwarded message or the repost
+    /// (`interaction_info.view_count`); 0 when unknown.
+    pub view_count: i32,
+}
+
+fn view_count(value: &Value) -> i32 {
+    value
+        .get("interaction_info")
+        .and_then(|info| info.get("view_count"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .sat_i32()
 }
 
 /// `publicForwards` (schema line 7190).
@@ -79,6 +91,7 @@ fn parse_public_forward(value: &Value) -> Option<PublicForwardView> {
                     .and_then(Value::as_i64)
                     .unwrap_or(0)
                     .sat_i32(),
+                view_count: view_count(message),
             })
         }
         "publicForwardStory" => {
@@ -93,6 +106,7 @@ fn parse_public_forward(value: &Value) -> Option<PublicForwardView> {
                     .and_then(Value::as_i64)
                     .unwrap_or(0)
                     .sat_i32(),
+                view_count: view_count(story),
             })
         }
         _ => None,
@@ -163,7 +177,7 @@ mod tests {
         let view = parse_public_forwards(&json!({
             "@type": "publicForwards", "total_count": 3, "next_offset": "n1",
             "forwards": [
-                {"@type": "publicForwardMessage", "message": {"id": 40, "chat_id": -100, "date": 11}},
+                {"@type": "publicForwardMessage", "message": {"id": 40, "chat_id": -100, "date": 11, "interaction_info": {"view_count": 77}}},
                 {"@type": "publicForwardStory", "story": {"id": 5, "poster_chat_id": -200, "date": 22}},
                 {"@type": "publicForwardFuture"}
             ]
@@ -186,6 +200,8 @@ mod tests {
             }
         );
         assert_eq!(view.forwards[1].date, 22);
+        assert_eq!(view.forwards[0].view_count, 77);
+        assert_eq!(view.forwards[1].view_count, 0);
     }
 
     #[test]
