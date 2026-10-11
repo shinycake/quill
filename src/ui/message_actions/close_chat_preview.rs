@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::go_to_message::{GoToTarget, MessageListContext, go_to_message_offered, go_to_target};
 
 impl QuillApp {
     /// Slice CL: dismiss the peek preview (click anywhere, the release
@@ -96,20 +97,41 @@ impl QuillApp {
             body = body.child(div().text_sm().text_color(danger()).child(failed));
         } else if !lines.is_empty() {
             for (name, text, id) in lines {
-                body = body.child(
-                    div()
-                        .id(("chat-preview-row", id))
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .text_xs()
-                                .font_semibold()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(name),
-                        )
-                        .child(div().text_sm().child(text)),
-                );
+                let message_id = MessageId(id as i64);
+                let row = div()
+                    .id(("chat-preview-row", id))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(name),
+                    )
+                    .child(div().text_sm().child(text));
+                // Telegram Desktop's "Go To Message" on a peeked message
+                // (`Context::ChatPreview`).
+                let row =
+                    if go_to_message_offered(MessageListContext::ChatPreview, message_id, false) {
+                        let owner = cx.entity().downgrade();
+                        row.context_menu(move |menu, _, _| {
+                            let owner = owner.clone();
+                            menu.item(
+                                gpui_kit::component::menu::PopupMenuItem::new("Go To Message")
+                                    .icon(gpui_kit::assets::IconName::MessageSquare)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = owner.update(cx, |this, cx| {
+                                            this.go_to_message_in(chat_id, message_id, window, cx);
+                                        });
+                                    }),
+                            )
+                        })
+                        .into_any_element()
+                    } else {
+                        row.into_any_element()
+                    };
+                body = body.child(row);
             }
         } else if in_flight {
             body = body.child(
@@ -873,6 +895,23 @@ impl QuillApp {
         self.sync_command_menu(cx);
         self.sync_inline_mode(cx);
         cx.notify();
+    }
+
+    /// Open `chat_id` if it is not showing, then jump to and highlight the
+    /// message (the peek preview's "Go To Message").
+    pub(in crate::ui) fn go_to_message_in(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_chat_preview(cx);
+        let open = self.session().and_then(|session| session.open_chat);
+        if let GoToTarget::OtherChat { chat_id, .. } = go_to_target(open, chat_id, message_id) {
+            self.select_listed_chat(chat_id, window, cx);
+        }
+        self.jump_to_pinned_message(message_id, cx);
     }
 
     pub(in crate::ui) fn jump_to_pinned_message(
