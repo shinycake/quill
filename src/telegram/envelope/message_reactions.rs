@@ -74,6 +74,8 @@ pub struct MessageReactions {
     /// `can_get_added_reactions`: the reactor list is available through
     /// `getMessageAddedReactions` (the message menu's "N Reacted" row).
     pub can_get_added_reactions: bool,
+    /// Top senders of Stars (`paid_reactors`), most Stars first.
+    pub paid_reactors: Vec<crate::paid_reaction::PaidReactor>,
 }
 
 impl MessageReactions {
@@ -268,10 +270,38 @@ pub(crate) fn parse_message_reactions(value: Option<&Value>) -> Option<MessageRe
                     .get("can_get_added_reactions")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                paid_reactors: parse_paid_reactors(value.get("paid_reactors")),
             })
         }
         _ => None,
     }
+}
+
+/// `paidReactor` list of a `messageReactions` object, most Stars first.
+pub(crate) fn parse_paid_reactors(value: Option<&Value>) -> Vec<crate::paid_reaction::PaidReactor> {
+    let Some(list) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let flag = |v: &Value, key: &str| v.get(key).and_then(Value::as_bool).unwrap_or(false);
+    let mut out: Vec<crate::paid_reaction::PaidReactor> = list
+        .iter()
+        .map(|item| {
+            let is_anonymous = flag(item, "is_anonymous");
+            crate::paid_reaction::PaidReactor {
+                sender: if is_anonymous {
+                    None
+                } else {
+                    super::message::parse_message_sender(item.get("sender_id")).ok()
+                },
+                star_count: item.get("star_count").and_then(Value::as_i64).unwrap_or(0),
+                is_top: flag(item, "is_top"),
+                is_me: flag(item, "is_me"),
+                is_anonymous,
+            }
+        })
+        .collect();
+    out.sort_by_key(|reactor| std::cmp::Reverse(reactor.star_count));
+    out
 }
 
 pub(crate) fn parse_message_reaction(value: &Value) -> Option<MessageReaction> {

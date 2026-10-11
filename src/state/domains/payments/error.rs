@@ -53,6 +53,31 @@ impl Session {
                 | RequestPurpose::GetStarGiveawayOptions
                 | RequestPurpose::LaunchPrepaidGiveaway,
             ) => self.apply_giveaway_error(err, pending),
+            Some(RequestPurpose::GetStarPackOptions) => {
+                let packs = &mut self.payments.star_packs;
+                packs.loading = false;
+                packs.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
+            }
+            Some(RequestPurpose::Payments(PaymentsPurpose::AddPendingPaidReaction {
+                message_id,
+                stars,
+            })) => {
+                if let Some(chat) = pending.and_then(|p| p.chat_id) {
+                    self.payments.paid.rollback(chat.0, message_id, stars);
+                }
+                self.payments.paid.note =
+                    Some(format!("Couldn't send Stars: {}", error_reason(err)));
+            }
+            Some(RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction { .. })) => {
+                self.payments.paid.note =
+                    Some(format!("Stars were not sent: {}", error_reason(err)));
+            }
+            Some(RequestPurpose::Payments(PaymentsPurpose::RemovePendingPaidReaction {
+                ..
+            })) => {
+                self.payments.paid.note =
+                    Some(format!("Couldn't undo the Stars: {}", error_reason(err)));
+            }
             Some(RequestPurpose::GetGiftTextLimit) => {
                 self.payments.gift_text_length_max = None;
             }

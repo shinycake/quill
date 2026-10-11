@@ -76,6 +76,10 @@ pub struct PaymentsState {
     pub gift_code: Option<GiftCodeLookup>,
     /// Giveaway lookups, payment options and prepaid launches.
     pub giveaway: GiveawayState,
+    /// Star reactions waiting for their Undo window to end.
+    pub paid: crate::paid_reaction::PaidReactions,
+    /// The Star packs listed under "Buy more Stars".
+    pub star_packs: crate::star_packs::StarPacksState,
 }
 
 /// A tapped bank card number and the lookup's progress.
@@ -116,6 +120,8 @@ impl PaymentsState {
             bank_card: None,
             gift_code: None,
             giveaway: GiveawayState::default(),
+            paid: Default::default(),
+            star_packs: Default::default(),
         }
     }
 }

@@ -154,6 +154,7 @@ pub(in crate::ui) fn caption_tail(
         rows_after: keyboard
             || bottom_bar
             || !message.reaction_chips().is_empty()
+            || message.paid_reaction().is_some()
             || message.self_destruct_badge(now_ms).is_some()
             || message.auto_delete_chip(now_ms).is_some(),
         footer_own_line: views || signature,

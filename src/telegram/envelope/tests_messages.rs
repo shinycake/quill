@@ -465,6 +465,7 @@ fn message_interaction_info_and_update_are_typed() {
                 }],
                 are_tags: false,
                 can_get_added_reactions: false,
+                paid_reactors: Vec::new(),
             }),
             ..MessageInteractionInfo::default()
         }),

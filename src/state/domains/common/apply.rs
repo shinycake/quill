@@ -67,6 +67,12 @@ impl Session {
                         _ => Some(false),
                     };
                 }
+                if name == "paid_reaction_star_count_max"
+                    && let OptionValue::Integer(limit) = &value
+                    && *limit > 0
+                {
+                    self.payments.paid.max_stars = Some(*limit);
+                }
                 if name == "gift_text_length_max"
                     && let OptionValue::Integer(limit) = &value
                 {

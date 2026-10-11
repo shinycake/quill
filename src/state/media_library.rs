@@ -122,6 +122,14 @@ impl Session {
         popular: Vec<StoryAvailableReactionView>,
         allow_custom_emoji: bool,
     ) {
+        // The Star reaction is its own flow (`paid_reaction`): note whether
+        // this message's picker offers it.
+        let paid_offered = top
+            .iter()
+            .chain(&recent)
+            .chain(&popular)
+            .any(|view| matches!(view.kind, StoryAvailableReactionKind::Paid));
+        self.payments.paid.offered = paid_offered.then_some((chat_id.0, message_id.0));
         let convert = |views: Vec<StoryAvailableReactionView>| -> Vec<ReactionChoice> {
             views
                 .into_iter()
