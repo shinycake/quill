@@ -30,21 +30,25 @@ pub struct RowMenuFacts<'a> {
     pub live: bool,
 }
 
+/// The profile entry's label for a chat kind; `None` when it has no profile.
+pub fn profile_label(kind: &ChatKind, is_saved_messages: bool) -> Option<&'static str> {
+    if is_saved_messages {
+        return None;
+    }
+    match kind {
+        ChatKind::Private { .. } | ChatKind::Secret { .. } => Some("View profile"),
+        ChatKind::BasicGroup { .. } => Some("View group info"),
+        ChatKind::Supergroup { is_channel, .. } => Some(if *is_channel {
+            "View channel info"
+        } else {
+            "View group info"
+        }),
+        ChatKind::Unknown => None,
+    }
+}
+
 pub fn row_menu_extras(facts: RowMenuFacts<'_>) -> RowMenuExtras {
-    let view_profile = if facts.is_saved_messages {
-        None
-    } else {
-        match facts.kind {
-            ChatKind::Private { .. } | ChatKind::Secret { .. } => Some("View profile"),
-            ChatKind::BasicGroup { .. } => Some("View group info"),
-            ChatKind::Supergroup { is_channel, .. } => Some(if *is_channel {
-                "View channel info"
-            } else {
-                "View group info"
-            }),
-            ChatKind::Unknown => None,
-        }
-    };
+    let view_profile = profile_label(facts.kind, facts.is_saved_messages);
     RowMenuExtras {
         view_profile,
         read_mentions: facts.unread_mentions > 0,

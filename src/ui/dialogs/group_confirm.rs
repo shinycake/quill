@@ -23,9 +23,6 @@ pub enum GroupConfirmAction {
     /// `remove_from_chat_list: true` (Telegram X `Tdlib.deleteChat`),
     /// not the destructive `deleteChat` constructor.
     RemoveFromList,
-    /// Slice CL3: row-menu Report — `reportChat` spam report (schema
-    /// 1.8.67, line 15693).
-    ReportChat,
     /// Slice CL3: row-menu Block/Unblock user —
     /// `setMessageSenderBlockList` (schema 1.8.67, line 14492).
     BlockUser {

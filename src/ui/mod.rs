@@ -147,6 +147,7 @@ mod capture_access;
 mod capture_block;
 mod chat;
 mod chat_bars;
+mod chat_header_menu_ui;
 mod chat_list;
 mod chat_look_ui;
 mod chat_row;

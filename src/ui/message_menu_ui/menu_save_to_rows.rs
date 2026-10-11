@@ -727,8 +727,14 @@ impl QuillApp {
             let dialog = dialog.overlay(true);
             let Some(flow) = this.message_report_flow() else {
                 return dialog
-                    .title(shell::dialog_title("Report message"))
+                    .title(shell::dialog_title("Report"))
                     .on_close(on_close);
+            };
+            // A chat report (the chat menus) carries no message ids.
+            let (report_title, subject) = if flow.message_ids.is_empty() {
+                ("Report chat", "chat")
+            } else {
+                ("Report message", "message")
             };
             let close_button = |label: &'static str| {
                 Button::new("message-report-close")
@@ -749,12 +755,7 @@ impl QuillApp {
             let mut footer = div().flex().justify_end().gap_2();
             match &flow.stage {
                 MessageReportStage::Checking | MessageReportStage::Sending => {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .text_color(text_muted())
-                            .child("Reporting…"),
-                    );
+                    body = body.child(div().text_sm().text_color(text_muted()).child("Reporting…"));
                     footer = footer.child(close_button("Cancel"));
                 }
                 MessageReportStage::PickOption { title, options } => {
@@ -764,7 +765,7 @@ impl QuillApp {
                             .font_semibold()
                             .text_color(text_menu())
                             .child(if title.is_empty() {
-                                "Why are you reporting this message?".to_string()
+                                format!("Why are you reporting this {subject}?")
                             } else {
                                 title.clone()
                             }),
@@ -812,12 +813,9 @@ impl QuillApp {
                         );
                     }
                     body = body
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child("Please help us by telling what is wrong with the message you have selected"),
-                        )
+                        .child(div().text_xs().text_color(text_muted()).child(format!(
+                            "Please help us by telling what is wrong with the {subject}"
+                        )))
                         .child(
                             Textarea::new(&this.message_ui.menu_ui.report_text)
                                 .aria_label(if is_optional {
@@ -859,17 +857,12 @@ impl QuillApp {
                     footer = footer.child(close_button("Close"));
                 }
                 MessageReportStage::Failed(message) => {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .text_color(danger())
-                            .child(message.clone()),
-                    );
+                    body = body.child(div().text_sm().text_color(danger()).child(message.clone()));
                     footer = footer.child(close_button("Close"));
                 }
             }
             dialog
-                .title(shell::dialog_title("Report message"))
+                .title(shell::dialog_title(report_title))
                 .content(shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {

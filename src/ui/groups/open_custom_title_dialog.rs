@@ -330,14 +330,6 @@ impl QuillApp {
                         .driver
                         .remove_chat_from_list(dialog.chat_id)
                         .map(|sent| sent_note(sent, "deleting chat…")),
-                    // Slice CL3: row-menu Report (`reportChat`, schema
-                    // 1.8.67, line 15693). TDLib answers
-                    // `ReportChatResult` asynchronously; the outcome
-                    // surfaces via `Session::report_chat_outcome`.
-                    GroupConfirmAction::ReportChat => live
-                        .driver
-                        .report_chat(dialog.chat_id)
-                        .map(|sent| sent_note(sent, "reporting chat…")),
                     // Slice CL3: row-menu Block/Unblock
                     // (`setMessageSenderBlockList`, schema 1.8.67, line
                     // 14492). TDLib answers `ok`; the new state arrives

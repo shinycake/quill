@@ -81,7 +81,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         text: &str,
         chosen: Option<(String, String, Vec<crate::telegram::envelope::ReportOption>)>,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || message_ids.is_empty() {
+        if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.chats.contains_key(&chat_id.0) {

@@ -137,3 +137,30 @@ fn profile_audio_is_sent_by_file_id() {
     assert_eq!(value["audio"]["audio"]["id"], 12);
     assert_eq!(value["audio"]["performer"], "Artist");
 }
+
+#[test]
+fn a_chat_report_sends_no_message_ids() {
+    let value = parse(&report_chat_messages(
+        RequestId(9),
+        ChatId(-100),
+        "",
+        &[],
+        "",
+    ));
+    assert_eq!(value["@type"], "reportChat");
+    assert_eq!(value["message_ids"], serde_json::json!([]));
+    assert_eq!(value["option_id"], "");
+}
+
+#[test]
+fn read_all_markers_name_the_right_request() {
+    use crate::telegram::requests::{read_all_chat_markers, read_all_chat_poll_votes};
+    let mentions = parse(&read_all_chat_markers(RequestId(1), ChatId(4), false));
+    assert_eq!(mentions["@type"], "readAllChatMentions");
+    assert_eq!(mentions["chat_id"], 4);
+    let reactions = parse(&read_all_chat_markers(RequestId(2), ChatId(4), true));
+    assert_eq!(reactions["@type"], "readAllChatReactions");
+    let votes = parse(&read_all_chat_poll_votes(RequestId(3), ChatId(4)));
+    assert_eq!(votes["@type"], "readAllChatPollVotes");
+    assert_eq!(votes["chat_id"], 4);
+}
