@@ -215,7 +215,12 @@ impl Session {
                 self.apply_star_giveaway_options(options, pending)
             }
             PaymentsPayload::StarPackOptions(options) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
+                    let gift = &mut self.payments.stars_gift;
+                    gift.loading = false;
+                    gift.error = None;
+                    gift.options = options;
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
                     let packs = &mut self.payments.star_packs;
                     packs.loading = false;
                     packs.loaded = true;

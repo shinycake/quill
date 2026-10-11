@@ -161,7 +161,8 @@ impl QuillApp {
         };
         let is_private = session.private_chat_user_id(ChatId(chat_id));
         let is_self = is_private.is_some() && is_private == session.my_user_id;
-        if !chat_look_allowed(is_private.is_some(), is_self) {
+        if !chat_look_allowed(is_private.is_some(), is_self) && !self.boosted_look_allowed(chat_id)
+        {
             return;
         }
         let theme = session.chats_state.chat_theme_names.get(&chat_id).cloned();
@@ -197,8 +198,12 @@ impl QuillApp {
             awaiting: None,
         });
         self.ensure_wallpapers_loaded(cx);
+        let boosted = self.is_boosted_look(chat_id);
         if let Some(live) = self.live.as_mut() {
             live.driver.download_chat_look_files(chat_id, true);
+            if boosted {
+                let _ = live.driver.refresh_chat_boost_level(ChatId(chat_id));
+            }
         }
         cx.notify();
     }
@@ -255,9 +260,12 @@ impl QuillApp {
         let current_theme = session.chats_state.chat_theme_names.get(&chat_id).cloned();
         let own = own_wallpaper(session, chat_id);
         let changes = plan_changes(current_theme.as_deref(), own, &dialog);
-        let premium = session.my_is_premium();
-        let only_for_self = !(dialog.both && premium);
-        if dialog.awaiting.is_some() {
+        let boosted = self.is_boosted_look(chat_id);
+        let premium = self.session().is_some_and(|s| s.my_is_premium());
+        // Boosted chats set the wallpaper for everyone, never for self only.
+        let only_for_self = !boosted && !(dialog.both && premium);
+        if dialog.awaiting.is_some() || (boosted && self.boosted_look_blocked(chat_id, &changes)) {
+            cx.notify();
             return;
         }
         match self.live.as_mut() {
@@ -273,7 +281,7 @@ impl QuillApp {
                     let result =
                         match change {
                             LookChange::Theme(name) => {
-                                live.driver.set_chat_theme(ChatId(chat_id), &name)
+                                live.driver.set_chat_look_theme(ChatId(chat_id), &name)
                             }
                             LookChange::Wallpaper { id, dimming } => live
                                 .driver
@@ -739,7 +747,9 @@ impl QuillApp {
                             })),
                         );
                     }
-                    if state.background.is_some() || state.file.is_some() {
+                    if (state.background.is_some() || state.file.is_some())
+                        && !this.is_boosted_look(chat_id)
+                    {
                         wall = wall.child(if premium {
                             Checkbox::new("chat-look-both")
                                 .checked(state.both)

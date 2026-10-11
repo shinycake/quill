@@ -13,14 +13,33 @@ impl Session {
         seq: u64,
     ) {
         match payload {
-            ChatsPayload::UpdateChatAccentColors { chat_id, accent } => {
+            ChatsPayload::UpdateChatAccentColors {
+                chat_id,
+                accent,
+                profile_look,
+            } => {
                 self.chats_state.chat_accents.insert(chat_id, accent);
+                let look = self.chats_state.chat_looks.entry(chat_id).or_default();
+                look.profile_accent_color_id = profile_look.profile_accent_color_id;
+                look.profile_background_custom_emoji_id =
+                    profile_look.profile_background_custom_emoji_id;
+            }
+            ChatsPayload::UpdateChatEmojiStatus {
+                chat_id,
+                emoji_status_id,
+            } => {
+                self.chats_state
+                    .chat_looks
+                    .entry(chat_id)
+                    .or_default()
+                    .emoji_status_id = emoji_status_id;
             }
             ChatsPayload::UpdateNewChat {
                 chat_id,
                 title,
                 kind,
                 accent,
+                profile_look,
                 unread_count,
                 last_read_inbox_message_id,
                 last_read_outbox_message_id,
@@ -58,6 +77,7 @@ impl Session {
                     self.set_chat_view_as_topics(chat_id.0, view_as_topics);
                 }
                 self.chats_state.chat_accents.insert(chat_id.0, accent);
+                self.chats_state.chat_looks.insert(chat_id.0, profile_look);
                 if let Some(silent) = default_disable_notification {
                     self.sync.set_default_silent(chat_id.0, silent);
                 }

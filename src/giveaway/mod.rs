@@ -7,8 +7,14 @@
 //! messages, so a new giveaway stops at the price.
 
 mod about;
+mod award;
+mod limits;
+mod members;
 
 pub use about::{AboutText, GiveawayTextContext, about_text};
+pub use award::*;
+pub use limits::*;
+pub use members::*;
 
 use crate::telegram::envelope::{
     GiveawayPrize, ParsedPrepaidGiveaway, PremiumGiveawayOption, StarGiveawayOption,
@@ -19,6 +25,9 @@ use serde_json::{Value, json};
 pub const PRIZE_DESCRIPTION_MAX: usize = 128;
 /// Other chats users must join (tdesktop `giveawayAddPeersMax` fallback).
 pub const ADDITIONAL_CHATS_MAX: usize = 10;
+/// Countries a giveaway can be limited to (tdesktop `giveawayCountriesMax`
+/// fallback, TDLib `giveaway_country_count_max`).
+pub const COUNTRIES_MAX: usize = 10;
 /// Longest wait before winners are picked (tdesktop `giveawayPeriodMax`
 /// fallback), in seconds.
 pub const PERIOD_MAX_SECS: i32 = 7 * 24 * 3600;
@@ -43,6 +52,8 @@ pub enum GiveawayFormError {
     /// No prize option is picked (the options did not load).
     NoOption,
     TooManyChats,
+    TooManyCountries,
+    TooManyUsers,
     PrizeTooLong,
     DateTooSoon,
     DateTooLate,
@@ -50,10 +61,22 @@ pub enum GiveawayFormError {
 
 impl GiveawayFormError {
     pub fn text(self) -> String {
+        self.text_for(&GiveawayLimits::default())
+    }
+
+    /// The message with the limits the account really has.
+    pub fn text_for(self, limits: &GiveawayLimits) -> String {
+        let (chats, countries) = (limits.chats_max, limits.countries_max);
         match self {
             Self::NoOption => "Choose how many prizes to give away.".into(),
             Self::TooManyChats => {
-                format!("You can add up to {ADDITIONAL_CHATS_MAX} groups and channels.")
+                format!("You can add up to {chats} groups and channels.")
+            }
+            Self::TooManyCountries => {
+                format!("You can pick up to {countries} countries.")
+            }
+            Self::TooManyUsers => {
+                format!("You can pick up to {chats} members.")
             }
             Self::PrizeTooLong => {
                 format!("The additional prize can be up to {PRIZE_DESCRIPTION_MAX} characters.")
@@ -84,6 +107,13 @@ pub struct GiveawayDraft {
     /// Winners for the chosen Stars option.
     pub star_winners: i32,
     pub additional_chat_ids: Vec<i64>,
+    /// The limits the form checks against; set from the account's options.
+    pub limits: GiveawayLimits,
+    /// Members who get a Premium gift code each instead of a random
+    /// giveaway. Empty = a random giveaway.
+    pub award_user_ids: Vec<i64>,
+    /// Two-letter codes of the countries that may take part. Empty = all.
+    pub country_codes: Vec<String>,
     pub only_new_members: bool,
     pub has_public_winners: bool,
     pub prize_description: String,
@@ -108,6 +138,9 @@ impl GiveawayDraft {
             star_option: 0,
             star_winners: 0,
             additional_chat_ids: Vec::new(),
+            limits: GiveawayLimits::default(),
+            award_user_ids: Vec::new(),
+            country_codes: Vec::new(),
             only_new_members: false,
             has_public_winners: true,
             prize_description: String::new(),
@@ -137,7 +170,7 @@ impl GiveawayDraft {
             self.additional_chat_ids.remove(index);
             return Ok(());
         }
-        if self.additional_chat_ids.len() >= ADDITIONAL_CHATS_MAX {
+        if self.additional_chat_ids.len() >= self.limits.chats_max {
             return Err(GiveawayFormError::TooManyChats);
         }
         self.additional_chat_ids.push(chat_id);
@@ -155,8 +188,14 @@ impl GiveawayDraft {
                 return Err(GiveawayFormError::NoOption);
             }
         }
-        if self.additional_chat_ids.len() > ADDITIONAL_CHATS_MAX {
+        if self.additional_chat_ids.len() > self.limits.chats_max {
             return Err(GiveawayFormError::TooManyChats);
+        }
+        if self.country_codes.len() > self.limits.countries_max {
+            return Err(GiveawayFormError::TooManyCountries);
+        }
+        if self.award_user_ids.len() > self.limits.chats_max {
+            return Err(GiveawayFormError::TooManyUsers);
         }
         if self.prize_description.chars().count() > PRIZE_DESCRIPTION_MAX {
             return Err(GiveawayFormError::PrizeTooLong);
@@ -171,8 +210,8 @@ impl GiveawayDraft {
         Ok(())
     }
 
-    /// `giveawayParameters` (schema `td_api.tl:5130`). Countries stay
-    /// empty: every country can take part.
+    /// `giveawayParameters` (schema `td_api.tl:5130`). No countries means
+    /// every country can take part.
     pub fn parameters_json(&self) -> Value {
         json!({
             "@type": "giveawayParameters",
@@ -181,7 +220,7 @@ impl GiveawayDraft {
             "winners_selection_date": self.selection_date,
             "only_new_members": self.only_new_members,
             "has_public_winners": self.has_public_winners,
-            "country_codes": Vec::<String>::new(),
+            "country_codes": self.country_codes,
             "prize_description": self.prize_description.trim(),
         })
     }
@@ -206,6 +245,10 @@ impl GiveawayDraft {
             } else {
                 prepaid.winner_count.saturating_mul(BOOSTS_PER_PREMIUM)
             };
+        }
+        if self.is_specific_users() {
+            let users = i32::try_from(self.award_user_ids.len()).unwrap_or(i32::MAX);
+            return users.saturating_mul(BOOSTS_PER_PREMIUM);
         }
         match self.kind {
             GiveawayKind::Premium => self.premium_winners.saturating_mul(BOOSTS_PER_PREMIUM),

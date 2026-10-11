@@ -1,7 +1,7 @@
 //! Payments and the gift marketplace.
 
 use super::*;
-use gpui_kit::component::input::{InputState, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::*;
 
 pub(crate) struct PaymentUi {
@@ -24,10 +24,31 @@ pub(crate) struct PaymentUi {
     pub(super) gift_hide_name: bool,
     /// "Also pay for the upgrade" on the send-gift dialog.
     pub(super) gift_pay_upgrade: bool,
+    /// Pay a Premium gift with Stars instead of money.
+    pub(super) gift_premium_by_stars: bool,
+    /// The search field of the lists you pick from: contacts to gift
+    /// Stars, members to award, countries (`stars_gift_ui`,
+    /// `giveaway_pick_ui`).
+    pub(super) pick_search: Entity<InputState>,
 }
 
 impl PaymentUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
+        let pick_search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search")
+                .submit_on_enter(false)
+        });
+        cx.subscribe_in(
+            &pick_search,
+            window,
+            |this, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.pick_search_changed(cx);
+                }
+            },
+        )
+        .detach();
         Self {
             dialog: None,
             marketplace_open: false,
@@ -59,6 +80,8 @@ impl PaymentUi {
             }),
             gift_hide_name: false,
             gift_pay_upgrade: false,
+            gift_premium_by_stars: false,
+            pick_search,
         }
     }
 }

@@ -87,6 +87,8 @@ pub struct PaymentsState {
     pub paid: crate::paid_reaction::PaidReactions,
     /// The Star packs listed under "Buy more Stars".
     pub star_packs: crate::star_packs::StarPacksState,
+    /// The Gift Stars dialog.
+    pub stars_gift: crate::stars_gift::StarsGiftState,
 }
 
 /// A tapped bank card number and the lookup's progress.
@@ -132,6 +134,7 @@ impl PaymentsState {
             giveaway: GiveawayState::default(),
             paid: Default::default(),
             star_packs: Default::default(),
+            stars_gift: Default::default(),
         }
     }
 }

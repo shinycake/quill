@@ -73,6 +73,8 @@ pub enum ChatsPayload {
         /// (schema 1.8.67, line 3937): the channel's or group's name color
         /// and the emoji repeated behind replies to its posts.
         accent: ChatAccent,
+        /// Profile color, profile icon and emoji status of the chat.
+        profile_look: ChatProfileLook,
         unread_count: i32,
         last_read_inbox_message_id: MessageId,
         last_read_outbox_message_id: MessageId,
@@ -261,6 +263,14 @@ pub enum ChatsPayload {
     UpdateChatAccentColors {
         chat_id: i64,
         accent: ChatAccent,
+        /// The same update carries the profile color and icon.
+        profile_look: ChatProfileLook,
+    },
+    /// `updateChatEmojiStatus` (schema 1.8.68, line 10906): the chat's
+    /// emoji status changed (0 = removed).
+    UpdateChatEmojiStatus {
+        chat_id: i64,
+        emoji_status_id: i64,
     },
     /// `parity:platform-deep-links`: `deepLinkInfo` (schema 1.8.67, line
     /// 10087) — the `getDeepLinkInfo` answer. The actionable data is in

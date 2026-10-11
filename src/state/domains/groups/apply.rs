@@ -413,6 +413,11 @@ impl Session {
                     && pending.purpose == RequestPurpose::SearchFromMembers
                 {
                     self.apply_from_members(pending.id, &members);
+                } else if let Some(RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers {
+                    generation,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.apply_award_members(generation, &members, total_count);
                 } else if let Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
                     filter,
                 })) = pending.map(|p| p.purpose)
@@ -425,6 +430,22 @@ impl Session {
                             total_count,
                         },
                     );
+                } else if let Some(RequestPurpose::Groups(
+                    GroupsPurpose::GetSupergroupMembersMore { filter, .. },
+                )) = pending.map(|p| p.purpose)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    // The info panel's next page joins the cached one. A
+                    // page dropped meanwhile by a membership change stays
+                    // dropped; the panel refetches the first page.
+                    if let Some(SupergroupMembersFetch::Loaded {
+                        members: loaded,
+                        total_count: total,
+                    }) = self.groups.supergroup_members.get_mut(&(chat_id.0, filter))
+                    {
+                        crate::inline_members::merge_page(loaded, members, |m| m.member_id);
+                        *total = total_count.max(loaded.len() as i32);
+                    }
                 }
             }
             // Slice G1: `createNewBasicGroupChat` answer

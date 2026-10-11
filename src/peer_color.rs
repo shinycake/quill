@@ -222,11 +222,15 @@ mod tests {
                 id: 0,
                 light_colors: vec![0xAA0000],
                 dark_colors: vec![],
+                min_supergroup_level: 0,
+                min_channel_level: 0,
             },
             ProfileAccentColor {
                 id: 4,
                 light_colors: vec![0x00BB00],
                 dark_colors: vec![],
+                min_supergroup_level: 0,
+                min_channel_level: 0,
             },
         ];
         let swatches = profile_swatches(&[4, 9, 0], &palette);

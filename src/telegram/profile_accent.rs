@@ -15,6 +15,10 @@ pub struct ProfileAccentColor {
     pub id: i32,
     pub light_colors: Vec<u32>,
     pub dark_colors: Vec<u32>,
+    /// `min_supergroup_chat_boost_level` (0 = none).
+    pub min_supergroup_level: i32,
+    /// `min_channel_chat_boost_level` (0 = none).
+    pub min_channel_level: i32,
 }
 
 impl ProfileAccentColor {
@@ -47,6 +51,10 @@ pub fn parse_profile_accent_color(value: &Value) -> Option<ProfileAccentColor> {
         id,
         light_colors: rgb_list(light.and_then(|c| c.get("palette_colors"))),
         dark_colors: rgb_list(dark.and_then(|c| c.get("palette_colors"))),
+        min_supergroup_level: super::name_accent::min_level(
+            value.get("min_supergroup_chat_boost_level"),
+        ),
+        min_channel_level: super::name_accent::min_level(value.get("min_channel_chat_boost_level")),
     })
 }
 
@@ -69,10 +77,11 @@ mod tests {
                 "background_colors": [],
                 "story_colors": []
             },
-            "min_supergroup_chat_boost_level": 0,
-            "min_channel_chat_boost_level": 0,
+            "min_supergroup_chat_boost_level": 3,
+            "min_channel_chat_boost_level": 5,
         });
         let c = parse_profile_accent_color(&v).unwrap();
+        assert_eq!((c.min_supergroup_level, c.min_channel_level), (3, 5));
         assert_eq!(c.id, 3);
         assert_eq!(c.light_colors, vec![0xFF5A5A, 0xFF8A8A]);
         assert_eq!(c.swatch_rgb(), 0xFF5A5A);

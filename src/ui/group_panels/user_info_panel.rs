@@ -528,6 +528,8 @@ impl QuillApp {
         body = body.child(self.event_log_section(chat_id, cx));
         // Slice G2: channel boost status + boost action.
         body = body.child(self.boost_section(chat_id, cx));
+        body = body
+            .children(self.inline_members_block(InfoPanelTarget::Supergroup(supergroup_id), cx));
         body.into_any_element()
     }
 
@@ -597,6 +599,8 @@ impl QuillApp {
             body = body.child(section);
         }
         body = body.child(self.group_management_section(chat_id, false, true, cx));
+        body = body
+            .children(self.inline_members_block(InfoPanelTarget::BasicGroup(basic_group_id), cx));
         body.into_any_element()
     }
 }

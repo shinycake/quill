@@ -127,6 +127,13 @@ pub enum GroupsPurpose {
     GetSupergroupMembers {
         filter: MemberListFilter,
     },
+    /// The info panel's members list scrolling past what is loaded:
+    /// `getSupergroupMembers` from `offset`; the page is appended to the
+    /// cached (`chat_id`, `filter`) page instead of replacing it.
+    GetSupergroupMembersMore {
+        filter: MemberListFilter,
+        offset: i32,
+    },
     /// Slice G1: `getBasicGroupFullInfo` (schema 1.8.67, line 11507).
     /// Response is `basicGroupFullInfo`; correlated via
     /// `PendingRequest::chat_id`.

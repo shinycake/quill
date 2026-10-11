@@ -106,6 +106,9 @@ pub enum StickersPurpose {
     GetThemedEmojiStatuses,
     /// Slice S10: `getDefaultEmojiStatuses` (td_api.tl:13963). Response is `emojiStatusCustomEmojis`.
     GetDefaultEmojiStatuses,
+    /// `getDefaultChatEmojiStatuses` (td_api.tl:14367). Response is
+    /// `emojiStatusCustomEmojis`: the statuses a channel or group may wear.
+    GetDefaultChatEmojiStatuses,
     /// Slice S10: `getUpgradedGiftEmojiStatuses` (td_api.tl:13960). Response is `emojiStatuses`.
     GetUpgradedGiftEmojiStatuses,
     /// Slice S10: `clearRecentEmojiStatuses` (td_api.tl:13966). Response is `ok`.
@@ -186,6 +189,7 @@ flat_purposes!(Stickers(StickersPurpose) {
     GetRecentEmojiStatuses,
     GetThemedEmojiStatuses,
     GetDefaultEmojiStatuses,
+    GetDefaultChatEmojiStatuses,
     GetUpgradedGiftEmojiStatuses,
     ClearRecentEmojiStatuses,
     GetAnimatedEmoji,

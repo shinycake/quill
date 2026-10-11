@@ -403,7 +403,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Business hours and location rows <!-- parity:profile-business-hours -->
 - [x] Shared media tabs: separate Photos and Videos, round videos, Polls, Stories, Gifts, Saved Music <!-- parity:profile-media-tabs -->
 - [x] Shared media calendar and jump by month <!-- parity:profile-media-calendar -->
-- [ ] Members list inline in the group info panel with online first and admin badges <!-- parity:profile-members-inline -->
+- [x] Members list inline in the group info panel with online first and admin badges <!-- parity:profile-members-inline -->
 - [x] Member context menu: Mention, Search messages, Promote, Restrict, Ban, Remove <!-- parity:profile-member-menu -->
 - [x] Remove from group (kick) as distinct from ban <!-- parity:profile-remove-member -->
 - [x] Add a bot to a group or channel as admin with chosen rights <!-- parity:profile-add-bot-to-group -->
@@ -549,7 +549,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Upgrade a basic group to a supergroup <!-- parity:admin-upgrade-basic -->
 - [x] Transfer ownership with password confirmation <!-- parity:admin-transfer-ownership -->
 - [x] Pick a new owner when leaving as owner <!-- parity:admin-new-owner-on-leave -->
-- [ ] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
+- [x] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
 - [x] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
 - [x] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
 - [x] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
@@ -879,11 +879,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Premium promo page with features, limits and subscribe flow <!-- parity:premium-promo-page -->
 - [x] Premium limit upsell boxes (pins, folders, links, caption, GIFs) <!-- parity:premium-limit-upsell -->
-- [ ] Stars: balance, transactions, top-up, send stars <!-- parity:premium-stars-balance -->
+- [x] Stars: balance, transactions, top-up, send stars <!-- parity:premium-stars-balance -->
 - [x] Send gifts and gift Premium <!-- parity:premium-send-gift -->
 - [x] Received gifts on a profile: show or hide, pin, convert, upgrade, transfer, sell, collections <!-- parity:premium-received-gifts -->
 - [ ] Gift auctions, crafting and resale filters (deferred: low impact) <!-- parity:premium-gift-auctions -->
-- [ ] Create and view giveaways (partial: info box, form and prepaid launch shipped; paying for a new giveaway, specific-user gift codes and country picker left) <!-- parity:premium-giveaways -->
+- [x] Create and view giveaways (partial: info box, form and prepaid launch shipped; paying for a new giveaway, specific-user gift codes and country picker left) <!-- parity:premium-giveaways -->
 - [ ] Check and apply Premium gift codes <!-- parity:premium-gift-codes -->
 - [x] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
 - [ ] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->

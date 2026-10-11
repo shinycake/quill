@@ -58,6 +58,10 @@ pub struct EmojiPanel {
     pub themed_status_ids: Vec<i64>,
     /// Slice S10: default statuses (`getDefaultEmojiStatuses`).
     pub default_status_ids: Vec<i64>,
+    /// `getDefaultChatEmojiStatuses`: the statuses of channels and groups.
+    pub chat_default_status_ids: Vec<i64>,
+    /// The Appearance box of a chat is open and shows those statuses.
+    pub chat_status_open: bool,
     /// Slice S10: upgraded-gift statuses (`getUpgradedGiftEmojiStatuses`).
     pub upgraded_gift_statuses: Vec<EmojiStatusItem>,
     /// Slice S10: last `getAnimatedEmoji` answer for the composer's
@@ -372,6 +376,8 @@ impl Session {
             self.stickers.emoji.themed_status_ids = custom_emoji_ids;
         } else if purpose == Some(RequestPurpose::GetDefaultEmojiStatuses) {
             self.stickers.emoji.default_status_ids = custom_emoji_ids;
+        } else if purpose == Some(RequestPurpose::GetDefaultChatEmojiStatuses) {
+            self.stickers.emoji.chat_default_status_ids = custom_emoji_ids;
         }
     }
 
