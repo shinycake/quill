@@ -612,6 +612,8 @@ fn map_tile_path(
 
 impl QuillApp {}
 
+mod reaction_chip_row;
+use reaction_chip_row::reaction_chip_row;
 mod session_history_row;
 mod wrap;
 #[allow(unused_imports)]

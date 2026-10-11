@@ -2,4 +2,3 @@
 # They may shrink but not grow; remove a line once its file is under the
 # limit. See docs/contributing/structure.md.
 1273 src/main.rs
-1199 src/ui/app_render.rs
