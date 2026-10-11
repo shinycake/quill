@@ -18,6 +18,13 @@ impl Session {
         {
             self.reject_replied_message(chat_id, message_id);
         }
+        // A caption over the limit opens its box (tdesktop `CaptionLimitBox`).
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::SendMessage | RequestPurpose::SendMessageAlbum)
+        ) {
+            self.note_premium_limit(err, pending);
+        }
         match pending.map(|p| p.purpose) {
             // The message menu's Report flow and audience lists.
             Some(RequestPurpose::ReportMessages) => {

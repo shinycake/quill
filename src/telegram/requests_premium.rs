@@ -124,6 +124,12 @@ pub fn get_premium_features(extra: RequestId) -> String {
     .to_string()
 }
 
+/// `getPremiumStickerExamples` (`schema/td_api.tl:16600`): example Premium
+/// stickers for the stickers feature preview. Response is `stickers`.
+pub fn get_premium_sticker_examples(extra: RequestId) -> String {
+    json!({"@type": "getPremiumStickerExamples", "@extra": extra.as_extra()}).to_string()
+}
+
 /// `getPremiumState`.
 pub fn get_premium_state(extra: RequestId) -> String {
     json!({"@type": "getPremiumState", "@extra": extra.as_extra()}).to_string()
@@ -224,6 +230,10 @@ mod tests {
         assert_eq!(
             v(&get_premium_state(RequestId(6)))["@type"],
             "getPremiumState"
+        );
+        assert_eq!(
+            v(&get_premium_sticker_examples(RequestId(7)))["@type"],
+            "getPremiumStickerExamples"
         );
     }
 }

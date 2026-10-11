@@ -70,6 +70,8 @@ pub struct PaymentsState {
     /// TDLib's `is_premium` option: the account's current Premium state.
     /// `None` until the option arrives.
     pub premium_option: Option<bool>,
+    /// TDLib's `is_premium_available` option; `None` until it arrives.
+    pub premium_available: Option<bool>,
     /// The card number the user tapped and what `getBankCardInfo` said.
     pub bank_card: Option<BankCardLookup>,
     /// The gift code link whose box is open.
@@ -117,6 +119,7 @@ impl PaymentsState {
             hub: crate::premium_hub::PremiumHub::default(),
             subscription_cancel_confirm: None,
             premium_option: None,
+            premium_available: None,
             bank_card: None,
             gift_code: None,
             giveaway: GiveawayState::default(),

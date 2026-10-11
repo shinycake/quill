@@ -56,6 +56,9 @@ pub enum PaymentsPurpose {
     GetPremiumFeatures,
     /// `getPremiumState`.
     GetPremiumState,
+    /// `getPremiumStickerExamples`. Response is `stickers`, kept in the
+    /// Premium hub for the stickers feature preview.
+    GetPremiumStickerExamples,
     /// Slice payments: `deleteSavedOrderInfo` (schema 1.8.67, line
     /// 15286). Response is `ok`; the saved info lives server-side, so
     /// there is no local state to invalidate — the `ok` just retires
@@ -119,6 +122,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     SellGift,
     GetPremiumFeatures,
     GetPremiumState,
+    GetPremiumStickerExamples,
     DeleteSavedOrderInfo,
     DeleteSavedCredentials,
     GetBankCardInfo,

@@ -745,6 +745,7 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
 /// One `premiumLimit`, shown as "default → Premium".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PremiumLimitRow {
+    pub type_name: String,
     pub title: &'static str,
     pub default_value: i64,
     pub premium_value: i64,
@@ -769,6 +770,8 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+pub mod promo;
 
 /// `premiumFeatures`: the feature rows and limits Telegram reports, plus the
 /// Premium Bot link the "Get Premium" button opens.
@@ -795,6 +798,7 @@ pub fn parse_premium_features(value: &Value) -> PremiumInfo {
             rows.iter()
                 .filter_map(|l| {
                     Some(PremiumLimitRow {
+                        type_name: l.get("type")?.get("@type")?.as_str()?.to_string(),
                         title: limit_title(l.get("type")?.get("@type")?.as_str()?)?,
                         default_value: int(l.get("default_value")),
                         premium_value: int(l.get("premium_value")),
@@ -812,6 +816,10 @@ pub fn parse_premium_features(value: &Value) -> PremiumInfo {
 pub struct PremiumStateInfo {
     pub text: String,
     pub is_subscribed: bool,
+    /// The plans Telegram offers, cheapest per month last (see `promo`).
+    pub options: Vec<promo::PremiumPlan>,
+    /// Promotion clips per feature (`premiumFeaturePromotionAnimation`).
+    pub animations: Vec<promo::PremiumAnimation>,
 }
 
 pub fn parse_premium_state(value: &Value) -> PremiumStateInfo {
@@ -821,6 +829,8 @@ pub fn parse_premium_state(value: &Value) -> PremiumStateInfo {
             .get("payment_options")
             .and_then(Value::as_array)
             .is_some_and(|rows| rows.iter().any(|o| flag(o, "is_current"))),
+        options: promo::parse_plans(value),
+        animations: promo::parse_animations(value),
     }
 }
 
@@ -868,6 +878,16 @@ pub struct PremiumHub {
     pub premium_state: Option<PremiumStateInfo>,
     pub premium_loading: bool,
     pub premium_error: Option<String>,
+    /// `getPremiumStickerExamples`: the stickers the stickers feature
+    /// preview shows, and whether the request is in flight or done.
+    pub premium_stickers: Vec<crate::telegram::envelope::StickerItem>,
+    pub premium_stickers_loading: bool,
+    pub premium_stickers_asked: bool,
+    /// The page of the Premium dialog: the overview or "Doubled limits".
+    pub promo_page: promo::PromoPage,
+    /// The limit box that is open (pins, caption, GIFs, ...), with how far
+    /// over the limit the action went when that is known (caption).
+    pub limit_box: Option<(crate::premium_limits::PremiumLimitKind, i64)>,
 }
 
 impl PremiumHub {

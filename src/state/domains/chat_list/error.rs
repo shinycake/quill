@@ -12,6 +12,11 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        // Pins over the limit open the Premium limit box (tdesktop `PinsLimitBox`).
+        let pins_box = matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::ToggleChatIsPinned | RequestPurpose::SetPinnedChats)
+        ) && self.note_premium_limit(err, pending);
         // A folder request that hit a limit opens the limit box (tdesktop
         // `ShowImportError` / the `*LimitBox`es) instead of an error line.
         let folder_op = match pending.map(|p| p.purpose) {
@@ -53,7 +58,7 @@ impl Session {
             // the optimistic state was already rolled back above.
             // Only the numeric code is shown; TDLib's message is
             // never stored.
-            Some(RequestPurpose::ToggleChatIsPinned) => {
+            Some(RequestPurpose::ToggleChatIsPinned) if !pins_box => {
                 self.chats_state.chat_action_error =
                     Some(format!("could not pin the chat (error {})", err.code));
             }
@@ -72,7 +77,7 @@ impl Session {
             // Slice CL2: refused chat-list actions surface in the
             // status note like the CL1 ones — a refusal is never
             // shown as success.
-            Some(RequestPurpose::SetPinnedChats) => {
+            Some(RequestPurpose::SetPinnedChats) if !pins_box => {
                 self.chats_state.chat_action_error = Some(format!(
                     "could not reorder pinned chats (error {})",
                     err.code

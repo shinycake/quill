@@ -65,7 +65,15 @@ impl Session {
                         }
                     ) if *slot == generation
                 );
-                if !stale {
+                // `joinChatByInviteLink` over the community limit opens the
+                // limit box (tdesktop `ChannelsLimitBox`) instead of a dialog.
+                let limit_box = matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { .. }))
+                ) && self.note_premium_limit(err, pending);
+                if !stale && limit_box {
+                    self.chats_state.deep_link = None;
+                } else if !stale {
                     let text = deep_link_error_text(self.chats_state.deep_link.as_ref(), err.code);
                     self.chats_state.deep_link = Some(DeepLinkState::ShowText(text));
                 }

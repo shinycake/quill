@@ -22,9 +22,6 @@ use quill::folder_limits::{
 };
 use std::collections::HashSet;
 
-/// Where Premium is bought (the official bot, as in tdesktop's fallback).
-const PREMIUM_URL: &str = "https://t.me/PremiumBot";
-
 /// The right-click menu of a folder tab: which folder (`None` = the All
 /// tab) and where the click landed.
 #[derive(Clone, Copy, Debug)]
@@ -675,11 +672,14 @@ impl QuillApp {
             if !premium {
                 footer = footer.child(
                     Button::new("folder-limit-premium")
-                        .label("Get Telegram Premium")
+                        .label(if kind == FolderLimitKind::Tags {
+                            "Get Premium"
+                        } else {
+                            "Increase Limit"
+                        })
                         .on_click(cx.listener(|this, _, window, cx| {
-                            cx.open_url(PREMIUM_URL);
                             this.folders.limit_box = None;
-                            cx.notify();
+                            this.open_premium(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderLimit, window, cx);
                         })),
                 );

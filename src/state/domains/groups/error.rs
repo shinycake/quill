@@ -22,6 +22,14 @@ impl Session {
                 chat.my_rights_fetched = true;
             }
         }
+        // Too many communities or public links open the limit box (tdesktop
+        // `ChannelsLimitBox`, `PublicLinksLimitBox`).
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::JoinChat | RequestPurpose::SetSupergroupUsername)
+        ) {
+            self.note_premium_limit(err, pending);
+        }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
                 self.groups.ownership.check_in_flight = false;

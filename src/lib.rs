@@ -101,6 +101,7 @@ pub mod playlist;
 pub mod poll;
 pub mod power_saving;
 pub mod premium_hub;
+pub mod premium_limits;
 pub mod presence;
 pub mod privacy;
 pub mod profile_forms;

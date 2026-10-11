@@ -116,6 +116,10 @@ impl QuillApp {
                     } else if self.deny_attachments(attachments.iter().map(|a| a.kind), cx) {
                         return;
                     }
+                    // A file over the upload limit opens the file size box.
+                    if self.deny_oversized_attachments(&attachments, cx) {
+                        return;
+                    }
                     // Phase B3: self-destruct only leaves the composer on
                     // photo/video attachments; the driver additionally
                     // strips it for non-private chats (TDLib's 400 gate).
@@ -279,8 +283,15 @@ impl QuillApp {
                             // MED4: runtime `message_caption_length_max`
                             // refusal — the counter already warned; this
                             // names the limit.
-                            self.connection.status_note =
-                                format!("caption too long (max {limit} characters)");
+                            // tdesktop `CaptionLimitBox`: the limit box says by how
+                            // much, with Premium's 4096 as the way out.
+                            let over = self.composer.read(cx).value().chars().count() as i64
+                                - i64::from(limit);
+                            self.show_premium_limit(
+                                quill::premium_limits::PremiumLimitKind::Caption,
+                                over.max(0),
+                                cx,
+                            );
                         }
                         Err(_) => {
                             let video_unreadable = snaps
