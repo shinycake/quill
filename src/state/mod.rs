@@ -93,6 +93,7 @@ mod session_connection;
 mod session_date_jump;
 mod session_files;
 mod session_forum;
+mod session_main_profile_tab;
 pub use session_forum::{FORUM_COLUMN_COLLAPSE_BELOW, FORUM_COLUMN_WIDTH, ForumColumn};
 mod session_forward;
 mod session_group_admin;

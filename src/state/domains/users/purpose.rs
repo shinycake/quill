@@ -73,6 +73,9 @@ pub enum UsersPurpose {
     /// B10: `setBirthdate` (schema 1.8.67, line 14841). Response is
     /// `ok`; the new value arrives via `updateUserFullInfo`.
     SetBirthdate,
+    /// `setMainProfileTab` (schema 1.8.68, line 15238). Response is `ok`;
+    /// the new value arrives via `updateUserFullInfo`.
+    SetMainProfileTab,
     /// B10: `setPersonalChat` (line 14847). Response is `ok`.
     SetPersonalChat,
     /// B10: `setUserNote` (line 14553). Response is `ok`.
@@ -119,6 +122,7 @@ flat_purposes!(Users(UsersPurpose) {
     ClearImportedContacts,
     SharePhoneNumber,
     SetBirthdate,
+    SetMainProfileTab,
     SetPersonalChat,
     SetUserNote,
     SetUserPersonalPhoto,

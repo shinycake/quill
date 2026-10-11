@@ -40,6 +40,8 @@ enum RowAction {
     EditBirthday,
     /// Open the personal channel picker (your own profile).
     PickPersonalChannel,
+    /// Open the main tab chooser (your own profile).
+    PickMainTab,
     /// Open a chat.
     OpenChat(ChatId),
     /// Open the edit-contact box focused on the note.
@@ -233,6 +235,18 @@ impl QuillApp {
             }),
             None => {}
         }
+        if is_self {
+            let current = info.and_then(|i| i.extras.main_profile_tab);
+            rows.push(DetailRow {
+                id: "info-main-tab",
+                value: current.map_or("Default", |tab| tab.label()).into(),
+                label: "Main tab",
+                copy: None,
+                action: RowAction::PickMainTab,
+                hint: current.is_none(),
+                extra_copy: None,
+            });
+        }
         if let Some(note) = info
             .map(|i| i.extras.note.clone())
             .filter(|n| !n.is_empty())
@@ -304,6 +318,7 @@ impl QuillApp {
                 }
                 RowAction::EditBirthday => this.open_birthday_dialog(window, cx),
                 RowAction::PickPersonalChannel => this.open_personal_channel_dialog(cx),
+                RowAction::PickMainTab => this.open_main_tab_dialog(cx),
                 RowAction::OpenChat(chat_id) => {
                     this.dismiss_profile_modal();
                     this.select_listed_chat(*chat_id, window, cx);
@@ -885,4 +900,5 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
+mod main_profile_tab_dialog;
 mod submit_personal_photo;

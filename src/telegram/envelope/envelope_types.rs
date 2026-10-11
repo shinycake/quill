@@ -240,6 +240,8 @@ pub struct UserProfileExtras {
     pub personal_photo: Option<ParsedProfilePhoto>,
     /// `business_info`: Telegram Business hours and location.
     pub business: Option<crate::business_info::BusinessInfo>,
+    /// `main_profile_tab`: the tab the profile opens on.
+    pub main_profile_tab: Option<crate::profile_tab::ProfileTab>,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -314,6 +316,7 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .filter(|value| !value.is_null())
             .and_then(super::users::parse_profile_photo),
         business: crate::business_info::parse_business_info(info.get("business_info")),
+        main_profile_tab: crate::profile_tab::ProfileTab::from_value(info.get("main_profile_tab")),
     }
 }
 

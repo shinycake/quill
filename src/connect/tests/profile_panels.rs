@@ -96,6 +96,30 @@ fn profile_lists_are_deduped_and_failures_retry() {
 }
 
 #[test]
+fn main_profile_tab_request_goes_out() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    assert!(
+        driver
+            .set_main_profile_tab(crate::profile_tab::ProfileTab::Files)
+            .is_ok()
+    );
+    let sent = recorder.snapshot();
+    assert_eq!(
+        sent.iter()
+            .filter(
+                |j| j.contains(r#""@type":"setMainProfileTab""#) && j.contains("profileTabFiles")
+            )
+            .count(),
+        1
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn birthdate_is_validated_before_sending() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());

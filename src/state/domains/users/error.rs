@@ -44,6 +44,7 @@ impl Session {
             }
             Some(
                 RequestPurpose::SetBirthdate
+                | RequestPurpose::SetMainProfileTab
                 | RequestPurpose::SetPersonalChat
                 | RequestPurpose::SetUserNote
                 | RequestPurpose::SetUserPersonalPhoto,

@@ -17,6 +17,7 @@ mod group_admin;
 mod groups;
 mod groups_more;
 mod history_window_cap;
+mod main_profile_tab;
 mod messages;
 mod messages_more;
 mod notifications;
