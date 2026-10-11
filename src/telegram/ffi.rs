@@ -285,7 +285,7 @@ mod tests {
             }
         };
         if mode == "secured" {
-            // The exact sequence LiveTdJson::connect runs.
+            // The exact sequence TdHub::shared runs.
             if api.secure_native_logging().is_err() {
                 eprintln!("QUILL_TEST_SETUP_FAILED");
                 std::process::exit(2);

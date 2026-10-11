@@ -460,7 +460,9 @@ impl QuillApp {
         if self.account.passcode.locked {
             return window_title(None, 0, None);
         }
-        let total = quill::tray::badge_count(session, &session.settings.badge_prefs);
+        // Every account counts, like tdesktop's `Core::App().unreadBadge()`.
+        let total = quill::tray::badge_count(session, &session.settings.badge_prefs)
+            .saturating_add(quill::notify_accounts::other_accounts_unread().count);
         let chat = session.chats.get(&chat_id.0).map(|chat| TitleChat {
             name: &chat.title,
             unread: chat.unread_count.max(0) as u32,

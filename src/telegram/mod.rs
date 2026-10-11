@@ -4,6 +4,7 @@ pub mod envelope_emoji;
 pub mod envelope_interaction;
 pub mod envelope_story;
 pub mod ffi;
+pub mod hub;
 pub mod name_accent;
 pub mod profile_accent;
 pub mod requests;
@@ -17,7 +18,7 @@ pub mod requests_story;
 pub mod requests_story_insights;
 pub mod story_areas;
 
-pub use client::{BridgeCommand, LiveTdJson, OwnedEnvelope, ReceiveBridge, ordered_receive_loop};
+pub use client::{BridgeCommand, LiveTdJson, OwnedEnvelope, ReceiveBridge};
 pub use envelope::{
     AnimationContent, AnimationItem, AuthorizationState, ChatAdminRights, ChatAdministratorEntry,
     ChatDraft, ChatKind, ChatPermissions, ChatPositionUpdate, ConnectionState,

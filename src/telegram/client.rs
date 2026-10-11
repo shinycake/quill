@@ -1,6 +1,7 @@
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::envelope::{Envelope, ParseError, parse_envelope};
 use crate::telegram::ffi::TdJson;
+use crate::telegram::hub::TdHub;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -20,7 +21,9 @@ pub enum BridgeCommand {
     Shutdown,
 }
 
-/// One dedicated receive loop. Tests inject JSON; live mode copies `td_receive`.
+/// One client's stream of envelopes. Tests inject JSON on a thread of the
+/// bridge's own; live clients read what the process-wide [`TdHub`] routes
+/// to their client id (`td_receive` serves every client at once).
 pub struct ReceiveBridge {
     pub rx: Receiver<OwnedEnvelope>,
     tx_cmd: Sender<BridgeCommand>,
@@ -30,6 +33,8 @@ pub struct ReceiveBridge {
     /// shutdown request (channel closed, thread panicked).
     stopped: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    /// A hub-fed bridge: the route to remove on shutdown.
+    route: Option<(Arc<TdHub>, i32)>,
 }
 
 /// Marks the bridge as stopped when the receive loop ends for any reason
@@ -73,36 +78,29 @@ impl ReceiveBridge {
             shutdown,
             stopped,
             thread: Some(thread),
+            route: None,
         })
     }
 
-    /// Live `td_receive` loop on a dedicated thread. JSON is copied before the next receive.
-    pub fn spawn_live(api: Arc<TdJson>, sink: Arc<dyn DiagnosticSink>) -> std::io::Result<Self> {
-        let (tx_out, rx_out) = mpsc::channel();
+    /// A bridge fed by `hub` for `client_id` ([`TdHub::bridge`]). It owns
+    /// no thread; shutting it down removes the route. `inject` is a no-op.
+    pub(crate) fn routed(
+        rx: Receiver<OwnedEnvelope>,
+        hub: Arc<TdHub>,
+        client_id: i32,
+        seq: Arc<AtomicU64>,
+        stopped: Arc<AtomicBool>,
+    ) -> Self {
         let (tx_cmd, _rx_cmd) = mpsc::channel();
-        let seq = Arc::new(AtomicU64::new(0));
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let seq_thread = seq.clone();
-        let stopped = Arc::new(AtomicBool::new(false));
-        let guard = StopGuard {
-            shutdown: shutdown.clone(),
-            stopped: stopped.clone(),
-        };
-        let shutdown_thread = shutdown.clone();
-        let thread = thread::Builder::new()
-            .name("quill-td-receive".into())
-            .spawn(move || {
-                let _guard = guard;
-                ordered_receive_loop(api, tx_out, seq_thread, shutdown_thread, sink)
-            })?;
-        Ok(Self {
-            rx: rx_out,
+        Self {
+            rx,
             tx_cmd,
             seq,
-            shutdown,
+            shutdown: Arc::new(AtomicBool::new(false)),
             stopped,
-            thread: Some(thread),
-        })
+            thread: None,
+            route: Some((hub, client_id)),
+        }
     }
 
     /// The receive loop ended without a shutdown request, so no more
@@ -123,18 +121,21 @@ impl ReceiveBridge {
         self.seq.load(Ordering::SeqCst)
     }
 
-    /// Signal the receive loop and join it. Safe to call twice.
-    /// Live mode only notices this after the current `td_receive` timeout (~200ms).
+    /// Signal the receive loop and join it (an injected bridge), or stop
+    /// routing to this client (a hub-fed one). Safe to call twice.
     pub fn shutdown(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
         let _ = self.tx_cmd.send(BridgeCommand::Shutdown);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        if let Some((hub, client_id)) = self.route.take() {
+            hub.routes().unregister(client_id);
+        }
     }
 
     pub fn is_joined(&self) -> bool {
-        self.thread.is_none()
+        self.thread.is_none() && self.route.is_none()
     }
 }
 
@@ -241,51 +242,41 @@ pub fn recover_failed_response(json: &str) -> Option<Envelope> {
     parse_envelope(&synthetic.to_string()).ok()
 }
 
+/// One TDLib client in the process-wide [`TdHub`].
 pub struct LiveTdJson {
     pub api: Arc<TdJson>,
     pub client_id: i32,
+    pub hub: Arc<TdHub>,
 }
 
 impl LiveTdJson {
-    pub fn connect() -> Result<Self, crate::telegram::ffi::TdJsonError> {
-        let api = Arc::new(TdJson::load_default()?);
-        // Fail closed: no client until the native log stream is emptied.
-        // install_redacted_log alone does not stop TDLib writing to stderr.
-        api.secure_native_logging()?;
-        api.install_redacted_log(crate::telegram::ffi::MAX_NATIVE_LOG_VERBOSITY);
+    /// A new client on the shared hub, which loads and secures `libtdjson`
+    /// the first time (fail closed: no client before the native log stream
+    /// is emptied). Every account gets a client id of its own.
+    pub fn connect(
+        sink: Arc<dyn DiagnosticSink>,
+    ) -> Result<Self, crate::telegram::ffi::TdJsonError> {
+        let hub = TdHub::shared(sink)?;
+        let api = hub
+            .api()
+            .cloned()
+            .ok_or(crate::telegram::ffi::TdJsonError::Load)?;
         let client_id = api.create_client_id();
-        Ok(Self { api, client_id })
+        Ok(Self {
+            api,
+            client_id,
+            hub,
+        })
+    }
+
+    /// The bridge that receives this client's envelopes. Make it before the
+    /// client's first request.
+    pub fn bridge(&self) -> ReceiveBridge {
+        self.hub.bridge(self.client_id)
     }
 
     pub fn send(&self, request: &str) -> Result<(), crate::telegram::ffi::TdJsonError> {
         self.api.send(self.client_id, request)
-    }
-}
-
-/// Blocking receive on a dedicated thread. The JSON pointer is copied immediately.
-pub fn ordered_receive_loop(
-    api: Arc<TdJson>,
-    tx_out: Sender<OwnedEnvelope>,
-    seq: Arc<AtomicU64>,
-    shutdown: Arc<AtomicBool>,
-    sink: Arc<dyn DiagnosticSink>,
-) {
-    while !shutdown.load(Ordering::SeqCst) {
-        let Some(json) = api.receive(0.2) else {
-            continue;
-        };
-        if let Some(owned) = copy_and_parse(&json, &seq, &sink)
-            && tx_out.send(owned).is_err()
-        {
-            sink.record(Diagnostic {
-                category: "td-receive",
-                type_name: None,
-                extra: None,
-                seq: None,
-                note: "bridge-stopped",
-            });
-            break;
-        }
     }
 }
 

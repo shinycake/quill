@@ -2,6 +2,7 @@
 
 Parity item: `parity:notify-all-accounts`. No code change and no parity
 fragment. This note records why, so the next attempt starts from the facts.
+The follow-up that built it is `codex-background-accounts.md`.
 
 ## What tdesktop does
 

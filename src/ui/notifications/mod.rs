@@ -246,6 +246,7 @@ impl QuillApp {
         // Notification clicks from the Linux listener thread: replies and
         // read receipts run here, chat opens wake the window.
         self.drain_background_clicks(cx);
+        self.drain_account_clicks(cx);
         let Some(live) = self.live.as_mut() else {
             return false;
         };
@@ -698,6 +699,8 @@ impl QuillApp {
         for (chat_id, action) in clicks {
             self.run_notification_action(chat_id, action, window, cx);
         }
+        // Other accounts: switches asked for by their notifications.
+        self.flush_background_accounts(window, cx);
         self.flush_call_notifications(window, cx);
         // Notifications whose chat was read elsewhere (or removed by TDLib)
         // are withdrawn from the OS notification center.
@@ -856,6 +859,7 @@ fn bridge_lost(stopped: bool, budget_hit: bool, already_lost: bool) -> bool {
     stopped && !budget_hit && !already_lost
 }
 
+mod account_notifications;
 mod avatar_icon;
 mod debug_notification;
 mod inline_reply;

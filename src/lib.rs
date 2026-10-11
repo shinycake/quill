@@ -83,6 +83,7 @@ pub mod moderation_exceptions;
 pub mod mute_menu;
 pub mod network_usage;
 pub mod notify;
+pub mod notify_accounts;
 pub mod notify_call;
 pub mod notify_focus;
 pub mod notify_prefs;

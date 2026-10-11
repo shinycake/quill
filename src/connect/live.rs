@@ -56,12 +56,11 @@ pub fn wait_closed<S: JsonSender>(
 /// Open LiveTdJson + receive bridge when gate + restore succeed.
 ///
 /// Drop / [`LiveConnect::shutdown`] send `close`, wait for
-/// `authorizationStateClosed`, then join the receive thread **before**
-/// `libtdjson` is unloaded. Unloading while TDLib worker threads are still
-/// running is what produced SIGSEGV (exit 139) after `--connect-smoke`.
-///
-/// Field order: `bridge` is dropped before `_live` (declaration order) so
-/// `td_receive` is not in-flight during `dlclose`.
+/// `authorizationStateClosed`, then remove the client's route from the
+/// shared receive hub (`telegram::hub`). The hub, and with it `libtdjson`,
+/// lives as long as the process: unloading the library while TDLib worker
+/// threads were still running is what produced SIGSEGV (exit 139) after
+/// `--connect-smoke`, and several accounts now share it.
 pub struct LiveConnect {
     pub driver: ConnectDriver<LiveSender>,
     pub bridge: ReceiveBridge,
@@ -135,13 +134,72 @@ pub fn start_prepared_live_connect(
     prepared: PreparedConnect,
     diagnostics: Arc<dyn DiagnosticSink>,
 ) -> Result<LiveConnect, ConnectBlocker> {
-    let live = LiveTdJson::connect().map_err(|e| match e {
+    let mut live = open_prepared_client(credentials, prepared, diagnostics.clone())?;
+    live.attach_call_engine(diagnostics.as_ref());
+    live.driver
+        .kickoff()
+        .map_err(|_| ConnectBlocker::TdjsonLoad)?;
+    Ok(live)
+}
+
+/// A client for an account that is not on screen (tdesktop keeps every
+/// account's session connected): the same session restore, but no call
+/// engine until the account is switched to ([`LiveConnect::attach_call_engine`]).
+pub fn start_background_live_connect(
+    credentials: TelegramCredentials,
+    prepared: PreparedConnect,
+    diagnostics: Arc<dyn DiagnosticSink>,
+) -> Result<LiveConnect, ConnectBlocker> {
+    let mut live = open_prepared_client(credentials, prepared, diagnostics)?;
+    live.driver
+        .kickoff()
+        .map_err(|_| ConnectBlocker::TdjsonLoad)?;
+    Ok(live)
+}
+
+impl LiveConnect {
+    /// Load and install the native call engine (once; a client that already
+    /// has one keeps it). Without the library calls run signaling-only.
+    pub fn attach_call_engine(&mut self, diagnostics: &dyn DiagnosticSink) {
+        if self.driver.has_call_engine() {
+            return;
+        }
+        match crate::calls::engine::NtgcallsEngine::load() {
+            Ok(engine) => {
+                self.driver.set_call_engine(Box::new(engine));
+                diagnostics.record(Diagnostic {
+                    category: "call",
+                    type_name: None,
+                    extra: None,
+                    seq: None,
+                    note: "call-engine-ready",
+                });
+            }
+            Err(_) => diagnostics.record(Diagnostic {
+                category: "call",
+                type_name: None,
+                extra: None,
+                seq: None,
+                note: "call-engine-unavailable-signaling-only",
+            }),
+        }
+    }
+}
+
+/// The client, its route on the shared receive hub and a session with the
+/// account's local prefs; nothing is sent yet.
+fn open_prepared_client(
+    credentials: TelegramCredentials,
+    prepared: PreparedConnect,
+    diagnostics: Arc<dyn DiagnosticSink>,
+) -> Result<LiveConnect, ConnectBlocker> {
+    let live = LiveTdJson::connect(diagnostics.clone()).map_err(|e| match e {
         TdJsonError::NotFound => ConnectBlocker::MissingTdjson,
         _ => ConnectBlocker::TdjsonLoad,
     })?;
     let sender = LiveSender::from_live(&live);
-    let bridge = ReceiveBridge::spawn_live(live.api.clone(), diagnostics.clone())
-        .map_err(|_| ConnectBlocker::ReceiveThread)?;
+    // Routed before the first request, so no envelope can arrive unrouted.
+    let bridge = live.bridge();
     let session = Session::new(prepared.account.clone(), diagnostics.clone());
     // Phase C2i: local call prefs (confirm-before-calling, less-data)
     // are loaded once here; the UI saves them back on toggle.
@@ -168,27 +226,7 @@ pub fn start_prepared_live_connect(
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
     session.settings.data_storage = load_data_storage_prefs(&prepared.paths);
-    let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
-    match crate::calls::engine::NtgcallsEngine::load() {
-        Ok(engine) => {
-            driver.set_call_engine(Box::new(engine));
-            diagnostics.record(Diagnostic {
-                category: "call",
-                type_name: None,
-                extra: None,
-                seq: None,
-                note: "call-engine-ready",
-            });
-        }
-        Err(_) => diagnostics.record(Diagnostic {
-            category: "call",
-            type_name: None,
-            extra: None,
-            seq: None,
-            note: "call-engine-unavailable-signaling-only",
-        }),
-    }
-    driver.kickoff().map_err(|_| ConnectBlocker::TdjsonLoad)?;
+    let driver = ConnectDriver::new(session, sender, credentials, prepared);
     Ok(LiveConnect {
         driver,
         bridge,

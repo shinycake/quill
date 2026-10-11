@@ -649,19 +649,6 @@ fn render_platform_icon(unread: u32, muted: bool, dark: Option<bool>) -> (Vec<u8
     }
 }
 
-/// tdesktop's `unreadBadgeMuted`: every counted unread chat is muted.
-#[cfg(feature = "ui")]
-fn badge_all_muted(session: &Session, unread: u32) -> bool {
-    if unread == 0 || !session.settings.badge_prefs.include_muted {
-        return false;
-    }
-    let unmuted = BadgePrefs {
-        include_muted: false,
-        ..session.settings.badge_prefs
-    };
-    badge_count(session, &unmuted) == 0
-}
-
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 thread_local! {
     /// UI-thread tray handle. `tray_icon::TrayIcon` is `!Send` on some
@@ -677,15 +664,16 @@ thread_local! {
         std::cell::RefCell::new(crate::tray_sni::TrayState::new());
 }
 
-/// Sync the system tray icon with the session's unread count. Called from a
-/// 1s timer in `main.rs` on the UI thread; a no-op when the count is
-/// unchanged or no system tray exists.
+/// Sync the system tray icon with the unread count of every account (the
+/// one on screen plus the background ones, like tdesktop's
+/// `Domain::unreadBadge`). Called from a 1s timer in `main.rs` on the UI
+/// thread; a no-op when the count is unchanged or no system tray exists.
+/// The muted look (tdesktop `unreadBadgeMuted`) applies when every counted
+/// unread chat is muted.
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn sync_tray(session: Option<&Session>) {
-    let unread = session
-        .map(|s| badge_count(s, &s.settings.badge_prefs))
-        .unwrap_or(0);
-    let muted = session.is_some_and(|s| badge_all_muted(s, unread));
+    let total = crate::notify_accounts::total_unread(session);
+    let (unread, muted) = (total.count, total.muted);
     let notifications = session.is_none_or(|s| s.settings.desktop_notifications);
     let sounds = session.is_none_or(|s| s.settings.inapp_sounds_enabled);
     TRAY.with(|cell| {
@@ -717,9 +705,7 @@ pub fn sync_tray(session: Option<&Session>) {
 /// Linux: drive the StatusNotifierItem lifecycle (see [`crate::tray_sni`]).
 #[cfg(all(feature = "ui", target_os = "linux"))]
 pub fn sync_tray(session: Option<&Session>) {
-    let unread = session
-        .map(|s| badge_count(s, &s.settings.badge_prefs))
-        .unwrap_or(0);
+    let unread = crate::notify_accounts::total_unread(session).count;
     let toggles = (
         session.is_none_or(|s| s.settings.desktop_notifications),
         session.is_none_or(|s| s.settings.inapp_sounds_enabled),
