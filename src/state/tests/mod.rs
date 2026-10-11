@@ -12,6 +12,7 @@ mod common;
 mod connection_indicator;
 mod downloads;
 mod drafts_everywhere;
+mod emoji_interaction;
 mod folder_followups;
 mod forum_column;
 mod forum_saved;

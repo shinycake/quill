@@ -93,6 +93,10 @@ impl Session {
                     self.stickers.emoji.trending_stale = true;
                 }
             }
+            payload @ (StickersPayload::EmojiEffectSticker { .. }
+            | StickersPayload::AnimatedEmojiMessageClicked { .. }) => {
+                self.apply_emoji_effect_payload(payload, pending);
+            }
             StickersPayload::UpdateDefaultReactionType { reaction_type } => {
                 self.stickers.default_reaction = ReactionChoice::from_type(&reaction_type);
             }

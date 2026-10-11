@@ -45,6 +45,7 @@ pub mod diagnostics;
 pub mod drop_modes;
 pub mod emoji;
 pub mod emoji_catalog;
+pub mod emoji_interaction;
 pub mod emoji_replace;
 pub mod export;
 pub mod fast_buttons;

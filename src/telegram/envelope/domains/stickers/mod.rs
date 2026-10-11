@@ -121,4 +121,19 @@ pub enum StickersPayload {
     UpdateActiveEmojiReactions {
         emojis: Vec<String>,
     },
+    /// `sticker` — the answer to `clickAnimatedEmojiMessage`: the effect to
+    /// play over the clicked message.
+    EmojiEffectSticker {
+        sticker: Option<StickerItem>,
+        files: Vec<ParsedFile>,
+    },
+    /// `updateAnimatedEmojiMessageClicked`: the other party clicked an
+    /// animated emoji; `sticker` is the effect to play if the message is on
+    /// screen.
+    AnimatedEmojiMessageClicked {
+        chat_id: i64,
+        message_id: i64,
+        sticker: Option<StickerItem>,
+        files: Vec<ParsedFile>,
+    },
 }

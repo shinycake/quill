@@ -147,6 +147,12 @@ pub(crate) fn parse_stickers_payload(
                     .collect(),
             },
         )),
+        "sticker" => Ok(crate::telegram::envelope_interaction::parse_effect_sticker(
+            value,
+        )),
+        "updateAnimatedEmojiMessageClicked" => {
+            Ok(crate::telegram::envelope_interaction::parse_animated_emoji_clicked(value))
+        }
         _ => return Ok(None),
     };
     payload.map(Some)
