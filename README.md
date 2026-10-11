@@ -734,7 +734,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
 - [ ] Watch channel live streams (RTMP) (deferred: low impact) <!-- parity:calls-rtmp-viewing -->
 - [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
-- [ ] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
+- [x] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 
 ### Stickers, emoji & GIFs
 
