@@ -29,20 +29,28 @@ fn orient_render_image(
     ]))))
 }
 
+/// Remember a video's turns for this run (tdesktop keeps them per document);
+/// no turns forgets the entry.
+pub(super) fn store_turns(map: &mut HashMap<(i64, i64), u8>, key: (i64, i64), turns: u8) {
+    if turns.is_multiple_of(4) {
+        map.remove(&key);
+    } else {
+        map.insert(key, turns % 4);
+    }
+}
+
 /// Seconds shown and linked by "Share at": the whole seconds played.
 pub(super) fn share_position_secs(elapsed: f64) -> i32 {
     elapsed.max(0.0) as i32
 }
 
 impl QuillApp {
-    /// Rotating needs pictures this app draws itself: the decoded frames
-    /// (every platform's fallback player, and GIFs). The macOS system
-    /// player draws into its own surface and cannot be turned.
+    /// Rotate works on the system player (its frames are turned in
+    /// `native_video_rotate`) and on the decoded frames.
     pub(in crate::ui) fn viewer_video_rotatable(&self) -> bool {
         self.viewer.state.current().is_some_and(|item| {
             item.kind.is_playable()
-                && self.viewer.native.is_none()
-                && !self.viewer.video_frames.is_empty()
+                && (self.viewer.native.is_some() || !self.viewer.video_frames.is_empty())
         })
     }
 
@@ -56,6 +64,13 @@ impl QuillApp {
         }
         self.viewer.orientation.rotate_cw();
         self.viewer.extra.oriented_frame = None;
+        if let Some(item) = self.viewer.state.current() {
+            store_turns(
+                &mut self.viewer.extra.rotations,
+                (item.chat_id.0, item.message_id.0),
+                self.viewer.orientation.turns,
+            );
+        }
         cx.notify();
     }
 
@@ -264,10 +279,21 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{orient_render_image, share_position_secs};
+    use super::{HashMap, orient_render_image, share_position_secs, store_turns};
     use gpui_kit::RenderImage;
     use quill::media_viewer::ViewerOrientation;
     use smallvec::SmallVec;
+
+    #[test]
+    fn turns_are_remembered_per_video_and_forgotten_at_zero() {
+        let mut map = HashMap::new();
+        store_turns(&mut map, (1, 2), 3);
+        store_turns(&mut map, (1, 3), 1);
+        assert_eq!(map.get(&(1, 2)), Some(&3));
+        store_turns(&mut map, (1, 2), 4);
+        assert!(!map.contains_key(&(1, 2)));
+        assert_eq!(map.len(), 1);
+    }
 
     #[test]
     fn share_position_is_whole_seconds_never_negative() {

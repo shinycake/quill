@@ -227,7 +227,13 @@ impl QuillApp {
         let native_frame = item
             .kind
             .is_playable()
-            .then(|| self.viewer.native.as_mut().and_then(|video| video.frame()))
+            .then(|| {
+                let turns = self.viewer.orientation.turns;
+                self.viewer.native.as_mut().and_then(|video| {
+                    video.set_rotation(turns);
+                    video.frame()
+                })
+            })
             .flatten();
         let content: AnyElement = if let Some(frame) = native_frame {
             frame.element(

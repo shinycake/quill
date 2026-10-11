@@ -82,6 +82,8 @@ pub(super) struct ViewerExtra {
     pub(in crate::ui) oriented_frame: Option<video_extras::OrientedFrame>,
     /// "Share at": the message and second the forward picker was opened at.
     pub share_at: Option<(ChatId, MessageId, i32)>,
+    /// Turns of videos rotated in this run, by `(chat, message)`.
+    pub rotations: HashMap<(i64, i64), u8>,
 }
 
 /// Screenshot-capture runs render a single frame: skip fades there so the

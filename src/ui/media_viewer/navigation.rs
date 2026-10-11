@@ -133,6 +133,15 @@ impl QuillApp {
         self.playback.error = None;
         self.viewer.extra.oriented_frame = None;
         self.viewer.extra.share_at = None;
+        if let Some(item) = self.viewer.state.current()
+            && let Some(turns) = self
+                .viewer
+                .extra
+                .rotations
+                .get(&(item.chat_id.0, item.message_id.0))
+        {
+            self.viewer.orientation.turns = *turns;
+        }
         self.apply_viewer_quality_pref();
         self.viewer.extra.inactive_paused = false;
         self.stop_viewer_video();
