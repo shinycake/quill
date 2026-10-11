@@ -619,6 +619,7 @@ impl QuillApp {
                         }));
                     }
                     let mut list = div().flex().flex_col().gap_2();
+                    let connection_type = app_c.update(cx, |this, _| this.connection_type_row());
                     for (label, action) in [
                         ("Edit profile", NavigationAction::Profile),
                         ("Accounts", NavigationAction::Accounts),
@@ -628,7 +629,7 @@ impl QuillApp {
                         ("Privacy and security", NavigationAction::Privacy),
                         ("Devices", NavigationAction::Sessions),
                         ("Data and storage", NavigationAction::Storage),
-                        ("Proxy", NavigationAction::Proxy),
+                        (connection_type.as_str(), NavigationAction::Proxy),
                         ("Stars", NavigationAction::Stars),
                         ("My gifts", NavigationAction::MyGifts),
                         ("Telegram Premium", NavigationAction::Premium),

@@ -36,6 +36,8 @@ pub(crate) struct ProxyUi {
     pub(crate) notice: Option<String>,
     /// The "this exposes your IP" warning was confirmed for this run.
     pub(crate) ip_warning_acked: bool,
+    /// The "Share proxy with QR code" box.
+    pub(crate) qr: Option<super::proxy_qr::ProxyQr>,
 }
 
 /// The add / edit box.
@@ -473,13 +475,46 @@ impl QuillApp {
         )
     }
 
-    /// "Proxy settings" link for the connection strip while connecting.
+    /// Settings row that opens the proxy list: tdesktop's "Connection
+    /// type" button with its current value (Settings > Advanced).
+    pub(super) fn connection_type_row(&self) -> String {
+        let value = self.session().map(|s| {
+            let connected = matches!(
+                s.connection,
+                ConnectionState::Ready | ConnectionState::Updating
+            );
+            quill::proxy_extras::connection_type_label(&s.settings.proxy, connected)
+        });
+        match value {
+            Some(value) => format!("Connection type: {value}"),
+            None => "Connection type".into(),
+        }
+    }
+
+    /// "Proxy settings" link for the connection strip while connecting,
+    /// with tdesktop's proxy shield (`ProxyIcon` in
+    /// `window_connecting_widget.cpp`) in front while a proxy is enabled.
     pub(super) fn proxy_strip_link(&self, cx: &mut Context<Self>) -> AnyElement {
-        Button::new("proxy-strip-settings")
-            .label("Proxy settings")
-            .ghost()
-            .xsmall()
-            .on_click(cx.listener(|this, _, _, cx| this.open_proxy_list(cx)))
+        let shield = self
+            .session()
+            .is_some_and(|s| s.settings.proxy.shield())
+            .then(|| {
+                Icon::new(gpui_kit::assets::IconName::Shield)
+                    .small()
+                    .text_color(cx.theme().muted_foreground)
+            });
+        div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .children(shield)
+            .child(
+                Button::new("proxy-strip-settings")
+                    .label("Proxy settings")
+                    .ghost()
+                    .xsmall()
+                    .on_click(cx.listener(|this, _, _, cx| this.open_proxy_list(cx))),
+            )
             .into_any_element()
     }
 
@@ -602,6 +637,13 @@ impl QuillApp {
                     icon_button("copy", gpui_kit::assets::IconName::Copy, "Copy link")
                         .disabled(!shareable)
                         .on_click(cx.listener(move |this, _, _, cx| this.copy_proxy_link(id, cx))),
+                ),
+            )
+            .child(
+                div().when(!shareable, |this| this.invisible()).child(
+                    icon_button("qr", gpui_kit::assets::IconName::QrCode, "Show QR code")
+                        .disabled(!shareable)
+                        .on_click(cx.listener(move |this, _, _, cx| this.open_proxy_qr(id, cx))),
                 ),
             )
             .child(
