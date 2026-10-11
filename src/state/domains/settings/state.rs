@@ -200,6 +200,9 @@ pub struct SettingsState {
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
     pub account_export: Option<crate::account_export::AccountExport>,
+    /// The running or just-finished chat export; the UI shows its progress
+    /// and clears it.
+    pub chat_export: Option<crate::export::ChatExport>,
     /// The `setlanguage` link whose box is open.
     pub language_link: Option<LanguageLinkLookup>,
     /// Quick reply shortcuts and their messages.
@@ -279,6 +282,7 @@ impl SettingsState {
             device_prefs: Default::default(),
             proxy: Default::default(),
             account_export: None,
+            chat_export: None,
             language_link: None,
         }
     }

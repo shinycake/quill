@@ -65,45 +65,6 @@ impl Session {
             });
             return;
         }
-        // `parity:platform-chat-export` — append the page to the export
-        // buffer. A page that adds nothing means the server has no more
-        // history. A merely short page does not: TDLib picks the page size
-        // and "can be smaller than the specified limit" (schema 1.8.67,
-        // line 11827) — its first answer is often the last message alone.
-        if let Some(pending) = pending
-            && pending.purpose == RequestPurpose::ExportChatHistory
-            && let Some(chat_id) = pending.chat_id
-        {
-            let senders: Vec<Option<String>> = messages
-                .iter()
-                .map(|message| message.sender.map(|sender| self.sender_label(sender)))
-                .collect();
-            if let Some(export) = self.messages.chat_export.as_mut()
-                && export.chat_id == chat_id
-            {
-                // `getChatHistory` is inclusive of `from_message_id`, so the
-                // first message of every non-first page is the boundary
-                // message already in the buffer — keep only messages older
-                // than it (matched by id, not position, so a boundary
-                // deleted between pages doesn't cost a message) so each
-                // message exports exactly once.
-                let boundary_id = export.messages.last().map(|m| m.id);
-                let before = export.messages.len();
-                for (message, sender) in messages.into_iter().zip(senders) {
-                    let mut exported = crate::chat_export::project_message(&message);
-                    if boundary_id.is_some_and(|boundary| exported.id >= boundary) {
-                        continue;
-                    }
-                    exported.sender = sender;
-                    export.messages.push(exported);
-                }
-                export.in_flight = false;
-                if export.messages.len() == before || export.past_range_start() {
-                    export.done_paging = true;
-                }
-            }
-            return;
-        }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetHistoryAround
         {

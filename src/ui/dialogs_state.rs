@@ -40,7 +40,12 @@ pub(crate) struct DialogUi {
     /// Theme and wallpaper picker for a chat, or a `bg/` link preview.
     pub(super) chat_look_dialog: Option<super::chat_look_ui::ChatLookDialog>,
     /// The "Export chat history" box.
-    pub(super) chat_export_dialog: Option<super::chat_export_ui::ChatExportDraft>,
+    pub(super) chat_export_dialog: Option<super::export_box::ChatExportDraft>,
+    /// The running export's progress is not on screen; its result shows as a
+    /// note instead.
+    pub(super) chat_export_progress_hidden: bool,
+    /// Last progress drawn, to redraw only when it changes.
+    pub(super) chat_export_seen: Option<quill::export::Progress>,
     /// Saved Messages: "Add Name" / "Edit Name" for a tag.
     pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
     /// Phase C2i: rating detail draft for the call-end card — the star
@@ -78,6 +83,8 @@ impl DialogUi {
             block_bar_dialog: None,
             chat_look_dialog: None,
             chat_export_dialog: None,
+            chat_export_progress_hidden: false,
+            chat_export_seen: None,
             saved_tag_dialog: None,
             rating_detail: None,
             rating_comment_input,
