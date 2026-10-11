@@ -31,12 +31,16 @@ const SETTLE: Duration = Duration::from_millis(150);
 const BUDGET_BYTES: usize = 64 << 20;
 /// Finished results nobody picked up are dropped past this many.
 const DONE_CAP: usize = 48;
+/// A turned freeform gradient crossfades in (tdesktop
+/// `kBackgroundFadeDuration`).
+const FADE: Duration = Duration::from_millis(200);
 
 /// Which area a request is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Slot {
-    /// The history of one window (the canvas adds the window id).
-    History,
+    /// The history of one window (the canvas adds the window id). The
+    /// entity re-renders when a crossfade starts.
+    History(EntityId),
     /// The wallpaper preview in a dialog.
     Preview,
     /// A gallery thumbnail: fixed size, never replaced or delayed.
@@ -223,7 +227,22 @@ struct Cache {
     bytes: usize,
     /// What each slot showed last (painted stretched while its next size
     /// renders, if it is still cached).
-    shown: HashMap<u64, u64>,
+    shown: HashMap<u64, Shown>,
+}
+
+/// One slot's last picture.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Shown {
+    key: u64,
+    /// The wallpaper whatever its rotation.
+    identity: u64,
+    area: (u32, u32),
+}
+
+/// A crossfade from the picture a wallpaper showed before it turned.
+struct Fade {
+    from: Composite,
+    start: Instant,
 }
 
 impl Cache {
@@ -263,6 +282,88 @@ impl Cache {
 
 thread_local! {
     static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
+    /// Running crossfades by wallpaper identity.
+    static FADES: RefCell<HashMap<u64, Fade>> = RefCell::new(HashMap::new());
+}
+
+/// Record that `slot` now shows `shown`. When only the rotation changed
+/// (same wallpaper, same size) and motion is allowed, a crossfade from the
+/// previous picture starts: this frame keeps the previous picture, and the
+/// caller re-renders so the overlay appears. Returns what to paint and
+/// whether a fade started.
+fn settle(
+    cache: &mut Cache,
+    slot: u64,
+    shown: Shown,
+    composite: Option<Composite>,
+) -> (Option<Composite>, bool) {
+    let previous = cache.shown.insert(slot, shown);
+    if let Some(previous) = previous
+        && previous.key != shown.key
+        && previous.identity == shown.identity
+        && previous.area == shown.area
+        && !quill::power_saving::reduce_motion_now()
+        && let Some(from) = cache.peek(previous.key)
+    {
+        FADES.with(|f| {
+            f.borrow_mut().insert(
+                shown.identity,
+                Fade {
+                    from: from.clone(),
+                    start: Instant::now(),
+                },
+            )
+        });
+        return (Some(from), true);
+    }
+    (composite, false)
+}
+
+/// Opacity left of the old picture `elapsed` into a fade.
+fn fade_opacity(elapsed: Duration) -> Option<f32> {
+    (elapsed < FADE).then(|| 1.0 - elapsed.as_secs_f32() / FADE.as_secs_f32())
+}
+
+/// The fading-out picture over a wallpaper that just turned, or `None`
+/// once the fade is over (render the history again while it runs).
+pub(super) fn fade_layer(wallpaper: &Wallpaper) -> Option<AnyElement> {
+    let identity = wallpaper.identity();
+    let (from, opacity) = FADES.with(|f| {
+        let mut fades = f.borrow_mut();
+        let fade = fades.get(&identity)?;
+        match fade_opacity(fade.start.elapsed()) {
+            Some(opacity) => Some((fade.from.clone(), opacity)),
+            None => {
+                fades.remove(&identity);
+                None
+            }
+        }
+    })?;
+    Some(
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .opacity(opacity)
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, window, _| {
+                        let _ = window.paint_image(
+                            bounds,
+                            from.image_bounds(bounds),
+                            Corners::default(),
+                            from.image.clone(),
+                            0,
+                            false,
+                        );
+                    },
+                )
+                .size_full(),
+            )
+            .into_any_element(),
+    )
 }
 
 /// What a canvas paints this frame.
@@ -270,47 +371,54 @@ pub(super) struct Lookup {
     pub composite: Option<Composite>,
     /// A newer image is on its way; ask for another frame.
     pub pending: bool,
+    /// A crossfade started: the history must render its overlay.
+    pub fade_started: bool,
 }
 
 /// The image for `wallpaper` at `width` x `height` pixels in `slot`.
 fn lookup(wallpaper: &Wallpaper, slot: u64, thumb: bool, width: u32, height: u32) -> Lookup {
     let key = image_key(wallpaper, width, height);
+    let shown = Shown {
+        key,
+        identity: if thumb { key } else { wallpaper.identity() },
+        area: (width, height),
+    };
+    let ready = |cache: &mut Cache, composite: Option<Composite>| {
+        let (composite, fade_started) = if thumb {
+            (composite, false)
+        } else {
+            settle(cache, slot, shown, composite)
+        };
+        Lookup {
+            composite,
+            pending: fade_started,
+            fade_started,
+        }
+    };
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(found) = cache.get(key) {
-            cache.shown.insert(slot, key);
-            return Lookup {
-                composite: found,
-                pending: false,
-            };
+            return ready(&mut cache, found);
         }
         let shared = shared();
         if !shared.threaded {
             let rendered = INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height));
             let composite = rendered.and_then(|r| to_composite(r, width, height));
             cache.insert(key, composite.clone());
-            cache.shown.insert(slot, key);
-            return Lookup {
-                composite,
-                pending: false,
-            };
+            return ready(&mut cache, composite);
         }
         let mut board = shared.board.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(result) = board.done.remove(&key) {
             drop(board);
             let composite = result.and_then(|r| to_composite(r, width, height));
             cache.insert(key, composite.clone());
-            cache.shown.insert(slot, key);
-            return Lookup {
-                composite,
-                pending: false,
-            };
+            return ready(&mut cache, composite);
         }
         // Thumbnails share a slot and never resize: no stale picture.
         let stale = if thumb {
             None
         } else {
-            cache.shown.get(&slot).and_then(|k| cache.peek(*k))
+            cache.shown.get(&slot).and_then(|s| cache.peek(s.key))
         };
         let not_before = if stale.is_some() {
             Instant::now() + SETTLE
@@ -333,6 +441,7 @@ fn lookup(wallpaper: &Wallpaper, slot: u64, thumb: bool, width: u32, height: u32
         Lookup {
             composite: stale,
             pending: true,
+            fade_started: false,
         }
     })
 }
@@ -360,7 +469,7 @@ pub(super) fn wallpaper_layer(
     on_area: Option<fn(Bounds<Pixels>)>,
 ) -> impl IntoElement {
     canvas(
-        move |bounds, window, _| {
+        move |bounds, window, cx| {
             if let Some(on_area) = on_area {
                 on_area(bounds);
             }
@@ -372,20 +481,26 @@ pub(super) fn wallpaper_layer(
             }
             let mut hasher = std::hash::DefaultHasher::new();
             slot.hash(&mut hasher);
-            if slot == Slot::History {
+            if let Slot::History(_) = slot {
                 window
                     .window_handle()
                     .window_id()
                     .as_u64()
                     .hash(&mut hasher);
             }
-            Some(lookup(
+            let found = lookup(
                 &wallpaper,
                 hasher.finish(),
                 slot == Slot::Thumb,
                 width,
                 height,
-            ))
+            );
+            if found.fade_started
+                && let Slot::History(entity) = slot
+            {
+                cx.notify(entity);
+            }
+            Some(found)
         },
         move |bounds, lookup, window, _| {
             let Some(lookup) = lookup else {
@@ -427,6 +542,15 @@ mod tests {
             height: 1,
             not_before: Instant::now() + Duration::from_millis(delay_ms),
         }
+    }
+
+    #[test]
+    fn fades_run_for_two_hundred_milliseconds() {
+        use super::fade_opacity;
+        assert_eq!(fade_opacity(Duration::ZERO), Some(1.0));
+        let half = fade_opacity(Duration::from_millis(100)).unwrap();
+        assert!((half - 0.5).abs() < 1e-3);
+        assert_eq!(fade_opacity(Duration::from_millis(200)), None);
     }
 
     #[test]

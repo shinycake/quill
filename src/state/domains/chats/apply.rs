@@ -43,7 +43,7 @@ impl Session {
                 view_as_topics,
                 default_disable_notification,
                 background,
-                theme_name,
+                theme,
                 reply_markup_message_id,
                 unread_mention_count,
                 unread_reaction_count,
@@ -62,7 +62,7 @@ impl Session {
                     self.sync.set_default_silent(chat_id.0, silent);
                 }
                 self.set_chat_background(chat_id.0, background);
-                self.set_chat_theme_name(chat_id.0, theme_name);
+                self.set_chat_theme(chat_id.0, theme);
                 self.set_chat_protected(chat_id.0, has_protected_content);
                 if let Some(setting) = available_reactions {
                     self.chats_state
@@ -379,16 +379,12 @@ impl Session {
             }
             ChatsPayload::Backgrounds(list) => {
                 for background in &list {
-                    if let Some(file) = &background.file {
-                        self.upsert_file(file.clone(), false);
-                    }
+                    self.upsert_background_files(background);
                 }
                 self.chats_state.installed_backgrounds = Some(list);
             }
             ChatsPayload::Background(background) => {
-                if let Some(file) = &background.file {
-                    self.upsert_file(file.clone(), false);
-                }
+                self.upsert_background_files(&background);
                 match pending.map(|p| p.purpose) {
                     Some(
                         RequestPurpose::SetDefaultBackground
@@ -408,10 +404,9 @@ impl Session {
                 chat_id,
                 background,
             } => self.set_chat_background(chat_id.0, background),
-            ChatsPayload::UpdateChatTheme {
-                chat_id,
-                theme_name,
-            } => self.set_chat_theme_name(chat_id.0, theme_name),
+            ChatsPayload::UpdateChatTheme { chat_id, theme } => {
+                self.set_chat_theme(chat_id.0, theme)
+            }
             ChatsPayload::UpdateEmojiChatThemes(themes) => {
                 for theme in &themes {
                     for settings in [&theme.light, &theme.dark] {
@@ -428,9 +423,7 @@ impl Session {
                 for_dark_theme,
                 background,
             } => {
-                if let Some(file) = &background.file {
-                    self.upsert_file(file.clone(), false);
-                }
+                self.upsert_background_files(&background);
                 self.chats_state
                     .default_backgrounds
                     .insert(for_dark_theme, background);

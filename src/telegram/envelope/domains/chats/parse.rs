@@ -248,7 +248,7 @@ pub(crate) fn parse_chats_payload(
         })),
         "updateChatTheme" => Ok(EnvelopePayload::Chats(ChatsPayload::UpdateChatTheme {
             chat_id: ChatId(int53(value.get("chat_id"))?),
-            theme_name: parse_chat_theme_name(value.get("theme")),
+            theme: parse_chat_theme(value.get("theme")),
         })),
         "updateEmojiChatThemes" => Ok(EnvelopePayload::Chats(ChatsPayload::UpdateEmojiChatThemes(
             parse_emoji_chat_themes(value),

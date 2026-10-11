@@ -151,7 +151,9 @@ impl QuillApp {
                     .rounded_md()
                     .when_some(
                         highlighted.then(|| self.jump_highlight_alpha(cx)).flatten(),
-                        |this, alpha| this.bg(cx.theme().primary.opacity(alpha)),
+                        |this, alpha| {
+                            this.bg(super::chat_palette::themed(cx.theme().primary).opacity(alpha))
+                        },
                     )
                     .when(selection_tint > 0., |this| {
                         this.bg(cx.theme().selection.opacity(selection_tint))

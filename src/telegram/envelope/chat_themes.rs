@@ -67,18 +67,40 @@ pub(crate) fn parse_chat_background(value: Option<&Value>) -> Option<ChatBackgro
     })
 }
 
-/// `chat.theme`: the emoji theme's name; `None` for no theme or a gift
-/// theme (those need `getGiftChatThemes`, which Quill does not call).
-pub(crate) fn parse_chat_theme_name(value: Option<&Value>) -> Option<String> {
+/// `ChatTheme` (`schema/td_api.tl:8838`): an emoji theme by name (its
+/// settings come from `updateEmojiChatThemes`), or a theme made from an
+/// upgraded gift, which carries its own settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatThemeRef {
+    Emoji(String),
+    Gift(Box<EmojiChatTheme>),
+}
+
+/// `chat.theme` / `updateChatTheme.theme`; `None` for no theme.
+pub(crate) fn parse_chat_theme(value: Option<&Value>) -> Option<ChatThemeRef> {
     let value = value.filter(|v| !v.is_null())?;
-    if value.get("@type")?.as_str()? != "chatThemeEmoji" {
-        return None;
+    match value.get("@type")?.as_str()? {
+        "chatThemeEmoji" => value
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|n| !n.is_empty())
+            .map(|n| ChatThemeRef::Emoji(n.to_string())),
+        "chatThemeGift" => {
+            let theme = value.get("gift_theme")?;
+            let gift = theme.get("gift");
+            let name = gift
+                .and_then(|g| g.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            Some(ChatThemeRef::Gift(Box::new(EmojiChatTheme {
+                name,
+                light: parse_theme_settings(theme.get("light_settings"))?,
+                dark: parse_theme_settings(theme.get("dark_settings"))?,
+            })))
+        }
+        _ => None,
     }
-    value
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|n| !n.is_empty())
-        .map(str::to_string)
 }
 
 fn parse_theme_settings(value: Option<&Value>) -> Option<ThemeSettings> {
@@ -133,16 +155,29 @@ mod tests {
     }
 
     #[test]
-    fn only_emoji_themes_have_a_name() {
+    fn emoji_and_gift_themes_parse() {
         assert_eq!(
-            parse_chat_theme_name(Some(&json!({"@type":"chatThemeEmoji","name":"🏠"}))),
-            Some("🏠".into())
+            parse_chat_theme(Some(&json!({"@type":"chatThemeEmoji","name":"🏠"}))),
+            Some(ChatThemeRef::Emoji("🏠".into()))
         );
         assert_eq!(
-            parse_chat_theme_name(Some(&json!({"@type":"chatThemeGift","gift_theme":{}}))),
-            None
+            parse_chat_theme(Some(&json!({"@type":"chatThemeGift","gift_theme":{}}))),
+            None,
+            "a gift theme without settings"
         );
-        assert_eq!(parse_chat_theme_name(None), None);
+        let settings = json!({"@type":"themeSettings","accent_color":0x22aa33,
+            "outgoing_message_fill":{"@type":"backgroundFillSolid","color":0x445566}});
+        let gift = parse_chat_theme(Some(&json!({"@type":"chatThemeGift","gift_theme":{
+            "@type":"giftChatTheme","gift":{"@type":"upgradedGift","name":"PlushPepe-1"},
+            "light_settings":settings,"dark_settings":settings}})));
+        match gift {
+            Some(ChatThemeRef::Gift(theme)) => {
+                assert_eq!(theme.name, "PlushPepe-1");
+                assert_eq!(theme.light.accent_color, 0x22aa33);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(parse_chat_theme(None), None);
     }
 
     #[test]

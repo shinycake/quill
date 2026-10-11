@@ -213,6 +213,7 @@ mod tests {
             is_dark: false,
             name: String::new(),
             file: None,
+            thumbnail: None,
             kind: BackgroundType::Fill(BackgroundFill::Solid(0)),
         }
     }

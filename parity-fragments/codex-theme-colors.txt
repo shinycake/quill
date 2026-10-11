@@ -1,0 +1,4 @@
+# Chat themes (emoji and gift) recolour the chat palette from their accent,
+# outgoing accent and black/white fallback, wallpaper-toned service pills,
+# theme backgrounds and fills (docs/decisions/codex-theme-colors.md).
+parity:updates-theme-colors

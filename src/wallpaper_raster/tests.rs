@@ -238,3 +238,33 @@ fn rgba_input_becomes_opaque_bgra() {
     assert_eq!(raster.pixel(0, 0), [3, 2, 1, 255]);
     assert_eq!(raster.byte_size(), 4);
 }
+
+#[test]
+fn freeform_rotation_steps_half_a_phase_per_send() {
+    assert_eq!(freeform_phase(0), (0, 1.0));
+    let one = next_rotation(0);
+    assert_eq!(one, 675);
+    assert_eq!(freeform_phase(one), (7, 0.5));
+    let two = next_rotation(one);
+    assert_eq!(freeform_phase(two), (7, 1.0));
+    // Sixteen sends come back to the start.
+    let mut r = 0;
+    for _ in 0..16 {
+        r = next_rotation(r);
+    }
+    assert_eq!(r, 0);
+    let colors = vec![0xff0000, 0x00ff00, 0x0000ff, 0xffff00];
+    let rest = FillSampler::new(&BackgroundFill::Freeform(colors.clone()));
+    let turned = FillSampler::rotated(&BackgroundFill::Freeform(colors.clone()), one);
+    assert_ne!(rest, turned);
+    // Two-colour gradients do not rotate.
+    let linear = BackgroundFill::Gradient {
+        top: 1,
+        bottom: 2,
+        angle: 0,
+    };
+    assert_eq!(
+        FillSampler::new(&linear),
+        FillSampler::rotated(&linear, one)
+    );
+}

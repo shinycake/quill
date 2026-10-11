@@ -158,12 +158,6 @@ impl BubbleLook {
     }
 }
 
-/// Whether text on this 0xRRGGBB fill must be dark (relative luminance).
-pub(crate) fn fill_is_light(fill: u32) -> bool {
-    let channel = |shift: u32| ((fill >> shift) & 0xff) as f32 / 255.0;
-    0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0) > 0.62
-}
-
 /// Radius of a corner that joins a neighbouring bubble or carries the
 /// bubble's tail (tdesktop `bubbleRadiusSmall`).
 const JOINED_RADIUS: f32 = 5.0;

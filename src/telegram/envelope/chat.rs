@@ -155,7 +155,7 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .and_then(Value::as_bool),
         // `chat.background` / `chat.theme` (schema 1.8.68, line 3937).
         background: parse_chat_background(chat.get("background")),
-        theme_name: parse_chat_theme_name(chat.get("theme")),
+        theme: parse_chat_theme(chat.get("theme")),
         // `chat.reply_markup_message_id` (schema 1.8.67, line 3624).
         reply_markup_message_id: MessageId(
             chat.get("reply_markup_message_id")

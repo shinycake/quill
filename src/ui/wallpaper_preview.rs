@@ -65,11 +65,6 @@ impl QuillApp {
             session.chats_state.background_error = None;
             session.chats_state.background_url = None;
         }
-        if let PreviewSource::Installed(_) = source
-            && let Some(live) = self.live.as_mut()
-        {
-            live.driver.download_background_files();
-        }
         self.dialogs.wallpaper_preview = Some(WallpaperPreview {
             source,
             blur: None,
@@ -280,6 +275,11 @@ impl QuillApp {
             };
             let muted = cx.theme().muted_foreground;
             let background = this.previewed_background(&preview.source);
+            // The gallery only fetched a thumbnail: the preview needs the
+            // full file (deduped while it downloads).
+            if let (Some(bg), Some(live)) = (&background, this.live.as_mut()) {
+                live.driver.download_background_file(bg);
+            }
             let error = this
                 .session()
                 .and_then(|s| s.chats_state.background_error.clone());

@@ -10,8 +10,7 @@
 //! Without a fill the theme's outgoing accent (else its accent) fills the
 //! bubbles, as before.
 
-use super::chat_theme::{accent_strong, text_on_fill};
-use super::synthetic::fill_is_light;
+use super::chat_theme::accent_strong;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::telegram::envelope::ThemeSettings;
@@ -34,11 +33,13 @@ pub(super) fn note_history_area(bounds: Bounds<Pixels>) {
 pub(crate) struct OutgoingFill {
     colors: [u32; 4],
     count: u8,
+    /// Night palette: white text on the bubbles; day: black.
+    dark: bool,
 }
 
 impl OutgoingFill {
     /// From the theme half for the current light or dark mode.
-    pub(crate) fn from_theme(settings: &ThemeSettings) -> Self {
+    pub(crate) fn from_theme(settings: &ThemeSettings, dark: bool) -> Self {
         let list = settings
             .outgoing_fill
             .as_ref()
@@ -51,17 +52,18 @@ impl OutgoingFill {
                         .unwrap_or(settings.accent_color),
                 ]
             });
-        Self::from_colors(&list)
+        Self::from_colors(&list, dark)
     }
 
     /// Up to four 0xRRGGBB colors, top to bottom.
-    pub(crate) fn from_colors(list: &[u32]) -> Self {
+    pub(crate) fn from_colors(list: &[u32], dark: bool) -> Self {
         let mut colors = [0u32; 4];
         let count = list.len().min(4);
         colors[..count].copy_from_slice(&list[..count]);
         Self {
             colors,
             count: count.max(1) as u8,
+            dark,
         }
     }
 
@@ -86,13 +88,14 @@ impl OutgoingFill {
         vertical_color_at(self.colors(), t)
     }
 
-    /// Text on these bubbles: dark on light fills, white otherwise.
+    /// Text on these bubbles (tdesktop `historyTextOutFg`): black on day
+    /// themes, white on night ones.
+    pub(crate) fn text_rgb(&self) -> u32 {
+        if self.dark { 0xffffff } else { 0x000000 }
+    }
+
     pub(crate) fn text(&self) -> Hsla {
-        if fill_is_light(self.solid()) {
-            Hsla::from(rgb(0x1a1a1a))
-        } else {
-            Hsla::from(text_on_fill())
-        }
+        rgb(self.text_rgb()).into()
     }
 }
 
@@ -170,29 +173,35 @@ mod tests {
 
     #[test]
     fn theme_fills_keep_every_color_in_order() {
-        let fill = OutgoingFill::from_theme(&settings(
-            Some(BackgroundFill::Freeform(vec![
-                0x000000, 0x0000ff, 0x00ff00, 0xff0000,
-            ])),
-            None,
-        ));
+        let fill = OutgoingFill::from_theme(
+            &settings(
+                Some(BackgroundFill::Freeform(vec![
+                    0x000000, 0x0000ff, 0x00ff00, 0xff0000,
+                ])),
+                None,
+            ),
+            false,
+        );
         assert_eq!(fill.colors(), &[0x000000, 0x0000ff, 0x00ff00, 0xff0000]);
         assert!(fill.is_gradient());
         assert_eq!(fill.color_at(0.0), 0x000000);
         assert_eq!(fill.color_at(1.0), 0xff0000);
-        let one = OutgoingFill::from_theme(&settings(Some(BackgroundFill::Solid(0xabcdef)), None));
+        let one =
+            OutgoingFill::from_theme(&settings(Some(BackgroundFill::Solid(0xabcdef)), None), true);
         assert!(!one.is_gradient());
         assert_eq!(one.solid(), 0xabcdef);
+        assert_eq!(one.text_rgb(), 0xffffff, "night: white");
+        assert_eq!(fill.text_rgb(), 0x000000, "day: black");
     }
 
     #[test]
     fn without_a_fill_the_outgoing_accent_then_the_accent_colors_bubbles() {
         assert_eq!(
-            OutgoingFill::from_theme(&settings(None, Some(0x445566))).solid(),
+            OutgoingFill::from_theme(&settings(None, Some(0x445566)), false).solid(),
             0x445566
         );
         assert_eq!(
-            OutgoingFill::from_theme(&settings(None, None)).solid(),
+            OutgoingFill::from_theme(&settings(None, None), false).solid(),
             0x112233
         );
     }

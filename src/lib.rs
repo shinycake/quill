@@ -156,6 +156,7 @@ pub mod system_accent;
 pub mod telegram;
 pub mod text;
 pub mod text_split;
+pub mod theme_colorize;
 pub mod topic_info;
 pub mod translate;
 pub mod tray;

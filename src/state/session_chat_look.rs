@@ -1,16 +1,24 @@
 //! Per-chat wallpaper and emoji chat theme: the reducer side
 //! (`chat.background`, `chat.theme`, `updateEmojiChatThemes`).
 use super::*;
-use crate::telegram::envelope::{ChatBackground, EmojiChatTheme, ThemeSettings};
+use crate::telegram::envelope::{ChatBackground, ChatThemeRef, EmojiChatTheme, ThemeSettings};
 
 impl Session {
+    /// Track a background's file and thumbnail so downloads update them.
+    pub fn upsert_background_files(&mut self, background: &Background) {
+        for file in [&background.file, &background.thumbnail]
+            .into_iter()
+            .flatten()
+        {
+            self.upsert_file(file.clone(), false);
+        }
+    }
+
     /// `chat.background` / `updateChatBackground`; `None` clears it.
     pub fn set_chat_background(&mut self, chat_id: i64, background: Option<ChatBackground>) {
         match background {
             Some(background) => {
-                if let Some(file) = &background.background.file {
-                    self.upsert_file(file.clone(), false);
-                }
+                self.upsert_background_files(&background.background);
                 self.chats_state
                     .chat_backgrounds
                     .insert(chat_id, background);
@@ -33,9 +41,31 @@ impl Session {
         }
     }
 
-    /// The emoji theme a chat uses, once `updateEmojiChatThemes` has
-    /// delivered its description.
+    /// `chat.theme` / `updateChatTheme`: an emoji theme by name, or a gift
+    /// theme with its own settings; `None` clears it.
+    pub fn set_chat_theme(&mut self, chat_id: i64, theme: Option<ChatThemeRef>) {
+        self.chats_state.chat_gift_themes.remove(&chat_id);
+        match theme {
+            Some(ChatThemeRef::Emoji(name)) => self.set_chat_theme_name(chat_id, Some(name)),
+            Some(ChatThemeRef::Gift(theme)) => {
+                self.set_chat_theme_name(chat_id, None);
+                for settings in [&theme.light, &theme.dark] {
+                    if let Some(background) = &settings.background {
+                        self.upsert_background_files(background);
+                    }
+                }
+                self.chats_state.chat_gift_themes.insert(chat_id, *theme);
+            }
+            None => self.set_chat_theme_name(chat_id, None),
+        }
+    }
+
+    /// The theme a chat uses: its gift theme, or its emoji theme once
+    /// `updateEmojiChatThemes` has delivered the description.
     pub fn chat_emoji_theme(&self, chat_id: i64) -> Option<&EmojiChatTheme> {
+        if let Some(gift) = self.chats_state.chat_gift_themes.get(&chat_id) {
+            return Some(gift);
+        }
         let name = self.chats_state.chat_theme_names.get(&chat_id)?;
         self.chats_state
             .emoji_chat_themes

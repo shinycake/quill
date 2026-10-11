@@ -141,8 +141,8 @@ pub enum ChatsPayload {
         default_disable_notification: Option<bool>,
         /// `chat.background`: the chat's own wallpaper, if any.
         background: Option<ChatBackground>,
-        /// `chat.theme` when it is an emoji theme.
-        theme_name: Option<String>,
+        /// `chat.theme`: an emoji or gift theme.
+        theme: Option<ChatThemeRef>,
         /// `chat.reply_markup_message_id` (schema 1.8.67, line 3624): the
         /// message whose keyboard the chat shows; 0 for none.
         reply_markup_message_id: MessageId,
@@ -308,7 +308,7 @@ pub enum ChatsPayload {
     /// theme.
     UpdateChatTheme {
         chat_id: ChatId,
-        theme_name: Option<String>,
+        theme: Option<ChatThemeRef>,
     },
     /// `updateEmojiChatThemes` (`schema/td_api.tl:11320`).
     UpdateEmojiChatThemes(Vec<EmojiChatTheme>),
