@@ -2,11 +2,11 @@
 //! `EditPeerColorBox` for channels): name color, profile color, emoji status.
 use super::*;
 use crate::chat_appearance::ApplyPlan;
-use crate::ids::{ChatId, FileId};
+use crate::ids::{ChatId, FileId, RequestId};
 use crate::state::RequestPurpose;
 use crate::telegram::requests_chat_appearance::{
     get_default_chat_emoji_statuses, set_chat_accent_color, set_chat_emoji_status,
-    set_chat_profile_accent_color,
+    set_chat_profile_accent_color, set_chat_theme_background,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -26,9 +26,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.chats_state.appearance_error = None;
-        self.session.groups.chat_boost_status.remove(&chat_id.0);
-        self.fetch_chat_boost_status(chat_id)?;
-        self.fetch_chat_boost_features(chat_id)?;
+        self.refresh_chat_boost_level(chat_id)?;
+        // Supergroups choose a custom emoji pack from their installed ones.
+        let _ = self.load_group_sticker_choices(chat_id);
         self.load_background_emoji_icons()?;
         self.session.stickers.emoji.chat_status_open = true;
         let purpose = RequestPurpose::GetDefaultChatEmojiStatuses;
@@ -44,6 +44,37 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.send_json_request(extra, &get_default_chat_emoji_statuses(extra))?;
         }
         Ok(())
+    }
+
+    /// Drop the cached boost level and fetch it again, with the level
+    /// table. tdesktop asks for it at Apply time (`CheckBoostLevel`).
+    pub fn refresh_chat_boost_level(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.groups.chat_boost_status.remove(&chat_id.0);
+        self.fetch_chat_boost_status(chat_id)?;
+        self.fetch_chat_boost_features(chat_id)?;
+        Ok(())
+    }
+
+    /// Set a chat theme: a private chat gets `setChatTheme`; a boosted
+    /// channel or supergroup gets a chat theme background instead.
+    pub fn set_chat_look_theme(
+        &mut self,
+        chat_id: ChatId,
+        name: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if self.session.chat_supergroup(chat_id).is_none() {
+            return self.set_chat_theme(chat_id, name);
+        }
+        if !self.can_edit_chat_appearance(chat_id) || name.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetChatTheme, Some(chat_id));
+        self.send_json_request(extra, &set_chat_theme_background(extra, chat_id, name))
     }
 
     /// Closing the box stops resolving its status choices.
@@ -95,6 +126,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .request(RequestPurpose::SetChatEmojiStatus, Some(chat_id));
             self.send_json_request(extra, &set_chat_emoji_status(extra, chat_id, status))?;
             sent += 1;
+        }
+        if let Some(pack) = plan.emoji_pack {
+            // The driver refuses (`None`) when full info says the viewer
+            // cannot set packs; that is an error here, not a silent skip.
+            match self.set_supergroup_custom_emoji_sticker_set(chat_id, pack)? {
+                Some(_) => sent += 1,
+                None => return Err(ConnectSendError::InvalidRequest),
+            }
         }
         Ok(sent)
     }

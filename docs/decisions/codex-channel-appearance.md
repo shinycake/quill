@@ -31,12 +31,26 @@ box. The status picker uses the chat default statuses.
   level they need, icon grids, status grid, "Level N required" notes and a
   "Get boosts" button that opens the chat's Boosts page.
 
-Not done: the chat wallpaper and group emoji pack rows of the same box, and
-timed statuses for chats (tdesktop's channel panel has none either).
+- Wallpaper row (tdesktop "Wallpaper" button with a level badge): opens the
+  existing chat look dialog for the channel or supergroup. Chat themes are sent
+  as `setChatBackground` with `backgroundTypeChatTheme` (level of the first
+  `chat_theme_background_count > 0`, default 9); gallery wallpapers and files
+  count as custom backgrounds (`can_set_custom_background`, default 10), as in
+  `checkLevelForChannel`. Boosted chats never use `only_for_self`. Removing a
+  wallpaper is free. Apply refetches the level and shows "Level N required"
+  inline instead of sending.
+- Group emoji pack row (supergroups): the installed emoji packs, sent with the
+  existing `setSupergroupCustomEmojiStickerSet`, gated by
+  `can_set_custom_emoji_sticker_set` (default 4). It is part of the same Apply
+  plan and level check. The old unguarded pack buttons in the group info panel
+  are untouched.
+
+Not done: timed statuses for chats (tdesktop's channel panel has none either).
 
 ## How verified
 Unit tests for the gating (levels, unchanged, unknown, too few, only changed
 parts, supergroup), request JSON per target, parsing, reducer updates and the
 driver (rights gate, one request per part, level refetch). The gate passes.
-A temporary demo capture of the box (not committed) showed the Name tab with
+Tests also cover the pack and wallpaper rules, the theme background request and
+the driver paths. A temporary demo capture of the first version of the box (not committed) showed the Name tab with
 level labels and the grids. No real chat's appearance was changed.

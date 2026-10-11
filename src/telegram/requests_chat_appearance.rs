@@ -66,6 +66,22 @@ pub fn set_chat_emoji_status(
     .to_string()
 }
 
+/// `setChatBackground` (line 13867) with a chat theme background for a boosted
+/// channel or supergroup: no input background, type `backgroundTypeChatTheme`
+/// (line 8801). Never `only_for_self` in boosted chats.
+pub fn set_chat_theme_background(extra: RequestId, chat_id: ChatId, theme_name: &str) -> String {
+    json!({
+        "@type": "setChatBackground",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "background": null,
+        "type": { "@type": "backgroundTypeChatTheme", "theme_name": theme_name },
+        "dark_theme_dimming": 0,
+        "only_for_self": false,
+    })
+    .to_string()
+}
+
 /// `getDefaultChatEmojiStatuses = EmojiStatusCustomEmojis;` (line 14367):
 /// the statuses offered for chats (tdesktop `channelStatusMode`).
 pub fn get_default_chat_emoji_statuses(extra: RequestId) -> String {
@@ -127,6 +143,17 @@ mod tests {
         assert_eq!(v["emoji_status"]["expiration_date"], 0);
         let cleared = parse(set_chat_emoji_status(RequestId(8), ChatId(-1003), None));
         assert_eq!(cleared["emoji_status"], Value::Null);
+    }
+
+    #[test]
+    fn chat_theme_background_request_is_for_everyone() {
+        let v = parse(set_chat_theme_background(RequestId(4), ChatId(-1005), "🦁"));
+        assert_eq!(v["@type"], "setChatBackground");
+        assert_eq!(v["chat_id"], -1005);
+        assert_eq!(v["background"], Value::Null);
+        assert_eq!(v["type"]["@type"], "backgroundTypeChatTheme");
+        assert_eq!(v["type"]["theme_name"], "🦁");
+        assert_eq!(v["only_for_self"], false);
     }
 
     #[test]

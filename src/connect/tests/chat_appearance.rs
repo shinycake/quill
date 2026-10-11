@@ -37,6 +37,7 @@ fn only_those_who_may_change_info_can_open_or_apply() {
         name: Some((9, 55)),
         profile: Some((4, 66)),
         status: Some(Some(77)),
+        emoji_pack: None,
     };
     // A plain member of the channel sends nothing.
     ingest(
@@ -71,6 +72,7 @@ fn only_those_who_may_change_info_can_open_or_apply() {
         name: Some((-1, 0)),
         profile: None,
         status: None,
+        emoji_pack: None,
     };
     assert!(driver.apply_chat_appearance(ChatId(-20), bad).is_err());
 }
@@ -104,4 +106,37 @@ fn opening_refreshes_the_level_and_loads_choices_once() {
     assert!(driver.session.stickers.emoji.chat_status_open);
     driver.close_chat_appearance();
     assert!(!driver.session.stickers.emoji.chat_status_open);
+}
+
+#[test]
+fn a_channel_theme_is_a_background_and_a_pack_needs_full_info() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    for json in [
+        r#"{"@type":"updateNewChat","chat":{"id":-30,"title":"G","type":{"@type":"chatTypeSupergroup","supergroup_id":130,"is_channel":false},"unread_count":0}}"#,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":130,"status":{"@type":"chatMemberStatusCreator","is_member":true}}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    }
+    driver.set_chat_look_theme(ChatId(-30), "x").unwrap();
+    let sent = sent_request(&recorder, "setChatBackground");
+    assert_eq!(sent["chat_id"], -30);
+    assert_eq!(sent["type"]["theme_name"], "x");
+    assert_eq!(count(&recorder, "setChatTheme"), 0);
+    assert!(driver.set_chat_look_theme(ChatId(-30), "").is_err());
+
+    // Without full info saying packs may be set, the pack is refused.
+    let plan = ApplyPlan {
+        name: None,
+        profile: None,
+        status: None,
+        emoji_pack: Some(900),
+    };
+    assert!(driver.apply_chat_appearance(ChatId(-30), plan).is_err());
+    assert_eq!(count(&recorder, "setSupergroupCustomEmojiStickerSet"), 0);
 }

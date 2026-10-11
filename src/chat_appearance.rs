@@ -29,6 +29,11 @@ const DEFAULT_GROUP_PROFILE_ICON_LEVEL: i32 = 5;
 const DEFAULT_STATUS_LEVEL: i32 = 8;
 /// tdesktop's answer for a color the palette does not list.
 const UNLISTED_COLOR_LEVEL: i32 = 1;
+/// `group_emoji_stickers_level_min`, `*_wallpaper_level_min` and
+/// `*_custom_wallpaper_level_min`.
+const DEFAULT_EMOJI_PACK_LEVEL: i32 = 4;
+const DEFAULT_THEME_BACKGROUND_LEVEL: i32 = 9;
+const DEFAULT_CUSTOM_BACKGROUND_LEVEL: i32 = 10;
 
 /// What the user edits. `-1` is "no profile color", `0` is "no icon" and
 /// "no status".
@@ -39,6 +44,9 @@ pub struct ChatAppearanceDraft {
     pub profile_color_id: i32,
     pub profile_emoji_id: i64,
     pub status_emoji_id: i64,
+    /// The group's custom emoji pack (`supergroupFullInfo`), 0 = none.
+    /// Supergroups only.
+    pub emoji_pack_id: i64,
 }
 
 /// Which section of the box a thing belongs to.
@@ -55,6 +63,8 @@ pub struct FeatureLevels {
     pub reply_icon: i32,
     pub profile_icon: i32,
     pub status: i32,
+    /// Custom emoji pack of a supergroup.
+    pub emoji_pack: i32,
 }
 
 impl FeatureLevels {
@@ -76,8 +86,63 @@ impl FeatureLevels {
                 },
             ),
             status: first(|f| f.can_set_emoji_status, DEFAULT_STATUS_LEVEL),
+            emoji_pack: first(
+                |f| f.can_set_custom_emoji_sticker_set,
+                DEFAULT_EMOJI_PACK_LEVEL,
+            ),
         }
     }
+}
+
+/// Minimum levels of the chat wallpaper: a chat theme background and a
+/// custom one (a gallery wallpaper or an image file).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WallpaperLevels {
+    pub theme_background: i32,
+    pub custom_background: i32,
+}
+
+impl WallpaperLevels {
+    pub fn from_features(features: Option<&ParsedBoostFeatures>) -> Self {
+        let first = |unlocks: fn(&ParsedBoostLevelFeatures) -> bool, fallback: i32| {
+            features
+                .and_then(|table| table.levels.iter().find(|level| unlocks(level)))
+                .map_or(fallback, |level| level.level)
+        };
+        Self {
+            theme_background: first(
+                |f| f.chat_theme_background_count > 0,
+                DEFAULT_THEME_BACKGROUND_LEVEL,
+            ),
+            custom_background: first(
+                |f| f.can_set_custom_background,
+                DEFAULT_CUSTOM_BACKGROUND_LEVEL,
+            ),
+        }
+    }
+
+    /// Whether a chat at `level` may set the wallpaper (`custom`: a gallery
+    /// wallpaper or file, else a chat theme background).
+    pub fn gate(&self, custom: bool, level: Option<i32>) -> WallpaperGate {
+        let required = if custom {
+            self.custom_background
+        } else {
+            self.theme_background
+        };
+        match level {
+            None => WallpaperGate::LevelUnknown,
+            Some(have) if have < required => WallpaperGate::NeedsBoosts { required, have },
+            Some(_) => WallpaperGate::Allowed,
+        }
+    }
+}
+
+/// The boost check in front of `setChatBackground`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WallpaperGate {
+    Allowed,
+    LevelUnknown,
+    NeedsBoosts { required: i32, have: i32 },
 }
 
 /// The level a channel needs for name color `id`: none for the color it
@@ -117,11 +182,15 @@ pub struct RequiredLevels {
     pub name: i32,
     pub profile: i32,
     pub status: i32,
+    pub emoji_pack: i32,
 }
 
 impl RequiredLevels {
     pub fn max(&self) -> i32 {
-        self.name.max(self.profile).max(self.status)
+        self.name
+            .max(self.profile)
+            .max(self.status)
+            .max(self.emoji_pack)
     }
 }
 
@@ -142,6 +211,8 @@ pub struct ApplyPlan {
     pub profile: Option<(i32, i64)>,
     /// `setChatEmojiStatus`: the custom emoji, `None` to remove.
     pub status: Option<Option<i64>>,
+    /// `setSupergroupCustomEmojiStickerSet`: the pack, 0 to remove.
+    pub emoji_pack: Option<i64>,
 }
 
 /// What pressing Apply does.
@@ -198,6 +269,12 @@ impl ChatAppearanceDraft {
         if self.status_emoji_id != current.status_emoji_id && self.status_emoji_id != 0 {
             required.status = rules.features.status;
         }
+        if rules.kind == ChatAppearanceKind::Supergroup
+            && self.emoji_pack_id != current.emoji_pack_id
+            && self.emoji_pack_id != 0
+        {
+            required.emoji_pack = rules.features.emoji_pack;
+        }
         required
     }
 
@@ -215,7 +292,9 @@ impl ChatAppearanceDraft {
         let profile = self.profile_color_id != current.profile_color_id
             || self.profile_emoji_id != current.profile_emoji_id;
         let status = self.status_emoji_id != current.status_emoji_id;
-        if !name && !profile && !status {
+        let emoji_pack = rules.kind == ChatAppearanceKind::Supergroup
+            && self.emoji_pack_id != current.emoji_pack_id;
+        if !name && !profile && !status && !emoji_pack {
             return ApplyOutcome::Unchanged;
         }
         let Some(have) = level else {
@@ -229,6 +308,7 @@ impl ChatAppearanceDraft {
             name: name.then_some((self.name_color_id, self.name_emoji_id)),
             profile: profile.then_some((self.profile_color_id, self.profile_emoji_id)),
             status: status.then_some((self.status_emoji_id != 0).then_some(self.status_emoji_id)),
+            emoji_pack: emoji_pack.then_some(self.emoji_pack_id),
         })
     }
 }
@@ -263,6 +343,9 @@ mod tests {
             can_set_background_custom_emoji: bg,
             can_set_profile_background_custom_emoji: profile,
             can_set_emoji_status: status,
+            can_set_custom_emoji_sticker_set: level >= 4,
+            chat_theme_background_count: if level >= 6 { 2 } else { 0 },
+            can_set_custom_background: level >= 9,
             ..ParsedBoostLevelFeatures::default()
         };
         ParsedBoostFeatures {
@@ -282,6 +365,7 @@ mod tests {
             profile_color_id: -1,
             profile_emoji_id: 0,
             status_emoji_id: 0,
+            emoji_pack_id: 0,
         }
     }
 
@@ -307,7 +391,8 @@ mod tests {
             FeatureLevels {
                 reply_icon: 3,
                 profile_icon: 6,
-                status: 9
+                status: 9,
+                emoji_pack: 6
             }
         );
         let channel = FeatureLevels::from_features(None, ChatAppearanceKind::Channel);
@@ -374,7 +459,8 @@ mod tests {
             RequiredLevels {
                 name: 5,
                 profile: 6,
-                status: 9
+                status: 9,
+                emoji_pack: 0
             }
         );
         assert_eq!(
@@ -435,5 +521,63 @@ mod tests {
         };
         assert_eq!(plan.name, None);
         assert_eq!(plan.profile, Some((3, 0)));
+    }
+
+    #[test]
+    fn the_emoji_pack_is_a_supergroup_part_with_its_own_level() {
+        let features = table();
+        let group = rules(ChatAppearanceKind::Supergroup, &features, &[], &[]);
+        let mut edited = draft();
+        edited.emoji_pack_id = 77;
+        assert_eq!(
+            edited.apply_outcome(&draft(), Some(5), &group),
+            ApplyOutcome::NeedsBoosts {
+                required: 6,
+                have: 5
+            }
+        );
+        let ApplyOutcome::Send(plan) = edited.apply_outcome(&draft(), Some(6), &group) else {
+            panic!("level 6 unlocks the pack");
+        };
+        assert_eq!(plan.emoji_pack, Some(77));
+        // Removing a pack is free; channels have no pack part.
+        let mut current = draft();
+        current.emoji_pack_id = 77;
+        let ApplyOutcome::Send(plan) = draft().apply_outcome(&current, Some(0), &group) else {
+            panic!("removing is free");
+        };
+        assert_eq!(plan.emoji_pack, Some(0));
+        let channel = rules(ChatAppearanceKind::Channel, &features, &[], &[]);
+        assert_eq!(
+            edited.apply_outcome(&draft(), None, &channel),
+            ApplyOutcome::Unchanged
+        );
+    }
+
+    #[test]
+    fn the_wallpaper_needs_a_theme_or_custom_level() {
+        let levels = WallpaperLevels::from_features(Some(&table()));
+        assert_eq!((levels.theme_background, levels.custom_background), (6, 9));
+        assert_eq!(levels.gate(false, None), WallpaperGate::LevelUnknown);
+        assert_eq!(
+            levels.gate(false, Some(5)),
+            WallpaperGate::NeedsBoosts {
+                required: 6,
+                have: 5
+            }
+        );
+        assert_eq!(levels.gate(false, Some(6)), WallpaperGate::Allowed);
+        assert_eq!(
+            levels.gate(true, Some(8)),
+            WallpaperGate::NeedsBoosts {
+                required: 9,
+                have: 8
+            }
+        );
+        let defaults = WallpaperLevels::from_features(None);
+        assert_eq!(
+            (defaults.theme_background, defaults.custom_background),
+            (9, 10)
+        );
     }
 }

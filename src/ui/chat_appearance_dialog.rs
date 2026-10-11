@@ -72,6 +72,10 @@ impl QuillApp {
             profile_color_id: look.profile_accent_color_id,
             profile_emoji_id: look.profile_background_custom_emoji_id,
             status_emoji_id: look.emoji_status_id,
+            emoji_pack_id: session
+                .chat_supergroup(chat_id)
+                .and_then(|id| session.supergroup_full_info(id))
+                .map_or(0, |info| info.custom_emoji_sticker_set_id),
         })
     }
 
@@ -157,7 +161,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn edit_chat_appearance(
+    pub(super) fn edit_chat_appearance(
         &mut self,
         cx: &mut Context<Self>,
         edit: impl FnOnce(&mut ChatAppearanceDraft, ChatAppearanceTab),
@@ -409,7 +413,11 @@ impl QuillApp {
 
     /// "Level N required" when the chat is below `required`, nothing once
     /// it is there. With the level unknown the minimum shows plainly.
-    fn chat_appearance_lock_note(required: i32, level: Option<i32>, muted: Hsla) -> Option<Div> {
+    pub(super) fn chat_appearance_lock_note(
+        required: i32,
+        level: Option<i32>,
+        muted: Hsla,
+    ) -> Option<Div> {
         (required > 0 && level.is_none_or(|have| have < required)).then(|| {
             div()
                 .text_xs()
@@ -735,6 +743,16 @@ impl QuillApp {
             .child(div().text_xs().text_color(muted).child(format!(
                 "The emoji status is shown next to the {group_word} name."
             )));
+
+        if kind == ChatAppearanceKind::Supergroup {
+            panel = panel.child(self.chat_appearance_pack_section(
+                features,
+                level,
+                draft.emoji_pack_id,
+                cx,
+            ));
+        }
+        panel = panel.child(self.chat_appearance_wallpaper_section(chat_id, kind, level, cx));
 
         if let Some((required, have)) = needs_boosts {
             panel = panel.child(
