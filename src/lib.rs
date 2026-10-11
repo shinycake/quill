@@ -65,6 +65,7 @@ pub mod go_to_message;
 pub mod icon_badge;
 pub mod ids;
 pub mod inline_grid;
+pub mod inline_members;
 pub mod key_fingerprint;
 pub mod layout;
 pub mod lifecycle;

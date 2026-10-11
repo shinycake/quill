@@ -329,6 +329,7 @@ impl QuillApp {
                 input.update(cx, |state, cx| state.set_value(&query, window, cx));
             }
         }
+        self.inline_members_opened(target, window, cx);
         cx.notify();
     }
 
