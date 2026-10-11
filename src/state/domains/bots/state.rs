@@ -68,6 +68,8 @@ pub struct BotsState {
     /// Bots slice: generation counter for `ResolveInlineBot` request
     /// correlation (bumped per resolve; see the purpose docs).
     pub inline_bot_resolve_seq: u64,
+    /// Editing an owned bot and creating a managed one.
+    pub owned: OwnedBotsState,
 }
 
 impl BotsState {
@@ -89,6 +91,7 @@ impl BotsState {
             inline_query: None,
             inline_bot_resolve: None,
             inline_bot_resolve_seq: 0,
+            owned: OwnedBotsState::default(),
         }
     }
 }

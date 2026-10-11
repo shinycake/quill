@@ -382,7 +382,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             | DeepLinkAction::AddBot { domain, .. }
             | DeepLinkAction::OpenWebAppLink { domain, .. }
             | DeepLinkAction::OpenMainWebApp { domain, .. }
-            | DeepLinkAction::OpenAttachmentBot { domain, .. } => search_public_chat(extra, domain),
+            | DeepLinkAction::OpenAttachmentBot { domain, .. }
+            | DeepLinkAction::CreateManagedBot { domain, .. } => search_public_chat(extra, domain),
             DeepLinkAction::MessageLink { url } => get_message_link_info(extra, url),
             DeepLinkAction::BoostLink { url } => get_chat_boost_link_info(extra, url),
             DeepLinkAction::OpenChannelBoost { chat_id } => get_chat(extra, ChatId(*chat_id)),

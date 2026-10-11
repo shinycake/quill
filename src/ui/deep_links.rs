@@ -132,6 +132,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.run_managed_bot_link(chat_id, action, window, cx) {
+            return;
+        }
         // Game and add-bot links open a picker over the current view; the
         // bot's own chat stays closed (tdesktop shows a box, not the chat).
         if matches!(

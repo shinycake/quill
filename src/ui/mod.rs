@@ -115,6 +115,8 @@ mod audio_playback;
 mod auth_registration;
 mod auth_ui;
 mod boosts_overview;
+mod bot_create_dialog;
+mod bot_edit_dialog;
 mod bot_pending;
 mod bot_stream;
 mod bot_verify_dialog;

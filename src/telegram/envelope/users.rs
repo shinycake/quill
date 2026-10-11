@@ -107,6 +107,12 @@ pub struct ParsedUser {
     pub has_main_web_app: bool,
     /// `userTypeBot.can_be_added_to_attachment_menu`.
     pub can_be_added_to_attachment_menu: bool,
+    /// `userTypeBot.can_be_edited`: the viewer owns the bot and may change
+    /// its name, about text and photo (tdesktop `botInfo->canEditInformation`).
+    pub can_be_edited: bool,
+    /// `userTypeBot.can_manage_bots`: the bot may create managed bots
+    /// (tdesktop `botInfo->canManageBots`).
+    pub can_manage_bots: bool,
     pub status: UserStatusKind,
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
@@ -301,6 +307,8 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     let can_join_groups = bot_flag("can_join_groups");
     let has_main_web_app = bot_flag("has_main_web_app");
     let can_be_added_to_attachment_menu = bot_flag("can_be_added_to_attachment_menu");
+    let can_be_edited = bot_flag("can_be_edited");
+    let can_manage_bots = bot_flag("can_manage_bots");
     let status = parse_user_status(value.get("status"));
     let photo_small_file_id = i32::try_from(int53_or_zero(
         value
@@ -371,6 +379,8 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         can_join_groups,
         has_main_web_app,
         can_be_added_to_attachment_menu,
+        can_be_edited,
+        can_manage_bots,
         status,
         photo_small_file_id,
         accent_color_id,

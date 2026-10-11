@@ -44,3 +44,21 @@ fn app_links_resolve_the_bot_first() {
         assert!(matches!(route_of(broken), LinkRoute::Message(_)));
     }
 }
+
+#[test]
+fn managed_bot_links_resolve_the_manager_first() {
+    assert_eq!(
+        route_of(
+            json!({"@type":"internalLinkTypeRequestManagedBot","manager_bot_username":"makerbot","suggested_bot_username":"coolbot","suggested_bot_name":"Cool"})
+        ),
+        LinkRoute::Resolve(DeepLinkAction::CreateManagedBot {
+            domain: "makerbot".into(),
+            suggested_username: "coolbot".into(),
+            suggested_name: "Cool".into(),
+        })
+    );
+    assert!(matches!(
+        route_of(json!({"@type":"internalLinkTypeRequestManagedBot","manager_bot_username":""})),
+        LinkRoute::Message(_)
+    ));
+}

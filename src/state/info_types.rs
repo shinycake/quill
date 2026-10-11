@@ -511,6 +511,13 @@ pub enum DeepLinkAction {
     /// `internalLinkTypeAttachmentMenuBot`: resolve the bot, add it to the
     /// attachment menu if needed, then `openWebApp` in the current chat.
     OpenAttachmentBot { domain: String, url: String },
+    /// `internalLinkTypeRequestManagedBot`: resolve the manager bot, then
+    /// the "Create Bot" dialog with the suggested name and username.
+    CreateManagedBot {
+        domain: String,
+        suggested_username: String,
+        suggested_name: String,
+    },
 }
 
 /// `parity:platform-deep-links`: the single active deep-link flow. One

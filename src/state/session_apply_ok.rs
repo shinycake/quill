@@ -21,6 +21,7 @@ impl Session {
         self.apply_giveaway_ok(pending);
         self.apply_boost_settings_ok(pending);
         self.apply_web_app_ok(pending);
+        self.apply_owned_bots_ok(pending);
         self.apply_privacy_data_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(

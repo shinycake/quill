@@ -58,6 +58,12 @@ pub enum InternalLink {
         username: String,
         game_short_name: String,
     },
+    /// `internalLinkTypeRequestManagedBot`: `tg://newbot?manager=&username=&name=`.
+    RequestManagedBot {
+        manager_username: String,
+        suggested_username: String,
+        suggested_name: String,
+    },
     ChatInvite {
         invite_link: String,
     },
@@ -259,6 +265,11 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
         "AttachmentMenuBot" => InternalLink::AttachmentMenuBot {
             username: text(value, "bot_username"),
             url: text(value, "url"),
+        },
+        "RequestManagedBot" => InternalLink::RequestManagedBot {
+            manager_username: text(value, "manager_bot_username"),
+            suggested_username: text(value, "suggested_bot_username"),
+            suggested_name: text(value, "suggested_bot_name"),
         },
         "Game" => InternalLink::Game {
             username: text(value, "bot_username"),
@@ -496,6 +507,18 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
             })
         }
         InternalLink::Game { .. } => LinkRoute::Message("This game link is broken.".into()),
+        InternalLink::RequestManagedBot {
+            manager_username,
+            suggested_username,
+            suggested_name,
+        } if !manager_username.is_empty() => LinkRoute::Resolve(A::CreateManagedBot {
+            domain: manager_username.clone(),
+            suggested_username: suggested_username.clone(),
+            suggested_name: suggested_name.clone(),
+        }),
+        InternalLink::RequestManagedBot { .. } => {
+            LinkRoute::Message("This bot link is broken.".into())
+        }
         InternalLink::ChatInvite { invite_link } => match invite_hash(invite_link) {
             Some(hash) => LinkRoute::Resolve(A::JoinInvite { hash }),
             None => LinkRoute::Message("This invite link is broken or has expired.".into()),

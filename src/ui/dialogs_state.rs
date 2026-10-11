@@ -13,6 +13,10 @@ pub(crate) struct DialogUi {
     pub(super) profile_dialog: Option<ProfileDialog>,
     /// "Verify accounts" for the owner of a verifying bot.
     pub(super) bot_verify_dialog: Option<super::bot_verify_dialog::BotVerifyDialog>,
+    /// Edit screen of a bot the viewer owns.
+    pub(super) bot_edit_dialog: Option<super::bot_edit_dialog::BotEditDialog>,
+    /// "Create Bot" from a managed-bot link.
+    pub(super) bot_create_dialog: Option<super::bot_create_dialog::BotCreateDialog>,
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,
@@ -56,6 +60,8 @@ impl DialogUi {
             profile_modal: None,
             profile_dialog: None,
             bot_verify_dialog: None,
+            bot_edit_dialog: None,
+            bot_create_dialog: None,
             edit_profile_dialog: None,
             pending_profile_gallery: None,
             add_contact_dialog: None,
