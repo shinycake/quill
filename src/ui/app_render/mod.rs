@@ -1,0 +1,935 @@
+//! impl Render for QuillApp (root view composition).
+
+use super::actions::{
+    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
+    ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat,
+    FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear, FormatItalic,
+    FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, HistoryPageDown,
+    HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat, LoadOlder, LockApp, MarkChatRead,
+    MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenChatSearch, OpenContacts, OpenHelp,
+    OpenPinnedChat, OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat,
+    PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious, SelectionExtendNewer, SelectionExtendOlder,
+    SelectionFocusNewer, SelectionFocusOlder, ShowChatMenu, ShowChatPreview, SpellingIgnore,
+    SpellingLearn, SpellingReplace, SpellingUnlearn, StoryTogglePause, SubmitCode, SubmitPassword,
+    SubmitPhone, ToggleFullscreen, ToggleMessageSelection, ToggleTheme, ViewerCopy,
+    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
+    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+};
+use super::app::QuillApp;
+use super::shell::title_bar;
+use super::shortcut_pack::HistoryKey;
+use gpui_kit::component::alert::Alert;
+use gpui_kit::component::input::{Copy as CopyAction, Paste as PasteAction};
+use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+use quill::auth::{AuthAction, view_for};
+use quill::composer::ComposerShortcut;
+use quill::ids::ChatId;
+use quill::settings::ThemeChoice;
+use quill::state::{ConnectionIndicator, connection_indicator};
+impl Render for QuillApp {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Bounded image memory: retired images and path images nothing can
+        // show any more leave the atlas (`image_budget`).
+        super::image_budget::begin_frame();
+        super::image_budget::sweep(window, cx);
+        super::spoiler_fx::release_media_tile(Some(window), cx);
+        let image_cache = self.slices.image_cache();
+        if let Some(cache) = &image_cache {
+            cache.update(cx, |cache, cx| cache.trim(window, cx));
+        }
+        self.schedule_idle_image_trim(cx);
+        self.sync_capture_block(window);
+        self.sync_speech_trial_hint(cx);
+        self.sync_window_title(window);
+        // Rows the history list painted last frame are what the user saw.
+        self.passcode_frame(window, cx);
+        self.report_visible_history(
+            window.is_window_active() && !self.account.passcode.locked,
+            cx,
+        );
+        self.report_visible_sponsored(window.is_window_active() && !self.account.passcode.locked);
+        // A conversation replayed from its cache (`app_slice`) still shows
+        // its clips: only a conversation that rendered (or a frame without
+        // one) and swept no player orphans them.
+        let history_drawn = self.slices.conversation_rendered.replace(false)
+            || !self.slices.conversation_shown.replace(false);
+        self.playback
+            .inline_videos
+            .borrow_mut()
+            .frame_start(history_drawn, window.scale_factor());
+        let active = window.is_window_active() || super::frame_clock::assume_active();
+        // The forum's topic list is a column of its own (tdesktop shows it
+        // where the chat list was).
+        let forum_column = self.forum_column_layout(window);
+        if self.frame.window_active.replace(active) != active {
+            self.playback
+                .inline_videos
+                .borrow_mut()
+                .set_window_active(active);
+        }
+        // The viewer left video full screen: give the window back.
+        if std::mem::take(&mut self.viewer.extra.restore_fullscreen) && window.is_fullscreen() {
+            window.toggle_fullscreen();
+        }
+        self.frame.media_roots_frame.borrow_mut().take();
+        // Spoiler specks painted last frame keep drifting.
+        if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
+            self.request_animation_tick(30, cx);
+        }
+        if std::mem::take(&mut self.recording.auto_send) {
+            cx.defer_in(window, |this, window, cx| this.send_recording(window, cx));
+        }
+        let status_toast = self.status_toast_visible(cx);
+        let viewer_open = self.viewer.state.is_open();
+        let menu_open = self.message_ui.menu.is_some()
+            || self.chat_list.menu.is_some()
+            || self.chat_list.archive_menu.is_some()
+            || self.chat_list.global.story_menu.is_some()
+            || self.folders.tab_menu.is_some();
+        if menu_open && !self.frame.context_menu_was_open {
+            self.frame.context_menu_previous_focus = window.focused(cx);
+            window.focus(&self.frame.context_menu_focus, cx);
+        } else if !menu_open && self.frame.context_menu_was_open {
+            // A menu action may already have focused an editor or a dialog.
+            if self.frame.context_menu_focus.contains_focused(window, cx)
+                && let Some(previous) = self.frame.context_menu_previous_focus.as_ref()
+            {
+                window.focus(previous, cx);
+            }
+            self.frame.context_menu_previous_focus = None;
+        }
+        self.frame.context_menu_was_open = menu_open;
+        self.frame_upkeep(window, cx);
+        let auth_state = self.current_auth();
+        let auth = view_for(&auth_state);
+        let inputs_live = self.live.is_some() || self.auth_ui.demo_inputs;
+        let show_phone = inputs_live && matches!(auth.action, AuthAction::EnterPhone);
+        let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
+        let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
+        let show_qr = inputs_live && matches!(auth.action, AuthAction::WaitOtherDevice);
+        // Slice parity:platform-offline-indicator — re-read every frame
+        // (the 40ms `poll_live` loop applies `updateConnectionState` and
+        // re-renders), so the indicator follows TDLib live.
+        let connection = self
+            .session()
+            .map(|session| session.connection)
+            .and_then(connection_indicator);
+        let root = div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .relative()
+            .bg(cx.theme().background)
+            // Window-wide text selection: message text can be selected and
+            // copied within a message (Telegram Desktop).
+            .child(gpui_kit::base::TextSelectionLayer)
+            // Batch 4: input clock for the online/idle presence.
+            .child(super::presence::input_probe())
+            // Capture phase: with message text selected, ⌘C copies it even
+            // while the composer has focus.
+            .capture_action(cx.listener(|_this, _: &CopyAction, window, cx| {
+                if let Some(((chat_id, _), text)) =
+                    super::selectable_text::selected_message_text(window, cx)
+                {
+                    if !_this.refuse_protected_copy(ChatId(chat_id), cx) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
+                    cx.stop_propagation();
+                } else if let Some((chat_id, text)) = _this.selected_messages_text() {
+                    // Selection mode: copy the selected messages.
+                    if !_this.refuse_protected_copy(chat_id, cx) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &LockApp, _, cx| this.lock_by_passcode(cx)))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                this.navigate(super::navigation::NavigationAction::Settings, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
+                #[cfg(target_os = "macos")]
+                {
+                    use quill::quit_guard::QuitDecision;
+                    let now =
+                        u64::try_from(this.frame.quit_clock.elapsed().as_millis()).unwrap_or(0);
+                    match this
+                        .frame
+                        .quit_guard
+                        .press(now, this.appearance.mac_warn_before_quit)
+                    {
+                        QuitDecision::Warn => {
+                            this.connection.status_note = quill::quit_guard::WARNING.to_string();
+                            cx.notify();
+                            return;
+                        }
+                        QuitDecision::Holding => return,
+                        QuitDecision::Quit => {}
+                    }
+                }
+                let _ = this;
+                window.remove_window();
+                cx.quit();
+            }))
+            // kit Phase 7: window-chrome actions behind the File / Window /
+            // View / Help menus (same dispatch path as the key bindings).
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                use quill::tray::{CloseOutcome, close_outcome};
+                match close_outcome(
+                    this.appearance.minimize_to_tray,
+                    quill::tray::tray_available(),
+                    cfg!(target_os = "macos"),
+                    super::window_control::hide_supported(window),
+                ) {
+                    CloseOutcome::HideApp => cx.hide(),
+                    CloseOutcome::Hide => {
+                        if !super::window_control::set_visible(window, false) {
+                            window.minimize_window();
+                        }
+                    }
+                    CloseOutcome::Minimize => window.minimize_window(),
+                    CloseOutcome::Quit => {
+                        window.remove_window();
+                        // macOS keeps a windowless app alive for its menu
+                        // bar; elsewhere closing the only window quits.
+                        #[cfg(not(target_os = "macos"))]
+                        cx.quit();
+                    }
+                }
+            }))
+            .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
+                #[cfg(target_os = "macos")]
+                if this.appearance.minimize_to_tray && quill::tray::tray_available() {
+                    cx.hide();
+                    return;
+                }
+                let _ = (this, cx);
+                window.minimize_window();
+            }))
+            .on_action(cx.listener(|this, _: &ZoomWindow, window, _| {
+                let _ = this;
+                window.zoom_window();
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFullscreen, window, _| {
+                let _ = this;
+                window.toggle_fullscreen();
+            }))
+            .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| {
+                // Write through the appearance funnel (persist + re-apply)
+                // so the 60s auto-night tick can't silently revert the
+                // flip. Auto-night, when enabled, still overrides the
+                // manual choice while active — same as the dialog.
+                // stories-high-contrast: the toggle cycles all three
+                // modes (Light → Dark → High contrast).
+                let next = match this.appearance.theme {
+                    ThemeChoice::Light => ThemeChoice::Dark,
+                    ThemeChoice::Dark => ThemeChoice::HighContrast,
+                    ThemeChoice::HighContrast => ThemeChoice::Light,
+                };
+                this.set_appearance(cx, |a| a.theme = next);
+            }))
+            .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
+                let _ = this;
+                cx.open_url("https://github.com/shinycake/quill");
+            }))
+            .on_action(cx.listener(|this, _: &OpenShortcuts, _, cx| {
+                this.settings.shortcuts_open = true;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &NextChat, window, cx| {
+                this.step_open_chat(1, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PrevChat, window, cx| {
+                this.step_open_chat(-1, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
+                this.composer
+                    .update(cx, |input, cx| input.focus(window, cx));
+            }))
+            // Parity slice (platform-paste-image): the kit Textarea's paste is
+            // text-only, and GPUI stops an action at the first handler, so a
+            // bubbling handler never ran. This one captures (runs before the
+            // focused textarea): clipboard images and copied files become
+            // attachments; anything else falls through to the text paste.
+            .capture_action(cx.listener(|this, _: &PasteAction, window, cx| {
+                if this.paste_image_from_clipboard(window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {
+                window.focus(&this.focus_sidebar, cx);
+            }))
+            // Shortcut pack (see `shortcut_pack.rs`): a handler that has no
+            // use for the key propagates it to the focused input.
+            .on_action(cx.listener(|this, _: &ReplyToPrevious, window, cx| {
+                if !this.reply_by_key(false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ReplyToNext, window, cx| {
+                if !this.reply_by_key(true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &AttachFile, window, cx| {
+                if !this.attach_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryPageUp, window, cx| {
+                if !this.scroll_history_by_key(HistoryKey::PageUp, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryPageDown, window, cx| {
+                if !this.scroll_history_by_key(HistoryKey::PageDown, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryToTop, window, cx| {
+                if !this.scroll_history_by_key(HistoryKey::Top, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryToBottom, window, cx| {
+                if !this.scroll_history_by_key(HistoryKey::Bottom, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &DeleteSelection, window, cx| {
+                if !this.delete_selection_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleMessageSelection, window, cx| {
+                if !this.toggle_focused_selection_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectionFocusOlder, window, cx| {
+                if !this.move_selection_focus_by_key(true, false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectionFocusNewer, window, cx| {
+                if !this.move_selection_focus_by_key(false, false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectionExtendOlder, window, cx| {
+                if !this.move_selection_focus_by_key(true, true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectionExtendNewer, window, cx| {
+                if !this.move_selection_focus_by_key(false, true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, action: &OpenPinnedChat, window, cx| {
+                if !this.open_pinned_by_key(action.index, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenSavedMessages, window, cx| {
+                if !this.open_saved_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenArchive, window, cx| {
+                if !this.open_archive_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenContacts, window, cx| {
+                if !this.open_contacts_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FirstChat, window, cx| {
+                if !this.open_edge_chat_by_key(false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &LastChat, window, cx| {
+                if !this.open_edge_chat_by_key(true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &PrevFolder, window, cx| {
+                if !this.step_folder_by_key(false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &NextFolder, window, cx| {
+                if !this.step_folder_by_key(true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &MarkChatRead, window, cx| {
+                if !this.mark_read_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ShowChatMenu, window, cx| {
+                if !this.chat_menu_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ShowChatPreview, window, cx| {
+                if !this.chat_preview_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &LoadOlder, _, cx| {
+                this.load_older_action(cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenSearch, window, cx| {
+                this.open_search_ui(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenChatSearch, window, cx| {
+                this.open_chat_search_ui(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ChatSearchNewer, _, cx| {
+                this.chat_search_newer(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ChatSearchOlder, _, cx| {
+                this.chat_search_older(cx);
+            }))
+            .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
+                this.cancel_search(window, cx);
+            }))
+            // Parity slice 5: left/right step the media viewer; `0` resets
+            // zoom. Only while the viewer is open: otherwise the handler
+            // propagates, so the keystroke reaches the focused input (an
+            // action handler stops propagation unless told to propagate,
+            // which used to eat the composer's arrow keys and "0").
+            .on_action(cx.listener(|this, _: &StoryTogglePause, _, cx| {
+                if this.stories.viewer.is_open() && !this.story_text_input_open() {
+                    this.toggle_story_pause(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerPrev, _, cx| {
+                if this.stories.viewer.is_open() && !this.story_text_input_open() {
+                    this.step_story_viewer(-1, cx);
+                } else if this.viewer.state.is_open() {
+                    this.step_media_viewer(-1, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerNext, _, cx| {
+                if this.stories.viewer.is_open() && !this.story_text_input_open() {
+                    this.step_story_viewer(1, cx);
+                } else if this.viewer.state.is_open() {
+                    this.step_media_viewer(1, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerZoomReset, _, cx| {
+                if this.viewer.state.is_open() {
+                    this.viewer_reset_zoom(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerZoomIn, _, cx| {
+                if this.viewer.state.is_open() {
+                    this.viewer_zoom_step(true, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerZoomOut, _, cx| {
+                if this.viewer.state.is_open() {
+                    this.viewer_zoom_step(false, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerFlipHorizontal, _, cx| {
+                if this.viewer.state.is_open() {
+                    this.flip_viewer_horizontal(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerFlipVertical, _, cx| {
+                if this.viewer.state.is_open() {
+                    this.flip_viewer_vertical(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerCopy, _, cx| {
+                if this.viewer.state.is_open() {
+                    this.copy_viewer_photo(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerSave, _, cx| {
+                if this.viewer.state.is_open() {
+                    this.save_viewer_media(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SubmitPhone, window, cx| {
+                this.submit_phone(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SubmitCode, window, cx| {
+                this.submit_code(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SubmitPassword, window, cx| {
+                this.submit_password(window, cx);
+            }))
+            // M1: formatting shortcuts only apply when the composer has
+            // focus (otherwise the keystroke belongs to whatever is
+            // focused).
+            // codex:spellcheck-native: composer context-menu spelling items.
+            .on_action(cx.listener(|this, action: &SpellingReplace, window, cx| {
+                this.on_spelling_replace(action, window, cx);
+            }))
+            .on_action(cx.listener(|this, action: &SpellingLearn, _, cx| {
+                this.on_spelling_learn(action, cx);
+            }))
+            .on_action(cx.listener(|this, action: &SpellingUnlearn, _, cx| {
+                this.on_spelling_unlearn(action, cx);
+            }))
+            .on_action(cx.listener(|this, action: &SpellingIgnore, _, cx| {
+                this.on_spelling_ignore(action, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatBold, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Bold, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatItalic, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Italic, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatUnderline, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Underline, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatStrikethrough, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Strikethrough, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatMonospace, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Monospace, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatBlockQuote, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::BlockQuote, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatSpoiler, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Spoiler, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatClear, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::ClearFormatting, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ComposerEditLink, window, cx| {
+                this.composer_link_chord(window, cx);
+            }))
+            .on_action(
+                cx.listener(|this, _: &ComposerEditCodeLanguage, window, cx| {
+                    this.open_code_language_dialog(window, cx);
+                }),
+            )
+            .on_action(cx.listener(|this, _: &ComposerPastePlain, window, cx| {
+                this.paste_plain_text(window, cx);
+            }))
+            // kit Phase 7: in-window menu bar on Linux/Windows (macOS uses
+            // the native menu bar installed by `setup_app_menus`).
+            .when(cfg!(not(target_os = "macos")), |this| {
+                this.child(
+                    div()
+                        .h(px(30.))
+                        .w_full()
+                        .flex_none()
+                        .bg(cx.theme().title_bar)
+                        .border_b_1()
+                        .border_color(cx.theme().title_bar_border)
+                        .child(self.menu_bar.clone()),
+                )
+            })
+            .child(title_bar(
+                self.pane_mode(),
+                self.live.is_some(),
+                self.search_is_open(),
+                cx,
+            ))
+            .children(self.frozen_banner(cx))
+            .children(self.live_share_strip(cx))
+            .children(self.unconfirmed_login_banner(cx))
+            .when(
+                matches!(
+                    self.settings.update_state,
+                    quill::updater::UpdateState::Available(_)
+                        | quill::updater::UpdateState::Installed(_)
+                ) && !self.settings.update_banner_dismissed,
+                |this| this.child(self.update_banner(cx)),
+            )
+            // Slice parity:platform-offline-indicator — slim connection
+            // strip below the title bar. Offline gets the kit warning
+            // banner with the "Waiting for network…" label; transitional
+            // states get a presence dot plus their per-state label
+            // (slice parity:platform-reconnect-states).
+            .when(connection == Some(ConnectionIndicator::Offline), |this| {
+                this.child(Alert::warning("connection-indicator", "Waiting for network…").banner())
+            })
+            .when_some(
+                connection.and_then(|c| match c {
+                    ConnectionIndicator::Transitioning(label) => Some(label),
+                    ConnectionIndicator::Offline => None,
+                }),
+                |this, label| {
+                    this.child(
+                        div()
+                            .w_full()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .gap(px(6.))
+                            .py(px(4.))
+                            .child(div().size(px(8.)).rounded_full().bg(cx.theme().warning))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(label),
+                            )
+                            .child(self.proxy_strip_link(cx)),
+                    )
+                },
+            )
+            .when(
+                self.pane_mode() == super::app::PaneMode::Connecting,
+                |this| {
+                    // Sign-in replaces the chat layout until the account is ready.
+                    this.child(div().flex_1().min_h_0().child(self.onboarding(
+                        &auth,
+                        show_phone,
+                        show_code,
+                        show_password,
+                        show_qr,
+                        cx,
+                    )))
+                },
+            )
+            .when(
+                self.pane_mode() != super::app::PaneMode::Connecting,
+                |this| {
+                    this.child(
+                        div()
+                            .id("quill-shell")
+                            .flex()
+                            .flex_1()
+                            .min_h_0()
+                            // The chat list follows its resize edge while dragged.
+                            .on_drag_move(cx.listener(
+                                |this,
+                                 event: &DragMoveEvent<super::navigation::SidebarResize>,
+                                 window,
+                                 cx| {
+                                    let left = event.bounds.origin.x;
+                                    this.set_sidebar_width(
+                                        event.event.position.x
+                                            - left
+                                            - px(this.folder_rail_width()),
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            ))
+                            // Ready: the chat list and the conversation are
+                            // cached slices, redrawn on their own (`app_slice`).
+                            .map(|this| {
+                                if forum_column == quill::state::ForumColumn::Replacing {
+                                    this
+                                } else if self.pane_mode() == super::app::PaneMode::Ready {
+                                    this.child(self.sidebar_slot())
+                                } else {
+                                    this.child(self.sidebar(
+                                        &auth,
+                                        show_phone,
+                                        show_code,
+                                        show_password,
+                                        show_qr,
+                                        cx,
+                                    ))
+                                }
+                            })
+                            .when(
+                                forum_column != quill::state::ForumColumn::Replacing,
+                                |this| this.child(self.sidebar_resize_handle(cx)),
+                            )
+                            .when(forum_column != quill::state::ForumColumn::Hidden, |this| {
+                                let open = self.session().and_then(|s| s.open_chat);
+                                this.child(self.forum_column_view(
+                                    open,
+                                    forum_column == quill::state::ForumColumn::Replacing,
+                                    cx,
+                                ))
+                            })
+                            .child(self.conversation_slot(cx))
+                            // Phase 6: user / group info panel beside the conversation.
+                            .when_some(self.info_panel(cx), |this, panel| this.child(panel))
+                            // MED3: downloads manager panel beside the conversation.
+                            .when_some(self.downloads_panel(cx), |this, panel| this.child(panel))
+                            // Slice media-shared-gallery: shared-media gallery panel.
+                            .when_some(self.shared_media_panel(cx), |this, panel| {
+                                this.child(panel)
+                            }),
+                    )
+                },
+            )
+            // Screenshot demos keep their caption as a fixed footer line
+            // (`QUILL_DEMO_HIDE_STATUS=1` hides it, for recordings).
+            .when(
+                self.live.is_none()
+                    && !self.connection.status_note.is_empty()
+                    && std::env::var_os("QUILL_DEMO_HIDE_STATUS").is_none(),
+                |this| {
+                    this.child(
+                        div()
+                            .id("status-line")
+                            .flex_none()
+                            .min_h(px(24.))
+                            .px_3()
+                            .role(Role::Label)
+                            .aria_label(self.connection.status_note.clone())
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(self.connection.status_note.clone()),
+                    )
+                },
+            )
+            .when(
+                self.viewer.state.is_open() && self.viewer.pip_window.is_none(),
+                |this| this.child(self.media_viewer_overlay(window, cx)),
+            )
+            // Live: the latest status note is a transient toast floating
+            // above the composer — no layout shift, no click capture, gone
+            // after a few seconds. It paints above the media viewer too
+            // ("Saved to Downloads", "Frame copied"), clear of its controls.
+            .when(status_toast, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(px(if viewer_open { 132. } else { 84. }))
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .id("status-toast")
+                                .role(Role::Label)
+                                .aria_label(self.connection.status_note.clone())
+                                .max_w(px(520.))
+                                .px_3()
+                                .py_1p5()
+                                .rounded_full()
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .bg(cx.theme().popover)
+                                .text_color(cx.theme().popover_foreground)
+                                .shadow_md()
+                                .text_sm()
+                                .truncate()
+                                .child(self.connection.status_note.clone()),
+                        ),
+                )
+            })
+            .children(self.custom_emoji_card(cx))
+            .children(self.photo_editor_overlay(cx))
+            // Phase 9.1: story viewer overlay above the media viewer.
+            .when(self.stories.viewer.is_open(), |this| {
+                this.child(self.story_viewer_overlay(cx))
+            })
+            // Phase 9.3: story composer overlay above the story viewer.
+            .when(self.stories.composer.open, |this| {
+                this.child(self.story_composer_overlay(cx))
+            })
+            // Phase 9.7: chat story page overlay (albums / chat page /
+            // archive) above the story composer.
+            .when(self.stories.page.is_some(), |this| {
+                this.child(self.story_page_overlay(cx))
+            })
+            // kit Phase 2 (redo): add-contact now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): edit-profile now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): vCard import now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): G1 dialogs now hosted in kit Dialogs
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): B1 dialogs now hosted in kit Dialogs via
+            // the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): folder dialogs now hosted in kit Dialogs
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): call confirm now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): notification defaults now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): storage usage now hosted in a kit Dialog
+            // via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): two-step verification now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): sessions now hosted in a kit Dialog via
+            // the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): websites now hosted in a kit Dialog via
+            // the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): archive settings now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): appearance now hosted in a kit Dialog via
+            // the shell sync — render wiring deleted.
+            // Slice S3: privacy overlay (Settings → Privacy) plus the
+            // per-rule editor and the always/never exception list.
+            .when(self.privacy.open, |this| {
+                this.child(self.privacy_overlay(cx))
+            })
+            .when_some(self.privacy_editor_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            .when_some(self.privacy_exceptions_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Avatar-click profile layer (tdesktop `Info::LayerWidget`).
+            .when_some(self.profile_modal_overlay(window, cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Phase C1: call overlay above everything else.
+            .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
+            // Phase C3a: group-call (voice chat) overlay above the call
+            // overlay.
+            .when_some(self.group_call_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // kit Phase 2 (redo): group-call start now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): scheduled messages now hosted in a kit
+            // Dialog via the shell sync — render wiring deleted.
+            // M1: right-click message context menu.
+            .when_some(self.message_ui.menu, |this, menu| {
+                this.child(self.message_menu_overlay(menu, cx))
+            })
+            // The copy menu of a phone number, card number or date, and
+            // the tooltip of a text link.
+            .when_some(self.link_popup_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            .when_some(self.link_tooltip_overlay(), |this, overlay| {
+                this.child(overlay)
+            })
+            // The expanded reaction selector, where the menu was.
+            .when_some(self.pickers.media_panel.reaction, |this, target| {
+                let panel = self.media_panel(cx);
+                this.child(
+                    div()
+                        .id("reaction-selector-layer")
+                        .occlude()
+                        .absolute()
+                        .inset_0()
+                        .child(
+                            div()
+                                .id("reaction-selector-backdrop")
+                                .absolute()
+                                .inset_0()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_media_panel(cx);
+                                })),
+                        )
+                        .child(
+                            anchored()
+                                .position(target.position)
+                                .snap_to_window_with_margin(px(8.))
+                                .child(panel),
+                        ),
+                )
+            })
+            // Slice CL1: right-click chat-row context menu.
+            .when_some(self.chat_list.menu, |this, menu| {
+                this.child(self.chat_menu_overlay(menu, cx))
+            })
+            .when_some(
+                self.chat_list.global.story_menu,
+                |this, (chat_id, position)| {
+                    this.child(self.story_menu_overlay(chat_id, position, cx))
+                },
+            )
+            .when_some(self.chat_list.archive_menu, |this, position| {
+                this.child(self.archive_menu_overlay(position, cx))
+            })
+            .when_some(self.folders.tab_menu, |this, menu| {
+                this.child(self.folder_tab_menu_overlay(menu, cx))
+            })
+            // Slice CL: floating peek preview — read-only recent
+            // messages beside the pressed chat-list row. Rendered above
+            // the row menu; any click or the long-press release closes
+            // it.
+            .when_some(self.chat_list.preview, |this, preview| {
+                this.child(self.chat_preview_overlay(preview, cx))
+            })
+            // MED4: Instant View reader overlay (above the menu).
+            .when_some(self.instant_view_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Middle-click autoscroll: the anchor mark, and any other press
+            // ends the mode (`ListWidget::mousePressEvent`).
+            .when_some(self.autoscroll_mark(cx), |this, mark| this.child(mark))
+            .when(self.autoscroll_active(), |this| {
+                this.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.autoscroll_stop(cx)),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _, _, cx| this.autoscroll_stop(cx)),
+                )
+            });
+        // The lock screen covers the whole window, above every overlay.
+        let root = root.when(self.account.passcode.locked, |this| {
+            this.child(self.lock_overlay(cx))
+        });
+        match image_cache {
+            Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
+            None => root.into_any_element(),
+        }
+    }
+}
+
+mod frame_upkeep;
+mod status_toast;
+#[allow(unused_imports)]
+use status_toast::*;
+
+#[cfg(test)]
+mod toast_tests {
+    use super::status_note_is_toast;
+
+    #[test]
+    fn only_failures_restrictions_and_invisible_confirmations_toast() {
+        for shown in [
+            "could not send rich message",
+            "Custom emoji need Telegram Premium",
+            "Slow mode: wait 12s before sending",
+            "copied to clipboard",
+            "Couldn't send the message.",
+        ] {
+            assert!(status_note_is_toast(shown), "{shown}");
+        }
+        for silent in [
+            "sending…",
+            "sticker sent",
+            "reaction updated",
+            "updating reaction…",
+            "react",
+        ] {
+            assert!(!status_note_is_toast(silent), "{silent}");
+        }
+    }
+}

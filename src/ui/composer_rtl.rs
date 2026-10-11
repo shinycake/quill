@@ -600,7 +600,6 @@ pub(super) mod tests {
 
     // --- message bubbles (`BidiParagraph`, see selectable_text.rs) ---
 
-    use gpui_kit::base::RunGeometry;
     use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
 
     /// A paragraph laid out at `wrap` width with the default text style.
