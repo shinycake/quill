@@ -69,6 +69,16 @@ pub fn get_chat_available_paid_message_reaction_senders(
     .to_string()
 }
 
+/// `getStarGiftPaymentOptions`: the Star packs for sale to give to a user.
+pub fn get_star_gift_payment_options(extra: RequestId, user_id: i64) -> String {
+    json!({
+        "@type": "getStarGiftPaymentOptions",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+    })
+    .to_string()
+}
+
 /// `getStarPaymentOptions`: the Star packs for sale.
 pub fn get_star_payment_options(extra: RequestId) -> String {
     json!({"@type": "getStarPaymentOptions", "@extra": extra.as_extra()}).to_string()

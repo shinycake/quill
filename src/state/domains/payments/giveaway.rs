@@ -54,9 +54,38 @@ pub struct GiveawayState {
     pub info: Option<GiveawayInfoLookup>,
     pub options: GiveawayOptions,
     pub launch: GiveawayLaunch,
+    /// Limits from TDLib's `giveaway_*` options.
+    pub limits: crate::giveaway::GiveawayLimits,
+    /// The "Choose members" list.
+    pub award_members: crate::giveaway::AwardMembers,
 }
 
 impl Session {
+    /// A page of the "Choose members" list: the people in it, not bots or
+    /// yourself.
+    pub(crate) fn apply_award_members(
+        &mut self,
+        generation: u64,
+        members: &[crate::telegram::envelope::ParsedChatMember],
+        total_count: i32,
+    ) {
+        use crate::telegram::envelope::MessageSender;
+        let ids = members
+            .iter()
+            .filter_map(|m| match m.member_id {
+                MessageSender::User { user_id } => Some(user_id),
+                MessageSender::Chat { .. } => None,
+            })
+            .filter(|id| Some(*id) != self.my_user_id && !self.bots.bot_user_ids.contains(id))
+            .collect();
+        self.payments.giveaway.award_members.accept(
+            generation,
+            ids,
+            i32::try_from(members.len()).unwrap_or(i32::MAX),
+            total_count,
+        );
+    }
+
     /// `giveawayInfo*` for our own `getGiveawayInfo`.
     pub(crate) fn apply_giveaway_info(
         &mut self,

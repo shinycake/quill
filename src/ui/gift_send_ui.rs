@@ -394,7 +394,29 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
             .child(Textarea::new(&this.payments.gift_message_input).aria_label("Gift message"))
             .child(hint(format!("Optional. Up to {max} characters."), cx));
     }
+    let stars_offered = can_pay && send.premium_options.iter().any(|o| o.star_count > 0);
+    let by_stars = stars_offered && this.payments.gift_premium_by_stars;
+    if stars_offered {
+        col = col.child(
+            Checkbox::new("premium-gift-by-stars")
+                .label("Pay with Stars instead")
+                .checked(by_stars)
+                .on_click(cx.listener(|this, &on, _, cx| {
+                    this.payments.gift_premium_by_stars = on;
+                    cx.notify();
+                })),
+        );
+        if let Some(balance) = session.payments.hub.balance {
+            col = col.child(hint(format!("Your balance: {}", stars(balance.stars)), cx));
+        }
+    }
     for (ix, option) in send.premium_options.iter().enumerate() {
+        let paid_in_stars = by_stars && option.star_count > 0;
+        let price = if paid_in_stars {
+            stars(option.star_count)
+        } else {
+            option.price_label()
+        };
         let row = div()
             .id(("premium-gift-option", ix as u64))
             .flex()
@@ -413,20 +435,16 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
                                 .child(format!("-{}%", option.discount_percentage)),
                         )
                     })
-                    .child(div().font_medium().child(option.price_label())),
+                    .child(div().font_medium().child(price.clone())),
             );
         col = col.child(if can_pay {
             let option = option.clone();
             row.cursor_pointer()
                 .tab_index(0)
                 .role(gpui_kit::Role::Button)
-                .aria_label(format!(
-                    "Gift Premium for {}, {}",
-                    option.title(),
-                    option.price_label()
-                ))
+                .aria_label(format!("Gift Premium for {}, {}", option.title(), price))
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.buy_premium_gift(option.clone(), window, cx);
+                    this.buy_premium_gift(option.clone(), paid_in_stars, window, cx);
                 }))
         } else {
             row
@@ -434,7 +452,7 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
     }
     col.child(hint(
         if can_pay {
-            "You pay for Premium in the checkout, not with Stars."
+            "You pay for Premium in the checkout."
         } else {
             "Premium can only be gifted to another person."
         },

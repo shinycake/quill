@@ -15,7 +15,8 @@ use gpui_kit::*;
 use quill::gift_manage::PremiumGiftOption;
 use quill::ids::{ChatId, MessageId};
 use quill::payment_invoice::{
-    InputInvoice, giveaway_invoice, invoice_link_invoice, premium_gift_invoice, stars_pack_invoice,
+    InputInvoice, giveaway_invoice, invoice_link_invoice, premium_gift_invoice,
+    premium_gift_stars_invoice, stars_pack_invoice,
 };
 use quill::premium_hub::group_digits;
 use quill::state::Session;
@@ -110,6 +111,7 @@ impl QuillApp {
     pub(super) fn buy_premium_gift(
         &mut self,
         option: PremiumGiftOption,
+        by_stars: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -126,8 +128,13 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        let invoice =
-            recipient.and_then(|recipient| premium_gift_invoice(&option, &recipient, &text, limit));
+        let invoice = recipient.and_then(|recipient| {
+            if by_stars {
+                premium_gift_stars_invoice(&option, &recipient, &text, limit)
+            } else {
+                premium_gift_invoice(&option, &recipient, &text, limit)
+            }
+        });
         match invoice {
             Some(invoice) => self.start_invoice_checkout(invoice, window, cx),
             None => self.set_status_note("Premium can only be gifted to another person.", cx),
@@ -146,7 +153,7 @@ impl QuillApp {
             .map(|s| s.payments.giveaway.options.clone())
             .unwrap_or_default();
         let note = match draft.validate(quill::local_time::now_unix() as i32) {
-            Err(error) => Some(error.text()),
+            Err(error) => Some(error.text_for(&draft.limits)),
             Ok(()) => match giveaway_invoice(&draft, &options) {
                 Some(invoice) => {
                     self.start_invoice_checkout(invoice, window, cx);

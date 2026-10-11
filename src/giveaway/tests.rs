@@ -1,12 +1,14 @@
 use crate::giveaway::{
-    ADDITIONAL_CHATS_MAX, GiveawayDraft, GiveawayFormError, GiveawayKind, GiveawayTextContext,
-    PERIOD_MAX_SECS, PRIZE_DESCRIPTION_MAX, about_text, premium_options_for, premium_winner_counts,
-    settle_premium, settle_stars,
+    ADDITIONAL_CHATS_MAX, AwardMembers, COUNTRIES_MAX, GiveawayDraft, GiveawayFormError,
+    GiveawayKind, GiveawayLimits, GiveawayTextContext, PERIOD_MAX_SECS, PRIZE_DESCRIPTION_MAX,
+    about_text, gift_code_months, gift_code_price, premium_options_for, premium_winner_counts,
+    settle_gift_code_months, settle_premium, settle_stars,
 };
 use crate::telegram::envelope::{
     GiveawayInfoData, GiveawayParticipantStatus, GiveawayPrize, GiveawaySummary,
     ParsedPrepaidGiveaway, PremiumGiveawayOption, SecretCode, StarGiveawayOption,
 };
+use serde_json::json;
 
 const NOW: i32 = 1_000_000;
 
@@ -337,4 +339,144 @@ fn new_members_prizes_and_groups_change_the_wording() {
         "1 random user that joined News and other listed groups and channels after October 1 at 10:00"
     ));
     assert!(text.paragraphs[1].contains("join channel News and other listed groups"));
+}
+
+#[test]
+fn members_to_award_toggle_up_to_the_limit() {
+    let mut draft = GiveawayDraft::new(-100, None, NOW);
+    assert!(!draft.is_specific_users());
+    assert_eq!(draft.toggle_award_user(5), Ok(()));
+    assert!(draft.is_specific_users());
+    assert_eq!(draft.toggle_award_user(5), Ok(()));
+    assert!(!draft.is_specific_users());
+    for id in 0..ADDITIONAL_CHATS_MAX as i64 {
+        assert_eq!(draft.toggle_award_user(id), Ok(()));
+    }
+    assert_eq!(
+        draft.toggle_award_user(99),
+        Err(GiveawayFormError::TooManyUsers)
+    );
+    // Members only replace a Premium giveaway that is not prepaid.
+    draft.kind = GiveawayKind::Stars;
+    assert!(!draft.is_specific_users());
+}
+
+#[test]
+fn countries_toggle_up_to_the_limit_and_reach_the_parameters() {
+    let mut draft = GiveawayDraft::new(-100, None, NOW);
+    assert_eq!(draft.toggle_country("US"), Ok(()));
+    assert_eq!(draft.toggle_country("DE"), Ok(()));
+    assert_eq!(
+        draft.parameters_json()["country_codes"],
+        json!(["US", "DE"])
+    );
+    assert_eq!(draft.toggle_country("US"), Ok(()));
+    assert_eq!(draft.parameters_json()["country_codes"], json!(["DE"]));
+    for n in 0..COUNTRIES_MAX - 1 {
+        assert_eq!(draft.toggle_country(&format!("C{n}")), Ok(()));
+    }
+    assert_eq!(
+        draft.toggle_country("ZZ"),
+        Err(GiveawayFormError::TooManyCountries)
+    );
+    draft.country_codes.push("ZZ".into());
+    draft.premium_winners = 5;
+    draft.premium_months = 3;
+    assert_eq!(
+        draft.validate(NOW),
+        Err(GiveawayFormError::TooManyCountries)
+    );
+}
+
+#[test]
+fn gift_code_prices_scale_from_the_one_person_price() {
+    let option = |amount, winners, months| PremiumGiveawayOption {
+        currency: "USD".into(),
+        amount,
+        winner_count: winners,
+        month_count: months,
+    };
+    let options = vec![option(1500, 5, 3), option(400, 1, 3), option(700, 1, 6)];
+    assert_eq!(gift_code_months(&options), vec![3, 6]);
+    assert_eq!(gift_code_price(&options, 3, 4), Some(("USD".into(), 1600)));
+    assert_eq!(gift_code_price(&options, 6, 2), Some(("USD".into(), 1400)));
+    assert_eq!(gift_code_price(&options, 12, 2), None);
+    assert_eq!(gift_code_price(&options, 3, 0), None);
+    let mut draft = GiveawayDraft::new(-100, None, NOW);
+    draft.premium_months = 9;
+    settle_gift_code_months(&mut draft, &options);
+    assert_eq!(draft.premium_months, 3);
+    draft.premium_months = 6;
+    settle_gift_code_months(&mut draft, &options);
+    assert_eq!(draft.premium_months, 6);
+}
+
+#[test]
+fn limits_come_from_the_options_with_the_constants_as_fallback() {
+    let mut limits = GiveawayLimits::default();
+    assert_eq!(limits.chats_max, ADDITIONAL_CHATS_MAX);
+    assert_eq!(limits.countries_max, COUNTRIES_MAX);
+    limits.apply_option("giveaway_additional_chat_count_max", 4);
+    limits.apply_option("giveaway_country_count_max", 7);
+    limits.apply_option("giveaway_duration_max", 99);
+    limits.apply_option("giveaway_country_count_max", 0);
+    limits.apply_option("giveaway_additional_chat_count_max", -2);
+    assert_eq!((limits.chats_max, limits.countries_max), (4, 7));
+}
+
+#[test]
+fn the_form_checks_against_its_limits() {
+    let mut draft = GiveawayDraft::new(-100, None, NOW);
+    draft.limits = GiveawayLimits {
+        chats_max: 2,
+        countries_max: 1,
+    };
+    assert_eq!(draft.toggle_chat(1), Ok(()));
+    assert_eq!(draft.toggle_chat(2), Ok(()));
+    assert_eq!(draft.toggle_chat(3), Err(GiveawayFormError::TooManyChats));
+    assert_eq!(draft.toggle_award_user(1), Ok(()));
+    assert_eq!(draft.toggle_award_user(2), Ok(()));
+    assert_eq!(
+        draft.toggle_award_user(3),
+        Err(GiveawayFormError::TooManyUsers)
+    );
+    assert_eq!(draft.toggle_country("US"), Ok(()));
+    assert_eq!(
+        draft.toggle_country("DE"),
+        Err(GiveawayFormError::TooManyCountries)
+    );
+    assert!(
+        GiveawayFormError::TooManyUsers
+            .text_for(&draft.limits)
+            .contains('2')
+    );
+}
+
+#[test]
+fn the_members_list_pages_and_drops_older_searches() {
+    let mut list = AwardMembers::default();
+    assert!(!list.can_load_more());
+    let first = list.restart(-100, "");
+    assert!(list.loading && !list.can_load_more());
+    assert!(list.accept(first, vec![1, 2, 3], 3, 5));
+    assert_eq!((list.offset, list.total, list.done), (3, 5, false));
+    assert!(list.can_load_more());
+    let page = list.begin_page();
+    assert_eq!(page, first);
+    assert!(list.accept(page, vec![3, 4, 5], 3, 5));
+    assert_eq!(list.user_ids, vec![1, 2, 3, 4, 5]);
+    assert!(list.done && !list.can_load_more());
+    // A new search starts over and an answer to the old one is dropped.
+    let second = list.restart(-100, "ada");
+    assert_ne!(first, second);
+    assert!(list.user_ids.is_empty() && list.query == "ada");
+    assert!(!list.accept(first, vec![9], 1, 1));
+    assert!(list.user_ids.is_empty() && list.loading);
+    list.fail(second, "boom".into());
+    assert_eq!(list.error.as_deref(), Some("boom"));
+    assert!(!list.loading);
+    // An empty page ends the list.
+    let third = list.restart(-100, "");
+    assert!(list.accept(third, Vec::new(), 0, 0));
+    assert!(list.done);
 }

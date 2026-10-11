@@ -1,0 +1,3 @@
+# Gift Stars, gift codes for chosen members, the country picker
+parity:premium-stars-balance
+parity:premium-giveaways
