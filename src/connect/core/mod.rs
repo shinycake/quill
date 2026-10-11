@@ -885,6 +885,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             &self.paths,
             &self.database_key,
             &self.session.settings.language_prefs.system_language_code,
+            &self.session.settings.device_prefs.custom_device_model,
         );
         // Contains api_hash — do not log `json`.
         let json = params.to_json(extra);

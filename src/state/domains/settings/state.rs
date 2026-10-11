@@ -194,6 +194,8 @@ pub struct SettingsState {
     /// `setTdlibParameters`, persisted via `settings::LanguagePrefs`.
     /// Loaded at startup like `call_prefs`; the UI saves on change.
     pub language_prefs: LanguagePrefs,
+    /// Custom device name sent as `device_model` at startup.
+    pub device_prefs: crate::settings::DevicePrefs,
     /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
@@ -263,6 +265,7 @@ impl SettingsState {
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),
             language_prefs: LanguagePrefs::default(),
+            device_prefs: Default::default(),
             proxy: Default::default(),
             account_export: None,
         }

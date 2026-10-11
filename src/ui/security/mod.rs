@@ -589,6 +589,7 @@ impl QuillApp {
         self.privacy.sessions_open = true;
         self.privacy.sessions_confirm = None;
         self.privacy.extra.session_details = None;
+        self.privacy.extra.renaming_device = false;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(demo) = self.demo_session.as_mut() {

@@ -225,6 +225,50 @@ pub fn save_language_prefs(paths: &AccountPaths, prefs: &LanguagePrefs) -> std::
     save_json_prefs(paths, "language_prefs.json", prefs)
 }
 
+/// parity:settings-session-details: tdesktop's "Rename current device"
+/// (`customDeviceModel`). An empty string means "use the default". It is
+/// the `device_model` of `setTdlibParameters`, so a change applies after
+/// Quill restarts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DevicePrefs {
+    #[serde(default)]
+    pub custom_device_model: String,
+}
+
+/// tdesktop `kMaxDeviceModelLength`.
+pub const MAX_DEVICE_MODEL_LEN: usize = 64;
+
+/// Device model reported when no custom name is set.
+pub const DEFAULT_DEVICE_MODEL: &str = "Desktop";
+
+/// Collapse whitespace and cap the length (tdesktop `CleanAndSimplify`
+/// plus the field's max length).
+pub fn clean_device_model(raw: &str) -> String {
+    let joined = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    joined.chars().take(MAX_DEVICE_MODEL_LEN).collect()
+}
+
+/// The `device_model` to send: the cleaned custom name, else the default.
+pub fn select_device_model(custom: &str) -> String {
+    let cleaned = clean_device_model(custom);
+    if cleaned.is_empty() {
+        DEFAULT_DEVICE_MODEL.to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Load the device prefs (`device_prefs.json`); missing or corrupt files
+/// fall back to defaults.
+pub fn load_device_prefs(paths: &AccountPaths) -> DevicePrefs {
+    load_json_prefs(paths, "device_prefs.json")
+}
+
+/// Persist the device prefs; failures are returned to the caller.
+pub fn save_device_prefs(paths: &AccountPaths, prefs: &DevicePrefs) -> std::io::Result<()> {
+    save_json_prefs(paths, "device_prefs.json", prefs)
+}
+
 /// Load the translation prefs (`translate_prefs.json`); missing or corrupt
 /// files fall back to defaults.
 pub fn load_translate_prefs(paths: &AccountPaths) -> crate::translate::TranslatePrefs {
@@ -300,5 +344,30 @@ mod tests {
         fs::write(paths.root.join("language_prefs.json"), b"{}").unwrap();
         assert_eq!(load_language_prefs(&paths), LanguagePrefs::default());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn device_prefs_roundtrip_and_model_selection() {
+        let dir = std::env::temp_dir().join(format!("quill-device-prefs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        assert_eq!(load_device_prefs(&paths), DevicePrefs::default());
+        let prefs = DevicePrefs {
+            custom_device_model: "Work laptop".into(),
+        };
+        save_device_prefs(&paths, &prefs).unwrap();
+        assert_eq!(load_device_prefs(&paths), prefs);
+        fs::write(paths.root.join("device_prefs.json"), b"not json").unwrap();
+        assert_eq!(load_device_prefs(&paths), DevicePrefs::default());
+        let _ = fs::remove_dir_all(&dir);
+
+        assert_eq!(select_device_model(""), "Desktop");
+        assert_eq!(select_device_model("   "), "Desktop");
+        assert_eq!(select_device_model("  My   Mac "), "My Mac");
+        let long = "x".repeat(200);
+        assert_eq!(
+            select_device_model(&long).chars().count(),
+            MAX_DEVICE_MODEL_LEN
+        );
     }
 }
