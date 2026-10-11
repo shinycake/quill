@@ -8,7 +8,6 @@ use super::pressable::PressableDiv;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::state::{SharedMediaAction, SharedMediaTab, calendar_media, month_sections};
 
@@ -51,7 +50,6 @@ impl QuillApp {
             let message_id = item.message_id;
             let action = item.action;
             let is_message = action == SharedMediaAction::Message;
-            let clickable = action != SharedMediaAction::Audio;
             let item_ix = if is_message {
                 message_id.0 as u64
             } else {
@@ -71,7 +69,8 @@ impl QuillApp {
                     item.label.clone()
                 })
                 .tab_index(0)
-                .when(clickable, |row| row.cursor_pointer().pressable(cx.theme()))
+                .cursor_pointer()
+                .pressable(cx.theme())
                 .child(div().text_lg().child(item.glyph))
                 .child(
                     div()

@@ -18,17 +18,13 @@ fn tab(session: &Session, tab: SharedMediaTab) -> &SharedMediaTabState {
 }
 
 #[test]
-fn saved_tracks_fill_the_playlist_tab_and_page() {
+fn saved_tracks_fill_the_users_playlist_and_page() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    session
-        .media
-        .shared_media
-        .begin_profile_fetch(SharedMediaTab::SavedMusic);
-    let extra = session.request(
+    let extra = session.request_for_user(
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
-        Some(ChatId(6)),
+        78,
     );
     apply_json(
         &mut session,
@@ -39,24 +35,24 @@ fn saved_tracks_fill_the_playlist_tab_and_page() {
             extra.0
         ),
     );
-    let playlist = tab(&session, SharedMediaTab::SavedMusic);
-    assert_eq!(playlist.status, SharedMediaTabStatus::Ready);
-    assert_eq!(playlist.items.len(), 2);
-    assert_eq!(playlist.items[0].label, "Ada — Night Drive · 3:34");
-    assert_eq!(playlist.items[1].label, "b.ogg");
-    assert_eq!(playlist.items[0].action, SharedMediaAction::Audio);
-    assert!(playlist.can_load_more());
-    assert_eq!(session.media.chat_media_counts[&6][&COUNT_KEY_PLAYLIST], 3);
-    // The next page appends and ends the list.
+    let playlist = &session.media.playlists[&78];
+    assert!(playlist.loaded);
+    assert_eq!(playlist.tracks.len(), 2);
+    assert_eq!(track_name(&playlist.tracks[0]), "Ada — Night Drive");
+    assert_eq!(track_name(&playlist.tracks[1]), "b.ogg");
+    assert!(playlist.has_more());
+    // The gallery tabs are not touched: the playlist is not a tab.
     assert!(
         session
-            .media
-            .shared_media
-            .begin_profile_more(SharedMediaTab::SavedMusic)
+            .shared_media_visible_tabs()
+            .iter()
+            .all(|tab| tab.lists_messages()
+                || matches!(tab, SharedMediaTab::Stories | SharedMediaTab::Gifts))
     );
-    let extra = session.request(
+    // The next page appends and ends the list.
+    let extra = session.request_for_user(
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: true }),
-        Some(ChatId(6)),
+        78,
     );
     apply_json(
         &mut session,
@@ -67,12 +63,31 @@ fn saved_tracks_fill_the_playlist_tab_and_page() {
             extra.0
         ),
     );
-    let playlist = tab(&session, SharedMediaTab::SavedMusic);
-    assert_eq!(playlist.items.len(), 3);
-    assert!(!playlist.can_load_more());
-    // The tab shows in the bar once its count is known.
-    let tabs = session.shared_media_visible_tabs();
-    assert!(tabs.contains(&SharedMediaTab::SavedMusic));
+    let playlist = &session.media.playlists[&78];
+    assert_eq!(playlist.tracks.len(), 3);
+    assert!(!playlist.has_more());
+}
+
+#[test]
+fn a_failed_playlist_request_is_loaded_and_empty() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    let extra = session.request_for_user(
+        RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
+        78,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"USER_PRIVACY"}}"#,
+            extra.0
+        ),
+    );
+    let playlist = &session.media.playlists[&78];
+    assert!(playlist.loaded && playlist.tracks.is_empty() && playlist.error.is_some());
 }
 
 #[test]
@@ -102,6 +117,7 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
     assert_eq!(gifts.items[0].label, "100 Stars — Happy birthday!");
     assert_eq!(gifts.items[1].label, "Plush Pepe #123");
     assert_eq!(gifts.items[0].action, SharedMediaAction::Gift);
+    assert!(matches!(gifts.items[0].visual, SharedMediaVisual::Gift(_)));
     assert_eq!(gifts.items[0].date, 1_700_000_000);
     assert!(!gifts.can_load_more());
     assert_eq!(session.media.chat_media_counts[&6][&COUNT_KEY_GIFTS], 2);
@@ -246,4 +262,47 @@ fn gallery_message_counts_include_polls_and_round_videos() {
             SharedMediaTab::Voice
         ]
     );
+}
+
+#[test]
+fn story_thumbnails_are_queued_once_for_download() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    let extra = session.request(
+        RequestPurpose::GetChatPostedToChatPageStories,
+        Some(ChatId(6)),
+    );
+    let file = |id: i32| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":10,"expected_size":10,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false}},"remote":{{"@type":"remoteFile","id":"r{id}","unique_id":"u{id}"}}}}"#
+        )
+    };
+    let size = |id: i32, w: i32| {
+        format!(
+            r#"{{"@type":"photoSize","type":"x","photo":{},"width":{w},"height":{w},"progressive_sizes":[]}}"#,
+            file(id)
+        )
+    };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"stories","@extra":"{}","total_count":1,"stories":[{{"@type":"story","id":5,"poster_chat_id":6,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{},{}]}}}}}}]}}"#,
+            extra.0,
+            size(61, 90),
+            size(62, 800)
+        ),
+    );
+    let stories = tab(&session, SharedMediaTab::Stories);
+    // The size nearest a grid tile comes first.
+    match &stories.items[0].visual {
+        SharedMediaVisual::Story { thumbs, .. } => {
+            assert_eq!(thumbs.first().map(|id| id.0), Some(61))
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(session.take_profile_thumbs(), vec![FileId(61)]);
+    assert!(session.take_profile_thumbs().is_empty());
 }

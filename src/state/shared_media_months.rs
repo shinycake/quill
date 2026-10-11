@@ -49,8 +49,7 @@ pub fn calendar_media(tab: SharedMediaTab) -> Option<SearchMediaKind> {
         | SharedMediaTab::Videos
         | SharedMediaTab::Polls
         | SharedMediaTab::Stories
-        | SharedMediaTab::Gifts
-        | SharedMediaTab::SavedMusic => None,
+        | SharedMediaTab::Gifts => None,
     }
 }
 
@@ -139,6 +138,7 @@ mod tests {
             message: None,
             date,
             action: SharedMediaAction::Message,
+            visual: SharedMediaVisual::None,
         }
     }
 

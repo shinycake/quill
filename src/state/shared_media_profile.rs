@@ -1,15 +1,17 @@
 //! The profile-style tabs of the shared-media gallery (tdesktop
-//! `info/profile/tabs`): which tabs a chat shows, the Photos / Videos split,
-//! and the tabs that load from their own TDLib methods (Stories, Gifts, and
-//! the saved-music Playlist) instead of `searchChatMessages`.
+//! `info/profile/tabs`): which tabs a chat shows, the Photos / Videos split
+//! (tdesktop's `profile-media-tabs-expanded` option), the tabs that load
+//! from their own TDLib methods (Stories and Gifts) instead of
+//! `searchChatMessages`, and the saved-music Playlist page.
 //!
 //! tdesktop lists the tabs in this order: Posts / Stories, Gifts, Media
 //! (or Photos and Videos once expanded), Saved, Files, Links, Music, Polls,
 //! Voice, GIFs. A tab with no items is hidden (`shown = count > 0`). Saved
 //! Messages and the common-groups / similar tabs are not shared media.
 use super::*;
+use crate::ids::FileId;
 use crate::premium_hub::GiftsPage;
-use crate::telegram::envelope::{ChatKind, ProfileAudiosPage};
+use crate::telegram::envelope::{ChatKind, ProfileAudio, ProfileAudiosPage};
 use std::collections::HashMap;
 
 /// What a click on a gallery row does.
@@ -22,8 +24,21 @@ pub enum SharedMediaAction {
     Story(i32),
     /// Open the chat's received gifts.
     Gift,
-    /// A saved track; read-only.
-    Audio,
+}
+
+/// What a grid tile of the Stories and Gifts tabs draws.
+#[derive(Debug, Clone, Default)]
+pub enum SharedMediaVisual {
+    #[default]
+    None,
+    /// A story's thumbnail: file ids to try in order, and the picture size.
+    Story {
+        thumbs: Vec<FileId>,
+        width: i32,
+        height: i32,
+    },
+    /// A received gift: its sticker, backdrop and price.
+    Gift(Box<crate::premium_hub::ReceivedGift>),
 }
 
 /// `getChatMessageCount` / `MEDIA_COUNT_FILTERS` index of the extra
@@ -34,7 +49,6 @@ pub const COUNT_KEY_VOICE: u8 = 8;
 /// comes with their first page.
 pub const COUNT_KEY_STORIES: u8 = 9;
 pub const COUNT_KEY_GIFTS: u8 = 10;
-pub const COUNT_KEY_PLAYLIST: u8 = 11;
 
 impl SharedMediaTab {
     /// The order the tab bar shows tabs in (tdesktop's profile tab order).
@@ -44,7 +58,6 @@ impl SharedMediaTab {
         SharedMediaTab::Media,
         SharedMediaTab::Photos,
         SharedMediaTab::Videos,
-        SharedMediaTab::SavedMusic,
         SharedMediaTab::Files,
         SharedMediaTab::Links,
         SharedMediaTab::Music,
@@ -67,7 +80,6 @@ impl SharedMediaTab {
             SharedMediaTab::Voice => &[COUNT_KEY_VOICE],
             SharedMediaTab::Stories => &[COUNT_KEY_STORIES],
             SharedMediaTab::Gifts => &[COUNT_KEY_GIFTS],
-            SharedMediaTab::SavedMusic => &[COUNT_KEY_PLAYLIST],
         }
     }
 
@@ -86,7 +98,7 @@ impl SharedMediaTab {
     }
 
     /// Whether the chat can have this tab at all: stories and gifts belong
-    /// to users and channels, saved music to users (`getUserProfileAudios`).
+    /// to users and channels.
     pub fn available_in(self, kind: &ChatKind) -> bool {
         let user = matches!(kind, ChatKind::Private { user_id } if user_id.0 > 0);
         let channel = matches!(
@@ -98,7 +110,6 @@ impl SharedMediaTab {
         );
         match self {
             SharedMediaTab::Stories | SharedMediaTab::Gifts => user || channel,
-            SharedMediaTab::SavedMusic => user,
             _ => true,
         }
     }
@@ -239,7 +250,37 @@ impl SharedMediaState {
     }
 }
 
-/// The row for a story posted to the profile.
+/// Thumbnail candidates of a story, best first: the photo size nearest a
+/// grid tile, or the video's thumbnail.
+fn story_thumbs(story: &crate::telegram::envelope::ParsedStory) -> (Vec<FileId>, i32, i32) {
+    use crate::telegram::envelope::StoryContentView;
+    const TILE: i32 = 200;
+    match &story.content {
+        StoryContentView::Photo { sizes } => {
+            let mut sorted: Vec<_> = sizes.iter().collect();
+            sorted.sort_by_key(|size| (size.width - TILE).abs());
+            let (width, height) = sorted.first().map_or((0, 0), |s| (s.width, s.height));
+            (
+                sorted.iter().map(|size| size.file_id).collect(),
+                width,
+                height,
+            )
+        }
+        StoryContentView::Video {
+            thumb_file_id,
+            thumb_width,
+            thumb_height,
+            ..
+        } => (
+            thumb_file_id.iter().copied().collect(),
+            *thumb_width,
+            *thumb_height,
+        ),
+        _ => (Vec::new(), 0, 0),
+    }
+}
+
+/// The tile for a story posted to the profile.
 pub fn story_item(
     story: Option<&crate::telegram::envelope::ParsedStory>,
     id: i32,
@@ -247,6 +288,7 @@ pub fn story_item(
     let caption: String = story
         .map(|story| story.caption.chars().take(60).collect())
         .unwrap_or_default();
+    let (thumbs, width, height) = story.map(story_thumbs).unwrap_or_default();
     SharedMediaItem {
         message_id: MessageId(0),
         glyph: SharedMediaTab::Stories.glyph(),
@@ -254,11 +296,16 @@ pub fn story_item(
         message: None,
         date: story.map_or(0, |story| story.date),
         action: SharedMediaAction::Story(id),
+        visual: SharedMediaVisual::Story {
+            thumbs,
+            width,
+            height,
+        },
     }
 }
 
-/// The row for a received gift: its price or collectible name, with the
-/// sender's note when there is one.
+/// The tile for a received gift: its price or collectible name, with the
+/// sender's note as the label when there is one.
 pub fn gift_item(gift: &crate::premium_hub::ReceivedGift) -> SharedMediaItem {
     let label = if gift.text.is_empty() {
         gift.headline()
@@ -272,11 +319,37 @@ pub fn gift_item(gift: &crate::premium_hub::ReceivedGift) -> SharedMediaItem {
         message: None,
         date: gift.date,
         action: SharedMediaAction::Gift,
+        visual: SharedMediaVisual::Gift(Box::new(gift.clone())),
     }
 }
 
-/// The row for a saved track: "Performer — Title" and its length.
-pub fn audio_item(audio: &crate::telegram::envelope::ProfileAudio) -> SharedMediaItem {
+/// A user's saved music (`getUserProfileAudios`), shown on the Playlist
+/// page and as the profile's music button.
+#[derive(Debug, Clone, Default)]
+pub struct Playlist {
+    pub tracks: Vec<ProfileAudio>,
+    pub total_count: i32,
+    /// The first page arrived (or failed).
+    pub loaded: bool,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+impl Playlist {
+    pub fn has_more(&self) -> bool {
+        self.loaded && !self.loading && (self.tracks.len() as i32) < self.total_count
+    }
+}
+
+/// The message id the player uses for a playlist track. Tracks have no
+/// message, so the (positive) file id is negated; real message ids are
+/// never negative.
+pub fn playlist_message_id(file_id: FileId) -> MessageId {
+    MessageId(-i64::from(file_id.0))
+}
+
+/// "Performer — Title" for a saved track, or its file name.
+pub fn track_name(audio: &ProfileAudio) -> String {
     let name = if !audio.performer.is_empty() || !audio.title.is_empty() {
         format!(
             "{} — {}",
@@ -286,24 +359,7 @@ pub fn audio_item(audio: &crate::telegram::envelope::ProfileAudio) -> SharedMedi
     } else {
         String::new()
     };
-    let name = caption_or(&[&name, &audio.file_name], "Music");
-    let label = if audio.duration > 0 {
-        format!(
-            "{name} · {}:{:02}",
-            audio.duration / 60,
-            audio.duration % 60
-        )
-    } else {
-        name
-    };
-    SharedMediaItem {
-        message_id: MessageId(0),
-        glyph: SharedMediaTab::SavedMusic.glyph(),
-        label,
-        message: None,
-        date: 0,
-        action: SharedMediaAction::Audio,
-    }
+    caption_or(&[&name, &audio.file_name], "Music")
 }
 
 impl Session {
@@ -326,6 +382,21 @@ impl Session {
             .insert(key, count);
     }
 
+    /// Ask for the thumbnails of the files (the next ingest downloads them).
+    fn want_profile_thumbs(&mut self, ids: impl IntoIterator<Item = FileId>) {
+        self.media
+            .profile_thumbs_due
+            .extend(ids.into_iter().filter(|id| id.0 != 0));
+    }
+
+    /// Thumbnails the Stories and Gifts grids still need.
+    pub fn take_profile_thumbs(&mut self) -> Vec<FileId> {
+        std::mem::take(&mut self.media.profile_thumbs_due)
+            .into_iter()
+            .filter(|id| self.should_download(*id))
+            .collect()
+    }
+
     /// A page of `getChatPostedToChatPageStories` landed (the loaded ids
     /// are already merged into `stories.chat_page_stories`).
     pub(crate) fn apply_profile_stories(&mut self, chat_id: ChatId, total_count: i32) {
@@ -339,6 +410,14 @@ impl Session {
             .iter()
             .map(|id| story_item(self.stories.stories.get(&(chat_id.0, *id)), *id))
             .collect();
+        let thumbs: Vec<FileId> = items
+            .iter()
+            .filter_map(|item| match &item.visual {
+                SharedMediaVisual::Story { thumbs, .. } => thumbs.first().copied(),
+                _ => None,
+            })
+            .collect();
+        self.want_profile_thumbs(thumbs);
         let has_more = (items.len() as i32) < total_count;
         self.set_profile_count(chat_id, COUNT_KEY_STORIES, total_count);
         self.media.shared_media.accept_profile(
@@ -366,6 +445,7 @@ impl Session {
             .flat_map(|gift| gift.gift.files.iter().cloned())
             .collect();
         self.remember_files(&files);
+        self.want_profile_thumbs(files.iter().map(|file| file.id));
         let items = page.gifts.iter().map(gift_item).collect();
         self.set_profile_count(chat_id, COUNT_KEY_GIFTS, page.total_count);
         self.media.shared_media.accept_profile(
@@ -380,43 +460,48 @@ impl Session {
         state.next_offset = page.next_offset;
     }
 
-    /// A `getUserProfileAudios` page for the Playlist tab.
+    /// A `getUserProfileAudios` page for the user's playlist.
     pub(crate) fn apply_profile_audios(
         &mut self,
         page: ProfileAudiosPage,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(pending) = pending else {
-            return;
-        };
-        let Some(chat_id) = pending.chat_id else {
+        let Some(user_id) = pending.and_then(|p| p.user_id) else {
             return;
         };
         let append = matches!(
-            pending.purpose,
-            RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: true })
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::Media(MediaPurpose::GetProfileAudios {
+                append: true
+            }))
         );
         self.remember_files(&page.files);
-        let items: Vec<SharedMediaItem> = page.audios.iter().map(audio_item).collect();
-        let before = if append {
-            self.media
-                .shared_media
-                .tab_state(SharedMediaTab::SavedMusic)
-                .items
-                .len()
-        } else {
-            0
-        };
-        let loaded = before + items.len();
-        self.set_profile_count(chat_id, COUNT_KEY_PLAYLIST, page.total_count);
-        self.media.shared_media.accept_profile(
-            chat_id,
-            SharedMediaTab::SavedMusic,
-            items,
-            page.total_count,
-            (loaded as i32) < page.total_count,
-            append,
-        );
+        let playlist = self.media.playlists.entry(user_id).or_default();
+        if !append {
+            playlist.tracks.clear();
+        }
+        for track in page.audios {
+            let known = track.file_id.0 != 0
+                && playlist
+                    .tracks
+                    .iter()
+                    .any(|old| old.file_id == track.file_id);
+            if !known {
+                playlist.tracks.push(track);
+            }
+        }
+        playlist.total_count = page.total_count.max(playlist.tracks.len() as i32);
+        playlist.loaded = true;
+        playlist.loading = false;
+        playlist.error = None;
+    }
+
+    /// A `getUserProfileAudios` request failed: no playlist for this user.
+    pub(crate) fn fail_profile_audios(&mut self, user_id: i64, error: String) {
+        let playlist = self.media.playlists.entry(user_id).or_default();
+        playlist.loaded = true;
+        playlist.loading = false;
+        playlist.error = Some(error);
     }
 
     /// A profile tab's request failed: the tab shows the error and hides
@@ -471,11 +556,7 @@ mod tests {
             filter(SharedMediaTab::Voice),
             Some("searchMessagesFilterVoiceAndVideoNote")
         );
-        for tab in [
-            SharedMediaTab::Stories,
-            SharedMediaTab::Gifts,
-            SharedMediaTab::SavedMusic,
-        ] {
+        for tab in [SharedMediaTab::Stories, SharedMediaTab::Gifts] {
             assert!(!tab.lists_messages());
         }
     }
@@ -522,10 +603,9 @@ mod tests {
 
     #[test]
     fn active_tab_always_shows_and_unavailable_tabs_never() {
-        let counts = counts(&[(COUNT_KEY_PLAYLIST, 3), (COUNT_KEY_GIFTS, 2)]);
+        let counts = counts(&[(COUNT_KEY_GIFTS, 2)]);
         let group = ChatKind::BasicGroup { basic_group_id: 1 };
         let tabs = visible_tabs(Some(&group), Some(&counts), false, SharedMediaTab::Files);
-        assert!(!tabs.contains(&SharedMediaTab::SavedMusic));
         assert!(!tabs.contains(&SharedMediaTab::Gifts));
         assert!(tabs.contains(&SharedMediaTab::Files));
         let channel = ChatKind::Supergroup {
@@ -534,7 +614,6 @@ mod tests {
         };
         let tabs = visible_tabs(Some(&channel), Some(&counts), false, SharedMediaTab::Media);
         assert!(tabs.contains(&SharedMediaTab::Gifts));
-        assert!(!tabs.contains(&SharedMediaTab::SavedMusic));
         assert_eq!(SharedMediaTab::Stories.label_in(true), "Posts");
         assert_eq!(SharedMediaTab::Stories.label_in(false), "Stories");
     }
@@ -576,9 +655,10 @@ mod tests {
             label: label.into(),
             message: None,
             date: 0,
-            action: SharedMediaAction::Audio,
+            action: SharedMediaAction::Gift,
+            visual: SharedMediaVisual::None,
         };
-        let tab = SharedMediaTab::SavedMusic;
+        let tab = SharedMediaTab::Gifts;
         gallery.begin_profile_fetch(tab);
         gallery.accept_profile(ChatId(1), tab, vec![row("a")], 2, true, false);
         assert_eq!(
@@ -601,16 +681,43 @@ mod tests {
     }
 
     #[test]
-    fn rows_for_gifts_and_tracks() {
-        let audio = crate::telegram::envelope::ProfileAudio {
+    fn rows_for_stories_tracks_and_split_state() {
+        let audio = ProfileAudio {
             file_id: crate::ids::FileId(1),
             title: "Night Drive".into(),
             performer: "Ada".into(),
             file_name: String::new(),
             duration: 214,
         };
-        assert_eq!(audio_item(&audio).label, "Ada — Night Drive · 3:34");
+        assert_eq!(track_name(&audio), "Ada — Night Drive");
+        assert_eq!(playlist_message_id(audio.file_id), MessageId(-1));
         assert_eq!(story_item(None, 7).action, SharedMediaAction::Story(7));
         assert_eq!(story_item(None, 7).label, "Story");
+        // With the option on, a fresh gallery opens on Photos, not Media.
+        let mut gallery = SharedMediaState {
+            media_split: true,
+            ..Default::default()
+        };
+        assert_eq!(gallery.open_for(ChatId(1)), SharedMediaTab::Photos);
+    }
+
+    #[test]
+    fn playlist_pages_until_the_total() {
+        let mut playlist = Playlist::default();
+        assert!(!playlist.has_more());
+        playlist.loaded = true;
+        playlist.total_count = 2;
+        assert!(playlist.has_more());
+        playlist.tracks = vec![
+            ProfileAudio {
+                file_id: crate::ids::FileId(1),
+                title: String::new(),
+                performer: String::new(),
+                file_name: "a.mp3".into(),
+                duration: 0,
+            };
+            2
+        ];
+        assert!(!playlist.has_more());
     }
 }

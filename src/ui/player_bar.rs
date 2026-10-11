@@ -68,6 +68,26 @@ impl QuillApp {
                 .and_then(|h| h.ordered().into_iter().find(|m| m.id == id))
                 .map(|m| (session, m))
         });
+        // A saved-music track has no message: its id is the negated file id.
+        if id.0 < 0
+            && let Some(track) = self.session().and_then(|session| {
+                session
+                    .media
+                    .playlists
+                    .values()
+                    .flat_map(|playlist| &playlist.tracks)
+                    .find(|track| quill::state::playlist_message_id(track.file_id) == id)
+            })
+        {
+            return TrackMeta {
+                title: [&track.title, &track.file_name]
+                    .into_iter()
+                    .find(|t| !t.trim().is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| "Audio".into()),
+                subtitle: track.performer.clone(),
+            };
+        }
         match (kind, message) {
             (PlaybackKind::Audio, Some((_, m))) => {
                 if let MessageContent::Audio(audio) = &m.content {

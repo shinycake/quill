@@ -298,9 +298,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // jump closes the gallery into a chat search).
     layer!(
         "shared-media",
-        |app| app
-            .session()
-            .is_some_and(|session| session.media.shared_media.open),
+        |app| app.session().is_some_and(|session| {
+            session.media.shared_media.open || session.media.shared_media.playlist_user.is_some()
+        }),
         |app, _, cx| app.close_shared_media_ui(cx)
     ),
     layer!(

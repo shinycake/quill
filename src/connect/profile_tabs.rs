@@ -9,21 +9,20 @@ use crate::telegram::envelope::{ChatKind, MessageSender};
 use crate::telegram::requests::{EXTRA_COUNT_FILTERS, get_user_profile_audios};
 use crate::telegram::requests_premium::get_received_gifts;
 
-/// Rows per page of the Stories, Gifts and Playlist tabs.
+/// Rows per page of the Stories and Gifts tabs and the playlist.
 const PROFILE_PAGE: i32 = 30;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// The user (for saved music) and the gifts owner of a chat, when its
-    /// kind has them.
-    fn profile_owner(&self, chat_id: ChatId) -> Option<(Option<i64>, MessageSender)> {
+    /// The gifts owner of a chat, when its kind has gifts.
+    fn profile_owner(&self, chat_id: ChatId) -> Option<MessageSender> {
         let chat = self.session.chats.get(&chat_id.0)?;
         match chat.kind {
             ChatKind::Private { user_id } if user_id.0 > 0 => {
-                Some((Some(user_id.0), MessageSender::User { user_id: user_id.0 }))
+                Some(MessageSender::User { user_id: user_id.0 })
             }
             ChatKind::Supergroup {
                 is_channel: true, ..
-            } => Some((None, MessageSender::Chat { chat_id: chat.id.0 })),
+            } => Some(MessageSender::Chat { chat_id: chat.id.0 }),
             _ => None,
         }
     }
@@ -42,11 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(kind) = self.session.chats.get(&chat_id.0).map(|c| c.kind.clone()) else {
             return Ok(());
         };
-        for tab in [
-            SharedMediaTab::Stories,
-            SharedMediaTab::Gifts,
-            SharedMediaTab::SavedMusic,
-        ] {
+        for tab in [SharedMediaTab::Stories, SharedMediaTab::Gifts] {
             let idle = self.session.media.shared_media.tabs[tab.index()].status
                 == SharedMediaTabStatus::Idle;
             if tab.available_in(&kind) && idle {
@@ -97,7 +92,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.media.shared_media.chat_id else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let Some((user_id, owner)) = self.profile_owner(chat_id) else {
+        let Some(owner) = self.profile_owner(chat_id) else {
             return Err(ConnectSendError::InvalidRequest);
         };
         if append {
@@ -108,7 +103,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.media.shared_media.begin_profile_fetch(tab);
         }
         let state = &self.session.media.shared_media.tabs[tab.index()];
-        let loaded = state.items.len() as i32;
         let next_offset = state.next_offset.clone();
         let result = match tab {
             SharedMediaTab::Stories => {
@@ -134,18 +128,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 let json = get_received_gifts(extra, owner, offset, PROFILE_PAGE);
                 self.send_profile_request(extra, &json)
             }
-            SharedMediaTab::SavedMusic => {
-                let Some(user_id) = user_id else {
-                    return Err(ConnectSendError::InvalidRequest);
-                };
-                let extra = self.session.request(
-                    RequestPurpose::Media(MediaPurpose::GetProfileAudios { append }),
-                    Some(chat_id),
-                );
-                let offset = if append { loaded } else { 0 };
-                let json = get_user_profile_audios(extra, user_id, offset, PROFILE_PAGE);
-                self.send_profile_request(extra, &json)
-            }
             _ => Err(ConnectSendError::InvalidRequest),
         };
         if result.is_err() {
@@ -153,6 +135,46 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail_profile_tab(chat_id, tab, "Could not send the request.".to_string());
         }
         result
+    }
+
+    /// Fetch a user's saved music: the first page once, or the next page
+    /// (`append`). Shown by the profile's music button and the Playlist page.
+    pub fn fetch_playlist(&mut self, user_id: i64, append: bool) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() || user_id <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let playlist = self.session.media.playlists.entry(user_id).or_default();
+        if playlist.loading || (!append && playlist.loaded) || (append && !playlist.has_more()) {
+            return Ok(());
+        }
+        let offset = if append {
+            playlist.tracks.len() as i32
+        } else {
+            0
+        };
+        playlist.loading = true;
+        let extra = self.session.request_for_user(
+            RequestPurpose::Media(MediaPurpose::GetProfileAudios { append }),
+            user_id,
+        );
+        let json = get_user_profile_audios(extra, user_id, offset, PROFILE_PAGE);
+        let sent = self.send_profile_request(extra, &json);
+        if sent.is_err() {
+            self.session
+                .fail_profile_audios(user_id, "Could not send the request.".to_string());
+        }
+        sent
+    }
+
+    /// Download the thumbnails the Stories and Gifts grids asked for.
+    pub fn maybe_download_profile_thumbs(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() || self.session.settings.media_prefs.data_saver {
+            return Ok(());
+        }
+        for file_id in self.session.take_profile_thumbs() {
+            self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)?;
+        }
+        Ok(())
     }
 
     fn send_profile_request(

@@ -20,6 +20,9 @@ impl QuillApp {
     /// never shows while a fetch is in flight.
     pub(super) fn shared_media_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
+        if let Some(user_id) = session.media.shared_media.playlist_user {
+            return Some(self.playlist_panel(user_id, cx));
+        }
         if !session.media.shared_media.open {
             return None;
         }
@@ -68,7 +71,6 @@ impl QuillApp {
                     .border_color(cx.theme().border)
                     .child(div().font_semibold().child(title))
                     .child(div().flex_1())
-                    .children(self.shared_media_split_button(active_tab, cx))
                     .children(self.shared_media_calendar_button(active_tab, cx))
                     .child(
                         div()
@@ -185,6 +187,11 @@ impl QuillApp {
             SharedMediaTabStatus::Empty => {
                 self.shared_media_empty_state(active_tab, is_channel, cx)
             }
+            SharedMediaTabStatus::Ready
+                if matches!(active_tab, SharedMediaTab::Stories | SharedMediaTab::Gifts) =>
+            {
+                self.shared_media_grid(active_tab, cx)
+            }
             SharedMediaTabStatus::Ready => self.shared_media_ready_list(active_tab, cx),
         };
         panel = panel.child(content);
@@ -237,6 +244,13 @@ impl QuillApp {
     pub(super) fn open_shared_media_ui(&mut self, cx: &mut Context<Self>) {
         if self.pane_mode() != PaneMode::Ready {
             return;
+        }
+        let split = self.chat_prefs.profile_media_tabs_expanded;
+        if let Some(live) = self.live.as_mut() {
+            let gallery = &mut live.driver.session.media.shared_media;
+            if !gallery.open {
+                gallery.media_split = split;
+            }
         }
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_shared_media() {

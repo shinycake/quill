@@ -57,13 +57,11 @@ fn opening_the_gallery_asks_for_counts_and_the_profile_tabs_of_a_user() {
             "{filter}"
         );
     }
-    for method in [
-        "getChatPostedToChatPageStories",
-        "getReceivedGifts",
-        "getUserProfileAudios",
-    ] {
+    for method in ["getChatPostedToChatPageStories", "getReceivedGifts"] {
         assert!(sent.contains(&method.to_string()), "{method}");
     }
+    // Saved music is not a tab: it is asked for with the profile.
+    assert!(!sent.contains(&"getUserProfileAudios".to_string()));
     let gallery = &driver.session.media.shared_media;
     assert_eq!(
         gallery.tabs[SharedMediaTab::Gifts.index()].status,
@@ -74,17 +72,13 @@ fn opening_the_gallery_asks_for_counts_and_the_profile_tabs_of_a_user() {
     assert!(driver.open_shared_media().unwrap());
     assert_eq!(recorder.snapshot().len(), before);
 
-    // A group has no stories, gifts or playlist.
+    // A group has no stories or gifts.
     driver.close_shared_media();
     driver.session.open_chat = Some(ChatId(-5));
     let before = recorder.snapshot().len();
     assert!(driver.open_shared_media().unwrap());
     let sent = types_sent(&recorder)[before..].to_vec();
-    for method in [
-        "getChatPostedToChatPageStories",
-        "getReceivedGifts",
-        "getUserProfileAudios",
-    ] {
+    for method in ["getChatPostedToChatPageStories", "getReceivedGifts"] {
         assert!(!sent.contains(&method.to_string()), "{method}");
     }
     let _ = std::fs::remove_dir_all(dir);
@@ -125,5 +119,39 @@ fn splitting_media_fetches_the_tab_it_moves_to() {
         driver.session.media.shared_media.active_tab,
         SharedMediaTab::Media
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_playlist_is_asked_for_once_per_user_and_pages_on_demand() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let before = recorder.snapshot().len();
+    driver.fetch_playlist(31, false).unwrap();
+    driver.fetch_playlist(31, false).unwrap();
+    let sent = recorder.snapshot()[before..].to_vec();
+    assert_eq!(sent.len(), 1);
+    let request: serde_json::Value = serde_json::from_str(&sent[0]).unwrap();
+    assert_eq!(request["@type"], "getUserProfileAudios");
+    assert_eq!(request["user_id"], 31);
+    assert_eq!(request["offset"], 0);
+    // Answer with one of two tracks, then ask for the next page.
+    let answer = format!(
+        r#"{{"@type":"audios","@extra":"{}","total_count":2,"audios":[{{"@type":"audio","duration":5,"title":"A","performer":"B","file_name":"a.mp3","mime_type":"audio/mpeg"}}]}}"#,
+        request["@extra"].as_str().unwrap()
+    );
+    driver
+        .ingest(copy_and_parse(&answer, &seq, &sink).unwrap())
+        .unwrap();
+    // Reloading the first page is a no-op once loaded.
+    driver.fetch_playlist(31, false).unwrap();
+    let before = recorder.snapshot().len();
+    driver.fetch_playlist(31, true).unwrap();
+    let sent = recorder.snapshot()[before..].to_vec();
+    let request: serde_json::Value = serde_json::from_str(&sent[0]).unwrap();
+    assert_eq!(request["offset"], 1);
     let _ = std::fs::remove_dir_all(dir);
 }

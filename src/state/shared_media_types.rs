@@ -3,7 +3,7 @@ use super::*;
 
 /// Slice media-shared-gallery: the per-chat shared-media gallery tabs. The
 /// message tabs map to one TDLib `searchChatMessages` filter constructor
-/// (`schema/td_api.tl` lines 6610-6664); Stories, Gifts and Playlist load
+/// (`schema/td_api.tl` lines 6610-6664); Stories and Gifts load
 /// from their own TDLib methods (see `shared_media_profile.rs`). The
 /// declaration order is the index into `SharedMediaState::tabs`; the order
 /// the tab bar shows them in is `SharedMediaTab::DISPLAY`.
@@ -21,12 +21,11 @@ pub enum SharedMediaTab {
     Polls,
     Stories,
     Gifts,
-    SavedMusic,
 }
 
 impl SharedMediaTab {
     /// Number of tabs.
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 11;
 
     pub const ALL: [SharedMediaTab; Self::COUNT] = [
         SharedMediaTab::Media,
@@ -40,7 +39,6 @@ impl SharedMediaTab {
         SharedMediaTab::Polls,
         SharedMediaTab::Stories,
         SharedMediaTab::Gifts,
-        SharedMediaTab::SavedMusic,
     ];
 
     /// Index into `SharedMediaState::tabs` (declaration order = `ALL` order).
@@ -62,7 +60,6 @@ impl SharedMediaTab {
             SharedMediaTab::Gifs => "GIFs",
             SharedMediaTab::Stories => "Stories",
             SharedMediaTab::Gifts => "Gifts",
-            SharedMediaTab::SavedMusic => "Playlist",
         }
     }
 
@@ -80,9 +77,7 @@ impl SharedMediaTab {
             SharedMediaTab::Polls => "searchMessagesFilterPoll",
             SharedMediaTab::Voice => "searchMessagesFilterVoiceAndVideoNote",
             SharedMediaTab::Gifs => "searchMessagesFilterAnimation",
-            SharedMediaTab::Stories | SharedMediaTab::Gifts | SharedMediaTab::SavedMusic => {
-                return None;
-            }
+            SharedMediaTab::Stories | SharedMediaTab::Gifts => return None,
         })
     }
 
@@ -93,7 +88,7 @@ impl SharedMediaTab {
             SharedMediaTab::Media | SharedMediaTab::Photos => "🖼",
             SharedMediaTab::Videos => "🎞",
             SharedMediaTab::Files => "📄",
-            SharedMediaTab::Music | SharedMediaTab::SavedMusic => "🎵",
+            SharedMediaTab::Music => "🎵",
             SharedMediaTab::Links => "🔗",
             SharedMediaTab::Polls => "📊",
             SharedMediaTab::Voice => "🎙",
@@ -118,7 +113,6 @@ impl SharedMediaTab {
             SharedMediaTab::Gifs => "No GIFs to show",
             SharedMediaTab::Stories => "No stories to show",
             SharedMediaTab::Gifts => "No gifts to show",
-            SharedMediaTab::SavedMusic => "No saved music to show",
         }
     }
 
@@ -141,7 +135,6 @@ impl SharedMediaTab {
                     "Stories posted to this channel's page\nwill be shown here."
                 }
                 SharedMediaTab::Gifts => "Gifts this channel received\nwill be shown here.",
-                SharedMediaTab::SavedMusic => "Saved music will be shown here.",
             };
         }
         match self {
@@ -172,7 +165,6 @@ impl SharedMediaTab {
             }
             SharedMediaTab::Stories => "Stories posted to the profile\nwill be shown here.",
             SharedMediaTab::Gifts => "Gifts shown on the profile\nwill be listed here.",
-            SharedMediaTab::SavedMusic => "Music added to the profile\nwill be listed here.",
         }
     }
 }
@@ -205,6 +197,8 @@ pub struct SharedMediaItem {
     pub date: i32,
     /// What a click on the row does; messages jump to the message.
     pub action: SharedMediaAction,
+    /// What the grid tiles of the Stories and Gifts tabs draw.
+    pub visual: SharedMediaVisual,
 }
 
 impl SharedMediaItem {
@@ -258,6 +252,7 @@ impl SharedMediaItem {
             message: message_copy,
             date: message.date,
             action: SharedMediaAction::Message,
+            visual: SharedMediaVisual::None,
         }
     }
 }
@@ -325,6 +320,9 @@ pub struct SharedMediaState {
     pub chat_id: Option<ChatId>,
     pub active_tab: SharedMediaTab,
     pub tabs: [SharedMediaTabState; SharedMediaTab::COUNT],
+    /// The Playlist page of this user's saved music is open instead of the
+    /// gallery (tdesktop opens it from the profile's music button).
+    pub playlist_user: Option<i64>,
     /// Show Photos and Videos as two tabs instead of Media (tdesktop's
     /// "Expand" / "Collapse" action on the media tab).
     pub media_split: bool,
@@ -350,7 +348,12 @@ impl SharedMediaState {
         }
         self.open = true;
         self.chat_id = Some(chat_id);
-        self.active_tab = initial;
+        self.playlist_user = None;
+        // With Photos and Videos split there is no Media tab.
+        self.active_tab = match initial {
+            SharedMediaTab::Media if self.media_split => SharedMediaTab::Photos,
+            other => other,
+        };
         self.generation = self.generation.saturating_add(1);
         for tab in self.tabs.iter_mut() {
             tab.clear();
@@ -359,6 +362,7 @@ impl SharedMediaState {
     }
 
     pub fn close(&mut self) {
+        self.playlist_user = None;
         self.open = false;
         self.chat_id = None;
         self.generation = self.generation.saturating_add(1);
