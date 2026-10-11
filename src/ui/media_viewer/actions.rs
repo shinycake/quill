@@ -342,7 +342,7 @@ impl QuillApp {
             return;
         }
         let png = self
-            .viewer_render_frame()
+            .viewer_oriented_frame()
             .ok_or("a frame can only be copied once the video has loaded")
             .and_then(|frame| {
                 let size = frame.size(0);

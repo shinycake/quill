@@ -49,6 +49,7 @@ mod stories;
 mod story_insights;
 mod updates_sync;
 mod users;
+mod video_alternatives;
 mod web_apps;
 
 #[cfg(test)]
@@ -156,4 +157,5 @@ pub use stories::*;
 pub use story_insights::*;
 pub use updates_sync::*;
 pub use users::*;
+pub use video_alternatives::VideoAlternative;
 pub use web_apps::*;

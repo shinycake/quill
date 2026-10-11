@@ -46,6 +46,7 @@ mod overlay;
 mod overlay_controls;
 mod playback;
 mod video;
+mod video_extras;
 
 /// Viewer state that is not part of the item list: Shared Media paging,
 /// video full screen, and the inactive-window pause of looping clips.
@@ -77,6 +78,10 @@ pub(super) struct ViewerExtra {
     pub speed_preview: Option<f64>,
     /// Screenshot demo: open the speed dial on the first frame.
     pub demo_speed_dial_open: bool,
+    /// The decoded frame turned for Rotate, kept for the frame it came from.
+    pub(in crate::ui) oriented_frame: Option<video_extras::OrientedFrame>,
+    /// "Share at": the message and second the forward picker was opened at.
+    pub share_at: Option<(ChatId, MessageId, i32)>,
 }
 
 /// Screenshot-capture runs render a single frame: skip fades there so the

@@ -21,6 +21,7 @@ pub fn profile_photo_items(photos: &[crate::state::ProfilePhoto]) -> Vec<MediaVi
             caption: String::new(),
             caption_entities: Vec::new(),
             duration_label: None,
+            quality_options: Vec::new(),
             natural_size: (photo.width > 0 && photo.height > 0)
                 .then_some((photo.width, photo.height)),
         })
@@ -57,6 +58,7 @@ fn photo_viewer_item(message: &HistoryMessage, photo: &PhotoContent) -> Option<M
         caption: photo.caption.clone(),
         caption_entities: photo.caption_entities.clone(),
         duration_label: None,
+        quality_options: Vec::new(),
         natural_size: photo
             .largest_size()
             .map(|size| (size.width, size.height))
@@ -99,6 +101,12 @@ fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
                 duration_label: Some(format_voice_duration(video.duration)),
                 natural_size: (video.width > 0 && video.height > 0)
                     .then_some((video.width, video.height)),
+                quality_options: build_quality_options(
+                    video.file_id,
+                    video.width,
+                    video.height,
+                    &video.alternatives,
+                ),
             })
         }
         // GIFs open the viewer too (secret ones never; spoilers once revealed).
@@ -121,6 +129,7 @@ fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
                 caption: animation.caption.clone(),
                 caption_entities: animation.caption_entities.clone(),
                 duration_label: Some(format_voice_duration(animation.duration)),
+                quality_options: Vec::new(),
                 natural_size: (animation.width > 0 && animation.height > 0)
                     .then_some((animation.width, animation.height)),
             })
@@ -186,6 +195,7 @@ mod tests {
                 thumb_file_id: thumb.map(FileId),
                 thumb_width: 320,
                 thumb_height: 240,
+                alternatives: Vec::new(),
             }),
         )
     }

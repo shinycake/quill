@@ -19,6 +19,7 @@ use crate::voice::format_voice_duration;
 
 mod controls;
 mod items;
+mod quality;
 mod save;
 mod transform;
 
@@ -28,6 +29,7 @@ pub use controls::{
     decide_viewer_video_start, seek_target_secs, viewer_delete_gate, viewer_key_action,
 };
 pub use items::{collect_media_items, profile_photo_items};
+pub use quality::{VideoQualityOption, build_quality_options, current_quality, pick_quality};
 pub use save::{
     downloads_dir, os_downloads_dir, save_media_to_downloads, save_media_to_downloads_in_dir,
     saved_note,
@@ -125,6 +127,9 @@ pub struct MediaViewerItem {
     /// Natural pixel size (photo's largest size / video frame) when known:
     /// the viewer sizes the media to fit its frame from this.
     pub natural_size: Option<(i32, i32)>,
+    /// Video only: the renditions the quality picker offers, tallest
+    /// first. Empty when the video has a single quality.
+    pub quality_options: Vec<VideoQualityOption>,
 }
 
 /// Viewer state: the open chat's media list plus the current position.

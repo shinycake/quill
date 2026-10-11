@@ -97,6 +97,10 @@ pub struct MediaPrefs {
     #[serde(default)]
     pub subsection_tabs_modes:
         std::collections::BTreeMap<i64, crate::subsection_tabs::SubsectionTabsMode>,
+    /// The viewer's video quality (Telegram Desktop's `videoQuality`):
+    /// 0 is Auto (the original), otherwise the chosen short side in pixels.
+    #[serde(default)]
+    pub video_quality: u32,
 }
 
 /// MED4: Instant View preference (TGX values 0/1/2).
@@ -141,6 +145,7 @@ impl Default for MediaPrefs {
             instant_view_mode: InstantViewMode::default(),
             sticker_suggest_mode: StickerSuggestMode::default(),
             subsection_tabs_modes: std::collections::BTreeMap::new(),
+            video_quality: 0,
         }
     }
 }

@@ -133,6 +133,10 @@ impl QuillApp {
                 })
                 .child(div().flex_1())
                 .child(speed_dial)
+                .when_some(
+                    self.viewer_quality_picker(item, row_id, cx),
+                    |this, picker| this.child(picker),
+                )
                 .when(
                     cfg!(target_os = "macos") && !self.viewer.video_frames.is_empty(),
                     |this| {
