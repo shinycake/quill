@@ -402,7 +402,11 @@ impl QuillApp {
     /// Phase 9.2: toggle the reply row in the viewer (`story.can_be_replied`
     /// gates the button).
     pub(super) fn toggle_story_reply(&mut self, cx: &mut Context<Self>) {
-        self.stories.reply_open = !self.stories.reply_open;
+        if self.stories.reply_open {
+            self.end_story_reply(cx);
+        } else {
+            self.stories.reply_open = true;
+        }
         cx.notify();
     }
 
@@ -431,7 +435,7 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             self.connection.status_note = "demo — story replies run with live TDLib".into();
         }
-        self.stories.reply_open = false;
+        self.end_story_reply(cx);
         cx.notify();
     }
 
@@ -453,7 +457,7 @@ impl QuillApp {
             self.connection.status_note = "demo — deleteStory runs with live TDLib".into();
         }
         self.stories.reaction_picker_open = false;
-        self.stories.reply_open = false;
+        self.end_story_reply(cx);
         cx.notify();
     }
 
@@ -729,7 +733,7 @@ impl QuillApp {
         self.stories.viewer.close();
         self.chat_list.pending_story_open = None;
         self.stories.reaction_picker_open = false;
-        self.stories.reply_open = false;
+        self.end_story_reply(cx);
         self.stories.viewers_open = false;
         self.stories.report_open = false;
         self.stories.stats_open = false;
@@ -770,7 +774,7 @@ impl QuillApp {
             let _ = live.driver.open_story(next.chat_id, next.story_id);
         }
         self.stories.reaction_picker_open = false;
-        self.stories.reply_open = false;
+        self.end_story_reply(cx);
         self.stories.stats_open = false;
         // B14: a new story starts playing (a Space pause is per story).
         self.stories.pause.reset();
@@ -880,4 +884,5 @@ impl QuillApp {
 }
 
 mod ensure_story_download;
+mod reply_media;
 mod story_viewer_overlay;

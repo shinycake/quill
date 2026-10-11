@@ -52,6 +52,7 @@ mod sponsored;
 mod sticker_tabs;
 mod stories;
 mod story_insights;
+mod story_reply_media;
 mod subsection_tabs;
 mod support;
 mod threads;

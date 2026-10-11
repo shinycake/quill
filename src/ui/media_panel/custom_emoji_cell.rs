@@ -208,6 +208,9 @@ impl QuillApp {
         if self.react_from_panel(quill::state::ReactionChoice::Emoji(emoji.to_string()), cx) {
             return;
         }
+        if self.route_story_reply_emoji(emoji.as_ref(), window, cx) {
+            return;
+        }
         self.composer.update(cx, |input, cx| {
             input.replace(emoji.as_ref(), window, cx);
             input.focus(window, cx);
@@ -234,6 +237,9 @@ impl QuillApp {
         if let Some(id) = item.custom_emoji_id
             && self.react_from_panel(quill::state::ReactionChoice::CustomEmoji(id), cx)
         {
+            return;
+        }
+        if self.route_story_reply_emoji(&item.emoji.clone(), window, cx) {
             return;
         }
         if !self.session().is_some_and(|s| s.my_is_premium()) {

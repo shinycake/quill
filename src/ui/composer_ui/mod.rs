@@ -268,6 +268,9 @@ impl QuillApp {
         height: i32,
         cx: &mut Context<Self>,
     ) {
+        if self.route_story_reply_gif(file_id, duration, (width, height), cx) {
+            return;
+        }
         let chat_id = self.session().and_then(|session| session.open_chat);
         let Some(chat_id) = chat_id else {
             return;
