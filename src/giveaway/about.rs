@@ -56,14 +56,13 @@ pub fn about_text(
     ctx: &GiveawayTextContext<'_>,
 ) -> AboutText {
     let finished = info.is_finished();
-    let (refunded, winner_count, activated, gift_code, won_stars, is_winner) = match info {
+    let (refunded, winner_count, activated, gift_code, won_stars) = match info {
         GiveawayInfoData::Completed {
             was_refunded,
             winner_count,
             activation_count,
             gift_code,
             won_star_count,
-            is_winner,
             ..
         } => (
             *was_refunded,
@@ -71,9 +70,8 @@ pub fn about_text(
             *activation_count,
             !gift_code.0.is_empty(),
             *won_star_count,
-            *is_winner,
         ),
-        GiveawayInfoData::Ongoing { .. } => (false, 0, 0, false, 0, false),
+        GiveawayInfoData::Ongoing { .. } => (false, 0, 0, false, 0),
     };
     let ch = &ctx.first_channel;
     let group = ctx.group;
@@ -96,11 +94,6 @@ pub fn about_text(
                 "You won {} in this giveaway \u{1F3C6}",
                 stars(won_stars)
             )),
-            true,
-        )
-    } else if is_winner {
-        (
-            Some("You won a prize in this giveaway \u{1F3C6}".to_string()),
             true,
         )
     } else if matches!(info, GiveawayInfoData::Completed { .. }) && !refunded {

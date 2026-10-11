@@ -289,6 +289,14 @@ fn ended_giveaways_report_the_users_result() {
         lost.result.as_deref(),
         Some("You didn't win a prize in this giveaway.")
     );
+    // tdesktop keys the result on the code and Stars alone, so a winner
+    // flag without either reads as a loss.
+    let flag_only = about_text(&s, &completed("", 0, true, false), &ctx);
+    assert_eq!(
+        flag_only.result.as_deref(),
+        Some("You didn't win a prize in this giveaway.")
+    );
+    assert!(!flag_only.won);
     let refunded = about_text(&s, &completed("", 0, false, true), &ctx);
     assert!(refunded.result.is_none());
     assert!(refunded.refund_notice.unwrap().contains("refunding"));

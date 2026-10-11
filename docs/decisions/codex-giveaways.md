@@ -48,9 +48,9 @@ not. No parity fragment is added.
 - Limits (extra chats 10, 7 days, 4 boosts per Premium) use tdesktop's
   fallbacks; Quill does not read the app config yet.
 - The button is always shown on channel and group boosts pages; tdesktop
-  hides it when `giveaway_gifts_purchase_available` is false.
-- "You won" is also shown when TDLib says `is_winner` without a code or
-  Stars (tdesktop would say "you didn't win").
+  hides it when the `giveaway_gifts_purchase_available` app config flag is
+  false. That flag is not in the TDLib schema and Quill reads no app config,
+  so the button stays.
 
 ## Verified
 
