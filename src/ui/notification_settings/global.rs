@@ -125,6 +125,8 @@ impl QuillApp {
             body = body.child(this.attention_section(cx));
             body = body.child(this.events_section(cx));
             body = body.child(this.inapp_sounds_section(cx));
+            this.ensure_notification_volume_slider(cx);
+            body = body.child(this.notification_volume_section(cx));
             let footer = div().flex().justify_end().gap_2().children([
                 Button::new("reset-all-notif-settings")
                     .small()

@@ -446,6 +446,8 @@ impl NotificationSounds {
             old.stop();
         }
         let player = Player::connect_new(&mixer);
+        // Settings > Notifications volume (tdesktop `notificationsVolume`).
+        player.set_volume(quill::notify_prefs::current().gain());
         let source: Option<Box<dyn Source + Send>> = match &sound {
             NotificationSound::File(path) => open_source(path, &SharedSpeed::new(1.0)).ok(),
             NotificationSound::DefaultTone => None,
