@@ -467,6 +467,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.story_reply_video_recording(window, cx) {
+            return;
+        }
         if self
             .open_chat_id()
             .is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx))

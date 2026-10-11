@@ -103,5 +103,39 @@ fn driver_story_reply_media_targets_the_story_and_is_gated() {
     assert_eq!(v["reply_to"]["story_poster_chat_id"], 7);
     assert_eq!(v["input_message_content"]["@type"], "inputMessageVoiceNote");
 
+    // A round video reply.
+    let video_path = dir.join("note.mp4");
+    std::fs::write(&video_path, b"mp4").unwrap();
+    let note = crate::video::VideoNoteDraft {
+        path: video_path,
+        duration_secs: 3,
+        length: 384,
+    };
+    driver
+        .send_story_reply_video_note(ChatId(7), 6, &note)
+        .unwrap();
+    let json = recorder.snapshot().last().cloned().expect("sendMessage");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToStory");
+    assert_eq!(v["input_message_content"]["@type"], "inputMessageVideoNote");
+
+    // A text reply carries entities: a custom emoji goes out as one.
+    driver
+        .send_story_reply(
+            ChatId(7),
+            6,
+            &format!("hi {}", crate::composer::custom_emoji_markup("😀", 42)),
+        )
+        .unwrap();
+    let json = recorder.snapshot().last().cloned().expect("sendMessage");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    let text = &v["input_message_content"]["text"];
+    assert_eq!(text["text"], "hi 😀");
+    assert_eq!(
+        text["entities"][0]["type"]["@type"],
+        "textEntityTypeCustomEmoji"
+    );
+    assert_eq!(text["entities"][0]["type"]["custom_emoji_id"], "42");
+
     let _ = std::fs::remove_dir_all(&dir);
 }

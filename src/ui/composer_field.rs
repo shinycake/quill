@@ -29,7 +29,7 @@ use std::rc::Rc;
 /// Token id prefix of a custom emoji in the field.
 const EMOJI_TOKEN: &str = "custom-emoji:";
 
-fn emoji_token(id: i64, fallback: &str) -> InlineToken {
+pub(super) fn emoji_token(id: i64, fallback: &str) -> InlineToken {
     InlineToken::new(format!("{EMOJI_TOKEN}{id}"), fallback.to_string())
 }
 
@@ -415,8 +415,16 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> impl Fn(&InlineTokenContext, &mut Window, &mut App) -> AnyElement + 'static {
-        let entities: Vec<quill::text::TextEntity> = self
-            .composer
+        self.field_token_renderer(&self.composer, cx)
+    }
+
+    /// [`Self::composer_token_renderer`] for any field (the story reply).
+    pub(super) fn field_token_renderer(
+        &self,
+        field: &Entity<TextareaState>,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&InlineTokenContext, &mut Window, &mut App) -> AnyElement + 'static {
+        let entities: Vec<quill::text::TextEntity> = field
             .read(cx)
             .tokens()
             .iter()

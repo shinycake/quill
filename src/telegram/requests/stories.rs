@@ -250,11 +250,7 @@ pub fn send_text_story_reply(
         "reply_markup": Value::Null,
         "input_message_content": {
             "@type": "inputMessageText",
-            "text": {
-                "@type": "formattedText",
-                "text": text,
-                "entities": []
-            },
+            "text": formatted_caption(text, false),
             "link_preview_options": Value::Null,
             "clear_draft": true
         }

@@ -239,9 +239,6 @@ impl QuillApp {
         {
             return;
         }
-        if self.route_story_reply_emoji(&item.emoji.clone(), window, cx) {
-            return;
-        }
         if !self.session().is_some_and(|s| s.my_is_premium()) {
             self.connection.status_note = "Custom emoji need Telegram Premium".into();
             cx.notify();
@@ -252,6 +249,9 @@ impl QuillApp {
         };
         // Drawn inline in the field, one caret stop (codex:composer-input).
         let fallback = item.emoji.clone();
+        if self.route_story_reply_custom_emoji(&fallback, id, window, cx) {
+            return;
+        }
         self.insert_composer_custom_emoji(&fallback, id, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
