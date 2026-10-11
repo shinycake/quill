@@ -42,6 +42,7 @@ mod polls_checklists;
 mod privacy_data;
 mod profile_panels;
 mod proxy;
+mod quick_replies;
 mod reactions_live;
 mod registration;
 mod reply_keyboard;

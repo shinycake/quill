@@ -735,6 +735,9 @@ impl QuillApp {
         let inline_active = quill::composer::inline_query_trigger(&text).is_some();
         let triggered = command_menu_trigger(&text).is_some() && !inline_active;
         let open_chat = self.session().and_then(|session| session.open_chat);
+        if triggered {
+            self.load_quick_replies_for_menu();
+        }
         let has_items = open_chat.is_some_and(|chat_id| {
             self.session()
                 .map(|session| !session.command_menu_items(chat_id).is_empty())
@@ -841,6 +844,10 @@ impl QuillApp {
         let Some(item) = items.get(index) else {
             return;
         };
+        if let Some(shortcut_id) = item.quick_reply {
+            self.send_quick_reply_row(shortcut_id, window, cx);
+            return;
+        }
         let command = item.command.clone();
         let current = self.composer_markup(cx);
         let base = strip_command_menu_trigger(&current).unwrap_or(current.as_str());
@@ -874,6 +881,10 @@ impl QuillApp {
         let Some(item) = items.get(index) else {
             return;
         };
+        if let Some(shortcut_id) = item.quick_reply {
+            self.send_quick_reply_row(shortcut_id, window, cx);
+            return;
+        }
         let command = format!("/{}", item.command.trim_start_matches('/'));
         let current = self.composer_markup(cx);
         let rest = strip_command_menu_trigger(&current)

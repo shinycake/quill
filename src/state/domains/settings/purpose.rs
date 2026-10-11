@@ -218,6 +218,15 @@ pub enum SettingsPurpose {
     /// `getLanguagePackInfo` for a `setlanguage` link. Response is
     /// `languagePackInfo`.
     GetLanguagePackInfo,
+    /// `loadQuickReplyShortcuts`; the list arrives as updates.
+    LoadQuickReplyShortcuts,
+    /// `loadQuickReplyShortcutMessages`; the messages arrive as an update.
+    LoadQuickReplyMessages {
+        shortcut_id: i32,
+    },
+    /// Add, edit, delete, rename or send of quick replies; the result
+    /// arrives as updates.
+    MutateQuickReplies,
 }
 
 flat_purposes!(Settings(SettingsPurpose) {
@@ -260,4 +269,6 @@ flat_purposes!(Settings(SettingsPurpose) {
     GetAccountTtl,
     DeleteAccount,
     GetLanguagePackInfo,
+    LoadQuickReplyShortcuts,
+    MutateQuickReplies,
 });

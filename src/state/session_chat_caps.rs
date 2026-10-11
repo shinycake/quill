@@ -881,7 +881,7 @@ impl Session {
     /// non-bot chats, unknown chats, or when no commands are known yet.
     pub fn command_menu_items(&self, chat_id: ChatId) -> Vec<CommandMenuItem> {
         let Some(user_id) = self.bot_user_id_for_chat(chat_id) else {
-            return Vec::new();
+            return self.quick_reply_menu_items(chat_id);
         };
         let specific: &[BotCommand] = self
             .bot_info_for_chat(chat_id)
