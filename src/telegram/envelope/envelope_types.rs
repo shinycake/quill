@@ -238,6 +238,8 @@ pub struct UserProfileExtras {
     /// `personal_photo` — the photo the current user set for this contact
     /// (shown first in the gallery as "Photo set by you").
     pub personal_photo: Option<ParsedProfilePhoto>,
+    /// `business_info`: Telegram Business hours and location.
+    pub business: Option<crate::business_info::BusinessInfo>,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -311,6 +313,7 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .get("personal_photo")
             .filter(|value| !value.is_null())
             .and_then(super::users::parse_profile_photo),
+        business: crate::business_info::parse_business_info(info.get("business_info")),
     }
 }
 
