@@ -1050,7 +1050,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
 - [x] Events: contact joined Telegram, pinned messages <!-- parity:notify-events -->
 - [x] Include muted chats in folder counters <!-- parity:notify-muted-counters -->
-- [ ] Sender avatar in OS notifications <!-- parity:notify-avatar -->
+- [ ] Sender avatar in OS notifications (partial: Linux shipped; macOS and Windows need an image field on GPUI SystemNotification) <!-- parity:notify-avatar -->
 
 ### Settings: appearance & chat
 
