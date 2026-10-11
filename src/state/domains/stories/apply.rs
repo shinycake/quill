@@ -183,6 +183,18 @@ impl Session {
                     && pending.purpose == RequestPurpose::GetStoryPublicForwards
                 {
                     self.accept_public_forwards(pending, forwards);
+                } else if let Some(RequestPurpose::Groups(
+                    GroupsPurpose::GetMessagePublicForwards {
+                        chat_id,
+                        message_id,
+                    },
+                )) = pending.map(|p| p.purpose)
+                {
+                    // A channel post's public forwards share the answer
+                    // type with a story's.
+                    self.groups
+                        .stats
+                        .accept_message_forwards(chat_id, message_id, forwards);
                 }
             }
             StoriesPayload::FoundStories { found } => {

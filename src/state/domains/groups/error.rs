@@ -125,6 +125,34 @@ impl Session {
                     );
                 }
             }
+            Some(RequestPurpose::GetStatisticalGraph) => {
+                if let Some(extra) = pending.map(|p| p.id) {
+                    self.groups.stats.fail_graph(
+                        extra,
+                        call_request_error_line(err, "Could not load the chart"),
+                    );
+                }
+            }
+            Some(RequestPurpose::Groups(GroupsPurpose::GetMessageStatistics {
+                chat_id,
+                message_id,
+            })) => self.groups.stats.fail_message_statistics(
+                chat_id,
+                message_id,
+                call_request_error_line(err, "Could not load statistics"),
+            ),
+            Some(RequestPurpose::Groups(GroupsPurpose::GetMessagePublicForwards {
+                chat_id,
+                message_id,
+            })) => self.groups.stats.fail_message_forwards(
+                chat_id,
+                message_id,
+                call_request_error_line(err, "Could not load public shares"),
+            ),
+            Some(RequestPurpose::Groups(GroupsPurpose::GetStatsPost {
+                chat_id,
+                message_id,
+            })) => self.groups.stats.post_missing(chat_id, message_id),
             // Phase D3a: failed invite-link / join-request requests
             // land in the fetch state so the panel shows an honest
             // error instead of spinning forever.

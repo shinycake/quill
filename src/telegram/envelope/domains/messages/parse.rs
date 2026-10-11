@@ -251,6 +251,7 @@ pub(crate) fn parse_messages_payload(
                     can_delete_reactions: flag("can_delete_reactions"),
                     can_edit_scheduling_state: flag("can_edit_scheduling_state"),
                     can_get_poll_vote_statistics: flag("can_get_poll_vote_statistics"),
+                    can_get_statistics: flag("can_get_statistics"),
                     can_be_replied_in_another_chat: flag("can_be_replied_in_another_chat"),
                     can_set_fact_check: flag("can_set_fact_check"),
                 }),

@@ -8,11 +8,13 @@
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
 use super::chat_theme::{accent, bg_canvas, border, danger, text_menu, text_muted};
-use super::statistics::{format_stat_count, stats_graph_row};
+use super::statistics::format_stat_count;
+use super::statistics_graph::stat_graph_block;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::stat_chart::ChartKind;
 use quill::state::{
     StorySearchQuery, StoryStatsFetch, event_log_relative_time, private_share_count,
     story_search_tag,
@@ -106,8 +108,9 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .max_w(px(360.))
-            .max_h(px(320.))
+            // Charts need a definite width.
+            .w(px(360.))
+            .max_h(px(420.))
             .overflow_y_scroll()
             .p_2()
             .rounded_md()
@@ -197,11 +200,23 @@ impl QuillApp {
                     );
             }
             StoryStatsFetch::Loaded(stats) => {
-                for (label, graph) in [
-                    ("Story interactions", &stats.interaction_graph),
-                    ("Story reactions", &stats.reaction_graph),
+                // tdesktop draws these as a two-scale line chart and a
+                // step chart.
+                for (id, label, graph, kind) in [
+                    (
+                        "story-viewer-interactions",
+                        "Interactions",
+                        &stats.interaction_graph,
+                        ChartKind::DoubleLinear,
+                    ),
+                    (
+                        "story-viewer-reactions",
+                        "Reactions",
+                        &stats.reaction_graph,
+                        ChartKind::Bar,
+                    ),
                 ] {
-                    if let Some(row) = stats_graph_row(label, graph, cx) {
+                    if let Some(row) = stat_graph_block(id, label, graph, kind) {
                         panel = panel.child(row);
                     }
                 }

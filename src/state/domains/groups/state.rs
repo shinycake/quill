@@ -35,6 +35,8 @@ pub struct GroupsState {
     pub community_error: Option<String>,
     /// Phase D2: `getChatStatistics` fetch state, keyed by chat id.
     pub chat_statistics: HashMap<i64, ChatStatisticsFetch>,
+    /// Async and zoomed graphs, message statistics and the panel's page.
+    pub stats: StatsState,
     /// Phase D3a: `getChatInviteLinks` fetch state, keyed by chat id.
     pub invite_links: HashMap<i64, InviteLinkFetch>,
     /// Phase D3a: `getChatJoinRequests` fetch state, keyed by chat id.
@@ -235,6 +237,7 @@ impl GroupsState {
             community_full_infos: HashMap::new(),
             community_error: None,
             chat_statistics: HashMap::new(),
+            stats: StatsState::default(),
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),
             join_request_queries: HashMap::new(),

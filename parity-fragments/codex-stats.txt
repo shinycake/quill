@@ -1,0 +1,2 @@
+# Statistics: message and story pages, zoomable charts, public forwards
+parity:admin-stats-messages

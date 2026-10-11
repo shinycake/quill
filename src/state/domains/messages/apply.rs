@@ -408,6 +408,14 @@ impl Session {
                     self.accept_date_message(message.id);
                     return;
                 }
+                if let Some(RequestPurpose::Groups(GroupsPurpose::GetStatsPost {
+                    chat_id,
+                    message_id,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.groups.stats.accept_post(chat_id, message_id, &message);
+                    return;
+                }
                 if let Some(RequestPurpose::GetRepliedMessage {
                     chat_id,
                     message_id,

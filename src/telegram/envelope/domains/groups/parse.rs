@@ -401,6 +401,16 @@ pub(crate) fn parse_groups_payload(
                 statistics: parse_chat_statistics(value)?,
             }))
         }
+        // `getMessageStatistics` (schema line 16355) and
+        // `getStatisticalGraph` (line 16368) answers.
+        "messageStatistics" => Ok(EnvelopePayload::Groups(GroupsPayload::MessageStatistics {
+            statistics: parse_message_statistics(value)?,
+        })),
+        "statisticalGraphData" | "statisticalGraphAsync" | "statisticalGraphError" => {
+            Ok(EnvelopePayload::Groups(GroupsPayload::StatisticalGraph {
+                graph: StatisticalGraph::parse(value)?,
+            }))
+        }
         // Slice G2: welcome-message updates (schema 1.8.67, lines
         // 10599/10649) and boost responses (lines 6943/6968).
         "updateChatWelcomeMessages" => Ok(EnvelopePayload::Groups(

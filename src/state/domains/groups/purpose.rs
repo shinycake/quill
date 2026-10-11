@@ -36,6 +36,24 @@ pub enum GroupsPurpose {
     /// `chatStatisticsChannel` / `chatStatisticsSupergroup`; correlated
     /// via `PendingRequest::chat_id` (the response carries no chat id).
     GetChatStatistics,
+    /// `getStatisticalGraph` for an async or zoomed graph; the answer is
+    /// matched to its graph by request id in `StatsState`.
+    GetStatisticalGraph,
+    /// `getMessageStatistics` for a channel post.
+    GetMessageStatistics {
+        chat_id: i64,
+        message_id: i64,
+    },
+    /// A `getMessagePublicForwards` page for a channel post.
+    GetMessagePublicForwards {
+        chat_id: i64,
+        message_id: i64,
+    },
+    /// `getMessage` for a recent post's row in the statistics.
+    GetStatsPost {
+        chat_id: i64,
+        message_id: i64,
+    },
     /// Phase D3a: `getChatInviteLinks`. Response is `chatInviteLinks`;
     /// correlated via `PendingRequest::chat_id`.
     GetChatInviteLinks,
@@ -307,6 +325,7 @@ flat_purposes!(Groups(GroupsPurpose) {
     GetSupergroup,
     GetSupergroupFullInfo,
     GetChatStatistics,
+    GetStatisticalGraph,
     GetChatInviteLinks,
     CreateChatInviteLink,
     EditChatInviteLink,
