@@ -68,6 +68,12 @@ pub(crate) struct HistoryUi {
     /// First and last row on screen at the last paint (the page keys scroll
     /// by this many rows).
     pub(super) scroll_view_probe: std::rc::Rc<std::cell::Cell<Option<(usize, usize)>>>,
+    /// Rows painted in the last frame with their window bounds, kept until
+    /// the next paint: drag selection hit-tests the pointer against them.
+    pub(super) hit_rows: std::rc::Rc<std::cell::RefCell<Vec<(usize, Bounds<Pixels>)>>>,
+    /// The list's window bounds at the last paint (drag selection
+    /// autoscrolls when the pointer leaves them).
+    pub(super) viewport: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     /// Pinned bar position per chat: index into the pinned list, newest
     /// first. A click on the bar jumps there and steps to the next older.
     pub(super) pinned_cursor: HashMap<i64, usize>,
@@ -119,6 +125,8 @@ impl HistoryUi {
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),
             scroll_view_probe: Default::default(),
+            hit_rows: Default::default(),
+            viewport: Default::default(),
             pinned_cursor: HashMap::new(),
             hidden_pinned: HashMap::new(),
             pinned_list_open: false,

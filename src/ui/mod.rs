@@ -62,6 +62,7 @@ mod privacy_state;
 mod recording_state;
 mod search_state;
 mod selectable_text;
+mod selection_drag;
 mod selection_mode;
 mod sessions_extra;
 mod settings_state;

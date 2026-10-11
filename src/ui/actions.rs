@@ -91,9 +91,9 @@ actions!(
         HistoryToBottom,
         /// Delete / Backspace while messages are selected: the delete box.
         DeleteSelection,
-        /// Cmd/Ctrl+Shift+A toggles the focused message in the selection;
-        /// Up / Down move the focus while selecting, Shift extends the range
-        /// (tdesktop `HistoryInner::keyPressEvent`).
+        /// Cmd/Ctrl+Shift+A or Ctrl+Space toggles the focused message in
+        /// the selection; Up / Down move the focus while selecting, Shift
+        /// extends the range (tdesktop `HistoryInner::keyPressEvent`).
         ToggleMessageSelection,
         SelectionFocusOlder,
         SelectionFocusNewer,
