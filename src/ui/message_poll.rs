@@ -131,10 +131,7 @@ pub(super) fn poll_body(
     if can_view_poll_voters(poll) {
         body = body.child(
             Button::new(format!("poll-voters-{}", message_id.0))
-                .label(format!(
-                    "View voters · {}",
-                    voter_count_label(poll.total_voter_count)
-                ))
+                .label(format!("View Votes ({})", poll.total_voter_count))
                 .ghost()
                 .text_color(accent())
                 .on_click(cx.listener(move |this, _, _, cx| {

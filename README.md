@@ -258,7 +258,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Save an audio message as a notification tone <!-- parity:menu-save-notification-tone -->
 - [x] Copy Post Link versus Copy Message Link wording and "members only" hint <!-- parity:menu-copy-post-link-wording -->
 - [x] Copy Card Number for bank-card entities <!-- parity:menu-copy-card-number -->
-- [ ] Poll menu: Retract vote, View results and ends-in note <!-- parity:menu-poll-actions -->
+- [x] Poll menu: Retract vote, View results and ends-in note <!-- parity:menu-poll-actions -->
 - [x] Saved Messages tag menu: Filter by Tag, Add or Edit Name, Remove Tag <!-- parity:menu-saved-tag-menu -->
 - [x] Info line explaining why Forward and Copy are missing in protected chats <!-- parity:menu-noforwards-note -->
 - [x] Admin delete box: delete all from user, ban and report spam in one step <!-- parity:menu-moderate-delete -->
