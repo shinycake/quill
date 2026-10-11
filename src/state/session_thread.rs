@@ -77,6 +77,17 @@ impl Session {
         }
         thread.chat_id = info.chat_id;
         thread.thread_id = info.message_thread_id;
+        // `messageThreadInfo.draft_message`: the thread's own draft. An
+        // unsaved composer edit for this thread (a re-resolve while
+        // typing) wins over TDLib's copy.
+        let slot = crate::composer::DraftTopic::Thread(info.message_thread_id);
+        if !self
+            .messages
+            .draft_dirty
+            .contains(&slot.key(info.chat_id.0))
+        {
+            thread.draft = info.draft;
+        }
         thread.unread_count = info.unread_message_count.max(0);
         if let Some(reply) = &info.reply_info {
             thread.reply_count = reply.reply_count;

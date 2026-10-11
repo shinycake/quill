@@ -296,6 +296,7 @@ impl QuillApp {
             return;
         }
         let text = self.composer_markup(cx);
-        self.save_chat_draft(chat_id, &text, None, false, cx);
+        let topic = self.open_draft_topic(chat_id);
+        self.save_chat_draft(chat_id, topic, &text, None, false, cx);
     }
 }

@@ -300,6 +300,9 @@ pub(crate) struct OutgoingTyping {
 pub(crate) struct PendingDraft {
     pub(crate) token: u64,
     pub(crate) chat_id: ChatId,
+    /// The slot the edit belongs to, fixed when the timer was armed: a
+    /// topic or thread switch before it fires still saves to the right one.
+    pub(crate) topic: crate::composer::DraftTopic,
     pub(crate) text: String,
     pub(crate) reply_to: Option<SendReply>,
 }

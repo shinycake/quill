@@ -42,6 +42,7 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     let mut topics = topics;
+                    self.keep_dirty_topic_drafts(chat_id, &mut topics);
                     for topic in &mut topics {
                         crate::state::session_subsection_tabs::settle_topic_unread(topic);
                         crate::state::session_subsection_tabs::trace_topic_unread(

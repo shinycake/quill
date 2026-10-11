@@ -1,12 +1,14 @@
-//! cross-chat draft lifecycle.
+//! Cross-chat draft lifecycle: save the composer into the slot it was
+//! typed in (chat, forum topic or reply thread — tdesktop's
+//! `Data::DraftKey`), restore the slot's draft when it opens again.
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::composer::{ComposerReplyTo, QuoteSelection, draft_text_to_store};
+use quill::composer::{ComposerReplyTo, DraftTopic, QuoteSelection, draft_text_to_store};
 use quill::connect::DraftSaveOutcome;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{Session, effective_preview};
+use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatDraft;
 use std::sync::Arc;
@@ -32,6 +34,13 @@ impl QuillApp {
             })
     }
 
+    /// The slot the open composer writes to (`Session::open_draft_topic`).
+    pub(super) fn open_draft_topic(&self, chat_id: ChatId) -> DraftTopic {
+        self.session()
+            .map(|session| session.open_draft_topic(chat_id))
+            .unwrap_or_default()
+    }
+
     pub(super) fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
         if self.composer_ui.pending_edit.is_some() {
             return;
@@ -39,13 +48,14 @@ impl QuillApp {
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
+        let topic = self.open_draft_topic(chat_id);
         let text = self.composer_markup(cx);
         let reply = self
             .composer_ui
             .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_reply(chat_id));
-        self.save_chat_draft(chat_id, &text, reply, delayed, cx);
+        self.save_chat_draft(chat_id, topic, &text, reply, delayed, cx);
     }
 
     pub(super) fn leaving_draft_parts(
@@ -125,10 +135,14 @@ impl QuillApp {
         }
     }
 
+    /// Save the composer before the view moves to another chat, topic or
+    /// thread. Call it before the switch: the slot is read from the state
+    /// as it is now (tdesktop `saveCurrentDraftToCloud` on leaving).
     pub(super) fn flush_leaving_draft(&mut self, cx: &mut Context<Self>) {
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
+        let topic = self.open_draft_topic(chat_id);
         let (text, reply) = if self.composer_ui.pending_edit.is_some() {
             let reply = self
                 .composer_ui
@@ -145,12 +159,27 @@ impl QuillApp {
                     .and_then(|reply| reply.send_reply(chat_id)),
             )
         };
-        self.save_chat_draft(chat_id, &text, reply, false, cx);
+        self.save_chat_draft(chat_id, topic, &text, reply, false, cx);
+    }
+
+    /// Ask for the open slot's draft to be put in the composer on the next
+    /// frame (the input needs `&mut Window`, which topic and thread
+    /// switches triggered from menus don't have).
+    pub(super) fn request_draft_restore(&mut self) {
+        self.composer_ui.draft_restore_pending = true;
+    }
+
+    /// Frame upkeep: run a requested restore.
+    pub(super) fn restore_draft_if_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.composer_ui.draft_restore_pending) {
+            self.restore_open_draft(window, cx);
+        }
     }
 
     pub(super) fn save_chat_draft(
         &mut self,
         chat_id: ChatId,
+        topic: DraftTopic,
         text: &str,
         reply_to: Option<quill::telegram::SendReply>,
         delayed: bool,
@@ -163,7 +192,7 @@ impl QuillApp {
         if self.live.is_some() {
             let outcome = self.live.as_mut().and_then(|live| {
                 live.driver
-                    .note_composer_draft(chat_id, text, reply_to, now_ms, delayed)
+                    .note_composer_draft_in(chat_id, topic, text, reply_to, now_ms, delayed)
                     .ok()
             });
             if let Some(DraftSaveOutcome::Debounced { token, delay }) = outcome {
@@ -174,7 +203,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        if !session.accepts_composer_draft(chat_id) {
+        if !session.accepts_composer_draft(chat_id, topic) {
             return;
         }
         let stored = draft_text_to_store(text, reply_to.is_some()).map(str::to_string);
@@ -184,7 +213,7 @@ impl QuillApp {
             reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
             quote: reply_to.and_then(|reply| reply.quote),
         });
-        session.store_composer_draft(chat_id, draft);
+        session.store_composer_draft(chat_id, topic, draft);
     }
 
     pub(super) fn schedule_draft_commit(
@@ -206,11 +235,14 @@ impl QuillApp {
     }
 
     pub(super) fn forget_local_draft(&mut self, chat_id: ChatId) {
+        let topic = self.open_draft_topic(chat_id);
         if let Some(live) = self.live.as_mut() {
             live.driver.cancel_pending_draft();
-            live.driver.session.store_composer_draft(chat_id, None);
+            live.driver
+                .session
+                .store_composer_draft(chat_id, topic, None);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.store_composer_draft(chat_id, None);
+            session.store_composer_draft(chat_id, topic, None);
         }
     }
 
@@ -222,25 +254,20 @@ impl QuillApp {
             return;
         };
         let restored = self.session().and_then(|session| {
-            if session.draft_is_dirty(chat_id) {
+            let topic = session.open_draft_topic(chat_id);
+            if session.draft_is_dirty(chat_id, topic) {
                 return None;
             }
-            if !session.accepts_composer_draft(chat_id) {
+            if !session.accepts_composer_draft(chat_id, topic) {
                 return Some((None, None));
             }
-            let draft = session
-                .chats
-                .get(&chat_id.0)
-                .and_then(|chat| chat.draft.clone());
+            let draft = session.draft_for(chat_id, topic).cloned();
             let preview = draft
                 .as_ref()
                 .and_then(|draft| draft.reply_to_message_id)
                 .map(|id| {
                     let text = session
-                        .histories
-                        .get(&chat_id.0)
-                        .and_then(|history| history.messages.get(&id.0))
-                        .map(effective_preview)
+                        .draft_reply_preview(chat_id, id)
                         .filter(|text| !text.is_empty())
                         .unwrap_or_else(|| "message".into());
                     (id, text)

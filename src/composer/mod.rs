@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 mod actions;
 mod attachments;
 mod commands;
+mod draft_topic;
 mod edit;
 mod markup;
 mod reply;
@@ -25,6 +26,7 @@ pub use commands::{
     inline_query_trigger, insert_bot_command_text, insert_switch_inline_text, mention_trigger,
     merge_command_menu_items, strip_command_menu_trigger,
 };
+pub use draft_topic::{DraftKey, DraftTopic};
 pub use edit::{
     ComposerEdit, ComposerEditKind, EDIT_MEDIA_ALBUM_ERROR, EDIT_MEDIA_INVALID_FILE, EditMediaKind,
     EditMediaReplacement, EditableMedia, LinkPreviewChoice, MediaEdit, begin_edit_draft,

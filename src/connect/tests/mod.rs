@@ -13,6 +13,7 @@ mod chat_state;
 mod connect_flow;
 mod deep_link_routing;
 mod deep_links;
+mod drafts_everywhere;
 mod drafts_polls;
 mod email_login;
 mod emoji_sets;

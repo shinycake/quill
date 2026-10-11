@@ -1,7 +1,7 @@
 //! Connect-driver tests: drafts, typing, polls.
 use super::super::*;
 use super::*;
-use crate::composer::ComposerSnapshot;
+use crate::composer::{ComposerSnapshot, DraftTopic};
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
@@ -277,8 +277,13 @@ fn private_draft_debounces_then_flushes_and_skips_channels() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.messages.draft_clears, vec![ChatId(7)]);
-    driver.clear_draft_after_send(ChatId(7), true).unwrap();
+    assert_eq!(
+        driver.session.messages.draft_clears,
+        vec![(ChatId(7), DraftTopic::Chat)]
+    );
+    driver
+        .clear_draft_after_send(ChatId(7), DraftTopic::Chat, true)
+        .unwrap();
     assert!(driver.session.chats.get(&7).unwrap().draft.is_none());
     assert!(!sink.rendered().contains("CANARY"));
     let _ = std::fs::remove_dir_all(&dir);

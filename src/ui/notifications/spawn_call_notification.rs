@@ -206,7 +206,7 @@ impl QuillApp {
         let idle = self.composer_ui.pending_edit.is_none()
             && self.composer_ui.pending_reply.is_none()
             && self.composer.read(cx).value().trim().is_empty();
-        for chat_id in clears {
+        for (chat_id, topic) in clears {
             if self.composer_ui.clear_draft_on_success != Some(chat_id) {
                 continue;
             }
@@ -215,7 +215,7 @@ impl QuillApp {
                 continue;
             }
             if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.clear_draft_after_send(chat_id, true);
+                let _ = live.driver.clear_draft_after_send(chat_id, topic, true);
             }
         }
     }

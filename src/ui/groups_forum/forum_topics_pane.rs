@@ -54,7 +54,14 @@ impl QuillApp {
             } else {
                 topic.name.clone()
             };
-            let preview = topic.last_message_preview.clone();
+            // A topic draft replaces the last-message preview (red
+            // "Draft:" prefix), as a chat row's does.
+            let draft = topic.draft_preview();
+            let preview = match &draft {
+                Some(draft) => draft.text.clone(),
+                None => topic.last_message_preview.clone(),
+            };
+            let draft_reply = draft.map(|draft| draft.reply);
             let extras = open
                 .map(|id| self.topic_extras(id, &topic))
                 .unwrap_or_default();
@@ -167,11 +174,20 @@ impl QuillApp {
                                 }
                             }),
                     )
-                    .when(!preview.is_empty(), |this| {
+                    .when(!preview.is_empty() || draft_reply.is_some(), |this| {
                         this.child(
                             div()
+                                .flex()
+                                .items_center()
+                                .min_w_0()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
+                                .when_some(draft_reply, |this, reply| {
+                                    this.child(super::super::chat_row::draft_prefix(
+                                        reply,
+                                        preview.is_empty(),
+                                    ))
+                                })
                                 .child(preview),
                         )
                     }),
@@ -286,6 +302,10 @@ impl QuillApp {
     /// Phase 5.1: select a forum topic (live: `searchChatMessages` with
     /// `topic_id`; demo: the seeded session takes it directly).
     pub(in crate::ui) fn select_topic_ui(&mut self, forum_topic_id: i32, cx: &mut Context<Self>) {
+        // The composer belongs to the slot being left (the chat's "All"
+        // view or the previous topic): save it there, then restore the new
+        // topic's draft once the switch is done.
+        self.flush_leaving_draft(cx);
         if self.live.is_some() {
             let result = self
                 .live
@@ -302,16 +322,19 @@ impl QuillApp {
         {
             session.select_topic(chat_id, forum_topic_id);
         }
+        self.request_draft_restore();
         cx.notify();
     }
 
     /// Phase 5.1: leave the topic view, back to the forum's topic list.
     pub(in crate::ui) fn deselect_topic_ui(&mut self, cx: &mut Context<Self>) {
+        self.flush_leaving_draft(cx);
         if self.live.is_some() {
             self.live.as_mut().expect("live").driver.deselect_topic();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.deselect_topic();
         }
+        self.request_draft_restore();
         self.connection.status_note = "back to topics".into();
         cx.notify();
     }

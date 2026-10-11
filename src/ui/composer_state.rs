@@ -103,6 +103,9 @@ pub(crate) struct ComposerUi {
     /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
     /// if the composer is still empty.
     pub(super) clear_draft_on_success: Option<ChatId>,
+    /// A topic or thread switch asked for the new slot's draft to be put
+    /// in the composer on the next frame (`restore_draft_if_pending`).
+    pub(super) draft_restore_pending: bool,
     /// Own-message edit (tdesktop `FieldHeader::editMessage`).
     pub(super) pending_edit: Option<ComposerEdit>,
     /// Normal composer draft stashed while editing (`DraftType::Normal`).
@@ -175,6 +178,7 @@ impl ComposerUi {
             rich_editor_open: false,
             pending_reply: None,
             clear_draft_on_success: None,
+            draft_restore_pending: false,
             pending_edit: None,
             saved_edit_draft: String::new(),
             saved_edit_reply: None,

@@ -277,6 +277,7 @@ impl Session {
             creation_date: info.creation_date,
             creator: info.creator,
             is_outgoing: info.is_outgoing,
+            draft: None,
         });
     }
 
@@ -306,6 +307,13 @@ impl Session {
             settle_topic_unread(topic);
             trace_topic_unread("updateForumTopic", update.chat_id, topic);
         }
+        // The topic's draft rides the same update (schema 1.8.68, line
+        // 11028); an unsaved composer edit for that topic wins.
+        self.set_remote_draft(
+            ChatId(update.chat_id),
+            crate::composer::DraftTopic::Forum(update.forum_topic_id),
+            update.draft,
+        );
     }
 
     /// A new message in a loaded topic list moves the topic up and refreshes
@@ -333,6 +341,7 @@ impl Session {
     /// A `getForumTopic` answer: TDLib's state for one topic replaces the
     /// cached entry (or adds it).
     pub(crate) fn replace_forum_topic(&mut self, chat_id: ChatId, mut topic: ForumTopic) {
+        self.keep_dirty_topic_drafts(chat_id, std::slice::from_mut(&mut topic));
         let Some(topics) = self.threads.forum_topics.get_mut(&chat_id.0) else {
             return;
         };

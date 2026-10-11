@@ -52,6 +52,10 @@ pub struct ForumTopic {
     pub creator: Option<MessageSender>,
     /// `forumTopicInfo.is_outgoing` — the current user created the topic.
     pub is_outgoing: bool,
+    /// `forumTopic.draft_message` (schema 1.8.68, line 4278): the topic's
+    /// own text draft, shown as "Draft:" in the topic row and restored
+    /// when the topic opens (tdesktop `ForumTopic::cloudDraft`).
+    pub draft: Option<ChatDraft>,
 }
 
 /// Subsection tabs: the `forumTopicInfo` fields that
@@ -81,6 +85,8 @@ pub struct ForumTopicUpdate {
     pub notification_settings: ChatNotificationSettings,
     pub unread_mention_count: i32,
     pub unread_reaction_count: i32,
+    /// `updateForumTopic.draft_message` (schema 1.8.68, line 11028).
+    pub draft: Option<ChatDraft>,
 }
 
 fn icon_fields(info: &Value) -> (i32, i64) {
@@ -130,6 +136,7 @@ pub(crate) fn parse_forum_topic_update(value: &Value) -> Option<ForumTopicUpdate
         notification_settings: parse_chat_notification_settings(value.get("notification_settings")),
         unread_mention_count: int53_or_zero(value.get("unread_mention_count")).sat_i32(),
         unread_reaction_count: int53_or_zero(value.get("unread_reaction_count")).sat_i32(),
+        draft: parse_chat_draft(value.get("draft_message")),
     })
 }
 
@@ -196,5 +203,6 @@ pub(crate) fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
             .get("is_outgoing")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        draft: parse_chat_draft(value.get("draft_message")),
     })
 }

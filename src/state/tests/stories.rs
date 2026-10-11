@@ -1,6 +1,7 @@
 //! State reducer tests: stories.
 use super::common::*;
 use super::*;
+use crate::composer::DraftTopic;
 
 #[test]
 fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
@@ -190,7 +191,7 @@ fn private_draft_restores_and_dirty_update_is_ignored() {
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#,
     );
-    assert!(session.accepts_composer_draft(ChatId(11)));
+    assert!(session.accepts_composer_draft(ChatId(11), DraftTopic::Chat));
     let draft = session.chats.get(&11).unwrap().draft.clone().unwrap();
     assert_eq!(draft.text, "meet at 6");
     assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
@@ -202,7 +203,7 @@ fn private_draft_restores_and_dirty_update_is_ignored() {
             .sidebar_preview()
             .starts_with("Draft:")
     );
-    session.mark_draft_dirty(ChatId(11));
+    session.mark_draft_dirty(ChatId(11), DraftTopic::Chat);
     apply_json(
         &mut session,
         &seq,
@@ -219,14 +220,18 @@ fn private_draft_restores_and_dirty_update_is_ignored() {
         &sink,
         r#"{"@type":"updateUser","user":{"id":11,"first_name":"Bot","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":false,"allows_users_to_create_topics":false,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#,
     );
-    assert!(!session.accepts_composer_draft(ChatId(11)));
+    // Bot chats draft like any private chat (tdesktop saves cloud drafts
+    // wherever the compose field is shown).
+    assert!(session.accepts_composer_draft(ChatId(11), DraftTopic::Chat));
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":13,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":null,"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"nope","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#,
     );
-    assert!(!session.accepts_composer_draft(ChatId(13)));
+    // A channel the user cannot post in: TDLib would refuse
+    // `setChatDraftMessage` (`can_send_message`), so no draft is kept.
+    assert!(!session.accepts_composer_draft(ChatId(13), DraftTopic::Chat));
 }
 
 #[test]

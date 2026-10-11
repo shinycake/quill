@@ -3,17 +3,6 @@ use super::*;
 use crate::telegram::envelope::MessageSchedulingState;
 
 impl Session {
-    /// Private chats only, and not a known bot. Channels, groups, secret chats skip drafts.
-    pub fn accepts_composer_draft(&self, chat_id: ChatId) -> bool {
-        let Some(chat) = self.chats.get(&chat_id.0) else {
-            return false;
-        };
-        match chat.kind {
-            ChatKind::Private { user_id } => !self.bots.bot_user_ids.contains(&user_id.0),
-            _ => false,
-        }
-    }
-
     /// Phase 3.1: bot chats ride the ordinary private-chat path
     /// (`is_supported_chat` / `can_post`) — no special gate. This
     /// resolves the peer bot user id for a private chat whose user is a
@@ -905,22 +894,6 @@ impl Session {
             .map(Vec::as_slice)
             .unwrap_or(&[]);
         merge_command_menu_items(specific, global)
-    }
-
-    pub fn mark_draft_dirty(&mut self, chat_id: ChatId) {
-        self.messages.draft_dirty.insert(chat_id.0);
-    }
-
-    pub fn draft_is_dirty(&self, chat_id: ChatId) -> bool {
-        self.messages.draft_dirty.contains(&chat_id.0)
-    }
-
-    /// Local persist (after `setChatDraftMessage`, or the demo path). Clears the dirty bit.
-    pub fn store_composer_draft(&mut self, chat_id: ChatId, draft: Option<ChatDraft>) {
-        if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-            chat.draft = draft;
-        }
-        self.messages.draft_dirty.remove(&chat_id.0);
     }
 }
 

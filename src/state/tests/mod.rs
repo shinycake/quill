@@ -11,6 +11,7 @@ mod chat_row;
 mod common;
 mod connection_indicator;
 mod downloads;
+mod drafts_everywhere;
 mod folder_followups;
 mod forum_column;
 mod forum_saved;

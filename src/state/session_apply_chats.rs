@@ -198,7 +198,11 @@ impl Session {
                 None => {}
             }
         }
-        if !self.messages.draft_dirty.contains(&chat_id.0) {
+        if !self
+            .messages
+            .draft_dirty
+            .contains(&crate::composer::DraftTopic::Chat.key(chat_id.0))
+        {
             chat.draft = draft;
         }
         self.replace_avatar(old_photo_file_id, photo_file_id);

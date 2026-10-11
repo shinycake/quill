@@ -1,6 +1,7 @@
 //! Messages: the menu, reports, links, AI drafts, limits, link previews, scheduling, forwarding, polls, drafts, sponsored rows, translation, export: the `messages` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::composer::{DraftKey, DraftTopic};
 use crate::state::*;
 
 pub struct MessagesState {
@@ -123,11 +124,13 @@ pub struct MessagesState {
     /// B15: `getPollVoteStatistics` fetch state, keyed by (chat id,
     /// message id).
     pub poll_stats: HashMap<(i64, i64), PollStatsFetch>,
-    /// Composer text changed since the last persisted draft. Remote
-    /// `updateChatDraftMessage` must not replace it (schema comment).
-    pub(crate) draft_dirty: HashSet<i64>,
-    /// Send succeeded; UI clears the server draft if the composer is still empty.
-    pub draft_clears: Vec<ChatId>,
+    /// Composer text changed since the last persisted draft of that
+    /// (chat, topic) slot. Remote `updateChatDraftMessage` /
+    /// `updateForumTopic` must not replace it (schema comment).
+    pub(crate) draft_dirty: HashSet<DraftKey>,
+    /// Send succeeded in this (chat, topic); UI clears the server draft
+    /// if the composer is still empty.
+    pub draft_clears: Vec<(ChatId, DraftTopic)>,
     /// Sponsored messages per chat (`getChatSponsoredMessages`).
     pub sponsored: HashMap<i64, ChatSponsoredMessages>,
     /// Set once Telegram confirmed `reportSponsoredResultAdsHidden`: no ads

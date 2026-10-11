@@ -126,6 +126,7 @@ mod tests {
             creation_date: 0,
             creator: None,
             is_outgoing: false,
+            draft: None,
         }
     }
 
