@@ -44,6 +44,9 @@ impl Session {
                     lookup.info = None;
                 }
             }
+            Some(RequestPurpose::CheckPremiumGiftCode | RequestPurpose::ApplyPremiumGiftCode) => {
+                self.apply_gift_code_error(err, pending);
+            }
             Some(RequestPurpose::GetGiftTextLimit) => {
                 self.payments.gift_text_length_max = None;
             }

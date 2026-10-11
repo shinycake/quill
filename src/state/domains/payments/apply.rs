@@ -13,6 +13,7 @@ impl Session {
         _seq: u64,
     ) {
         match payload {
+            PaymentsPayload::GiftCodeInfo(info) => self.apply_gift_code_info(info, pending),
             PaymentsPayload::BankCardInfo(info) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBankCardInfo)
                     && let Some(lookup) = self.payments.bank_card.as_mut()

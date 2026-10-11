@@ -200,6 +200,8 @@ pub struct SettingsState {
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
     pub account_export: Option<crate::account_export::AccountExport>,
+    /// The `setlanguage` link whose box is open.
+    pub language_link: Option<LanguageLinkLookup>,
 }
 
 impl SettingsState {
@@ -268,6 +270,7 @@ impl SettingsState {
             device_prefs: Default::default(),
             proxy: Default::default(),
             account_export: None,
+            language_link: None,
         }
     }
 }

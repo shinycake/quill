@@ -72,6 +72,8 @@ pub struct PaymentsState {
     pub premium_option: Option<bool>,
     /// The card number the user tapped and what `getBankCardInfo` said.
     pub bank_card: Option<BankCardLookup>,
+    /// The gift code link whose box is open.
+    pub gift_code: Option<GiftCodeLookup>,
 }
 
 /// A tapped bank card number and the lookup's progress.
@@ -110,6 +112,7 @@ impl PaymentsState {
             subscription_cancel_confirm: None,
             premium_option: None,
             bank_card: None,
+            gift_code: None,
         }
     }
 }

@@ -215,6 +215,9 @@ pub enum SettingsPurpose {
     /// `updateAuthorizationState` → `Closed` (already handled by
     /// `set_auth`) — never faked client-side.
     DeleteAccount,
+    /// `getLanguagePackInfo` for a `setlanguage` link. Response is
+    /// `languagePackInfo`.
+    GetLanguagePackInfo,
 }
 
 flat_purposes!(Settings(SettingsPurpose) {
@@ -256,4 +259,5 @@ flat_purposes!(Settings(SettingsPurpose) {
     GetAutoDownloadSettingsPresets,
     GetAccountTtl,
     DeleteAccount,
+    GetLanguagePackInfo,
 });

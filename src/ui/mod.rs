@@ -192,6 +192,7 @@ mod invite_admin_more_ui;
 mod invite_admin_ui;
 mod jump_buttons;
 mod jump_date;
+mod link_info_boxes;
 mod live_location_tick;
 mod marketplace;
 mod media_panel;

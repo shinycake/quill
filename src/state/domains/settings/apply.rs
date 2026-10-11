@@ -13,6 +13,7 @@ impl Session {
         _seq: u64,
     ) {
         match payload {
+            SettingsPayload::LanguagePackInfo(info) => self.apply_language_pack_info(info, pending),
             // `updateNotificationGroup` / `updateActiveNotifications`: a
             // group that emptied (read elsewhere, or removed) clears the
             // OS notifications we showed for the chat.

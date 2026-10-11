@@ -24,6 +24,7 @@ mod group_calls;
 mod groups;
 mod history_window;
 mod invite_admin;
+mod link_info;
 mod links_boosts;
 mod live_location;
 mod media_library;
