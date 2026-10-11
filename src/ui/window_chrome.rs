@@ -57,6 +57,6 @@ impl QuillApp {
             name,
             unread: unread.max(0) as u32,
         });
-        window_title(chat, total, None)
+        window_title(chat, total, self.title_account_name().as_deref())
     }
 }

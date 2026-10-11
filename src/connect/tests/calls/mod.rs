@@ -16,6 +16,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
+mod late_engine;
 mod media;
 
 /// Phase C3a: `join_video_chat` must accept the tracked, unjoined call

@@ -329,7 +329,8 @@ impl QuillApp {
                 .is_some_and(|s| !s.ordered_archived_chats().is_empty()),
             self.appearance.archive_in_main_menu,
         );
-        Button::new("main-menu")
+        let accounts_unread = self.other_accounts_unread();
+        let button = Button::new("main-menu")
             .icon(gpui_kit::assets::IconName::Menu)
             .ghost()
             .tooltip("Menu")
@@ -379,13 +380,21 @@ impl QuillApp {
                     if matches!(action, NavigationAction::NightMode) {
                         item = item.checked(night);
                     }
+                    // The other accounts' unread counter (tdesktop's
+                    // accounts toggle badge).
+                    if let (NavigationAction::Accounts, Some(unread)) = (action, accounts_unread) {
+                        item = PopupMenuItem::element(move |_, cx| {
+                            super::background_accounts::chrome::accounts_menu_row(unread, cx)
+                        });
+                    }
                     menu = menu.item(item.on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| this.navigate(action, window, cx));
                     }));
                 }
                 menu
             })
-            .into_any_element()
+            .into_any_element();
+        self.with_other_accounts_dot(button)
     }
     pub(super) fn build_settings_dialog(
         app: &Entity<Self>,

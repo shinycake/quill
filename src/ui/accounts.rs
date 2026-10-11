@@ -158,6 +158,9 @@ impl QuillApp {
             .sticker_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.stop_sticker_playback();
+        // Chat windows draw the account on screen: the outgoing account's
+        // close (and come back when it is switched to again).
+        self.close_chat_windows_for_switch(cx);
         // `parity:notify-all-accounts`: the outgoing account stays connected
         // in the background, and an account already running there comes
         // forward as it is instead of restarting.

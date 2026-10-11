@@ -32,6 +32,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod account_row;
+mod calls;
+pub(super) mod chrome;
 mod clicks;
 mod switch;
 
@@ -77,6 +79,8 @@ pub(crate) struct BackgroundAccounts {
     pub(super) notify_from_all: bool,
     /// A background notification asked for the taskbar flash / Dock bounce.
     pub(super) attention: bool,
+    /// A call ringing on a background account (`calls`).
+    ringing: Option<calls::BackgroundRing>,
 }
 
 impl BackgroundAccounts {
@@ -90,6 +94,7 @@ impl BackgroundAccounts {
             pending_open: None,
             notify_from_all: true,
             attention: false,
+            ringing: None,
         }
     }
 
@@ -339,6 +344,10 @@ impl QuillApp {
                 }
             }
             ingested |= live.driver.request_tick(now);
+            // TDLib keeps proxies per account: each one runs its own
+            // auto-switch (tdesktop `ProxyRotationManager`) with its own
+            // `proxy_prefs.json`, like the account on screen.
+            ingested |= live.driver.proxy_tick(quill::state::unix_ms_now());
             busy |= ingested;
             let mut status = background_status(&live.driver.session.auth);
             if live.bridge.stopped_unexpectedly() {
@@ -377,6 +386,7 @@ impl QuillApp {
             self.deliver_background(&key, drain, cx);
         }
         self.drain_account_clicks(cx);
+        self.sync_background_calls(cx);
         if changed {
             cx.notify();
         }

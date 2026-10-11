@@ -30,6 +30,13 @@ pub fn notify_from_all_setting_visible(account_count: usize) -> bool {
     account_count >= 2
 }
 
+/// tdesktop `MainWindow::updateTitle`: the window title names the signed-in
+/// user only while more than one account is signed in
+/// (`accountsAuthedCount() > 1`).
+pub fn account_name_in_title(signed_in_accounts: usize) -> bool {
+    signed_in_accounts > 1
+}
+
 /// What a background account's client is doing, for its row in the
 /// account list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,6 +207,37 @@ pub fn drain_background(session: &mut Session, notify_from_all: bool) -> Backgro
         clears,
         sound_plays,
         attention,
+    }
+}
+
+/// The incoming call still ringing in `session`: `(call id, caller user id,
+/// video)`.
+pub fn ringing_incoming_call(session: &Session) -> Option<(i32, i64, bool)> {
+    let call = session.calls.active_call.as_ref()?;
+    (!call.is_outgoing
+        && matches!(
+            call.state,
+            crate::telegram::envelope::CallState::Pending { .. }
+        ))
+    .then_some((call.id, call.user_id, call.is_video))
+}
+
+/// What to do about an incoming call on an account that is not on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundCallPlan {
+    /// Ring: the call prompt, the ringtone and the OS notification.
+    Ring,
+    /// tdesktop `Calls::Instance` handles one call at a time across every
+    /// account: a call that comes in while another is in progress or
+    /// ringing is declined as busy.
+    DeclineBusy,
+}
+
+pub fn plan_background_call(on_screen_in_call: bool, another_ringing: bool) -> BackgroundCallPlan {
+    if on_screen_in_call || another_ringing {
+        BackgroundCallPlan::DeclineBusy
+    } else {
+        BackgroundCallPlan::Ring
     }
 }
 

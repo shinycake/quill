@@ -181,6 +181,7 @@ impl QuillApp {
             guard.extend(later);
         }
         self.open_pending_account_chat(window, cx);
+        self.flush_background_call_picks(window, cx);
     }
 
     /// Open the chat a notification switched accounts for, once that

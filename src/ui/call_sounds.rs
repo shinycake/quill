@@ -167,6 +167,7 @@ impl super::app::QuillApp {
             session.calls.summary.clone(),
         );
         let enabled = session.settings.inapp_sounds_enabled;
+        let background_ring = self.background_ring_audible();
         let marks = &mut self.calls.sound_marks;
         let sounds = &mut self.calls.sounds;
         sounds.set_enabled(enabled);
@@ -213,7 +214,11 @@ impl super::app::QuillApp {
                     });
                 }
             }
-            (None, None) => sounds.keep_looping(None),
+            // A call ringing on an account in the background rings here
+            // too (`background_accounts::calls`).
+            (None, None) => {
+                sounds.keep_looping(background_ring.then_some(CallSound::Incoming));
+            }
         }
     }
 }

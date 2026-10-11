@@ -27,7 +27,8 @@ impl QuillApp {
                     .into_any_element(),
             );
         }
-        (client.unread.count > 0).then(|| unread_pill(key, client.unread, cx))
+        (client.unread.count > 0)
+            .then(|| counter_pill(&format!("account-unread-{key}"), client.unread, cx))
     }
 
     /// Settings > Notifications: "Show notifications from: All accounts",
@@ -115,7 +116,7 @@ impl QuillApp {
 
 /// The counter pill: accent while something unmuted is unread, grey when
 /// every counted chat is muted (like the folder tab counters).
-fn unread_pill(key: &AccountKey, unread: AccountUnread, cx: &App) -> AnyElement {
+pub(super) fn counter_pill(id: &str, unread: AccountUnread, cx: &App) -> AnyElement {
     let bg = if unread.muted {
         cx.theme().muted_foreground.opacity(0.55)
     } else {
@@ -127,7 +128,7 @@ fn unread_pill(key: &AccountKey, unread: AccountUnread, cx: &App) -> AnyElement 
         unread.count.to_string()
     };
     div()
-        .id(SharedString::from(format!("account-unread-{key}")))
+        .id(SharedString::from(id.to_string()))
         .flex_none()
         .h(px(16.))
         .min_w(px(16.))

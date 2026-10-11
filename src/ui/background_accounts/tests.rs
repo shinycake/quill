@@ -1,10 +1,12 @@
 //! Background accounts in the window: the account list badge, and what a
 //! click on another account's notification does once it reaches the
 //! render (needs the `demo-capture` feature for gpui-kit's test support).
+use super::calls::BackgroundRing;
 use super::{AccountUnread, BackgroundClient, BackgroundStatus, PendingOpen};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
+use crate::ui::shell::DialogKind;
 use crate::ui::shell::QuillShell;
 use gpui_kit::AppContext;
 use gpui_kit::component::Root;
@@ -14,6 +16,13 @@ use quill::notify::NotificationAction;
 use std::time::{Duration, Instant};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    let (app, _, vcx) = new_app_shell(cx);
+    (app, vcx)
+}
+
+fn new_app_shell(
+    cx: &mut TestAppContext,
+) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -23,12 +32,83 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
             QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
         });
         let shell = cx.new(|_| QuillShell::new(view.clone()));
-        *slot_in.borrow_mut() = Some(view);
+        *slot_in.borrow_mut() = Some((view, shell.clone()));
         Root::new(shell, window, cx)
     });
-    let app = slot.borrow().clone().unwrap();
+    let (app, shell) = slot.borrow().clone().unwrap();
     let vcx = VisualTestContext::from_window(handle.into(), cx);
-    (app, vcx)
+    (app, shell, vcx)
+}
+
+fn ring() -> BackgroundRing {
+    BackgroundRing {
+        account: other_account(),
+        call_id: 77,
+        caller: "Alice".into(),
+        is_video: false,
+        account_name: "Work".into(),
+        dismissed: false,
+        // No OS notification in tests.
+        notified: true,
+    }
+}
+
+#[gpui_kit::test]
+fn a_call_ringing_on_another_account_shows_its_prompt(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app_shell(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        assert!(!app.background_ring_audible());
+        app.background.ringing = Some(ring());
+        assert!(app.background_ring_audible());
+        assert_eq!(app.background_ring_account(), Some(&other_account()));
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    shell.read_with(&vcx, |shell, _| {
+        assert_eq!(shell.open_dialog, Some(DialogKind::BackgroundCall));
+    });
+    // Declining with no running client only stops the ring here.
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.decline_background_call(cx);
+        assert!(app.background_ring_account().is_none());
+    });
+    vcx.run_until_parked();
+    shell.read_with(&vcx, |shell, _| {
+        assert_ne!(shell.open_dialog, Some(DialogKind::BackgroundCall));
+    });
+}
+
+#[gpui_kit::test]
+fn a_dismissed_prompt_stops_ringing_in_the_app(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app_shell(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let mut dismissed = ring();
+        dismissed.dismissed = true;
+        app.background.ringing = Some(dismissed);
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| assert!(!app.background_ring_audible()));
+    shell.read_with(&vcx, |shell, _| {
+        assert_ne!(shell.open_dialog, Some(DialogKind::BackgroundCall));
+    });
+}
+
+#[gpui_kit::test]
+fn the_main_menu_counts_the_other_accounts(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        assert!(app.other_accounts_unread().is_none());
+        app.background
+            .clients
+            .push(client(BackgroundStatus::Ready, 4));
+        assert_eq!(app.other_accounts_unread().map(|u| u.count), Some(4));
+        // Not signed in on screen (demo): no account name in the title.
+        assert!(app.title_account_name().is_none());
+        cx.notify();
+    });
+    // The menu button with its dot draws.
+    vcx.run_until_parked();
 }
 
 /// A demo chat that is not the open one.

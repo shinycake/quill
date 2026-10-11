@@ -19,9 +19,15 @@ impl QuillApp {
                 quill::notify_call::parse_call_notification_tag(&response.tag)
             {
                 let _ = notification_app.update(cx, |this, cx| {
-                    if this
-                        .session()
-                        .is_none_or(|s| account != format!("account:{}", s.account.0))
+                    // The account on screen, or a background account whose
+                    // call rings (`background_accounts::calls`).
+                    let ringing_here = this
+                        .background_ring_account()
+                        .is_some_and(|key| account == format!("account:{}", key.0));
+                    if !ringing_here
+                        && this
+                            .session()
+                            .is_none_or(|s| account != format!("account:{}", s.account.0))
                     {
                         return;
                     }
