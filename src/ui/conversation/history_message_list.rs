@@ -592,6 +592,10 @@ impl QuillApp {
         let probe = self.history.scroll_probe.clone();
         let top_probe = self.history.scroll_top_probe.clone();
         let view_probe = self.history.scroll_view_probe.clone();
+        let hit_rows = self.history.hit_rows.clone();
+        let viewport = self.history.viewport.clone();
+        let history_focus = self.message_ui.history_focus.clone();
+        let drag_app = cx.weak_entity();
         let reveal = self.history_reveal(cx);
         let reveal_probe = self.frame.motion.reveal_probe();
         let jump_zone = self.history.scroller.read(cx).is_scrolled_up().then(|| {
@@ -610,6 +614,13 @@ impl QuillApp {
             super::wallpaper::paint_wallpaper(
                 div()
                     .id(id)
+                    // Selecting messages gives the rows the keyboard
+                    // (`selection_drag`): Space, Up and Down act on them,
+                    // typing goes on to the composer.
+                    .track_focus(&history_focus)
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        this.history_key_down(event, window, cx);
+                    }))
                     .relative()
                     .flex()
                     .flex_col()
@@ -687,13 +698,36 @@ impl QuillApp {
                 .min_h_0(),
             ))
             // Paints after the rows: the first row reaching below the
-            // top edge is what the floating date describes.
+            // top edge is what the floating date describes. The same pass
+            // keeps the rows' bounds for drag selection and listens to the
+            // window's pointer for it: a drag runs over rows whose
+            // selection overlays block hover, so element listeners on the
+            // list would miss it.
             .child(
                 canvas(
                     |_, _, _| {},
-                    move |bounds, _, _, _| {
+                    move |bounds, _, window, _| {
                         let mut rows = probe.borrow_mut();
                         reveal_probe.note(&rows, count, bounds.top());
+                        *hit_rows.borrow_mut() =
+                            rows.iter().map(|(ix, row, _)| (*ix, *row)).collect();
+                        viewport.set(Some(bounds));
+                        let moved = drag_app.clone();
+                        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                            if phase.bubble() && event.pressed_button == Some(MouseButton::Left) {
+                                let _ = moved.update(cx, |this, cx| {
+                                    if this.message_ui.selection_drag.is_some() {
+                                        this.selection_drag_pointer(event.position, window, cx);
+                                    }
+                                });
+                            }
+                        });
+                        let released = drag_app.clone();
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                            if phase.bubble() && event.button == MouseButton::Left {
+                                let _ = released.update(cx, |this, cx| this.selection_release(cx));
+                            }
+                        });
                         let top = rows
                             .iter()
                             .filter(|(_, row, _)| row.bottom() > bounds.top())

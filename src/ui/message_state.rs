@@ -29,13 +29,17 @@ pub(crate) struct MessageUi {
     pub(super) pending_link: Option<super::entity_links::PendingLink>,
     /// Last row clicked in selection mode: the Shift+click range anchor.
     pub(super) selection_anchor: Option<MessageId>,
-    /// A drag over rows is selecting (`true`) or deselecting (`false`).
-    pub(super) selection_drag: Option<bool>,
-    /// The row keyboard selection acts on (Cmd/Ctrl+Space, Up / Down).
+    /// A left press on a row that may become a drag selection, and the
+    /// range it covers once it did (`selection_drag`).
+    pub(super) selection_drag: Option<super::selection_drag::DragSelect>,
+    /// The 15 ms pointer poll of a held press is running.
+    pub(super) selection_drag_loop: bool,
+    /// The row keyboard selection acts on (Ctrl+Space, Up / Down).
     pub(super) selection_focus: Option<MessageId>,
-    /// A left press on a row outside text: dragging onto another row
-    /// starts selecting messages.
-    pub(super) drag_select_from: Option<(ChatId, MessageId)>,
+    /// Keyboard focus of the history while selecting: a row press or a
+    /// drag moves focus here, so Space, Up and Down act on the rows and
+    /// not on the composer (tdesktop focuses `HistoryInner`).
+    pub(super) history_focus: FocusHandle,
     /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
     /// The message menu's reaction strip is expanded to every reaction.
     pub(super) reactions_expanded: bool,
@@ -88,8 +92,9 @@ impl MessageUi {
             pending_link: None,
             selection_anchor: None,
             selection_drag: None,
+            selection_drag_loop: false,
             selection_focus: None,
-            drag_select_from: None,
+            history_focus: cx.focus_handle(),
             reactions_expanded: false,
             pending_delete: None,
             pending_stop_poll: None,

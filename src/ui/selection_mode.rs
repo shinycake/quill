@@ -1,6 +1,8 @@
 //! Message selection mode, as in Telegram Desktop: once a message is
 //! selected ("Select" in its menu), a click anywhere on a row toggles it,
 //! each row shows a check circle, and ⌘C copies the selected messages.
+//! Pressing and dragging over rows, and the keyboard, live in
+//! `selection_drag` and `shortcut_pack`.
 
 use super::app::QuillApp;
 use super::motion;
@@ -36,10 +38,12 @@ impl QuillApp {
     /// frames while either moves. An inactive window snaps.
     pub(super) fn selection_motion(&self, chat_id: ChatId, cx: &mut Context<Self>) -> (f32, f32) {
         let now = std::time::Instant::now();
-        let on = self.selecting_in(chat_id);
+        // A drag that is about to select rows shows the mode already.
+        let on = self.selection_visible_in(chat_id);
+        let count = on.then(|| self.selection_shown_count(chat_id));
         let mut fx = self.frame.motion.selection.borrow_mut();
-        if on && let Some(draft) = self.share.pending_forward.as_ref() {
-            fx.last_count = draft.count();
+        if let Some(count) = count {
+            fx.last_count = count;
         }
         fx.sync_mode(on, self.frame.window_active.get(), now);
         if fx.moving(now) {
@@ -60,11 +64,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> SelectionRow {
         let (mode, _) = self.selection_motion(chat_id, cx);
-        let selected = self
-            .share
-            .pending_forward
-            .as_ref()
-            .is_some_and(|draft| draft.contains(message_id));
+        // The row's state, or the drag's while it covers the row.
+        let selected = self.selection_shown(chat_id, message_id);
         if mode <= 0. && !selected {
             return SelectionRow::default();
         }
@@ -93,40 +94,20 @@ impl QuillApp {
                     this.rounded_md().border_2().border_color(ring_color)
                 })
                 .when(interactive, |this| {
-                    this.occlude()
+                    // Takes the row's clicks (links and media don't fire)
+                    // but lets the wheel through to the list.
+                    this.block_mouse_except_scroll()
                         .cursor_pointer()
-                        // Press toggles the row (Shift extends a range from
-                        // the last row) and starts a drag that applies the
-                        // same state to the rows it crosses.
+                        // A click toggles the row on release, Shift+click
+                        // selects the range from the last clicked row, and
+                        // a drag selects or deselects the rows it covers
+                        // (`selection_drag`).
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                                this.selection_press(
-                                    chat_id,
-                                    message_id,
-                                    pending,
-                                    event.modifiers.shift,
-                                    cx,
+                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                this.selection_press_row(
+                                    chat_id, message_id, pending, event, window, cx,
                                 );
-                            }),
-                        )
-                        .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                            if event.pressed_button == Some(MouseButton::Left) {
-                                this.selection_drag_over(chat_id, message_id, pending, cx);
-                            } else {
-                                this.message_ui.selection_drag = None;
-                            }
-                        }))
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(|this, _: &MouseUpEvent, _, _| {
-                                this.message_ui.selection_drag = None
-                            }),
-                        )
-                        .on_mouse_up_out(
-                            MouseButton::Left,
-                            cx.listener(|this, _: &MouseUpEvent, _, _| {
-                                this.message_ui.selection_drag = None
                             }),
                         )
                 })
@@ -302,66 +283,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Mouse press on a row in selection mode.
-    fn selection_press(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        pending: bool,
-        shift: bool,
-        cx: &mut Context<Self>,
-    ) {
-        self.message_ui.selection_focus = Some(message_id);
-        let anchor = self.message_ui.selection_anchor.filter(|_| shift);
-        if let Some(anchor) = anchor {
-            let ids = self.loaded_selectable_ids(chat_id);
-            let range = quill::selection_pin::range_between(&ids, anchor, message_id);
-            self.add_to_selection(chat_id, range);
-            self.message_ui.selection_drag = None;
-            cx.notify();
-            return;
-        }
-        let selected = self
-            .share
-            .pending_forward
-            .as_ref()
-            .is_some_and(|draft| draft.contains(message_id));
-        self.toggle_forward_select(chat_id, message_id, pending, cx);
-        self.message_ui.selection_anchor = Some(message_id);
-        self.message_ui.selection_drag = Some(!selected);
-    }
-
-    /// The pointer crossed a row while pressed: give it the drag's state.
-    pub(super) fn selection_drag_over(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        pending: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(want) = self.message_ui.selection_drag else {
-            return;
-        };
-        if self.message_ui.selection_anchor == Some(message_id) {
-            return;
-        }
-        let selected = self
-            .share
-            .pending_forward
-            .as_ref()
-            .is_some_and(|draft| draft.contains(message_id));
-        let full = self
-            .share
-            .pending_forward
-            .as_ref()
-            .is_some_and(|draft| quill::selection_pin::room_for(draft.count()) == 0);
-        if selected != want && !(want && full) {
-            self.toggle_forward_select(chat_id, message_id, pending, cx);
-        }
-        self.message_ui.selection_anchor = Some(message_id);
-        self.message_ui.selection_focus = Some(message_id);
-    }
-
     /// Select `ids` that are not selected yet, up to the selection limit
     /// (`Data::MaxSelectedItems`).
     pub(super) fn add_to_selection(&mut self, chat_id: ChatId, ids: Vec<MessageId>) {
@@ -420,25 +341,6 @@ impl QuillApp {
                 1,
             )
             .is_empty()
-    }
-
-    /// A press that turns into a drag over another row starts selecting
-    /// when it did not begin on text (`HistoryInner` drag selection).
-    pub(super) fn begin_drag_selection(
-        &mut self,
-        chat_id: ChatId,
-        from: MessageId,
-        to: MessageId,
-        cx: &mut Context<Self>,
-    ) {
-        if self.selecting_in(chat_id) || from == to {
-            return;
-        }
-        self.toggle_forward_select(chat_id, from, false, cx);
-        self.message_ui.selection_anchor = Some(from);
-        self.message_ui.selection_focus = Some(from);
-        self.message_ui.selection_drag = Some(true);
-        self.selection_drag_over(chat_id, to, false, cx);
     }
 
     /// Loaded, sent messages of the chat in history order.

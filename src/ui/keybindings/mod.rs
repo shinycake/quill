@@ -899,7 +899,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 90);
+        assert_eq!(defaults.len(), 91);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
@@ -1321,6 +1321,7 @@ mod tests {
             ("delete".to_string(), "DeleteSelection"),
             ("backspace".to_string(), "DeleteSelection"),
             (primary("shift-a"), "ToggleMessageSelection"),
+            ("ctrl-space".to_string(), "ToggleMessageSelection"),
             ("up".to_string(), "SelectionFocusOlder"),
             ("down".to_string(), "SelectionFocusNewer"),
             ("shift-up".to_string(), "SelectionExtendOlder"),

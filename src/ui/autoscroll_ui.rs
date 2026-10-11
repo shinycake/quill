@@ -191,8 +191,9 @@ impl QuillApp {
 
 /// Feeds one wheel event to the list under `anchor`. The list reacts only
 /// to the hovered hitbox, so the logical pointer visits the anchor for the
-/// event and goes back to where the real one is.
-fn scroll_history_by(
+/// event and goes back to where the real one is. Drag selection's edge
+/// autoscroll (`selection_drag`) scrolls the same way.
+pub(super) fn scroll_history_by(
     window: &mut Window,
     cx: &mut App,
     anchor: Point<Pixels>,

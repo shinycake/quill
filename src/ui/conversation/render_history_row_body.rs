@@ -120,6 +120,7 @@ impl QuillApp {
                 // M1: `cx.listener` closures must be `'static`, so the
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);
+                let message_pending = message.pending;
                 let selection = self.selection_row(row_chat, row_msg, message.pending, cx);
                 let (selection_overlay, selection_tint, selection_slide) =
                     (selection.overlay, selection.tint, selection.slide);
@@ -170,36 +171,25 @@ impl QuillApp {
                             this.message_ui.swipe_reply_start =
                                 Some((row_chat, row_msg, event.position.x));
                             // A press that starts on text selects text; any
-                            // other press may become a message drag.
-                            this.message_ui.drag_select_from = (!this.selecting_in(row_chat)
-                                && !gpui_kit::base::TextSelection::has_selection(window, cx))
-                            .then_some((row_chat, row_msg));
+                            // other press may become a message drag
+                            // (`selection_drag`). In selection mode the
+                            // row's overlay takes the press instead.
+                            if !this.selecting_in(row_chat) {
+                                this.selection_press_row(
+                                    row_chat,
+                                    row_msg,
+                                    message_pending,
+                                    event,
+                                    window,
+                                    cx,
+                                );
+                            }
                             cx.notify();
-                        }),
-                    )
-                    .on_mouse_move(
-                        cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
-                            if event.pressed_button != Some(MouseButton::Left) {
-                                return;
-                            }
-                            let Some((chat_id, from)) = this.message_ui.drag_select_from else {
-                                return;
-                            };
-                            if chat_id != row_chat
-                                || from == row_msg
-                                || gpui_kit::base::TextSelection::has_selection(window, cx)
-                            {
-                                return;
-                            }
-                            this.message_ui.drag_select_from = None;
-                            this.message_ui.swipe_reply_start = None;
-                            this.begin_drag_selection(chat_id, from, row_msg, cx);
                         }),
                     )
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            this.message_ui.drag_select_from = None;
                             if let Some((chat_id, message_id, start_x)) =
                                 this.message_ui.swipe_reply_start.take()
                                 && chat_id == row_chat
