@@ -7,10 +7,6 @@ use crate::state::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessagesPurpose {
     GetHistory,
-    /// `parity:platform-chat-export` — `getChatHistory` pages for a chat
-    /// history export. The `messages` answer appends to
-    /// `Session::chat_export` instead of merging into view history.
-    ExportChatHistory,
     /// Any `sendMessage` (text / photo / document). Response `message` is pending.
     SendMessage,
     /// M2: `getFullRichMessage`. Response `richMessage` replaces the
@@ -252,7 +248,6 @@ pub enum MessagesPurpose {
 
 flat_purposes!(Messages(MessagesPurpose) {
     GetHistory,
-    ExportChatHistory,
     SendMessage,
     SendMessageAlbum,
     OpenChat,

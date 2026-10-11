@@ -146,10 +146,6 @@ pub struct MessagesState {
     /// Translation state (`translateText` / `translateMessageText`, the
     /// chat translate bar).
     pub translate: TranslateState,
-    /// `parity:platform-chat-export` — in-progress chat history export.
-    /// The driver pages `getChatHistory` into this; the UI surfaces the
-    /// result (path or error) and clears it.
-    pub chat_export: Option<crate::chat_export::ChatExportState>,
     /// Notification-tone limits (`notification_sound_*_max` options).
     pub tone_limits: crate::message_menu::ToneLimits,
 }
@@ -201,7 +197,6 @@ impl MessagesState {
             sponsored_report_target: None,
             last_sponsored_report: None,
             translate: TranslateState::default(),
-            chat_export: None,
             tone_limits: crate::message_menu::ToneLimits::default(),
         }
     }

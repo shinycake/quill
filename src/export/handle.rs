@@ -1,0 +1,153 @@
+//! The running export as the session sees it: a worker thread plus the two
+//! channels the connect driver pumps (requests out to TDLib, answers back).
+use super::settings::ExportSettings;
+use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
+use crate::ids::RequestId;
+use serde_json::Value;
+use std::io;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
+
+/// Blocks the worker on channels the driver services from the poll loop.
+struct ChannelTdlib {
+    requests: mpsc::Sender<Value>,
+    replies: mpsc::Receiver<Value>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Tdlib for ChannelTdlib {
+    fn call(&mut self, request: Value, timeout: Duration) -> Result<Value, ExportError> {
+        let cancelled = || self.cancelled.load(Ordering::Acquire);
+        if cancelled() {
+            return Err(ExportError::Cancelled);
+        }
+        self.requests
+            .send(request)
+            .map_err(|_| ExportError::Cancelled)?;
+        let started = Instant::now();
+        loop {
+            if cancelled() {
+                return Err(ExportError::Cancelled);
+            }
+            match self.replies.recv_timeout(Duration::from_millis(100)) {
+                Ok(mut value) => {
+                    if let Some(object) = value.as_object_mut() {
+                        object.remove("@extra");
+                        object.remove("@client_id");
+                    }
+                    return Ok(value);
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(ExportError::Cancelled),
+                Err(mpsc::RecvTimeoutError::Timeout) if started.elapsed() > timeout => {
+                    return Err(ExportError::Tdlib("the request timed out".into()));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+        }
+    }
+}
+
+pub struct ChatExport {
+    requests: mpsc::Receiver<Value>,
+    replies: mpsc::Sender<Value>,
+    /// The request the driver sent and awaits an answer for.
+    pub pending: Option<RequestId>,
+    progress: Arc<Mutex<Progress>>,
+    cancelled: Arc<AtomicBool>,
+    pub folder: PathBuf,
+    pub title: String,
+}
+
+impl ChatExport {
+    /// Create the output folder and start the worker thread.
+    pub fn start(settings: ExportSettings, files_root: PathBuf) -> io::Result<Self> {
+        let parent = settings.dir.canonicalize()?;
+        let now = crate::local_time::civil_local(crate::local_time::now_unix());
+        let stamp = format!("{:04}-{:02}-{:02}", now.year, now.month, now.day);
+        let folder = create_folder(&parent, &settings.title, &stamp)?;
+        let (request_tx, requests) = mpsc::channel();
+        let (replies, reply_rx) = mpsc::channel();
+        let progress = Arc::new(Mutex::new(Progress::starting()));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let title = settings.title.clone();
+        let worker_progress = progress.clone();
+        let worker_cancelled = cancelled.clone();
+        let worker_folder = folder.clone();
+        std::thread::spawn(move || {
+            let mut tdlib = ChannelTdlib {
+                requests: request_tx,
+                replies: reply_rx,
+                cancelled: worker_cancelled,
+            };
+            let report = |progress: Progress| {
+                if let Ok(mut slot) = worker_progress.lock() {
+                    *slot = progress;
+                }
+            };
+            let job = Job {
+                settings: &settings,
+                files_root: &files_root,
+                offset_at: &crate::local_time::utc_offset_at,
+                report: &report,
+            };
+            let last = match run(&job, &mut tdlib, &worker_folder) {
+                Ok(summary) => Stage::Finished(summary),
+                Err(ExportError::Cancelled) => Stage::Cancelled,
+                Err(err) => Stage::Failed(err.to_string()),
+            };
+            if let Ok(mut slot) = worker_progress.lock() {
+                slot.stage = last;
+            }
+        });
+        Ok(Self {
+            requests,
+            replies,
+            pending: None,
+            progress,
+            cancelled,
+            folder,
+            title,
+        })
+    }
+
+    /// The next request for TDLib, if the worker has one waiting.
+    pub fn next_request(&self) -> Option<Value> {
+        self.requests.try_recv().ok()
+    }
+
+    /// Hand TDLib's answer to the worker.
+    pub fn reply(&mut self, id: RequestId, value: Value) {
+        if self.pending == Some(id) {
+            self.pending = None;
+            let _ = self.replies.send(value);
+        }
+    }
+
+    /// The request could not be sent: tell the worker so it fails cleanly.
+    pub fn fail_send(&mut self, id: RequestId) {
+        self.reply(
+            id,
+            serde_json::json!({"@type": "error", "code": 0, "message": "could not send"}),
+        );
+    }
+
+    pub fn progress(&self) -> Progress {
+        self.progress
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_else(|_| Progress::starting())
+    }
+
+    /// Ask the worker to stop. It does so at its next step.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for ChatExport {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}

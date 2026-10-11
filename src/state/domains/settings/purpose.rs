@@ -7,6 +7,8 @@ use crate::state::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsPurpose {
     ExportAccount,
+    /// A request from the running chat export (`export::ChatExport`).
+    ExportChat,
     /// `setChatNotificationSettings`. Response is `ok`; mute via
     /// `updateChatNotificationSettings`.
     SetChatNotificationSettings,
@@ -240,6 +242,7 @@ pub enum SettingsPurpose {
 
 flat_purposes!(Settings(SettingsPurpose) {
     ExportAccount,
+    ExportChat,
     SetChatNotificationSettings,
     GetSavedNotificationSounds,
     GetScopeNotificationSettings,
