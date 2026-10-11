@@ -125,21 +125,31 @@ impl Session {
             self.threads.thread = None;
         }
         self.view_generation.bump();
+        self.prepare_history_view(chat_id);
+    }
+
+    /// Start a fresh view of `chat_id`'s history: nothing viewed or
+    /// reported yet, and the unread anchor the view opens at. Shared by
+    /// the main window (`open_chat`) and a chat opened in its own window.
+    pub fn prepare_history_view(&mut self, chat_id: ChatId) {
+        let unread_anchor = self
+            .chats
+            .get(&chat_id.0)
+            .and_then(ChatSummary::unread_anchor);
+        let unread_count = self
+            .chats
+            .get(&chat_id.0)
+            .map_or(0, |chat| chat.unread_count);
+        let view_generation = self.view_generation;
         let history = self.histories.entry(chat_id.0).or_default();
-        history.view_generation = self.view_generation;
+        history.view_generation = view_generation;
         history.viewed.clear();
         history.viewing.clear();
         history.visible.clear();
         history.visible_reported = false;
-        history.unread_anchor = self
-            .chats
-            .get(&chat_id.0)
-            .and_then(ChatSummary::unread_anchor);
+        history.unread_anchor = unread_anchor;
         history.unread_at_open = match history.unread_anchor {
-            Some(_) => self
-                .chats
-                .get(&chat_id.0)
-                .map_or(0, |chat| chat.unread_count),
+            Some(_) => unread_count,
             None => 0,
         };
     }
@@ -186,9 +196,10 @@ impl Session {
 
     /// The UI shows `ids` of the open chat `chat_id`: they become due for
     /// `viewMessages`, and from now on this open generation views only
-    /// reported rows. Returns whether `chat_id` is the open chat.
+    /// reported rows. Returns whether `chat_id` is on screen (the open
+    /// chat or one shown in its own window).
     pub fn report_visible_messages(&mut self, chat_id: ChatId, ids: &[MessageId]) -> bool {
-        if self.open_chat != Some(chat_id) {
+        if !self.chat_is_shown(chat_id) {
             return false;
         }
         let history = self.histories.entry(chat_id.0).or_default();

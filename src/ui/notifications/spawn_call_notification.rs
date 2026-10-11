@@ -74,6 +74,11 @@ impl QuillApp {
             self.dismiss_os_notification(chat_id, cx);
             return;
         }
+        // A chat with a window of its own takes the click (Telegram
+        // Desktop `windowForShowingHistory`); the main window stays behind.
+        if self.routed_to_chat_window(chat_id, cx) {
+            return;
+        }
         cx.activate(true);
         window.activate_window();
         self.select_listed_chat(chat_id, window, cx);

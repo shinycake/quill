@@ -63,9 +63,7 @@ impl Session {
         messages: &[ParsedMessage],
         seq: u64,
     ) {
-        if self.take_stale_history_request(pending)
-            || pending.view_generation != Some(self.view_generation)
-        {
+        if self.take_stale_history_request(pending) || self.history_view_stale(pending) {
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some("messages".into()),
@@ -78,7 +76,7 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        if self.open_chat != Some(chat_id) {
+        if !self.chat_is_shown(chat_id) {
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some("messages".into()),

@@ -126,6 +126,7 @@ mod session_thread;
 mod session_translate;
 mod session_updates;
 mod session_web_apps;
+mod session_window_chats;
 mod shared_media_months;
 mod shared_media_types;
 mod sticker_gif_types;

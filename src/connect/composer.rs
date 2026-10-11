@@ -194,6 +194,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(prev) = self.session.open_chat else {
             return Ok(());
         };
+        // A chat that is also shown in its own window stays open in TDLib
+        // (`openChat` is a per-chat flag there: one `closeChat` would end it
+        // for that window too). That window's close sends it.
+        if self.session.window_chats.contains(&prev) {
+            return Ok(());
+        }
         // No `supported()` gate: `select_chat` sends `openChat` for every
         // chat, so every opened chat gets its paired `closeChat` (Telegram
         // X `Tdlib.closeChatImpl`).
@@ -218,12 +224,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`Session::message_ids_to_view`). Unread counts change only when
     /// `updateChatReadInbox` arrives.
     pub fn maybe_view_open_messages(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Ok(None);
-        }
         let Some(chat_id) = self.session.open_chat else {
             return Ok(None);
         };
+        self.maybe_view_messages_for(chat_id)
+    }
+
+    /// [`Self::maybe_view_open_messages`] for a chat on screen: the open
+    /// chat or one shown in its own window.
+    pub fn maybe_view_messages_for(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.chat_is_shown(chat_id) {
+            return Ok(None);
+        }
         if !self
             .session
             .chats
@@ -252,7 +267,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // does when a topic's messages are on screen.
         let source = if self.session.thread_for_chat(chat_id).is_some() {
             "messageSourceMessageThreadHistory"
-        } else if self.session.open_topic.is_some() {
+        } else if self.session.open_chat == Some(chat_id) && self.session.open_topic.is_some() {
             "messageSourceForumTopicHistory"
         } else {
             "messageSourceChatHistory"
@@ -290,7 +305,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.maybe_view_open_messages()
+        self.maybe_view_messages_for(chat_id)
     }
 
     /// Persist the open chat's composer before a search result switches chats.

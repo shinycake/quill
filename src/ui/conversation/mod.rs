@@ -97,7 +97,11 @@ impl QuillApp {
                     thread.is_comments(),
                 ))
             });
-        let info_target = info_target.filter(|_| thread_header.is_none());
+        // A chat window has no info column, search bar or chat menu of its
+        // own yet; those act on the main window, so the window's header
+        // leaves them out.
+        let in_window = self.windows.in_window();
+        let info_target = info_target.filter(|_| thread_header.is_none() && !in_window);
         // Parity slice: channel/supergroup header extras — photo,
         // description snippet, primary @username, subscriber/member count,
         // and the linked discussion chat ("Discuss").
@@ -421,28 +425,30 @@ impl QuillApp {
                                     })),
                             )
                         })
-                        .child(
-                            Button::new("chat-find")
-                                .icon(if chat_search_open {
-                                    gpui_kit::assets::IconName::X
-                                } else {
-                                    gpui_kit::assets::IconName::Search
-                                })
-                                .ghost()
-                                .tooltip(if chat_search_open {
-                                    "Close search"
-                                } else {
-                                    "Search this chat"
-                                })
-                                .accessibility_label("Search this chat")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if this.chat_search_is_open() {
-                                        this.close_chat_search_ui(window, cx);
+                        .when(!in_window, |this| {
+                            this.child(
+                                Button::new("chat-find")
+                                    .icon(if chat_search_open {
+                                        gpui_kit::assets::IconName::X
                                     } else {
-                                        this.open_chat_search_ui(window, cx);
-                                    }
-                                })),
-                        )
+                                        gpui_kit::assets::IconName::Search
+                                    })
+                                    .ghost()
+                                    .tooltip(if chat_search_open {
+                                        "Close search"
+                                    } else {
+                                        "Search this chat"
+                                    })
+                                    .accessibility_label("Search this chat")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if this.chat_search_is_open() {
+                                            this.close_chat_search_ui(window, cx);
+                                        } else {
+                                            this.open_chat_search_ui(window, cx);
+                                        }
+                                    })),
+                            )
+                        })
                         .when(voice_ok, |this| {
                             this.child(
                                 Button::new("chat-voice-chat")
@@ -486,7 +492,7 @@ impl QuillApp {
                                     })),
                             )
                         })
-                        .child(self.chat_navigation_menu(cx)),
+                        .when(!in_window, |this| this.child(self.chat_navigation_menu(cx))),
                 )
             });
         // Selecting messages swaps the bar for Forward N / Delete N / Cancel.
@@ -602,7 +608,7 @@ impl QuillApp {
         if !window_active || rendered.is_empty() {
             return;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.viewed_chat() else {
             return;
         };
         let mut ids: Vec<MessageId> = rendered

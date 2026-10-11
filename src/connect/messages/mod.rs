@@ -31,12 +31,21 @@ mod media_send;
 impl<S: JsonSender> ConnectDriver<S> {
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
     pub fn fetch_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
+        self.fetch_history_for(chat_id)
+    }
+
+    /// [`Self::fetch_history`] for a chat that is on screen: the open chat
+    /// or one shown in its own window (`Session::chat_is_shown`).
+    pub fn fetch_history_for(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.chat_is_shown(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         if self
             .session
             .histories
@@ -112,12 +121,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Load the page after the window's newest message while the window
     /// stops short of the chat's latest message (`HistoryState::has_newer`).
     pub fn fetch_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
+        self.fetch_history_newer_for(chat_id)
+    }
+
+    /// [`Self::fetch_history_newer`] for a chat on screen (the open chat or
+    /// one in its own window).
+    pub fn fetch_history_newer_for(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.chat_is_shown(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let Some(from) = self
             .session
             .histories
