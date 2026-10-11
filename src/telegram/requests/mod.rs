@@ -24,6 +24,7 @@ mod media;
 mod message_menu;
 mod messages;
 mod misc;
+mod paid_reaction;
 mod payments;
 mod poll_extras;
 mod polls;
@@ -100,6 +101,7 @@ pub(crate) use messages::{
     formatted_caption, message_topic_value, self_destruct_type_value, send_reply_value,
 };
 pub use misc::*;
+pub use paid_reaction::*;
 pub use payments::*;
 pub use poll_extras::*;
 pub use polls::*;

@@ -16,7 +16,9 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::local_path::sandboxed_display_path;
-use quill::premium_hub::{PREMIUM_BOT_URL, PremiumHub, ReceivedGift, StarTx, TxFilter};
+use quill::premium_hub::{
+    PREMIUM_BOT_URL, PremiumHub, ReceivedGift, StarTx, TxFilter, group_digits,
+};
 use quill::state::Session;
 use quill::telegram::envelope::{
     GiftCard, GiftCardKind, MessageSender, ParsedFile, ServiceAction, StickerContent,
@@ -225,6 +227,7 @@ impl QuillApp {
                             })),
                     );
                 }
+                body = body.child(star_packs::star_packs_section(session, cx));
                 body = body.child(
                     div()
                         .text_xs()
@@ -651,10 +654,7 @@ fn gift_details(
     if !gift.gift.upgraded && gift.gift.star_count > 0 {
         col = col.child(fact_row(
             "Value",
-            format!(
-                "{} Stars",
-                quill::premium_hub::group_digits(gift.gift.star_count)
-            ),
+            format!("{} Stars", group_digits(gift.gift.star_count)),
             cx,
         ));
     }
@@ -895,3 +895,4 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod open_premium;
+mod star_packs;

@@ -189,6 +189,28 @@ impl HistoryMessage {
             .unwrap_or_default()
     }
 
+    /// The Star reaction (`reactionTypePaid`) with its count, if the
+    /// message has Stars.
+    pub fn paid_reaction(&self) -> Option<&MessageReaction> {
+        self.interaction_info
+            .as_ref()?
+            .reactions
+            .as_ref()?
+            .reactions
+            .iter()
+            .find(|reaction| {
+                reaction.reaction_type == crate::telegram::envelope::ReactionType::Paid
+            })
+    }
+
+    /// Top senders of Stars on this message, most Stars first.
+    pub fn paid_reactors(&self) -> &[crate::paid_reaction::PaidReactor] {
+        self.interaction_info
+            .as_ref()
+            .and_then(|info| info.reactions.as_ref())
+            .map_or(&[], |reactions| reactions.paid_reactors.as_slice())
+    }
+
     /// Whether the current user chose `choice` on this message.
     pub fn chosen_reaction(&self, choice: &crate::state::ReactionChoice) -> bool {
         let Some(reactions) = self

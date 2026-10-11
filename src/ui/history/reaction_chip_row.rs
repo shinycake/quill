@@ -25,6 +25,12 @@ pub(super) fn reaction_chip_row(
         .items_center()
         .gap_1()
         .mt_1();
+    // The Star reaction leads the row (tdesktop sorts it first).
+    if let Some(paid) = message.paid_reaction() {
+        row = row.child(super::super::paid_reaction_chip::paid_reaction_chip(
+            message, paid, cx,
+        ));
+    }
     for (index, chip) in chips.iter().enumerate() {
         let Some(choice) = quill::state::ReactionChoice::from_type(&chip.reaction_type) else {
             continue;

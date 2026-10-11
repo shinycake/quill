@@ -484,6 +484,7 @@ impl QuillApp {
                     cx,
                 ));
             }
+            row = row.children(self.paid_picker_cell(chat_id, message_id, cx));
             let more = options.all().len() > options.top.len().min(7)
                 || (options.allow_custom_emoji && session.is_some_and(|s| s.my_is_premium()));
             if more {

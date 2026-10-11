@@ -322,6 +322,15 @@ impl QuillApp {
             progressed = true;
             need = RedrawNeed::Now;
         }
+        // Star reactions: commit the ones whose Undo window ended, and keep
+        // the toast's countdown redrawing while one is waiting.
+        let paid_now = quill::state::unix_ms_now();
+        if live.driver.paid_reaction_tick(paid_now)
+            || live.driver.session.payments.paid.has_pending()
+        {
+            progressed = true;
+            need = RedrawNeed::Now;
+        }
         // A desktop notification, its sound or a forced reply is handed
         // out by the next render (`flush_notifications`): draw it now,
         // whatever the updates were and whether or not the window is in

@@ -203,6 +203,15 @@ impl Session {
             PaymentsPayload::StarGiveawayOptions(options) => {
                 self.apply_star_giveaway_options(options, pending)
             }
+            PaymentsPayload::StarPackOptions(options) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
+                    let packs = &mut self.payments.star_packs;
+                    packs.loading = false;
+                    packs.loaded = true;
+                    packs.error = None;
+                    packs.options = options;
+                }
+            }
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 self.payments.hub.balance = Some(amount);
             }

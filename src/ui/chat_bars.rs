@@ -72,6 +72,8 @@ impl QuillApp {
         .collect();
         // Batch 7: the translate bar (and its toast) sits below the others.
         bars.extend(self.translate_bar_views(chat_id, cx));
+        // The Star reaction's "sent" toast with Undo.
+        bars.extend(self.paid_toast_view(chat_id, cx));
         bars
     }
 

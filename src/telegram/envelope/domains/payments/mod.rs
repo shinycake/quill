@@ -44,6 +44,8 @@ pub enum PaymentsPayload {
     PremiumGiveawayOptions(Vec<PremiumGiveawayOption>),
     /// `starGiveawayPaymentOptions`.
     StarGiveawayOptions(Vec<StarGiveawayOption>),
+    /// `starPaymentOptions` — the `getStarPaymentOptions` answer.
+    StarPackOptions(Vec<crate::star_packs::StarPack>),
     /// `updateOwnedStarCount`: the signed-in user's Stars balance changed.
     UpdateOwnedStarCount(crate::premium_hub::StarAmount),
 }

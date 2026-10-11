@@ -85,6 +85,7 @@ pub mod notify_call;
 pub mod notify_focus;
 pub mod notify_prefs;
 pub mod owned_bots;
+pub mod paid_reaction;
 pub mod passcode;
 pub mod peer_badge;
 pub mod peer_color;
@@ -137,6 +138,7 @@ pub mod spell_download;
 #[cfg(windows)]
 pub mod spell_win;
 pub mod spellcheck;
+pub mod star_packs;
 pub mod state;
 pub mod sticker_playback;
 pub mod sticker_set_box;

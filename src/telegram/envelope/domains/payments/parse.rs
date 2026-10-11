@@ -88,6 +88,9 @@ pub(crate) fn parse_payments_payload(
         "starGiveawayPaymentOptions" => Ok(EnvelopePayload::Payments(
             PaymentsPayload::StarGiveawayOptions(parse_star_giveaway_options(value)),
         )),
+        "starPaymentOptions" => Ok(EnvelopePayload::Payments(PaymentsPayload::StarPackOptions(
+            crate::star_packs::parse_star_packs(value),
+        ))),
         "updateOwnedStarCount" => Ok(EnvelopePayload::Payments(
             PaymentsPayload::UpdateOwnedStarCount(crate::premium_hub::StarAmount::parse(
                 value.get("star_amount"),

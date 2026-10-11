@@ -238,7 +238,7 @@ pub(in crate::ui) fn session_history_row(
         .as_ref()
         .and_then(|info| info.reactions.as_ref())
         .is_some_and(|reactions| reactions.can_get_added_reactions);
-    let has_chips = !chips.is_empty();
+    let has_chips = !chips.is_empty() || message.paid_reaction().is_some();
     // Channel posts open their comments, group messages their replies
     // (tdesktop `paintCommentsButton`). Inside the open thread itself the
     // bar would only point back at the view.
@@ -278,7 +278,7 @@ pub(in crate::ui) fn session_history_row(
                 cx,
             ))
         });
-    let chip_row = (!chips.is_empty()).then(|| {
+    let chip_row = (!chips.is_empty() || message.paid_reaction().is_some()).then(|| {
         reaction_chip_row(
             message,
             &chips,

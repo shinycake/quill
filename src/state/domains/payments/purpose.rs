@@ -79,6 +79,23 @@ pub enum PaymentsPurpose {
     /// `getPremiumGiveawayPaymentOptions`. Response is
     /// `premiumGiveawayPaymentOptions`.
     GetPremiumGiveawayOptions,
+    /// `getStarPaymentOptions` for "Buy more Stars". Response is
+    /// `starPaymentOptions`.
+    GetStarPackOptions,
+    /// `addPendingPaidMessageReaction` for a Star reaction tap; the Stars
+    /// are rolled back if TDLib refuses.
+    AddPendingPaidReaction {
+        message_id: i64,
+        stars: i64,
+    },
+    /// `commitPendingPaidMessageReactions` once the toast ran out.
+    CommitPaidReaction {
+        message_id: i64,
+    },
+    /// `removePendingPaidMessageReactions`: the toast's Undo.
+    RemovePendingPaidReaction {
+        message_id: i64,
+    },
     /// `getStarGiveawayPaymentOptions`. Response is
     /// `starGiveawayPaymentOptions`.
     GetStarGiveawayOptions,
@@ -108,4 +125,5 @@ flat_purposes!(Payments(PaymentsPurpose) {
     GetPremiumGiveawayOptions,
     GetStarGiveawayOptions,
     LaunchPrepaidGiveaway,
+    GetStarPackOptions,
 });
