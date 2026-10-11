@@ -220,7 +220,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Location and venue messages show a map thumbnail <!-- parity:render-map-thumbnail -->
 - [x] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
 - [x] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
-- [ ] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
+- [x] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
 - [ ] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
 - [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
 - [ ] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
@@ -953,7 +953,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Server-defined chat themes, backgrounds and accent colors are applied <!-- parity:updates-theme-colors -->
 - [x] Chat sender, view-as-topics and default-disable-notification changes apply live <!-- parity:updates-chat-flags -->
 - [x] Downloads list stays in sync with file download updates <!-- parity:updates-downloads-sync -->
-- [ ] Dice emoji list and animated emoji click updates <!-- parity:updates-dice-emoji -->
+- [x] Dice emoji list and animated emoji click updates <!-- parity:updates-dice-emoji -->
 - [x] Frozen-account banner <!-- parity:updates-freeze-state -->
 - [x] Free transcription quota hints <!-- parity:updates-speech-trial -->
 - [ ] Owned Stars count and chat boost updates <!-- parity:updates-stars-boosts -->
