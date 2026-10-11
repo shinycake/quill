@@ -292,7 +292,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Show and hide button for bot reply keyboards <!-- parity:composer-bot-keyboard-toggle -->
 - [x] Reply keyboards update from the server outside the loaded history <!-- parity:composer-reply-markup-update -->
 - [x] Keyboard buttons that request users, a chat or a phone number <!-- parity:composer-keyboard-request-buttons -->
-- [ ] Inline bot results in a grid and the "switch to PM" button <!-- parity:composer-inline-grid -->
+- [x] Inline bot results in a grid and the "switch to PM" button <!-- parity:composer-inline-grid -->
 - [x] Recent inline bots suggested when typing @ <!-- parity:composer-recent-inline-bots -->
 - [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
 - [ ] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->

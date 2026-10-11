@@ -1,2 +1,0 @@
-# inline bot results: justified media grid, list rows, results button, paging
-parity:composer-inline-grid
