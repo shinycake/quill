@@ -107,14 +107,15 @@ fn linear(colors: &[u32], side: u32) -> Square {
 }
 
 /// Three or four colours blended around moving points: the 64 x 64
-/// picture Telegram Desktop makes, then scaled to `side`.
-fn complex(colors: &[u32], side: u32) -> Square {
+/// picture Telegram Desktop makes (`GenerateSmallComplexGradient`) for the
+/// rotation phase `phase` (rotation / 45), before any scaling. Chat
+/// wallpapers use phase 0, the emoji avatar phase 1.
+pub fn small_complex_gradient(colors: &[u32], phase: usize) -> Square {
     const SMALL: u32 = 64;
-    // Phase 1 is rotation 45; the colours sit at the phase's points.
-    let current = points(1);
+    let current = points(phase % 8);
     let count = colors.len().min(4);
     let rgb: Vec<[f32; 3]> = colors.iter().take(count).map(|c| channels(*c)).collect();
-    let small = Square::from_fn(SMALL, |x, y| {
+    Square::from_fn(SMALL, |x, y| {
         let direct_x = x as f32 / SMALL as f32;
         let direct_y = y as f32 / SMALL as f32;
         let cx = direct_x - 0.5;
@@ -136,11 +137,19 @@ fn complex(colors: &[u32], side: u32) -> Square {
             b += weight * color[2];
         }
         if sum <= 0.0 {
-            return [rgb[0][0] as u8, rgb[0][1] as u8, rgb[0][2] as u8];
+            return rgb
+                .first()
+                .map_or([0, 0, 0], |c| [c[0] as u8, c[1] as u8, c[2] as u8]);
         }
         [(r / sum) as u8, (g / sum) as u8, (b / sum) as u8]
-    });
-    if side == SMALL {
+    })
+}
+
+/// The phase-1 complex gradient (rotation 45, the emoji avatar's) scaled to
+/// `side`.
+fn complex(colors: &[u32], side: u32) -> Square {
+    let small = small_complex_gradient(colors, 1);
+    if side == small.side {
         small
     } else {
         small.scaled(side)

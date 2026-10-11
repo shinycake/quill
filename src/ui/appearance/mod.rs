@@ -327,7 +327,7 @@ impl QuillApp {
             joined_above: false,
             out_fill: self
                 .chat_look(self.open_chat_id().map(|c| c.0), cx)
-                .outgoing_fill,
+                .outgoing,
         }
     }
 
@@ -842,6 +842,7 @@ crate::ui::shell::register_dialogs! {
 
 mod appearance_keybindings_section;
 mod new_accent_picker;
+mod telegram_wallpapers;
 
 #[cfg(test)]
 mod tests {

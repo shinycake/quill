@@ -732,3 +732,34 @@ fn chat_look_requests_count_acks_and_surface_errors() {
         "errors are not acknowledgements"
     );
 }
+
+#[test]
+fn background_share_links_land_once_and_errors_surface() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetBackgroundUrl, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"httpUrl","@extra":"{}","url":"https://t.me/bg/abc?mode=blur"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(
+        session.chats_state.background_url.as_deref(),
+        Some("https://t.me/bg/abc?mode=blur")
+    );
+    let extra = session.request(RequestPurpose::GetBackgroundUrl, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BACKGROUND_INVALID"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.chats_state.background_error.is_some());
+}

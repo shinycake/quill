@@ -21,7 +21,8 @@ impl Session {
                 | RequestPurpose::SearchBackground
                 | RequestPurpose::SetChatBackground
                 | RequestPurpose::DeleteChatBackground
-                | RequestPurpose::SetChatTheme,
+                | RequestPurpose::SetChatTheme
+                | RequestPurpose::GetBackgroundUrl,
             ) => {
                 self.chats_state.background_error = Some(error_reason(err));
             }

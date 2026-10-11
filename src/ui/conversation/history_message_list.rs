@@ -658,6 +658,7 @@ impl QuillApp {
                 // theme background).
                 look.wallpaper.as_ref(),
                 look.dimming,
+                super::wallpaper_cache::Slot::History,
             )
             .child(super::history_fx::reveal_viewport(
                 reveal,
