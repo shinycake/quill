@@ -104,23 +104,10 @@ fn chat_row_updates_of_other_chats_only_touch_the_chat_list() {
 fn the_comment_thread_counts_as_shown() {
     let mut session = two_chats();
     session.open_chat = Some(ChatId(12));
-    session.threads.thread = Some(ThreadView {
-        origin_chat_id: ChatId(12),
-        origin_message_id: MessageId(1),
-        chat_id: ChatId(77),
-        thread_id: 0,
-        status: ThreadStatus::Ready,
-        reply_count: 0,
-        unread_count: 0,
-        last_read_inbox_message_id: 0,
-        root_ids: Vec::new(),
-        history: Default::default(),
-        unread_anchor: None,
-        root_jump_serial: 0,
-        needs_chat_switch: false,
-        reading_started: false,
-        forum_topic_id: None,
-    });
+    let mut thread = ThreadView::resolving(ChatId(12), MessageId(1));
+    thread.chat_id = ChatId(77);
+    thread.status = ThreadStatus::Ready;
+    session.threads.thread = Some(thread);
     let read = r#"{"@type":"updateChatReadInbox","chat_id":77,"last_read_inbox_message_id":5,"unread_count":0}"#;
     assert_eq!(need(&session, read), RedrawNeed::Now);
 }

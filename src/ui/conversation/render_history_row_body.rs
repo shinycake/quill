@@ -271,14 +271,22 @@ impl QuillApp {
     /// The window stops short of the latest message and its end is near:
     /// load the next newer page (the driver dedupes in-flight requests).
     pub(in crate::ui) fn maybe_auto_load_newer(&mut self, cx: &mut Context<Self>) {
+        let in_thread = self.thread_active();
         if let Some(live) = self.live.as_mut()
             && live.driver.session.open_topic.is_none()
-            && live.driver.session.threads.thread.is_none()
+            && (in_thread || live.driver.session.threads.thread.is_none())
             && live.driver.session.threads.saved.sublist.is_none()
             && live.driver.session.threads.saved.tag_search.is_none()
-            && live.driver.fetch_history_newer().ok().flatten().is_some()
         {
-            cx.notify();
+            // A thread window pages forward on its own.
+            let sent = if in_thread {
+                live.driver.fetch_thread_history_newer()
+            } else {
+                live.driver.fetch_history_newer()
+            };
+            if sent.ok().flatten().is_some() {
+                cx.notify();
+            }
         }
     }
 
@@ -287,17 +295,26 @@ impl QuillApp {
     /// the bottom when it lands); otherwise just scroll down.
     pub(in crate::ui) fn jump_to_latest_messages(&mut self, cx: &mut Context<Self>) {
         let in_thread = self.thread_active();
-        let replaced = !in_thread
-            && self.live.as_mut().is_some_and(|live| {
+        // Inside a thread the button addresses the thread's window: its
+        // divider goes, and a window short of the newest replies is
+        // replaced (the scroller lands at the end when the page arrives).
+        let replaced = if in_thread {
+            self.live
+                .as_mut()
+                .is_some_and(|live| matches!(live.driver.thread_jump_to_latest(), Ok(Some(_))))
+        } else {
+            self.live.as_mut().is_some_and(|live| {
                 live.driver
                     .session
                     .open_chat
                     .and_then(|chat| live.driver.session.histories.get(&chat.0))
                     .is_some_and(|h| h.has_newer)
                     && live.driver.jump_to_latest().is_ok()
-            });
+            })
+        };
         if !replaced {
-            if let Some(live) = self.live.as_mut()
+            if !in_thread
+                && let Some(live) = self.live.as_mut()
                 && let Some(chat) = live.driver.session.open_chat
                 && let Some(history) = live.driver.session.histories.get_mut(&chat.0)
             {

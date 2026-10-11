@@ -543,21 +543,24 @@ impl QuillApp {
         // Channel-post comments and group reply threads: `getMessageThread`
         // (schema 1.8.67, line 11566) gated by
         // `messageProperties.can_get_message_thread`.
-        let has_replies = message
+        let reply_count = message
             .interaction_info
             .as_ref()
             .and_then(|info| info.reply_info.as_ref())
-            .is_some_and(|reply| reply.reply_count > 0);
-        if (is_channel_post || has_replies) && allows(false, |a| a.can_get_message_thread) {
+            .map_or(0, |reply| reply.reply_count);
+        if (is_channel_post || reply_count > 0) && allows(false, |a| a.can_get_message_thread) {
+            // Comments for channel posts; "View N Replies" / "View Thread"
+            // for group messages (tdesktop `lng_replies_view`).
+            let label: SharedString = if is_channel_post {
+                "View Comments".into()
+            } else {
+                quill::state::replies_menu_label(reply_count).into()
+            };
             item!(
                 order::VIEW_COMMENTS,
                 gpui_kit::assets::IconName::MessageSquare,
                 "menu-comments",
-                if is_channel_post {
-                    "View Comments"
-                } else {
-                    "View Thread"
-                },
+                label.clone(),
                 this,
                 window,
                 cx,

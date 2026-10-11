@@ -81,9 +81,14 @@ impl Session {
         if let Some(reply) = &info.reply_info {
             thread.reply_count = reply.reply_count;
             thread.last_read_inbox_message_id = reply.last_read_inbox_message_id;
+            thread.last_message_id = reply.last_message_id;
         }
-        thread.unread_anchor = (thread.unread_count > 0 && thread.last_read_inbox_message_id > 0)
-            .then_some(MessageId(thread.last_read_inbox_message_id));
+        // The divider sits after the last read reply; with nothing read yet
+        // it sits after the root, so the first reply is the first unread
+        // (tdesktop `readTillId = max(afterId, rootId)`).
+        thread.unread_anchor = (thread.unread_count > 0).then_some(MessageId(
+            thread.last_read_inbox_message_id.max(thread.thread_id),
+        ));
         thread.status = ThreadStatus::LoadingHistory;
         thread.needs_chat_switch = open_chat != Some(info.chat_id);
         let rows: Vec<HistoryMessage> = info
@@ -97,25 +102,36 @@ impl Session {
         }
     }
 
-    /// One `getMessageThreadHistory` page.
+    /// One `getMessageThreadHistory` page: the first page (newest, or
+    /// around the read position), an older page, or a newer page
+    /// (`ThreadsPurpose::GetMessageThreadHistoryNewer`). Pages of a window
+    /// that was replaced since are dropped.
     pub(crate) fn apply_thread_history(
         &mut self,
         messages: Vec<ParsedMessage>,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(RequestPurpose::GetMessageThreadHistory { message_id }) =
-            pending.map(|p| p.purpose)
-        else {
+        let Some(pending) = pending else {
             return;
         };
-        let origin_chat = pending.and_then(|p| p.chat_id);
+        let (message_id, newer) = match pending.purpose {
+            RequestPurpose::GetMessageThreadHistory { message_id } => (message_id, false),
+            RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer {
+                message_id,
+            }) => (message_id, true),
+            _ => return,
+        };
+        let origin_chat = pending.chat_id;
         for message in &messages {
             self.remember_files(&message.files);
         }
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
-        if Some(thread.origin_chat_id) != origin_chat || thread.origin_message_id.0 != message_id {
+        if Some(thread.origin_chat_id) != origin_chat
+            || thread.origin_message_id.0 != message_id
+            || thread.stale_pages.remove(&pending.id.0)
+        {
             return;
         }
         let empty = messages.is_empty();
@@ -134,11 +150,24 @@ impl Session {
                 added += 1;
             }
         }
-        if empty || added == 0 || reached_root || oldest_reply.is_none() {
-            thread.history.loaded_complete = true;
-        }
-        if let Some(oldest) = oldest_reply {
-            thread.history.next_from_message_id = MessageId(oldest);
+        if newer {
+            // The newer side: an empty page says the window reached the
+            // newest reply whatever the server reported before.
+            if added == 0 {
+                thread.has_newer = false;
+            } else {
+                thread.refresh_has_newer();
+            }
+        } else {
+            if empty || added == 0 || reached_root || oldest_reply.is_none() {
+                thread.history.loaded_complete = true;
+            }
+            if let Some(oldest) = oldest_reply {
+                thread.history.next_from_message_id = MessageId(oldest);
+            }
+            // A first page around the read position stops short of the
+            // newest reply; older pages leave the newest row as it is.
+            thread.refresh_has_newer();
         }
         thread.history.total_count = thread.history.messages.len() as i32;
         if thread.status == ThreadStatus::LoadingHistory {
@@ -148,26 +177,56 @@ impl Session {
 
     /// A thread request failed.
     pub(crate) fn fail_thread(&mut self, pending: Option<&PendingRequest>, line: String) {
-        let Some(purpose) = pending.map(|p| p.purpose) else {
+        let Some(pending) = pending else {
             return;
         };
-        let (RequestPurpose::GetMessageThread { message_id }
-        | RequestPurpose::GetMessageThreadHistory { message_id }) = purpose
-        else {
+        let (message_id, newer) = match pending.purpose {
+            RequestPurpose::GetMessageThread { message_id }
+            | RequestPurpose::GetMessageThreadHistory { message_id } => (message_id, false),
+            RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer {
+                message_id,
+            }) => (message_id, true),
+            _ => return,
+        };
+        let origin_chat = pending.chat_id;
+        let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
-        let origin_chat = pending.and_then(|p| p.chat_id);
-        if let Some(thread) = self.threads.thread.as_mut()
-            && Some(thread.origin_chat_id) == origin_chat
-            && thread.origin_message_id.0 == message_id
-            && thread.status != ThreadStatus::Ready
+        if Some(thread.origin_chat_id) != origin_chat
+            || thread.origin_message_id.0 != message_id
+            || thread.stale_pages.remove(&pending.id.0)
         {
+            return;
+        }
+        if newer {
+            thread.newer_failed = true;
+        } else if thread.status != ThreadStatus::Ready {
             thread.status = ThreadStatus::Failed(line);
         }
     }
 
-    /// Keep the thread's reply counter in sync with the root's
-    /// `interaction_info.reply_info` updates.
+    /// Replace the open thread's window (jump to the latest replies): the
+    /// pages still in flight are marked stale. Returns whether a thread
+    /// was open.
+    pub(crate) fn reset_thread_window(&mut self) -> bool {
+        let Some(thread) = self.threads.thread.as_ref() else {
+            return false;
+        };
+        let message_id = thread.origin_message_id.0;
+        let purposes = [
+            RequestPurpose::GetMessageThreadHistory { message_id },
+            RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer { message_id }),
+        ];
+        let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
+        let thread = self.threads.thread.as_mut().expect("checked above");
+        thread.stale_pages.extend(stale.into_iter().map(|id| id.0));
+        thread.reset_window();
+        true
+    }
+
+    /// Keep the thread's counters in sync with the root's
+    /// `interaction_info.reply_info` updates: the reply count, the newest
+    /// reply and the server's read position.
     pub(crate) fn sync_thread_reply_info(
         &mut self,
         chat_id: ChatId,
@@ -184,14 +243,57 @@ impl Session {
         }
         if let Some(reply) = reply {
             thread.reply_count = reply.reply_count;
+            thread.last_message_id = thread.last_message_id.max(reply.last_message_id);
+            thread.read_till(reply.last_read_inbox_message_id);
         }
     }
 
+    /// The UI shows thread rows up to `ids`' newest: read them locally
+    /// (`viewMessages` follows through the chat's own report) and let the
+    /// origin post's comments bar lose its unread dot at once, as tdesktop's
+    /// `setCommentsInboxReadTill` does.
+    pub(crate) fn thread_read_till(&mut self, chat_id: ChatId, ids: &[MessageId]) {
+        let Some(thread) = self
+            .threads
+            .thread
+            .as_mut()
+            .filter(|thread| thread.chat_id == chat_id && thread.thread_id != 0)
+        else {
+            return;
+        };
+        let Some(newest) = ids
+            .iter()
+            .map(|id| id.0)
+            .filter(|id| *id > 0 && thread.history.messages.contains_key(id))
+            .max()
+        else {
+            return;
+        };
+        if !thread.read_till(newest) {
+            return;
+        }
+        let (origin_chat, origin_message, till) = (
+            thread.origin_chat_id,
+            thread.origin_message_id,
+            thread.last_read_inbox_message_id,
+        );
+        self.edit_loaded_message(origin_chat, origin_message, |message| {
+            if let Some(reply) = message
+                .interaction_info
+                .as_mut()
+                .and_then(|info| info.reply_info.as_mut())
+            {
+                reply.last_read_inbox_message_id = reply.last_read_inbox_message_id.max(till);
+            }
+        });
+    }
+
     /// A thread message arrived (update or own send): add it to the open
-    /// thread's rows.
+    /// thread's rows, or hold it outside a window that stops short of the
+    /// newest replies.
     pub(crate) fn thread_upsert(&mut self, row: HistoryMessage) {
         if let Some(thread) = self.threads.thread.as_mut() {
-            thread.history.upsert(row);
+            thread.note_live(row);
         }
     }
 

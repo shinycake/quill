@@ -165,6 +165,12 @@ impl QuillApp {
             }
             return;
         }
+        // The reducer replaced the window (an own send while newer replies
+        // were unloaded, or a jump that waited for a stale page): request
+        // the newest page.
+        if live.driver.thread_needs_reload() && live.driver.fetch_thread_history().is_ok() {
+            cx.notify();
+        }
         if self.history.thread_root_jump {
             let complete = live
                 .driver

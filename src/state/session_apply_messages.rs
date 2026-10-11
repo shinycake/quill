@@ -36,6 +36,7 @@ impl Session {
             && matches!(
                 pending.purpose,
                 RequestPurpose::GetMessageThreadHistory { .. }
+                    | RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer { .. })
             )
         {
             self.apply_thread_history(messages, Some(pending));

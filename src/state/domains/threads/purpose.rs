@@ -84,6 +84,15 @@ pub enum ThreadsPurpose {
     },
     /// `setSavedMessagesTagLabel` (schema 1.8.67, line 12859): `ok`.
     SetSavedMessagesTagLabel,
+    /// `getMessageThreadHistory` (schema 1.8.68, line 12231) with a
+    /// negative offset: the page after the open thread's newest loaded
+    /// reply, while the window stops short of the thread's last reply
+    /// (`ThreadView::has_newer`). Response is `messages`; `message_id` is
+    /// the thread's origin message, correlated to the origin chat via
+    /// `PendingRequest::chat_id`.
+    GetMessageThreadHistoryNewer {
+        message_id: i64,
+    },
 }
 
 flat_purposes!(Threads(ThreadsPurpose) {
