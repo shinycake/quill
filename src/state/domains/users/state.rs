@@ -42,6 +42,11 @@ pub struct UsersState {
     /// `setProfilePhoto`/`deleteProfilePhoto`), shown in the
     /// edit-profile dialog. Cleared when the dialog opens.
     pub profile_edit_error: Option<String>,
+    /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
+    /// the color editor offers as reply and profile icons.
+    pub background_emoji_icons: Vec<StickerItem>,
+    /// The icon request failed; the editor shows a retry hint.
+    pub background_emoji_icons_failed: bool,
     /// Phase B1: secret-chat records keyed by `secret_chat_id`
     /// (`updateSecretChat` / `getSecretChat` answers). Kept at the
     /// session level because `updateSecretChat` is guaranteed to arrive
@@ -74,6 +79,8 @@ impl UsersState {
             username_check: None,
             username_check_pending: None,
             profile_edit_error: None,
+            background_emoji_icons: Vec::new(),
+            background_emoji_icons_failed: false,
             secret_chat_states: HashMap::new(),
             secret_chat_fetch_queue: Vec::new(),
             support_user_ready: None,

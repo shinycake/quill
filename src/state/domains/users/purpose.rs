@@ -54,6 +54,12 @@ pub enum UsersPurpose {
     /// Response is `ok`; the new color arrives via `updateUser` on our
     /// own user (`profile_accent_color_id`).
     SetProfileAccentColor,
+    /// `setAccentColor` (schema 1.8.68, line 15205). Response is `ok`; the
+    /// new name color arrives via `updateUser` on our own user.
+    SetAccentColor,
+    /// `getDefaultBackgroundCustomEmojiStickers` (schema 1.8.68, line
+    /// 15154). Response is `stickers`: the reply and profile icon choices.
+    GetBackgroundEmojiIcons,
     /// Slice A6: `removeContacts`. Response is `ok`; the contacts list is
     /// invalidated for refetch (same as `AddContact`).
     RemoveContact,
@@ -121,6 +127,8 @@ flat_purposes!(Users(UsersPurpose) {
     SetProfilePhoto,
     DeleteProfilePhoto,
     SetProfileAccentColor,
+    SetAccentColor,
+    GetBackgroundEmojiIcons,
     RemoveContact,
     ImportContacts,
     ClearImportedContacts,

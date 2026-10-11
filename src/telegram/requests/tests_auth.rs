@@ -386,3 +386,31 @@ fn b4_confirm_session_and_accept_terms_shapes_match_1_8_67() {
     assert_eq!(v["@type"], "acceptTermsOfService");
     assert_eq!(v["terms_of_service_id"], "tos-1");
 }
+
+#[test]
+fn set_accent_color_request_shape_matches_1_8_68() {
+    // `setAccentColor accent_color_id:int32 background_custom_emoji_id:int64
+    // = Ok;` (line 15205).
+    let v: serde_json::Value = serde_json::from_str(&set_accent_color(
+        RequestId(79),
+        9,
+        5_368_324_170_671_202_286,
+    ))
+    .unwrap();
+    assert_eq!(v["@type"], "setAccentColor");
+    assert_eq!(v["@extra"], "79");
+    assert_eq!(v["accent_color_id"], 9);
+    assert_eq!(
+        v["background_custom_emoji_id"],
+        5_368_324_170_671_202_286_i64
+    );
+
+    let v: serde_json::Value =
+        serde_json::from_str(&set_accent_color(RequestId(80), 2, 0)).unwrap();
+    assert_eq!(v["background_custom_emoji_id"], 0);
+
+    let v: serde_json::Value =
+        serde_json::from_str(&get_default_background_custom_emoji_stickers(RequestId(81))).unwrap();
+    assert_eq!(v["@type"], "getDefaultBackgroundCustomEmojiStickers");
+    assert_eq!(v["@extra"], "81");
+}

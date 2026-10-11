@@ -30,10 +30,14 @@ impl Session {
                 | RequestPurpose::ToggleUsernameIsActive
                 | RequestPurpose::SetProfilePhoto
                 | RequestPurpose::DeleteProfilePhoto
-                | RequestPurpose::SetProfileAccentColor,
+                | RequestPurpose::SetProfileAccentColor
+                | RequestPurpose::SetAccentColor,
             ) => {
                 self.users_state.profile_edit_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));
+            }
+            Some(RequestPurpose::GetBackgroundEmojiIcons) => {
+                self.users_state.background_emoji_icons_failed = true;
             }
             // B10: profile panel fetches keep the reason for a Retry row;
             // refused edits surface as a toast.

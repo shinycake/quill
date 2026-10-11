@@ -105,7 +105,7 @@ impl QuillApp {
         let Some(me) = me else {
             return;
         };
-        let (first, last, bio, username, accent) = self
+        let (first, last, bio, username) = self
             .session()
             .and_then(|s| s.user(me))
             .map(|u| {
@@ -119,8 +119,6 @@ impl QuillApp {
                     u.last_name.clone(),
                     bio,
                     u.editable_username.clone(),
-                    // A12: -1 = no accent color (schema 1.8.67, line 2386).
-                    u.profile_accent_color_id,
                 )
             })
             .unwrap_or_default();
@@ -130,7 +128,7 @@ impl QuillApp {
             live.driver.session.users_state.username_check_pending = None;
         }
         self.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(
-            window, cx, &first, &last, &bio, &username, accent,
+            window, cx, &first, &last, &bio, &username,
         ));
         if let Some(dialog) = &self.dialogs.edit_profile_dialog {
             dialog
@@ -343,38 +341,6 @@ impl QuillApp {
         match live.driver.set_profile_photo(&path) {
             Ok(_) => self.connection.status_note = "Photo update requested.".into(),
             Err(err) => self.connection.status_note = format!("set photo failed: {err:?}"),
-        }
-        cx.notify();
-    }
-
-    /// A12: `setProfileAccentColor` from the dialog. The current
-    /// `profile_background_custom_emoji_id` is preserved by the driver
-    /// (Quill has no background-emoji picker).
-    pub(super) fn submit_profile_accent(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
-            return;
-        };
-        let selected = dialog.accent_selection;
-        let current = self
-            .session()
-            .and_then(|s| s.my_user_id)
-            .and_then(|me| self.session().and_then(|s| s.user(me)))
-            .map(|u| u.profile_accent_color_id)
-            .unwrap_or(-1);
-        if selected == current {
-            self.connection.status_note = "Accent color unchanged.".into();
-            cx.notify();
-            return;
-        }
-        let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
-            cx.notify();
-            return;
-        };
-        live.driver.session.users_state.profile_edit_error = None;
-        match live.driver.set_profile_accent_color(selected) {
-            Ok(_) => self.connection.status_note = "Accent color update requested.".into(),
-            Err(err) => self.connection.status_note = format!("set accent color failed: {err:?}"),
         }
         cx.notify();
     }
@@ -673,68 +639,23 @@ impl QuillApp {
                         ),
                     ),
             );
-        // A12: accent color picker — swatches from the server palette
-        // (`updateProfileAccentColors`), saved via `setProfileAccentColor`.
-        // The server pushes the palette after authorization; until then
-        // only "None" shows (honest empty state, not a fake palette).
-        let (available_ids, palette) = self
-            .session()
-            .map(|s| {
-                (
-                    s.chats_state.available_accent_color_ids.clone(),
-                    s.chats_state.profile_accent_colors.clone(),
-                )
-            })
-            .unwrap_or_default();
-        let mut swatch_row = div().flex().flex_wrap().gap_2();
-        for id in &available_ids {
-            let color = palette
-                .iter()
-                .find(|c| c.id == *id)
-                .map(|c| c.swatch_rgb())
-                .unwrap_or(0x229ED9);
-            let selected = dialog.accent_selection == *id;
-            let id = *id;
-            swatch_row = swatch_row.child(self.appearance_swatch(
-                format!("edit-profile-accent-{id}"),
-                color,
-                "",
-                selected,
-                cx,
-                move |this, cx| {
-                    if let Some(dialog) = this.dialogs.edit_profile_dialog.as_mut() {
-                        dialog.accent_selection = id;
-                    }
-                    cx.notify();
-                },
-            ));
-        }
-        let none_selected = dialog.accent_selection == -1;
-        swatch_row = swatch_row.child(self.appearance_chip(
-            "edit-profile-accent-none",
-            "None",
-            none_selected,
-            cx,
-            |this, cx| {
-                if let Some(dialog) = this.dialogs.edit_profile_dialog.as_mut() {
-                    dialog.accent_selection = -1;
-                }
-                cx.notify();
-            },
-        ));
+        // Name and profile colors live in their own box (tdesktop "Your
+        // color"), which also covers the reply and profile icons.
         panel = panel.child(
             div()
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(section("Accent color"))
-                .child(swatch_row)
+                .child(section("Colors"))
                 .child(
                     div().flex().gap_2().child(
-                        Button::new("edit-profile-save-accent")
-                            .label("Save accent color")
+                        Button::new("edit-profile-colors")
+                            .label("Name and profile color…")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_profile_accent(cx);
+                                this.open_peer_color_dialog(
+                                    quill::peer_color::PeerColorTab::Profile,
+                                    cx,
+                                );
                             })),
                     ),
                 ),

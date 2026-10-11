@@ -461,6 +461,8 @@ fn update_accent_colors_stores_name_palette() {
     );
     assert_eq!(session.chats_state.name_accent_colors.len(), 1);
     assert_eq!(session.chats_state.name_accent_colors[0].id, 4242);
+    // The editor's swatch ids keep the server order.
+    assert_eq!(session.chats_state.available_name_accent_ids, vec![4242]);
     // The renderer's lookup sees the server colors for a 7+ id.
     assert_eq!(
         crate::telegram::name_accent::name_color_rgb(4242, false),

@@ -329,10 +329,9 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(Value::as_i64)
         .and_then(|n| i32::try_from(n).ok())
         .unwrap_or(-1);
-    let profile_background_custom_emoji_id = value
-        .get("profile_background_custom_emoji_id")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
+    // TDLib JSON writes int64 as a string.
+    let profile_background_custom_emoji_id =
+        int64(value.get("profile_background_custom_emoji_id")).unwrap_or(0);
     let is_premium = value
         .get("is_premium")
         .and_then(Value::as_bool)
