@@ -1,5 +1,6 @@
 use crate::composer::SendOptions;
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::payment_invoice::InputInvoice;
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::*;
 
@@ -275,10 +276,23 @@ fn b2_send_bot_start_message_and_get_bot_similar_bots_shapes_match_1_8_67() {
     assert_eq!(v["bot_user_id"], 21);
 }
 
+fn message_invoice() -> InputInvoice {
+    InputInvoice::Message {
+        chat_id: ChatId(21),
+        message_id: MessageId(401),
+    }
+}
+
 #[test]
 fn p1_payment_request_shapes_match_1_8_67() {
     // `getPaymentForm` (schema 1.8.67, line 15262).
-    let json = get_payment_form(RequestId(71), ChatId(21), MessageId(401));
+    let json = get_payment_form(
+        RequestId(71),
+        &InputInvoice::Message {
+            chat_id: ChatId(21),
+            message_id: MessageId(401),
+        },
+    );
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "getPaymentForm");
     assert_eq!(v["@extra"], "71");
@@ -293,7 +307,7 @@ fn p1_payment_request_shapes_match_1_8_67() {
         email_address: "a@x.io".into(),
         shipping_address: Default::default(),
     };
-    let json = validate_order_info(RequestId(72), ChatId(21), MessageId(401), &order, true);
+    let json = validate_order_info(RequestId(72), &message_invoice(), &order, true);
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "validateOrderInfo");
     assert_eq!(v["order_info"]["@type"], "orderInfo");
@@ -304,8 +318,7 @@ fn p1_payment_request_shapes_match_1_8_67() {
     let creds = input_credentials_new("tok_test", true);
     let json = send_payment_form(
         RequestId(73),
-        ChatId(21),
-        MessageId(401),
+        &message_invoice(),
         7,
         "oi1",
         "fast",

@@ -376,8 +376,9 @@ pub struct LoginUrlRequest {
 /// and `sendPaymentForm` need it after the form answer is applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentRequest {
-    pub chat_id: ChatId,
-    pub message_id: MessageId,
+    /// What is being paid: an invoice message, an invoice link or a
+    /// payment toward Telegram. The same value goes into every request.
+    pub invoice: crate::payment_invoice::InputInvoice,
 }
 
 /// B1: pick the custom keyboard to show for a chat — the newest message

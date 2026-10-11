@@ -70,6 +70,7 @@ impl QuillApp {
             DeepLinkUi::Background { name } => self.open_background_link(name, cx),
             DeepLinkUi::GiftCode { code } => self.open_gift_code_link(code, cx),
             DeepLinkUi::LanguagePack { id } => self.open_language_pack_link(id, cx),
+            DeepLinkUi::Invoice { name } => self.open_invoice_link(&name, window, cx),
             DeepLinkUi::Settings(SettingsTarget::PeerColor(tab)) => {
                 self.open_peer_color_dialog(tab, cx);
             }

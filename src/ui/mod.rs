@@ -223,6 +223,7 @@ mod inline_playback;
 mod inline_return;
 mod invite_admin_more_ui;
 mod invite_admin_ui;
+mod invoice_checkout;
 mod jump_buttons;
 mod jump_date;
 mod link_info_boxes;

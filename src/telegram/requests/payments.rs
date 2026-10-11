@@ -1,4 +1,5 @@
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::payment_invoice::InputInvoice;
 use crate::telegram::envelope::OrderInfoData;
 use serde_json::{Value, json};
 
@@ -29,16 +30,13 @@ fn payment_theme_parameters() -> Value {
 }
 
 /// Slice P1: `getPaymentForm` (TDLib 1.8.67, `schema/td_api.tl:15262`) —
-/// the Buy button flow. Response is `paymentForm`.
-pub fn get_payment_form(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+/// the Buy button flow, an invoice link or a payment toward Telegram.
+/// Response is `paymentForm`.
+pub fn get_payment_form(extra: RequestId, invoice: &InputInvoice) -> String {
     json!({
         "@type": "getPaymentForm",
         "@extra": extra.as_extra(),
-        "input_invoice": {
-            "@type": "inputInvoiceMessage",
-            "chat_id": chat_id.0,
-            "message_id": message_id.0,
-        },
+        "input_invoice": invoice.to_json(),
         "theme": payment_theme_parameters(),
     })
     .to_string()
@@ -68,19 +66,14 @@ pub fn order_info_json(order: &OrderInfoData) -> Value {
 /// Response is `validatedOrderInfo` with the shipping options.
 pub fn validate_order_info(
     extra: RequestId,
-    chat_id: ChatId,
-    message_id: MessageId,
+    invoice: &InputInvoice,
     order: &OrderInfoData,
     allow_save: bool,
 ) -> String {
     json!({
         "@type": "validateOrderInfo",
         "@extra": extra.as_extra(),
-        "input_invoice": {
-            "@type": "inputInvoiceMessage",
-            "chat_id": chat_id.0,
-            "message_id": message_id.0,
-        },
+        "input_invoice": invoice.to_json(),
         "order_info": order_info_json(order),
         "allow_save": allow_save,
     })
@@ -110,8 +103,7 @@ pub fn input_credentials_saved(saved_credentials_id: &str) -> Value {
 #[allow(clippy::too_many_arguments)]
 pub fn send_payment_form(
     extra: RequestId,
-    chat_id: ChatId,
-    message_id: MessageId,
+    invoice: &InputInvoice,
     payment_form_id: i64,
     order_info_id: &str,
     shipping_option_id: &str,
@@ -121,11 +113,7 @@ pub fn send_payment_form(
     json!({
         "@type": "sendPaymentForm",
         "@extra": extra.as_extra(),
-        "input_invoice": {
-            "@type": "inputInvoiceMessage",
-            "chat_id": chat_id.0,
-            "message_id": message_id.0,
-        },
+        "input_invoice": invoice.to_json(),
         "payment_form_id": payment_form_id,
         "order_info_id": order_info_id,
         "shipping_option_id": shipping_option_id,

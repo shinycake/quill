@@ -16,11 +16,16 @@ impl QuillApp {
                 this.close_payment_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title(crate::ui::shell::dialog_title("Checkout"));
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Checkout"));
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close.clone());
             };
-            if session.payments.form.is_none() && !session.payments.form_loading {
+            if session.payments.form.is_none()
+                && !session.payments.form_loading
+                && session.payments.note.is_none()
+            {
                 return dialog.on_close(on_close.clone());
             }
             let Some(dialog_state) = this.payments.dialog.as_ref() else {
@@ -46,7 +51,10 @@ impl QuillApp {
                         // per dialog render — hand it over through a one-shot cell.
                         let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                         move |content, _, _| {
-                            let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                            let body = body
+                                .borrow_mut()
+                                .take()
+                                .unwrap_or_else(|| div().into_any_element());
                             content.child(body)
                         }
                     }))
@@ -54,9 +62,7 @@ impl QuillApp {
             };
             match &form.form_type {
                 PaymentFormTypeData::Stars { star_count } => {
-                    body = body.child(div().text_sm().child(format!(
-                        "This invoice asks for {star_count} Telegram Stars — Stars checkout is not supported in this slice."
-                    )));
+                    body = this.stars_form_body(body, form, *star_count, session, cx);
                 }
                 PaymentFormTypeData::StarSubscription => {
                     body = body.child(
@@ -66,10 +72,9 @@ impl QuillApp {
                     );
                 }
                 PaymentFormTypeData::Unknown => {
-                    body =
-                        body.child(div().text_sm().child(
-                            "This invoice uses a payment form type this client doesn't support.",
-                        ));
+                    body = body.child(div().text_sm().child(
+                        "This invoice uses a payment form type this client doesn't support.",
+                    ));
                 }
                 PaymentFormTypeData::Regular(regular) => {
                     body = this.payment_form_body(
@@ -94,7 +99,10 @@ impl QuillApp {
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

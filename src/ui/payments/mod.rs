@@ -22,35 +22,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 impl QuillApp {
-    /// Slice P1: Buy button press — fetch the `paymentForm`
-    /// (`getPaymentForm`, schema 1.8.67, line 15262). The dialog opens when
-    /// the answer is applied; while it loads, the dialog shows a spinner.
-    pub(super) fn press_buy_button(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.form_loading = true;
-            live.driver.session.payments.note = None;
-            live.driver.send_payment_form_request(chat_id, message_id)
-        });
-        match sent {
-            Some(Ok(_)) => {
-                self.open_payment_dialog(window, cx);
-            }
-            _ => {
-                if let Some(live) = self.live.as_mut() {
-                    live.driver.session.payments.form_loading = false;
-                }
-                self.connection.status_note = "could not load the payment form".into();
-            }
-        }
-        cx.notify();
-    }
-
     /// Slice P1: create the checkout dialog inputs, prefilling the order
     /// fields from the form's `saved_order_info` (schema:4720) when present.
     pub(super) fn open_payment_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -74,6 +45,7 @@ impl QuillApp {
             live.driver.session.payments.validated = None;
             live.driver.session.payments.shipping_id = None;
             live.driver.session.payments.request = None;
+            live.driver.session.payments.form_paid = false;
         }
         cx.notify();
     }
@@ -435,6 +407,8 @@ impl QuillApp {
             .primary();
         body = body.child(if session.payments.sending {
             pay.label("Processing…").disabled(true)
+        } else if session.payments.form_paid {
+            pay.label("Paid").disabled(true)
         } else if can_pay {
             pay.on_click(cx.listener(|this, _, window, cx| {
                 this.submit_payment(cx);
@@ -484,12 +458,8 @@ impl QuillApp {
         };
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payments.note = None;
-            live.driver.validate_payment_order_info(
-                request.chat_id,
-                request.message_id,
-                &order,
-                allow_save,
-            )
+            live.driver
+                .validate_payment_order_info(&request.invoice, &order, allow_save)
         });
         if !matches!(sent, Some(Ok(_))) {
             self.connection.status_note = "could not validate order info".into();
@@ -507,10 +477,11 @@ impl QuillApp {
                 session.payments.request.clone(),
                 session.payments.validated.clone(),
                 session.payments.shipping_id.clone(),
+                session.payments.form_paid,
             )
         });
         let dialog = self.payments.dialog.as_ref();
-        let (Some((Some(form), Some(request), validated, shipping_id)), Some(dialog)) =
+        let (Some((Some(form), Some(request), validated, shipping_id, false)), Some(dialog)) =
             (snapshot, dialog)
         else {
             self.connection.status_note = "payment form not loaded".into();
@@ -545,8 +516,7 @@ impl QuillApp {
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payments.note = None;
             let sent = live.driver.submit_payment_form(
-                request.chat_id,
-                request.message_id,
+                &request.invoice,
                 form.id,
                 order_info_id,
                 shipping_option_id,
@@ -788,10 +758,7 @@ fn subscription_price_label(pricing: &StarSubscriptionPricing) -> String {
 crate::ui::shell::register_dialogs! {
     PaymentForm => DialogSpec::new(
         3500,
-        |app| {
-            app.payments.dialog.is_some()
-                && app.session().is_some_and(|s| s.payments.form.is_some() || s.payments.form_loading)
-        },
+        |app| app.payment_dialog_visible(),
         QuillApp::build_payment_dialog,
     ),
 
