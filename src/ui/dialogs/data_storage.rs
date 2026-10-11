@@ -77,34 +77,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn choose_account_export_folder(&mut self, media: bool, cx: &mut Context<Self>) {
-        let account = self
-            .live
-            .as_ref()
-            .map(|live| live.driver.session.account.clone());
-        let picker = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Export Telegram data here".into()),
-        });
-        cx.spawn(async move |this, cx| {
-            let result = picker.await;
-            let _ = this.update(cx, |this, cx| {
-                if let Ok(Ok(Some(paths))) = result
-                    && let Some(folder) = paths.first()
-                    && let Some(live) = this.live.as_mut()
-                    && Some(&live.driver.session.account) == account.as_ref()
-                    && let Err(error) = live.driver.start_account_export(folder, media)
-                {
-                    live.driver.session.settings.data_storage_error = Some(error.to_string());
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
     /// Slice S4: the Data & Storage dialog — the per-network editor when
     /// one is open, otherwise the overview (auto-download networks,
     /// less-data-for-calls, the storage breakdown, clear cache).
@@ -235,78 +207,43 @@ impl QuillApp {
                     .child(format!("Error: {err}")),
             );
         }
-        body = body.child(section_header("Export Telegram data"))
-            .child(div().text_xs().child("Profile, contacts, sessions and all accessible main and archived chat histories. Choose a folder; media is optional."));
-        if let Some(export) = session
+        // `parity:data-export-full`: the full export has its own box.
+        let running = session
             .as_ref()
             .and_then(|s| s.settings.account_export.as_ref())
-        {
-            let label = export.label();
-            let folder = export.folder.clone();
-            let finished = export.finished.load(std::sync::atomic::Ordering::Acquire);
-            body = body
-                .child(
-                    div()
-                        .id("account-export-status")
-                        .role(Role::Label)
-                        .aria_label(label.clone())
-                        .text_sm()
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .gap_2()
-                        .child(
-                            Button::new("account-export-open")
-                                .label("Show export folder")
-                                .outline()
-                                .small()
-                                .on_click(move |_, _, cx| cx.reveal_path(&folder)),
-                        )
-                        .child(
-                            Button::new("account-export-cancel")
-                                .ghost()
-                                .small()
-                                .label(if finished {
-                                    "Dismiss export"
-                                } else {
-                                    "Cancel export"
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(live) = this.live.as_mut() {
-                                        live.driver.session.settings.account_export = None;
-                                    }
-                                    cx.notify();
-                                })),
-                        ),
-                );
-        } else {
-            // Both export choices sit side by side as outline actions.
-            let mut exports = div().flex().flex_wrap().gap_2();
-            for media in [false, true] {
-                exports = exports.child(
-                    Button::new(if media {
-                        "account-export-media"
+            .map(|export| export.progress().label());
+        body = body
+            .child(section_header("Export Telegram data"))
+            .child(div().text_xs().child(
+                "Save your account information, contacts, stories, chats and media as HTML or JSON files.",
+            ));
+        if let Some(label) = &running {
+            body = body.child(
+                div()
+                    .id("account-export-status")
+                    .role(Role::Status)
+                    .aria_label(label.clone())
+                    .text_sm()
+                    .child(label.clone()),
+            );
+        }
+        body = body.child(
+            div().flex().child(
+                Button::new("account-export-open")
+                    .label(if running.is_some() {
+                        "Show export progress"
                     } else {
-                        "account-export-json"
-                    })
-                    .label(if media {
-                        "Export with media…"
-                    } else {
-                        "Export JSON…"
+                        "Export Telegram data…"
                     })
                     .outline()
                     .small()
                     .disabled(self.live.is_none())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.choose_account_export_folder(media, cx)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_account_export(cx);
+                        this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
                     })),
-                );
-            }
-            body = body.child(exports);
-        }
+            ),
+        );
         // --- Automatic downloads ---
         body = body.child(section_header("Automatic downloads"));
         let prefs = session.as_ref().map(|s| &s.settings.data_storage);

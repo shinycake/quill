@@ -42,7 +42,7 @@ fn entity_name(kind: &EntityKind) -> &'static str {
     }
 }
 
-fn iso_date(date: i32, offset: i32) -> String {
+pub(crate) fn iso_date(date: i32, offset: i32) -> String {
     let unix = i64::from(date);
     let time = civil_at(unix, offset);
     let second = (unix + i64::from(offset)).rem_euclid(60);
@@ -115,7 +115,7 @@ pub fn message_json(msg: &ExportMessage, outcome: Option<&Outcome>, offset: i32)
     match &msg.body {
         Body::Media(media) => {
             let value: Value = match outcome {
-                Some(Outcome::Saved(path)) => path.clone().into(),
+                Some(Outcome::Saved { path, .. }) => path.clone().into(),
                 Some(Outcome::Skipped(skip)) => skip_note(media.kind, *skip).into(),
                 None => Value::Null,
             };
@@ -125,6 +125,19 @@ pub fn message_json(msg: &ExportMessage, outcome: Option<&Outcome>, offset: i32)
                 "file"
             };
             object.insert(key.into(), value);
+            if let Some(Outcome::Saved {
+                thumb: Some(thumb), ..
+            }) = outcome
+            {
+                object.insert("thumbnail".into(), thumb.clone().into());
+                if let Some(size) = media.thumb.map(|t| t.size).filter(|s| *s > 0) {
+                    object.insert("thumbnail_file_size".into(), size.into());
+                }
+            }
+            if media.width > 0 && media.height > 0 {
+                object.insert("width".into(), media.width.into());
+                object.insert("height".into(), media.height.into());
+            }
             if let Some(kind) = media_type(media.kind) {
                 object.insert("media_type".into(), kind.into());
             }
@@ -191,7 +204,19 @@ pub fn message_json(msg: &ExportMessage, outcome: Option<&Outcome>, offset: i32)
     out
 }
 
-/// Streams `result.json`.
+/// Where a chat's messages go as they are written: the chat export's own
+/// `result.json`, or one chat inside an account export's `result.json`.
+pub trait MessageSink {
+    fn push_message(&mut self, message: &Value) -> io::Result<()>;
+}
+
+impl<W: Write> MessageSink for JsonWriter<W> {
+    fn push_message(&mut self, message: &Value) -> io::Result<()> {
+        self.push(message)
+    }
+}
+
+/// Streams a chat export's `result.json`.
 pub struct JsonWriter<W: Write> {
     out: W,
     first: bool,
@@ -271,12 +296,19 @@ mod tests {
             mime: "audio/ogg".into(),
             duration: 4,
             label: String::new(),
+            width: 0,
+            height: 0,
+            thumb: None,
         });
         let saved = message_json(
             &msg(media.clone()),
-            Some(&Outcome::Saved("voice_messages/audio_1.ogg".into())),
+            Some(&Outcome::Saved {
+                path: "voice_messages/audio_1.ogg".into(),
+                thumb: None,
+            }),
             0,
         );
+        assert!(saved.get("thumbnail").is_none());
         assert_eq!(saved["file"], "voice_messages/audio_1.ogg");
         assert_eq!(saved["media_type"], "voice_message");
         assert_eq!(saved["duration_seconds"], 4);
@@ -295,9 +327,53 @@ mod tests {
             mime: String::new(),
             duration: 0,
             label: String::new(),
+            width: 800,
+            height: 600,
+            thumb: None,
         });
-        let v = message_json(&msg(photo), Some(&Outcome::Saved("photos/p.jpg".into())), 0);
+        let v = message_json(
+            &msg(photo),
+            Some(&Outcome::Saved {
+                path: "photos/p.jpg".into(),
+                thumb: None,
+            }),
+            0,
+        );
         assert_eq!(v["photo"], "photos/p.jpg");
+        assert_eq!(
+            (v["width"].as_i64(), v["height"].as_i64()),
+            (Some(800), Some(600))
+        );
+    }
+
+    #[test]
+    fn videos_name_their_thumbnail() {
+        let video = Body::Media(MediaRef {
+            kind: MediaKind::Video,
+            file_id: 1,
+            size: 5000,
+            file_name: "clip.mp4".into(),
+            mime: "video/mp4".into(),
+            duration: 3,
+            label: String::new(),
+            width: 0,
+            height: 0,
+            thumb: Some(crate::export::model::ThumbRef {
+                file_id: 2,
+                size: 321,
+            }),
+        });
+        let v = message_json(
+            &msg(video),
+            Some(&Outcome::Saved {
+                path: "video_files/clip.mp4".into(),
+                thumb: Some("video_files/clip.mp4_thumb.jpg".into()),
+            }),
+            0,
+        );
+        assert_eq!(v["thumbnail"], "video_files/clip.mp4_thumb.jpg");
+        assert_eq!(v["thumbnail_file_size"], 321);
+        assert!(v.get("width").is_none());
     }
 
     #[test]

@@ -49,7 +49,7 @@ const EARLIEST: YearMonth = YearMonth {
 };
 const CELL: f32 = 34.;
 
-fn default_folder() -> PathBuf {
+pub(super) fn default_folder() -> PathBuf {
     quill::file_prefs::configured_download_dir()
         .or_else(|| directories::UserDirs::new().and_then(|d| d.download_dir().map(PathBuf::from)))
         .unwrap_or_else(std::env::temp_dir)

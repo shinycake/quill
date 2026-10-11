@@ -80,6 +80,10 @@ error branches, and `MessagesState::chat_export`.
 
 ## Differences from tdesktop
 
+The later account-export slice
+(`docs/decisions/codex-account-export.md`) adds thumbnails, profile-picture
+placeholders and `js/script.js`. As this slice landed:
+
 - No thumbnails for videos and files, no profile pictures, no `export_results.html`
   index page (tdesktop skips the index for one chat's export as well).
 - No JavaScript. Replies link with plain anchors (`messages2.html#message12`).
