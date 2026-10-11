@@ -247,6 +247,7 @@ mod profile_panels;
 mod profile_photo_sources;
 mod proxy;
 mod proxy_qr;
+mod ptt_delay;
 mod quick_action_ui;
 mod quick_replies;
 mod reactions;

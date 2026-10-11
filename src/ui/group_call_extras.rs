@@ -10,7 +10,6 @@ use super::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
-use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::*;
@@ -316,9 +315,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let delays = quill::calls::ptt::RELEASE_DELAYS_MS;
         let config = config.sanitized();
-        let selected_delay = delays.iter().position(|d| *d == config.release_delay_ms);
         let capturing = self.group_call.ptt_capture;
         let needs_permission = config.enabled
             && (matches!(
@@ -384,29 +381,7 @@ impl QuillApp {
                                 })),
                         ),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::MEDIUM)
-                        .px_2()
-                        .pt_1()
-                        .child("Release delay"),
-                )
-                .child(
-                    RadioGroup::vertical("call-pref-ptt-delay")
-                        .selected_index(selected_delay)
-                        .children(delays.iter().map(|ms| {
-                            Radio::new(format!("call-pref-ptt-delay-{ms}"))
-                                .label(format!("{ms} ms"))
-                        }))
-                        .on_click(cx.listener(move |this, &ix, _, cx| {
-                            let ms = delays[ix];
-                            this.set_call_pref(
-                                |prefs| prefs.push_to_talk.release_delay_ms = ms,
-                                cx,
-                            );
-                        })),
-                )
+                .child(self.ptt_delay_row(config.release_delay_ms, cx))
                 .child(div().text_xs().text_color(muted).px_2().child(
                     quill::calls::ptt_global::status_note(
                         self.group_call.global_ptt.state(),

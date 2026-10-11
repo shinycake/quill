@@ -628,7 +628,10 @@ impl QuillApp {
                                     super::settings_account_ui::ASK_QUESTION_PAGE => {
                                         this.ask_question_page(cx)
                                     }
-                                    _ => this.call_settings_section(cx).into_any_element(),
+                                    _ => {
+                                        this.ensure_ptt_delay_slider(cx);
+                                        this.call_settings_section(cx).into_any_element()
+                                    }
                                 })
                                 .into_any_element()
                         }));

@@ -27,6 +27,8 @@ pub(crate) struct GroupCallUi {
     pub(super) ptt: quill::calls::ptt::PushToTalk,
     pub(super) ptt_clock: Instant,
     pub(super) ptt_capture: bool,
+    /// Release-delay slider in Settings > Calls (`ui/ptt_delay.rs`).
+    pub(super) ptt_delay_slider: Option<Entity<gpui_kit::component::slider::SliderState>>,
     /// System-wide push-to-talk hook, live only while joined with PTT on.
     pub(super) global_ptt: quill::calls::ptt_global::PlatformController,
     pub(super) global_ptt_polling: bool,
@@ -58,6 +60,7 @@ impl GroupCallUi {
             ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
             ptt_capture: false,
+            ptt_delay_slider: None,
             global_ptt: Default::default(),
             global_ptt_polling: false,
             pin: quill::calls::tile_pin::TilePin::default(),
