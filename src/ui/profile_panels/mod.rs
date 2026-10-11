@@ -61,7 +61,7 @@ pub(super) struct CopyAction {
 struct DetailRow {
     id: &'static str,
     value: String,
-    label: &'static str,
+    label: String,
     copy: Option<CopyAction>,
     action: RowAction,
     /// Muted value (an "Add …" call to action on your own profile).
@@ -127,7 +127,7 @@ impl QuillApp {
                     toast: "Bio copied to clipboard",
                 }),
                 value: bio,
-                label: "Bio",
+                label: "Bio".into(),
                 action: RowAction::None,
                 hint: false,
                 extra_copy: None,
@@ -137,7 +137,7 @@ impl QuillApp {
             rows.push(DetailRow {
                 id: "info-phone",
                 value: format_phone(&user.phone_number),
-                label: "Mobile",
+                label: "Mobile".into(),
                 copy: Some(CopyAction {
                     text: copyable_phone(&user.phone_number),
                     menu: "Copy Phone Number",
@@ -152,7 +152,7 @@ impl QuillApp {
             rows.push(DetailRow {
                 id: "info-username",
                 value: format!("@{}", user.username),
-                label: "Username",
+                label: "Username".into(),
                 copy: Some(CopyAction {
                     text: format!("@{}", user.username),
                     menu: "Copy Username",
@@ -170,7 +170,7 @@ impl QuillApp {
             rows.push(DetailRow {
                 id: "info-link",
                 value: link.trim_start_matches("https://").to_string(),
-                label: "Link",
+                label: "Link".into(),
                 copy: Some(CopyAction {
                     text: link,
                     menu: "Copy Link",
@@ -185,7 +185,7 @@ impl QuillApp {
             Some(birthday) => rows.push(DetailRow {
                 id: "info-birthday",
                 value: super::group_panels::format_birthday(birthday),
-                label: "Birthday",
+                label: "Birthday".into(),
                 copy: None,
                 action: if is_self {
                     RowAction::EditBirthday
@@ -198,7 +198,7 @@ impl QuillApp {
             None if is_self => rows.push(DetailRow {
                 id: "info-birthday",
                 value: "Add your birthday".into(),
-                label: "Birthday",
+                label: "Birthday".into(),
                 copy: None,
                 action: RowAction::EditBirthday,
                 hint: true,
@@ -207,14 +207,20 @@ impl QuillApp {
             None => {}
         }
         let personal = info.map_or(0, |i| i.extras.personal_chat_id);
-        let personal_title = (personal != 0)
-            .then(|| session.chats.get(&personal).map(|c| c.title.clone()))
-            .flatten();
-        match personal_title {
-            Some(title) => rows.push(DetailRow {
+        let personal_card = (personal != 0)
+            .then(|| session.chats.get(&personal))
+            .flatten()
+            .map(|chat| {
+                let subscribers = session
+                    .group_member_counts(chat)
+                    .map_or(0, |(members, _)| members);
+                quill::personal_channel::card(&chat.title, subscribers, &chat.last_preview)
+            });
+        match personal_card {
+            Some(card) => rows.push(DetailRow {
                 id: "info-personal-channel",
-                value: title,
-                label: "Personal channel",
+                value: card.value,
+                label: card.label,
                 copy: None,
                 action: if is_self {
                     RowAction::PickPersonalChannel
@@ -227,7 +233,7 @@ impl QuillApp {
             None if is_self => rows.push(DetailRow {
                 id: "info-personal-channel",
                 value: "Add a personal channel".into(),
-                label: "Personal channel",
+                label: "Personal channel".into(),
                 copy: None,
                 action: RowAction::PickPersonalChannel,
                 hint: true,
@@ -240,7 +246,7 @@ impl QuillApp {
             rows.push(DetailRow {
                 id: "info-main-tab",
                 value: current.map_or("Default", |tab| tab.label()).into(),
-                label: "Main tab",
+                label: "Main tab".into(),
                 copy: None,
                 action: RowAction::PickMainTab,
                 hint: current.is_none(),
@@ -259,7 +265,7 @@ impl QuillApp {
                     toast: "Note copied to clipboard",
                 }),
                 value: note,
-                label: "Note (only visible to you)",
+                label: "Note (only visible to you)".into(),
                 action: if user.is_contact {
                     RowAction::EditNote(user_id)
                 } else {
@@ -300,7 +306,7 @@ impl QuillApp {
                 .when(interactive, |this| {
                     this.cursor_pointer()
                         .role(gpui_kit::Role::Button)
-                        .aria_label(format!("{}: {}", row.label, row.value))
+                        .aria_label(format!("{}: {}", row.label, row.value.replace('\n', ": ")))
                         .tab_index(0)
                         .hover(move |style| style.bg(hover))
                 })
@@ -309,7 +315,7 @@ impl QuillApp {
                         .text_sm()
                         .when(row.hint, |this| this.text_color(muted)),
                 )
-                .child(div().text_xs().text_color(muted).child(row.label));
+                .child(div().text_xs().text_color(muted).child(row.label.clone()));
             let tapped = base.on_click(cx.listener(move |this, _, window, cx| match &action {
                 RowAction::None => {
                     if let Some(copy) = &copy {

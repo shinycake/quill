@@ -81,6 +81,7 @@ pub mod owned_bots;
 pub mod passcode;
 pub mod peer_badge;
 pub mod peer_color;
+pub mod personal_channel;
 pub mod phone;
 pub mod phone_suggestion;
 pub mod pin_reorder;

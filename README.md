@@ -790,7 +790,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Tapping a custom emoji shows "This emoji is from X pack" with a View button <!-- parity:stickers-custom-emoji-toast -->
 - [x] Masks tab and mask stickers <!-- parity:stickers-masks -->
 - [x] Emoji search by keyword in all languages <!-- parity:emoji-keyword-search -->
-- [ ] Emoji set style picker <!-- parity:emoji-set-style -->
+- [ ] Emoji set style picker (blocked: needs bitmap-sprite emoji glyphs in GPUI text layout; see docs/decisions/codex-emoji-set-style.md) <!-- parity:emoji-set-style -->
 - [ ] "Replace emoji automatically" setting <!-- parity:emoji-replace-auto -->
 - [x] Quick reaction on double-click and choose the default quick reaction <!-- parity:reactions-quick-double-click -->
 - [x] Double-click-to-reply setting and reply or reaction corner buttons <!-- parity:reactions-corner-settings -->
@@ -1008,7 +1008,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Contacts with upcoming birthdays list and birthday privacy row in Settings > Privacy <!-- parity:settings-birthday-contacts -->
 - [x] Large emoji: send a lone emoji as a big glyph, with a Chat settings toggle <!-- parity:settings-large-emoji -->
 - [ ] "Pull to next channel" chat setting <!-- parity:settings-pull-next-channel -->
-- [ ] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
+- [x] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
 - [ ] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
 - [x] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
 - [ ] Profile photo from camera, emoji avatar builder and video avatar with frame choice <!-- parity:settings-photo-sources -->
