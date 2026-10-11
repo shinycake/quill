@@ -8,7 +8,6 @@
 1903 src/ui/appearance.rs
 1386 src/ui/chat_row.rs
 1681 src/ui/demo.rs
-1038 src/ui/groups_forum.rs
 1863 src/ui/history.rs
 1087 src/ui/keybindings.rs
 1374 src/ui/media_panel.rs
