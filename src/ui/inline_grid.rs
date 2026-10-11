@@ -21,6 +21,9 @@ use quill::state::{DeepLinkAction, InlineBotResolve, InlineQueryFetch};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::path::PathBuf;
 
+/// Chat id of the panel's players in the history's player table.
+const INLINE_PANEL_PLAYER_CHAT: i64 = i64::MIN;
+
 /// Row title: the result title, falling back to a capitalized kind label
 /// (`sticker` results carry no title).
 fn list_title(result: &InlineQueryResultSummary) -> String {
@@ -59,6 +62,47 @@ impl QuillApp {
             .get(&file_id.0)
             .and_then(|file| file.usable_path())
             .and_then(|path| sandboxed_display_path(path, roots))
+    }
+
+    /// The current frame of an animation result's clip: it plays muted and
+    /// looped on the history's native player, like a GIF in a chat, while
+    /// the panel shows it. The player slots live in the history's table
+    /// under a key no chat uses, so a panel that closes stops them.
+    fn inline_clip_picture(
+        &self,
+        result: &InlineQueryResultSummary,
+        roots: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) -> Option<super::native_video::VideoPicture> {
+        let (clip, media) = (result.clip?, result.media?);
+        if !super::native_video::supported()
+            || self.viewer.state.is_open()
+            || self.stories.viewer.is_open()
+        {
+            return None;
+        }
+        let prefs = &self.session()?.settings.media_prefs;
+        if !prefs.autoplay_gifs || prefs.data_saver {
+            return None;
+        }
+        let path = self.inline_image_path(clip, roots)?;
+        let tile = super::inline_video::InlineTile::media(
+            super::message_media::MediaFrameKind::Gif,
+            media.width,
+            media.height,
+            0,
+        );
+        if super::native_video::decodes_in_process() && !tile.within_inline_area() {
+            return None;
+        }
+        let frame = self.playback.inline_videos.borrow_mut().frame(
+            INLINE_PANEL_PLAYER_CHAT,
+            i64::from(clip.0),
+            tile,
+            || Some(path),
+        )?;
+        self.request_animation_tick(30, cx);
+        Some(frame.picture)
     }
 
     /// The panel for the current inline trigger. Clicks act on mouse-down
@@ -236,14 +280,16 @@ impl QuillApp {
                 ObjectFit::Cover
             };
             let (w, h) = (px(cell.width as f32), px(height as f32));
-            let content = match path {
-                Some(path) => img(path)
+            let playing = self.inline_clip_picture(result, roots, cx);
+            let content = match (playing, path) {
+                (Some(picture), _) => picture.element(w, h, fit, Corners::all(px(0.))),
+                (None, Some(path)) => img(path)
                     .w(w)
                     .h(h)
                     .object_fit(fit)
                     .with_fallback(move || div().size_full().bg(muted).into_any_element())
                     .into_any_element(),
-                None => div().size_full().bg(muted).into_any_element(),
+                (None, None) => div().size_full().bg(muted).into_any_element(),
             };
             return div()
                 .id(("inline-cell", index as u64))
@@ -357,10 +403,14 @@ impl QuillApp {
         self.composer_ui.inline_query_armed = None;
         match action {
             ButtonAction::StartBot { parameter } => {
+                // tdesktop sends the bot's start with the parameter once
+                // its chat is open and remembers where to come back to
+                // (`inline_return.rs`).
+                self.begin_inline_return(bot_id, &username, &parameter);
                 if let Some(live) = self.live.as_mut() {
                     let sent = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
                         domain: username,
-                        start_param: Some(parameter).filter(|p| !p.is_empty()),
+                        start_param: None,
                         post: None,
                         story_id: None,
                     });

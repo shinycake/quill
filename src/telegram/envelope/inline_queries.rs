@@ -45,6 +45,9 @@ pub struct InlineQueryResultSummary {
     /// The image to show, when the result has one. `file_id` 0 means the
     /// result is a media cell whose image has no file yet.
     pub media: Option<InlineMedia>,
+    /// The clip an animation result plays in the grid: Telegram's MP4 GIF
+    /// file (true `image/gif` files stay still, as in the history).
+    pub clip: Option<FileId>,
 }
 
 /// Bots slice: `inlineQueryResultsButton` (TDLib 1.8.68,
@@ -150,6 +153,7 @@ pub(crate) fn parse_inline_query_result(
     let mut title = str_field(value, "title");
     let mut description = str_field(value, "description");
     let null = Value::Null;
+    let mut clip = None;
     let media = match kind {
         "article" | "location" => thumbnail_media(value.get("thumbnail"), &mut files),
         "contact" => {
@@ -199,6 +203,7 @@ pub(crate) fn parse_inline_query_result(
             // decides the layout (file 0 draws a placeholder).
             item.map(|item| {
                 files.extend(item_files);
+                clip = Some(item.file_id).filter(|id| id.0 != 0 && item.mime_type != "image/gif");
                 InlineMedia {
                     file_id: item.thumb_file_id.unwrap_or(FileId(0)),
                     width: item.width,
@@ -233,6 +238,7 @@ pub(crate) fn parse_inline_query_result(
             description,
             query_id: 0,
             media,
+            clip,
         },
         files,
     )
@@ -351,6 +357,9 @@ mod tests {
         assert_eq!(ids, vec![Some(11), Some(0), Some(21), Some(31)]);
         assert_eq!(p.results[1].media.unwrap().width, 480);
         assert_eq!(p.animations.len(), 2);
+        // MP4 GIFs play in the grid; the clip is the animation file.
+        assert_eq!(p.results[0].clip, Some(FileId(10)));
+        assert_eq!(p.results[2].clip, None);
     }
 
     #[test]

@@ -7,7 +7,9 @@
 //! This module ports that packing as pure integer math so the panel's
 //! shape is unit-tested; `ui/inline_grid.rs` only draws it.
 
-use crate::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
+use crate::telegram::envelope::{
+    InlineKeyboardButtonType, InlineQueryResultSummary, InlineQueryResultsButton, ReplyMarkup,
+};
 
 /// Width of the results panel in pixels (tdesktop: `emojiPanWidth` 345).
 pub const PANEL_WIDTH: i32 = 380;
@@ -333,6 +335,23 @@ pub fn button_action(button: &InlineQueryResultsButton) -> Option<ButtonAction> 
     }
 }
 
+/// The query of the first switch-inline button of a bot message, which
+/// sends the user back to the chat they started from (tdesktop
+/// `CheckForSwitchInlineButton`).
+pub fn switch_inline_query(markup: &ReplyMarkup) -> Option<String> {
+    let ReplyMarkup::InlineKeyboard(keyboard) = markup else {
+        return None;
+    };
+    keyboard
+        .rows
+        .iter()
+        .flatten()
+        .find_map(|button| match &button.kind {
+            InlineKeyboardButtonType::SwitchInline { query, .. } => Some(query.clone()),
+            _ => None,
+        })
+}
+
 /// Whether to ask for the next page: tdesktop does so once the scroll
 /// position gets within one viewport of the end (`top + height >
 /// scrollTopMax`), which also fires when the content is shorter than the
@@ -546,6 +565,31 @@ mod tests {
                 parameter: String::new()
             })
         );
+    }
+
+    #[test]
+    fn switch_inline_button_is_found_in_an_inline_keyboard() {
+        use crate::telegram::envelope::{
+            InlineKeyboard, InlineKeyboardButton, InlineKeyboardButtonStyle,
+            InlineKeyboardTargetChat,
+        };
+        let button = |kind| InlineKeyboardButton {
+            text: "b".into(),
+            style: InlineKeyboardButtonStyle::default(),
+            kind,
+        };
+        let markup = ReplyMarkup::InlineKeyboard(InlineKeyboard {
+            rows: vec![
+                vec![button(InlineKeyboardButtonType::CallbackGame)],
+                vec![button(InlineKeyboardButtonType::SwitchInline {
+                    query: "cats".into(),
+                    target: InlineKeyboardTargetChat::Current,
+                })],
+            ],
+            force_reply: false,
+        });
+        assert_eq!(switch_inline_query(&markup).as_deref(), Some("cats"));
+        assert_eq!(switch_inline_query(&ReplyMarkup::RemoveKeyboard), None);
     }
 
     #[test]

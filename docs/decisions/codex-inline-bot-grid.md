@@ -18,7 +18,11 @@ Checklist item `parity:composer-inline-grid`.
   and takes it alone.
 - The `inlineQueryResultsButton` (start parameter or web app url) is a
   button above the results. It is shown for any non-empty text, also with no
-  results. A start button opens the bot's chat with the start token; a web
+  results. A start button remembers the current chat (`inlineReturnTo`), opens the
+  bot's chat and sends the start with the token at once
+  (`sendBotStartCommand`); when the bot answers with a switch-inline
+  button (or the user presses one) tdesktop goes back to the remembered
+  chat and types `@bot query` there; a web
   app button opens the bot's web view (`attachWebView().open`).
 - Paging: `Widget::onScroll` asks for the next `next_offset` page when the
   scroll position is within one viewport of the end, which also fires when
@@ -53,8 +57,11 @@ row, no pictures, no button. Thumbnails were dropped at parse time.
 - `ui/inline_grid.rs` (new): draws the panel (fixed 380px, scrolls past
   360px), the button row, grid cells and list rows; loads more on scroll and
   after each page; routes the button. A start button reuses the
-  `t.me/bot?start=` link flow (open the bot, `/start <parameter>` waits in
-  the composer). A web app button opens the bot's mini app for the open chat
+  same open-the-bot-by-username flow as links, but the start is sent
+  right away (`sendBotStartMessage` through `press_bot_start`) and
+  `ui/inline_return.rs` remembers the origin chat, then returns with
+  `@bot query` typed when a bot message carries a switch-inline button or
+  such a button is pressed. A web app button opens the bot's mini app for the open chat
   (`web_app_ui/inline_results_button.rs`).
 - `ui/inline_mode.rs`: the dropdown builds an `InlineView`, picks and Up/Down
   walk the cells in display order, the "More results" row is gone, a new
@@ -66,8 +73,11 @@ row, no pictures, no button. Thumbnails were dropped at parse time.
   the grid's display order, wrapping at the ends).
 - The mini app opens as an inline keyboard app, so the first open of a bot
   still asks for its terms.
-- No send-with-options context menu, no hold-to-preview, no GIF playback in
-  the grid (still frames only).
+- GIF cells autoplay muted and looped through the history's native video
+  player (`inline_video` slots under a reserved chat key, frame clock at
+  30 fps, only MP4 GIFs, small clips, honours autoplay and data saver).
+  Quill has no GIF hover preview or send-with-options menu elsewhere (the
+  GIF picker has neither), so the grid has none either.
 - Rows are laid out for the fixed panel width, not a measured one.
 
 ## Verification
@@ -79,5 +89,5 @@ row, no pictures, no button. Thumbnails were dropped at parse time.
   ids, button carry-over, end-of-list and the download queue.
 - A temporary demo capture (not committed) showed the grid with the button,
   highlight, and list rows with pictures, letter placeholders and scrolling.
-- Not verified: a real bot (no network use in development), the web app
+- Not verified: playback in the panel, the start and return round trip, a real bot (no network use in development), the web app
   button end to end, scroll-triggered paging against a live account.

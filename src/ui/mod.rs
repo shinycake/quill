@@ -210,6 +210,7 @@ mod history;
 mod inline_grid;
 mod inline_mode;
 mod inline_playback;
+mod inline_return;
 mod invite_admin_more_ui;
 mod invite_admin_ui;
 mod jump_buttons;

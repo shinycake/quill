@@ -181,12 +181,15 @@ impl QuillApp {
         }
         self.dismiss_cross_chat_state(chat_id, cx);
         self.restore_open_draft(window, cx);
-        // Bot `start=`: prefill `/start <param>` — never auto-send, the
-        // user confirms.
-        if let DeepLinkAction::OpenUsername {
-            start_param: Some(param),
-            ..
-        } = action
+        // The inline results button's start goes out right away (the user
+        // pressed it); a link's `start=` only prefills `/start <param>`,
+        // the user confirms.
+        let started = self.take_inline_start(chat_id, cx);
+        if !started
+            && let DeepLinkAction::OpenUsername {
+                start_param: Some(param),
+                ..
+            } = action
         {
             let prefill = format!("/start {param}");
             self.composer
