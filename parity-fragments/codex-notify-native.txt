@@ -1,0 +1,5 @@
+# codex/notify-native: inline reply typed into the OS notification, Mark as
+# read without the window, sender avatar on all three platforms
+# (docs/decisions/codex-notify-native.md).
+parity:notify-inline-actions
+parity:notify-avatar

@@ -243,6 +243,9 @@ impl QuillApp {
         self.sync_presence();
         self.drain_account_notices();
         self.apply_pending_keybindings(cx);
+        // Notification clicks from the Linux listener thread: replies and
+        // read receipts run here, chat opens wake the window.
+        self.drain_background_clicks(cx);
         let Some(live) = self.live.as_mut() else {
             return false;
         };
@@ -672,6 +675,10 @@ impl QuillApp {
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
+        self.post_debug_notification_once(cx);
+        // Inline replies and "Mark as read" need no window; what is left
+        // opens a chat.
+        self.drain_background_clicks(cx);
         let clicks: Vec<(ChatId, NotificationAction)> = self
             .notify
             .notify_clicks
@@ -840,6 +847,11 @@ fn bridge_lost(stopped: bool, budget_hit: bool, already_lost: bool) -> bool {
 }
 
 mod avatar_icon;
+mod debug_notification;
+mod inline_reply;
+#[cfg(target_os = "linux")]
+mod linux_dbus;
+mod native_extras;
 mod spawn_call_notification;
 
 #[cfg(test)]

@@ -58,8 +58,8 @@ impl QuillApp {
     /// A notification was clicked or one of its buttons pressed. "Mark as
     /// read" works in the background (the window stays where it is); "Open"
     /// and "Reply" bring the app forward with the chat selected, and Reply
-    /// also focuses the composer (GPUI notifications have no inline text
-    /// field, see `quill::notify::NotificationAction`).
+    /// also focuses the composer (a Reply whose text was typed into the
+    /// notification was already sent by `drain_background_clicks`).
     pub(in crate::ui) fn run_notification_action(
         &mut self,
         chat_id: ChatId,
@@ -68,10 +68,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if action == NotificationAction::MarkRead {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.mark_chat_as_read(chat_id);
-            }
-            self.dismiss_os_notification(chat_id, cx);
+            self.mark_read_from_notification(chat_id, cx);
             return;
         }
         // A chat with a window of its own takes the click (Telegram
@@ -89,21 +86,37 @@ impl QuillApp {
     }
 
     /// Withdraw the chat's shown notification: GPUI dismisses by tag on
-    /// macOS and Windows. Linux `notify-send --wait` processes own their
-    /// notification and cannot be recalled; the daemon expires them.
+    /// macOS and Windows; on Linux `CloseNotification` over D-Bus from a
+    /// worker thread. A `notify-send --wait` fallback process owns its
+    /// notification and cannot be recalled; the daemon expires it.
     pub(in crate::ui) fn dismiss_os_notification(
         &mut self,
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) {
-        if quill::notify::current_backend() != quill::notify::NotifyBackend::Native {
+        self.notify.reply_targets.remove(&chat_id);
+        if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
+            let tag = self.notification_tag(chat_id);
+            cx.dismiss_system_notification(&tag);
             return;
         }
-        let account = self
-            .session()
-            .map(|s| s.account.0.as_str())
-            .unwrap_or("primary");
-        cx.dismiss_system_notification(&quill::notify::notification_tag(account, chat_id));
+        self.close_linux_notification(chat_id);
+    }
+
+    /// Linux: `CloseNotification` for the chat's toast on a worker thread,
+    /// when the D-Bus notifier is up. Nothing elsewhere.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables, clippy::unused_self))]
+    fn close_linux_notification(&self, chat_id: ChatId) {
+        #[cfg(target_os = "linux")]
+        if let Some(notifier) = super::linux_dbus::notifier(&self.notify.notify_clicks) {
+            let _ = std::thread::Builder::new()
+                .name("quill-notify-close".to_string())
+                .spawn(move || {
+                    if let Err(error) = notifier.close(chat_id) {
+                        eprintln!("failed to close the desktop notification: {error}");
+                    }
+                });
+        }
     }
 
     /// Parity slice: resolve a notification sound and play it. `Default`
@@ -123,10 +136,11 @@ impl QuillApp {
         }
     }
 
-    /// Phase 8.1: show one queued notification via the platform backend on a
-    /// worker thread. A click (Linux `notify-send --wait --action`) records
-    /// the chat id; the next render focuses it. Concurrent workers are
-    /// capped; excess bursts are dropped rather than stacking threads.
+    /// Phase 8.1: show one queued notification via the platform backend.
+    /// macOS and Windows go through GPUI; Linux through D-Bus (or the
+    /// `notify-send` fallback) on a worker thread. A click records the chat
+    /// id; the next render focuses it. Concurrent workers are capped; excess
+    /// bursts are dropped rather than stacking threads.
     pub(in crate::ui) fn spawn_os_notification(
         &mut self,
         queued: QueuedNotification,
@@ -134,24 +148,61 @@ impl QuillApp {
     ) {
         // A locked app shows no sender or text (tdesktop hides the message
         // preview while the passcode lock is up).
-        let notification = if self.account.passcode.locked {
+        let locked = self.account.passcode.locked;
+        let notification = if locked {
             queued.for_locked_display()
         } else {
             queued.for_display()
         };
+        let icon = self.notification_avatar(notification.chat_id, locked);
+        self.show_os_notification(notification, icon, locked, cx);
+    }
+
+    /// The chat's circular avatar PNG for its notification: only an
+    /// already-downloaded small photo, and never while locked (the locked
+    /// toast hides the sender).
+    fn notification_avatar(&self, chat_id: ChatId, locked: bool) -> Option<PathBuf> {
+        if locked {
+            return None;
+        }
+        self.session()
+            .and_then(|s| s.chat_photo_path(chat_id))
+            .map(PathBuf::from)
+            .and_then(|path| super::avatar_icon::circular_icon_for(&path))
+    }
+
+    /// Show one notification with its avatar through the platform backend
+    /// (see [`Self::spawn_os_notification`]).
+    pub(in crate::ui) fn show_os_notification(
+        &mut self,
+        notification: quill::notify::OsNotification,
+        icon: Option<PathBuf>,
+        locked: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let chat_id = notification.chat_id;
+        // An inline reply answers the newest notified message.
+        match notification.message_id {
+            Some(message_id) => self.notify.reply_targets.insert(chat_id, message_id),
+            None => self.notify.reply_targets.remove(&chat_id),
+        };
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
             // macOS (UNUserNotificationCenter) and Windows (WinRT toast): the
-            // click returns through `on_system_notification_response`.
-            let account = self
-                .session()
-                .map(|s| s.account.0.as_str())
-                .unwrap_or("primary");
+            // click returns through `on_system_notification_response`. The
+            // picture and the reply field ride beside the GPUI notification;
+            // a locked app offers no buttons, so no field either.
+            let tag = self.notification_tag(chat_id);
+            super::native_extras::register(
+                &tag,
+                icon.as_deref(),
+                (!locked).then_some(NotificationAction::Reply.id()),
+            );
             cx.show_system_notification(SystemNotification {
-                tag: quill::notify::notification_tag(account, notification.chat_id).into(),
+                tag: tag.into(),
                 title: notification.title.into(),
                 body: notification.body.into(),
                 // Locked: no buttons, a reply must not bypass the passcode.
-                actions: quill::notify::action_buttons(self.account.passcode.locked)
+                actions: quill::notify::action_buttons(locked)
                     .into_iter()
                     .map(|(id, label)| SystemNotificationAction {
                         id: id.into(),
@@ -161,16 +212,6 @@ impl QuillApp {
             });
             return;
         }
-        // Sender avatar: only an already-downloaded small photo, and never
-        // while locked (the locked toast hides the sender).
-        let icon = if self.account.passcode.locked {
-            None
-        } else {
-            self.session()
-                .and_then(|s| s.chat_photo_path(notification.chat_id))
-                .map(std::path::PathBuf::from)
-                .and_then(|path| super::avatar_icon::circular_icon_for(&path))
-        };
         let Some(command) =
             quill::notify::build_notification_command_with_icon(&notification, icon.as_deref())
         else {
@@ -186,12 +227,29 @@ impl QuillApp {
         let spawn = std::thread::Builder::new()
             .name("quill-notify".to_string())
             .spawn(move || {
+                // D-Bus first: `Notify` returns at once and the listener
+                // thread reports the click. Without a session bus,
+                // `notify-send --wait` holds the thread until the click.
+                #[cfg(target_os = "linux")]
+                if let Some(notifier) = super::linux_dbus::notifier(&clicks) {
+                    if let Err(error) = notifier.show(
+                        chat_id,
+                        &notification.title,
+                        &notification.body,
+                        icon.as_deref(),
+                        locked,
+                    ) {
+                        eprintln!("failed to show the desktop notification: {error}");
+                    }
+                    inflight.fetch_sub(1, Ordering::SeqCst);
+                    return;
+                }
                 let outcome = quill::notify::run_notification_command(&command);
                 inflight.fetch_sub(1, Ordering::SeqCst);
                 if let Some(action) = outcome.action
                     && let Ok(mut guard) = clicks.lock()
                 {
-                    guard.push((notification.chat_id, action));
+                    guard.push((chat_id, action));
                 }
             });
         if spawn.is_err() {

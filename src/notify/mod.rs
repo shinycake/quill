@@ -6,22 +6,26 @@
 //! backend built here.
 //!
 //! Backends:
-//! - Linux: `notify-send` (libnotify), with `--wait --action=default=Open`
-//!   so a click can focus the chat. Action support varies by notification
-//!   daemon (GNOME/KDE honor it; others may ignore clicks) — the click path
-//!   is best-effort, documented in DECISIONS.md.
+//! - Linux: the `org.freedesktop.Notifications` D-Bus service ([`dbus`] has
+//!   the wire shapes, `ui::notifications::linux_dbus` the bus traffic), with
+//!   `inline-reply` where the daemon advertises it. Without a session bus,
+//!   `notify-send` (libnotify) with `--wait --action=default=Open` so a click
+//!   can still focus the chat.
 //! - macOS / Windows: native GPUI system notifications (dispatched by the
 //!   UI): `UNUserNotificationCenter` on macOS, WinRT toasts (AUMID
 //!   registered by GPUI under HKCU) on Windows. A click on the body comes
 //!   back through `App::on_system_notification_response` carrying the tag
 //!   built by [`notification_tag`], which [`parse_notification_tag`] maps
-//!   back to the chat.
+//!   back to the chat. The sender picture and the inline reply field ride
+//!   beside the GPUI notification through the Quill patch in
+//!   `third_party/gpui-pre-{macos,windows}` (`notification_extras`).
 //!
 //! Command arguments are passed to the process without a shell, so message
 //! text can never inject shell syntax. The reducer never spawns processes;
 //! dispatch runs on UI-thread-spawned worker threads.
 
 pub mod avatar;
+pub mod dbus;
 
 use crate::ids::{ChatId, MessageId};
 use crate::telegram::envelope::{ParsedMessage, ReactionNotificationSource, effective_content};
@@ -34,6 +38,10 @@ pub const GENERIC_BODY: &str = "New message";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OsNotification {
     pub chat_id: ChatId,
+    /// The message it announces, when it announces one: an inline reply
+    /// typed into the notification answers it in a group
+    /// ([`plan_inline_reply`]). `None` for reaction notifications.
+    pub message_id: Option<MessageId>,
     pub title: String,
     pub body: String,
 }
@@ -44,6 +52,8 @@ pub struct OsNotification {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueuedNotification {
     pub chat_id: ChatId,
+    /// The newest message of the burst (see [`OsNotification::message_id`]).
+    pub message_id: Option<MessageId>,
     pub title: String,
     pub body: String,
     pub count: u32,
@@ -63,6 +73,7 @@ impl QueuedNotification {
     pub fn for_locked_display(&self) -> OsNotification {
         OsNotification {
             chat_id: self.chat_id,
+            message_id: self.message_id,
             title: "Quill".to_string(),
             body: if self.count > 1 {
                 format!("{} new messages", self.count)
@@ -80,6 +91,7 @@ impl QueuedNotification {
         };
         OsNotification {
             chat_id: self.chat_id,
+            message_id: self.message_id,
             title: self.title.clone(),
             body,
         }
@@ -102,9 +114,14 @@ pub fn coalesce_notification_with_sound(
 ) {
     if let Some(existing) = queue.iter_mut().find(|q| q.chat_id == notification.chat_id) {
         existing.count += 1;
+        // A reply from the notification answers the newest message.
+        if notification.message_id.is_some() {
+            existing.message_id = notification.message_id;
+        }
     } else {
         queue.push(QueuedNotification {
             chat_id: notification.chat_id,
+            message_id: notification.message_id,
             title: notification.title,
             body: notification.body,
             count: 1,
@@ -224,6 +241,7 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
     };
     Some(OsNotification {
         chat_id,
+        message_id: Some(message.id),
         title: title.to_string(),
         body,
     })
@@ -295,15 +313,17 @@ pub fn decide_notification_sound(input: &SoundInput) -> Option<NotificationSound
 /// read" on the platforms that support notification actions
 /// (`Window::Notifications::Manager`, `platform/*/notifications_manager_*`).
 ///
-/// GPUI's `SystemNotification` offers action buttons on macOS, Windows and
-/// Linux but no inline text field, so "Reply" brings the app forward with
-/// the chat open and the composer focused (the documented fallback for
-/// inline text input).
+/// "Reply" is a text field inside the notification where the platform has
+/// one (macOS `UNTextInputNotificationAction`, the Windows toast `<input>`,
+/// the Linux `inline-reply` action); the typed text is sent with
+/// [`plan_inline_reply`]. Where there is none, or when nothing was typed,
+/// "Reply" brings the app forward with the chat open and the composer
+/// focused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationAction {
     /// The notification body itself: open the chat.
     Open,
-    /// Open the chat and focus the composer.
+    /// Send the typed text, or open the chat and focus the composer.
     Reply,
     /// Mark the chat as read without opening it.
     MarkRead,
@@ -356,6 +376,47 @@ pub fn action_buttons(locked: bool) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// Grey text in the empty inline reply field.
+pub const INLINE_REPLY_PLACEHOLDER: &str = "Type a reply";
+
+/// Label of the button that sends the inline reply field.
+pub const INLINE_REPLY_SEND: &str = "Send";
+
+/// A reply typed into a notification, ready for the send path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineReply {
+    /// The text, trimmed.
+    pub text: String,
+    /// The message to reply to: the notified message in a group or channel.
+    /// In a private chat the text is sent on its own, as Telegram Desktop
+    /// does (`Manager::notificationReplied`: `!history->peer->isUser()`).
+    pub reply_to: Option<MessageId>,
+}
+
+/// What to send for the text typed into a notification's reply field.
+/// `None` means nothing: blank text, or the app is locked by the passcode
+/// (the field is not offered while locked, but a notification posted before
+/// the lock may still be answered; its text must not bypass the lock). The
+/// caller then opens the chat instead.
+pub fn plan_inline_reply(
+    text: &str,
+    locked: bool,
+    private_chat: bool,
+    message_id: Option<MessageId>,
+) -> Option<InlineReply> {
+    if locked {
+        return None;
+    }
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(InlineReply {
+        text: text.to_string(),
+        reply_to: if private_chat { None } else { message_id },
+    })
+}
+
 /// Pure inputs for a reaction notification ("X reacted to your message").
 pub struct ReactionNotifyInput<'a> {
     pub chat_id: ChatId,
@@ -393,6 +454,7 @@ pub fn decide_reaction_notify(input: &ReactionNotifyInput) -> Option<OsNotificat
     };
     Some(OsNotification {
         chat_id: input.chat_id,
+        message_id: None,
         title: input.chat_title.to_string(),
         body,
     })

@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.8 (Apache-2.0):
+// adds the notification_extras module. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 #![cfg(target_os = "macos")]
 //! macOS platform implementation for GPUI.
 //!
@@ -8,6 +10,7 @@ mod display;
 mod display_link;
 mod events;
 mod keyboard;
+pub mod notification_extras;
 mod pasteboard;
 mod system_notifications;
 
