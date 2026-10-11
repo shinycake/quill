@@ -288,3 +288,65 @@ fn driver_folder_share_requests_and_optimistic_delete() {
     assert_eq!(v["chat_ids"], serde_json::json!([7, 8]));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn select_chat_at_requests_history_around_the_message_and_highlights_it() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    driver.select_chat(ChatId(7)).unwrap();
+    let around = driver
+        .select_chat_at(ChatId(8), Some(MessageId(40)))
+        .unwrap()
+        .expect("history around the target");
+    assert_eq!(driver.session.open_chat, Some(ChatId(8)));
+    let sent = recorder.snapshot();
+    let history: Vec<_> = sent
+        .iter()
+        .filter(|j| j.contains("\"@type\":\"getChatHistory\"") && j.contains("\"chat_id\":8"))
+        .collect();
+    // The first (and only) history request of the chat is the window around
+    // the message, not the newest page.
+    assert_eq!(history.len(), 1, "{history:?}");
+    assert!(history[0].contains("\"from_message_id\":40"));
+    assert_eq!(
+        driver.session.search.chat_search.jump,
+        crate::state::ChatSearchJump::Loading {
+            message_id: MessageId(40)
+        }
+    );
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":40,"chat_id":8,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"target","entities":[]}}}}}}]}}"#,
+                    around.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        driver.session.search.chat_search.jump,
+        crate::state::ChatSearchJump::Ready {
+            message_id: MessageId(40)
+        }
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

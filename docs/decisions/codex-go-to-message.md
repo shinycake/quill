@@ -24,8 +24,20 @@ qualifies.)
 - Nothing is added to search, Saved sublists, shared media or threads, since
   tdesktop does not offer it there.
 
+## Opening at the message
+
+From the preview the chat opens directly at the message: `ConnectDriver::select_chat_at(chat, Some(message))`
+skips the newest-page load and runs the existing jump pipeline
+(`getChatHistory` around the message, then highlight). The UI passes the
+target through `chat_list.open_at`, taken by `select_chat_with`. A target in
+the already open chat is a plain jump.
+
 ## Verified
 
-Unit tests for the contexts and the jump target; gate. The cross-chat jump
-right after opening a chat has not been exercised against live TDLib: the
-history window may be replaced by the initial load.
+- Unit tests for the contexts and the jump target.
+- Driver test: `select_chat_at` sends exactly one history request, around the
+  message, and the jump becomes Ready (highlight) when it arrives.
+- GPUI UI test (`--features demo-capture`, `message_actions/go_to_tests.rs`):
+  right-click on a preview row opens the menu, and clicking its item is not
+  eaten by the overlay's mouse-up close; the chat opens and the preview closes.
+- Gate. Not run against live TDLib.

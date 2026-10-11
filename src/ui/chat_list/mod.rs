@@ -214,12 +214,13 @@ impl QuillApp {
                 session.stickers.stickers.close();
             }
         }
+        let open_at = self.chat_list.open_at.take();
         if self.live.is_some() {
             let driver = &mut self.live.as_mut().expect("live").driver;
             let result = if thread_switch {
                 driver.switch_to_thread_chat()
             } else {
-                driver.select_chat(chat_id)
+                driver.select_chat_at(chat_id, open_at)
             };
             self.connection.status_note = match result {
                 Ok(_) => "".into(),
@@ -227,6 +228,9 @@ impl QuillApp {
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
+            if let Some(message_id) = open_at {
+                let _ = session.begin_chat_search_jump(message_id);
+            }
         }
         self.restore_open_draft(window, cx);
         if carried_reply.is_some() {

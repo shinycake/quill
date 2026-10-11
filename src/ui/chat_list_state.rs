@@ -38,6 +38,9 @@ pub(crate) struct ChatListUi {
     /// Slice CL: an in-progress long press on a chat-list row — the
     /// row's chat id + press start, for the peek preview.
     pub(super) preview_press: Option<(ChatId, Instant)>,
+    /// The message the next chat open lands on ("Go To Message" from the
+    /// peek preview); taken by `select_chat_with`.
+    pub(super) open_at: Option<quill::ids::MessageId>,
     /// Slice CL3: multi-select mode — checked chat ids. Non-empty while
     /// selecting; rows toggle the check instead of opening the chat and
     /// the select bar offers the bulk actions.
@@ -91,6 +94,7 @@ impl ChatListUi {
             pin_drag_anchor: None,
             preview: None,
             preview_press: None,
+            open_at: None,
             selected: HashSet::new(),
             filter: ChatListFilter::All,
             archive_hint_open: false,

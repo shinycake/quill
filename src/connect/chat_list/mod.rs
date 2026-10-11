@@ -21,6 +21,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Returns `None` if history is already complete or a history request
     /// is already in flight.
     pub fn select_chat(&mut self, chat_id: ChatId) -> Result<Option<RequestId>, ConnectSendError> {
+        self.select_chat_at(chat_id, None)
+    }
+
+    /// `select_chat`, landing on `target` instead of the bottom: the first
+    /// history load is the window around that message, which then
+    /// highlights (the "Go To Message" of a peeked chat). A target in the
+    /// already open chat is a plain jump.
+    pub fn select_chat_at(
+        &mut self,
+        chat_id: ChatId,
+        target: Option<MessageId>,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -31,6 +43,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             self.fetch_open_chat_extras(chat_id)?;
             self.maybe_download_open_chat_media()?;
+            if let Some(target) = target {
+                return self.jump_to_chat_search_message(target);
+            }
             return self.fetch_history();
         }
         self.cancel_outgoing_typing()?;
@@ -47,7 +62,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.fetch_open_chat_extras(chat_id)?;
         self.fetch_pinned_messages(chat_id)?;
-        self.fetch_history()
+        match target {
+            Some(target) => self.jump_to_chat_search_message(target),
+            None => self.fetch_history(),
+        }
     }
 
     /// What an opened chat needs besides its history: membership, bot

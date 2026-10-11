@@ -100,6 +100,7 @@ impl QuillApp {
                 let message_id = MessageId(id as i64);
                 let row = div()
                     .id(("chat-preview-row", id))
+                    .debug_selector(|| "chat-preview-row".into())
                     .flex()
                     .flex_col()
                     .child(
@@ -908,10 +909,24 @@ impl QuillApp {
     ) {
         self.close_chat_preview(cx);
         let open = self.session().and_then(|session| session.open_chat);
-        if let GoToTarget::OtherChat { chat_id, .. } = go_to_target(open, chat_id, message_id) {
-            self.select_listed_chat(chat_id, window, cx);
+        match go_to_target(open, chat_id, message_id) {
+            GoToTarget::OtherChat {
+                chat_id,
+                message_id,
+            } => {
+                // The chat opens at the message: its first history load is
+                // the window around it.
+                self.chat_list.open_at = Some(message_id);
+                self.select_listed_chat(chat_id, window, cx);
+                self.chat_list.open_at = None;
+                if let Some(live) = self.live.as_ref() {
+                    self.connection.status_note = chat_search_jump_note(&live.driver.session);
+                } else if let Some(session) = self.demo_session.as_ref() {
+                    self.connection.status_note = chat_search_jump_note(session);
+                }
+            }
+            GoToTarget::SameChat { message_id } => self.jump_to_pinned_message(message_id, cx),
         }
-        self.jump_to_pinned_message(message_id, cx);
     }
 
     pub(in crate::ui) fn jump_to_pinned_message(

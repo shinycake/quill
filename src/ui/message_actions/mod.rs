@@ -127,5 +127,7 @@ fn confirm_hide_pinned(
 }
 
 mod close_chat_preview;
+#[cfg(all(test, feature = "demo-capture"))]
+mod go_to_tests;
 mod message_menu_overlay;
 mod unpin_from_banner;
