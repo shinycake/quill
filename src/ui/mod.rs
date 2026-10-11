@@ -19,6 +19,7 @@ mod appearance_power;
 mod auth_recovery;
 mod auth_state;
 mod autoscroll_ui;
+mod background_accounts;
 mod bidi_line;
 mod bot_about;
 mod bottom_action;

@@ -96,6 +96,9 @@ impl super::app::QuillApp {
                 this.reload_account_keybindings(cx);
                 if this.live.is_some() {
                     this.spawn_poll_loop(cx);
+                    // `parity:notify-all-accounts`: the other accounts
+                    // connect too, after the one on screen.
+                    this.ensure_background_accounts(cx);
                 }
                 cx.notify();
             });

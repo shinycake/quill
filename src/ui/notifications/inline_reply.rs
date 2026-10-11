@@ -43,14 +43,17 @@ impl QuillApp {
                 return;
             };
             let _ = notification_app.update(cx, |this, cx| {
+                let action =
+                    NotificationAction::from_id(response.action_id.as_ref().map(|id| id.as_ref()));
+                // Another account's notification (`parity:notify-all-accounts`):
+                // read it there, or switch to it and open the chat.
                 if this
                     .session()
                     .is_none_or(|s| account != format!("account:{}", s.account.0))
                 {
+                    this.queue_account_click(account, chat_id, action, cx);
                     return;
                 }
-                let action =
-                    NotificationAction::from_id(response.action_id.as_ref().map(|id| id.as_ref()));
                 if let Ok(mut clicks) = this.notify.notify_clicks.lock() {
                     clicks.push((chat_id, action));
                 }

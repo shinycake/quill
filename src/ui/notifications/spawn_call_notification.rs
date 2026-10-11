@@ -1,6 +1,7 @@
 //! Methods moved out of `notifications.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::ids::AccountKey;
 
 impl QuillApp {
     pub(super) fn spawn_call_notification(
@@ -94,25 +95,43 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) {
-        self.notify.reply_targets.remove(&chat_id);
+        self.dismiss_notification_as(None, chat_id, cx);
+    }
+
+    /// [`Self::dismiss_os_notification`] for the account on screen
+    /// (`account` `None`) or a background account.
+    pub(in crate::ui) fn dismiss_notification_as(
+        &mut self,
+        account: Option<&AccountKey>,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) {
+        if account.is_none() {
+            self.notify.reply_targets.remove(&chat_id);
+        }
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
-            let tag = self.notification_tag(chat_id);
+            let tag = match account {
+                Some(key) => quill::notify::notification_tag(&key.0, chat_id),
+                None => self.notification_tag(chat_id),
+            };
             cx.dismiss_system_notification(&tag);
             return;
         }
-        self.close_linux_notification(chat_id);
+        self.close_linux_notification(account.cloned(), chat_id);
     }
 
     /// Linux: `CloseNotification` for the chat's toast on a worker thread,
     /// when the D-Bus notifier is up. Nothing elsewhere.
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables, clippy::unused_self))]
-    fn close_linux_notification(&self, chat_id: ChatId) {
+    fn close_linux_notification(&self, account: Option<AccountKey>, chat_id: ChatId) {
         #[cfg(target_os = "linux")]
-        if let Some(notifier) = super::linux_dbus::notifier(&self.notify.notify_clicks) {
+        if let Some(notifier) =
+            super::linux_dbus::notifier(&self.notify.notify_clicks, &self.background.clicks)
+        {
             let _ = std::thread::Builder::new()
                 .name("quill-notify-close".to_string())
                 .spawn(move || {
-                    if let Err(error) = notifier.close(chat_id) {
+                    if let Err(error) = notifier.close(&(account, chat_id)) {
                         eprintln!("failed to close the desktop notification: {error}");
                     }
                 });
@@ -180,22 +199,44 @@ impl QuillApp {
         locked: bool,
         cx: &mut Context<Self>,
     ) {
+        self.show_notification_as(None, notification, icon, locked, cx);
+    }
+
+    /// [`Self::show_os_notification`] for the account on screen (`account`
+    /// `None`) or a background account. A background account's
+    /// notification has no reply field (a reply needs that account on
+    /// screen: Reply switches to it and focuses the composer), and its
+    /// clicks go to `background.clicks`.
+    pub(in crate::ui) fn show_notification_as(
+        &mut self,
+        account: Option<&AccountKey>,
+        notification: quill::notify::OsNotification,
+        icon: Option<PathBuf>,
+        locked: bool,
+        cx: &mut Context<Self>,
+    ) {
         let chat_id = notification.chat_id;
+        let reply_field = account.is_none() && !locked;
         // An inline reply answers the newest notified message.
-        match notification.message_id {
-            Some(message_id) => self.notify.reply_targets.insert(chat_id, message_id),
-            None => self.notify.reply_targets.remove(&chat_id),
-        };
+        if account.is_none() {
+            match notification.message_id {
+                Some(message_id) => self.notify.reply_targets.insert(chat_id, message_id),
+                None => self.notify.reply_targets.remove(&chat_id),
+            };
+        }
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
             // macOS (UNUserNotificationCenter) and Windows (WinRT toast): the
             // click returns through `on_system_notification_response`. The
             // picture and the reply field ride beside the GPUI notification;
             // a locked app offers no buttons, so no field either.
-            let tag = self.notification_tag(chat_id);
+            let tag = match account {
+                Some(key) => quill::notify::notification_tag(&key.0, chat_id),
+                None => self.notification_tag(chat_id),
+            };
             super::native_extras::register(
                 &tag,
                 icon.as_deref(),
-                (!locked).then_some(NotificationAction::Reply.id()),
+                reply_field.then_some(NotificationAction::Reply.id()),
             );
             cx.show_system_notification(SystemNotification {
                 tag: tag.into(),
@@ -223,6 +264,8 @@ impl QuillApp {
             return;
         }
         let clicks = self.notify.notify_clicks.clone();
+        let account_clicks = self.background.clicks.clone();
+        let account = account.cloned();
         let inflight = self.notify.notify_inflight.clone();
         let spawn = std::thread::Builder::new()
             .name("quill-notify".to_string())
@@ -231,13 +274,14 @@ impl QuillApp {
                 // thread reports the click. Without a session bus,
                 // `notify-send --wait` holds the thread until the click.
                 #[cfg(target_os = "linux")]
-                if let Some(notifier) = super::linux_dbus::notifier(&clicks) {
+                if let Some(notifier) = super::linux_dbus::notifier(&clicks, &account_clicks) {
                     if let Err(error) = notifier.show(
-                        chat_id,
+                        (account, chat_id),
                         &notification.title,
                         &notification.body,
                         icon.as_deref(),
                         locked,
+                        reply_field,
                     ) {
                         eprintln!("failed to show the desktop notification: {error}");
                     }
@@ -246,10 +290,20 @@ impl QuillApp {
                 }
                 let outcome = quill::notify::run_notification_command(&command);
                 inflight.fetch_sub(1, Ordering::SeqCst);
-                if let Some(action) = outcome.action
-                    && let Ok(mut guard) = clicks.lock()
-                {
-                    guard.push((chat_id, action));
+                let Some(action) = outcome.action else {
+                    return;
+                };
+                match account {
+                    Some(account) => {
+                        if let Ok(mut guard) = account_clicks.lock() {
+                            guard.push((account, chat_id, action));
+                        }
+                    }
+                    None => {
+                        if let Ok(mut guard) = clicks.lock() {
+                            guard.push((chat_id, action));
+                        }
+                    }
                 }
             });
         if spawn.is_err() {

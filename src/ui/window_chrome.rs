@@ -34,7 +34,9 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return window_title(None, 0, None);
         };
-        let total = quill::tray::badge_count(session, &session.settings.badge_prefs);
+        // Every account counts, like tdesktop's `Core::App().unreadBadge()`.
+        let total = quill::tray::badge_count(session, &session.settings.badge_prefs)
+            .saturating_add(quill::notify_accounts::other_accounts_unread().count);
         let open = session.open_chat.and_then(|id| session.chats.get(&id.0));
         let topic = open.and_then(|chat| session.open_topic_info(chat.id));
         let name = open.map(|chat| {

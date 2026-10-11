@@ -665,6 +665,7 @@ impl QuillApp {
             if let Some(mut live) = self.live.take() {
                 live.shutdown(quill::connect::CLIENT_CLOSE_TIMEOUT);
             }
+            self.stop_background_accounts();
             let store = os_secret_store();
             for account in &accounts {
                 let _ = store.delete(account);

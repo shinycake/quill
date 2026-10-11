@@ -301,6 +301,7 @@ impl QuillApp {
             demo_ui: super::demo_state::DemoUi::new(demo_sink),
             calls: super::calls_state::CallUi::new(audio_output.clone()),
             notify: super::notify_state::NotifyUi::new(&audio_output),
+            background: super::background_accounts::BackgroundAccounts::new(),
             message_ui: super::message_state::MessageUi::new(window, cx),
             dialogs: super::dialogs_state::DialogUi::new(window, cx),
             admin: super::admin_state::AdminUi::new(),

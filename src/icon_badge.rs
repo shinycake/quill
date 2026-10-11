@@ -14,7 +14,8 @@
 //!   button with the rendered count pill (`tray::render_overlay_icon`).
 //!   The window handle is registered once by `set_native_window`.
 //!
-//! The count is [`tray::badge_count`] — the same `BadgePrefs`-governed
+//! The count is [`crate::tray::badge_count`] summed over every account
+//! (`notify_accounts::total_unread`) — the same `BadgePrefs`-governed
 //! total as the system tray badge (TDLib's server-side totals; muted and
 //! archived chats included by default, like Telegram Desktop). There is deliberately no second
 //! unread definition here.
@@ -29,7 +30,6 @@
 //! [`APP_URI`] names the `quill.desktop` id a future install will satisfy.
 
 use crate::state::Session;
-use crate::tray;
 
 /// App URI carried by the LauncherEntry signal: `application://` +
 /// the desktop-file id docks match against.
@@ -46,7 +46,7 @@ thread_local! {
 /// the badge) when nothing is unread.
 #[cfg(any(all(target_os = "macos", feature = "ui"), test))]
 fn dock_badge_label(unread: u32) -> Option<String> {
-    (unread > 0).then(|| tray::badge_text(unread))
+    (unread > 0).then(|| crate::tray::badge_text(unread))
 }
 
 /// Accessible description of the Windows overlay icon.
@@ -54,7 +54,7 @@ fn dock_badge_label(unread: u32) -> Option<String> {
 fn overlay_description(unread: u32) -> String {
     match unread {
         0 => String::new(),
-        n => format!("{} unread", tray::badge_text(n)),
+        n => format!("{} unread", crate::tray::badge_text(n)),
     }
 }
 
@@ -65,12 +65,11 @@ fn trace(line: &str) {
     }
 }
 
-/// Sync the taskbar/dock app-icon badge with the session's unread count.
-/// Call from the UI thread (the 1s tray timer); emits only on change.
+/// Sync the taskbar/dock app-icon badge with the unread count of every
+/// account (tdesktop `Domain::unreadBadge`). Call from the UI thread (the 1s
+/// tray timer); emits only on change.
 pub fn sync_icon_badge(session: Option<&Session>) {
-    let unread = session
-        .map(|s| tray::badge_count(s, &s.settings.badge_prefs))
-        .unwrap_or(0);
+    let unread = crate::notify_accounts::total_unread(session).count;
     LAST_SENT.with(|last| {
         if last.get() == Some(unread) {
             return;
@@ -264,7 +263,7 @@ mod windows_overlay {
                 }
                 .is_ok();
             }
-            let (rgba, w, h) = tray::render_overlay_icon(unread);
+            let (rgba, w, h) = crate::tray::render_overlay_icon(unread);
             let Ok(icon) = icon_from_rgba(&rgba, w, h) else {
                 return false;
             };

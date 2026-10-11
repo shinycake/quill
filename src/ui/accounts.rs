@@ -1,11 +1,12 @@
 //! Slice parity:auth-multi-account (UI half): the Accounts dialog — list
 //! accounts, switch between them, add a new one, remove a non-active one.
-//! The registry backend lives in `quill::settings` (slice, PR #214); the
-//! switch flow is the documented one: `LiveConnect::shutdown` →
-//! `set_active_account` → `start_live_connect_for_account`, after which the
-//! existing auth UI renders whatever TDLib reports for the new account
-//! (fresh account → the phone/QR/code flow; returning account → session
-//! restore). Hosted in a kit `Dialog` via `window.open_dialog` (the kit
+//! The registry backend lives in `quill::settings` (slice, PR #214). A
+//! switch hands the outgoing client to the background
+//! (`background_accounts`, `parity:notify-all-accounts`), persists the new
+//! active account, and brings that account's background client forward or,
+//! when none runs, starts one; the existing auth UI renders whatever TDLib
+//! reports for it (fresh account → the phone/QR/code flow; returning
+//! account → session restore). Hosted in a kit `Dialog` via `window.open_dialog` (the kit
 //! Phase 2 redo pattern). Removing the active account is not offered in
 //! the UI — switch away from it first.
 
@@ -17,7 +18,6 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::connect::CLIENT_CLOSE_TIMEOUT;
 use quill::ids::AccountKey;
 use quill::platform::live_secret_store;
 use quill::settings::{
@@ -158,14 +158,18 @@ impl QuillApp {
             .sticker_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.stop_sticker_playback();
-        if let Some(mut live) = self.live.take() {
-            live.shutdown(CLIENT_CLOSE_TIMEOUT);
-        }
+        // `parity:notify-all-accounts`: the outgoing account stays connected
+        // in the background, and an account already running there comes
+        // forward as it is instead of restarting.
+        self.retire_live_to_background();
         if let Err(e) = set_active_account(&root, key) {
             self.fail_account_switch(format!("Could not switch account: {e}"), window, cx);
             return;
         }
-        self.start_connection(cx);
+        match self.take_background_live(key) {
+            Some(live) => self.adopt_live(live, cx),
+            None => self.start_connection(cx),
+        }
         cx.notify();
     }
 
@@ -227,6 +231,9 @@ impl QuillApp {
             return;
         };
         self.account.accounts.remove_confirm = None;
+        // Close its background client first: TDLib must not be writing
+        // while the account's folder is deleted.
+        self.stop_background_account(key);
         match remove_account(&root, key) {
             Ok(()) => {
                 // Drop the account's keychain item too: otherwise the
@@ -291,6 +298,11 @@ impl QuillApp {
                 )
                 .into_any_element()
         };
+        // Another account's unread counter or status
+        // (`parity:notify-all-accounts`).
+        let badge = (!is_active)
+            .then(|| self.background_account_badge(&record.key, cx))
+            .flatten();
         row = row.child(
             div()
                 .flex()
@@ -299,10 +311,18 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     div()
-                        .font_semibold()
-                        .text_sm()
-                        .truncate()
-                        .child(super::bidi_line::one_line_plain(name.clone())),
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .font_semibold()
+                                .text_sm()
+                                .truncate()
+                                .child(super::bidi_line::one_line_plain(name.clone())),
+                        )
+                        .children(badge),
                 )
                 .child(actions),
         );
@@ -393,7 +413,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Switching restarts the connection under the other account."),
+                        .child("Accounts you are not using stay connected and keep their unread counts."),
                 )
                 .child(div().font_semibold().text_sm().child("Add another account"))
                 .child(

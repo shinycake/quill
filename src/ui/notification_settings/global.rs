@@ -118,6 +118,8 @@ impl QuillApp {
             // Slice parity:chatlist-badge-settings: app badge counter
             // preferences (include muted/archived, messages vs chats).
             body = body.child(this.badge_counter_section(cx));
+            // tdesktop "Show notifications from: All accounts" (2+ accounts).
+            body = body.children(this.notify_from_all_section(cx));
             // Parity slice: in-app notification sounds (tdesktop "Play
             // sounds") — the client-side toggle gating
             // `Session::notification_sound_for`.

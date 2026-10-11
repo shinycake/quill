@@ -50,6 +50,10 @@ struct AccountRegistry {
     accounts: Vec<AccountRecord>,
     #[serde(default)]
     active: Option<AccountKey>,
+    /// tdesktop `notifyFromAll` (Settings > Notifications > "Show
+    /// notifications from: All accounts"), app-wide like tdesktop's.
+    #[serde(default = "default_true")]
+    notify_from_all: bool,
 }
 
 impl Default for AccountRegistry {
@@ -60,6 +64,7 @@ impl Default for AccountRegistry {
                 display_name: "Primary".to_string(),
             }],
             active: Some(AccountKey::primary()),
+            notify_from_all: true,
         }
     }
 }
@@ -151,6 +156,17 @@ pub fn set_active_account(app_root: &Path, key: &AccountKey) -> std::io::Result<
         ));
     }
     registry.active = Some(key.clone());
+    save_registry(app_root, &registry)
+}
+
+/// Whether accounts that are not on screen show notifications (default on).
+pub fn notify_from_all(app_root: &Path) -> bool {
+    load_registry(app_root).notify_from_all
+}
+
+pub fn set_notify_from_all(app_root: &Path, on: bool) -> std::io::Result<()> {
+    let mut registry = load_registry(app_root);
+    registry.notify_from_all = on;
     save_registry(app_root, &registry)
 }
 
@@ -492,5 +508,25 @@ mod account_registry_tests {
         assert!(p2.tdlib_database.ends_with("accounts/account-1/tdlib"));
         assert_ne!(p1.tdlib_database, p2.tdlib_database);
         assert_ne!(p1.tdlib_files, p2.tdlib_files);
+    }
+
+    #[test]
+    fn notify_from_all_defaults_on_and_persists_with_the_accounts() {
+        let root = tmp_root("notify-all");
+        assert!(notify_from_all(&root), "tdesktop default: on");
+        let k1 = add_account(&root, "Work").unwrap();
+        set_notify_from_all(&root, false).unwrap();
+        assert!(!notify_from_all(&root));
+        // Other registry edits keep the choice.
+        set_active_account(&root, &k1).unwrap();
+        assert!(!notify_from_all(&root));
+        // A registry written before the setting existed reads as on.
+        std::fs::write(
+            root.join("accounts.json"),
+            r#"{"accounts":[{"key":"primary","display_name":"Primary"}],"active":"primary"}"#,
+        )
+        .unwrap();
+        assert!(notify_from_all(&root));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

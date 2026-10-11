@@ -60,6 +60,8 @@ pub struct QuillApp {
     pub(super) calls: super::calls_state::CallUi,
     /// Notifications: OS clicks, sounds, mute and auto-delete menus, defaults (`ui/notify_state.rs`).
     pub(super) notify: super::notify_state::NotifyUi,
+    /// Accounts that are not on screen, still connected (`ui/background_accounts`).
+    pub(super) background: super::background_accounts::BackgroundAccounts,
     /// Accounts, account lifecycle, local passcode, freeze and age checks (`ui/account_state.rs`).
     pub(super) account: super::account_state::AccountUi,
     /// Spell checking: the engine, results and the dictionaries box (`ui/spell_state.rs`).
