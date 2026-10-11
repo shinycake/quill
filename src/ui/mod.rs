@@ -234,6 +234,7 @@ mod profile_modal;
 mod profile_panels;
 mod proxy;
 mod proxy_qr;
+mod quick_action_ui;
 mod reactions;
 mod recording;
 mod reply_options_ui;

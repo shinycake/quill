@@ -199,14 +199,14 @@ impl QuillApp {
                             {
                                 this.begin_reply_from_message(chat_id, message_id, window, cx);
                             }
-                            // B11: double-click reacts with the quick
-                            // reaction (tdesktop `toggleFavoriteReaction`);
-                            // on selected text it selects the word instead.
+                            // Double-click runs the quick action setting
+                            // (tdesktop `chatQuickAction`); on selected
+                            // text it selects the word instead.
                             if event.click_count == 2
                                 && !this.selecting_in(row_chat)
                                 && !gpui_kit::base::TextSelection::has_selection(window, cx)
                             {
-                                this.quick_react(row_chat, row_msg, cx);
+                                this.double_click_action(row_chat, row_msg, window, cx);
                             }
                             cx.notify();
                         }),

@@ -66,6 +66,10 @@ pub struct MediaPrefs {
     /// default on): a reaction button beside the hovered bubble.
     #[serde(default = "default_true")]
     pub corner_reaction: bool,
+    /// Telegram Desktop's `chatQuickAction`: what double-clicking a message
+    /// does (reply by default).
+    #[serde(default)]
+    pub quick_action: crate::quick_action::QuickAction,
     #[serde(default)]
     pub recent_emoji: Vec<String>,
     pub remember_media_grouping: bool,
@@ -133,6 +137,7 @@ impl Default for MediaPrefs {
             loop_animated_stickers: true,
             corner_reply: true,
             corner_reaction: true,
+            quick_action: crate::quick_action::QuickAction::default(),
             recent_emoji: Vec::new(),
             remember_media_grouping: false,
             group_media: false,
@@ -196,6 +201,7 @@ mod tests {
             group_media: false,
             hq_round_videos: true,
             prefer_video_mode: true,
+            quick_action: crate::quick_action::QuickAction::React,
             ..Default::default()
         };
         save_media_prefs(&paths, &prefs).expect("save works");

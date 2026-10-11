@@ -203,7 +203,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(muted)
                     .px_2()
-                    .child("Double-click a message to react with it"),
+                    .child("Used when double-click is set to react"),
             )
             .child(strip)
             .into_any_element()

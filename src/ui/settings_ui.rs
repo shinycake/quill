@@ -664,6 +664,7 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.open_emoji_sets(cx))),
             )
+            .child(self.quick_action_radios(cx))
             .child(self.quick_reaction_picker(cx))
             .child(self.corner_button_switches(cx))
             .child(
