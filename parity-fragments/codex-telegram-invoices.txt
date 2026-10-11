@@ -1,3 +1,0 @@
-# Premium gift payment and invoice links open the checkout
-parity:premium-send-gift
-parity:deeplink-invoice

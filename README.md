@@ -880,7 +880,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Premium promo page with features, limits and subscribe flow <!-- parity:premium-promo-page -->
 - [x] Premium limit upsell boxes (pins, folders, links, caption, GIFs) <!-- parity:premium-limit-upsell -->
 - [ ] Stars: balance, transactions, top-up, send stars <!-- parity:premium-stars-balance -->
-- [ ] Send gifts and gift Premium <!-- parity:premium-send-gift -->
+- [x] Send gifts and gift Premium <!-- parity:premium-send-gift -->
 - [x] Received gifts on a profile: show or hide, pin, convert, upgrade, transfer, sell, collections <!-- parity:premium-received-gifts -->
 - [ ] Gift auctions, crafting and resale filters (deferred: low impact) <!-- parity:premium-gift-auctions -->
 - [ ] Create and view giveaways (partial: info box, form and prepaid launch shipped; paying for a new giveaway, specific-user gift codes and country picker left) <!-- parity:premium-giveaways -->
@@ -931,7 +931,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] share and msg_url links open a chat picker with the draft text <!-- parity:deeplink-share-draft -->
 - [x] Settings links open the matching settings page <!-- parity:deeplink-settings -->
 - [x] Login code links fill in the code <!-- parity:deeplink-login-code -->
-- [ ] Invoice links open the payment checkout <!-- parity:deeplink-invoice -->
+- [x] Invoice links open the payment checkout <!-- parity:deeplink-invoice -->
 - [ ] Boost links open the boost dialog <!-- parity:deeplink-boost -->
 - [x] Premium gift code links offer to apply the code <!-- parity:deeplink-giftcode -->
 - [ ] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
