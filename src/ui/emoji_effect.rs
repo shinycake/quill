@@ -12,24 +12,35 @@
 //!
 //! Where a message is on screen is noted while the history paints
 //! (`anchor_tracker`); an effect for a message that is not visible is
-//! dropped, as tdesktop does. tdesktop mirrors the sticker for messages on
-//! the left; GPUI's image painting has no flip, so Quill draws it as is.
+//! dropped, as tdesktop does. The anchor is the emoji glyph at the start of
+//! the text block, not the footer's reserved space. Like tdesktop, the
+//! sticker is mirrored for messages on the left: its decoded frames are
+//! flipped once when the effect starts and kept for the next one. Effects
+//! past the fifth wait their turn (`may_start`, tdesktop `checkDelayed`).
 
 use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
 use super::sticker_playback::PlaybackSize;
 use gpui_kit::*;
+use quill::bubble_layout::LARGE_EMOJI_SIZE;
 use quill::emoji_interaction::{EmojiEffect, MAX_PLAYS};
 use quill::ids::{ChatId, MessageId};
 use quill::state::Session;
 use quill::telegram::envelope::MessageContent;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// tdesktop `kMaxDelay`: an effect whose sticker has not arrived by then
 /// is not played any more.
 const START_WAIT: Duration = Duration::from_secs(3);
+/// tdesktop `kSmallDelay`: a new effect starts this long after the last.
+const SMALL_DELAY: Duration = Duration::from_millis(200);
+/// Effects waiting or playing, at most.
+const MAX_QUEUED: usize = 8;
+/// The glyph's line is this many times its size tall.
+const GLYPH_LINE: f32 = 1.2;
 /// Frame rate asked of the clock while an effect plays.
 const TICK_FPS: u32 = 30;
 /// The effect is this many emoji heights wide and tall, within bounds.
@@ -70,7 +81,17 @@ fn anchor(key: Key) -> Option<Bounds<Pixels>> {
 fn anchor_tracker(key: Key) -> impl IntoElement {
     canvas(
         |_, _, _| {},
-        move |bounds, _, window, _| {
+        move |block, _, window, _| {
+            // The emoji is the first thing in the block; the rest is the
+            // time footer's reserved space.
+            let glyph = LARGE_EMOJI_SIZE as f32;
+            let bounds = Bounds::new(
+                block.origin,
+                size(
+                    block.size.width.min(px(glyph)),
+                    block.size.height.min(px(glyph * GLYPH_LINE)),
+                ),
+            );
             let visible = bounds.intersect(&window.content_mask().bounds);
             if visible.size.width > Pixels::ZERO && visible.size.height > Pixels::ZERO {
                 ANCHORS.with(|anchors| {
@@ -127,6 +148,71 @@ fn effect_origin(
     };
     let y = (top + bottom - side) / 2.0;
     (x + shift.0, y + shift.1)
+}
+
+/// tdesktop `checkDelayed`: whether another effect may start beside the
+/// ones playing, given each one's elapsed and total time.
+fn may_start(playing: &[(Duration, Duration)]) -> bool {
+    if playing.len() >= MAX_PLAYS || playing.iter().any(|(at, _)| *at < SMALL_DELAY) {
+        return false;
+    }
+    // Three or more at once: wait until one is half played.
+    playing.len() < 3 || playing.iter().any(|(at, total)| *at * 2 > *total)
+}
+
+/// Mirror an RGBA/BGRA image left to right: `bytes` is `height` rows of
+/// `width` 4-byte pixels.
+fn flip_rows(bytes: &[u8], width: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    for row in bytes.chunks_exact(width * 4) {
+        for pixel in row.as_chunks::<4>().0.iter().rev() {
+            out.extend_from_slice(pixel);
+        }
+    }
+    out
+}
+
+thread_local! {
+    /// Mirrored frames by sticker file; two at most (frames are large).
+    static MIRRORED: RefCell<Vec<(i32, Arc<[Arc<RenderImage>]>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The frames of `file` mirrored, made once and kept.
+fn mirrored_frames(file: i32, frames: &Arc<[Arc<RenderImage>]>) -> Arc<[Arc<RenderImage>]> {
+    if let Some(found) = MIRRORED.with(|m| {
+        m.borrow()
+            .iter()
+            .find(|(id, _)| *id == file)
+            .map(|(_, frames)| frames.clone())
+    }) {
+        return found;
+    }
+    let flipped: Arc<[Arc<RenderImage>]> = frames
+        .iter()
+        .map(|frame| {
+            let width = frame.size(0).width.0.max(0) as u32;
+            let height = frame.size(0).height.0.max(0) as u32;
+            let flipped = frame.as_bytes(0).and_then(|bytes| {
+                image::RgbaImage::from_raw(width, height, flip_rows(bytes, width as usize))
+            });
+            match flipped {
+                Some(rgba) => Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+                    image::Frame::new(rgba),
+                ]))),
+                None => frame.clone(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .into();
+    MIRRORED.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= 2 {
+            let (_, old) = m.remove(0);
+            super::image_budget::retire_all(old.iter().cloned());
+        }
+        m.push((file, flipped.clone()));
+    });
+    flipped
 }
 
 /// The effect's edge for an emoji `height` tall.
@@ -205,9 +291,10 @@ impl QuillApp {
             ACTIVE.with(|active| {
                 let mut active = active.borrow_mut();
                 for (effect, outgoing) in queued.into_iter().zip(outgoing) {
-                    // Only for a message on screen, and a few at a time.
+                    // Only for a message on screen; a few play at once and
+                    // the rest wait.
                     let key = (effect.chat_id.0, effect.message_id.0);
-                    if anchor(key).is_none() || active.len() >= MAX_PLAYS {
+                    if anchor(key).is_none() || active.len() >= MAX_QUEUED {
                         continue;
                     }
                     active.push(Active {
@@ -308,11 +395,22 @@ impl QuillApp {
         ACTIVE.with(|active| {
             let mut active = active.borrow_mut();
             for (index, clip) in clips {
+                let playing: Vec<(Duration, Duration)> = active
+                    .iter()
+                    .filter_map(|a| a.clip.as_ref())
+                    .map(|c| (c.started.elapsed(), c.duration))
+                    .collect();
                 let entry = &mut active[index];
-                if let Some(mut clip) = clip {
-                    // Plays once from now, whatever the loop setting says.
+                if let Some(mut clip) = clip
+                    && may_start(&playing)
+                {
+                    // Plays once from now, whatever the loop setting says;
+                    // mirrored for a message on the left.
                     clip.started = Instant::now();
                     clip.looping = false;
+                    if !entry.outgoing {
+                        clip.frames = mirrored_frames(entry.effect.sticker.file_id.0, &clip.frames);
+                    }
                     entry.clip = Some(clip);
                     if entry.effect.incoming {
                         watched.push((entry.effect.chat_id, entry.effect.sticker.emoji.clone()));
@@ -368,7 +466,11 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_SIDE, MIN_SIDE, SHIFT_SHARE, effect_origin, effect_side, shift_for};
+    use super::{
+        MAX_SIDE, MIN_SIDE, SHIFT_SHARE, effect_origin, effect_side, flip_rows, may_start,
+        shift_for,
+    };
+    use std::time::Duration;
 
     #[test]
     fn effect_hugs_the_bubble_side_and_centres_on_the_emoji() {
@@ -396,5 +498,39 @@ mod tests {
             assert!(y.abs() <= SHIFT_SHARE * 50.0 + 1e-4);
         }
         assert_ne!(shift_for(1, 50.0), shift_for(2, 50.0));
+    }
+
+    #[test]
+    fn flip_mirrors_each_row() {
+        // Two rows of three pixels; pixel i has bytes [i, i, i, i].
+        let bytes: Vec<u8> = (0..6u8).flat_map(|i| [i; 4]).collect();
+        let flipped = flip_rows(&bytes, 3);
+        let pixels: Vec<u8> = flipped.chunks(4).map(|p| p[0]).collect();
+        assert_eq!(pixels, vec![2, 1, 0, 5, 4, 3]);
+        assert_eq!(flip_rows(&flipped, 3), bytes);
+    }
+
+    #[test]
+    fn effects_wait_like_tdesktop_check_delayed() {
+        let ms = Duration::from_millis;
+        assert!(may_start(&[]));
+        // Too soon after the last start.
+        assert!(!may_start(&[(ms(100), ms(2000))]));
+        assert!(may_start(&[(ms(300), ms(2000))]));
+        // Three playing: one must be half played.
+        let three = [
+            (ms(300), ms(2000)),
+            (ms(400), ms(2000)),
+            (ms(500), ms(2000)),
+        ];
+        assert!(!may_start(&three));
+        let half = [
+            (ms(300), ms(2000)),
+            (ms(400), ms(2000)),
+            (ms(1500), ms(2000)),
+        ];
+        assert!(may_start(&half));
+        // Five is the limit.
+        assert!(!may_start(&[(ms(1500), ms(2000)); 5]));
     }
 }
