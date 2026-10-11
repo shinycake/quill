@@ -549,7 +549,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Upgrade a basic group to a supergroup <!-- parity:admin-upgrade-basic -->
 - [x] Transfer ownership with password confirmation <!-- parity:admin-transfer-ownership -->
 - [x] Pick a new owner when leaving as owner <!-- parity:admin-new-owner-on-leave -->
-- [ ] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
+- [x] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
 - [x] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
 - [x] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
 - [x] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
