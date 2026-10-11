@@ -112,35 +112,7 @@ pub fn search_messages_filtered(
     limit: i32,
     filters: &SearchMessagesFilters,
 ) -> String {
-    let chat_type_filter = match (filters.community_id, filters.chat_type.constructor()) {
-        (Some(id), _) => json!({
-            "@type": "searchMessagesChatTypeFilterCommunity",
-            "community_id": id,
-        }),
-        (None, Some(constructor)) => json!({ "@type": constructor }),
-        (None, None) => Value::Null,
-    };
-    let filter = filters
-        .media
-        .constructor()
-        .map_or(Value::Null, search_messages_filter_json);
-    json!({
-        "@type": "searchMessages",
-        "@extra": extra.as_extra(),
-        "chat_list": if filters.archived {
-            json!({ "@type": "chatListArchive" })
-        } else {
-            Value::Null
-        },
-        "query": query,
-        "offset": "",
-        "limit": limit,
-        "filter": filter,
-        "chat_type_filter": chat_type_filter,
-        "min_date": filters.min_date,
-        "max_date": filters.max_date,
-    })
-    .to_string()
+    super::search_messages_page(extra, query, "", limit, filters)
 }
 
 /// `searchChatsOnServer query:string type_filter:SearchChatTypeFilter

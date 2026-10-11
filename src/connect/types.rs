@@ -85,6 +85,9 @@ pub enum SearchFlight {
     /// The "Public posts" scope: one `searchPublicPosts` /
     /// `searchPublicMessagesByTag` request.
     PublicPosts(RequestId),
+    /// A media tab on an empty field: one `searchMessages` with the tab's
+    /// filter and no query.
+    Media(RequestId),
 }
 
 /// Empty/open recents send immediately; typed queries wait for [`SEARCH_DEBOUNCE`].

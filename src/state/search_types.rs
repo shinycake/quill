@@ -135,6 +135,8 @@ pub struct SearchState {
     pub public_limits_exceeded: bool,
     /// Empty-query surface: `searchRecentlyFoundChats` (official Recent).
     pub recents: bool,
+    /// Paging, recommendations and quota of the strip's tabs.
+    pub tabs: SearchTabsState,
     pub(crate) chats_done: bool,
     pub(crate) messages_done: bool,
     pub(crate) public_done: bool,
@@ -162,6 +164,7 @@ impl Default for SearchState {
             top_menu: None,
             public_limits_exceeded: false,
             recents: false,
+            tabs: SearchTabsState::default(),
             chats_done: false,
             messages_done: false,
             public_done: false,
@@ -240,6 +243,7 @@ impl SearchState {
         self.public_chat_ids.clear();
         self.server_chat_ids.clear();
         self.public_limits_exceeded = false;
+        self.tabs.reset_paging();
         self.chats_done = false;
         self.messages_done = false;
         self.public_done = false;

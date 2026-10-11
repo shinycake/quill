@@ -31,7 +31,18 @@ impl Session {
                         self.remember_files(&message.files);
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
+                    self.search
+                        .search
+                        .set_first_page_offset(next_offset.clone());
                     self.search.search.accept_messages(hits, false);
+                } else if self.search.search.matches_generation(pending)
+                    && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchMessagesMore)
+                {
+                    for message in &messages {
+                        self.remember_files(&message.files);
+                    }
+                    let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
+                    self.search.search.append_page(hits, next_offset.clone());
                 }
                 // Phase C2i: `searchCallMessages` pages for the
                 // Recent-calls tab. `searchCallMessages` returns call and
@@ -50,8 +61,8 @@ impl Session {
             // exhausted free quota is flagged, never paid for.
             SearchPayload::FoundPublicPosts {
                 messages,
+                next_offset,
                 are_limits_exceeded,
-                ..
             } => {
                 if self.search.search.matches_generation(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchPublicPosts)
@@ -61,7 +72,34 @@ impl Session {
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
                     self.search.search.public_limits_exceeded = are_limits_exceeded;
+                    self.search.search.set_first_page_offset(next_offset);
                     self.search.search.accept_messages(hits, false);
+                } else if self.search.search.matches_generation(pending)
+                    && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchPublicPostsMore)
+                {
+                    for message in &messages {
+                        self.remember_files(&message.files);
+                    }
+                    let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
+                    self.search.search.public_limits_exceeded = are_limits_exceeded;
+                    self.search.search.append_page(hits, next_offset);
+                }
+            }
+            SearchPayload::PublicPostLimits {
+                daily_free,
+                remaining_free,
+                next_free_in,
+                star_count,
+                current_query_free,
+            } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPublicPostSearchLimits) {
+                    self.search.search.tabs.limits = Some(PublicPostLimits {
+                        daily_free,
+                        remaining_free,
+                        next_free_in,
+                        star_count,
+                        current_query_free,
+                    });
                 }
             }
             SearchPayload::MessageCalendar { days, .. } => {

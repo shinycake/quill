@@ -21,6 +21,16 @@ pub enum SearchPayload {
         next_offset: String,
         are_limits_exceeded: bool,
     },
+    /// `publicPostSearchLimits` — `getPublicPostSearchLimits` (schema line
+    /// 3135): the free searches left for the Posts tab.
+    PublicPostLimits {
+        daily_free: i32,
+        remaining_free: i32,
+        /// Seconds until a free search comes back; 0 = now.
+        next_free_in: i32,
+        star_count: i64,
+        current_query_free: bool,
+    },
     /// `foundChatMessages` — `searchChatMessages`.
     FoundChatMessages {
         total_count: i32,

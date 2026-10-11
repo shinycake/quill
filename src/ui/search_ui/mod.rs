@@ -30,6 +30,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::search_filters::{
     SearchChatType, SearchDateRange, SearchMediaKind, SearchScope, tag_query,
 };
+use quill::search_tabs::SearchTab;
 use quill::state::{
     ChatSearchJump, FromPicker, RequestPurpose, SearchConfirm, SearchStatus, Session,
 };
@@ -865,6 +866,8 @@ impl QuillApp {
 
 mod chat_search_bar;
 mod search_results;
+mod tab_results;
+mod tab_strip;
 
 #[cfg(test)]
 mod match_tests {

@@ -683,6 +683,11 @@ impl Session {
             }
             return;
         }
+        // `getRecommendedChats`: the Channels tab's list, not a query answer.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecommendedChats) {
+            self.search.search.accept_recommended(chat_ids);
+            return;
+        }
         if self.search.search.matches_generation(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {

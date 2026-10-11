@@ -26,6 +26,17 @@ impl Session {
             }
             _ => {}
         }
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::GetRecommendedChats) => {
+                self.search.search.tabs.recommended_loading = false;
+            }
+            Some(RequestPurpose::SearchMessagesMore | RequestPurpose::SearchPublicPostsMore)
+                if self.search.search.matches_generation(pending) =>
+            {
+                self.search.search.fail_page();
+            }
+            _ => {}
+        }
         if self.search.search.matches_generation(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {

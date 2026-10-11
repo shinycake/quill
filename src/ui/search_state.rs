@@ -6,6 +6,8 @@ use gpui_kit::*;
 pub(crate) struct SearchUi {
     pub(super) input: Entity<TextareaState>,
     pub(super) chat_input: Entity<TextareaState>,
+    /// The Channels tab lists all joined channels, not the first five.
+    pub(super) channels_expanded: bool,
 }
 
 impl SearchUi {
@@ -16,6 +18,7 @@ impl SearchUi {
         Self {
             input: search_input,
             chat_input: chat_search_input,
+            channels_expanded: false,
         }
     }
 }

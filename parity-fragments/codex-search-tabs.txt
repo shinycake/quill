@@ -1,0 +1,2 @@
+# global search tab strip: channels, apps, posts, media, links, files, music, voice
+parity:chatlist-search-tabs
