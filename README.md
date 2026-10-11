@@ -1075,7 +1075,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip (partial: all but "use system proxy", which TDLib has no hook for) <!-- parity:data-proxy-extras -->
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [ ] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
-- [ ] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
+- [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
 - [ ] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
 - [ ] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
 - [ ] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
