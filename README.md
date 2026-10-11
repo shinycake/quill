@@ -559,7 +559,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Channel direct messages settings and paid-message price <!-- parity:admin-direct-messages -->
 - [ ] Auto-translate channel and sponsored-messages toggles <!-- parity:admin-auto-translate -->
 - [x] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
-- [ ] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
+- [x] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
 - [x] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
 - [x] Recent actions: server-side admin filter and explainer <!-- parity:admin-log-extras -->
 
