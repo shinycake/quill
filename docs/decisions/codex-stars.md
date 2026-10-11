@@ -46,10 +46,10 @@
   reactions and the chat lists the Star reaction as allowed
   (`chatAvailableReactionsSome` containing `reactionTypePaid`; `...All` never
   includes it).
-- The chip count adds the Stars still waiting for their Undo window. If TDLib
-  already includes pending Stars in `updateMessageInteractionInfo`, the count
-  would be doubled for those 5.5 seconds; this was not checked against a live
-  account.
+- The chip count is TDLib's: after `addPendingPaidMessageReaction` TDLib folds
+  the pending Stars into the paid count of `updateMessageInteractionInfo` and
+  marks the reaction chosen, so Quill adds nothing locally (that would count
+  them twice).
 - The cap comes from `updateOption paid_reaction_star_count_max` (10,000 until
   it arrives).
 - The box offers "Send as <channel>" for the channels from
