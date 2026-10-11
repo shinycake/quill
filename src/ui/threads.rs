@@ -120,6 +120,9 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The composer still belongs to the chat (or topic) the thread is
+        // opened from: save it there before TDLib resolves the thread.
+        self.flush_leaving_draft(cx);
         if let Some(live) = self.live.as_mut()
             && live.driver.open_thread(chat_id, message_id).is_err()
         {
@@ -160,6 +163,9 @@ impl QuillApp {
                 Some(chat_id) => self.select_chat_with(chat_id, true, window, cx),
                 None => {
                     let _ = live.driver.start_thread_in_open_chat();
+                    // The thread's own draft (`messageThreadInfo.draft_message`)
+                    // replaces the chat's text the composer still shows.
+                    self.restore_open_draft(window, cx);
                     cx.notify();
                 }
             }
@@ -206,10 +212,15 @@ impl QuillApp {
             .thread
             .as_ref()
             .map(|thread| thread.origin_message_id);
+        // Save the thread's draft while the thread is still the open slot.
+        self.flush_leaving_draft(cx);
+        let live = self.live.as_mut().expect("checked above");
         let back = live.driver.close_thread();
         self.history.thread_root_jump = false;
-        if let Some(chat) = back {
-            self.select_listed_chat(chat, window, cx);
+        match back {
+            Some(chat) => self.select_listed_chat(chat, window, cx),
+            // Same chat: the chat's (or topic's) own draft comes back.
+            None => self.restore_open_draft(window, cx),
         }
         // Land on the post the thread was opened from.
         if let Some(message_id) = origin {
@@ -221,9 +232,11 @@ impl QuillApp {
     /// "View in chat": leave the thread and show its root in the
     /// discussion group's own history.
     pub(super) fn view_thread_in_chat(&mut self, cx: &mut Context<Self>) {
-        let Some(live) = self.live.as_mut() else {
+        if self.live.is_none() {
             return;
-        };
+        }
+        self.flush_leaving_draft(cx);
+        let live = self.live.as_mut().expect("checked above");
         let root = live
             .driver
             .session
@@ -232,6 +245,7 @@ impl QuillApp {
             .as_ref()
             .map(|thread| MessageId(thread.thread_id));
         live.driver.session.close_thread();
+        self.request_draft_restore();
         self.history.thread_root_jump = false;
         if let Some(root) = root {
             self.jump_to_replied_message(root, cx);

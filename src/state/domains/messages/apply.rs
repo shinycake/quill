@@ -18,13 +18,10 @@ impl Session {
                 draft,
                 positions,
             } => {
-                let chat = self
-                    .chats
+                self.chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id));
-                if !self.messages.draft_dirty.contains(&chat_id.0) {
-                    chat.draft = draft;
-                }
+                self.set_remote_draft(chat_id, crate::composer::DraftTopic::Chat, draft);
                 self.replace_main_list_from_positions(chat_id, &positions);
                 self.rebuild_main_order();
             }
@@ -181,6 +178,7 @@ impl Session {
             } => {
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
+                let thread_id = message.thread_id;
                 self.note_last_message_send_state(
                     chat_id,
                     old_message_id,
@@ -207,7 +205,11 @@ impl Session {
                 {
                     thread.history.replace_id(old_message_id, row);
                 }
-                self.messages.draft_clears.push(chat_id);
+                // The draft of the slot the message went to (topic, thread
+                // or chat) is cleared once the composer is seen idle.
+                self.messages
+                    .draft_clears
+                    .push((chat_id, Self::draft_topic_of_message(topic_id, thread_id)));
             }
             MessagesPayload::UpdateMessageSendFailed {
                 message,

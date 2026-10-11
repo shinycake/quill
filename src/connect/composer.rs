@@ -1,6 +1,8 @@
 //! Connect driver: composer drafts and open-chat bookkeeping.
 use super::*;
-use crate::composer::{DraftSaveClock, DraftSaveStep, draft_text_to_store, schedule_draft_save};
+use crate::composer::{
+    DraftSaveClock, DraftSaveStep, DraftTopic, draft_text_to_store, schedule_draft_save,
+};
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::ChatDraft;
@@ -10,8 +12,11 @@ use crate::telegram::requests::{
 use std::time::Duration;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Composer edit in a private chat. `delayed` follows tdesktop `saveDraft(true)`
-    /// (1s quiet, 5s cap). `delayed == false` is Unigram's flush on leaving the chat.
+    /// Composer edit in the open chat, saved to the slot the composer is
+    /// writing to now (`Session::open_draft_topic`): the chat, the open
+    /// forum topic or the open reply thread. `delayed` follows tdesktop
+    /// `saveDraft(true)` (1s quiet, 5s cap). `delayed == false` is the
+    /// flush on leaving the chat, topic or thread.
     pub fn note_composer_draft(
         &mut self,
         chat_id: ChatId,
@@ -20,23 +25,35 @@ impl<S: JsonSender> ConnectDriver<S> {
         now_ms: u64,
         delayed: bool,
     ) -> Result<DraftSaveOutcome, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.accepts_composer_draft(chat_id) {
+        let topic = self.session.open_draft_topic(chat_id);
+        self.note_composer_draft_in(chat_id, topic, text, reply_to, now_ms, delayed)
+    }
+
+    /// [`Self::note_composer_draft`] for an explicit slot. The UI passes
+    /// the slot it read before switching away, so a flush after the
+    /// switch still lands where the text was typed.
+    pub fn note_composer_draft_in(
+        &mut self,
+        chat_id: ChatId,
+        topic: DraftTopic,
+        text: &str,
+        reply_to: Option<SendReply>,
+        now_ms: u64,
+        delayed: bool,
+    ) -> Result<DraftSaveOutcome, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.accepts_composer_draft(chat_id, topic) {
             return Ok(DraftSaveOutcome::Skipped);
         }
         let stored = draft_text_to_store(text, reply_to.is_some()).map(str::to_string);
         let reply_to = stored.as_ref().and(reply_to);
-        if self.draft_matches(chat_id, stored.as_deref(), reply_to.as_ref()) {
+        if self.draft_matches(chat_id, topic, stored.as_deref(), reply_to.as_ref()) {
             self.pending_draft = None;
             self.draft_clock = DraftSaveClock::idle();
-            let existing = self
-                .session
-                .chats
-                .get(&chat_id.0)
-                .and_then(|chat| chat.draft.clone());
-            self.session.store_composer_draft(chat_id, existing);
+            let existing = self.session.draft_for(chat_id, topic).cloned();
+            self.session.store_composer_draft(chat_id, topic, existing);
             return Ok(DraftSaveOutcome::Skipped);
         }
-        self.session.mark_draft_dirty(chat_id);
+        self.session.mark_draft_dirty(chat_id, topic);
         match schedule_draft_save(self.draft_clock, now_ms, delayed) {
             DraftSaveStep::Wait {
                 delay_ms,
@@ -50,6 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.pending_draft = Some(PendingDraft {
                     token,
                     chat_id,
+                    topic,
                     text: stored.unwrap_or_default(),
                     reply_to,
                 });
@@ -61,7 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             DraftSaveStep::Write => {
                 self.pending_draft = None;
                 self.draft_clock = DraftSaveClock::idle();
-                self.send_draft(chat_id, stored.as_deref(), reply_to.as_ref())?;
+                self.send_draft(chat_id, topic, stored.as_deref(), reply_to.as_ref())?;
                 Ok(DraftSaveOutcome::Sent)
             }
         }
@@ -82,35 +100,39 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.draft_clock = DraftSaveClock::idle();
         let text = draft_text_to_store(&pending.text, pending.reply_to.is_some());
         let reply_to = text.and(pending.reply_to);
-        if self.draft_matches(pending.chat_id, text, reply_to.as_ref()) {
-            self.session.store_composer_draft(
-                pending.chat_id,
-                self.session
-                    .chats
-                    .get(&pending.chat_id.0)
-                    .and_then(|chat| chat.draft.clone()),
-            );
+        if self.draft_matches(pending.chat_id, pending.topic, text, reply_to.as_ref()) {
+            let existing = self
+                .session
+                .draft_for(pending.chat_id, pending.topic)
+                .cloned();
+            self.session
+                .store_composer_draft(pending.chat_id, pending.topic, existing);
             return Ok(None);
         }
-        self.send_draft(pending.chat_id, text, reply_to.as_ref())
+        self.send_draft(pending.chat_id, pending.topic, text, reply_to.as_ref())
             .map(Some)
     }
 
-    /// Successful send: drop the draft when the composer is still idle.
+    /// Successful send into `topic` of `chat_id`: drop that slot's draft
+    /// when the composer is still idle.
     pub fn clear_draft_after_send(
         &mut self,
         chat_id: ChatId,
+        topic: DraftTopic,
         composer_idle: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !composer_idle || self.session.draft_is_dirty(chat_id) {
+        if !composer_idle || self.session.draft_is_dirty(chat_id, topic) {
             return Ok(None);
         }
-        if !self.session.accepts_composer_draft(chat_id) {
+        if !self.session.accepts_composer_draft(chat_id, topic) {
+            return Ok(None);
+        }
+        if self.session.draft_for(chat_id, topic).is_none() {
             return Ok(None);
         }
         self.pending_draft = None;
         self.draft_clock = DraftSaveClock::idle();
-        self.send_draft(chat_id, None, None).map(Some)
+        self.send_draft(chat_id, topic, None, None).map(Some)
     }
 
     pub fn cancel_pending_draft(&mut self) {
@@ -121,14 +143,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn draft_matches(
         &self,
         chat_id: ChatId,
+        topic: DraftTopic,
         text: Option<&str>,
         reply_to: Option<&SendReply>,
     ) -> bool {
-        let current = self
-            .session
-            .chats
-            .get(&chat_id.0)
-            .and_then(|chat| chat.draft.as_ref());
+        let current = self.session.draft_for(chat_id, topic);
         match (current, text) {
             (None, None) => true,
             (Some(draft), Some(text)) => {
@@ -143,16 +162,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn send_draft(
         &mut self,
         chat_id: ChatId,
+        topic: DraftTopic,
         text: Option<&str>,
         reply_to: Option<&SendReply>,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::SetChatDraftMessage, Some(chat_id));
-        match self
-            .sender
-            .send_json(&set_chat_draft_message(extra, chat_id, text, reply_to))
-        {
+        match self.sender.send_json(&set_chat_draft_message(
+            extra, chat_id, topic, text, reply_to,
+        )) {
             Ok(()) => {
                 let draft = text
                     .filter(|text| !text.trim().is_empty() || reply_to.is_some())
@@ -161,7 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         reply_to_message_id: reply_to.map(|reply| reply.message_id),
                         quote: reply_to.and_then(|reply| reply.quote.clone()),
                     });
-                self.session.store_composer_draft(chat_id, draft);
+                self.session.store_composer_draft(chat_id, topic, draft);
                 Ok(extra)
             }
             Err(err) => {

@@ -118,7 +118,7 @@ pub(in crate::ui) fn chat_unread_indicator(chat: &ChatSummary) -> Option<(i32, b
 /// The red "Draft:" lead of a draft preview, with Telegram Desktop's
 /// reply mark before it when the draft replies to a message
 /// (`dialogsDraftFg`).
-pub(super) fn draft_prefix(reply: bool, bare: bool) -> impl IntoElement {
+pub(in crate::ui) fn draft_prefix(reply: bool, bare: bool) -> impl IntoElement {
     let tone = Hsla::from(danger());
     div()
         .flex_none()

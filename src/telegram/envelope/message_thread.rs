@@ -12,6 +12,9 @@ pub struct ParsedMessageThreadInfo {
     pub reply_info: Option<MessageReplyInfo>,
     pub unread_message_count: i32,
     pub messages: Vec<ParsedMessage>,
+    /// `messageThreadInfo.draft_message` (schema 1.8.68, line 4207): the
+    /// thread's text draft, present only when the user can write there.
+    pub draft: Option<ChatDraft>,
 }
 
 /// `message.topic_id` as a comment / reply thread (`messageTopicThread`).
@@ -42,5 +45,6 @@ pub(crate) fn parse_message_thread_info(
             .flatten()
             .filter_map(|message| parse_message(message).ok())
             .collect(),
+        draft: parse_chat_draft(value.get("draft_message")),
     })
 }

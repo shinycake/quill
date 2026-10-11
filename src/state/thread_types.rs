@@ -68,6 +68,10 @@ pub struct ThreadView {
     /// that topic (`messageTopicForum`) and reply to the thread root;
     /// `None` outside forums, where a thread is its own `messageTopicThread`.
     pub forum_topic_id: Option<i32>,
+    /// `messageThreadInfo.draft_message`: the thread's text draft
+    /// (`DraftTopic::Thread`), restored into the composer when the thread
+    /// view opens and shown nowhere else (threads have no list row).
+    pub draft: Option<ChatDraft>,
 }
 
 impl ThreadView {
@@ -94,6 +98,7 @@ impl ThreadView {
             needs_chat_switch: false,
             reading_started: false,
             forum_topic_id: None,
+            draft: None,
         }
     }
 

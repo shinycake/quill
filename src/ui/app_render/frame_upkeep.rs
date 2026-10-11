@@ -13,6 +13,9 @@ impl QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
+        // A topic or thread switch without a window at hand asked for the
+        // new slot's draft to be restored into the composer.
+        self.restore_draft_if_pending(window, cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in

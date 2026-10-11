@@ -1,4 +1,5 @@
 use super::{SendReply, send_reply_value};
+use crate::composer::DraftTopic;
 use crate::ids::{ChatId, MessageId, RequestId};
 use serde_json::{Value, json};
 
@@ -392,9 +393,28 @@ pub fn leave_chat(extra: RequestId, chat_id: ChatId) -> String {
 /// `draft_message` null removes the draft. Text uses `draftMessageContentText`.
 /// `date` 0 and `effect_id` `"0"` match Unigram's `DraftMessage` constructor
 /// (`int64` is a JSON string). `link_preview_options` null keeps the default.
+/// `setChatDraftMessage.topic_id` (schema 1.8.68, line 13887): null for
+/// the chat itself, `messageTopicForum` for a forum topic,
+/// `messageTopicThread` for a reply thread.
+pub fn draft_topic_value(topic: DraftTopic) -> Value {
+    match topic {
+        DraftTopic::Chat => Value::Null,
+        DraftTopic::Forum(forum_topic_id) => {
+            super::messages::message_topic_value(Some(forum_topic_id))
+        }
+        DraftTopic::Thread(message_thread_id) => {
+            super::groups::message_topic_thread_value(message_thread_id)
+        }
+    }
+}
+
+/// `setChatDraftMessage chat_id topic_id draft_message` (schema 1.8.68,
+/// line 13887). `topic` picks the slot: the chat, a forum topic or a reply
+/// thread.
 pub fn set_chat_draft_message(
     extra: RequestId,
     chat_id: ChatId,
+    topic: DraftTopic,
     text: Option<&str>,
     reply_to: Option<&SendReply>,
 ) -> String {
@@ -430,7 +450,7 @@ pub fn set_chat_draft_message(
         "@type": "setChatDraftMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": draft_topic_value(topic),
         "draft_message": draft_message,
     })
     .to_string()

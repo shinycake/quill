@@ -1,3 +1,4 @@
+use crate::composer::DraftTopic;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::telegram::requests::*;
 use serde_json::{Value, json};
@@ -406,6 +407,7 @@ fn set_chat_draft_message_matches_1_8_67() {
     let save = set_chat_draft_message(
         RequestId(41),
         ChatId(11),
+        DraftTopic::Chat,
         Some("meet at 6"),
         Some(&SendReply::plain(MessageId(101))),
     );
@@ -440,6 +442,7 @@ fn set_chat_draft_message_matches_1_8_67() {
     let quoted = set_chat_draft_message(
         RequestId(43),
         ChatId(11),
+        DraftTopic::Chat,
         Some("agree"),
         Some(&SendReply {
             message_id: MessageId(101),
@@ -457,10 +460,57 @@ fn set_chat_draft_message_matches_1_8_67() {
         "meet at"
     );
     assert_eq!(v["draft_message"]["reply_to"]["quote"]["position"], 0);
-    let clear = set_chat_draft_message(RequestId(42), ChatId(11), None, None);
+    let clear = set_chat_draft_message(RequestId(42), ChatId(11), DraftTopic::Chat, None, None);
     let v: serde_json::Value = serde_json::from_str(&clear).unwrap();
     assert_eq!(v["draft_message"], Value::Null);
     assert!(!save.contains("CANARY"));
+}
+
+/// `setChatDraftMessage.topic_id` per draft slot (schema 1.8.68, lines
+/// 3311, 3314, 13887): a forum topic is `messageTopicForum`, a reply
+/// thread `messageTopicThread`, the chat itself null.
+#[test]
+fn set_chat_draft_message_topic_id_per_slot() {
+    let forum = set_chat_draft_message(
+        RequestId(44),
+        ChatId(-100),
+        DraftTopic::Forum(7),
+        Some("in the topic"),
+        None,
+    );
+    let v: serde_json::Value = serde_json::from_str(&forum).unwrap();
+    assert_eq!(v["topic_id"]["@type"], "messageTopicForum");
+    assert_eq!(v["topic_id"]["forum_topic_id"], 7);
+    assert_eq!(
+        v["draft_message"]["content"]["text"]["text"],
+        "in the topic"
+    );
+
+    let thread = set_chat_draft_message(
+        RequestId(45),
+        ChatId(-100),
+        DraftTopic::Thread(501),
+        None,
+        Some(&SendReply::plain(MessageId(503))),
+    );
+    let v: serde_json::Value = serde_json::from_str(&thread).unwrap();
+    assert_eq!(v["topic_id"]["@type"], "messageTopicThread");
+    assert_eq!(v["topic_id"]["message_thread_id"], 501);
+    // A reply-only draft still carries a `draftMessage` (empty text).
+    assert_eq!(v["draft_message"]["@type"], "draftMessage");
+    assert_eq!(v["draft_message"]["reply_to"]["message_id"], 503);
+
+    let cleared = set_chat_draft_message(
+        RequestId(46),
+        ChatId(-100),
+        DraftTopic::Thread(501),
+        None,
+        None,
+    );
+    let v: serde_json::Value = serde_json::from_str(&cleared).unwrap();
+    assert_eq!(v["topic_id"]["@type"], "messageTopicThread");
+    assert_eq!(v["draft_message"], Value::Null);
+    assert_eq!(draft_topic_value(DraftTopic::Chat), Value::Null);
 }
 
 #[test]
