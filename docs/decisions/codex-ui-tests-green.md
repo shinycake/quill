@@ -45,6 +45,14 @@ GPUI's test platform needs no display: `TestPlatform` uses a no-op text
 system and no window server, so there is no Xvfb. The same command is the
 one to add to `quill-tools/gate.sh`.
 
+The first Linux run built and ran the suite headless, and 5 of 416 tests
+failed because they had only ever run on macOS. Four pressed `cmd-z` or
+`cmd-a`, which is Super on Linux, so undo and select-all never fired. They
+now press GPUI's `secondary-` modifier: Cmd on macOS, Ctrl elsewhere. The
+fifth compared the lock chords as text, and GPUI writes Cmd as `super` off
+macOS; it now compares in GPUI's own spelling. ALSA prints errors because
+the runner has no sound card; the tests do not depend on audio.
+
 ## One proxy list for the app
 
 tdesktop keeps proxy settings app-wide (`Core::Settings::proxy()`: the

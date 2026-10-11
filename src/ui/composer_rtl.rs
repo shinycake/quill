@@ -558,7 +558,7 @@ pub(super) mod tests {
                 window.click("composer", cx);
                 let text = "שלום hello עולם";
                 set_text(&input, text, window, cx);
-                window.press("cmd-a", cx);
+                window.press("secondary-a", cx);
                 assert_eq!(input.read(cx).selected_range(), 0..text.len());
                 window.input("ש", cx);
                 window.render_frame(cx);
