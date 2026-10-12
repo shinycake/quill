@@ -136,7 +136,14 @@ impl QuillApp {
         };
         // Power saving: the switches gate animations as they are drawn; the
         // interface-animations one also folds into GPUI's reduced motion.
+        #[cfg(test)]
+        quill::power_saving::isolate_for_tests();
         quill::power_saving::set(self.appearance.power_saving);
+        quill::battery_saving::set_ignore(self.appearance.ignore_battery_saving);
+        quill::battery_saving::apply();
+        if self.demo_session.is_none() {
+            super::battery_watch::watch(cx);
+        }
         cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
         // Quill's themes and high contrast take the single accent of old.
         let accent = quill::system_accent::effective(

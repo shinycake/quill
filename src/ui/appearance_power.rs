@@ -38,6 +38,7 @@ fn flag_id(flag: Flag) -> &'static str {
         Flag::StickersPanel => "power-stickers-panel",
         Flag::StickersChat => "power-stickers-chat",
         Flag::EmojiPanel => "power-emoji-panel",
+        Flag::EmojiReactions => "power-emoji-reactions",
         Flag::EmojiChat => "power-emoji-chat",
         Flag::ChatBackground => "power-chat-background",
         Flag::ChatSpoiler => "power-spoiler",
@@ -141,16 +142,17 @@ impl QuillApp {
     }
 
     /// "Battery and animations": one switch per category, checked while the
-    /// animation plays (tdesktop's checkboxes are the inverse of its flags).
+    /// animation plays (tdesktop's checkboxes are the inverse of its flags),
+    /// then "Save Power on Low Battery" where the platform reports a
+    /// battery saver. While that saver forces everything on, the switches
+    /// are dimmed and a click explains why they do not change.
     pub(super) fn appearance_power_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let bits = self.appearance.power_saving;
         let muted = cx.theme().muted_foreground;
-        let mut body = div().flex().flex_col().gap_2().child(
-            div()
-                .font_semibold()
-                .text_sm()
-                .child("Battery and animations"),
-        );
+        let saver = quill::battery_saving::state();
+        let forced =
+            quill::battery_saving::forcing_for(saver, self.appearance.ignore_battery_saving);
+        let mut groups = div().flex().flex_col().gap_2();
         for group in &GROUPS {
             let mut block = div().flex().flex_col().gap_1();
             if let Some(title) = group.title {
@@ -167,14 +169,56 @@ impl QuillApp {
                     move |prefs, on| prefs.power_saving = with_flag(prefs.power_saving, flag, !on),
                 ));
             }
-            body = body.child(block);
+            groups = groups.child(block);
         }
-        body.child(
-            div()
-                .text_xs()
-                .text_color(muted)
-                .child("Switch an animation off to keep it still and save battery."),
-        )
-        .into_any_element()
+        if forced {
+            // tdesktop dims the box and a click shows the toast.
+            groups = groups.relative().opacity(0.6).child(
+                div()
+                    .id("power-forced-overlay")
+                    .absolute()
+                    .inset_0()
+                    .cursor_pointer()
+                    .occlude()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.set_status_note(FORCED_MESSAGE, cx);
+                    })),
+            );
+        }
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child("Battery and animations"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("Power saving options"),
+            )
+            .child(groups);
+        if saver.is_some() {
+            body = body
+                .child(div().mt_2().child(self.appearance_switch_row(
+                    cx,
+                    "power-auto",
+                    "Save Power on Low Battery",
+                    "",
+                    !self.appearance.ignore_battery_saving,
+                    |prefs, on| prefs.ignore_battery_saving = !on,
+                )))
+                .child(div().text_xs().text_color(muted).child(
+                    "Automatically disable all animations when your laptop is in a battery saving mode.",
+                ));
+        }
+        body.into_any_element()
     }
 }
+
+/// tdesktop `lng_settings_power_turn_off`.
+const FORCED_MESSAGE: &str = "Please turn off Save Power on Low Battery to change these settings.";

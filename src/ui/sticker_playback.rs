@@ -442,8 +442,9 @@ impl QuillApp {
         cx: &mut Context<QuillApp>,
     ) -> Option<AnimatedVisual> {
         // Battery and animations: stickers and emoji in messages stay
-        // still (the row shows the preview image).
-        if power_saving::on(size.chat_flag()) {
+        // still (the row shows the preview image). A dice's landing is not
+        // a sticker autoplay in tdesktop and always plays.
+        if !once && power_saving::on(size.chat_flag()) {
             return None;
         }
         if self.slices.in_conversation() && super::anim_layer::current().is_some() {
