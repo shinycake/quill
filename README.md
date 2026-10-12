@@ -1006,7 +1006,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Set or remove your birthday and open birthday privacy <!-- parity:settings-birthday -->
 - [x] Contacts with upcoming birthdays list and birthday privacy row in Settings > Privacy <!-- parity:settings-birthday-contacts -->
 - [x] Large emoji: send a lone emoji as a big glyph, with a Chat settings toggle <!-- parity:settings-large-emoji -->
-- [ ] "Pull to next channel" chat setting <!-- parity:settings-pull-next-channel -->
+- [x] "Pull to next channel" chat setting <!-- parity:settings-pull-next-channel -->
 - [x] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
 - [x] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
 - [x] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
@@ -1058,7 +1058,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Interface scale <!-- parity:appearance-scale -->
 - [x] Font family choice <!-- parity:appearance-font -->
 - [ ] Interface language packs (English only today) <!-- parity:appearance-localization -->
-- [ ] Adaptive layout for wide screens (all messages on the left with photos; off by default in Quill) <!-- parity:appearance-wide-layout -->
+- [x] Adaptive layout for wide screens (all messages on the left with photos; off by default in Quill) <!-- parity:appearance-wide-layout -->
 - [x] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
 - [x] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
 - [x] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
