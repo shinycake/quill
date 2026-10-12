@@ -724,9 +724,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Noise suppression toggle in group calls (blocked: the prebuilt ntgcalls exposes no audio-processing switch; see docs/decisions/codex-call-audio-controls.md) <!-- parity:calls-noise-suppression -->
 - [x] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
 - [x] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
-- [ ] Screen source chooser with window and screen thumbnails <!-- parity:calls-screen-source-chooser -->
-- [ ] Pause screen sharing <!-- parity:calls-screen-share-pause -->
-- [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls <!-- parity:calls-conference -->
+- [ ] Screen source chooser with window and screen thumbnails (blocked: ntgcalls 3.0.2 exposes one opaque source per platform and opens the system picker; see docs/decisions/codex-calls-bundle.md) <!-- parity:calls-screen-source-chooser -->
+- [ ] Pause screen sharing (blocked: ntgcalls has no capturer pause event, which is what triggers it in Telegram Desktop) <!-- parity:calls-screen-share-pause -->
+- [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls (blocked: ntgcalls has no hook for TDLib's encryptGroupCallData/decryptGroupCallData) <!-- parity:calls-conference -->
 - [x] Detect when you speak in a group call and show it to others <!-- parity:calls-speaking-detection -->
 - [x] Call window options: stay on top, device settings inside the call <!-- parity:calls-window-options -->
 - [ ] Battery-low and microphone-off indicators for the other person (partial: microphone-off shipped; battery-low blocked: ntgcalls keeps the battery flag inside its own signaling) <!-- parity:calls-peer-indicators -->
