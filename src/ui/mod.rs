@@ -163,7 +163,10 @@ mod chat_swipe_ui;
 mod chatlist_global;
 mod chatlist_style;
 mod checklists;
+mod command_shortcuts;
 mod composer;
+#[cfg(all(test, feature = "demo-capture"))]
+mod composer_bundle_tests;
 mod composer_field;
 #[cfg(all(test, feature = "demo-capture"))]
 mod composer_field_tests;
@@ -294,6 +297,7 @@ mod restricted_exceptions;
 mod round_record;
 mod round_seek;
 mod saved_sublists;
+mod schedule_repeat;
 mod scheduled;
 mod screenshot_demo;
 mod search_ui;

@@ -16,6 +16,7 @@ use super::actions::{
     ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
+use super::command_shortcuts::CommandActions;
 use super::shell::title_bar;
 use super::shortcut_pack::HistoryKey;
 use gpui_kit::component::alert::Alert;
@@ -396,6 +397,7 @@ impl Render for QuillApp {
                     cx.propagate();
                 }
             }))
+            .command_actions(cx)
             .on_action(cx.listener(|this, _: &LoadOlder, _, cx| {
                 this.load_older_action(cx);
             }))

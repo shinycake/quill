@@ -1,9 +1,10 @@
 //! "Replace emoji automatically" (tdesktop `Ui::InstantReplaces`,
 //! `InputField::processInstantReplaces`): typing a trigger such as `:-)`,
 //! `<3` or `:rocket:` swaps it for the emoji as the last character lands.
-//! With the setting off only the text replacements (dashes, guillemets,
-//! `:shrug:`) stay, as in `InstantReplaces::TextOnly`. Pure, so it is unit
-//! tested.
+//! The message field installs `InstantReplaces::Default()` and binds the
+//! setting to `setInstantReplacesEnabled`, so with the setting off nothing
+//! is replaced at all, dashes and guillemets included (`TextOnly` is only
+//! used by the member tag field). Pure, so it is unit tested.
 
 use std::ops::Range;
 
@@ -15,7 +16,7 @@ pub struct InstantReplace {
     pub with: String,
 }
 
-/// Replacements that are always on.
+/// The text replacements of `InstantReplaces::Default`.
 const TEXT_ONLY: &[(&str, &str)] = &[
     ("--", "\u{2014}"),
     ("<<", "\u{ab}"),
@@ -23,8 +24,9 @@ const TEXT_ONLY: &[(&str, &str)] = &[
     (":shrug:", "\u{af}\\_(\u{30c4})_/\u{af}"),
 ];
 
-/// Emoticons, replaced only with "Replace emoji automatically" on. Two
-/// need a trailing space so words such as "taxD" stay alone (tdesktop).
+/// Emoticons of `InstantReplaces::Default`. `:o ` and `xD ` come straight
+/// from `InstantReplaces::Default()`; they need the trailing space so the
+/// text `:o` and `xD` can be typed on.
 const EMOTICONS: &[(&str, &str)] = &[
     (":o ", "\u{1f628}"),
     ("xD ", "\u{1f606}"),
@@ -63,45 +65,46 @@ fn ends_with_ignore_case(head: &str, pattern: &str) -> bool {
         && head[head.len() - pattern.len()..].eq_ignore_ascii_case(pattern)
 }
 
+/// The triggers `InstantReplaces::Default()` adds by hand are matched
+/// letter for letter (its trie compares characters exactly); the ones
+/// that come from the emoji replacement table ignore case.
+fn matches_trigger(head: &str, what: &str) -> bool {
+    if matches!(what, ":o " | "xD ") {
+        head.ends_with(what)
+    } else {
+        ends_with_ignore_case(head, what)
+    }
+}
+
 /// The replacement for the character just typed, if any. `prev` is the
 /// text before the keystroke, `new` after it, `caret` the byte offset
-/// after the typed character.
+/// after the typed character. `enabled` is the "Replace emoji
+/// automatically" setting: off replaces nothing (`_instantReplacesEnabled`).
 pub fn instant_replacement(
     prev: &str,
     new: &str,
     caret: usize,
-    replace_emoji: bool,
+    enabled: bool,
 ) -> Option<InstantReplace> {
-    if !typed_one_char(prev, new, caret) {
+    if !enabled || !typed_one_char(prev, new, caret) {
         return None;
     }
     let head = &new[..caret];
-    let emoticons: &[(&str, &str)] = if replace_emoji { EMOTICONS } else { &[] };
+    // `processInstantReplaces` walks the trie back from the typed character
+    // and stops at the first node that holds a replacement: the shortest
+    // matching ending wins.
     let best = TEXT_ONLY
         .iter()
-        .chain(emoticons)
-        .filter(|(what, _)| ends_with_ignore_case(head, what))
-        // A trigger that starts with a letter must start a word.
-        .filter(|(what, _)| {
-            let start = head.len() - what.len();
-            let first_is_word = what.chars().next().is_some_and(char::is_alphanumeric);
-            !first_is_word
-                || head[..start]
-                    .chars()
-                    .next_back()
-                    .is_none_or(|before| !before.is_alphanumeric())
-        })
-        .max_by_key(|(what, _)| what.len());
+        .chain(EMOTICONS)
+        .filter(|(what, _)| matches_trigger(head, what))
+        .min_by_key(|(what, _)| what.len());
     if let Some((what, with)) = best {
         return Some(InstantReplace {
             range: caret - what.len()..caret,
             with: (*with).to_string(),
         });
     }
-    if replace_emoji {
-        return shortcode(head);
-    }
-    None
+    shortcode(head)
 }
 
 /// `:name:` closed by the typed colon.
@@ -139,17 +142,27 @@ mod tests {
     }
 
     #[test]
-    fn dashes_and_guillemets_always_replace() {
-        assert_eq!(typed("a-", '-', false).as_deref(), Some("a\u{2014}"));
+    fn dashes_and_guillemets_replace_with_the_setting_on() {
+        assert_eq!(typed("a-", '-', true).as_deref(), Some("a\u{2014}"));
         assert_eq!(typed("<", '<', true).as_deref(), Some("\u{ab}"));
-        assert_eq!(typed(">", '>', false).as_deref(), Some("\u{bb}"));
+        assert_eq!(typed(">", '>', true).as_deref(), Some("\u{bb}"));
         assert_eq!(typed("a", '-', true), None);
     }
 
     #[test]
-    fn emoticons_need_the_setting() {
-        assert_eq!(typed(":-", ')', true).as_deref(), Some("\u{1f642}"));
+    fn the_setting_off_replaces_nothing() {
+        // `setInstantReplacesEnabled`: the message field turns every
+        // replacement off, dashes and guillemets too.
+        assert_eq!(typed("a-", '-', false), None);
+        assert_eq!(typed("<", '<', false), None);
         assert_eq!(typed(":-", ')', false), None);
+        assert_eq!(typed(":shrug", ':', false), None);
+        assert_eq!(typed("go :rocket", ':', false), None);
+    }
+
+    #[test]
+    fn emoticons_replace() {
+        assert_eq!(typed(":-", ')', true).as_deref(), Some("\u{1f642}"));
         assert_eq!(
             typed("I <", '3', true).as_deref(),
             Some("I \u{2764}\u{fe0f}")
@@ -157,10 +170,13 @@ mod tests {
     }
 
     #[test]
-    fn matching_ignores_case_and_respects_word_starts() {
-        assert_eq!(typed("XD", ' ', true).as_deref(), Some("\u{1f606}"));
-        assert_eq!(typed("taxD", ' ', true), None);
+    fn hand_added_triggers_match_exactly_and_table_ones_ignore_case() {
         assert_eq!(typed("so xD", ' ', true).as_deref(), Some("so \u{1f606}"));
+        // The trie compares characters exactly: no match for `XD `.
+        assert_eq!(typed("XD", ' ', true), None);
+        // There is no word-start rule: `taxD ` still matches.
+        assert_eq!(typed("taxD", ' ', true).as_deref(), Some("ta\u{1f606}"));
+        assert_eq!(typed(":-", 'p', true).as_deref(), Some("\u{1f61b}"));
     }
 
     #[test]
@@ -177,7 +193,7 @@ mod tests {
     #[test]
     fn shrug_is_a_text_replacement() {
         assert_eq!(
-            typed(":shrug", ':', false).as_deref(),
+            typed(":shrug", ':', true).as_deref(),
             Some("\u{af}\\_(\u{30c4})_/\u{af}")
         );
     }

@@ -83,6 +83,7 @@ impl QuillApp {
     }
 
     pub(super) fn start_recording(&mut self, cx: &mut Context<Self>) {
+        self.recording.lock_next = false;
         match self.record_mode() {
             RecordMode::Audio => self.start_voice_recording(cx),
             RecordMode::Video => self.start_video_note_recording(cx),
@@ -155,6 +156,7 @@ impl QuillApp {
     }
 
     fn begin_video_note_capture(&mut self, cx: &mut Context<Self>) {
+        let lock = std::mem::take(&mut self.recording.lock_next);
         if self.recording_active() {
             return;
         }
@@ -164,6 +166,7 @@ impl QuillApp {
         match VideoNoteCapture::start(hq) {
             Ok(capture) => {
                 self.recording.video_note_capture = Some(capture);
+                self.recording.locked = lock;
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
                 self.connection.status_note = "recording video note".into();

@@ -2,6 +2,7 @@
 //! its body's layout and paint, and its kit dialog layer.
 
 use super::super::app::QuillApp;
+use super::super::command_shortcuts::CommandActions;
 use super::super::shell::QuillShell;
 use super::slot::{SharedSlot, WindowSlot, scope_probe};
 use gpui_kit::component::{Root, StyledExt, TitleBar};
@@ -57,21 +58,23 @@ impl ChatWindowView {
     }
 
     /// The window is going away: flush the draft and tell the app.
-    fn closing(&mut self, cx: &mut Context<Self>) {
+    fn closing(&mut self, reopenable: bool, cx: &mut Context<Self>) {
         if self.closed {
             return;
         }
         self.closed = true;
         let chat_id = self.chat_id;
+        // Where the window stood, for "Reopen closed window".
+        let bounds = self.bounds_seen.filter(|_| reopenable);
         let _ = self.owner.update(cx, |app, cx| {
             app.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
-            app.chat_window_closed(chat_id, cx);
+            app.chat_window_closed(chat_id, bounds, cx);
         });
     }
 
     /// Close the window from inside it (title bar close, Cmd/Ctrl+W).
     pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.closing(cx);
+        self.closing(true, cx);
         window.remove_window();
     }
 }
@@ -94,7 +97,7 @@ impl Render for ChatWindowView {
             (alive, app.chat_window_title(chat_id))
         });
         if !alive {
-            self.closing(cx);
+            self.closing(false, cx);
             let handle = window.window_handle();
             cx.defer(move |cx| {
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
@@ -154,6 +157,7 @@ impl Render for ChatWindowView {
                     let _ = view.update(cx, |this, cx| this.close(window, cx));
                 }
             })
+            .chat_window_command_actions(self.owner.clone(), chat_id)
             // Window-wide text selection, as in the main window.
             .child(gpui_kit::base::TextSelectionLayer)
             .child(scope_probe(self.owner.clone(), Some(chat_id)))
@@ -313,7 +317,7 @@ pub(super) fn open_chat_window(
         *built_out.borrow_mut() = Some((view.downgrade(), view.read(cx).slot.clone()));
         let weak = view.downgrade();
         window.on_window_should_close(cx, move |_, cx| {
-            let _ = weak.update(cx, |this, cx| this.closing(cx));
+            let _ = weak.update(cx, |this, cx| this.closing(true, cx));
             true
         });
         window.activate_window();

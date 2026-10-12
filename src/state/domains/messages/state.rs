@@ -135,6 +135,9 @@ pub struct MessagesState {
     /// Send succeeded in this (chat, topic); UI clears the server draft
     /// if the composer is still empty.
     pub draft_clears: Vec<(ChatId, DraftTopic)>,
+    /// Captions chosen for media messages that are still being sent; each
+    /// goes out as an edit once the message has its real id.
+    pub deferred_captions: Vec<crate::composer::DeferredCaption>,
     /// Sponsored messages per chat (`getChatSponsoredMessages`).
     pub sponsored: HashMap<i64, ChatSponsoredMessages>,
     /// Set once Telegram confirmed `reportSponsoredResultAdsHidden`: no ads
@@ -196,6 +199,7 @@ impl MessagesState {
             poll_stats: HashMap::new(),
             draft_dirty: HashSet::new(),
             draft_clears: Vec::new(),
+            deferred_captions: Vec::new(),
             sponsored: HashMap::new(),
             sponsored_hidden: false,
             sponsored_report: None,

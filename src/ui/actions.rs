@@ -114,7 +114,22 @@ actions!(
         /// Cmd/Ctrl+\: the open chat's context menu.
         ShowChatMenu,
         /// Cmd/Ctrl+]: the open chat's peek preview.
-        ShowChatPreview
+        ShowChatPreview,
+        /// Commands of tdesktop's shortcut list (`core/shortcuts.cpp`) that
+        /// have no default chord, set in Settings: send now, send without
+        /// sound, pick a time and send, the scheduled messages, the link
+        /// preview toggle, a round video message, archiving the chat and
+        /// the recent actions of a channel.
+        JustSend,
+        SendSilently,
+        ScheduleSend,
+        ShowScheduledMessages,
+        ToggleLinkPreview,
+        RecordRoundMessage,
+        ArchiveOpenChat,
+        ShowAdminLog,
+        /// Cmd/Ctrl+Shift+T: bring back the chat window closed last.
+        ReopenClosedWindow
     ]
 );
 

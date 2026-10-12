@@ -536,6 +536,8 @@ impl Session {
                 {
                     message.scheduling_state = Some(MessageSchedulingState::SendAtDate {
                         send_date: send_date as i32,
+                        // `editMessageSchedulingState` cannot repeat.
+                        repeat_period: 0,
                     });
                 }
                 self.messages.message_action_note = Some("message rescheduled".into());

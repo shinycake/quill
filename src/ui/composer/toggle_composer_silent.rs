@@ -23,8 +23,13 @@ impl QuillApp {
     /// M1: the composer's `messageSendOptions` for the next send.
     pub(in crate::ui) fn composer_send_options(&self) -> SendOptions {
         SendOptions {
-            disable_notification: self.composer_effective_silent(),
+            disable_notification: self.composer_effective_silent()
+                || self.composer_ui.send_silent_once,
             scheduling: self.composer_ui.scheduling,
+            schedule_repeat_period: match self.composer_ui.scheduling {
+                ComposerScheduling::SendAtDate(_) => self.composer_ui.schedule_repeat,
+                _ => 0,
+            },
             link_preview_disabled: self.composer_ui.preview_disabled,
             link_preview_above_text: self.composer_ui.preview_above,
             link_preview_media: self.composer_ui.preview_media,

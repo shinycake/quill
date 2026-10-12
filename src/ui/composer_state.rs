@@ -88,6 +88,11 @@ pub(crate) struct ComposerUi {
     /// M1: scheduling choice (`messageSchedulingState*`, schema 1.8.67
     /// lines 5902/5905). Reset to `None` after each successful send.
     pub(super) scheduling: ComposerScheduling,
+    /// The repeat period (seconds) chosen with the schedule, zero for
+    /// never. One-shot like `scheduling`.
+    pub(super) schedule_repeat: i32,
+    /// "Silent send" shortcut: the next send alone goes without sound.
+    pub(super) send_silent_once: bool,
     /// M1: the schedule picker popup above the composer.
     pub(super) schedule_popup_open: bool,
     /// The date+time picker behind the schedule popup (created when the
@@ -180,6 +185,8 @@ impl ComposerUi {
             prev_text: String::new(),
             markdown_revert: None,
             scheduling: ComposerScheduling::None,
+            schedule_repeat: 0,
+            send_silent_once: false,
             schedule_popup_open: false,
             schedule_picker: None,
             scheduled_dialog_open: false,

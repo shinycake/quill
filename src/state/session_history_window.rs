@@ -89,20 +89,42 @@ impl Session {
         }
     }
 
-    /// The newest own message of `chat_id` that can be edited in the
-    /// composer (Up in an empty composer, like Telegram Desktop). `None`
-    /// when the loaded window doesn't reach the latest messages — its
+    /// What Up in an empty composer edits (tdesktop `HistoryWidget`
+    /// `keyPressEvent`): when the last message of the chat is still being
+    /// sent, a media message opens its caption (the new caption goes out
+    /// with the upload) and anything else leaves Up to scroll; otherwise
+    /// the newest own message that can be edited in the composer.
+    /// `None` when the loaded window doesn't reach the latest messages: its
     /// newest own message might not be the last one.
     pub fn last_editable_message(&self, chat_id: ChatId) -> Option<crate::composer::ComposerEdit> {
         let history = self.histories.get(&chat_id.0)?;
         if history.has_newer {
             return None;
         }
+        if let Some(last) = history.messages.values().next_back()
+            && last.pending
+            && !last.failed
+        {
+            return crate::composer::ComposerEdit::from_pending_media(
+                chat_id,
+                last.id,
+                &last.content,
+            )
+            .filter(|_| last.is_outgoing);
+        }
         history
             .messages
             .values()
             .rev()
-            .filter(|message| message.is_outgoing && !message.pending && !message.failed)
+            // `HistoryItem::canBeEdited`: forwarded and via-bot messages
+            // are skipped, the scan goes on to older ones.
+            .filter(|message| {
+                message.is_outgoing
+                    && !message.pending
+                    && !message.failed
+                    && message.forward_info.is_none()
+                    && message.extras.via_bot_user_id == 0
+            })
             .find_map(|message| {
                 crate::composer::ComposerEdit::from_own_content(
                     chat_id,

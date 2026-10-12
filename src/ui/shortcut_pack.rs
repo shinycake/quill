@@ -120,7 +120,7 @@ pub(in crate::ui) enum HistoryKey {
 impl QuillApp {
     /// Shortcuts are off while a dialog, viewer or the lock screen owns the
     /// window, and before the account is signed in.
-    fn shortcut_blocked(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub(super) fn shortcut_blocked(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.pane_mode() != PaneMode::Ready
             || self.account.passcode.locked
             || self.viewer.state.is_open()

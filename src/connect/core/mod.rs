@@ -500,7 +500,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // history before a discussion link), taken before `apply`.
         let admin_followup = self.capture_admin_followup(&owned);
         let paid_prices_change = Self::changes_paid_prices(&owned.envelope.payload);
+        let send_outcome = Self::send_outcome(&owned.envelope.payload);
         self.session.apply(owned);
+        self.run_deferred_caption(send_outcome);
         if paid_prices_change {
             self.sync_paid_guard();
         }

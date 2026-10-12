@@ -586,7 +586,10 @@ fn scheduled_entry(id: i64, send_date: i32) -> ParsedMessage {
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
-        scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date }),
+        scheduling_state: Some(MessageSchedulingState::SendAtDate {
+            send_date,
+            repeat_period: 0,
+        }),
         can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("later".into()),
@@ -630,11 +633,17 @@ fn reschedule_ok_rewrites_the_scheduled_entry() {
     );
     assert_eq!(
         session.messages.scheduled_messages[0].scheduling_state,
-        Some(MessageSchedulingState::SendAtDate { send_date: 5000 })
+        Some(MessageSchedulingState::SendAtDate {
+            send_date: 5000,
+            repeat_period: 0
+        })
     );
     assert_eq!(
         session.messages.scheduled_messages[1].scheduling_state,
-        Some(MessageSchedulingState::SendAtDate { send_date: 2000 })
+        Some(MessageSchedulingState::SendAtDate {
+            send_date: 2000,
+            repeat_period: 0
+        })
     );
 }
 

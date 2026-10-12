@@ -15,6 +15,9 @@ pub(crate) struct RecordingUi {
     /// MED2: lock-to-record — a locked recording ignores Esc; only Send
     /// or Cancel (with confirmation) ends it.
     pub(super) locked: bool,
+    /// The next video message starts locked (the "Record Round Message"
+    /// shortcut, `startRecordingAndLock`).
+    pub(super) lock_next: bool,
     /// MED2: the record bar is showing the discard-confirmation row.
     pub(super) discard_confirm: bool,
     /// The paused recording is being played back (position of the preview).
@@ -34,6 +37,7 @@ impl RecordingUi {
             voice_capture: None,
             video_note_capture: None,
             locked: false,
+            lock_next: false,
             discard_confirm: false,
             preview: None,
             once: false,

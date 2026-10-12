@@ -1,15 +1,17 @@
 use super::actions::{
-    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
-    ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer, FocusSidebar, FormatBlockQuote,
-    FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough,
-    FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat,
-    LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder, OpenArchive,
-    OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages, OpenSearch,
-    OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious,
+    ArchiveOpenChat, AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
+    ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer, FocusSidebar,
+    FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler,
+    FormatStrikethrough, FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom,
+    HistoryToTop, JustSend, LastChat, LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat,
+    NextFolder, OpenArchive, OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat,
+    OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp,
+    RecordRoundMessage, ReopenClosedWindow, ReplyToNext, ReplyToPrevious, ScheduleSend,
     SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer, SelectionFocusOlder,
-    ShowChatMenu, ShowChatPreview, StoryTogglePause, ToggleFullscreen, ToggleMessageSelection,
-    ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev,
-    ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    SendSilently, ShowAdminLog, ShowChatMenu, ShowChatPreview, ShowScheduledMessages,
+    StoryTogglePause, ToggleFullscreen, ToggleLinkPreview, ToggleMessageSelection, ToggleTheme,
+    ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave,
+    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -243,6 +245,53 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
         label: "Save media",
         defaults: &[primary!("s")],
     },
+    // Commands of tdesktop's shortcut list that ship without a chord
+    // (`core/shortcuts.cpp` `fillDefaults`), except reopening a window.
+    RebindableAction {
+        id: "reopen-closed-window",
+        label: "Reopen closed window",
+        defaults: &[primary!("shift-t")],
+    },
+    RebindableAction {
+        id: "archive-chat",
+        label: "Archive chat",
+        defaults: &[],
+    },
+    RebindableAction {
+        id: "show-scheduled",
+        label: "Scheduled messages",
+        defaults: &[],
+    },
+    RebindableAction {
+        id: "just-send",
+        label: "Just send",
+        defaults: &[],
+    },
+    RebindableAction {
+        id: "send-silently",
+        label: "Silent send",
+        defaults: &[],
+    },
+    RebindableAction {
+        id: "schedule-send",
+        label: "Schedule",
+        defaults: &[],
+    },
+    RebindableAction {
+        id: "toggle-link-preview",
+        label: "Toggle link preview",
+        defaults: &[],
+    },
+    RebindableAction {
+        id: "record-round",
+        label: "Record Round Message",
+        defaults: &[],
+    },
+    RebindableAction {
+        id: "show-admin-log",
+        label: "Group/Channel Recent Actions",
+        defaults: &[],
+    },
 ];
 
 /// Parity slice (platform-custom-keybindings): build the key binding for a
@@ -287,6 +336,15 @@ pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
         "viewer-copy" => Some(KeyBinding::new(keystroke, ViewerCopy, None)),
         "viewer-save" => Some(KeyBinding::new(keystroke, ViewerSave, None)),
         "story-pause" => Some(KeyBinding::new(keystroke, StoryTogglePause, None)),
+        "reopen-closed-window" => Some(KeyBinding::new(keystroke, ReopenClosedWindow, None)),
+        "archive-chat" => Some(KeyBinding::new(keystroke, ArchiveOpenChat, None)),
+        "show-scheduled" => Some(KeyBinding::new(keystroke, ShowScheduledMessages, None)),
+        "just-send" => Some(KeyBinding::new(keystroke, JustSend, None)),
+        "send-silently" => Some(KeyBinding::new(keystroke, SendSilently, None)),
+        "schedule-send" => Some(KeyBinding::new(keystroke, ScheduleSend, None)),
+        "toggle-link-preview" => Some(KeyBinding::new(keystroke, ToggleLinkPreview, None)),
+        "record-round" => Some(KeyBinding::new(keystroke, RecordRoundMessage, None)),
+        "show-admin-log" => Some(KeyBinding::new(keystroke, ShowAdminLog, None)),
         _ => None,
     }
 }
@@ -710,6 +768,12 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("ctrl-m", "Minimize window", "General", MinimizeWindow),
         row("f11", "Toggle fullscreen", "General", ToggleFullscreen),
         row(
+            primary!("shift-t"),
+            "Reopen closed window",
+            "General",
+            ReopenClosedWindow,
+        ),
+        row(
             "cmd-ctrl-f",
             "Toggle fullscreen",
             "General",
@@ -899,7 +963,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 91);
+        assert_eq!(defaults.len(), 92);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();

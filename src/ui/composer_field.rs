@@ -160,6 +160,10 @@ pub(super) fn tag_for_action(action: &quill::composer::FormatAction) -> Composer
 pub(super) struct MarkdownRevert {
     pub text: String,
     pub caret: usize,
+    /// An instant text replacement (`:-)` to an emoji) is taken back by
+    /// putting the typed text back over this range; a markdown replacement
+    /// is taken back with an undo step.
+    pub restore: Option<(Range<usize>, String)>,
 }
 
 impl QuillApp {
@@ -405,7 +409,15 @@ impl QuillApp {
         {
             return false;
         }
-        window.dispatch_action(Box::new(gpui_kit::component::input::Undo), cx);
+        match revert.restore {
+            Some((range, original)) => {
+                // Telegram Desktop `revertFormatReplace`: the typed text
+                // comes back over the replacement.
+                self.replace_composer_text(range, &original, window, cx);
+                self.composer_ui.prev_text = self.composer.read(cx).value().to_string();
+            }
+            None => window.dispatch_action(Box::new(gpui_kit::component::input::Undo), cx),
+        }
         true
     }
 
@@ -529,6 +541,7 @@ pub(super) fn apply_markdown(
     Some(MarkdownRevert {
         text: input.value().to_string(),
         caret: input.selected_range().start,
+        restore: None,
     })
 }
 
