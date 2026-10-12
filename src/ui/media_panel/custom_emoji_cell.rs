@@ -15,7 +15,14 @@ impl QuillApp {
         // built beyond the viewport (overdraw) hold still and do not ask
         // the frame clock for redraws.
         let file_id = item.file_id;
-        let animated = if quill::power_saving::on(quill::power_saving::Flag::EmojiPanel) {
+        // The reaction selector is this panel in reaction mode, with its own
+        // switch (tdesktop `EmojiListWidget::powerSavingFlag`).
+        let flag = if self.pickers.media_panel.reaction.is_some() {
+            quill::power_saving::Flag::EmojiReactions
+        } else {
+            quill::power_saving::Flag::EmojiPanel
+        };
+        let animated = if quill::power_saving::on(flag) {
             // Battery and animations: the emoji panel shows stills.
             None
         } else if on_screen {

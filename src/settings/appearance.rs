@@ -105,6 +105,10 @@ pub struct AppearancePrefs {
     /// animations play, tdesktop's default.
     #[serde(default)]
     pub power_saving: u32,
+    /// tdesktop `ignoreBatterySaving`: keep the animation switches as set
+    /// even while the system battery saver is on.
+    #[serde(default)]
+    pub ignore_battery_saving: bool,
     /// Chat wallpaper as 0xRRGGBB; None = the theme background.
     #[serde(default)]
     pub wallpaper_rgb: Option<u32>,
@@ -220,6 +224,7 @@ impl Default for AppearancePrefs {
             system_accent: false,
             font_family: String::new(),
             power_saving: 0,
+            ignore_battery_saving: false,
             wallpaper_rgb: None,
             telegram_wallpaper: false,
             wallpaper_tile_day: false,
@@ -375,6 +380,7 @@ mod tests {
             system_accent: true,
             font_family: "Avenir".into(),
             power_saving: crate::power_saving::Flag::StickersChat.bit(),
+            ignore_battery_saving: true,
             wallpaper_rgb: Some(0x0e1621),
             telegram_wallpaper: true,
             wallpaper_tile_day: true,

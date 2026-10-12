@@ -21,6 +21,7 @@ mod auth_recovery;
 mod auth_state;
 mod autoscroll_ui;
 mod background_accounts;
+pub(crate) mod battery_watch;
 mod bidi_line;
 mod bot_about;
 mod bottom_action;
