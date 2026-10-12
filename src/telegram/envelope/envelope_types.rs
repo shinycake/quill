@@ -255,6 +255,9 @@ pub struct UserProfileExtras {
     /// `bot_verification`: the bot that verified the user, with its
     /// description (shown on the profile).
     pub bot_verification: Option<crate::bot_verification::BotVerification>,
+    /// `incoming_paid_message_star_count`: Stars the user pays per message
+    /// to the account; 0 when they write for free.
+    pub incoming_paid_message_star_count: i64,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -338,6 +341,7 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
         bot_verification: crate::bot_verification::parse_bot_verification(
             info.get("bot_verification"),
         ),
+        incoming_paid_message_star_count: field(info, "incoming_paid_message_star_count").max(0),
     }
 }
 
@@ -372,6 +376,12 @@ pub struct SupergroupFullAdmin {
     /// `bot_verification`: the bot that verified the chat, with its
     /// description (shown on the profile).
     pub bot_verification: Option<crate::bot_verification::BotVerification>,
+    /// `can_enable_paid_messages` — a positive direct messages price may
+    /// be set.
+    pub can_enable_paid_messages: bool,
+    /// `outgoing_paid_message_star_count`: Stars the account pays per
+    /// message in this supergroup (0 for administrators and free groups).
+    pub outgoing_paid_message_star_count: i64,
 }
 
 /// A chat's name color and reply emoji (`chat.accent_color_id`,

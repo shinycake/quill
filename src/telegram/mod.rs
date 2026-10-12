@@ -13,6 +13,7 @@ pub mod requests_data_settings;
 pub mod requests_emoji;
 pub mod requests_gifts;
 pub mod requests_group_stickers;
+pub mod requests_paid_messages;
 pub mod requests_payments;
 pub mod requests_premium;
 pub mod requests_privacy;

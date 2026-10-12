@@ -49,6 +49,7 @@ mod message_link_at;
 mod message_menu;
 mod messages;
 mod moderation;
+mod paid_messages;
 mod paid_reaction;
 mod payments;
 mod peer_color;

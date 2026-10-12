@@ -106,6 +106,9 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    if self.paid_send_waits(chat_id, &text, cx) {
+                        return;
+                    }
                     let attachments = self.composer_ui.pending_attachments.clone();
                     // The viewer's own rights in a group: text needs the
                     // basic right, each attachment its media right.

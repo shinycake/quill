@@ -106,6 +106,9 @@ pub enum GroupsPayload {
         /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line
         /// 2746) — discussion group members must join to write.
         join_to_send_messages: bool,
+        /// `supergroup.paid_message_star_count`: Stars non-administrators
+        /// pay per message (a channel's direct messages group).
+        paid_message_star_count: i64,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
@@ -167,6 +170,8 @@ pub enum GroupsPayload {
         /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line
         /// 2746).
         join_to_send_messages: bool,
+        /// `supergroup.paid_message_star_count`.
+        paid_message_star_count: i64,
     },
     /// `chatMember` — `getChatMember` response for a channel.
     ChatMember { member: ParsedChatMember },

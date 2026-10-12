@@ -331,6 +331,19 @@ pub(crate) fn parse_settings_payload(
                 value,
             )),
         )),
+        "canSendMessageToUserResultOk"
+        | "canSendMessageToUserResultUserHasPaidMessages"
+        | "canSendMessageToUserResultUserRestrictsNewChats"
+        | "canSendMessageToUserResultUserIsDeleted" => {
+            crate::paid_messages::CanSend::parse(type_name, value)
+                .map(|answer| {
+                    EnvelopePayload::Settings(SettingsPayload::CanSendMessageToUser(answer))
+                })
+                .ok_or(ParseError::MissingField)
+        }
+        "starCount" => Ok(EnvelopePayload::Settings(SettingsPayload::StarCount(
+            int53_or_zero(value.get("star_count")),
+        ))),
         "networkStatistics" => Ok(EnvelopePayload::Settings(
             SettingsPayload::NetworkStatistics(crate::network_usage::NetworkUsage::from_value(
                 value,

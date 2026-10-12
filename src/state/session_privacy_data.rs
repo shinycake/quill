@@ -53,6 +53,7 @@ impl Session {
             }
             _ => {}
         }
+        self.payments.paid_messages.apply_option(name, value);
     }
 
     /// Payloads of this block. Returns true when handled.
@@ -67,6 +68,24 @@ impl Session {
                 if purpose == Some(RequestPurpose::GetNewChatPrivacy) {
                     self.settings.privacy_data.new_chat =
                         Some(NewChatPrivacyState::Ready(*settings));
+                }
+                true
+            }
+            SettingsPayload::CanSendMessageToUser(answer) => {
+                if purpose == Some(RequestPurpose::CanSendMessageToUser)
+                    && let Some(user_id) = pending.and_then(|p| p.user_id)
+                {
+                    self.payments
+                        .paid_messages
+                        .record_answer(user_id, *answer, unix_ms_now());
+                }
+                true
+            }
+            SettingsPayload::StarCount(stars) => {
+                if purpose == Some(RequestPurpose::GetPaidMessageRevenue)
+                    && let Some(user_id) = pending.and_then(|p| p.user_id)
+                {
+                    self.payments.paid_messages.revenue.insert(user_id, *stars);
                 }
                 true
             }
@@ -118,6 +137,15 @@ impl Session {
                 self.settings.privacy_data.check_password_suggested = false;
             }
             Some(RequestPurpose::SetInactiveSessionTtl) => self.settings.privacy_data.error = None,
+            Some(RequestPurpose::AllowUnpaidMessages) => {
+                if let Some(user_id) = pending.and_then(|p| p.user_id) {
+                    self.finish_unpaid_exception(user_id);
+                }
+            }
+            Some(RequestPurpose::SetDirectMessagesGroup) => {
+                self.payments.paid_messages.error = None;
+                self.payments.paid_messages.saving = false;
+            }
             _ => {}
         }
     }
@@ -151,12 +179,15 @@ impl Session {
             RequestPurpose::GetNewChatPrivacy => {
                 data.new_chat = Some(NewChatPrivacyState::Failed);
             }
-            RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy { previous_allow }) => {
+            RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy {
+                previous_allow,
+                previous_stars,
+            }) => {
                 // Roll the optimistic choice back to what the server had.
-                if let Some(NewChatPrivacyState::Ready(current)) = data.new_chat {
+                if matches!(data.new_chat, Some(NewChatPrivacyState::Ready(_))) {
                     data.new_chat = Some(NewChatPrivacyState::Ready(NewChatPrivacy {
                         allow_from_unknown: previous_allow,
-                        ..current
+                        incoming_paid_message_star_count: previous_stars,
                     }));
                 }
                 data.error = Some(sessions_error_line("change who can message you", err));
@@ -177,6 +208,17 @@ impl Session {
                     err,
                 ));
             }
+            RequestPurpose::CanSendMessageToUser
+            | RequestPurpose::GetPaidMessageRevenue
+            | RequestPurpose::LoadDirectMessagesChat => {
+                // Nothing to show: the chat stays free and the Remove Fee
+                // box hides the refund line.
+            }
+            RequestPurpose::AllowUnpaidMessages | RequestPurpose::SetDirectMessagesGroup => {
+                self.payments.paid_messages.saving = false;
+                self.payments.paid_messages.error =
+                    Some(sessions_error_line("change the paid message settings", err));
+            }
             RequestPurpose::GetNetworkStatistics => {
                 data.network_loading = false;
                 data.error = Some(sessions_error_line("load the network usage", err));
@@ -192,6 +234,18 @@ impl Session {
                 };
             }
             _ => {}
+        }
+    }
+
+    /// `allowUnpaidMessagesFromUser` went through: the user writes for
+    /// free now, so the Remove Fee bar and the paid total go away.
+    pub fn finish_unpaid_exception(&mut self, user_id: i64) {
+        let paid = &mut self.payments.paid_messages;
+        paid.saving = false;
+        paid.error = None;
+        paid.revenue.remove(&user_id);
+        if let Some(info) = self.users_state.user_full_infos.get_mut(&user_id) {
+            info.extras.incoming_paid_message_star_count = 0;
         }
     }
 

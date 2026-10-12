@@ -129,6 +129,7 @@ pub(crate) fn parse_groups_payload(
                     .get("join_to_send_messages")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                paid_message_star_count: int53_or_zero(supergroup.get("paid_message_star_count")),
             }))
         }
         "supergroup" => Ok(EnvelopePayload::Groups(GroupsPayload::Supergroup {
@@ -185,6 +186,7 @@ pub(crate) fn parse_groups_payload(
                 .get("join_to_send_messages")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            paid_message_star_count: int53_or_zero(value.get("paid_message_star_count")),
         })),
         "updateChatMember" => {
             let member = value

@@ -358,7 +358,12 @@ impl QuillApp {
                 body.child(self.exception_picker(cx, target, kind, &detail))
             };
         }
-        Some(self.privacy_shell(cx, "exceptions", kind.label(), body.into_any_element()))
+        let title = if key == PrivacySettingKey::AllowUnpaidMessages {
+            key.label()
+        } else {
+            kind.label()
+        };
+        Some(self.privacy_shell(cx, "exceptions", title, body.into_any_element()))
     }
 
     /// One Premium users / Mini Apps switch row of an exception list.

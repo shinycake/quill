@@ -114,6 +114,7 @@ pub enum SettingsPurpose {
     /// optimistically at send time.
     SetNewChatPrivacy {
         previous_allow: bool,
+        previous_stars: i64,
     },
     /// B13: `setGiftSettings`. Response is `ok`; applied optimistically.
     SetGiftSettings,
@@ -260,6 +261,21 @@ pub enum SettingsPurpose {
     /// `toggleHasSponsoredMessagesEnabled`. Response is `ok`; the value
     /// arrives as `updateUserFullInfo`.
     SetSponsoredEnabled,
+    /// `canSendMessageToUser`. Response is `canSendMessageToUserResult*`;
+    /// the user is `PendingRequest::user_id`.
+    CanSendMessageToUser,
+    /// `getPaidMessageRevenue`. Response is `starCount`; the user is
+    /// `PendingRequest::user_id`.
+    GetPaidMessageRevenue,
+    /// `allowUnpaidMessagesFromUser`. Response is `ok`; the user is
+    /// `PendingRequest::user_id`.
+    AllowUnpaidMessages,
+    /// `setChatDirectMessagesGroup`. Response is `ok`; the new state
+    /// arrives as `updateSupergroupFullInfo` and `updateSupergroup`.
+    SetDirectMessagesGroup,
+    /// `getChat` of a channel's direct messages group that is not loaded
+    /// yet; its price arrives with the `updateSupergroup` before the chat.
+    LoadDirectMessagesChat,
 }
 
 flat_purposes!(Settings(SettingsPurpose) {
@@ -310,4 +326,9 @@ flat_purposes!(Settings(SettingsPurpose) {
     GetConnectedBot,
     SaveConnectedBot,
     SetSponsoredEnabled,
+    CanSendMessageToUser,
+    GetPaidMessageRevenue,
+    AllowUnpaidMessages,
+    SetDirectMessagesGroup,
+    LoadDirectMessagesChat,
 });

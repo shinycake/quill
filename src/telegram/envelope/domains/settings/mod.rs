@@ -100,6 +100,10 @@ pub enum SettingsPayload {
     },
     /// B13: `newChatPrivacySettings` — `getNewChatPrivacySettings` answer.
     NewChatPrivacySettings(crate::privacy::NewChatPrivacy),
+    /// `canSendMessageToUserResult*` — `canSendMessageToUser` answer.
+    CanSendMessageToUser(crate::paid_messages::CanSend),
+    /// `starCount` — `getPaidMessageRevenue` answer.
+    StarCount(i64),
     /// B13: `networkStatistics` — `getNetworkStatistics` answer.
     NetworkStatistics(crate::network_usage::NetworkUsage),
     /// B13: `recoveryEmailAddress` — the answer that proves a typed

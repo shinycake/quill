@@ -42,21 +42,35 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         allow_from_unknown: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         let Some(NewChatPrivacyState::Ready(current)) = self.session.settings.privacy_data.new_chat
         else {
             // Not loaded: writing would reset the paid-message price.
             return Err(ConnectSendError::InvalidRequest);
         };
-        let next = NewChatPrivacy {
+        self.set_new_chat_settings(NewChatPrivacy {
             allow_from_unknown,
             ..current
+        })
+    }
+
+    /// `setNewChatPrivacySettings` with the whole value: the Messages box
+    /// saves Everybody, Contacts and Premium, or a price in one request.
+    /// Applied optimistically; a failure restores the previous value.
+    pub fn set_new_chat_settings(
+        &mut self,
+        next: NewChatPrivacy,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(NewChatPrivacyState::Ready(current)) = self.session.settings.privacy_data.new_chat
+        else {
+            return Err(ConnectSendError::InvalidRequest);
         };
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy {
                 previous_allow: current.allow_from_unknown,
+                previous_stars: current.incoming_paid_message_star_count,
             }),
             None,
         );

@@ -186,7 +186,7 @@ pub fn message_send_options(options: &SendOptions) -> Value {
         "from_background": false,
         "protect_content": false,
         "allow_paid_broadcast": false,
-        "paid_message_star_count": 0,
+        "paid_message_star_count": options.paid_message_star_count,
         "update_order_of_installed_sticker_sets": options.update_order_of_installed_sticker_sets,
         "scheduling_state": scheduling_state,
         "effect_id": 0,

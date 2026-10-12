@@ -509,6 +509,9 @@ impl QuillApp {
         if let Some(row) = self.chat_appearance_row(chat_id, cx) {
             body = body.child(row);
         }
+        if let Some(row) = self.direct_messages_settings_row(chat_id, cx) {
+            body = body.child(row);
+        }
         if controls.upgrade {
             body = body.child(
                 action_row(

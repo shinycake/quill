@@ -6,10 +6,12 @@
 use super::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 
 use gpui_kit::*;
 use quill::chat_bottom_bar::{BarFacts, BottomBar, ChannelFacts, bottom_bar};
 use quill::ids::ChatId;
+use quill::paid_messages::SendGate;
 use quill::state::{ChatSummary, Session};
 use quill::telegram::envelope::ChatKind;
 
@@ -41,6 +43,7 @@ impl QuillApp {
                 join_by_request: self.chat_join_by_request(chat.id),
             }),
             muted: chat.is_muted(),
+            premium_required: session.send_gate(chat.id) == SendGate::PremiumRequired,
         }
     }
 
@@ -55,6 +58,7 @@ impl QuillApp {
         match bottom_bar(&self.bottom_bar_facts(session, chat))? {
             bar @ (BottomBar::Unblock { .. }
             | BottomBar::Start
+            | BottomBar::PremiumRequired
             | BottomBar::JoinGroup
             | BottomBar::ApplyToJoin) => Some(bar),
             BottomBar::JoinChannel | BottomBar::MuteUnmute { .. } => None,
@@ -64,6 +68,13 @@ impl QuillApp {
     pub(super) fn bottom_action_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bar = self.bottom_action()?;
         let chat_id = self.session()?.open_chat?;
+        // `{name} only accepts messages from contacts and Premium users.`
+        let sentence = (bar == BottomBar::PremiumRequired)
+            .then(|| {
+                SendGate::PremiumRequired
+                    .sentence(&self.session()?.chats.get(&chat_id.0)?.title.clone())
+            })
+            .flatten();
         Some(
             div()
                 .id("bottom-action-bar")
@@ -71,8 +82,19 @@ impl QuillApp {
                 .border_t_1()
                 .border_color(cx.theme().border)
                 .flex()
+                .flex_col()
+                .gap_2()
                 .items_center()
                 .justify_center()
+                .when_some(sentence, |this, line| {
+                    this.child(
+                        div()
+                            .text_sm()
+                            .text_center()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(line),
+                    )
+                })
                 .child(
                     Button::new("bottom-action")
                         .label(bar.label())
@@ -91,6 +113,7 @@ impl QuillApp {
         match bar {
             BottomBar::Unblock { restart } => self.unblock_peer(chat_id, restart, cx),
             BottomBar::Start => self.start_bot_from_bar(chat_id, cx),
+            BottomBar::PremiumRequired => self.open_premium(cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
                 self.join_channel(chat_id, cx);
                 self.connection.status_note = if bar == BottomBar::ApplyToJoin {

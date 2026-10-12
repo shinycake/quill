@@ -79,6 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<(), ConnectSendError> {
         self.maybe_probe_channel_membership()?;
         self.maybe_fetch_bot_info()?;
+        self.maybe_fetch_paid_messages_info()?;
         self.maybe_fetch_bot_commands()?;
         self.maybe_fetch_reply_markup()?;
         self.maybe_view_open_messages()?;
