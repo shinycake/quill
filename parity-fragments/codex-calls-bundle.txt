@@ -1,2 +1,0 @@
-# Calls bundle: speaker and listener links for video chats
-parity:calls-speaker-links
