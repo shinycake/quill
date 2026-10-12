@@ -37,18 +37,40 @@
   Opening a story that is not in the poster's tray fetches it and opens the
   viewer on that single story (`story_viewer/mod.rs`).
 
+## Follow-up in the same PR
+
+- Paid-media albums render every item. Locked: each preview in Quill's album
+  layout (`quill::album`), all under the spoiler surface and one unlock
+  overlay. Bought: `ServiceAction::PaidMedia.unlocked` holds the photos and
+  videos, drawn with the album tiles; the media viewer pages through them
+  (`collect_media_items` emits one item per bought item, `open_media_viewer_at`
+  picks the tapped one). A single bought item is still an ordinary photo or
+  video message.
+- The locked preview wears the spoiler surface (`spoiler_surface` in
+  `message_media/surfaces.rs`, split out of `spoiler_cover`): the cached blurred
+  minithumbnail, the darkening and the shared speck "mess". This replaced the
+  first version's own blur.
+- "Media Unlocked. N Stars transferred to {chat}." goes to the status bar after
+  a successful Stars payment for a paid-media message
+  (`Session::note_paid_media_unlocked`, drained in `notifications/mod.rs`).
+  Quill has no toast widget; the status bar is its notice surface.
+- The mention picture sits in the shared story ring (`with_story_ring`): the
+  unread gradient while the story is active and newer than the poster's read
+  mark, the thin muted ring otherwise.
+
 ## Not done
 
-- A paid-media album with several unlocked items renders only the first item
-  (no grouped layout inside one message).
-- No spoiler particles over the locked preview, no "Media Unlocked" toast,
-  no unread ring on the mention picture.
+- A bought album's tiles are not grouped with neighbouring messages.
+- Nothing else known.
 
 ## Verification
 
-- Unit tests: envelope parse (locked, bought photo, story ids), service
-  wording, state card state, checkout routing, frame policy, blur, expired
-  mention text, card selection.
-- Temporary demo capture (not committed) showed the locked card, forwarded
-  story card and mention row with the round picture and button.
+- Unit tests: envelope parse (locked, bought photo, bought album, story ids),
+  service wording, state card state, unread ring state, Media Unlocked note
+  (paid media yes, plain message no), viewer items for a bought album, checkout
+  routing, frame policy, album layout, expired mention text, card selection.
+- Temporary demo captures (not committed) showed: the locked single card, the
+  locked three-item album under the specks, a bought album, mention rows with a
+  clipped round picture and the unread ring, the expired forwarded story card
+  and the expired mention wording.
 - Not exercised: a real purchase, a real story viewer open from a card.

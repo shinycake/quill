@@ -201,8 +201,33 @@ pub(in crate::ui) fn spoiler_cover(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let key = (chat_id.0, message_id.0 as u64, u64::MAX, false);
-    // A smooth blur of the inline minithumbnail (scaled up and blurred
-    // once, cached): the raw 40 px JPEG scaled to the frame shows blocks.
+    spoiler_surface(row_id, minithumbnail, frame_w, frame_h, corners)
+        .role(gpui_kit::Role::Button)
+        .aria_label("Reveal spoiler")
+        .tab_index(0)
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.message_ui.spoiler_revealed.insert(key);
+            crate::ui::spoiler_fx::mark_revealed(key);
+            if let Some(file_id) = download {
+                this.request_media_download(file_id, None, cx);
+            }
+            cx.notify();
+        }))
+        .into_any_element()
+}
+
+/// The covered picture of a spoiler without its click: the blurred inline
+/// preview (scaled up and blurred once, cached under `row_id`: the raw 40 px
+/// JPEG scaled to the frame shows blocks), tdesktop's darkening and the
+/// drifting speck "mess". Locked paid media wears the same surface.
+pub(in crate::ui) fn spoiler_surface(
+    row_id: u64,
+    minithumbnail: Option<&quill::telegram::envelope::MiniThumbnail>,
+    frame_w: Pixels,
+    frame_h: Pixels,
+    corners: MediaCorners,
+) -> Stateful<Div> {
     let preview = minithumbnail
         .filter(|mini| !mini.data.is_empty())
         .and_then(|mini| blurred_preview(row_id, &mini.data))
@@ -242,19 +267,6 @@ pub(in crate::ui) fn spoiler_cover(
                 .bg(gpui_kit::black().opacity(shade)),
         )
         .child(dust)
-        .role(gpui_kit::Role::Button)
-        .aria_label("Reveal spoiler")
-        .tab_index(0)
-        .cursor_pointer()
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.message_ui.spoiler_revealed.insert(key);
-            crate::ui::spoiler_fx::mark_revealed(key);
-            if let Some(file_id) = download {
-                this.request_media_download(file_id, None, cx);
-            }
-            cx.notify();
-        }))
-        .into_any_element()
 }
 
 /// The minithumbnail scaled up and Gaussian-blurred, cached per message.

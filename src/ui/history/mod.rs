@@ -232,6 +232,7 @@ pub(super) fn album_history_row(
             files,
             downloading,
             media_roots,
+            0,
             cx,
         );
         mosaic = mosaic.child(tile);
@@ -402,9 +403,14 @@ pub(super) fn album_tile(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
+    // Which item of the message the tile is (a bought paid-media album
+    // holds several under one message id); 0 for ordinary albums.
+    item_offset: usize,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let row_id = message.id.0 as u64;
+    let row_id = (message.id.0 as u64)
+        .wrapping_mul(64)
+        .wrapping_add(item_offset as u64);
     let corners = mosaic_corners.tile(
         part.x <= 0,
         part.y <= 0,
@@ -431,7 +437,7 @@ pub(super) fn album_tile(
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.open_media_viewer(chat_id, message_id, cx);
+            this.open_media_viewer_at(chat_id, message_id, item_offset, cx);
         }));
     match &message.content {
         MessageContent::Photo(photo) => {

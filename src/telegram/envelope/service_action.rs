@@ -321,11 +321,13 @@ pub enum ServiceAction {
     },
     /// `messagePaidMedia`: media sold for Stars. `locked` holds one entry
     /// per `paidMediaPreview` (blurred thumbnail, size, duration) while
-    /// the media is still locked; it is empty once the viewer bought it
-    /// (the unlocked photos and videos are not rendered yet).
+    /// the media is still locked. Once the viewer bought an album, `locked`
+    /// is empty and `unlocked` holds its photos and videos (a single bought
+    /// item parses as an ordinary photo or video message instead).
     PaidMedia {
         stars: i64,
         locked: Vec<PaidMediaPreview>,
+        unlocked: Vec<MessageContent>,
         caption: String,
     },
 }
@@ -870,6 +872,7 @@ impl ServiceAction {
             "messagePaidMedia" => A::PaidMedia {
                 stars: i(value, "star_count"),
                 locked: paid_media_previews(value),
+                unlocked: Vec::new(),
                 caption: value
                     .get("caption")
                     .and_then(|caption| caption.get("text"))

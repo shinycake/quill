@@ -221,40 +221,56 @@ pub(in crate::ui) fn story_mention_extras(
     if state == StoryCardState::Expired {
         return None;
     }
-    let side = px(MENTION_SIDE);
     let preview = session.and_then(|s| s.story_preview(poster.0, story_id));
-    let mut circle = div()
+    let path = preview
+        .as_ref()
+        .and_then(|p| picture_path(p, files, media_roots));
+    let dims = preview.as_ref().map(|p| (p.width, p.height));
+    // tdesktop draws the ring in both states: the unread gradient, or the
+    // thinner muted outline once read (`StoryMention::draw`).
+    let ring = quill::story_ring::StoryRing {
+        count: 1,
+        unread: usize::from(session.is_some_and(|s| s.story_is_unread(poster.0, story_id))),
+    };
+    let circle = div()
         .id(("story-mention", row_id))
-        .size(side)
         .flex_none()
-        .rounded_full()
-        .overflow_hidden()
-        .border_2()
-        .border_color(super::super::chat_theme::accent())
-        .bg(fill_muted())
         .role(gpui_kit::Role::Button)
         .aria_label("View story")
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
             this.open_message_story(poster, story_id, cx);
-        }));
-    if let Some(path) = preview
-        .as_ref()
-        .and_then(|p| picture_path(p, files, media_roots))
-    {
-        circle = circle.child(
-            img(crate::ui::image_budget::sized_media(
-                &path,
-                (side, side),
-                preview.as_ref().map(|p| (p.width, p.height)),
-                crate::ui::image_budget::Fit::Cover,
-            ))
-            .size_full()
-            .rounded_full()
-            .object_fit(ObjectFit::Cover),
-        );
-    }
+        }))
+        .child(crate::ui::story_ring::with_story_ring(
+            move |avatar| {
+                let side = px(avatar);
+                let base = div()
+                    .size(side)
+                    .rounded_full()
+                    .overflow_hidden()
+                    .bg(fill_muted());
+                match path.clone() {
+                    Some(path) => base
+                        .child(
+                            img(crate::ui::image_budget::sized_media(
+                                &path,
+                                (side, side),
+                                dims,
+                                crate::ui::image_budget::Fit::Cover,
+                            ))
+                            .size_full()
+                            .rounded_full()
+                            .object_fit(ObjectFit::Cover),
+                        )
+                        .into_any_element(),
+                    None => base.into_any_element(),
+                }
+            },
+            ring,
+            MENTION_SIDE,
+            text_muted().into(),
+        ));
     Some(
         div()
             .flex()

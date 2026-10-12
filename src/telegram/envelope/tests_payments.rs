@@ -342,6 +342,7 @@ fn paid_media_keeps_locked_previews_and_caption() {
         stars,
         locked,
         caption,
+        ..
     } = action.as_ref()
     else {
         panic!("{action:?}");

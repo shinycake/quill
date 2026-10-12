@@ -142,4 +142,68 @@ impl Session {
             caption: story.caption.clone(),
         })
     }
+
+    /// Whether the story is an active, not yet read story of its poster:
+    /// the mention picture's ring is then the unread gradient.
+    pub fn story_is_unread(&self, chat_id: i64, story_id: i32) -> bool {
+        self.stories.tray.get(&chat_id).is_some_and(|tray| {
+            tray.stories
+                .iter()
+                .any(|info| info.story_id == story_id && story_id > tray.max_read_story_id)
+        })
+    }
+
+    /// After a successful Stars payment for a paid-media message: the note
+    /// tdesktop shows as a toast (`ShowPaidMediaUnlockedToast`, "Media
+    /// Unlocked"). Only for paid media; an invoice message gets none.
+    pub(crate) fn note_paid_media_unlocked(&mut self) {
+        use crate::payment_invoice::InputInvoice;
+        use crate::telegram::envelope::PaymentFormTypeData;
+        let Some(InputInvoice::Message {
+            chat_id,
+            message_id,
+        }) = self.payments.request.as_ref().map(|r| r.invoice.clone())
+        else {
+            return;
+        };
+        let Some(PaymentFormTypeData::Stars { star_count }) =
+            self.payments.form.as_ref().map(|f| f.form_type.clone())
+        else {
+            return;
+        };
+        let paid_media = self
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .is_some_and(|message| is_paid_media_content(&message.content));
+        if !paid_media {
+            return;
+        }
+        let chat = self
+            .chats
+            .get(&chat_id.0)
+            .map_or("the chat", |chat| chat.title.as_str());
+        self.payments.unlocked_notice = Some(media_unlocked_note(star_count, chat));
+    }
+}
+
+/// Locked paid media, or the photo and video it turns into.
+fn is_paid_media_content(content: &MessageContent) -> bool {
+    match content {
+        MessageContent::Photo(_) | MessageContent::Video(_) => true,
+        MessageContent::Action(action) => {
+            matches!(action.as_ref(), ServiceAction::PaidMedia { .. })
+        }
+        _ => false,
+    }
+}
+
+/// `lng_credits_media_done_title` and `_text`, on one line.
+pub fn media_unlocked_note(stars: i64, chat: &str) -> String {
+    let count = if stars == 1 {
+        "1 Star".to_string()
+    } else {
+        format!("{stars} Stars")
+    };
+    format!("Media Unlocked. {count} transferred to {chat}.")
 }

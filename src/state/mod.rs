@@ -179,7 +179,9 @@ pub use session_message_menu::{
     Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
     StickerSetView, StickerSetViewStage, reaction_filter_key,
 };
-pub use session_message_story::{StoryCardState, StoryPreview, message_story_key};
+pub use session_message_story::{
+    StoryCardState, StoryPreview, media_unlocked_note, message_story_key,
+};
 pub use session_privacy_data::{PasswordCheck, PrivacyData};
 pub use session_proxy::LINK_PING_ID;
 pub use session_reply::{

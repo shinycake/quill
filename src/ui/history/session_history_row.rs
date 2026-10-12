@@ -534,7 +534,7 @@ pub(in crate::ui) fn session_history_row(
             cx,
         )),
         // Locked paid media and forwarded stories are bubble cards.
-        MessageContent::Action(_) => action_card(message, session, files, media_roots, cx),
+        MessageContent::Action(_) => action_card(message, session, files, downloading, media_roots, cx),
         MessageContent::Text(_)
         | MessageContent::RichMessage(_)
         | MessageContent::Game(_)

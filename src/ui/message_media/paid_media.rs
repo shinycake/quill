@@ -1,25 +1,22 @@
-//! A locked `messagePaidMedia` (tdesktop `HistoryView::Photo` with an
-//! `extendedMediaPreview`): the blurred inline preview, an "Unlock for
-//! ★N" button and, for an album, the item count. A press anywhere on the
-//! card opens the Stars checkout of the message (`inputInvoiceMessage`,
+//! `messagePaidMedia` (tdesktop `HistoryView::Photo` / `GroupedMedia` with an
+//! `extendedMediaPreview`): while locked, the blurred inline preview under
+//! the spoiler specks with an "Unlock for ★N" button; an album shows every
+//! preview in Quill's album layout. A press anywhere on the card opens the
+//! Stars checkout of the message (`inputInvoiceMessage`,
 //! `Payments::CheckoutProcess::Start` in `MakePaidMediaLink`). Once the
-//! viewer has paid, TDLib replaces the content with a photo or video and
-//! the ordinary media renderers take over (`telegram/envelope/paid_media.rs`).
+//! viewer has paid, TDLib replaces the content: one item becomes a photo or
+//! video message, several stay here as a bought album drawn with the album
+//! tiles (`telegram/envelope/paid_media.rs`).
 
+use super::surfaces::spoiler_surface;
 use super::*;
+use quill::album::{
+    ALBUM_MAX_WIDTH, ALBUM_MIN_WIDTH, ALBUM_SPACING, AlbumRect, album_pixel_size, layout_bounds,
+    layout_media_group,
+};
 use quill::payment_invoice::InputInvoice;
-use quill::telegram::envelope::PaidMediaPreview;
-use quill::wallpaper_raster::{Raster, blur};
-use std::sync::{Mutex, OnceLock};
-
-/// Longest side the preview is blurred at; the tiny JPEG (about 40 px) is
-/// scaled up to this first so the blur has smooth pixels to work with.
-const BLUR_SIDE: u32 = 96;
-/// Blur radius in preview pixels (`Images::Blur` strength in tdesktop's
-/// blurred placeholders is of the same order).
-const BLUR_RADIUS: u32 = 10;
-/// Blurred previews kept; the cache is dropped when it grows past this.
-const CACHE_LIMIT: usize = 64;
+use quill::state::HistoryMessage;
+use quill::telegram::envelope::{MessageContent, PaidMediaPreview};
 
 /// The checkout a press on a locked card opens.
 pub(in crate::ui) fn paid_media_invoice(chat_id: ChatId, message_id: MessageId) -> InputInvoice {
@@ -29,8 +26,8 @@ pub(in crate::ui) fn paid_media_invoice(chat_id: ChatId, message_id: MessageId) 
     }
 }
 
-/// Card frame of a paid-media preview of `width` x `height` pixels: the
-/// same box a photo gets (`Photo::countCurrentSize`), so the bubble keeps
+/// Card frame of a single paid-media preview of `width` x `height` pixels:
+/// the same box a photo gets (`Photo::countCurrentSize`), so the bubble keeps
 /// the photo width policy.
 pub(in crate::ui) fn paid_media_frame(width: i32, height: i32) -> (Pixels, Pixels) {
     media_frame_for(MediaFrameKind::Photo, width, height, 0)
@@ -41,62 +38,66 @@ pub(in crate::ui) fn star_price(stars: i64) -> String {
     format!("\u{2605}{stars}")
 }
 
-/// The preview JPEG scaled up and blurred, ready to draw; `None` when the
-/// bytes do not decode.
-pub(in crate::ui) fn blurred_raster(jpeg: &[u8]) -> Option<Raster> {
-    let image = image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg)
-        .ok()?
-        .to_rgba8();
-    let (w, h) = image.dimensions();
-    if w == 0 || h == 0 {
-        return None;
-    }
-    // Scale the tiny picture up so the blur has smooth pixels to work on.
-    let scale = (BLUR_SIDE as f32 / w.max(h) as f32).max(1.0);
-    let target = (
-        ((w as f32 * scale).round() as u32).max(1),
-        ((h as f32 * scale).round() as u32).max(1),
-    );
-    let image = image::imageops::resize(
-        &image,
-        target.0,
-        target.1,
-        image::imageops::FilterType::Triangle,
-    );
-    let (w, h) = image.dimensions();
-    let mut raster = Raster::from_rgba(w, h, image.into_raw());
-    blur(&mut raster, BLUR_RADIUS);
-    Some(raster)
+/// Album layout of several previews or bought items, and its box.
+pub(in crate::ui) fn paid_album_layout(sizes: &[(i32, i32)]) -> (Vec<AlbumRect>, (i32, i32)) {
+    let layout = layout_media_group(sizes, ALBUM_MAX_WIDTH, ALBUM_MIN_WIDTH, ALBUM_SPACING);
+    let bounds = layout_bounds(&layout);
+    (layout, bounds)
 }
 
-fn cache() -> &'static Mutex<std::collections::HashMap<u64, Option<Arc<RenderImage>>>> {
-    static CACHE: OnceLock<Mutex<std::collections::HashMap<u64, Option<Arc<RenderImage>>>>> =
-        OnceLock::new();
-    CACHE.get_or_init(Default::default)
+/// Fixed colors over a picture (they sit on media, not on the theme), like
+/// the video play badge and time pill.
+fn media_pill(child: AnyElement) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .px_2()
+        .py_0p5()
+        .rounded_full()
+        .bg(gpui_kit::black().opacity(0.55))
+        .text_color(gpui_kit::white())
+        .text_xs()
+        .child(child)
 }
 
-/// The blurred preview as a GPUI image, decoded once per distinct preview.
-fn blurred_preview(jpeg: &[u8]) -> Option<Arc<RenderImage>> {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    jpeg.hash(&mut hasher);
-    let key = hasher.finish();
-    let mut cache = cache().lock().ok()?;
-    if let Some(found) = cache.get(&key) {
-        return found.clone();
-    }
-    if cache.len() >= CACHE_LIMIT {
-        cache.clear();
-    }
-    let image = blurred_raster(jpeg).and_then(|raster| {
-        // GPUI's sprites are BGRA, which is how a `Raster` is stored.
-        let buffer = image::RgbaImage::from_raw(raster.width, raster.height, raster.bgra)?;
-        Some(Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-            image::Frame::new(buffer),
-        ]))))
-    });
-    cache.insert(key, image.clone());
-    image
+/// The lock and the "Unlock for ★N" pill, centered on the card.
+fn unlock_overlay(stars: i64) -> Div {
+    div()
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .size(px(44.))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui_kit::black().opacity(0.55))
+                        .text_color(gpui_kit::white())
+                        .child(Icon::new(gpui_kit::assets::IconName::Lock)),
+                )
+                .child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .rounded_full()
+                        .bg(gpui_kit::black().opacity(0.6))
+                        .text_color(gpui_kit::white())
+                        .text_sm()
+                        .font_medium()
+                        .child(format!("Unlock for {}", star_price(stars))),
+                ),
+        )
 }
 
 /// `messagePaidMedia` while still locked.
@@ -108,10 +109,32 @@ pub(in crate::ui) fn paid_media_card(
     caption: &str,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let row_id = message_id.0 as u64;
-    let first = locked.first();
-    let (width, height) =
-        paid_media_frame(first.map_or(0, |p| p.width), first.map_or(0, |p| p.height));
+    let row_id = (message_id.0 as u64).wrapping_mul(64);
+    let sizes: Vec<(i32, i32)> = locked.iter().map(|p| (p.width, p.height)).collect();
+    let (frames, (width, height)): (Vec<AlbumRect>, (Pixels, Pixels)) = if locked.len() > 1 {
+        let (layout, (w, h)) = paid_album_layout(
+            &sizes
+                .iter()
+                .map(|&(w, h)| (w.max(1), h.max(1)))
+                .collect::<Vec<_>>(),
+        );
+        (layout, (px(w as f32), px(h as f32)))
+    } else {
+        let (w, h) = paid_media_frame(
+            sizes.first().map_or(0, |s| s.0),
+            sizes.first().map_or(0, |s| s.1),
+        );
+        (
+            vec![AlbumRect {
+                x: 0,
+                y: 0,
+                width: f32::from(w) as i32,
+                height: f32::from(h) as i32,
+            }],
+            (w, h),
+        )
+    };
+    let corners = MediaCorners::small();
     let mut tile = div()
         .id(("paid-media", row_id))
         .relative()
@@ -127,88 +150,29 @@ pub(in crate::ui) fn paid_media_card(
         .on_click(cx.listener(move |this, _, window, cx| {
             this.start_invoice_checkout(paid_media_invoice(chat_id, message_id), window, cx);
         }));
-    if let Some(preview) = first
-        .and_then(|p| p.minithumbnail.as_ref())
-        .filter(|mini| !mini.data.is_empty())
-        .and_then(|mini| blurred_preview(&mini.data))
-    {
-        tile = tile.child(
-            img(ImageSource::Render(preview))
-                .size_full()
-                .object_fit(ObjectFit::Cover),
+    for (index, (preview, rect)) in locked.iter().zip(&frames).enumerate() {
+        let surface = spoiler_surface(
+            row_id + index as u64,
+            preview.minithumbnail.as_ref(),
+            px(rect.width as f32),
+            px(rect.height as f32),
+            corners,
         );
+        let mut part = div()
+            .absolute()
+            .left(px(rect.x as f32))
+            .top(px(rect.y as f32))
+            .w(px(rect.width as f32))
+            .h(px(rect.height as f32))
+            .child(surface);
+        if preview.duration > 0 {
+            part = part.child(div().absolute().top_2().left_2().child(media_pill(
+                format_voice_duration(preview.duration).into_any_element(),
+            )));
+        }
+        tile = tile.child(part);
     }
-    // Over the picture the colors are fixed (they sit on media, not on
-    // the theme), like the video play badge and time pill.
-    let pill = |child: AnyElement| {
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .py_0p5()
-            .rounded_full()
-            .bg(gpui_kit::black().opacity(0.55))
-            .text_color(gpui_kit::white())
-            .text_xs()
-            .child(child)
-    };
-    tile = tile
-        .child(
-            div()
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .size(px(44.))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(gpui_kit::black().opacity(0.55))
-                                .text_color(gpui_kit::white())
-                                .child(Icon::new(gpui_kit::assets::IconName::Lock)),
-                        )
-                        .child(
-                            div()
-                                .px_3()
-                                .py_1()
-                                .rounded_full()
-                                .bg(gpui_kit::black().opacity(0.6))
-                                .text_color(gpui_kit::white())
-                                .text_sm()
-                                .font_medium()
-                                .child(format!("Unlock for {}", star_price(stars))),
-                        ),
-                ),
-        )
-        .when(locked.len() > 1, |this| {
-            this.child(
-                div()
-                    .absolute()
-                    .top_2()
-                    .right_2()
-                    .child(pill(format!("{} items", locked.len()).into_any_element())),
-            )
-        });
-    if let Some(duration) = first.map(|p| p.duration).filter(|d| *d > 0) {
-        tile = tile.child(
-            div()
-                .absolute()
-                .top_2()
-                .left_2()
-                .child(pill(format_voice_duration(duration).into_any_element())),
-        );
-    }
+    tile = tile.child(unlock_overlay(stars));
     div()
         .flex()
         .flex_col()
@@ -220,29 +184,57 @@ pub(in crate::ui) fn paid_media_card(
         .into_any_element()
 }
 
+/// A bought paid-media album: its photos and videos in the album layout,
+/// each opening the viewer on its own item.
+pub(in crate::ui) fn paid_album_card(
+    message: &HistoryMessage,
+    unlocked: &[MessageContent],
+    caption: &str,
+    files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let sizes: Vec<(i32, i32)> = unlocked.iter().map(album_pixel_size).collect();
+    let (layout, (box_w, box_h)) = paid_album_layout(&sizes);
+    let mut mosaic = div()
+        .id(("paid-album", message.id.0 as u64))
+        .relative()
+        .w(px(box_w as f32))
+        .h(px(box_h as f32))
+        .overflow_hidden();
+    for (index, (content, part)) in unlocked.iter().zip(&layout).enumerate() {
+        let mut item = message.clone();
+        item.content = content.clone();
+        mosaic = mosaic.child(crate::ui::history::album_tile(
+            &item,
+            part,
+            (box_w, box_h),
+            MediaCorners::small(),
+            files,
+            downloading,
+            media_roots,
+            index,
+            cx,
+        ));
+    }
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(mosaic)
+        .when(!caption.is_empty(), |this| {
+            this.child(div().text_sm().child(caption.to_string()))
+        })
+        .into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{InputInvoice, blurred_raster, paid_media_frame, paid_media_invoice, star_price};
+    use super::{
+        InputInvoice, paid_album_layout, paid_media_frame, paid_media_invoice, star_price,
+    };
     use quill::ids::{ChatId, MessageId};
-
-    fn tiny_jpeg() -> Vec<u8> {
-        // A 8x6 checkerboard: strongly varying, so a blur is measurable.
-        let image = image::RgbImage::from_fn(8, 6, |x, y| {
-            if (x + y) % 2 == 0 {
-                image::Rgb([250, 250, 250])
-            } else {
-                image::Rgb([5, 5, 5])
-            }
-        });
-        let mut bytes = Vec::new();
-        image::DynamicImage::ImageRgb8(image)
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Jpeg,
-            )
-            .expect("encode");
-        bytes
-    }
 
     #[test]
     fn the_unlock_press_asks_for_the_message_invoice() {
@@ -277,14 +269,15 @@ mod tests {
     }
 
     #[test]
-    fn the_preview_is_scaled_up_and_blurred() {
-        let raster = blurred_raster(&tiny_jpeg()).expect("decodes");
-        assert!(raster.width >= 8 * 8 && raster.height >= 6 * 8);
-        // The checkerboard's neighbouring pixels differ by ~245; after the
-        // blur they are close.
-        let a = raster.pixel(raster.width / 2, raster.height / 2)[0];
-        let b = raster.pixel(raster.width / 2 + 1, raster.height / 2)[0];
-        assert!(a.abs_diff(b) < 40, "{a} vs {b}");
-        assert!(blurred_raster(b"not a jpeg").is_none());
+    fn an_album_lays_out_every_item_inside_one_box() {
+        let sizes = [(800, 600), (600, 800), (400, 400)];
+        let (layout, (w, h)) = paid_album_layout(&sizes);
+        assert_eq!(layout.len(), 3);
+        assert!(w > 0 && h > 0);
+        for part in &layout {
+            assert!(part.width > 0 && part.height > 0);
+            assert!(part.x >= 0 && part.y >= 0);
+            assert!(part.x + part.width <= w && part.y + part.height <= h);
+        }
     }
 }

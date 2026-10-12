@@ -32,6 +32,9 @@ pub struct PaymentsState {
     /// The open form was paid: Pay stays off, so one form is never sent
     /// twice.
     pub form_paid: bool,
+    /// "Media Unlocked" note after a paid-media purchase, drained into the
+    /// status bar by the UI poll.
+    pub unlocked_notice: Option<String>,
     /// Slice P1: a failed `getPaymentReceipt`, drained into the status
     /// note by `poll_live` — the checkout dialog (which renders
     /// `payment_note`) may be closed when the receipt fetch fails.
@@ -115,6 +118,7 @@ impl PaymentsState {
             note: None,
             sending: false,
             form_paid: false,
+            unlocked_notice: None,
             receipt_error: None,
             verification_url: None,
             marketplace_gift: None,

@@ -1,7 +1,7 @@
 //! Service-action content that draws as a media card in a bubble instead
 //! of a centered pill: locked paid media and forwarded stories.
 
-use super::paid_media::paid_media_card;
+use super::paid_media::{paid_album_card, paid_media_card};
 use super::story_card::story_card;
 use super::*;
 use quill::state::{HistoryMessage, message_story_key};
@@ -17,7 +17,23 @@ pub(in crate::ui) fn locked_paid_media(
                 stars,
                 locked,
                 caption,
+                ..
             } if !locked.is_empty() => Some((*stars, locked.as_slice(), caption.as_str())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A bought paid-media album: its items and caption.
+pub(in crate::ui) fn bought_paid_album(
+    content: &MessageContent,
+) -> Option<(&[MessageContent], &str)> {
+    match content {
+        MessageContent::Action(action) => match action.as_ref() {
+            ServiceAction::PaidMedia {
+                unlocked, caption, ..
+            } if !unlocked.is_empty() => Some((unlocked.as_slice(), caption.as_str())),
             _ => None,
         },
         _ => None,
@@ -33,7 +49,9 @@ pub(in crate::ui) fn forwarded_story(content: &MessageContent) -> Option<(i64, i
 
 /// Whether the content is a bubble card, not a service row.
 pub(in crate::ui) fn is_bubble_card(content: &MessageContent) -> bool {
-    locked_paid_media(content).is_some() || forwarded_story(content).is_some()
+    locked_paid_media(content).is_some()
+        || bought_paid_album(content).is_some()
+        || forwarded_story(content).is_some()
 }
 
 /// The card of a bubble-card action; `None` for other actions.
@@ -41,6 +59,7 @@ pub(in crate::ui) fn action_card(
     message: &HistoryMessage,
     session: Option<&Session>,
     files: &HashMap<i32, ParsedFile>,
+    downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
@@ -51,6 +70,17 @@ pub(in crate::ui) fn action_card(
             stars,
             locked,
             caption,
+            cx,
+        ));
+    }
+    if let Some((unlocked, caption)) = bought_paid_album(&message.content) {
+        return Some(paid_album_card(
+            message,
+            unlocked,
+            caption,
+            files,
+            downloading,
+            media_roots,
             cx,
         ));
     }
@@ -87,6 +117,7 @@ mod tests {
         action(ServiceAction::PaidMedia {
             stars: 10,
             locked,
+            unlocked: Vec::new(),
             caption: String::new(),
         })
     }
@@ -97,6 +128,25 @@ mod tests {
         assert!(is_bubble_card(&story(false)));
         assert_eq!(forwarded_story(&story(true)), None);
         assert!(!is_bubble_card(&story(true)));
+    }
+
+    #[test]
+    fn a_bought_album_is_a_card_with_its_items() {
+        let items = vec![
+            MessageContent::ScreenshotTaken,
+            MessageContent::ScreenshotTaken,
+        ];
+        let album = action(ServiceAction::PaidMedia {
+            stars: 5,
+            locked: Vec::new(),
+            unlocked: items,
+            caption: "Pair".into(),
+        });
+        assert!(is_bubble_card(&album));
+        assert!(locked_paid_media(&album).is_none());
+        let (unlocked, caption) = super::bought_paid_album(&album).expect("album");
+        assert_eq!(unlocked.len(), 2);
+        assert_eq!(caption, "Pair");
     }
 
     #[test]
