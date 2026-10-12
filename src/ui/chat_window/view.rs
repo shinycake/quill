@@ -131,14 +131,15 @@ impl Render for ChatWindowView {
         let body = app.update(cx, |app, cx| app.chat_window_body(chat_id, window, cx));
         app.update(cx, |app, _| app.set_window_scope(outer));
         let view = cx.weak_entity();
-        let title_bar = TitleBar::new()
+        super::super::window_frame::sync(window, app.read(cx).appearance.native_window_frame);
+        let title_bar = super::super::window_frame::FrameTitleBar::new()
             .on_close_window({
                 let view = view.clone();
                 move |_, window, cx| {
                     let _ = view.update(cx, |this, cx| this.close(window, cx));
                 }
             })
-            .child(
+            .caption(
                 div()
                     .font_semibold()
                     .text_sm()
@@ -302,9 +303,11 @@ pub(super) fn open_chat_window(
         window_min_size: Some(size(px(380.), px(400.))),
         titlebar: Some(TitlebarOptions {
             title: Some("Quill".into()),
+            appears_transparent: super::super::window_frame::titlebar_hidden(),
             ..TitleBar::title_bar_options()
         }),
         app_owns_titlebar_drag: true,
+        window_decorations: super::super::window_frame::window_decorations(),
         app_id: Some("org.shinycake.quill".into()),
         focus: true,
         show: true,

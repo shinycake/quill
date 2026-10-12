@@ -1,16 +1,18 @@
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::poll::PollOptionInput;
 use serde_json::{Value, json};
 
 /// `addPollOption` (TDLib 1.8.67, `schema/td_api.tl:12920`):
 /// `addPollOption chat_id:int53 message_id:int53 option:inputPollOption =
-/// Ok;`. Only valid when `messagePoll.can_add_option`; `media` is null
-/// (option media is out of this slice). The new option arrives through
-/// `updatePoll`.
+/// Ok;`. Only valid when `messagePoll.can_add_option`; `media` is the
+/// option's picture, sticker or link, or none. The new option arrives
+/// through `updatePoll`.
 pub fn add_poll_option(
     extra: RequestId,
     chat_id: ChatId,
     message_id: MessageId,
     text: &str,
+    media: Option<&PollOptionInput>,
 ) -> String {
     json!({
         "@type": "addPollOption",
@@ -19,8 +21,8 @@ pub fn add_poll_option(
         "message_id": message_id.0,
         "option": {
             "@type": "inputPollOption",
-            "text": { "@type": "formattedText", "text": text, "entities": [] },
-            "media": Value::Null
+            "text": super::option_text_json(text),
+            "media": media.map_or(Value::Null, super::input_poll_media)
         }
     })
     .to_string()
@@ -72,6 +74,7 @@ mod tests {
             ChatId(7),
             MessageId(9),
             "Tacos",
+            None,
         ));
         assert_eq!(value["@type"], "addPollOption");
         assert_eq!(value["chat_id"], 7);
@@ -79,6 +82,18 @@ mod tests {
         assert_eq!(value["option"]["@type"], "inputPollOption");
         assert_eq!(value["option"]["text"]["text"], "Tacos");
         assert!(value["option"]["media"].is_null());
+        let link = PollOptionInput::Link {
+            url: "https://example.com".into(),
+        };
+        let value = parse(&add_poll_option(
+            RequestId(2),
+            ChatId(7),
+            MessageId(9),
+            "Tacos",
+            Some(&link),
+        ));
+        assert_eq!(value["option"]["media"]["@type"], "inputPollMediaLink");
+        assert_eq!(value["option"]["media"]["url"], "https://example.com");
     }
 
     #[test]

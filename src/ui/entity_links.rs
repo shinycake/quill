@@ -45,6 +45,9 @@ pub(super) struct OpenLinkConfirm {
     pub(super) url: String,
     pub(super) shown: String,
     pub(super) suspicious: Vec<Range<usize>>,
+    /// Asked for a poll option's link: tdesktop's "Open Link" box, with the
+    /// address, "Open" and "Cancel" only.
+    pub(super) from_poll_option: bool,
 }
 
 /// The small menu a phone number, card number or date opens on click.
@@ -99,6 +102,7 @@ impl QuillApp {
                         url,
                         shown,
                         suspicious,
+                        from_poll_option: false,
                     });
                 }
             },
@@ -551,6 +555,7 @@ impl QuillApp {
                     url: String::new(),
                     shown: String::new(),
                     suspicious: Vec::new(),
+                    from_poll_option: false,
                 });
             let marked = !confirm.suspicious.is_empty();
             let mut highlights: Vec<(Range<usize>, HighlightStyle)> = confirm
@@ -582,6 +587,7 @@ impl QuillApp {
             }
             let url = confirm.url.clone();
             let shown = confirm.shown.clone();
+            let from_poll_option = confirm.from_poll_option;
             let body = div()
                 .flex()
                 .flex_col()
@@ -603,14 +609,16 @@ impl QuillApp {
                 .flex()
                 .justify_end()
                 .gap_2()
-                .child(
-                    Button::new("open-link-copy")
-                        .label("Copy Link")
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.copy_entity_text(shown.clone(), cx);
-                        })),
-                )
+                .when(!from_poll_option, |this| {
+                    this.child(
+                        Button::new("open-link-copy")
+                            .label("Copy Link")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.copy_entity_text(shown.clone(), cx);
+                            })),
+                    )
+                })
                 .child(
                     Button::new("open-link-cancel")
                         .label("Cancel")
@@ -633,7 +641,11 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Open this link?"))
+                .title(crate::ui::shell::dialog_title(if from_poll_option {
+                    "Open Link"
+                } else {
+                    "Open this link?"
+                }))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {

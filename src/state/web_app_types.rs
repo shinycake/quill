@@ -70,6 +70,9 @@ pub struct WebApps {
     pub attachment_menu_toggled: Option<Result<(i64, bool), String>>,
     /// One-shot: write-access answers, `(bot_user_id, result)`.
     pub write_access: Option<(i64, WriteAccessResult)>,
+    /// One-shot: `toggleBotCanManageEmojiStatus` outcome,
+    /// `(bot_user_id, done)`.
+    pub emoji_access: Option<(i64, bool)>,
     /// One-shot: `searchWebApp` answer for a `t.me/bot/app` link,
     /// `(bot_user_id, app)` or a failure message.
     pub found: Option<Result<(i64, FoundWebApp), String>>,

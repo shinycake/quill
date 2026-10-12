@@ -1,6 +1,7 @@
 //! Building viewer items from chat history and profile photos.
 
 use super::*;
+use crate::telegram::envelope::PollOptionMedia;
 
 /// B10: viewer items for a profile photo gallery. The item's `message_id`
 /// is the `chatPhoto.id` ("Set as main photo" reads it back); both sizes
@@ -61,6 +62,14 @@ fn paid_album_items(message: &HistoryMessage) -> Option<&[MessageContent]> {
 }
 
 fn photo_viewer_item(message: &HistoryMessage, photo: &PhotoContent) -> Option<MediaViewerItem> {
+    photo_item(message.chat_id, message.id, photo)
+}
+
+fn photo_item(
+    chat_id: ChatId,
+    message_id: MessageId,
+    photo: &PhotoContent,
+) -> Option<MediaViewerItem> {
     let largest = photo.open_file_id()?;
     let mut display = vec![largest];
     if let Some(thumb) = photo.thumb_size()
@@ -74,8 +83,8 @@ fn photo_viewer_item(message: &HistoryMessage, photo: &PhotoContent) -> Option<M
         }
     }
     Some(MediaViewerItem {
-        chat_id: message.chat_id,
-        message_id: message.id,
+        chat_id,
+        message_id,
         kind: MediaViewerKind::Photo,
         display_file_ids: display,
         download_file_id: largest,
@@ -115,6 +124,71 @@ pub fn timed_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
         return None;
     }
     viewer_item_for(message, true)
+}
+
+/// The viewer item for the picture or clip of a poll option, which opens
+/// over the poll's message (`ViewerSource::Poll`). Stickers, links and
+/// places have none: they open elsewhere.
+pub fn poll_option_viewer_item(
+    chat_id: ChatId,
+    message_id: MessageId,
+    media: &PollOptionMedia,
+) -> Option<MediaViewerItem> {
+    match media {
+        PollOptionMedia::Photo(photo) => photo_item(chat_id, message_id, photo),
+        PollOptionMedia::Video(video) => {
+            let thumb = video.thumb_file_id.filter(|id| id.0 != 0);
+            let download = thumb.unwrap_or(video.file_id);
+            if download.0 == 0 {
+                return None;
+            }
+            Some(MediaViewerItem {
+                chat_id,
+                message_id,
+                kind: MediaViewerKind::Video,
+                display_file_ids: thumb.into_iter().collect(),
+                download_file_id: download,
+                play_file_id: Some(video.file_id).filter(|id| id.0 != 0),
+                duration_secs: Some(video.duration.max(0)),
+                mime_type: Some(video.mime_type.clone()),
+                start_timestamp: Some(0),
+                caption: String::new(),
+                caption_entities: Vec::new(),
+                duration_label: Some(format_voice_duration(video.duration)),
+                quality_options: Vec::new(),
+                natural_size: (video.width > 0 && video.height > 0)
+                    .then_some((video.width, video.height)),
+            })
+        }
+        PollOptionMedia::Animation(animation) => {
+            let thumb = animation.thumb_file_id.filter(|id| id.0 != 0);
+            let download = thumb.unwrap_or(animation.file_id);
+            if download.0 == 0 {
+                return None;
+            }
+            Some(MediaViewerItem {
+                chat_id,
+                message_id,
+                kind: MediaViewerKind::Animation,
+                display_file_ids: thumb.into_iter().collect(),
+                download_file_id: download,
+                play_file_id: Some(animation.file_id).filter(|id| id.0 != 0),
+                duration_secs: Some(animation.duration.max(0)),
+                mime_type: Some(animation.mime_type.clone()),
+                start_timestamp: Some(0),
+                caption: String::new(),
+                caption_entities: Vec::new(),
+                duration_label: Some(format_voice_duration(animation.duration)),
+                quality_options: Vec::new(),
+                natural_size: (animation.width > 0 && animation.height > 0)
+                    .then_some((animation.width, animation.height)),
+            })
+        }
+        PollOptionMedia::Sticker(_)
+        | PollOptionMedia::Link { .. }
+        | PollOptionMedia::Location(_)
+        | PollOptionMedia::Venue { .. } => None,
+    }
 }
 
 fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {

@@ -23,12 +23,12 @@ pub(super) fn title_bar(
     // zoom, Linux min/max/close, macOS traffic-light inset) in theme tokens,
     // replacing the hand-rolled 44px bar. The caption + action buttons ride
     // as its children.
-    TitleBar::new()
+    super::window_frame::FrameTitleBar::new()
         .on_close_window(|_, window, cx| {
             window.remove_window();
             cx.quit();
         })
-        .child(div().font_semibold().text_sm().child(title))
+        .caption(div().font_semibold().text_sm().child(title))
         .child(
             div()
                 .flex()

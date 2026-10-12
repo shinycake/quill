@@ -72,3 +72,21 @@ Each changed source file starts with a comment saying so. The changes are
 licensed under Apache-2.0, like the rest of the crate. Background and what
 still needs a live check: `docs/decisions/codex-idle-frames-x11-windows.md`;
 notifications: `docs/decisions/codex-notify-native.md`.
+
+The Quill project also changed it in 2026 so a window can switch between the
+system frame and an application-drawn one while it is open (Telegram
+Desktop's "Use system window frame"). GPUI fixes this at creation from
+`TitlebarOptions::appears_transparent`, and `request_decorations` is a no-op on
+Windows and is called with `Server` during every window's creation, so it
+cannot carry an opt-in:
+
+- `src/native_frame.rs` (new, public): `set_native_frame(hwnd, native)`
+  flips the window's `hide_title_bar` and sends `SWP_FRAMECHANGED`, so
+  `WM_NCCALCSIZE` and `WM_NCHITTEST` start or stop leaving the system title
+  bar and caption buttons alone.
+- `src/window.rs`, `src/events.rs`: `hide_title_bar` is a `Cell<bool>`;
+  `notify_frame_changed` is `pub(crate)`.
+- `src/gpui_windows.rs`: declares the new module.
+
+Not built or run on Windows by the author (no Windows machine); see
+`docs/decisions/codex-misc-bundle.md`.

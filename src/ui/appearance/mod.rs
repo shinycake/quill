@@ -609,6 +609,7 @@ impl QuillApp {
         if tray.run_in_background {
             body.push(this.appearance_close_behavior_section(cx));
         }
+        body.extend(this.native_frame_section(super::window_frame::supported(), cx));
         #[cfg(target_os = "macos")]
         {
             body.push(
@@ -627,6 +628,29 @@ impl QuillApp {
             );
         }
         body
+    }
+
+    /// tdesktop "Use system window frame" (Linux and Windows only);
+    /// `supported` is a parameter so tests can show it on any platform.
+    pub(crate) fn native_frame_section(
+        &self,
+        supported: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        supported.then(|| {
+            self.appearance_section(
+                cx,
+                "Use system window frame",
+                "The system draws the title bar and window buttons.",
+                Switch::new("general-native-window-frame")
+                    .checked(self.appearance.native_window_frame)
+                    .accessibility_label("Use the system window frame")
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_appearance(cx, |a| a.native_window_frame = on)
+                    }))
+                    .into_any_element(),
+            )
+        })
     }
 
     /// tdesktop "When the window is closed": run in the background or quit.

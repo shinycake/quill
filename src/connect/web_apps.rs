@@ -9,7 +9,7 @@ use crate::telegram::requests::{
     allow_bot_to_send_messages, can_bot_send_messages, close_web_app, get_attachment_menu_bot,
     get_grossing_web_app_bots, get_main_web_app, get_web_app_link_url, get_web_app_url,
     open_web_app, search_web_app, send_web_app_custom_request, send_web_app_data,
-    toggle_bot_is_added_to_attachment_menu,
+    toggle_bot_can_manage_emoji_status, toggle_bot_is_added_to_attachment_menu,
 };
 use crate::web_app::LaunchSource;
 use crate::web_app::theme::ThemeParams;
@@ -208,6 +208,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         self.session.bots.web_apps.write_access = None;
         let json = allow_bot_to_send_messages(extra, bot_user_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// `toggleBotCanManageEmojiStatus`. The bot's stored `can_manage_emoji_status`
+    /// follows at once, like tdesktop's `canManageEmojiStatus`; a failure puts
+    /// it back (`apply_web_app_error`).
+    pub fn set_bot_emoji_status_access(
+        &mut self,
+        bot_user_id: i64,
+        allowed: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self.web_app_extra(
+            RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
+                bot_user_id,
+                allowed,
+            }),
+            None,
+        )?;
+        self.session.bots.web_apps.emoji_access = None;
+        if let Some(Some(info)) = self.session.bots.bot_info.get_mut(&bot_user_id) {
+            info.can_manage_emoji_status = allowed;
+        }
+        let json = toggle_bot_can_manage_emoji_status(extra, bot_user_id, allowed);
         self.send_json_request(extra, &json)
     }
 

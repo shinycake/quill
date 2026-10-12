@@ -81,6 +81,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Open the viewer on the picture or clip of a poll option. The item is
+    /// not a message of its own, so the message actions stay out of it.
+    pub(in crate::ui) fn open_poll_option_viewer(
+        &mut self,
+        item: MediaViewerItem,
+        cx: &mut Context<Self>,
+    ) {
+        self.viewer.state = MediaViewer::open_poll(item);
+        self.viewer.open_gen += 1;
+        self.viewer_note_activity(false, cx);
+        self.reset_viewer_item_state(cx);
+        cx.notify();
+    }
+
     /// Open the viewer on a photo, video or GIF of the Shared Media panel,
     /// paging over that tab's list (tdesktop `SharedMediaWithLastSlice`).
     /// The list loads older pages as the user pages toward its start.
@@ -190,9 +204,11 @@ impl QuillApp {
         self.ensure_viewer_download(cx);
         self.maybe_autoplay_viewer_video(cx);
         // What TDLib allows for this message (Delete in the toolbar).
-        // Profile photos are not messages.
-        if self.viewer.state.source() != ViewerSource::Profile
-            && let (Some(item), Some(live)) = (self.viewer.state.current(), self.live.as_mut())
+        // Profile photos and poll option media are not messages.
+        if !matches!(
+            self.viewer.state.source(),
+            ViewerSource::Profile | ViewerSource::Poll
+        ) && let (Some(item), Some(live)) = (self.viewer.state.current(), self.live.as_mut())
         {
             let _ = live
                 .driver

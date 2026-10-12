@@ -43,6 +43,9 @@ pub struct BotInfo {
     /// `botInfo.verification_parameters`: set only for the bot's owner, who
     /// may then verify accounts with this bot.
     pub verification_parameters: Option<crate::bot_verification::BotVerificationParameters>,
+    /// `botInfo.can_manage_emoji_status`: the person let this bot set their
+    /// emoji status (tdesktop `canManageEmojiStatus`).
+    pub can_manage_emoji_status: bool,
 }
 
 /// Slice B2: `botMenuButton text:string url:string = BotMenuButton;`
@@ -125,6 +128,10 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
         verification_parameters: crate::bot_verification::parse_bot_verification_parameters(
             value.get("verification_parameters"),
         ),
+        can_manage_emoji_status: value
+            .get("can_manage_emoji_status")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -203,6 +210,18 @@ mod tests {
         let group = info.group_admin_rights.expect("group rights");
         assert!(group.can_manage_chat && group.can_delete_messages && !group.can_post_messages);
         assert_eq!(info.channel_admin_rights, None);
+    }
+
+    #[test]
+    fn emoji_status_access_is_read_and_defaults_to_off() {
+        let on = parse_bot_info(Some(&json!({
+            "@type": "botInfo",
+            "can_manage_emoji_status": true,
+        })))
+        .expect("bot info");
+        assert!(on.can_manage_emoji_status);
+        let off = parse_bot_info(Some(&json!({"@type": "botInfo"}))).expect("bot info");
+        assert!(!off.can_manage_emoji_status);
     }
 
     #[test]

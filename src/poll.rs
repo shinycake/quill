@@ -28,6 +28,30 @@ pub const QUIZ_EXPLANATION_MAX_LINE_FEEDS: usize = 2;
 // against it instead of this fixed ceiling.
 pub const POLL_OPEN_PERIOD_MAX_HOURS: u32 = 24;
 
+/// Media for a new poll option (`inputPollOption.media`), as tdesktop's
+/// create box offers it: a photo or video from a file, a sticker, a link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PollOptionInput {
+    /// A picked image file.
+    Photo { path: String },
+    /// A picked video file, with what `inputVideo` asks for.
+    Video {
+        path: String,
+        duration: i32,
+        width: i32,
+        height: i32,
+    },
+    /// A sticker TDLib already has (`file_id`); `emoji` is for the preview.
+    Sticker {
+        file_id: i32,
+        width: i32,
+        height: i32,
+        emoji: String,
+    },
+    /// The address as typed (trimmed).
+    Link { url: String },
+}
+
 /// Longest poll option text (`kMaxOptionLength` in tdesktop's poll box and
 /// `getOption("poll_answer_length_max")`'s default).
 pub const POLL_OPTION_MAX_CHARS: usize = 100;
@@ -266,6 +290,9 @@ pub struct PollDraft {
     pub question: String,
     pub description: String,
     pub options: Vec<String>,
+    /// The picture, clip, sticker or link attached to each option, by the
+    /// same index as `options` (may be shorter).
+    pub option_media: Vec<Option<PollOptionInput>>,
     pub is_anonymous: bool,
     pub allows_multiple_answers: bool,
     pub is_quiz: bool,
@@ -304,6 +331,17 @@ impl PollDraft {
             .iter()
             .map(|option| option.trim())
             .filter(|option| !option.is_empty())
+            .collect()
+    }
+
+    /// The media of each usable option, in the order of
+    /// [`Self::usable_options`].
+    pub fn usable_option_media(&self) -> Vec<Option<&PollOptionInput>> {
+        self.options
+            .iter()
+            .enumerate()
+            .filter(|(_, option)| !option.trim().is_empty())
+            .map(|(index, _)| self.option_media.get(index).and_then(Option::as_ref))
             .collect()
     }
 
@@ -387,11 +425,9 @@ mod tests {
 
     fn option(chosen: bool, percentage: i32) -> PollOption {
         PollOption {
-            id: "opt".to_string(),
-            text: "option".to_string(),
-            voter_count: 0,
             vote_percentage: percentage,
             is_chosen: chosen,
+            ..PollOption::plain("opt".to_string(), "option".to_string())
         }
     }
 
@@ -843,6 +879,26 @@ mod tests {
         draft.duration_hours = "5".into();
         assert_eq!(draft.validate_at(now), None);
         assert_eq!(draft.open_period_secs(), 0);
+    }
+
+    #[test]
+    fn option_media_follows_the_options_that_have_text() {
+        let link = |url: &str| {
+            Some(PollOptionInput::Link {
+                url: url.to_string(),
+            })
+        };
+        let draft = PollDraft {
+            options: vec!["a".into(), "  ".into(), "b".into(), "c".into()],
+            // The blank second option's media is dropped with it.
+            option_media: vec![link("1"), link("2"), None],
+            ..PollDraft::new()
+        };
+        assert_eq!(draft.usable_options(), ["a", "b", "c"]);
+        assert_eq!(
+            draft.usable_option_media(),
+            vec![link("1").as_ref(), None, None]
+        );
     }
 
     #[test]

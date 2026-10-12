@@ -103,6 +103,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         )
     }
 
+    /// `getCustomEmojiStickers` for one custom emoji a mini app suggests as the
+    /// emoji status, so its sticker can be checked and shown. `Ok(None)`: the
+    /// shared lookup is busy with another batch; ask again on the next tick.
+    pub fn resolve_custom_emoji(
+        &mut self,
+        custom_emoji_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if custom_emoji_id <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.emoji_set_request(RequestPurpose::GetCustomEmojiStickers, |extra| {
+            crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, &[custom_emoji_id])
+        })
+    }
+
     pub(crate) fn maybe_resolve_emoji_status_choices(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
             || !((self.session.stickers.emoji.open && self.session.stickers.emoji.status_open)

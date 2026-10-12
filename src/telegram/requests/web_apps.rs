@@ -2,7 +2,7 @@
 //! (13505), `getWebAppUrl` (13484), `getMainWebApp` (13478),
 //! `getWebAppLinkUrl` (13471), `searchWebApp` (13459), `closeWebApp`
 //! (13508), `sendWebAppData` (13495), `canBotSendMessages` (15365),
-//! `allowBotToSendMessages` (15368), `getAttachmentMenuBot` (14338),
+//! `allowBotToSendMessages` (15368), `toggleBotCanManageEmojiStatus` (14960), `getAttachmentMenuBot` (14338),
 //! `toggleBotIsAddedToAttachmentMenu` (14344), `getGrossingWebAppBots`
 //! (13454), `sendWebAppCustomRequest`.
 
@@ -153,6 +153,22 @@ pub fn allow_bot_to_send_messages(extra: RequestId, bot_user_id: i64) -> String 
     .to_string()
 }
 
+/// `toggleBotCanManageEmojiStatus`: let a bot set the person's emoji status
+/// (a mini app's access request, or the profile's "Emoji Status" switch).
+pub fn toggle_bot_can_manage_emoji_status(
+    extra: RequestId,
+    bot_user_id: i64,
+    can_manage_emoji_status: bool,
+) -> String {
+    json!({
+        "@type": "toggleBotCanManageEmojiStatus",
+        "@extra": extra.as_extra(),
+        "bot_user_id": bot_user_id,
+        "can_manage_emoji_status": can_manage_emoji_status,
+    })
+    .to_string()
+}
+
 pub fn get_attachment_menu_bot(extra: RequestId, bot_user_id: i64) -> String {
     json!({
         "@type": "getAttachmentMenuBot",
@@ -287,6 +303,10 @@ mod tests {
             parse(allow_bot_to_send_messages(RequestId(1), 42))["@type"],
             "allowBotToSendMessages"
         );
+        let value = parse(toggle_bot_can_manage_emoji_status(RequestId(1), 42, true));
+        assert_eq!(value["@type"], "toggleBotCanManageEmojiStatus");
+        assert_eq!(value["bot_user_id"], 42);
+        assert_eq!(value["can_manage_emoji_status"], true);
         assert_eq!(
             parse(get_attachment_menu_bot(RequestId(1), 42))["@type"],
             "getAttachmentMenuBot"

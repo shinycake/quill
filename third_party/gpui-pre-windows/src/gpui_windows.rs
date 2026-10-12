@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
-// adds the frame_idle and notification_extras modules. See
+// adds the frame_idle, notification_extras and native_frame modules. See
 // third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![cfg(target_os = "windows")]
 
@@ -16,6 +16,7 @@ mod display;
 mod events;
 mod frame_idle;
 mod keyboard;
+pub mod native_frame;
 pub mod notification_extras;
 mod platform;
 mod system_notifications;

@@ -127,9 +127,14 @@ pub(crate) fn parse_messages_payload(
                 reply_markup: parse_reply_markup(value.get("reply_markup")),
             },
         )),
-        "updatePoll" => Ok(EnvelopePayload::Messages(MessagesPayload::UpdatePoll {
-            poll: parse_poll(value.get("poll")).ok_or(ParseError::MissingField)?,
-        })),
+        "updatePoll" => {
+            let (poll, files) =
+                parse_poll_with_files(value.get("poll")).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::Messages(MessagesPayload::UpdatePoll {
+                poll,
+                files,
+            }))
+        }
         // B15: `pollVoteStatistics` (schema 1.8.67, line 10263).
         "pollVoteStatistics" => Ok(EnvelopePayload::Messages(
             MessagesPayload::PollVoteStatistics {
