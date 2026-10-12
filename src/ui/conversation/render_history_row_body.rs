@@ -98,7 +98,10 @@ impl QuillApp {
                                     // tdesktop `Sticker::mirrorHorizontal`.
                                     if crate::ui::sticker_mirror::mirrors(
                                         sticker.premium_animation.is_some(),
-                                        message.is_outgoing,
+                                        quill::chat_wide::has_right_layout(
+                                            message.is_outgoing,
+                                            look.wide,
+                                        ),
                                     ) {
                                         crate::ui::sticker_mirror::mirrored(visual)
                                     } else {
@@ -140,10 +143,28 @@ impl QuillApp {
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);
                 let message_pending = message.pending;
-                let selection = self.selection_row(row_chat, row_msg, message.pending, cx);
+                let wide_right = look.wide.then(|| {
+                    let limit = crate::ui::history::bubble_width::message_width_limit(
+                        cx,
+                        &message.content,
+                        look.font,
+                        look.plain,
+                    )
+                    .map_or(quill::bubble_layout::MSG_MAX_WIDTH as f32, f32::from);
+                    let width = self
+                        .history
+                        .viewport
+                        .get()
+                        .map_or(f32::MAX, |view| f32::from(view.size.width));
+                    quill::chat_wide::selection_right(limit, width)
+                });
+                let selection =
+                    self.selection_row(row_chat, row_msg, message.pending, wide_right, cx);
                 let (selection_overlay, selection_tint, selection_slide) =
                     (selection.overlay, selection.tint, selection.slide);
-                let outgoing = message.is_outgoing;
+                // The side the bubble sits on (`hasRightLayout`): the wide
+                // layout keeps outgoing messages on the left.
+                let right = quill::chat_wide::has_right_layout(message.is_outgoing, look.wide);
                 let vanishing = inputs.vanishing;
                 let highlighted = inputs.highlighted;
                 let failed = message.failed;
@@ -238,8 +259,8 @@ impl QuillApp {
                                 div()
                                     .absolute()
                                     .bottom(px(12. + frame.rise))
-                                    .when(outgoing, |this| this.right(px(56.)))
-                                    .when(!outgoing, |this| this.left(px(64.)))
+                                    .when(right, |this| this.right(px(56.)))
+                                    .when(!right, |this| this.left(px(64.)))
                                     .opacity(frame.alpha)
                                     .text_size(px(26. * frame.scale))
                                     .child(glyph),
@@ -247,7 +268,7 @@ impl QuillApp {
                         },
                     )
                     // Selecting slides an outgoing bubble aside for the check.
-                    .child(if outgoing && selection_slide > 0. {
+                    .child(if right && selection_slide > 0. {
                         div()
                             .relative()
                             .right(px(selection_slide))

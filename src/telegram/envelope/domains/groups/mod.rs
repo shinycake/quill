@@ -112,6 +112,10 @@ pub enum GroupsPayload {
         /// `supergroup.paid_message_star_count`: Stars non-administrators
         /// pay per message (a channel's direct messages group).
         paid_message_star_count: i64,
+        /// `supergroup.restriction_info.restriction_reason` is not empty
+        /// (schema 1.8.68 `restrictionInfo`): the content must be
+        /// restricted.
+        restricted: bool,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the

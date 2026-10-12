@@ -545,16 +545,16 @@ impl QuillApp {
     }
 }
 
-/// Full-width "N Unread Messages" bar above the first unread message.
-fn unread_divider(count: i32, cx: &App) -> impl IntoElement {
+/// Full-width "N Unread Messages" bar above the first unread message. In
+/// the wide layout the label is centred in the wide column while the bar
+/// stays full width (tdesktop `UnreadBar::paint`).
+fn unread_divider(count: i32, wide: bool, cx: &App) -> impl IntoElement {
     let text = SharedString::from(quill::state::unread_bar_text(count));
     div()
         .id("unread-divider")
         .w_full()
         .my_2()
         .py_1()
-        .flex()
-        .justify_center()
         .bg(super::chat_palette::service_bg(
             cx.theme().secondary.opacity(0.7),
         ))
@@ -563,7 +563,10 @@ fn unread_divider(count: i32, cx: &App) -> impl IntoElement {
         .text_color(cx.theme().secondary_foreground)
         .role(Role::Heading)
         .aria_label(text.clone())
-        .child(text)
+        .child(super::chat_wide_ui::wide_column(
+            wide,
+            div().w_full().flex().justify_center().child(text),
+        ))
 }
 
 /// Centered local-day pill between history rows ("Today", "12 March").

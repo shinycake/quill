@@ -141,6 +141,9 @@ pub(crate) struct BubbleLook {
     pub joined_above: bool,
     /// The chat's emoji theme: fill of outgoing bubbles.
     pub out_fill: Option<super::bubble_theme::OutgoingFill>,
+    /// "Adaptive layout for wide screens" is in effect (`chat_wide`):
+    /// outgoing bubbles sit on the left like incoming ones.
+    pub wide: bool,
 }
 
 impl BubbleLook {
@@ -171,6 +174,7 @@ impl BubbleLook {
             text: Hsla::from(rgb(0xffffff)),
             joined_above: false,
             out_fill: None,
+            wide: false,
         }
     }
 }
@@ -180,14 +184,14 @@ impl BubbleLook {
 /// and so is the top corner when the bubble continues the one above.
 fn bubble_corners(
     content: component::bubble::BubbleContent,
-    outgoing: bool,
+    right: bool,
     look: BubbleLook,
 ) -> component::bubble::BubbleContent {
     if look.plain {
         return content;
     }
     let small = px(JOINED_RADIUS);
-    if outgoing {
+    if right {
         content
             .when(look.joined_above, |this| this.rounded_tr(small))
             .rounded_br(small)
@@ -391,7 +395,10 @@ fn message_bubble_with_quote(
     } = chrome;
     let has_sender_status = sender_status.is_some();
     let group: SharedString = format!("message-row-{}", row.id).into();
-    let alignment = if row.outgoing {
+    // tdesktop `Element::hasRightLayout`: the wide layout keeps outgoing
+    // messages on the left, tail and all; only their colors differ.
+    let right = quill::chat_wide::has_right_layout(row.outgoing, look.wide);
+    let alignment = if right {
         component::message::MessageAlignment::End
     } else {
         component::message::MessageAlignment::Start
@@ -430,7 +437,7 @@ fn message_bubble_with_quote(
             Hsla::from(text_bright())
         })
         .when(rtl, |this| this.text_right())
-        .map(|this| bubble_corners(this, row.outgoing, look))
+        .map(|this| bubble_corners(this, right, look))
         // Telegram Desktop names a group sender inside the bubble, on its
         // first line, in the sender's color. Bubble-less rows (stickers,
         // round videos, big emoji) keep the name above instead.
@@ -542,7 +549,7 @@ fn message_bubble_with_quote(
     // or time. The kit's reaction region is the bubble-anchored slot that
     // isn't clipped by the surface; restyle it to a bare container.
     if let Some(actions) = actions {
-        let (side_alignment, outside) = if row.outgoing {
+        let (side_alignment, outside) = if right {
             (component::message::MessageAlignment::Start, true)
         } else {
             (component::message::MessageAlignment::End, false)

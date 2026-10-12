@@ -111,6 +111,8 @@ impl QuillApp {
                     })),
             );
         }
+        // tdesktop puts "Adaptive layout for wide screens" right under it.
+        body = body.children(self.adaptive_wide_checkbox(cx));
         if let Some(error) = error {
             body = body.child(
                 div()

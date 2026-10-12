@@ -286,12 +286,16 @@ impl QuillApp {
         if self.history.scroll_date.separator_at_top {
             return None;
         }
+        // The wide layout centres it in its column (`PaintDate` with
+        // `chatWide`).
+        let column = div().absolute().top_2().left_0();
+        let column = if self.chat_wide() {
+            column.w(px(quill::chat_wide::WIDE_CHAT_WIDTH))
+        } else {
+            column.right_0()
+        };
         Some(
-            div()
-                .absolute()
-                .top_2()
-                .left_0()
-                .right_0()
+            column
                 .flex()
                 .justify_center()
                 .opacity(alpha)

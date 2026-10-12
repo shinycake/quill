@@ -75,6 +75,11 @@ impl Session {
             .or_insert_with(|| placeholder_chat(pos.chat_id));
         match pos.list {
             ChatList::Main => {
+                if pos.order != 0 && pos.is_promoted {
+                    self.chat_list.promoted_chats.insert(pos.chat_id.0);
+                } else {
+                    self.chat_list.promoted_chats.remove(&pos.chat_id.0);
+                }
                 if pos.order == 0 {
                     chat.in_main_list = false;
                 } else {
@@ -118,6 +123,7 @@ impl Session {
         {
             Some(pos) => self.apply_position_fields(pos),
             None => {
+                self.chat_list.promoted_chats.remove(&chat_id.0);
                 if let Some(chat) = self.chats.get_mut(&chat_id.0) {
                     chat.in_main_list = false;
                 }

@@ -96,6 +96,13 @@ pub struct ChatListState {
     /// Slice CL: chat-list peek preview — the latest `getChatHistory`
     /// result for one unopened chat (`parity:chatlist-chat-preview`).
     pub chat_preview_fetch: Option<PreviewHistoryFetch>,
+    /// Chats TDLib placed in the main list as a promotion
+    /// (`chatPosition.source`: a proxy sponsor or a public service
+    /// announcement), tdesktop's `useTopPromotion`.
+    pub promoted_chats: HashSet<i64>,
+    /// Chats whose history page was preloaded for the pull to the next
+    /// channel (`pull_next`): the answer arrived.
+    pub preloaded_histories: HashSet<i64>,
 }
 
 impl ChatListState {
@@ -134,6 +141,8 @@ impl ChatListState {
             archive_settings_loading: false,
             archive_settings_open: false,
             chat_preview_fetch: None,
+            promoted_chats: HashSet::new(),
+            preloaded_histories: HashSet::new(),
         }
     }
 }

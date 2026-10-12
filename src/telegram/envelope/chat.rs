@@ -63,6 +63,10 @@ pub struct ChatPositionUpdate {
     pub list: ChatList,
     pub order: i64,
     pub is_pinned: bool,
+    /// `chatPosition.source` is set (schema 1.8.68 `ChatSource`): TDLib
+    /// shows the chat because of a proxy sponsor or a public service
+    /// announcement, not because the user has it.
+    pub is_promoted: bool,
 }
 
 /// Typed `ChatJoinResult` — `joinChat` response (TDLib 1.8.67: no
@@ -273,6 +277,9 @@ pub(crate) fn parse_position_entry(chat_id: ChatId, position: &Value) -> ChatPos
             .get("is_pinned")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        is_promoted: position
+            .get("source")
+            .is_some_and(|source| !source.is_null()),
     }
 }
 

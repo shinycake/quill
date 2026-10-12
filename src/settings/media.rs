@@ -66,6 +66,11 @@ pub struct MediaPrefs {
     /// default on): a reaction button beside the hovered bubble.
     #[serde(default = "default_true")]
     pub corner_reaction: bool,
+    /// Telegram Desktop's "Swipe to the next unread channel"
+    /// (`pullToNextChannel`, default on): pulling past the bottom of a
+    /// channel opens the next unread one (`pull_next`).
+    #[serde(default = "default_true")]
+    pub pull_to_next_channel: bool,
     /// Telegram Desktop's `chatQuickAction`: what double-clicking a message
     /// does (reply by default).
     #[serde(default)]
@@ -137,6 +142,7 @@ impl Default for MediaPrefs {
             loop_animated_stickers: true,
             corner_reply: true,
             corner_reaction: true,
+            pull_to_next_channel: true,
             quick_action: crate::quick_action::QuickAction::default(),
             recent_emoji: Vec::new(),
             remember_media_grouping: false,

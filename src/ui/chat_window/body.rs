@@ -79,7 +79,16 @@ impl QuillApp {
                 this.drop_files_plain(paths.paths(), cx);
             }))
             .child(top)
-            .child(bottom)
+            .child(
+                // The pull to the next channel's note covers the composer.
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .child(bottom)
+                    .children(self.pull_hint_overlay(cx)),
+            )
             .children(drop_overlay);
         let viewer_open = self.viewer.state.is_open() && self.viewer.pip_window.is_none();
         div()

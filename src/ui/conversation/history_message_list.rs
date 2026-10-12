@@ -93,6 +93,10 @@ impl QuillApp {
                 |message| quill::album::is_album_media(&message.content),
             );
             let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
+            // "Adaptive layout for wide screens": photos beside every
+            // message in private chats and groups (`chat_wide`).
+            let wide = self.chat_wide();
+            let chat_kind = chat.map(|summary| summary.kind.clone());
             let is_group = matches!(
                 chat.map(|summary| &summary.kind),
                 Some(
@@ -159,7 +163,13 @@ impl QuillApp {
                     None => None,
                 }
                 .unwrap_or_else(|| {
-                    if is_group {
+                    // Your own messages never take the chat's name (the
+                    // wide layout shows your photo beside them).
+                    if message.is_outgoing {
+                        session
+                            .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))
+                            .map_or_else(|| "You".into(), |u| u.display_name())
+                    } else if is_group {
                         "Member".into()
                     } else {
                         sender_name.to_string()
@@ -189,14 +199,19 @@ impl QuillApp {
                     None => None,
                 }
                 .and_then(|path| sandboxed_display_path(path, &media_roots));
-                let sender_avatar = (!message.is_outgoing && is_group).then(|| {
-                    if continues {
-                        // Spacer: same column width, no avatar.
-                        (String::new(), None)
-                    } else {
-                        (name, photo)
-                    }
-                });
+                let sender_avatar = chat_kind
+                    .as_ref()
+                    .is_some_and(|kind| {
+                        quill::chat_wide::shows_sender_photo(kind, message.is_outgoing, wide)
+                    })
+                    .then(|| {
+                        if continues {
+                            // Spacer: same column width, no avatar.
+                            (String::new(), None)
+                        } else {
+                            (name, photo)
+                        }
+                    });
                 (sender, receipt, sender_avatar, show_sender)
             };
             let now = quill::local_time::civil_local(quill::local_time::now_unix());
@@ -619,6 +634,13 @@ impl QuillApp {
         let history_focus = self.message_ui.history_focus.clone();
         let drag_app = cx.weak_entity();
         let reveal = self.history_reveal(cx);
+        // The pull to the next channel lifts the rows over its indicator.
+        let (pull_shift, pull_indicator, pull_listener) = self.pull_layer(cx);
+        let reveal = match (reveal, pull_shift > 0.) {
+            (reveal, false) => reveal,
+            (Some((shift, extra)), true) => Some((shift - pull_shift, extra)),
+            (None, true) => Some((-pull_shift, 0.)),
+        };
         let reveal_probe = self.frame.motion.reveal_probe();
         let jump_zone = self.history.scroller.read(cx).is_scrolled_up().then(|| {
             div()
@@ -795,7 +817,10 @@ impl QuillApp {
                 .inset_0()
                 .size_full(),
             )
+            .children(pull_indicator)
+            .child(pull_listener)
             .children(date_pill)
+            .child(self.chat_layout_probe(cx))
             // tdesktop's corner "@" / heart buttons.
             .children(corner_buttons.map(super::anim_layer::occluder))
             // Where the scroller's jump-to-latest button floats while
@@ -845,6 +870,8 @@ impl QuillApp {
             self.render_history_row_body(row, cx)
         });
         let has_day = row.day_label().is_some();
+        // The wide layout centres dates and the unread label in its column.
+        let wide = self.chat_wide();
         let probe = self.history.scroll_probe.clone();
         // Notes where the row is painted, for the floating date pill.
         let tracker = canvas(
@@ -861,7 +888,7 @@ impl QuillApp {
             .child(tracker)
             .when_some(row.day_label(), |this, label| {
                 this.child(super::chat_palette::with_palette(palette, false, || {
-                    day_separator(label, cx)
+                    super::chat_wide_ui::wide_column(wide, day_separator(label, cx))
                 }))
             })
             .when(row.unread_divider(), |this| {
@@ -871,7 +898,7 @@ impl QuillApp {
                     .and_then(|s| viewed.and_then(|chat| s.histories.get(&chat.0)))
                     .map_or(0, |h| h.unread_at_open);
                 this.child(super::chat_palette::with_palette(palette, false, || {
-                    unread_divider(unread_at_open, cx)
+                    unread_divider(unread_at_open, wide, cx)
                 }))
             })
             .child(element)

@@ -42,6 +42,11 @@ pub enum MessagesPurpose {
     /// loaded window's newest message, while the window does not reach the
     /// chat's latest message (`HistoryState::has_newer`).
     GetHistoryNewer,
+    /// `getChatHistory` around the read position of the next unread
+    /// channel while the user pulls toward it (tdesktop
+    /// `Support::SendPreloadRequest`). The answer only marks the chat
+    /// preloaded; TDLib keeps the messages for the real open.
+    PreloadHistory,
     /// `getMessageAvailableReactions` for the message reaction picker.
     GetMessageAvailableReactions {
         message_id: i64,
@@ -256,6 +261,7 @@ flat_purposes!(Messages(MessagesPurpose) {
     GetPinnedMessages,
     GetHistoryAround,
     GetHistoryNewer,
+    PreloadHistory,
     SearchMentionMembers,
     EditMessage,
     DeleteMessages,
