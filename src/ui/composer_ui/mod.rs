@@ -790,6 +790,9 @@ impl QuillApp {
                                         &mut this.composer_ui.pending_attachments,
                                         !as_files,
                                     );
+                                    // Back to media: read the videos again.
+                                    this.composer_ui.send_box.sound_checked.clear();
+                                    this.check_tray_videos(cx);
                                     cx.notify();
                                 })),
                         )

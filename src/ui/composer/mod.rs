@@ -109,6 +109,14 @@ impl QuillApp {
                     if self.paid_send_waits(chat_id, &text, cx) {
                         return;
                     }
+                    // A video's sound track is still being read: wait, so a
+                    // soundless one is sent as a GIF.
+                    if self.tray_videos_checking() {
+                        self.connection.status_note =
+                            "checking the video… send again in a moment".into();
+                        cx.notify();
+                        return;
+                    }
                     let attachments = self.composer_ui.pending_attachments.clone();
                     // The viewer's own rights in a group: text needs the
                     // basic right, each attachment its media right.
@@ -571,6 +579,7 @@ impl QuillApp {
             Ok(count) => format!("Attached {count} files. Send to upload."),
             Err(note) => note.into(),
         };
+        self.check_tray_videos(cx);
         cx.notify();
     }
 

@@ -141,3 +141,43 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[gpui_kit::test]
+fn a_soundless_mp4_becomes_a_gif_after_the_background_check(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("quill-send-box-gif-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("silent.mp4");
+    let made = quill::media_tools::command("ffmpeg")
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=64x64:rate=5",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&clip)
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !made {
+        // Skipped where ffmpeg isn't installed.
+        return;
+    }
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.attach_dropped_files(std::slice::from_ref(&clip), cx);
+        // The probe runs in the background: the tray waits for it.
+        assert!(app.tray_videos_checking());
+        assert!(!app.composer_ui.pending_attachments[0].extras.gif);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(!app.tray_videos_checking());
+        assert!(app.composer_ui.pending_attachments[0].extras.gif);
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}

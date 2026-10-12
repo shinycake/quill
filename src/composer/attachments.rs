@@ -25,6 +25,12 @@ pub struct ComposerAttachment {
     pub extras: AttachmentExtras,
 }
 
+/// Whether the video file has no sound track (ffprobe). Blocks; a file it
+/// can't read counts as having sound, so it stays a video.
+pub fn without_sound_track(path: &Path) -> bool {
+    crate::video_edit::probe_source(path).is_some_and(|source| !source.has_audio)
+}
+
 /// The media kind a file is sent as when dropped or pasted, by extension:
 /// formats Telegram sends as photos or videos. Anything else is a file.
 pub fn media_kind_for(path: &Path) -> Option<AttachmentKind> {
@@ -52,7 +58,6 @@ impl ComposerAttachment {
                 }
                 (false, Some(kind)) if attachment.kind == AttachmentKind::Document => {
                     attachment.kind = kind;
-                    attachment.mark_soundless_gif();
                 }
                 (true, None) if gif && attachment.extras.gif => {
                     attachment.kind = AttachmentKind::Document;
@@ -76,22 +81,18 @@ impl ComposerAttachment {
         })
     }
 
-    /// tdesktop `modifications.gif = !hasAudio`: a `.mp4` video without a
-    /// sound track is a GIF when it goes out on its own. Reads the file with
-    /// ffprobe; a file it can't read stays a video. Blocks briefly.
-    pub fn mark_soundless_gif(&mut self) {
-        let mp4 = self
-            .path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
-        if self.kind == AttachmentKind::Video
-            && mp4
+    /// tdesktop `modifications.gif = !hasAudio`: an `.mp4` video may be a
+    /// GIF when it has no sound track. This says whether the file is worth
+    /// checking with [`without_sound_track`]; the check runs ffprobe, so the
+    /// UI does it in the background and then sets `extras.gif`.
+    pub fn needs_sound_check(&self) -> bool {
+        self.kind == AttachmentKind::Video
             && !self.extras.gif
-            && crate::video_edit::probe_source(&self.path).is_some_and(|source| !source.has_audio)
-        {
-            self.extras.gif = true;
-        }
+            && self
+                .path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"))
     }
 
     /// Whether this attachment goes out as a GIF animation when the tray is
@@ -189,14 +190,12 @@ impl ComposerAttachment {
         if planned.len() > crate::album::ALBUM_MAX_ITEMS.saturating_sub(list.len()) {
             return Err("Attach at most 10 files at a time.");
         }
-        let mut picked = planned
+        let picked = planned
             .iter()
             .map(|(path, kind)| Self::pick(path, *kind))
             .collect::<Option<Vec<_>>>()
             .ok_or("Could not attach files. Drop existing files, not folders.")?;
-        for att in &mut picked {
-            att.mark_soundless_gif();
-        }
+
         list.extend(picked);
         Ok(planned.len())
     }
@@ -410,11 +409,15 @@ mod tests {
         let (Some(silent), Some(loud)) = (make("silent.mp4", false), make("loud.mp4", true)) else {
             return;
         };
-        let mut list = Vec::new();
-        ComposerAttachment::append_dropped_files(&mut list, &[silent, loud]).unwrap();
-        assert!(list[0].extras.gif, "no sound track: a GIF");
-        assert!(!list[1].extras.gif, "with sound: a video");
-        assert!(!list[0].extras.sound_removed);
+        assert!(without_sound_track(&silent), "no sound track: a GIF");
+        assert!(!without_sound_track(&loud), "with sound: a video");
+        assert!(!without_sound_track(&root.join("missing.mp4")));
+        let mut att = ComposerAttachment::pick(&silent, AttachmentKind::Video).unwrap();
+        assert!(att.needs_sound_check());
+        att.extras.gif = true;
+        assert!(!att.needs_sound_check());
+        let photo = ComposerAttachment::pick(&loud, AttachmentKind::Photo).unwrap();
+        assert!(!photo.needs_sound_check());
         let _ = fs::remove_dir_all(&root);
     }
 

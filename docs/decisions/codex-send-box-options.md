@@ -59,7 +59,10 @@ Parity items `parity:composer-send-options` and (with Edit Video)
   (`gif && !_album && mp4`), and as a plain video inside an album. A video
   that had sound and was turned into a GIF in the editor leaves the album
   and goes alone (`sendsVideoAsGif`, `GroupRanges`). Quill marks an `.mp4`
-  with no sound track (ffprobe, on attach) and follows the same rules:
+  with no sound track and follows the same rules. The ffprobe check runs in
+  the background after the file is attached; the tray shows "Checking the
+  video…" and a send waits until it is done, so the GIF flag is set before
+  the message is built. Rules:
   `AttachmentExtras.gif` stays on when more files are added,
   `sound_removed` marks the ones that leave the album, and
   `ComposerAttachment::split_for_send` makes the messages. Non-mp4 soundless
@@ -77,7 +80,8 @@ Parity items `parity:composer-send-options` and (with Edit Video)
 ## Differences from tdesktop
 
 - The crop is set with sliders, not by dragging handles on the picture.
-- Playback does not show a flip, and the estimated file size tdesktop shows
+- `NativeVideo` can only turn the picture, not mirror it, so playback does
+  not show a flip (the still picture does), and the estimated file size tdesktop shows
   is not shown.
 - Clearing "Edit Cover" does not open tdesktop's photo editor on the cover
   image.

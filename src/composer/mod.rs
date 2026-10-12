@@ -22,6 +22,7 @@ mod shortcuts;
 pub use actions::{DeleteConfirm, ForwardDraft, cancel_forward_draft};
 pub use attachments::{
     AttachmentKind, ComposerAttachment, clipboard_image_attachment, media_kind_for,
+    without_sound_track,
 };
 pub use commands::{
     CommandMenuItem, command_menu_trigger, complete_mention, filter_command_menu_items,

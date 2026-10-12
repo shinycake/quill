@@ -3,7 +3,7 @@
 //! editor. Behaviour is in `send_box_options.rs` and `video_editor.rs`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use super::send_box_options::PriceDialog;
@@ -16,6 +16,10 @@ pub(crate) struct SendBoxUi {
     pub(super) paid_stars: i64,
     /// Sizes read from the header of tray photos, once per file.
     pub(super) photo_sizes: RefCell<HashMap<PathBuf, Option<(u32, u32)>>>,
+    /// Tray videos whose sound track is being read in the background, and
+    /// those already read (tdesktop `hasAudio`).
+    pub(super) sound_checking: HashSet<PathBuf>,
+    pub(super) sound_checked: HashSet<PathBuf>,
     /// The "Paid Content" price box.
     pub(super) price: Option<PriceDialog>,
     /// The video editor opened from the tray or the edit box.
@@ -28,6 +32,8 @@ impl SendBoxUi {
             hd_photos: false,
             paid_stars: 0,
             photo_sizes: RefCell::new(HashMap::new()),
+            sound_checking: HashSet::new(),
+            sound_checked: HashSet::new(),
             price: None,
             video_editor: None,
         }
@@ -38,6 +44,8 @@ impl SendBoxUi {
         self.hd_photos = false;
         self.paid_stars = 0;
         self.photo_sizes.borrow_mut().clear();
+        self.sound_checking.clear();
+        self.sound_checked.clear();
     }
 }
 

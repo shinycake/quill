@@ -102,9 +102,73 @@ impl QuillApp {
             .any(|(width, height)| can_use_high_quality(width, height))
     }
 
+    /// Read the sound track of the new tray videos in the background; a
+    /// video without one becomes a GIF when it lands (tdesktop
+    /// `modifications.gif = !hasAudio`). Sending waits for the reads.
+    pub(super) fn check_tray_videos(&mut self, cx: &mut Context<Self>) {
+        let paths: Vec<std::path::PathBuf> = self
+            .composer_ui
+            .pending_attachments
+            .iter()
+            .filter(|attachment| attachment.needs_sound_check())
+            .map(|attachment| attachment.path.clone())
+            .filter(|path| {
+                let send_box = &self.composer_ui.send_box;
+                !send_box.sound_checking.contains(path) && !send_box.sound_checked.contains(path)
+            })
+            .collect();
+        for path in paths {
+            self.composer_ui
+                .send_box
+                .sound_checking
+                .insert(path.clone());
+            let probed = path.clone();
+            let worker =
+                cx.background_spawn(async move { quill::composer::without_sound_track(&probed) });
+            cx.spawn(async move |this, cx| {
+                let silent = worker.await;
+                let _ = this.update(cx, |this, cx| {
+                    let send_box = &mut this.composer_ui.send_box;
+                    // The batch may have been sent or cleared meanwhile.
+                    if !send_box.sound_checking.remove(&path) {
+                        return;
+                    }
+                    send_box.sound_checked.insert(path.clone());
+                    if silent {
+                        for attachment in this
+                            .composer_ui
+                            .pending_attachments
+                            .iter_mut()
+                            .filter(|attachment| attachment.path == path)
+                            .filter(|attachment| attachment.needs_sound_check())
+                        {
+                            attachment.extras.gif = true;
+                        }
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+    }
+
+    /// Videos in the tray are still being read.
+    pub(super) fn tray_videos_checking(&self) -> bool {
+        !self.composer_ui.send_box.sound_checking.is_empty()
+    }
+
     /// The options row of the tray: High quality and the price.
     pub(super) fn send_box_option_controls(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut controls = Vec::new();
+        if self.tray_videos_checking() {
+            controls.push(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Checking the video…")
+                    .into_any_element(),
+            );
+        }
         if self.tray_has_large_photo() {
             controls.push(
                 gpui_kit::component::checkbox::Checkbox::new("composer-high-quality")
