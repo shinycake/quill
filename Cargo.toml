@@ -50,6 +50,9 @@ ui = [
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
+# Developer frame profiling: GPUI frame histograms + debug overlay
+# (QUILL_FRAME_PROFILE=<report path>). See src/ui/frame_profile.rs.
+frame-profiler = ["ui", "gpui-kit/profiler"]
 
 [dependencies]
 base64 = "0.22"

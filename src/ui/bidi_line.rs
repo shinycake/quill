@@ -141,7 +141,7 @@ impl Element for BidiLine {
                         _ => None,
                     })
                     .unwrap_or(px(1.0e6));
-                let Some(paragraph) = BidiParagraph::layout_one_line(
+                let Some(paragraph) = super::paragraph_cache::layout_one_line(
                     &text,
                     &runs,
                     font_size,
@@ -151,7 +151,6 @@ impl Element for BidiLine {
                 ) else {
                     return Size::default();
                 };
-                let paragraph = Rc::new(paragraph);
                 let size = size(paragraph.width(), line_height);
                 *measured.borrow_mut() = Some((limit, paragraph));
                 size
@@ -182,7 +181,7 @@ impl Element for BidiLine {
         self.paragraph = measured.or_else(|| {
             let (style, font_size, line_height) = metrics(window);
             let runs = text_runs(&self.text, &style, &self.source);
-            BidiParagraph::layout_one_line(
+            super::paragraph_cache::layout_one_line(
                 &self.text,
                 &runs,
                 font_size,
@@ -190,7 +189,6 @@ impl Element for BidiLine {
                 bounds.size.width,
                 window,
             )
-            .map(Rc::new)
         });
     }
 

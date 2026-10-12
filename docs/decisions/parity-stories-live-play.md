@@ -36,3 +36,20 @@
   counts / top donors (`liveStoryDonors`); starting a live story
   (`startLiveStory` is posting-side).
 
+## RTMP viewing (2026-10-12) — no-go as a URL player
+
+`parity:calls-rtmp-viewing` and `parity:stories-live-stream-playback` are
+not an HLS/RTMP URL. Telegram Desktop still joins the call
+(`JoinBroadcastStream`, `InstanceMode::Stream`,
+`tgcalls::GroupConnectionModeBroadcast`). Time sync is
+`phone.getGroupCallStreamChannels`; segments are `upload.getFile` of
+`inputGroupCallStream` (MPEG-4 / OGG) fed back into tgcalls as
+`BroadcastPart`. The story viewer embeds that same group call.
+
+TDLib exposes the same path as `getGroupCallStreams` /
+`getGroupCallStreamSegment` (schema only in Quill; no request builder).
+`getVideoChatRtmpUrl` is the publisher ingest key, already cached.
+Quill has no URL player: history video is ffmpeg frames from a local
+file. Do not invent one. These items stay blocked until a broadcast
+join is wired through ntgcalls.
+

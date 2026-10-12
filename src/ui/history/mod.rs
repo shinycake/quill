@@ -239,12 +239,16 @@ pub(super) fn album_history_row(
         mosaic = mosaic.child(tile);
     }
     let caption = messages.iter().rev().find_map(|message| {
-        let text = match &message.content {
-            MessageContent::Photo(photo) => photo.caption.clone(),
-            MessageContent::Video(video) => video.caption.clone(),
-            _ => String::new(),
+        let (text, entities) = match &message.content {
+            MessageContent::Photo(photo) => (&photo.caption, &photo.caption_entities),
+            MessageContent::Video(video) => (&video.caption, &video.caption_entities),
+            _ => return None,
         };
-        if text.is_empty() { None } else { Some(text) }
+        if text.is_empty() {
+            None
+        } else {
+            Some((message.chat_id, message.id, text.clone(), entities.clone()))
+        }
     });
     // Media-led like single photos: the mosaic sits on a thin inset and,
     // without a caption, the time rides on the picture.
@@ -261,14 +265,37 @@ pub(super) fn album_history_row(
     chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.)));
     chrome.footer_overlay = !has_caption;
     chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx).into_any_element());
+    let revealed = std::collections::HashSet::new();
+    let emoji: HashMap<i64, ImageSource> = HashMap::new();
+    let layered: HashMap<i64, super::anim_layer::LayeredClip> = HashMap::new();
     let extra = div()
         .id(("album-extra", album_id as u64))
         .flex()
         .flex_col()
         .gap_1()
         .child(mosaic)
-        .when_some(caption, |this, text| {
-            this.child(div().px_2().py_1().text_sm().child(text))
+        .when_some(caption, |this, (chat_id, message_id, text, entities)| {
+            // Same paragraph path as a single photo. A plain string is
+            // GPUI's left-to-right layout, so a Hebrew caption reads
+            // backwards.
+            this.child(
+                div()
+                    .w(px(box_w as f32))
+                    .px_2()
+                    .py_1()
+                    .child(rich_text_reserving(
+                        &text,
+                        &entities,
+                        (chat_id.0, message_id.0 as u64),
+                        true,
+                        &revealed,
+                        look.font,
+                        &emoji,
+                        &layered,
+                        None,
+                        cx,
+                    )),
+            )
         })
         .into_any_element();
     session_bubble_quoted(

@@ -264,16 +264,13 @@ impl BidiParagraph {
         }
         words.push(word_start..range.end);
 
-        let measure = |r: Range<usize>, window: &mut Window| -> Pixels {
-            if r.is_empty() {
-                return px(0.);
-            }
-            let slice = &text[r.clone()];
-            let line_runs = runs_in(runs, &r);
-            window
-                .text_system()
-                .shape_line(slice.to_string().into(), font_size, &line_runs, None)
-                .width
+        // The hard line is shaped once and each glyph's advance is credited to the byte it
+        // starts at; a range's width is then a difference of prefix sums. Shaping every word
+        // (and every character of a long word) on its own cost a CoreText line plus a font
+        // fallback lookup each, which is what made scrolling onto new messages slow.
+        let advance_before = Self::advance_prefix(text, runs, range, font_size, window);
+        let measure = |r: Range<usize>, _: &mut Window| -> Pixels {
+            advance_before[r.end - range.start] - advance_before[r.start - range.start]
         };
 
         let mut breaks = Vec::new();
@@ -306,6 +303,46 @@ impl BidiParagraph {
             }
         }
         breaks
+    }
+
+    /// For each byte offset in `range` (and its end), the advance of the glyphs that start
+    /// before it, from one shaping of the whole range.
+    fn advance_prefix(
+        text: &str,
+        runs: &[TextRun],
+        range: &Range<usize>,
+        font_size: Pixels,
+        window: &mut Window,
+    ) -> Vec<Pixels> {
+        let mut prefix = vec![px(0.); range.len() + 1];
+        if range.is_empty() {
+            return prefix;
+        }
+        let shaped = window.text_system().shape_line(
+            text[range.clone()].to_string().into(),
+            font_size,
+            &runs_in(runs, range),
+            None,
+        );
+        // Glyphs in visual order; each one's advance runs to the next glyph's position.
+        let mut glyphs: Vec<(Pixels, usize)> = shaped
+            .runs
+            .iter()
+            .flat_map(|run| run.glyphs.iter())
+            .map(|glyph| (glyph.position.x, glyph.index))
+            .collect();
+        glyphs.sort_by_key(|&(x, _)| x);
+        for (i, &(x, index)) in glyphs.iter().enumerate() {
+            let next = glyphs.get(i + 1).map_or(shaped.width, |&(next, _)| next);
+            if index < range.len() {
+                prefix[index + 1] += next - x;
+            }
+        }
+        for i in 1..prefix.len() {
+            let before = prefix[i - 1];
+            prefix[i] += before;
+        }
+        prefix
     }
 
     /// Shapes one row's `range` run by run in visual order.

@@ -49,6 +49,8 @@ mod ffmpeg_video;
 mod folders_state;
 mod force_reply;
 mod frame_clock;
+#[cfg(feature = "frame-profiler")]
+mod frame_profile;
 mod frame_state;
 mod group_call_state;
 mod history_state;
@@ -63,6 +65,7 @@ mod native_video;
 mod native_video_rotate;
 mod nested_click;
 mod notify_state;
+mod paragraph_cache;
 mod payments_state;
 mod peer_color_dialog;
 mod photo_edit;

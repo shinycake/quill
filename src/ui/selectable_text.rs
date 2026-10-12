@@ -97,8 +97,6 @@ pub(super) struct SelectableRichText {
     bidi_source: Option<BidiSource>,
     /// The paragraph laid out by the bidirectional path, once prepainted.
     paragraph: Option<Rc<BidiParagraph>>,
-    /// The paragraph measured during layout, to reuse when its wrap width stands.
-    measured: Rc<std::cell::RefCell<Option<(Option<Pixels>, Rc<BidiParagraph>)>>>,
     /// Custom emoji painted over placeholder glyphs.
     emoji: Vec<InlineEmoji>,
 }
@@ -159,7 +157,6 @@ impl SelectableRichText {
             layer: None,
             bidi_source: None,
             paragraph: None,
-            measured: Rc::default(),
             emoji: Vec::new(),
         }
     }
@@ -439,21 +436,30 @@ impl Element for SelectableRichText {
             );
             let runs = text_runs(&self.text, &style, &source);
             let text = self.text.clone();
-            let measured = self.measured.clone();
-            let layout_id = window.request_measured_layout(Default::default(), {
+            // Measures go through the shared paragraph cache: taffy asks
+            // for several widths per frame and the row is rebuilt every
+            // frame, so a per-element slot would shape the text again.
+            // A zero minimum width lets the paragraph shrink to its row and
+            // wrap there. Its min-content is one unwrapped line, so with the
+            // default minimum a right-aligned (flex) row lets a long Hebrew
+            // paragraph spill out of the bubble instead of wrapping.
+            let mut layout_style = Style::default();
+            layout_style.min_size.width = px(0.).into();
+            let layout_id = window.request_measured_layout(layout_style, {
                 move |known, available, window, _| {
                     let wrap = known.width.or(match available.width {
                         AvailableSpace::Definite(width) => Some(width),
                         _ => None,
                     });
-                    let paragraph =
-                        BidiParagraph::layout(&text, &runs, font_size, line_height, wrap, window)
-                            .map(Rc::new);
-                    let size = paragraph.as_ref().map_or_else(Size::default, |p| p.size());
-                    if let Some(paragraph) = paragraph {
-                        *measured.borrow_mut() = Some((wrap, paragraph));
-                    }
-                    size
+                    super::paragraph_cache::layout(
+                        &text,
+                        &runs,
+                        font_size,
+                        line_height,
+                        wrap,
+                        window,
+                    )
+                    .map_or_else(Size::default, |p| p.size())
                 }
             });
             return (layout_id, handle);
@@ -474,33 +480,22 @@ impl Element for SelectableRichText {
         cx: &mut App,
     ) -> Self::PrepaintState {
         if let Some(source) = self.bidi_source.clone() {
-            // The measured paragraph stands when it was wrapped at this width; else lay it out
-            // again at the width it was given.
-            let measured = self
-                .measured
-                .borrow()
-                .as_ref()
-                .filter(|(wrap, _)| *wrap == Some(bounds.size.width))
-                .map(|(_, paragraph)| paragraph.clone());
-            self.paragraph = measured.or_else(|| {
-                let style = window.text_style();
-                let font_size = style.font_size.to_pixels(window.rem_size());
-                let line_height = window.pixel_snap(
-                    style
-                        .line_height
-                        .to_pixels(font_size.into(), window.rem_size()),
-                );
-                let runs = text_runs(&self.text, &style, &source);
-                BidiParagraph::layout(
-                    &self.text,
-                    &runs,
-                    font_size,
-                    line_height,
-                    Some(bounds.size.width),
-                    window,
-                )
-                .map(Rc::new)
-            });
+            let style = window.text_style();
+            let font_size = style.font_size.to_pixels(window.rem_size());
+            let line_height = window.pixel_snap(
+                style
+                    .line_height
+                    .to_pixels(font_size.into(), window.rem_size()),
+            );
+            let runs = text_runs(&self.text, &style, &source);
+            self.paragraph = super::paragraph_cache::layout(
+                &self.text,
+                &runs,
+                font_size,
+                line_height,
+                Some(bounds.size.width),
+                window,
+            );
         } else {
             self.styled
                 .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);

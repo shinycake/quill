@@ -13,6 +13,10 @@ use gpui_kit::{
 };
 use quill::advanced::experimental::{self, Imported, Values};
 
+/// The experimental options are process-wide; the tests that set them take
+/// this lock so parallel tests don't flip them under each other.
+static EXPERIMENTAL_OPTIONS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     let root = std::env::temp_dir().join(format!("quill-advanced-ui-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&root);
@@ -135,6 +139,9 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
 fn numberbuttons_switches_fast_buttons_mode_and_lists_it_on_the_page(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    let _options = EXPERIMENTAL_OPTIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     experimental::set_fast_buttons_mode(false);
     app.update_in(vcx, |app, _, _| app.settings.open = true);
     type_into(&app, vcx, "numberbuttons");
@@ -165,6 +172,9 @@ fn numberbuttons_switches_fast_buttons_mode_and_lists_it_on_the_page(cx: &mut Te
 fn the_experimental_page_changes_restores_exports_and_imports(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    let _options = EXPERIMENTAL_OPTIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     experimental::set_fast_buttons_mode(false);
     app.update_in(vcx, |app, _, cx| {
         app.settings.open = true;
