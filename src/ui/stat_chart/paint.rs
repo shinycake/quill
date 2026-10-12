@@ -4,14 +4,12 @@
 //! `ChartWidget::Footer`). Built series are cached per range, scale and
 //! size, so a hover redraw replays them instead of re-tessellating.
 
-use super::details::details;
-use super::state::{ChartState, Snapshot};
-use super::{FOOTER_HEIGHT, PLOT_HEIGHT, ZoomFn};
+use super::state_zoom::LocalZoomView;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use quill::stat_chart::{
     ChartKind, FOOTER_SIDE, Limits, RangeSelector, StatChart, bar_columns, chart_rulers,
-    label_indices, line_ratios,
+    label_indices_for_step, label_step, line_ratios,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -26,8 +24,6 @@ const LINE_WIDTH: f32 = 2.;
 const DOT_RADIUS: f32 = 5.;
 /// An x label's width budget (`dayStringMaxWidth`).
 const LABEL_WIDTH: f64 = 40.;
-/// Space between the hovered point and its tooltip.
-const POPUP_GAP: f32 = 12.;
 
 /// Where the drawing area starts below the plot element's top.
 pub(super) fn plot_rect_top() -> f32 {
@@ -269,7 +265,7 @@ fn paint_prims(prims: Vec<Prim>, window: &mut Window) {
 /// A caption at `origin` (top-left), right-aligned to `origin.x` or
 /// centered on it per `anchor`. With `fade`, a caption crossing its left
 /// or right edge fades out as it leaves (tdesktop `PaintBottomLine`).
-fn caption(
+pub(super) fn caption(
     text: &str,
     origin: Point<Pixels>,
     color: Hsla,
@@ -325,29 +321,49 @@ fn caption(
 }
 
 #[derive(Clone, Copy)]
-enum Anchor {
+pub(super) enum Anchor {
     Left,
     Right,
     Center,
 }
 
-struct Palette {
+pub(super) struct Palette {
     rule: Hsla,
     caption: Hsla,
     surface: Hsla,
+    /// The range selector: outside the window, its frame, the grips.
+    inactive: Hsla,
+    handle: Hsla,
+    grip: Hsla,
 }
 
-fn palette(cx: &App) -> Palette {
+pub(super) fn palette(cx: &App) -> Palette {
     let theme = cx.theme();
     Palette {
         rule: theme.border,
         caption: theme.muted_foreground,
         surface: theme.background,
+        inactive: theme.muted.opacity(0.75),
+        handle: theme.muted_foreground.opacity(0.45),
+        grip: theme.background,
     }
 }
 
+/// What the plot's paint needs from the frame's snapshot.
+#[derive(Clone)]
+pub(super) struct PlotSnap {
+    pub range: Limits,
+    pub y: Limits,
+    pub alpha: Vec<f32>,
+    pub rulers: Vec<(Limits, f32)>,
+    pub labels: Vec<(usize, f32)>,
+    /// The point whose details show, and their opacity.
+    pub details: Option<(usize, f32)>,
+    pub local: Option<LocalZoomView>,
+}
+
 #[allow(clippy::too_many_arguments)]
-fn paint_plot(
+pub(super) fn paint_plot(
     bounds: Bounds<Pixels>,
     chart: &StatChart,
     kind: ChartKind,
@@ -363,34 +379,53 @@ fn paint_plot(
         range: snap.range,
         y: snap.y,
     };
-    let rulers = chart_rulers(chart, kind, snap.y_target);
+    // A local zoom fades the areas, rulers and dates out as the pie
+    // comes in.
+    let zoom = snap.local.as_ref().map_or(0.0, |local| local.progress);
+    let fade = 1.0 - zoom;
+    let rulers: Vec<(Vec<quill::stat_chart::Ruler>, f32)> = snap
+        .rulers
+        .iter()
+        .map(|(limits, alpha)| (chart_rulers(chart, kind, *limits), alpha * fade))
+        .filter(|(_, alpha)| *alpha > 0.0)
+        .collect();
     let rulers_above = matches!(kind, ChartKind::StackBar | ChartKind::StackLinear);
     let ruler_lines = |window: &mut Window| {
-        for ruler in &rulers {
-            let y = scale.y(ruler.value);
-            if y < f32::from(rect.top()) - 0.5 || y > f32::from(rect.bottom()) + 0.5 {
-                continue;
+        for (set, alpha) in &rulers {
+            for ruler in set {
+                let y = scale.y(ruler.value);
+                if y < f32::from(rect.top()) - 0.5 || y > f32::from(rect.bottom()) + 0.5 {
+                    continue;
+                }
+                window.paint_quad(fill(
+                    Bounds::new(point(rect.left(), px(y)), size(rect.size.width, px(1.))),
+                    colors.rule.opacity(colors.rule.a * alpha),
+                ));
             }
-            window.paint_quad(fill(
-                Bounds::new(point(rect.left(), px(y)), size(rect.size.width, px(1.))),
-                colors.rule,
-            ));
         }
     };
     if !rulers_above {
         ruler_lines(window);
     }
-    let selected = snap.hover.filter(|_| kind == ChartKind::StackBar);
+    let selected = snap
+        .details
+        .filter(|_| kind == ChartKind::StackBar)
+        .map(|(i, _)| i);
+    let alpha: Vec<f32> = snap.alpha.iter().map(|a| a * fade).collect();
     let key = GeomKey {
         rect,
         range: snap.range,
         y: snap.y,
-        alpha: snap.alpha.clone(),
+        alpha: alpha.clone(),
         selected,
     };
-    let prims = cached_series(cache, key, || {
-        build_series(chart, kind, &scale, &snap.alpha, LINE_WIDTH, selected)
-    });
+    let prims = if fade > 0.0 {
+        cached_series(cache, key, || {
+            build_series(chart, kind, &scale, &alpha, LINE_WIDTH, selected)
+        })
+    } else {
+        Vec::new()
+    };
     // Lines may overshoot the plot's height a little; never its sides.
     let mask = Bounds::new(
         point(rect.left(), bounds.top()),
@@ -401,70 +436,87 @@ fn paint_plot(
         if rulers_above {
             ruler_lines(window);
         }
-        if let Some(i) = snap.hover {
-            paint_selection(chart, kind, &scale, i, &snap.alpha, colors, window);
+        if let Some((i, details_alpha)) = snap.details {
+            let alpha: Vec<f32> = alpha.iter().map(|a| a * details_alpha).collect();
+            paint_selection(chart, kind, &scale, i, &alpha, colors, window);
         }
     });
+    if let Some(local) = snap.local.as_ref() {
+        super::pie_paint::paint_pie(rect, chart, local, window, cx);
+    }
     // Ruler captions: left in the first line's color on a double chart,
     // the second line's scale on the right.
     let double = kind == ChartKind::DoubleLinear && chart.lines.len() == 2;
-    let line_color = |k: usize| -> Hsla {
+    let line_color = |k: usize, alpha: f32| -> Hsla {
         let c: Hsla = rgb(chart.lines[k].color()).into();
-        c.opacity(snap.alpha.get(k).copied().unwrap_or(1.0))
+        c.opacity(snap.alpha.get(k).copied().unwrap_or(1.0) * alpha)
     };
-    for ruler in &rulers {
-        let y = scale.y(ruler.value);
-        if y < f32::from(rect.top()) - 0.5 || y > f32::from(rect.bottom()) + 0.5 {
-            continue;
-        }
-        let top = px(y - CAPTION_LINE - 2.);
-        let left_color = if double {
-            line_color(0)
-        } else {
-            colors.caption
-        };
-        caption(
-            &ruler.caption,
-            point(rect.left(), top),
-            left_color,
-            Anchor::Left,
-            None,
-            window,
-            cx,
-        );
-        if double {
+    for (set, alpha) in &rulers {
+        for ruler in set {
+            let y = scale.y(ruler.value);
+            if y < f32::from(rect.top()) - 0.5 || y > f32::from(rect.bottom()) + 0.5 {
+                continue;
+            }
+            let top = px(y - CAPTION_LINE - 2.);
+            let left_color = if double {
+                line_color(0, *alpha)
+            } else {
+                colors.caption.opacity(colors.caption.a * alpha)
+            };
             caption(
-                &ruler.right_caption,
-                point(rect.right(), top),
-                line_color(1),
-                Anchor::Right,
+                &ruler.caption,
+                point(rect.left(), top),
+                left_color,
+                Anchor::Left,
                 None,
                 window,
                 cx,
             );
+            if double {
+                caption(
+                    &ruler.right_caption,
+                    point(rect.right(), top),
+                    line_color(1, *alpha),
+                    Anchor::Right,
+                    None,
+                    window,
+                    cx,
+                );
+            }
         }
     }
-    // Dates under the plot.
+    // Dates under the plot; an old step fades out under the new one.
     let width = f32::from(rect.size.width) as f64;
     let bars = matches!(kind, ChartKind::Bar | ChartKind::StackBar);
     let label_y = rect.bottom() + px(6.);
     let offset = local_offset();
+    let labels: Vec<(usize, f32)> = if snap.labels.is_empty() {
+        vec![(label_step(chart, snap.range, width), 1.0)]
+    } else {
+        snap.labels.clone()
+    };
     window.with_content_mask(Some(ContentMask { bounds }), |window| {
-        for i in label_indices(chart, snap.range, width, LABEL_WIDTH) {
-            let x = if bars {
-                bar_center(chart, &scale, i)
-            } else {
-                scale.x(chart, i)
-            };
-            caption(
-                &chart.day_label(i, offset),
-                point(px(x), label_y),
-                colors.caption,
-                Anchor::Center,
-                Some(rect),
-                window,
-                cx,
-            );
+        for (step, alpha) in labels {
+            let alpha = alpha * fade;
+            if alpha <= 0.0 {
+                continue;
+            }
+            for i in label_indices_for_step(chart, snap.range, width, LABEL_WIDTH, step) {
+                let x = if bars {
+                    bar_center(chart, &scale, i)
+                } else {
+                    scale.x(chart, i)
+                };
+                caption(
+                    &chart.day_label(i, offset),
+                    point(px(x), label_y),
+                    colors.caption.opacity(colors.caption.a * alpha),
+                    Anchor::Center,
+                    Some(rect),
+                    window,
+                    cx,
+                );
+            }
         }
     });
 }
@@ -542,290 +594,117 @@ fn paint_selection(
     }
 }
 
-/// What the plot's paint needs from the frame's snapshot.
-#[derive(Clone)]
-struct PlotSnap {
-    range: Limits,
-    y: Limits,
-    y_target: Limits,
-    alpha: Vec<f32>,
-    hover: Option<usize>,
+/// What the range selector's paint needs.
+pub(super) struct FooterSnap {
+    pub selector: Limits,
+    pub footer_y: Limits,
+    pub alpha: Vec<f32>,
+    pub local: Option<LocalZoomView>,
 }
 
-/// The plot with its hover handling, keyboard steps and tooltip.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn plot(
-    id: &str,
-    state: &Entity<ChartState>,
-    chart: &Rc<StatChart>,
+/// The range selector: the whole chart in miniature (or, zoomed into a
+/// pie, the eight days as stacked columns) with a window over the
+/// selected part.
+pub(super) fn paint_footer(
+    bounds: Bounds<Pixels>,
+    chart: &StatChart,
     kind: ChartKind,
-    snapshot: &Snapshot,
-    on_zoom: Option<ZoomFn>,
-    _window: &mut Window,
-    cx: &mut App,
-) -> impl IntoElement {
-    let snap = PlotSnap {
-        range: snapshot.range,
-        y: snapshot.y,
-        y_target: snapshot.y_target,
-        alpha: snapshot.alpha.clone(),
-        hover: snapshot.hover,
+    snap: &FooterSnap,
+    cache: &SharedCache,
+    colors: &Palette,
+    window: &mut Window,
+) {
+    let inner = Bounds::new(
+        point(bounds.left(), bounds.top() + px(1.)),
+        size(bounds.size.width, bounds.size.height - px(2.)),
+    );
+    let zoom = snap.local.as_ref().map_or(0.0, |local| local.progress);
+    let scale = Scale {
+        rect: inner,
+        range: Limits::new(0.0, 1.0),
+        y: snap.footer_y,
     };
-    let bounds_cell = snapshot.plot_bounds.clone();
-    let cache = snapshot.plot_cache.clone();
-    let colors = palette(cx);
-    let paint_chart = chart.clone();
-    let canvas = canvas(
-        move |_, _, _| {},
-        move |bounds, _, window, cx| {
-            bounds_cell.set(bounds);
-            paint_plot(
-                bounds,
-                &paint_chart,
-                kind,
-                &snap,
-                &cache,
-                &colors,
-                window,
-                cx,
-            );
-        },
-    )
-    .size_full();
-    let index_at = {
-        let chart = chart.clone();
-        let cell = snapshot.plot_bounds.clone();
-        move |position: Point<Pixels>, state: &ChartState| -> Option<usize> {
-            let rect = plot_rect(cell.get());
-            let x = f32::from(position.x - rect.left()) as f64;
-            state.index_at(&chart, x, f32::from(rect.size.width) as f64)
+    let alpha: Vec<f32> = snap.alpha.iter().map(|a| a * (1.0 - zoom)).collect();
+    let key = GeomKey {
+        rect: inner,
+        range: scale.range,
+        y: snap.footer_y,
+        alpha: alpha.clone(),
+        selected: None,
+    };
+    let prims = if zoom < 1.0 {
+        cached_series(cache, key, || {
+            build_series(chart, kind, &scale, &alpha, 1., None)
+        })
+    } else {
+        Vec::new()
+    };
+    window.with_content_mask(Some(ContentMask { bounds: inner }), |window| {
+        paint_prims(prims, window);
+        if let Some(local) = snap.local.as_ref() {
+            super::pie_paint::paint_zoom_columns(inner, chart, local, &snap.alpha, window);
         }
-    };
-    let index_at = Rc::new(index_at);
-    let mut element = div()
-        .id(ElementId::Name(format!("{id}-plot").into()))
-        .debug_selector(|| format!("{id}-plot"))
-        .relative()
-        .w_full()
-        .h(px(PLOT_HEIGHT))
-        .track_focus(&snapshot.focus)
-        .on_mouse_move({
-            let state = state.clone();
-            let index_at = index_at.clone();
-            move |event: &MouseMoveEvent, _, cx| {
-                state.update(cx, |s, cx| {
-                    let index = index_at(event.position, s);
-                    s.hover(index, cx);
-                });
-            }
-        })
-        .on_mouse_down(MouseButton::Left, {
-            let state = state.clone();
-            let index_at = index_at.clone();
-            move |event: &MouseDownEvent, window, cx| {
-                state.update(cx, |s, cx| {
-                    let index = index_at(event.position, s);
-                    s.press(index, cx);
-                    window.focus(&s.focus_handle(), cx);
-                });
-            }
-        })
-        .on_hover({
-            let state = state.clone();
-            move |hovered: &bool, _, cx| {
-                if !*hovered {
-                    state.update(cx, |s, cx| s.leave(cx));
-                }
-            }
-        })
-        .on_key_down({
-            let state = state.clone();
-            let chart = chart.clone();
-            let on_zoom = on_zoom.clone();
-            move |event: &KeyDownEvent, window, cx| {
-                match event.keystroke.key.as_str() {
-                    "left" => state.update(cx, |s, cx| s.step(-1, cx)),
-                    "right" => state.update(cx, |s, cx| s.step(1, cx)),
-                    "escape" => state.update(cx, |s, cx| s.clear(cx)),
-                    "enter" => {
-                        let selected = state.read(cx).selected();
-                        if let (Some(i), Some(on_zoom)) = (selected, on_zoom.as_ref())
-                            && let Some(x) = chart.x.get(i)
-                        {
-                            on_zoom(*x as i64, window, cx);
-                        }
-                    }
-                    _ => return,
-                }
-                cx.stop_propagation();
-            }
-        })
-        .child(canvas);
-    if let Some(index) = snapshot.hover.filter(|i| *i < chart.x.len()) {
-        // Beside the point, on the side with more room, so the pointer
-        // never sits under the tooltip (tdesktop `setupDetails`).
-        let ratio = snapshot.range.ratio(chart.x_frac[index]) as f32;
-        let width = f32::from(snapshot.plot_bounds.get().size.width);
-        let point_x = width * ratio;
-        let place = if ratio > 0.5 {
-            Err(px((width - point_x + POPUP_GAP).max(4.)))
-        } else {
-            Ok(px(if width > 0. { point_x + POPUP_GAP } else { 4. }))
-        };
-        element = element.child(details(
-            id,
-            chart,
-            kind,
-            index,
-            &snapshot.enabled,
-            place,
-            on_zoom,
-            cx,
+    });
+    let width = f32::from(bounds.size.width) as f64;
+    let (left, right) = RangeSelector::new(width, snap.selector).handles();
+    let x = |v: f64| bounds.left() + px(v as f32);
+    let radius = px(6.);
+    // Dim what is outside the window.
+    window.paint_quad(quad(
+        Bounds::new(
+            inner.origin,
+            size(
+                x(left + FOOTER_SIDE / 2.0) - bounds.left(),
+                inner.size.height,
+            ),
+        ),
+        radius,
+        colors.inactive,
+        px(0.),
+        transparent_black(),
+        BorderStyle::Solid,
+    ));
+    let right_edge = x(right + FOOTER_SIDE / 2.0);
+    window.paint_quad(quad(
+        Bounds::new(
+            point(right_edge, inner.top()),
+            size(bounds.right() - right_edge, inner.size.height),
+        ),
+        radius,
+        colors.inactive,
+        px(0.),
+        transparent_black(),
+        BorderStyle::Solid,
+    ));
+    // The window: two handles joined by thin top and bottom edges.
+    window.paint_quad(quad(
+        Bounds::new(
+            point(x(left), bounds.top()),
+            size(x(right + FOOTER_SIDE) - x(left), bounds.size.height),
+        ),
+        radius,
+        transparent_black(),
+        Edges {
+            top: px(1.),
+            bottom: px(1.),
+            left: px(FOOTER_SIDE as f32),
+            right: px(FOOTER_SIDE as f32),
+        },
+        colors.handle,
+        BorderStyle::Solid,
+    ));
+    for edge in [left, right] {
+        let center = x(edge + FOOTER_SIDE / 2.0);
+        window.paint_quad(quad(
+            Bounds::new(
+                point(center - px(1.), bounds.center().y - px(5.)),
+                size(px(2.), px(10.)),
+            ),
+            px(1.),
+            colors.grip,
+            px(0.),
+            transparent_black(),
+            BorderStyle::Solid,
         ));
     }
-    element
-}
-
-/// The range selector: the whole chart in miniature with a window over
-/// the visible part. Drag a handle to resize the window, drag inside to
-/// move it, click outside to center it there.
-pub(super) fn footer(
-    id: &str,
-    state: &Entity<ChartState>,
-    chart: &Rc<StatChart>,
-    kind: ChartKind,
-    snapshot: &Snapshot,
-    cx: &App,
-) -> impl IntoElement {
-    let theme = cx.theme();
-    let inactive = theme.muted.opacity(0.75);
-    let handle = theme.muted_foreground.opacity(0.45);
-    let grip = theme.background;
-    let range = snapshot.range;
-    let footer_y = snapshot.footer_y;
-    let alpha = snapshot.alpha.clone();
-    let cell = snapshot.footer_bounds.clone();
-    let cache = snapshot.footer_cache.clone();
-    let paint_chart = chart.clone();
-    let drag_state = state.clone();
-    let canvas = canvas(
-        move |_, _, _| {},
-        move |bounds, _, window, _cx| {
-            cell.set(bounds);
-            let inner = Bounds::new(
-                point(bounds.left(), bounds.top() + px(1.)),
-                size(bounds.size.width, bounds.size.height - px(2.)),
-            );
-            let scale = Scale {
-                rect: inner,
-                range: Limits::new(0.0, 1.0),
-                y: footer_y,
-            };
-            let key = GeomKey {
-                rect: inner,
-                range: scale.range,
-                y: footer_y,
-                alpha: alpha.clone(),
-                selected: None,
-            };
-            let prims = cached_series(&cache, key, || {
-                build_series(&paint_chart, kind, &scale, &alpha, 1., None)
-            });
-            window.with_content_mask(Some(ContentMask { bounds: inner }), |window| {
-                paint_prims(prims, window);
-            });
-            let width = f32::from(bounds.size.width) as f64;
-            let (left, right) = RangeSelector::new(width, range).handles();
-            let x = |v: f64| bounds.left() + px(v as f32);
-            let radius = px(6.);
-            // Dim what is outside the window.
-            window.paint_quad(quad(
-                Bounds::new(
-                    inner.origin,
-                    size(
-                        x(left + FOOTER_SIDE / 2.0) - bounds.left(),
-                        inner.size.height,
-                    ),
-                ),
-                radius,
-                inactive,
-                px(0.),
-                transparent_black(),
-                BorderStyle::Solid,
-            ));
-            let right_edge = x(right + FOOTER_SIDE / 2.0);
-            window.paint_quad(quad(
-                Bounds::new(
-                    point(right_edge, inner.top()),
-                    size(bounds.right() - right_edge, inner.size.height),
-                ),
-                radius,
-                inactive,
-                px(0.),
-                transparent_black(),
-                BorderStyle::Solid,
-            ));
-            // The window: two handles joined by thin top and bottom edges.
-            let window_bounds = Bounds::new(
-                point(x(left), bounds.top()),
-                size(x(right + FOOTER_SIDE) - x(left), bounds.size.height),
-            );
-            window.paint_quad(quad(
-                window_bounds,
-                radius,
-                transparent_black(),
-                Edges {
-                    top: px(1.),
-                    bottom: px(1.),
-                    left: px(FOOTER_SIDE as f32),
-                    right: px(FOOTER_SIDE as f32),
-                },
-                handle,
-                BorderStyle::Solid,
-            ));
-            for edge in [left, right] {
-                let center = x(edge + FOOTER_SIDE / 2.0);
-                window.paint_quad(quad(
-                    Bounds::new(
-                        point(center - px(1.), bounds.center().y - px(5.)),
-                        size(px(2.), px(10.)),
-                    ),
-                    px(1.),
-                    grip,
-                    px(0.),
-                    transparent_black(),
-                    BorderStyle::Solid,
-                ));
-            }
-            // Drags keep going outside the selector until release.
-            let state = drag_state.clone();
-            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
-                if phase == DispatchPhase::Bubble && state.read(cx).dragging() {
-                    let x = f32::from(event.position.x - bounds.left()) as f64;
-                    state.update(cx, |s, cx| s.drag_to(x, cx));
-                }
-            });
-            let state = drag_state.clone();
-            window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
-                if phase == DispatchPhase::Bubble && state.read(cx).dragging() {
-                    state.update(cx, |s, _| s.release());
-                }
-            });
-        },
-    )
-    .size_full();
-    let cell = snapshot.footer_bounds.clone();
-    let state = state.clone();
-    div()
-        .id(ElementId::Name(format!("{id}-range").into()))
-        .debug_selector(|| format!("{id}-range"))
-        .w_full()
-        .h(px(FOOTER_HEIGHT))
-        .cursor(CursorStyle::ResizeLeftRight)
-        .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
-            let x = f32::from(event.position.x - cell.get().left()) as f64;
-            state.update(cx, |s, cx| s.grab(x, cx));
-            cx.stop_propagation();
-        })
-        .child(canvas)
 }

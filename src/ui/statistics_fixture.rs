@@ -333,6 +333,8 @@ pub(crate) fn seed_channel_statistics(session: &mut Session, chat_id: i64) {
                 date: ((START_MS + (59 - i) * DAY_MS) / 1000) as i32,
                 views: 12_000 - i as i32 * 500,
                 forwards: 20 - i as i32,
+                thumbs: Vec::new(),
+                is_poll: false,
             }),
         );
     }

@@ -93,15 +93,35 @@ fn every_chart_kind_draws_and_failed_graphs_stay_out(cx: &mut TestAppContext) {
     assert!(find(vcx, &format!("stats-{CHANNEL}-iv-plot")).is_none());
 }
 
+/// Let real time pass for fades (they run on the wall clock) and the
+/// chart's frame timer fire.
+fn after_fade(vcx: &mut VisualTestContext) {
+    std::thread::sleep(std::time::Duration::from_millis(450));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(500));
+    frames(vcx);
+}
+
 #[gpui_kit::test]
-fn hover_shows_details_and_moving_the_range_hides_them(cx: &mut TestAppContext) {
+fn a_press_shows_details_and_moving_the_range_hides_them(cx: &mut TestAppContext) {
     let (_app, mut vcx) = open_statistics(cx);
     let vcx = &mut vcx;
     let details = format!("stats-{CHANNEL}-followers-details");
     let plot = bounds(vcx, &format!("stats-{CHANNEL}-followers-plot"));
+    // Hovering alone shows nothing, as in tdesktop.
     vcx.simulate_mouse_move(plot.center(), None, Modifiers::default());
     frames(vcx);
-    assert!(find(vcx, &details).is_some(), "hover shows the tooltip");
+    assert!(find(vcx, &details).is_none(), "hover alone shows nothing");
+    vcx.simulate_click(plot.center(), Modifiers::default());
+    frames(vcx);
+    assert!(find(vcx, &details).is_some(), "a press shows the details");
+    // Pressing the same point again hides them.
+    vcx.simulate_click(plot.center(), Modifiers::default());
+    after_fade(vcx);
+    assert!(find(vcx, &details).is_none(), "a second press hides them");
+    vcx.simulate_click(plot.center(), Modifiers::default());
+    frames(vcx);
+    assert!(find(vcx, &details).is_some());
     // Switching a line off keeps the chart drawing.
     let chip = bounds(vcx, &format!("stats-{CHANNEL}-followers-line-0"));
     vcx.simulate_click(chip.center(), Modifiers::default());
@@ -113,8 +133,61 @@ fn hover_shows_details_and_moving_the_range_hides_them(cx: &mut TestAppContext) 
     vcx.simulate_mouse_down(handle, MouseButton::Left, Modifiers::default());
     vcx.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
     vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    after_fade(vcx);
+    assert!(find(vcx, &details).is_none(), "a range change hides them");
+}
+
+#[gpui_kit::test]
+fn a_percentage_chart_zooms_into_a_pie_and_back(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open_statistics(cx);
+    let vcx = &mut vcx;
+    let plot = bounds(vcx, &format!("stats-{CHANNEL}-languages-plot"));
+    let at = point(plot.right() - px(30.), plot.center().y);
+    vcx.simulate_click(at, Modifiers::default());
     frames(vcx);
-    assert!(find(vcx, &details).is_none(), "a range change hides it");
+    let details = bounds(vcx, &format!("stats-{CHANNEL}-languages-details"));
+    vcx.simulate_mouse_move(details.center(), None, Modifiers::default());
+    vcx.simulate_click(details.center(), Modifiers::default());
+    after_fade(vcx);
+    // The pie: a slice under the pointer shows its total.
+    let plot = bounds(vcx, &format!("stats-{CHANNEL}-languages-plot"));
+    let pie_details = format!("stats-{CHANNEL}-languages-pie-details");
+    let on_pie = point(plot.center().x + px(4.), plot.center().y + px(14.));
+    vcx.simulate_mouse_move(on_pie, None, Modifiers::default());
+    after_fade(vcx);
+    assert!(
+        find(vcx, &pie_details).is_some(),
+        "hovering a slice shows its total"
+    );
+    assert!(find(vcx, &format!("stats-{CHANNEL}-languages-details")).is_none());
+    // Escape zooms back out.
+    vcx.simulate_click(on_pie, Modifiers::default());
+    vcx.simulate_keystrokes("escape");
+    after_fade(vcx);
+    assert!(find(vcx, &pie_details).is_none(), "zoomed out");
+}
+
+#[gpui_kit::test]
+fn export_builds_the_page_workbook(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_statistics(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().unwrap();
+        let (sheets, name) =
+            crate::ui::statistics_export::page_workbook(session, CHANNEL).expect("overview");
+        let names: Vec<&str> = sheets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names[0], "Overview");
+        // The async graph that loaded is exported too; error graphs not.
+        assert!(names.contains(&"Notifications"));
+        assert!(!names.contains(&"New followers by source"));
+        assert!(name.ends_with(".xlsx"));
+        assert!(!quill::stat_chart::serialize_workbook(&sheets).is_empty());
+        seed_message_statistics(session, CHANNEL, CHANNEL);
+        let (sheets, name) =
+            crate::ui::statistics_export::page_workbook(session, CHANNEL).expect("message");
+        assert_eq!(sheets[1].name, "Interactions");
+        assert!(name.contains("_100_"), "{name}");
+    });
 }
 
 #[gpui_kit::test]

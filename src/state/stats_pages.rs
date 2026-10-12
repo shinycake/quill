@@ -3,6 +3,7 @@
 //! forwards, previews of recent posts, and which page the statistics
 //! panel shows (tdesktop `info/statistics/`).
 use super::*;
+use crate::state::session_reply::{story_thumb_candidates, thumb_candidates};
 use crate::telegram::envelope::{
     MessageStatisticsView, ParsedMessage, PublicForwardsView, StatisticalGraph,
 };
@@ -82,6 +83,25 @@ pub struct StatsPostPreview {
     pub date: i32,
     pub views: i32,
     pub forwards: i32,
+    /// Files to show as the row's thumbnail, best first.
+    pub thumbs: Vec<FileId>,
+    /// A poll: its message statistics add the votes chart.
+    pub is_poll: bool,
+}
+
+fn preview(
+    content: &crate::telegram::envelope::MessageContent,
+    date: i32,
+    info: Option<&crate::telegram::envelope::MessageInteractionInfo>,
+) -> StatsPostPreview {
+    StatsPostPreview {
+        text: content.preview(),
+        date,
+        views: info.map_or(0, |i| i.view_count),
+        forwards: info.map_or(0, |i| i.forward_count),
+        thumbs: thumb_candidates(content),
+        is_poll: matches!(content, crate::telegram::envelope::MessageContent::Poll(_)),
+    }
 }
 
 /// tdesktop shows ten recent posts first and thirty more per "Show more".
@@ -246,15 +266,13 @@ impl StatsState {
     }
 
     pub(crate) fn accept_post(&mut self, chat_id: i64, message_id: i64, message: &ParsedMessage) {
-        let info = message.interaction_info.as_ref();
         self.posts.insert(
             (chat_id, message_id),
-            Some(StatsPostPreview {
-                text: message.content.preview(),
-                date: message.date,
-                views: info.map_or(0, |i| i.view_count),
-                forwards: info.map_or(0, |i| i.forward_count),
-            }),
+            Some(preview(
+                &message.content,
+                message.date,
+                message.interaction_info.as_ref(),
+            )),
         );
     }
 
@@ -283,19 +301,72 @@ impl Session {
             .get(&chat_id)
             .and_then(|history| history.messages.get(&message_id))
         {
-            let info = message.interaction_info.as_ref();
-            return PostLookup::Ready(StatsPostPreview {
-                text: message.content.preview(),
-                date: message.date,
-                views: info.map_or(0, |i| i.view_count),
-                forwards: info.map_or(0, |i| i.forward_count),
-            });
+            return PostLookup::Ready(preview(
+                &message.content,
+                message.date,
+                message.interaction_info.as_ref(),
+            ));
         }
         match self.groups.stats.posts.get(&(chat_id, message_id)) {
             Some(Some(preview)) => PostLookup::Ready(preview.clone()),
             Some(None) => PostLookup::Missing,
             None => PostLookup::Unknown,
         }
+    }
+
+    /// Open (or close) the info panel. The statistics panel opens on the
+    /// chat overview.
+    pub fn set_open_info_panel(&mut self, target: Option<InfoPanelTarget>) {
+        if let Some(InfoPanelTarget::Statistics(chat_id)) = target {
+            self.groups.stats.reset(chat_id);
+        }
+        self.users_state.open_info_panel = target;
+    }
+
+    /// Thumbnails the open statistics panel shows: its recent posts and
+    /// stories, and the post whose page is open.
+    pub(crate) fn stats_thumb_file_ids(&self) -> Vec<FileId> {
+        use crate::telegram::envelope::{ChatStatistics, ChatStatisticsObject};
+        let Some(InfoPanelTarget::Statistics(chat_id)) = self.users_state.open_info_panel else {
+            return Vec::new();
+        };
+        let post = |message_id: i64| match self.stats_post(chat_id, message_id) {
+            PostLookup::Ready(post) => post.thumbs,
+            _ => Vec::new(),
+        };
+        let mut ids = Vec::new();
+        match self.groups.stats.page(chat_id) {
+            StatsPage::Message(message_id) => ids.extend(post(message_id)),
+            StatsPage::Story(story_id) => {
+                if let Some(story) = self.stories.stories.get(&(chat_id, story_id)) {
+                    ids.extend(story_thumb_candidates(story));
+                }
+            }
+            StatsPage::Overview => {
+                if let Some(ChatStatisticsFetch::Loaded(stats)) =
+                    self.groups.chat_statistics.get(&chat_id)
+                    && let ChatStatistics::Channel(channel) = stats.as_ref()
+                {
+                    let total = channel.recent_interactions.len();
+                    let shown = self.groups.stats.recent_posts_shown(chat_id, total);
+                    for info in channel.recent_interactions.iter().take(shown) {
+                        match info.object {
+                            ChatStatisticsObject::Message { message_id } => {
+                                // The first file is enough for a 40 px tile.
+                                ids.extend(post(message_id).into_iter().take(1));
+                            }
+                            ChatStatisticsObject::Story { story_id } => {
+                                if let Some(story) = self.stories.stories.get(&(chat_id, story_id))
+                                {
+                                    ids.extend(story_thumb_candidates(story).into_iter().take(1));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ids
     }
 
     /// Open the statistics of `message_id` in `chat_id`'s panel.

@@ -314,6 +314,7 @@ mod sponsored_about;
 mod stars_gift_ui;
 mod stat_chart;
 mod statistics;
+mod statistics_export;
 mod statistics_graph;
 mod statistics_posts;
 mod sticker_mirror;
