@@ -30,6 +30,70 @@ pub struct VideoEdits {
     pub quality: u32,
     /// Drop the sound and send the clip as a GIF.
     pub gif: bool,
+    /// Clockwise quarter turns, 0 to 3 (tdesktop `PhotoModifications::angle`).
+    pub turns: u8,
+    /// Mirrored left to right, before the turns.
+    pub flipped: bool,
+    /// The part of the turned frame that is kept.
+    pub crop: Option<Crop>,
+}
+
+/// The kept part of the frame as thousandths of the turned frame (tdesktop
+/// keeps a pixel `QRect`; thousandths keep the model independent of size).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Crop {
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub h: u16,
+}
+
+/// The smallest crop side, in thousandths.
+pub const MIN_CROP: u16 = 100;
+
+impl Crop {
+    /// The whole frame.
+    pub const FULL: Self = Self {
+        x: 0,
+        y: 0,
+        w: 1000,
+        h: 1000,
+    };
+
+    /// Keep the crop inside the frame and at least `MIN_CROP` wide and high.
+    pub fn clamped(self) -> Self {
+        let w = self.w.clamp(MIN_CROP, 1000);
+        let h = self.h.clamp(MIN_CROP, 1000);
+        Self {
+            x: self.x.min(1000 - w),
+            y: self.y.min(1000 - h),
+            w,
+            h,
+        }
+    }
+
+    /// Pixels `(x, y, w, h)` for a frame of `width` x `height`, with even
+    /// sides as the encoder wants.
+    pub fn pixels(self, width: u32, height: u32) -> (u32, u32, u32, u32) {
+        let part = |total: u32, start: u16, len: u16| {
+            let total = total.max(2);
+            let len = ((u64::from(total) * u64::from(len) / 1000) as u32 & !1).clamp(2, total & !1);
+            let start = ((u64::from(total) * u64::from(start) / 1000) as u32 & !1).min(total - len);
+            (start, len)
+        };
+        let (x, w) = part(width, self.x, self.w);
+        let (y, h) = part(height, self.y, self.h);
+        (x, y, w, h)
+    }
+}
+
+/// The size of a frame after `turns` clockwise quarter turns.
+pub fn turned_size(width: u32, height: u32, turns: u8) -> (u32, u32) {
+    if turns % 2 == 1 {
+        (height, width)
+    } else {
+        (width, height)
+    }
 }
 
 impl VideoEdits {
@@ -41,6 +105,26 @@ impl VideoEdits {
             cover_ms: 0,
             quality: 0,
             gif: false,
+            turns: 0,
+            flipped: false,
+            crop: None,
+        }
+    }
+
+    /// Turn, flip or crop was chosen.
+    pub fn has_geometry(&self) -> bool {
+        !self.turns.is_multiple_of(4) || self.flipped || self.crop.is_some()
+    }
+
+    /// The size the clip has after turning and cropping.
+    pub fn edited_size(&self, source: &VideoSource) -> (u32, u32) {
+        let (width, height) = turned_size(source.width, source.height, self.turns);
+        match self.crop {
+            Some(crop) => {
+                let (_, _, w, h) = crop.pixels(width, height);
+                (w, h)
+            }
+            None => (width, height),
         }
     }
 
@@ -74,7 +158,7 @@ impl VideoEdits {
     /// tdesktop `VideoEdited`: the file has to be encoded again. A changed
     /// cover alone only moves the start timestamp.
     pub fn needs_transcode(&self, duration_ms: i64) -> bool {
-        self.is_trimmed(duration_ms) || self.quality != 0 || self.gif
+        self.is_trimmed(duration_ms) || self.quality != 0 || self.gif || self.has_geometry()
     }
 
     /// `inputVideo.start_timestamp` in whole seconds, counted from the start
@@ -206,6 +290,22 @@ fn strings(list: &[&str]) -> Vec<String> {
     list.iter().map(|arg| (*arg).to_string()).collect()
 }
 
+/// The ffmpeg filters for flip and turns (tdesktop flips, then turns
+/// clockwise).
+fn turn_filters(turns: u8, flipped: bool) -> Vec<String> {
+    let mut filters = Vec::new();
+    if flipped {
+        filters.push("hflip".to_string());
+    }
+    match turns % 4 {
+        1 => filters.push("transpose=1".into()),
+        2 => filters.push("hflip,vflip".into()),
+        3 => filters.push("transpose=2".into()),
+        _ => {}
+    }
+    filters
+}
+
 /// ffmpeg arguments that write the edited clip `output` (H.264 in MP4,
 /// AAC sound unless the clip becomes a GIF).
 pub fn encode_args(
@@ -222,9 +322,15 @@ pub fn encode_args(
     if edits.gif || !source.has_audio {
         args.push("-an".into());
     }
-    let mut filters = Vec::new();
-    if edits.quality != 0 && edits.quality < source.width.min(source.height) {
-        filters.push(if source.width <= source.height {
+    let mut filters = turn_filters(edits.turns, edits.flipped);
+    let (width, height) = edits.edited_size(source);
+    if let Some(crop) = edits.crop {
+        let (turned_w, turned_h) = turned_size(source.width, source.height, edits.turns);
+        let (x, y, w, h) = crop.pixels(turned_w, turned_h);
+        filters.push(format!("crop={w}:{h}:{x}:{y}"));
+    }
+    if edits.quality != 0 && edits.quality < width.min(height) {
+        filters.push(if width <= height {
             format!("scale={}:-2", edits.quality & !1)
         } else {
             format!("scale=-2:{}", edits.quality & !1)
@@ -244,15 +350,18 @@ pub fn encode_args(
 }
 
 /// ffmpeg arguments that save the frame at `at_ms` as the image `output`,
-/// at most `PREVIEW_SIDE` px on the longer side.
-pub fn frame_args(input: &str, at_ms: i64, output: &str) -> Vec<String> {
+/// flipped and turned like the edit, at most `PREVIEW_SIDE` px on the
+/// longer side. The crop is drawn over the picture, not applied.
+pub fn frame_args(input: &str, at_ms: i64, output: &str, turns: u8, flipped: bool) -> Vec<String> {
     let mut args = strings(&["-y", "-ss"]);
     args.push(seconds(at_ms.max(0)));
     args.extend(strings(&["-i", input, "-frames:v", "1", "-vf"]));
-    args.push(format!(
+    let mut filters = turn_filters(turns, flipped);
+    filters.push(format!(
         "scale='min({0},iw)':'min({0},ih)':force_original_aspect_ratio=decrease",
         PREVIEW_SIDE
     ));
+    args.push(filters.join(","));
     args.extend(strings(&["-q:v", "3", output]));
     args
 }
@@ -301,7 +410,12 @@ pub fn render_edited(
 
 /// Save the frame at `at_ms` of `source_path` as a JPEG, for the editor's
 /// preview. Blocks; call it off the UI thread.
-pub fn render_frame(source_path: &Path, at_ms: i64) -> Result<PathBuf, String> {
+pub fn render_frame(
+    source_path: &Path,
+    at_ms: i64,
+    turns: u8,
+    flipped: bool,
+) -> Result<PathBuf, String> {
     let dir = work_dir();
     std::fs::create_dir_all(&dir).map_err(|_| "couldn't read the video".to_string())?;
     let output = dir.join(format!("frame-{}.jpg", stamp()));
@@ -309,6 +423,8 @@ pub fn render_frame(source_path: &Path, at_ms: i64) -> Result<PathBuf, String> {
         &source_path.to_string_lossy(),
         at_ms,
         &output.to_string_lossy(),
+        turns,
+        flipped,
     ))?;
     crate::local_path::pick_send_path(&output).ok_or_else(|| "couldn't read the video".into())
 }
@@ -335,6 +451,7 @@ mod tests {
             cover_ms: 0,
             quality: 0,
             gif: false,
+            ..VideoEdits::full(0)
         };
         let fixed = edits.clamped(20_000, true);
         assert_eq!(fixed.from_ms, 19_500);
@@ -411,6 +528,7 @@ mod tests {
             cover_ms: 2_000,
             quality: 480,
             gif: false,
+            ..VideoEdits::full(0)
         };
         let args = encode_args("in.mp4", "out.mp4", &edits, &source());
         let at = |flag: &str| args.iter().position(|arg| arg == flag).unwrap();
@@ -441,7 +559,7 @@ mod tests {
 
     #[test]
     fn frame_args_seek_before_the_input() {
-        let args = frame_args("in.mp4", 2_345, "f.jpg");
+        let args = frame_args("in.mp4", 2_345, "f.jpg", 0, false);
         assert_eq!(args[1], "-ss");
         assert_eq!(args[2], "2.345");
         assert_eq!(args.last().unwrap(), "f.jpg");
@@ -487,18 +605,91 @@ mod tests {
             cover_ms: 800,
             quality: 360,
             gif: true,
+            turns: 1,
+            ..VideoEdits::full(0)
         }
         .clamped(source.duration_ms, true);
         let output = render_edited(&clip, &edits, &source).expect("the edit renders");
         let edited = probe_source(&output).expect("the edited clip reads");
         assert!((900..=1200).contains(&edited.duration_ms), "{edited:?}");
-        assert_eq!((edited.width, edited.height), (480, 360));
+        assert_eq!((edited.width, edited.height), (360, 480));
         assert!(!edited.has_audio, "a GIF has no sound");
-        let frame = render_frame(&output, 300).expect("a frame");
+        let frame = render_frame(&output, 300, 1, true).expect("a frame");
         assert!(frame.is_file());
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_file(output);
         let _ = std::fs::remove_file(frame);
+    }
+
+    #[test]
+    fn crop_stays_inside_the_frame_with_even_pixels() {
+        let crop = Crop {
+            x: 950,
+            y: 0,
+            w: 500,
+            h: 20,
+        }
+        .clamped();
+        assert_eq!((crop.x, crop.w, crop.h), (500, 500, MIN_CROP));
+        assert_eq!(Crop::FULL.pixels(641, 481), (0, 0, 640, 480));
+        let (x, y, w, h) = Crop {
+            x: 250,
+            y: 500,
+            w: 500,
+            h: 500,
+        }
+        .pixels(1000, 800);
+        assert_eq!((x, y, w, h), (250, 400, 500, 400));
+        assert_eq!(turned_size(640, 480, 1), (480, 640));
+        assert_eq!(turned_size(640, 480, 2), (640, 480));
+    }
+
+    #[test]
+    fn flip_turn_and_crop_come_before_the_scale() {
+        let edits = VideoEdits {
+            turns: 1,
+            flipped: true,
+            crop: Some(Crop {
+                x: 0,
+                y: 0,
+                w: 500,
+                h: 1000,
+            }),
+            quality: 360,
+            ..VideoEdits::full(20_000)
+        };
+        // 1920x1080 turned is 1080x1920; the crop keeps 540x1920; the
+        // shorter side is 540, so 360 scales it.
+        let args = encode_args("in.mp4", "out.mp4", &edits, &source());
+        let at = args.iter().position(|arg| arg == "-vf").unwrap();
+        assert_eq!(
+            args[at + 1],
+            "hflip,transpose=1,crop=540:1920:0:0,scale=360:-2,format=yuv420p"
+        );
+        assert_eq!(edits.edited_size(&source()), (540, 1920));
+        assert!(edits.needs_transcode(20_000));
+        assert!(edits.has_geometry());
+        let half = VideoEdits {
+            turns: 2,
+            ..VideoEdits::full(20_000)
+        };
+        let args = encode_args("in.mp4", "out.mp4", &half, &source());
+        assert!(args.contains(&"hflip,vflip,format=yuv420p".to_string()));
+        let left = VideoEdits {
+            turns: 3,
+            ..VideoEdits::full(20_000)
+        };
+        let args = encode_args("in.mp4", "out.mp4", &left, &source());
+        assert!(args.contains(&"transpose=2,format=yuv420p".to_string()));
+        assert!(!VideoEdits::full(20_000).has_geometry());
+    }
+
+    #[test]
+    fn the_preview_frame_is_turned_but_not_cropped() {
+        let args = frame_args("in.mp4", 0, "f.jpg", 1, true);
+        let at = args.iter().position(|arg| arg == "-vf").unwrap();
+        assert!(args[at + 1].starts_with("hflip,transpose=1,scale="));
+        assert!(!args[at + 1].contains("crop"));
     }
 
     #[test]

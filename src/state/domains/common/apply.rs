@@ -121,6 +121,13 @@ impl Session {
                     self.messages.message_caption_length_max =
                         limit.max(0).min(i64::from(i32::MAX)) as i32;
                 }
+                // The dearest price of paid media (schema `inputMessagePaidMedia`).
+                if name == "paid_media_message_star_count_max"
+                    && let OptionValue::Integer(limit) = value
+                    && limit > 0
+                {
+                    self.messages.paid_media_star_max = limit;
+                }
                 // R8: plain-text limit (tdesktop `messageLengthCurrent`).
                 // A zero or negative value would make every send look
                 // oversized, so floor it at 1.

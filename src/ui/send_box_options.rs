@@ -16,8 +16,8 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, MediaSendOptions, PAID_MEDIA_MAX_STARS, PriceInput,
-    can_use_high_quality, cover_send_path, paid_media_fits, parse_paid_price, session_allows_cover,
+    AttachmentKind, ComposerAttachment, MediaSendOptions, PriceInput, can_use_high_quality,
+    cover_send_path, is_gif_path, paid_media_fits, parse_paid_price, session_allows_cover,
     session_allows_paid_media,
 };
 use std::cell::RefCell;
@@ -48,6 +48,14 @@ impl QuillApp {
                 &self.composer_ui.pending_attachments,
                 self.composer_group_media_effective(),
             )
+    }
+
+    /// The dearest price the account may set (the TDLib option).
+    fn paid_media_star_max(&self) -> i64 {
+        self.session()
+            .map_or(quill::composer::PAID_MEDIA_MAX_STARS, |session| {
+                session.messages.paid_media_star_max
+            })
     }
 
     /// The price in effect for the next send; 0 when paid media is not
@@ -150,7 +158,8 @@ impl QuillApp {
         attachment: &ComposerAttachment,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        if attachment.kind != AttachmentKind::Video || attachment.extras.gif {
+        // A `.gif` file is an animation already: nothing to edit.
+        if attachment.kind != AttachmentKind::Video || is_gif_path(&attachment.path) {
             return Vec::new();
         }
         let mut actions = vec![
@@ -164,11 +173,17 @@ impl QuillApp {
                 }))
                 .into_any_element(),
         ];
-        let cover_ok = self.session().is_some_and(|session| {
-            session
-                .open_chat
-                .is_some_and(|chat| session_allows_cover(session, chat))
-        });
+        // A video that goes out as a GIF has no cover.
+        let animation = attachment.sends_as_animation(
+            self.composer_ui.pending_attachments.len(),
+            self.composer_group_media_effective(),
+        );
+        let cover_ok = !animation
+            && self.session().is_some_and(|session| {
+                session
+                    .open_chat
+                    .is_some_and(|chat| session_allows_cover(session, chat))
+            });
         if cover_ok {
             let owner = cx.entity().downgrade();
             let has_cover = attachment.extras.cover.is_some();
@@ -291,7 +306,11 @@ impl QuillApp {
             return true;
         };
         let text = dialog.input.read(cx).value().to_string();
-        match parse_paid_price(&text) {
+        let max = self.paid_media_star_max();
+        let Some(dialog) = self.composer_ui.send_box.price.as_mut() else {
+            return true;
+        };
+        match parse_paid_price(&text, max) {
             PriceInput::TooHigh => {
                 dialog.too_high = true;
                 cx.notify();
@@ -339,7 +358,8 @@ impl QuillApp {
                 .child(Input::new(&state.input).aria_label("Stars to unlock"))
                 .when(state.too_high, |body| {
                     body.child(div().text_sm().text_color(danger).child(format!(
-                        "The price can be up to {PAID_MEDIA_MAX_STARS} Stars."
+                        "The price can be up to {} Stars.",
+                        this.paid_media_star_max()
                     )))
                 })
                 .child(div().text_sm().text_color(muted).child(

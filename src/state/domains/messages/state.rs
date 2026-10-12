@@ -52,6 +52,10 @@ pub struct MessagesState {
     /// (TDLib 1.8.67, `schema/td_api.tl:10926`); default 1024 is TDLib's
     /// compiled default. Guards caption edits and media-send captions.
     pub message_caption_length_max: i32,
+    /// `getOption("paid_media_message_star_count_max")`: the dearest paid
+    /// media price in Stars; 10000 until the option arrives (tdesktop's
+    /// `stars_paid_post_amount_max` default).
+    pub paid_media_star_max: i64,
     /// R8: `getOption("message_text_length_max")` via `updateOption`; 4096 is
     /// the compiled default (Premium raises it). Plain text sends are cut
     /// into several messages at this size (tdesktop `CutPart`); edits over
@@ -166,6 +170,7 @@ impl MessagesState {
             ai_composer_blocks: None,
             ai_error: None,
             message_caption_length_max: 1024,
+            paid_media_star_max: crate::composer::PAID_MEDIA_MAX_STARS,
             message_text_length_max: 4096,
             instant_view: None,
             instant_view_fallback_url: None,

@@ -3,8 +3,8 @@
 //! GIF sent with its caption, and paid media.
 use super::*;
 use crate::composer::{
-    ComposerAttachment, MediaSendOptions, PAID_MEDIA_MAX_STARS, cover_send_path, paid_media_fits,
-    photo_for_send, session_allows_cover, session_allows_paid_media,
+    ComposerAttachment, MediaSendOptions, cover_send_path, paid_media_fits, photo_for_send,
+    session_allows_cover, session_allows_paid_media,
 };
 use crate::telegram::requests::{
     LocalAnimation, PaidMediaItem, input_message_paid_media, send_paid_media, with_video_options,
@@ -100,7 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let chat_id = snapshot.chat_id();
         let stars = snapshot.media.paid_stars;
-        if !(1..=PAID_MEDIA_MAX_STARS).contains(&stars)
+        if !(1..=self.session.messages.paid_media_star_max).contains(&stars)
             || !session_allows_paid_media(&self.session, chat_id)
             || self.topic_send_is_closed(chat_id)
         {

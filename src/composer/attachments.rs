@@ -48,9 +48,11 @@ impl ComposerAttachment {
                 (true, Some(_)) => {
                     attachment.kind = AttachmentKind::Document;
                     attachment.spoiler = false;
+                    attachment.extras.gif = false;
                 }
                 (false, Some(kind)) if attachment.kind == AttachmentKind::Document => {
                     attachment.kind = kind;
+                    attachment.mark_soundless_gif();
                 }
                 (true, None) if gif && attachment.extras.gif => {
                     attachment.kind = AttachmentKind::Document;
@@ -72,6 +74,50 @@ impl ComposerAttachment {
         list.iter().any(|attachment| {
             media_kind_for(&attachment.path).is_some() || is_gif_path(&attachment.path)
         })
+    }
+
+    /// tdesktop `modifications.gif = !hasAudio`: a `.mp4` video without a
+    /// sound track is a GIF when it goes out on its own. Reads the file with
+    /// ffprobe; a file it can't read stays a video. Blocks briefly.
+    pub fn mark_soundless_gif(&mut self) {
+        let mp4 = self
+            .path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
+        if self.kind == AttachmentKind::Video
+            && mp4
+            && !self.extras.gif
+            && crate::video_edit::probe_source(&self.path).is_some_and(|source| !source.has_audio)
+        {
+            self.extras.gif = true;
+        }
+    }
+
+    /// Whether this attachment goes out as a GIF animation when the tray is
+    /// sent: it is a GIF and goes alone (one file, separate messages, or a
+    /// video whose sound was taken out, which leaves the album).
+    pub fn sends_as_animation(&self, tray_len: usize, grouped: bool) -> bool {
+        self.extras.gif && (tray_len == 1 || !grouped || self.extras.sound_removed)
+    }
+
+    /// The messages the tray is sent as. One album (or one file) normally;
+    /// when `grouped` is false every file is its own message, and a video
+    /// turned into a GIF leaves the album and goes alone (tdesktop
+    /// `GroupRanges`). Each inner list of two or more is an album.
+    pub fn split_for_send(list: &[Self], grouped: bool) -> Vec<Vec<Self>> {
+        if !grouped {
+            return list.iter().map(|att| vec![att.clone()]).collect();
+        }
+        let (alone, together): (Vec<&Self>, Vec<&Self>) = list
+            .iter()
+            .partition(|att| att.extras.gif && att.extras.sound_removed);
+        let mut groups = Vec::new();
+        if !together.is_empty() {
+            groups.push(together.into_iter().cloned().collect());
+        }
+        groups.extend(alone.into_iter().map(|att| vec![att.clone()]));
+        groups
     }
 
     /// Append an explicit OS file drop (or pasted files), preserving the
@@ -111,14 +157,19 @@ impl ComposerAttachment {
                 (path.clone(), kind)
             })
             .collect();
-        let had_gif = list.iter().any(|att| att.extras.gif);
+        let had_gif = list
+            .iter()
+            .any(|att| is_gif_path(&att.path) && att.extras.gif);
         let added = Self::append_planned(list, &planned)?;
         if gif_alone && let Some(first) = list.first_mut() {
             first.extras.gif = true;
         }
         if had_gif {
-            // A GIF is only sent alone: next to other files it is a file.
-            for att in list.iter_mut().filter(|att| att.extras.gif) {
+            // An animated `.gif` file is only sent alone: next to other files it is a file.
+            for att in list
+                .iter_mut()
+                .filter(|att| is_gif_path(&att.path) && att.extras.gif)
+            {
                 att.kind = AttachmentKind::Document;
                 att.extras.gif = false;
             }
@@ -138,11 +189,14 @@ impl ComposerAttachment {
         if planned.len() > crate::album::ALBUM_MAX_ITEMS.saturating_sub(list.len()) {
             return Err("Attach at most 10 files at a time.");
         }
-        let picked = planned
+        let mut picked = planned
             .iter()
             .map(|(path, kind)| Self::pick(path, *kind))
             .collect::<Option<Vec<_>>>()
             .ok_or("Could not attach files. Drop existing files, not folders.")?;
+        for att in &mut picked {
+            att.mark_soundless_gif();
+        }
         list.extend(picked);
         Ok(planned.len())
     }
@@ -304,6 +358,81 @@ mod tests {
         let mut both = Vec::new();
         ComposerAttachment::append_dropped_files(&mut both, &[gif, photo]).unwrap();
         assert!(both.iter().all(|att| att.kind == AttachmentKind::Document));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn gif_videos_leave_the_album_only_when_their_sound_was_taken_out() {
+        let mut silent = attachment("a.mp4", AttachmentKind::Video);
+        silent.extras.gif = true;
+        let mut muted = attachment("b.mp4", AttachmentKind::Video);
+        muted.extras.gif = true;
+        muted.extras.sound_removed = true;
+        let photo = attachment("c.jpg", AttachmentKind::Photo);
+        let list = [silent.clone(), muted.clone(), photo.clone()];
+        let groups = ComposerAttachment::split_for_send(&list, true);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].len(), 2, "a soundless video stays in the album");
+        assert_eq!(groups[1], [muted.clone()]);
+        // Ungrouped: one message each.
+        assert_eq!(ComposerAttachment::split_for_send(&list, false).len(), 3);
+        assert!(silent.sends_as_animation(1, true));
+        assert!(!silent.sends_as_animation(3, true));
+        assert!(silent.sends_as_animation(3, false));
+        assert!(muted.sends_as_animation(3, true));
+        assert!(!photo.sends_as_animation(1, true));
+    }
+
+    #[test]
+    fn an_mp4_without_a_sound_track_is_marked_as_a_gif() {
+        let root = scratch("silent-gif");
+        let make = |name: &str, with_sound: bool| {
+            let path = root.join(name);
+            let mut args = vec![
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=1:size=64x64:rate=5",
+            ];
+            if with_sound {
+                args.extend(["-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac"]);
+            }
+            args.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest"]);
+            let made = crate::media_tools::command("ffmpeg")
+                .args(args)
+                .arg(&path)
+                .output()
+                .is_ok_and(|out| out.status.success());
+            made.then_some(path)
+        };
+        // Skipped where ffmpeg isn't installed.
+        let (Some(silent), Some(loud)) = (make("silent.mp4", false), make("loud.mp4", true)) else {
+            return;
+        };
+        let mut list = Vec::new();
+        ComposerAttachment::append_dropped_files(&mut list, &[silent, loud]).unwrap();
+        assert!(list[0].extras.gif, "no sound track: a GIF");
+        assert!(!list[1].extras.gif, "with sound: a video");
+        assert!(!list[0].extras.sound_removed);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_gif_video_stays_gif_when_more_files_are_added() {
+        let root = scratch("gif-keeps");
+        let (clip, photo) = (root.join("a.mp4"), root.join("b.png"));
+        for path in [&clip, &photo] {
+            fs::write(path, [1]).unwrap();
+        }
+        let mut list = Vec::new();
+        ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&clip)).unwrap();
+        list[0].extras.gif = true;
+        list[0].extras.sound_removed = true;
+        ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&photo)).unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list[0].extras.gif && list[0].extras.sound_removed);
+        assert_eq!(list[0].kind, AttachmentKind::Video);
         let _ = fs::remove_dir_all(&root);
     }
 

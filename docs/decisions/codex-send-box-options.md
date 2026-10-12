@@ -49,15 +49,38 @@ Parity items `parity:composer-send-options` and (with Edit Video)
   tdesktop; before, the original file went to TDLib. When ffmpeg is missing
   or fails, the original is sent.
 
+## Follow-up: limits, soundless GIFs, crop, rotate, flip, playback
+
+- The price limit comes from the TDLib option
+  `paid_media_message_star_count_max` (schema `inputMessagePaidMedia`), read
+  from `updateOption`; 10000 until it arrives.
+- tdesktop sets `modifications.gif = !hasAudio` on every video that can join
+  an album. It sends such a video as an animation when it goes alone
+  (`gif && !_album && mp4`), and as a plain video inside an album. A video
+  that had sound and was turned into a GIF in the editor leaves the album
+  and goes alone (`sendsVideoAsGif`, `GroupRanges`). Quill marks an `.mp4`
+  with no sound track (ffprobe, on attach) and follows the same rules:
+  `AttachmentExtras.gif` stays on when more files are added,
+  `sound_removed` marks the ones that leave the album, and
+  `ComposerAttachment::split_for_send` makes the messages. Non-mp4 soundless
+  videos are not converted to mp4 on their own (tdesktop transcodes
+  h264 files up to 10 MiB); they stay videos.
+- The editor has what tdesktop's local video editor has: trim, cover frame,
+  quality, GIF, and now rotate (clockwise quarter turns), flip (before the
+  turn, as tdesktop's transform does), a crop and looping playback of the
+  trimmed range. Turn, flip and crop are ffmpeg filters (`hflip`,
+  `transpose`, `crop`) ahead of the scale. The crop is two range sliders with
+  a frame drawn over the picture, where tdesktop drags handles. Rotate
+  clears the crop. Playback uses `NativeVideo`; its picture is turned for
+  Rotate, a flip shows in the still picture only.
+
 ## Differences from tdesktop
 
-- No crop, rotate or flip in the video editor, and no playback: the picture
-  is the frame at the last moved handle.
-- A soundless video is not turned into a GIF on its own; use the editor's
-  GIF option or a `.gif` file.
+- The crop is set with sliders, not by dragging handles on the picture.
+- Playback does not show a flip, and the estimated file size tdesktop shows
+  is not shown.
 - Clearing "Edit Cover" does not open tdesktop's photo editor on the cover
   image.
-- The price limit is the fixed 10000 default, not the app config value.
 
 ## How it was checked
 

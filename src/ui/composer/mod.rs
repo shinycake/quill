@@ -142,24 +142,48 @@ impl QuillApp {
                     let grouped = self.composer_group_media_effective();
                     let mut snaps = Vec::new();
                     if albumable && grouped {
-                        snaps.push(
-                            ComposerSnapshot::capture_album(
-                                chat_id,
-                                view_generation,
-                                text,
-                                attachments,
-                            )
-                            .with_reply(self.composer_ui.pending_reply.clone())
-                            .with_self_destruct(self_destruct)
-                            // M1: silent / scheduled / when-online /
-                            // link-preview options ride the snapshot to
-                            // `sendMessage.options`.
-                            .with_send_options(self.composer_send_options())
-                            // MED4: caption-above-media toggle.
-                            .with_caption_above_media(
-                                self.composer_ui.caption_above && !self.open_chat_is_secret(),
-                            ),
-                        );
+                        // A video turned into a GIF leaves the album and
+                        // goes alone (tdesktop `GroupRanges`); paid media
+                        // is one message.
+                        let groups = if self.paid_stars_in_effect() > 0 {
+                            vec![attachments]
+                        } else {
+                            ComposerAttachment::split_for_send(&attachments, true)
+                        };
+                        for (i, group) in groups.into_iter().enumerate() {
+                            let text = if i == 0 { text.clone() } else { String::new() };
+                            let snap = if group.len() >= 2 {
+                                ComposerSnapshot::capture_album(
+                                    chat_id,
+                                    view_generation,
+                                    text,
+                                    group,
+                                )
+                            } else {
+                                ComposerSnapshot::capture_with_attachment(
+                                    chat_id,
+                                    view_generation,
+                                    text,
+                                    group.into_iter().next(),
+                                )
+                            };
+                            snaps.push(
+                                snap.with_reply(if i == 0 {
+                                    self.composer_ui.pending_reply.clone()
+                                } else {
+                                    None
+                                })
+                                .with_self_destruct(self_destruct)
+                                // M1: silent / scheduled / when-online /
+                                // link-preview options ride the snapshot to
+                                // `sendMessage.options`.
+                                .with_send_options(self.composer_send_options())
+                                // MED4: caption-above-media toggle.
+                                .with_caption_above_media(
+                                    self.composer_ui.caption_above && !self.open_chat_is_secret(),
+                                ),
+                            );
+                        }
                     } else if attachments.len() >= 2 {
                         // One message per ungrouped attachment, the
                         // caption riding the first.

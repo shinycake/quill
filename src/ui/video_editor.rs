@@ -9,10 +9,11 @@
 //! the file to send. The math and command lines are `quill::video_edit`.
 
 use super::app::QuillApp;
+use super::native_video::NativeVideo;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -35,27 +36,34 @@ pub(super) enum EditorTarget {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Knob {
+pub(super) enum Knob {
     Range,
     Cover,
+    CropX,
+    CropY,
 }
 
 pub(super) struct VideoEditorDialog {
     target: EditorTarget,
     /// The file the edits start from.
-    source: PathBuf,
+    pub(super) source: PathBuf,
     /// Probed size, length and sound; `None` while it is read.
-    info: Option<VideoSource>,
-    edits: VideoEdits,
+    pub(super) info: Option<VideoSource>,
+    pub(super) edits: VideoEdits,
     /// The frame shown above the sliders.
-    preview: Option<PathBuf>,
+    pub(super) preview: Option<PathBuf>,
     /// Bumped by every probe, frame and encode; late answers are dropped.
-    serial: u64,
+    pub(super) serial: u64,
     /// The edited copy is being encoded.
     busy: bool,
-    note: Option<String>,
+    pub(super) note: Option<String>,
     range: Option<Entity<SliderState>>,
     cover: Option<Entity<SliderState>>,
+    pub(super) crop_x: Option<Entity<SliderState>>,
+    pub(super) crop_y: Option<Entity<SliderState>>,
+    /// The preview player while the trimmed range plays.
+    pub(super) player: RefCell<Option<NativeVideo>>,
+    pub(super) playing: bool,
 }
 
 /// Where the editor writes its pictures and copies is
@@ -90,7 +98,15 @@ impl QuillApp {
             .source
             .clone()
             .unwrap_or_else(|| attachment.path.clone());
-        let initial = attachment.extras.edits;
+        // A soundless video is a GIF from the start (tdesktop sets
+        // `modifications.gif = !hasAudio`); the range is filled in once the
+        // video is read.
+        let initial = attachment.extras.edits.or_else(|| {
+            attachment.extras.gif.then(|| VideoEdits {
+                gif: true,
+                ..VideoEdits::full(0)
+            })
+        });
         self.open_video_editor(EditorTarget::Tray(index), source, initial, window, cx);
     }
 
@@ -143,6 +159,10 @@ impl QuillApp {
             note: Some("Reading the video…".into()),
             range: None,
             cover: None,
+            crop_x: None,
+            crop_y: None,
+            player: RefCell::new(None),
+            playing: false,
         });
         let worker = cx.background_spawn(async move { probe_source(&source) });
         cx.spawn_in(window, async move |this, cx| {
@@ -179,9 +199,40 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        // An edit that only asked for a GIF has no range yet.
         let edits = initial
-            .map(|edits| edits.clamped(info.duration_ms, true))
+            .map(|edits| {
+                let till_ms = if edits.till_ms <= 0 {
+                    info.duration_ms
+                } else {
+                    edits.till_ms
+                };
+                VideoEdits { till_ms, ..edits }.clamped(info.duration_ms, true)
+            })
             .unwrap_or_else(|| VideoEdits::full(info.duration_ms));
+        let crop_unit =
+            |start: u16, len: u16| (f32::from(start) / 1000.0, f32::from(start + len) / 1000.0);
+        let crop = edits.crop.unwrap_or(quill::video_edit::Crop::FULL);
+        let crop_x = self.video_editor_knob_slider(
+            Knob::CropX,
+            SliderState::new()
+                .min(0.0)
+                .max(1.0)
+                .step(0.01)
+                .default_value(crop_unit(crop.x, crop.w)),
+            window,
+            cx,
+        );
+        let crop_y = self.video_editor_knob_slider(
+            Knob::CropY,
+            SliderState::new()
+                .min(0.0)
+                .max(1.0)
+                .step(0.01)
+                .default_value(crop_unit(crop.y, crop.h)),
+            window,
+            cx,
+        );
         let range = self.video_editor_knob_slider(
             Knob::Range,
             SliderState::new()
@@ -208,6 +259,8 @@ impl QuillApp {
             editor.edits = edits;
             editor.range = Some(range);
             editor.cover = Some(cover);
+            editor.crop_x = Some(crop_x);
+            editor.crop_y = Some(crop_y);
             editor.note = None;
         }
         self.refresh_video_preview(at, cx);
@@ -247,6 +300,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(knob, Knob::CropX | Knob::CropY) {
+            self.video_editor_crop_knob(knob, start, end, release, window, cx);
+            return;
+        }
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
@@ -286,8 +343,12 @@ impl QuillApp {
                         });
                     }
                 }
+                if release && let Some(video) = editor.player.borrow_mut().as_mut() {
+                    video.seek(editor.edits.from_ms as f64 / 1000.0);
+                }
                 show_at
             }
+            Knob::CropX | Knob::CropY => return,
             Knob::Cover => {
                 let fraction = f64::from(end.clamp(0.0, 1.0));
                 let length = editor.edits.length_ms() as f64;
@@ -304,14 +365,16 @@ impl QuillApp {
     }
 
     /// Cut the frame at `at_ms` of the source for the picture.
-    fn refresh_video_preview(&mut self, at_ms: i64, cx: &mut Context<Self>) {
+    pub(super) fn refresh_video_preview(&mut self, at_ms: i64, cx: &mut Context<Self>) {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
         editor.serial += 1;
         let serial = editor.serial;
         let source = editor.source.clone();
-        let worker = cx.background_spawn(async move { render_frame(&source, at_ms) });
+        let (turns, flipped) = (editor.edits.turns, editor.edits.flipped);
+        let worker =
+            cx.background_spawn(async move { render_frame(&source, at_ms, turns, flipped) });
         cx.spawn(async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
@@ -376,18 +439,25 @@ impl QuillApp {
         };
         let edits = editor.edits;
         let source = editor.source.clone();
-        if !edits.needs_transcode(info.duration_ms) {
+        // Taking the sound out of a video that has none changes nothing.
+        let effective = VideoEdits {
+            gif: edits.gif && info.has_audio,
+            ..edits
+        };
+        if !effective.needs_transcode(info.duration_ms) {
             self.apply_video_edit(source.clone(), source, edits, info, cx);
             self.close_video_editor(cx);
             return true;
         }
+        editor.playing = false;
+        *editor.player.borrow_mut() = None;
         editor.busy = true;
         editor.note = Some("Preparing the video…".into());
         editor.serial += 1;
         let serial = editor.serial;
         let encode_source = source.clone();
         let worker =
-            cx.background_spawn(async move { render_edited(&encode_source, &edits, &info) });
+            cx.background_spawn(async move { render_edited(&encode_source, &effective, &info) });
         cx.spawn_in(window, async move |this, cx| {
             let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
@@ -442,12 +512,17 @@ impl QuillApp {
         let mut extras = AttachmentExtras {
             source: edited.then(|| source.clone()),
             edits: (!untouched).then_some(edits),
-            start_timestamp: edits.start_timestamp_secs(info.duration_ms),
+            start_timestamp: VideoEdits {
+                gif: edits.gif && info.has_audio,
+                ..edits
+            }
+            .start_timestamp_secs(info.duration_ms),
+            sound_removed: edits.gif && info.has_audio,
             ..AttachmentExtras::default()
         };
         let note = match target {
             Some(EditorTarget::Tray(index)) => {
-                let alone = self.composer_ui.pending_attachments.len() == 1;
+                let several = self.composer_ui.pending_attachments.len() > 1;
                 let Some(attachment) = self.composer_ui.pending_attachments.get_mut(index) else {
                     return;
                 };
@@ -455,14 +530,14 @@ impl QuillApp {
                     let _ = std::fs::remove_file(&attachment.path);
                 }
                 extras.cover = attachment.extras.cover.take();
-                extras.gif = edits.gif && alone;
+                extras.gif = edits.gif;
                 if edited {
                     attachment.file_name = mp4_name(&attachment.file_name);
                 }
                 attachment.path = output;
                 attachment.extras = extras;
-                if edits.gif && !alone {
-                    "The video goes out without sound, in the album"
+                if edits.gif && info.has_audio && several {
+                    "The GIF leaves the album and goes out on its own"
                 } else {
                     "Video edits saved"
                 }
@@ -482,6 +557,7 @@ impl QuillApp {
                 }
                 replacement.path = output;
                 extras.gif = false;
+                extras.sound_removed = false;
                 edit.media_edit.video_extras = extras;
                 "Video edits saved"
             }
@@ -524,46 +600,26 @@ impl QuillApp {
     }
 
     fn video_editor_body(&self, editor: &VideoEditorDialog, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let muted = theme.muted_foreground;
+        let muted = cx.theme().muted_foreground;
+        let this_stage = self.video_editor_stage(editor, cx);
         let gif_allowed = editor.target != EditorTarget::MessageEdit;
-        let picture = div()
-            .h(px(240.))
-            .w_full()
+        let picture = this_stage;
+        let mut body = div()
             .flex()
-            .items_center()
-            .justify_center()
-            .rounded_md()
-            .bg(theme.muted)
-            .overflow_hidden()
-            .children(editor.preview.as_ref().map(|path| {
-                img(path.clone())
-                    .max_h(px(240.))
-                    .max_w_full()
-                    .object_fit(ObjectFit::Contain)
-            }));
-        let mut body = div().flex().flex_col().gap_3().child(picture);
-        if let (Some(info), Some(range), Some(cover)) = (editor.info, &editor.range, &editor.cover)
-        {
+            .flex_col()
+            .gap_3()
+            .child(picture)
+            .child(self.video_editor_toolbar(editor, cx));
+        if let (Some(info), Some(range), Some(cover), Some(crop_x), Some(crop_y)) = (
+            editor.info,
+            &editor.range,
+            &editor.cover,
+            &editor.crop_x,
+            &editor.crop_y,
+        ) {
             let edits = editor.edits;
-            let row = |caption: &'static str, value: String, slider: &Entity<SliderState>| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(caption)
-                            .child(value),
-                    )
-                    .child(Slider::new(slider))
-            };
             body = body
-                .child(row(
+                .child(self.video_editor_slider_row(
                     "Trim",
                     format!(
                         "{} to {} ({})",
@@ -572,9 +628,28 @@ impl QuillApp {
                         format_clock(edits.length_ms())
                     ),
                     range,
+                    cx,
                 ))
-                .child(row("Cover frame", format_clock(edits.cover_ms), cover));
-            let levels = quality_levels(info.width, info.height);
+                .child(self.video_editor_slider_row(
+                    "Cover frame",
+                    format_clock(edits.cover_ms),
+                    cover,
+                    cx,
+                ))
+                .child(self.video_editor_slider_row(
+                    "Crop left to right",
+                    crop_label(edits.crop.map(|crop| (crop.x, crop.w))),
+                    crop_x,
+                    cx,
+                ))
+                .child(self.video_editor_slider_row(
+                    "Crop top to bottom",
+                    crop_label(edits.crop.map(|crop| (crop.y, crop.h))),
+                    crop_y,
+                    cx,
+                ));
+            let (edited_w, edited_h) = edits.edited_size(&info);
+            let levels = quality_levels(edited_w, edited_h);
             if levels.len() > 1 {
                 let mut choices = div().flex().flex_wrap().gap_1();
                 for level in levels {
@@ -643,6 +718,16 @@ impl QuillApp {
     }
 }
 
+/// "20% to 80%" for a crop side, "Whole frame" without one.
+fn crop_label(side: Option<(u16, u16)>) -> String {
+    match side {
+        Some((start, len)) if len < 1000 => {
+            format!("{}% to {}%", start / 10, (start + len) / 10)
+        }
+        _ => "Whole frame".into(),
+    }
+}
+
 /// The cover frame as a share of the kept range (0 to 1).
 fn cover_fraction(edits: &VideoEdits) -> f32 {
     let length = edits.length_ms();
@@ -685,6 +770,7 @@ mod tests {
             cover_ms: 3_000,
             quality: 0,
             gif: false,
+            ..VideoEdits::full(0)
         };
         assert!((cover_fraction(&edits) - 0.25).abs() < 1e-6);
         assert_eq!(cover_fraction(&VideoEdits::full(0)), 0.0);

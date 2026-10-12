@@ -61,8 +61,10 @@ pub struct MediaSendOptions {
 /// What the user set on one attachment besides the file itself.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AttachmentExtras {
-    /// Send the file as a GIF (`inputMessageAnimation`): a `.gif` file, or
-    /// a video turned into one in the video editor. Only for a lone file.
+    /// Send the file as a GIF (`inputMessageAnimation`) when it is sent on
+    /// its own: a `.gif` file, a video without sound (tdesktop
+    /// `modifications.gif = !hasAudio`) or a video turned into one in the
+    /// video editor. In an album it goes as a plain video.
     pub gif: bool,
     /// The cover picked with "Edit Cover" (`inputVideo.cover`).
     pub cover: Option<PathBuf>,
@@ -74,6 +76,10 @@ pub struct AttachmentExtras {
     pub source: Option<PathBuf>,
     /// The edits `path` was made with.
     pub edits: Option<VideoEdits>,
+    /// `gif` came from taking the sound out of a video that had it
+    /// (tdesktop `sendsVideoAsGif`): such a video leaves an album and goes
+    /// out alone. A video that never had sound stays in the album.
+    pub sound_removed: bool,
 }
 
 /// A `.gif` file: it is sent as an animation, not a video or a file.
@@ -85,7 +91,7 @@ pub fn is_gif_path(path: &Path) -> bool {
 
 /// tdesktop `PreparedList::canChangePrice` for the files in the tray: at
 /// most ten photos and videos, sent compressed (and as one album when
-/// there are several). A GIF is not paid media.
+/// there are several). An animated `.gif` file is not paid media.
 pub fn paid_media_fits(list: &[ComposerAttachment], grouped: bool) -> bool {
     !list.is_empty()
         && list.len() <= crate::album::ALBUM_MAX_ITEMS
@@ -94,7 +100,7 @@ pub fn paid_media_fits(list: &[ComposerAttachment], grouped: bool) -> bool {
             matches!(
                 attachment.kind,
                 AttachmentKind::Photo | AttachmentKind::Video
-            ) && !attachment.extras.gif
+            ) && !is_gif_path(&attachment.path)
         })
 }
 
@@ -117,21 +123,22 @@ pub fn session_allows_paid_media(session: &crate::state::Session, chat_id: ChatI
 pub enum PriceInput {
     /// Empty or zero: the media is not paid (tdesktop applies a zero price).
     Clear,
-    /// A price from 1 to `PAID_MEDIA_MAX_STARS` Stars.
+    /// A price from 1 Star up to the limit.
     Price(i64),
     /// Over the limit (tdesktop `field->showError()`).
     TooHigh,
 }
 
-/// Read the price field. Anything but digits is ignored, so "1 000" is 1000.
-pub fn parse_paid_price(text: &str) -> PriceInput {
+/// Read the price field against `max` (the TDLib option, or
+/// `PAID_MEDIA_MAX_STARS`). Anything but digits is ignored, so "1 000" is 1000.
+pub fn parse_paid_price(text: &str, max: i64) -> PriceInput {
     let digits: String = text.chars().filter(char::is_ascii_digit).collect();
     if digits.is_empty() {
         return PriceInput::Clear;
     }
     match digits.parse::<i64>() {
         Ok(0) => PriceInput::Clear,
-        Ok(price) if price <= PAID_MEDIA_MAX_STARS => PriceInput::Price(price),
+        Ok(price) if price <= max => PriceInput::Price(price),
         _ => PriceInput::TooHigh,
     }
 }
@@ -262,9 +269,13 @@ mod tests {
         assert!(!paid_media_fits(&[], true));
         assert!(!paid_media_fits(&vec![photo.clone(); 11], true));
         assert!(paid_media_fits(&vec![photo.clone(); 10], true));
-        let mut gif = video;
-        gif.extras.gif = true;
+        let mut gif = video.clone();
+        gif.path = PathBuf::from("/tmp/x.gif");
         assert!(!paid_media_fits(&[gif], true));
+        // A soundless video is a "GIF" for the animation rule only.
+        let mut silent = video;
+        silent.extras.gif = true;
+        assert!(paid_media_fits(&[silent], true));
         assert!(!paid_media_fits(
             &[attachment(AttachmentKind::VideoNote)],
             true
@@ -273,17 +284,20 @@ mod tests {
 
     #[test]
     fn the_price_box_accepts_up_to_the_limit_and_clears_on_empty() {
-        assert_eq!(parse_paid_price("250"), PriceInput::Price(250));
-        assert_eq!(parse_paid_price(" 1 000 "), PriceInput::Price(1000));
-        assert_eq!(parse_paid_price("10000"), PriceInput::Price(10_000));
-        assert_eq!(parse_paid_price("10001"), PriceInput::TooHigh);
+        let max = PAID_MEDIA_MAX_STARS;
+        assert_eq!(parse_paid_price("250", max), PriceInput::Price(250));
+        assert_eq!(parse_paid_price(" 1 000 ", max), PriceInput::Price(1000));
+        assert_eq!(parse_paid_price("10000", max), PriceInput::Price(10_000));
+        assert_eq!(parse_paid_price("10001", max), PriceInput::TooHigh);
+        assert_eq!(parse_paid_price("10001", 20_000), PriceInput::Price(10_001));
+        assert_eq!(parse_paid_price("500", 400), PriceInput::TooHigh);
         assert_eq!(
-            parse_paid_price("99999999999999999999"),
+            parse_paid_price("99999999999999999999", max),
             PriceInput::TooHigh
         );
-        assert_eq!(parse_paid_price(""), PriceInput::Clear);
-        assert_eq!(parse_paid_price("0"), PriceInput::Clear);
-        assert_eq!(parse_paid_price("abc"), PriceInput::Clear);
+        assert_eq!(parse_paid_price("", max), PriceInput::Clear);
+        assert_eq!(parse_paid_price("0", max), PriceInput::Clear);
+        assert_eq!(parse_paid_price("abc", max), PriceInput::Clear);
     }
 
     #[test]

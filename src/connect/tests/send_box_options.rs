@@ -3,9 +3,7 @@
 //! media), checked on the recorded request JSON.
 use super::super::*;
 use super::*;
-use crate::composer::{
-    AttachmentKind, ComposerAttachment, ComposerSnapshot, MediaSendOptions, PAID_MEDIA_MAX_STARS,
-};
+use crate::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, MediaSendOptions};
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::ChatId;
 use crate::platform::MemorySecretStore;
@@ -288,7 +286,8 @@ fn paid_media_is_refused_where_it_is_not_allowed() {
         Err(ConnectSendError::InvalidRequest)
     );
     // A price out of range, a file, a GIF.
-    for bad in [0, PAID_MEDIA_MAX_STARS + 1] {
+    rig.driver.session.messages.paid_media_star_max = 400;
+    for bad in [0, 401] {
         let snap = rig
             .snapshot(13, "", att.clone())
             .with_media_options(paid(bad));
@@ -307,12 +306,41 @@ fn paid_media_is_refused_where_it_is_not_allowed() {
         rig.driver.send_snapshot(&snap),
         Err(ConnectSendError::InvalidRequest)
     );
-    let mut gif = ComposerAttachment::pick(&demo_clip(), AttachmentKind::Video).unwrap();
+    let gif_file =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/screenshots/fixtures/demo-gif.gif");
+    let mut gif = ComposerAttachment::pick(&gif_file, AttachmentKind::Video).unwrap();
     gif.extras.gif = true;
     let snap = rig.snapshot(13, "", gif).with_media_options(paid(5));
     assert_eq!(
         rig.driver.send_snapshot(&snap),
         Err(ConnectSendError::InvalidRequest)
     );
+    let _ = std::fs::remove_dir_all(&rig.dir);
+}
+
+#[test]
+fn a_soundless_video_is_an_animation_alone_and_a_video_in_an_album() {
+    let mut rig = Rig::new(false);
+    let mut silent = ComposerAttachment::pick(&demo_clip(), AttachmentKind::Video).unwrap();
+    silent.extras.gif = true;
+    // Alone: an animation.
+    let snap = rig.snapshot(7, "alone", silent.clone());
+    rig.driver.send_snapshot(&snap).unwrap();
+    assert_eq!(
+        rig.last()["input_message_content"]["@type"],
+        "inputMessageAnimation"
+    );
+    // In an album: a plain video.
+    let photo = rig.file("p.png", &[1]);
+    let photo = ComposerAttachment::pick(&photo, AttachmentKind::Photo).unwrap();
+    let album = ComposerSnapshot::capture_album(
+        ChatId(7),
+        rig.driver.session.view_generation,
+        "",
+        vec![photo, silent],
+    );
+    rig.driver.send_snapshot(&album).unwrap();
+    let contents = &rig.last()["input_message_contents"];
+    assert_eq!(contents[1]["@type"], "inputMessageVideo");
     let _ = std::fs::remove_dir_all(&rig.dir);
 }

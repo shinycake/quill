@@ -346,6 +346,7 @@ mod threads;
 mod translate_ui;
 mod tray_settings;
 mod video_editor;
+mod video_editor_tools;
 mod video_pip;
 mod wallpaper;
 mod wallpaper_cache;
