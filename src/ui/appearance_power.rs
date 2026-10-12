@@ -204,14 +204,14 @@ impl QuillApp {
             .child(groups);
         if saver.is_some() {
             body = body
-                .child(self.appearance_switch_row(
+                .child(div().mt_2().child(self.appearance_switch_row(
                     cx,
                     "power-auto",
                     "Save Power on Low Battery",
                     "",
                     !self.appearance.ignore_battery_saving,
                     |prefs, on| prefs.ignore_battery_saving = !on,
-                ))
+                )))
                 .child(div().text_xs().text_color(muted).child(
                     "Automatically disable all animations when your laptop is in a battery saving mode.",
                 ));

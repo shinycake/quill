@@ -10,20 +10,16 @@
 //! The probe may block (Linux runs `gdbus`), so callers run it on a
 //! background thread and hand the answer to [`set_state`].
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use crate::power_saving::{BATTERY_IGNORE, BATTERY_STATE, slot_get, slot_set};
 
-const UNKNOWN: u8 = 0;
-const OFF: u8 = 1;
-const ON: u8 = 2;
-
-static STATE: AtomicU8 = AtomicU8::new(UNKNOWN);
-/// tdesktop `Settings::ignoreBatterySaving`: the user turned the switch off.
-static IGNORE: AtomicBool = AtomicBool::new(false);
+const UNKNOWN: u32 = 0;
+const OFF: u32 = 1;
+const ON: u32 = 2;
 
 /// The last probed answer: `Some(saving)`, or `None` when the platform has
 /// no signal (tdesktop's empty `std::optional`).
 pub fn state() -> Option<bool> {
-    match STATE.load(Ordering::Relaxed) {
+    match slot_get(BATTERY_STATE) {
         UNKNOWN => None,
         value => Some(value == ON),
     }
@@ -36,16 +32,17 @@ pub fn set_state(saving: Option<bool>) {
         Some(false) => OFF,
         Some(true) => ON,
     };
-    STATE.store(value, Ordering::Relaxed);
+    slot_set(BATTERY_STATE, value);
 }
 
-/// The "Save Power on Low Battery" switch is off.
+/// tdesktop `Settings::ignoreBatterySaving`: the "Save Power on Low
+/// Battery" switch is off.
 pub fn set_ignore(ignore: bool) {
-    IGNORE.store(ignore, Ordering::Relaxed);
+    slot_set(BATTERY_IGNORE, ignore.into());
 }
 
 pub fn ignored() -> bool {
-    IGNORE.load(Ordering::Relaxed)
+    slot_get(BATTERY_IGNORE) != 0
 }
 
 /// Whether every flag is forced on: the saver is on and not ignored.

@@ -155,42 +155,80 @@ pub const fn reduce_motion(os_prefers: bool, bits: u32, force: bool) -> bool {
     os_prefers || is_on(bits, force, Flag::Animations)
 }
 
-static BITS: AtomicU32 = AtomicU32::new(0);
-static FORCE_ALL: AtomicBool = AtomicBool::new(false);
-static OS_REDUCE_MOTION: AtomicBool = AtomicBool::new(false);
+const SLOTS: usize = 5;
+pub(crate) const BITS: usize = 0;
+pub(crate) const FORCE_ALL: usize = 1;
+pub(crate) const OS_REDUCE_MOTION: usize = 2;
+pub(crate) const BATTERY_STATE: usize = 3;
+pub(crate) const BATTERY_IGNORE: usize = 4;
+
+static GLOBAL: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+static ISOLATED: AtomicBool = AtomicBool::new(false);
+
+thread_local! {
+    static LOCAL: std::cell::Cell<[u32; SLOTS]> = const { std::cell::Cell::new([0; SLOTS]) };
+}
+
+/// Keep this state per thread from now on. The app keeps one process-wide
+/// copy; UI tests run in parallel, so each gets its own (the same split as
+/// `chat_theme`'s palette state).
+#[doc(hidden)]
+pub fn isolate_for_tests() {
+    ISOLATED.store(true, Ordering::Relaxed);
+}
+
+pub(crate) fn slot_get(slot: usize) -> u32 {
+    if ISOLATED.load(Ordering::Relaxed) {
+        LOCAL.with(|c| c.get()[slot])
+    } else {
+        GLOBAL[slot].load(Ordering::Relaxed)
+    }
+}
+
+pub(crate) fn slot_set(slot: usize, value: u32) {
+    if ISOLATED.load(Ordering::Relaxed) {
+        LOCAL.with(|c| {
+            let mut all = c.get();
+            all[slot] = value;
+            c.set(all);
+        });
+    } else {
+        GLOBAL[slot].store(value, Ordering::Relaxed);
+    }
+}
 
 /// Replace the current set (sanitized).
 pub fn set(bits: u32) {
-    BITS.store(sanitize(bits), Ordering::Relaxed);
+    slot_set(BITS, sanitize(bits));
 }
 
 /// The current set.
 pub fn current() -> u32 {
-    BITS.load(Ordering::Relaxed)
+    slot_get(BITS)
 }
 
 /// Save power everywhere regardless of the set (tdesktop's `SetForceAll`).
 pub fn set_force_all(force: bool) {
-    FORCE_ALL.store(force, Ordering::Relaxed);
+    slot_set(FORCE_ALL, force.into());
+}
+
+fn forced() -> bool {
+    slot_get(FORCE_ALL) != 0
 }
 
 /// Whether `flag` saves power right now.
 pub fn on(flag: Flag) -> bool {
-    is_on(current(), FORCE_ALL.load(Ordering::Relaxed), flag)
+    is_on(current(), forced(), flag)
 }
 
 /// Remember the OS reduce-motion preference, read once at startup.
 pub fn set_os_reduce_motion(prefers: bool) {
-    OS_REDUCE_MOTION.store(prefers, Ordering::Relaxed);
+    slot_set(OS_REDUCE_MOTION, prefers.into());
 }
 
 /// What `App::set_reduce_motion` should be right now.
 pub fn reduce_motion_now() -> bool {
-    reduce_motion(
-        OS_REDUCE_MOTION.load(Ordering::Relaxed),
-        current(),
-        FORCE_ALL.load(Ordering::Relaxed),
-    )
+    reduce_motion(slot_get(OS_REDUCE_MOTION) != 0, current(), forced())
 }
 
 #[cfg(test)]

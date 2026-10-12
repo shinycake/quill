@@ -16,15 +16,7 @@ use quill::ids::{ChatId, FileId};
 use quill::premium_hub::promo::PromoPage;
 use quill::telegram::envelope::{MessageContent, StickerContent, StickerFormat, StickerItem};
 use quill::telegram::{EmojiCategory, EmojiCategorySource};
-use std::sync::{Arc, Mutex, MutexGuard};
-
-/// The power-saving flags are process-wide: tests that flip them or depend
-/// on the flight run one at a time.
-static POWER_STATE: Mutex<()> = Mutex::new(());
-
-fn power_state() -> MutexGuard<'static, ()> {
-    POWER_STATE.lock().unwrap_or_else(|e| e.into_inner())
-}
+use std::sync::Arc;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -266,8 +258,8 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
 
 #[gpui_kit::test]
 fn a_sent_sticker_flies_from_the_panel_to_its_message_and_lands(cx: &mut TestAppContext) {
-    let _power = power_state();
     send_fly::reset();
+    send_fly::TEST_DURATION.with(|d| d.set(Some(std::time::Duration::from_millis(1500))));
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, _| {
@@ -336,7 +328,7 @@ fn a_sent_sticker_flies_from_the_panel_to_its_message_and_lands(cx: &mut TestApp
     );
 
     // It lands after the reveal duration and the message shows again.
-    std::thread::sleep(std::time::Duration::from_millis(250));
+    std::thread::sleep(std::time::Duration::from_millis(1600));
     frames(vcx);
     assert_eq!(send_fly::flight_state(), None);
     send_fly::reset();
@@ -344,7 +336,6 @@ fn a_sent_sticker_flies_from_the_panel_to_its_message_and_lands(cx: &mut TestApp
 
 #[gpui_kit::test]
 fn no_flight_when_message_effects_are_off(cx: &mut TestAppContext) {
-    let _power = power_state();
     send_fly::reset();
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -374,7 +365,6 @@ fn no_flight_when_message_effects_are_off(cx: &mut TestAppContext) {
 /// with every switch left at "plays". Ignoring the saver restores the flight.
 #[gpui_kit::test]
 fn battery_saver_stops_the_send_fly_unless_ignored(cx: &mut TestAppContext) {
-    let _power = power_state();
     send_fly::reset();
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

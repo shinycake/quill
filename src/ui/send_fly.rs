@@ -29,6 +29,22 @@ use std::time::{Duration, Instant};
 
 /// `st::itemRevealDuration`.
 const DURATION: Duration = super::motion::REVEAL_DURATION;
+
+/// The flight's length. Tests stretch it so a slow, loaded run cannot see
+/// the flight end between two assertions.
+fn duration() -> Duration {
+    #[cfg(test)]
+    if let Some(stretched) = TEST_DURATION.with(std::cell::Cell::get) {
+        return stretched;
+    }
+    DURATION
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static TEST_DURATION: std::cell::Cell<Option<Duration>> =
+        const { std::cell::Cell::new(None) };
+}
 /// A message whose sticker never shows (scrolled away, failed to send)
 /// ends the flight after this long.
 const WAIT_FOR_TARGET: Duration = Duration::from_secs(2);
@@ -286,7 +302,7 @@ impl QuillApp {
                 current.started = Some(now);
             }
             let ended = match current.started {
-                Some(started) => now.duration_since(started) >= DURATION,
+                Some(started) => now.duration_since(started) >= duration(),
                 None => now.duration_since(current.armed) >= WAIT_FOR_TARGET,
             };
             if ended {
@@ -306,7 +322,7 @@ impl QuillApp {
         let origin = ORIGIN.with(Cell::get);
         let positioned = started.zip(TARGET.with(Cell::get)).zip(origin);
         let picture = positioned.map(|((started, target), origin)| {
-            let progress = super::motion::progress(now.duration_since(started), DURATION);
+            let progress = super::motion::progress(now.duration_since(started), duration());
             let at = flight(rect_of(from), rect_of(target), ease_out_quint(progress));
             div()
                 .absolute()

@@ -136,6 +136,8 @@ impl QuillApp {
         };
         // Power saving: the switches gate animations as they are drawn; the
         // interface-animations one also folds into GPUI's reduced motion.
+        #[cfg(test)]
+        quill::power_saving::isolate_for_tests();
         quill::power_saving::set(self.appearance.power_saving);
         quill::battery_saving::set_ignore(self.appearance.ignore_battery_saving);
         quill::battery_saving::apply();
