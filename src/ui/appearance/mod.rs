@@ -12,7 +12,7 @@ use super::chat_theme::{set_high_contrast, set_theme_mode};
 use super::synthetic::BubbleLook;
 use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::color_picker::{ColorPickerEvent, ColorPickerState, ColorSelect};
+use gpui_kit::component::color_picker::{ColorPickerEvent, ColorPickerState};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
@@ -24,8 +24,7 @@ use quill::ids::AccountKey;
 use quill::settings::{
     AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, DEFAULT_LANGUAGE_CODE, LanguagePrefs,
     SUPPORTED_LANGUAGES, ThemeChoice, clamp_font_size, load_appearance_prefs, load_chat_prefs,
-    local_minutes_since_midnight, night_active, safe_app_root, save_appearance_prefs,
-    save_chat_prefs,
+    safe_app_root, save_appearance_prefs, save_chat_prefs,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -55,16 +54,6 @@ pub(crate) fn accent_rgb_from(color: Hsla) -> u32 {
     let value = (channel(rgba.r) << 16) | (channel(rgba.g) << 8) | channel(rgba.b);
     value.max(1)
 }
-
-const ACCENT_PRESETS: &[(u32, &str)] = &[
-    (0x2f81f7, "Blue"),
-    (0x3fb950, "Green"),
-    (0x8957e5, "Purple"),
-    (0xf778ba, "Pink"),
-    (0xd29922, "Orange"),
-    (0x39c5cf, "Teal"),
-    (0xf85149, "Red"),
-];
 
 /// Wallpaper presets (0xRRGGBB); the "Default" chip keeps the theme
 /// background.
@@ -129,26 +118,17 @@ impl QuillApp {
     /// reverted by the schedule.
     pub(crate) fn apply_appearance(&mut self, cx: &mut Context<Self>) {
         let hc = self.appearance.theme == ThemeChoice::HighContrast;
-        let dark = if hc {
-            true
-        } else {
-            match self.appearance.auto_night {
-                AutoNight::Off => self.appearance.theme == ThemeChoice::Dark,
-                // On Linux without a desktop portal this reports Light; the
-                // mode is still honest — it follows what the platform says.
-                // Matches gpui-component's own `From<WindowAppearance>` map
-                // (Dark | VibrantDark → dark).
-                AutoNight::System => matches!(
-                    cx.window_appearance(),
-                    WindowAppearance::Dark | WindowAppearance::VibrantDark
-                ),
-                AutoNight::Scheduled => night_active(
-                    self.appearance.night_start_minutes,
-                    self.appearance.night_end_minutes,
-                    local_minutes_since_midnight(),
-                ),
-            }
-        };
+        // The day or night theme (tdesktop keeps one of each and switches
+        // with night mode); high contrast keeps its own palette.
+        let (theme_id, palette) = self.resolve_app_theme(hc || self.night_mode_now(cx));
+        // Quill Light and Quill Dark (and high contrast) are drawn by the
+        // token pairs and the kit's own colours, exactly as before themes:
+        // no palette is installed for them.
+        let painted = !hc
+            && !theme_id
+                .builtin()
+                .is_some_and(quill::app_theme::BuiltinTheme::is_quill);
+        let dark = hc || palette.is_dark();
         let mode = if dark {
             ThemeMode::Dark
         } else {
@@ -158,6 +138,7 @@ impl QuillApp {
         // interface-animations one also folds into GPUI's reduced motion.
         quill::power_saving::set(self.appearance.power_saving);
         cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
+        // Quill's themes and high contrast take the single accent of old.
         let accent = quill::system_accent::effective(
             self.appearance.accent_rgb,
             self.appearance.system_accent,
@@ -165,12 +146,18 @@ impl QuillApp {
         );
         let scale = self.appearance.interface_scale_pct;
         let family = super::appearance_power::interface_font(&self.appearance.font_family, cx);
-        let applied = (mode, accent, hc, scale, family.clone());
+        let look = if painted {
+            palette.fingerprint()
+        } else {
+            u64::from(accent)
+        };
+        let applied = (mode, look, hc, scale, family.clone());
         if self.settings.appearance_applied.as_ref() == Some(&applied) {
             return;
         }
         set_theme_mode(mode, None, cx);
         set_high_contrast(hc);
+        self.install_app_theme((!hc).then(|| (theme_id, palette.clone())), painted);
         let primary = if accent == 0 {
             Hsla::from(super::chat_theme::accent_strong())
         } else {
@@ -180,21 +167,26 @@ impl QuillApp {
         // re-projects the Base layer and refreshes windows. Mutating
         // `global_mut` alone would leave primary buttons on the old accent.
         Theme::update(cx, |theme| {
-            // Primary buttons draw from their own tokens: point them at the
-            // accent too, or Send and other primary actions stay neutral.
             let colors = &mut theme.colors;
-            colors.primary = primary;
-            colors.primary_foreground = gpui_kit::white();
-            colors.button_primary = primary;
-            colors.button_primary_hover = Hsla {
-                l: (primary.l + 0.06).min(1.),
-                ..primary
-            };
-            colors.button_primary_active = Hsla {
-                l: (primary.l - 0.06).max(0.),
-                ..primary
-            };
-            colors.button_primary_foreground = gpui_kit::white();
+            if painted {
+                super::app_theme::kit_colors::apply(colors, &palette);
+            } else {
+                // Primary buttons draw from their own tokens: point them at
+                // the accent too, or Send and other primary actions stay
+                // neutral.
+                colors.primary = primary;
+                colors.primary_foreground = gpui_kit::white();
+                colors.button_primary = primary;
+                colors.button_primary_hover = Hsla {
+                    l: (primary.l + 0.06).min(1.),
+                    ..primary
+                };
+                colors.button_primary_active = Hsla {
+                    l: (primary.l - 0.06).max(0.),
+                    ..primary
+                };
+                colors.button_primary_foreground = gpui_kit::white();
+            }
             // The rem size stays at the kit's default: the interface scale
             // zooms whole windows instead (below), so scaling rems too
             // would apply it twice.
@@ -381,13 +373,12 @@ impl QuillApp {
                             "Customize how Quill looks and feels. Changes are saved on this device.",
                         ),
                 );
-                body = body.child(this.appearance_theme_section(cx));
+                body = body.child(this.app_themes_section(cx));
                 body = body.child(this.appearance_peer_color_section(cx));
                 body = body.child(this.appearance_spellcheck_section(cx));
                 body = body.child(this.appearance_suggest_emoji_section(cx));
                 body = body.child(this.appearance_profile_media_section(cx));
                 body = body.child(this.appearance_auto_night_section(cx));
-                body = body.child(this.appearance_accent_section(cx));
                 body = body.child(this.appearance_scale_section(cx));
                 this.ensure_wallpapers_loaded(cx);
                 body = body.child(this.appearance_wallpaper_section(cx));
@@ -648,37 +639,6 @@ impl QuillApp {
         )
     }
 
-    fn appearance_theme_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let selected = Some(match self.appearance.theme {
-            ThemeChoice::Light => 0,
-            ThemeChoice::Dark => 1,
-            ThemeChoice::HighContrast => 2,
-        });
-        // kit Phase 6 style: a kit RadioGroup (was: hand-rolled chips).
-        let control = RadioGroup::horizontal("appearance-theme")
-            .selected_index(selected)
-            .children([
-                Radio::new("appearance-theme-light").label("☀️ Light"),
-                Radio::new("appearance-theme-dark").label("🌙 Dark"),
-                Radio::new("appearance-theme-hc").label("◐ High contrast"),
-            ])
-            .on_click(cx.listener(|this, &ix, _, cx| {
-                this.set_appearance(cx, |a| {
-                    a.theme = match ix {
-                        0 => ThemeChoice::Light,
-                        1 => ThemeChoice::Dark,
-                        _ => ThemeChoice::HighContrast,
-                    }
-                });
-            }));
-        let hint = if self.appearance.auto_night == AutoNight::Off {
-            "Applies to the whole app immediately."
-        } else {
-            "Auto-night is on — this applies while night mode is inactive."
-        };
-        self.appearance_section(cx, "Theme", hint, control.into_any_element())
-    }
-
     fn appearance_auto_night_section(&self, cx: &mut Context<Self>) -> AnyElement {
         const MODES: [AutoNight; 3] = [AutoNight::Off, AutoNight::System, AutoNight::Scheduled];
         const LABELS: [&str; 3] = ["Off", "System", "Scheduled"];
@@ -736,100 +696,6 @@ impl QuillApp {
             );
         }
         body.into_any_element()
-    }
-
-    fn appearance_accent_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        // The system color counts as chosen only while the OS reports one.
-        let system = self
-            .settings
-            .system_accent
-            .filter(|_| self.appearance.system_accent);
-        let current = if system.is_some() {
-            u32::MAX
-        } else {
-            self.appearance.accent_rgb
-        };
-        let mut row = div()
-            .flex()
-            .gap_2()
-            .items_center()
-            .child(self.appearance_chip(
-                "appearance-accent-default",
-                "Default",
-                current == 0,
-                cx,
-                |this, cx| {
-                    this.set_appearance(cx, |a| {
-                        a.accent_rgb = 0;
-                        a.system_accent = false;
-                    })
-                },
-            ));
-        // tdesktop's "System accent color" (settings_chat.cpp), shown only
-        // where the OS reports an accent.
-        if let Some(color) = self.settings.system_accent {
-            row = row.child(self.appearance_swatch(
-                "appearance-accent-system",
-                color,
-                "System",
-                system.is_some(),
-                cx,
-                |this, cx| this.set_appearance(cx, |a| a.system_accent = true),
-            ));
-        }
-        for &(color, name) in ACCENT_PRESETS {
-            row = row.child(self.appearance_swatch(
-                format!("appearance-accent-{color:06x}"),
-                color,
-                name,
-                current == color,
-                cx,
-                move |this, cx| {
-                    this.set_appearance(cx, |a| {
-                        a.accent_rgb = color;
-                        a.system_accent = false;
-                    })
-                },
-            ));
-        }
-        // tdesktop's last accent circle opens a free-form color editor;
-        // here it is the kit's framed color field, with the presets
-        // featured at the top of its palette.
-        let custom = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(div().text_sm().child("Custom"))
-            .child(
-                ColorSelect::new(&self.settings.accent_picker)
-                    .featured_colors(
-                        ACCENT_PRESETS
-                            .iter()
-                            .map(|&(color, _)| Hsla::from(rgb(color)))
-                            .collect(),
-                    )
-                    .accessibility_label("Custom accent color")
-                    .w(px(180.)),
-            );
-        self.appearance_section(
-            cx,
-            "Accent color",
-            if self.settings.system_accent.is_some() {
-                "Highlights, selections and links across the app. System follows \
-                 your operating system's accent. Custom colors are kept light \
-                 enough on dark themes and dark enough on light ones."
-            } else {
-                "Highlights, selections and links across the app. Custom colors are \
-                 kept light enough on dark themes and dark enough on light ones."
-            },
-            div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(row)
-                .child(custom)
-                .into_any_element(),
-        )
     }
 }
 

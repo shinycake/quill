@@ -37,7 +37,11 @@ pub(crate) struct SettingsUi {
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
-    pub(super) appearance_applied: Option<(ThemeMode, u32, bool, u16, String)>,
+    /// The middle value is the applied palette's fingerprint (the accent
+    /// under high contrast).
+    pub(super) appearance_applied: Option<(ThemeMode, u64, bool, u16, String)>,
+    /// App themes: custom theme list, the applied palette, the editor.
+    pub(super) app_theme: super::app_theme::AppThemeUi,
     /// The operating system's accent color (0xRRGGBB), when it reports one
     /// and has been read (`refresh_system_accent`).
     pub(super) system_accent: Option<u32>,
@@ -101,6 +105,7 @@ impl SettingsUi {
             shortcuts_open: false,
             sticker_settings_open: false,
             appearance_applied: None,
+            app_theme: Default::default(),
             system_accent: None,
             system_accent_probed: false,
             font_picker,

@@ -9,7 +9,7 @@ mod format;
 mod pie;
 mod range;
 mod slots;
-mod xlsx;
+pub(crate) mod xlsx;
 
 pub use axis::*;
 pub use format::*;

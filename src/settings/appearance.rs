@@ -78,9 +78,21 @@ pub struct AppearancePrefs {
     pub night_start_minutes: u16,
     #[serde(default = "default_night_end")]
     pub night_end_minutes: u16,
-    /// Accent color as 0xRRGGBB; 0 = the theme's default accent.
+    /// Accent color of Quill Light and Quill Dark as 0xRRGGBB; 0 = their
+    /// default accent. tdesktop's themes use `theme_accents`.
     #[serde(default)]
     pub accent_rgb: u32,
+    /// tdesktop's day and night themes: the theme used while night mode
+    /// is off, and the one used while it is on (manually or by
+    /// auto-night).
+    #[serde(default = "crate::app_theme::ThemeId::default_day")]
+    pub day_theme: crate::app_theme::ThemeId,
+    #[serde(default = "crate::app_theme::ThemeId::default_night")]
+    pub night_theme: crate::app_theme::ThemeId,
+    /// tdesktop `themesAccentColors`: the accent chosen for each built-in
+    /// theme (by its id), 0xRRGGBB.
+    #[serde(default)]
+    pub theme_accents: std::collections::BTreeMap<String, u32>,
     /// tdesktop `systemAccentColorEnabled`: use the operating system's
     /// accent color instead of `accent_rgb` while the OS reports one.
     #[serde(default)]
@@ -202,6 +214,9 @@ impl Default for AppearancePrefs {
             night_start_minutes: default_night_start(),
             night_end_minutes: default_night_end(),
             accent_rgb: 0,
+            day_theme: crate::app_theme::ThemeId::default_day(),
+            night_theme: crate::app_theme::ThemeId::default_night(),
+            theme_accents: Default::default(),
             system_accent: false,
             font_family: String::new(),
             power_saving: 0,
@@ -237,6 +252,25 @@ impl Default for AppearancePrefs {
 /// the single load path: the font size clamps to 12–20 px and night
 /// times wrap into 0..1440.
 impl AppearancePrefs {
+    /// The theme for night mode on or off.
+    pub fn theme_for(&self, night: bool) -> &crate::app_theme::ThemeId {
+        if night {
+            &self.night_theme
+        } else {
+            &self.day_theme
+        }
+    }
+
+    /// The accent chosen for a built-in theme (0xRRGGBB): Quill's themes
+    /// keep the single `accent_rgb` they always had; tdesktop's each have
+    /// their own entry.
+    pub fn accent_for(&self, theme: crate::app_theme::BuiltinTheme) -> Option<u32> {
+        if theme.is_quill() {
+            return (self.accent_rgb != 0).then_some(self.accent_rgb);
+        }
+        self.theme_accents.get(theme.id()).copied()
+    }
+
     /// Whether photo wallpapers tile in the light or dark theme.
     pub fn wallpaper_tile(&self, dark: bool) -> bool {
         if dark {
@@ -335,6 +369,9 @@ mod tests {
             night_start_minutes: 23 * 60,
             night_end_minutes: 6 * 60,
             accent_rgb: 0x2f81f7,
+            day_theme: crate::app_theme::ThemeId::Builtin(crate::app_theme::BuiltinTheme::Day),
+            night_theme: crate::app_theme::ThemeId::Custom("Ocean".into()),
+            theme_accents: [("night".to_string(), 0xca7896)].into(),
             system_accent: true,
             font_family: "Avenir".into(),
             power_saving: crate::power_saving::Flag::StickersChat.bit(),
@@ -497,5 +534,38 @@ mod theme_choice_tests {
         );
         let legacy: AppearancePrefs = serde_json::from_str("{}").unwrap();
         assert_eq!(legacy.theme, ThemeChoice::Light);
+    }
+
+    /// Prefs saved before themes keep loading: Classic by day, Tinted at
+    /// night, and an old single accent still colours built-in themes until
+    /// one gets its own.
+    #[test]
+    fn theme_slots_and_accents() {
+        use crate::app_theme::{BuiltinTheme, ThemeId};
+        let old: AppearancePrefs =
+            serde_json::from_str(r#"{"theme":"dark","accent_rgb":3108855}"#).unwrap();
+        assert_eq!(
+            old.theme_for(false),
+            &ThemeId::Builtin(BuiltinTheme::QuillLight)
+        );
+        assert_eq!(
+            old.theme_for(true),
+            &ThemeId::Builtin(BuiltinTheme::QuillDark)
+        );
+        // The old accent stays on Quill's themes only.
+        assert_eq!(old.accent_for(BuiltinTheme::QuillDark), Some(0x2f6ff7));
+        assert_eq!(old.accent_for(BuiltinTheme::Night), None);
+        let mut prefs = old;
+        prefs.theme_accents.insert("night".into(), 0xca7896);
+        assert_eq!(prefs.accent_for(BuiltinTheme::Night), Some(0xca7896));
+        assert_eq!(
+            AppearancePrefs::default().accent_for(BuiltinTheme::Day),
+            None
+        );
+        // A custom theme slot survives a round trip.
+        prefs.night_theme = ThemeId::Custom("Ocean".into());
+        let json = serde_json::to_string(&prefs).unwrap();
+        let back: AppearancePrefs = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.night_theme, ThemeId::Custom("Ocean".into()));
     }
 }

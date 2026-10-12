@@ -3,21 +3,24 @@
 use super::*;
 
 impl QuillApp {
-    /// The custom accent field's state, showing `accent_rgb` (or the
-    /// theme's accent when that is the default). A committed color is
-    /// limited like tdesktop's (`limit_custom_accent`) and becomes the
-    /// accent.
+    /// The custom accent field's state, showing the old single
+    /// `accent_rgb` when there is one (else empty, with its placeholder).
+    /// A committed color is limited like tdesktop's
+    /// (`limit_custom_accent`) and becomes the accent of the built-in
+    /// theme on screen.
     pub(in crate::ui) fn new_accent_picker(
         accent_rgb: u32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<ColorPickerState> {
-        let initial = if accent_rgb == 0 {
-            Hsla::from(super::super::chat_theme::accent_strong())
-        } else {
-            Hsla::from(rgb(accent_rgb))
-        };
-        let picker = cx.new(|cx| ColorPickerState::new(window, cx).default_value(initial));
+        let picker = cx.new(|cx| {
+            let state = ColorPickerState::new(window, cx);
+            if accent_rgb == 0 {
+                state
+            } else {
+                state.default_value(Hsla::from(rgb(accent_rgb)))
+            }
+        });
         cx.subscribe_in(
             &picker,
             window,
@@ -30,10 +33,11 @@ impl QuillApp {
                     picker.update(cx, |picker, cx| picker.set_value(limited, window, cx));
                 }
                 let value = accent_rgb_from(limited);
-                this.set_appearance(cx, |a| {
-                    a.accent_rgb = value;
-                    a.system_accent = false;
-                });
+                // The accent of the built-in theme on screen (custom
+                // themes take no accent, as in tdesktop).
+                if let Some(theme) = this.applied_builtin_theme() {
+                    this.set_theme_accent(theme, value, cx);
+                }
             },
         )
         .detach();

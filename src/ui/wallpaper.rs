@@ -364,6 +364,9 @@ impl QuillApp {
             self.appearance.telegram_wallpaper,
             self.account_telegram_wallpaper(dark),
         )
+        // Nothing chosen: the app theme's background (tdesktop's theme
+        // wallpaper).
+        .or_else(|| self.theme_wallpaper())
     }
 
     /// What `chat_id` shows: its own wallpaper, else its theme's, else the
@@ -377,12 +380,18 @@ impl QuillApp {
             let wallpaper = session_wallpaper(session, background)?;
             Some((wallpaper, dimming.clamp(0, 100) as u8))
         });
-        let outgoing = chat_id.and_then(|id| {
-            Some(OutgoingFill::from_theme(
-                self.session()?.chat_theme_settings(id, dark)?,
-                dark,
-            ))
-        });
+        let outgoing = chat_id
+            .and_then(|id| {
+                Some(OutgoingFill::from_theme(
+                    self.session()?.chat_theme_settings(id, dark)?,
+                    dark,
+                ))
+            })
+            // No chat theme: the app theme's outgoing bubbles.
+            .or_else(|| {
+                self.default_chat_theme()
+                    .map(|(theme, fill_dark)| OutgoingFill::from_theme(theme, fill_dark))
+            });
         match own {
             Some((wallpaper, dimming)) => ChatLook {
                 wallpaper: Some(wallpaper.with_stored_rotation()),

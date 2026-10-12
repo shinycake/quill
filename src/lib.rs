@@ -5,6 +5,7 @@ pub mod about;
 pub mod admin_extras;
 pub mod album;
 pub mod animation;
+pub mod app_theme;
 pub mod auth;
 pub mod auto_delete;
 pub mod autoscroll;
