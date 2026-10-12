@@ -4,6 +4,15 @@ use crate::boost_box::{BoostDecision, BoostPhase, classify, decide};
 use crate::telegram::requests::{get_chat_boost_features, set_supergroup_unrestrict_boost_count};
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// A channel's `boost_level` moved (`updateSupergroup`): ask again for
+    /// the boost status of every chat whose cached status is now stale, so an
+    /// open boost box, profile row or look dialog shows the new level.
+    pub(crate) fn refresh_moved_boost_statuses(&mut self) {
+        for chat_id in self.session.take_moved_boost_chats() {
+            let _ = self.fetch_chat_boost_status(chat_id);
+        }
+    }
+
     /// Slice G2: `getChatBoostStatus` (schema 1.8.67, line 13917) —
     /// cached per chat (level + boost count) for the boost dialog.
     pub fn fetch_chat_boost_status(

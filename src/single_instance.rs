@@ -29,9 +29,9 @@ const HEADER: &str = "quill-ipc 1";
 /// How long a launch waits for the owner to acknowledge before giving up.
 pub const ACK_TIMEOUT: Duration = Duration::from_secs(3);
 /// Upper bound on one forwarded message.
-const MAX_MESSAGE_BYTES: u64 = 64 * 1024;
+const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
 /// Upper bound on forwarded arguments honored per connection.
-const MAX_ARGS: usize = 32;
+const MAX_ARGS: usize = 256;
 /// `sun_path` is 104 bytes on macOS (108 on Linux), terminator included.
 #[cfg(unix)]
 const MAX_SOCKET_PATH: usize = 100;

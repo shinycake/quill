@@ -41,6 +41,7 @@ impl QuillApp {
     /// info dialog, or a deferred chat open for render.
     pub(super) fn pump_deep_link(&mut self, cx: &mut Context<Self>) {
         self.tick_media_seek(cx);
+        self.pump_start_files(cx);
         // `tg://proxy` / `tg://socks` (and the t.me forms) are parsed
         // locally and need no sign-in: a user who is blocked from
         // Telegram can only get in through them.
