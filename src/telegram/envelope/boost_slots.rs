@@ -37,9 +37,36 @@ pub(crate) fn parse_boost_slots(value: &Value) -> Vec<ParsedBoostSlot> {
         .unwrap_or_default()
 }
 
+/// `boosts_per_sent_gift` from a `jsonValueObject` app config; 0 when the
+/// key is missing (tdesktop's `BoostsForGift` default).
+pub(crate) fn boosts_per_gift(config: &Value) -> i32 {
+    config
+        .get("members")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|member| member.get("key").and_then(Value::as_str) == Some("boosts_per_sent_gift"))
+        .and_then(|member| member.get("value")?.get("value")?.as_f64())
+        .map_or(0, |count| count.clamp(0.0, 1000.0) as i32)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ParsedBoostSlot, Value, parse_boost_slots};
+    use super::{ParsedBoostSlot, Value, boosts_per_gift, parse_boost_slots};
+
+    #[test]
+    fn reads_boosts_per_gift_from_the_app_config() {
+        let v: Value = serde_json::from_str(
+            r#"{"@type":"jsonValueObject","members":[
+              {"key":"other","value":{"@type":"jsonValueNumber","value":9}},
+              {"key":"boosts_per_sent_gift","value":{"@type":"jsonValueNumber","value":4}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(boosts_per_gift(&v), 4);
+        let none: Value =
+            serde_json::from_str(r#"{"@type":"jsonValueObject","members":[]}"#).unwrap();
+        assert_eq!(boosts_per_gift(&none), 0);
+    }
 
     #[test]
     fn parses_every_slot_field() {

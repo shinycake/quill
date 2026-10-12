@@ -114,6 +114,16 @@ mod tests {
     }
 }
 
+/// `getApplicationConfig` (schema/td_api.tl:16789): the server's app
+/// config as JSON; tdesktop reads `boosts_per_sent_gift` from it.
+pub fn get_application_config(extra: RequestId) -> String {
+    json!({
+        "@type": "getApplicationConfig",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// `getChatBoostFeatures` (schema/td_api.tl:14305): the level table for
 /// channels or groups.
 pub fn get_chat_boost_features(extra: RequestId, is_channel: bool) -> String {

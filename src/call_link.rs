@@ -77,9 +77,77 @@ pub fn step_note(step: CallLinkStep, live_stream: bool) -> Option<String> {
         CallLinkStep::JustOpen | CallLinkStep::Offer { .. } => None,
         CallLinkStep::NoCall => Some(BAD_LINK_NOTE.into()),
         CallLinkStep::AlreadyJoined => Some(format!("You are already in this {what}.")),
-        CallLinkStep::Busy => Some(format!(
-            "Leave your current call to join this {what}, then open the link again."
-        )),
+        // Busy asks first (`CallLinkConfirm`).
+        CallLinkStep::Busy => None,
+    }
+}
+
+/// What the viewer is in now, when a call link arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaveKind {
+    /// A 1:1 call.
+    PrivateCall,
+    /// A group call in a group (`current_is_channel` false) or channel.
+    GroupCall { current_is_channel: bool },
+}
+
+/// tdesktop `Instance::confirmLeaveCurrent`: the question before leaving the
+/// current call for the one a link offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallLinkConfirm {
+    pub chat_id: i64,
+    pub invite_hash: String,
+    pub live_stream: bool,
+    pub target_is_channel: bool,
+    pub leave: LeaveKind,
+}
+
+impl CallLinkConfirm {
+    pub fn text(&self) -> &'static str {
+        match (self.leave, self.target_is_channel) {
+            (LeaveKind::PrivateCall, false) => "End your active call and join this video chat?",
+            (LeaveKind::PrivateCall, true) => {
+                "Do you want to end your active call and join a live stream in this channel?"
+            }
+            (
+                LeaveKind::GroupCall {
+                    current_is_channel: false,
+                },
+                false,
+            ) => "Leave your currently active video chat and join this video chat?",
+            (
+                LeaveKind::GroupCall {
+                    current_is_channel: false,
+                },
+                true,
+            ) => {
+                "Do you want to leave your active video chat and join a live stream in this channel?"
+            }
+            (
+                LeaveKind::GroupCall {
+                    current_is_channel: true,
+                },
+                false,
+            ) => {
+                "Do you want to leave your active live stream and join a video chat in this group?"
+            }
+            (
+                LeaveKind::GroupCall {
+                    current_is_channel: true,
+                },
+                true,
+            ) => {
+                "Do you want to leave your active live stream and join a live stream in this channel?"
+            }
+        }
+    }
+
+    /// The confirm button (`lng_call_bar_hangup`, `lng_group_call_leave`).
+    pub fn button(&self) -> &'static str {
+        match self.leave {
+            LeaveKind::PrivateCall => "End call",
+            LeaveKind::GroupCall { .. } => "Leave",
+        }
     }
 }
 
@@ -175,11 +243,36 @@ mod tests {
             plan(&channel(), Some(call(4)), None, true),
             CallLinkStep::Busy
         );
-        assert!(
-            step_note(CallLinkStep::Busy, true)
-                .unwrap()
-                .contains("live stream")
+        assert_eq!(step_note(CallLinkStep::Busy, true), None);
+    }
+
+    #[test]
+    fn the_confirmation_names_what_is_left() {
+        let ask = |leave, target_is_channel| CallLinkConfirm {
+            chat_id: 1,
+            invite_hash: String::new(),
+            live_stream: target_is_channel,
+            target_is_channel,
+            leave,
+        };
+        let private = ask(LeaveKind::PrivateCall, false);
+        assert_eq!(private.button(), "End call");
+        assert!(private.text().starts_with("End your active call"));
+        let from_channel = ask(
+            LeaveKind::GroupCall {
+                current_is_channel: true,
+            },
+            true,
         );
+        assert_eq!(from_channel.button(), "Leave");
+        assert!(from_channel.text().contains("live stream in this channel"));
+        let to_group = ask(
+            LeaveKind::GroupCall {
+                current_is_channel: false,
+            },
+            false,
+        );
+        assert!(to_group.text().ends_with("join this video chat?"));
     }
 
     #[test]

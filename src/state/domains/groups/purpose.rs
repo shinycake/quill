@@ -240,6 +240,9 @@ pub enum GroupsPurpose {
     /// `getChatBoostFeatures` (schema 1.8.68, line 14305): the level table;
     /// the pending `chat_id` is the chat it was asked for.
     GetChatBoostFeatures,
+    /// `getApplicationConfig` (schema 1.8.68, line 16789), asked for
+    /// `boosts_per_sent_gift` only.
+    GetBoostsPerGift,
     /// `setSupergroupUnrestrictBoostCount` (schema 1.8.68, line 15571).
     /// Response `ok`; the value is applied then, see
     /// `GroupsState::unrestrict_boost_pending`.
@@ -359,6 +362,7 @@ flat_purposes!(Groups(GroupsPurpose) {
     ToggleSupergroupAggressiveAntiSpam,
     GetChatBoostStatus,
     GetChatBoostFeatures,
+    GetBoostsPerGift,
     SetSupergroupUnrestrictBoostCount,
     GetBoostSlotsForBoost,
     BoostChat,

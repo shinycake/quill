@@ -123,6 +123,36 @@ fn opening_the_box_reads_the_level_and_boosts_nothing() {
 }
 
 #[test]
+fn the_app_config_gives_the_gift_boosts_and_changes_the_notice() {
+    let mut rig = Rig::new(true);
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    assert_eq!(rig.sent_all("getApplicationConfig").len(), 1);
+    let extra = rig
+        .driver
+        .session
+        .requests
+        .pending_extra_for(RequestPurpose::GetBoostsPerGift, None)
+        .expect("config pending");
+    rig.ingest(&format!(
+        r#"{{"@type":"jsonValueObject","@extra":"{}","members":[{{"key":"boosts_per_sent_gift","value":{{"@type":"jsonValueNumber","value":3}}}}]}}"#,
+        extra.0
+    ));
+    assert_eq!(rig.driver.session.groups.boosts_per_gift, Some(3));
+    // Asked once.
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    assert_eq!(rig.sent_all("getApplicationConfig").len(), 1);
+    rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    rig.answer_slots(&format!("[{}]", slot(4, 13, 0)));
+    assert_eq!(
+        rig.phase(),
+        BoostPhase::Notice(BoostNotice::GiftMore {
+            receive: 3,
+            again: true
+        })
+    );
+}
+
+#[test]
 fn the_status_answer_gives_the_viewers_own_boosts() {
     let mut rig = Rig::new(true);
     rig.driver.open_boost_box(ChatId(13)).unwrap();
@@ -183,10 +213,10 @@ fn other_slots_open_the_reassign_list_and_wait_for_a_second_click() {
     assert!(rig.sent_all("boostChat").is_empty());
     // A row that is cooling down cannot be picked.
     let state = rig.driver.session.groups.boost_box.as_mut().unwrap();
-    state.toggle_slot(6, now());
+    state.toggle_slot(6, now(), 0);
     assert!(state.reassign_selection(now()).is_empty());
-    state.toggle_slot(4, now());
-    state.toggle_slot(5, now());
+    state.toggle_slot(4, now(), 0);
+    state.toggle_slot(5, now(), 0);
     assert!(rig.driver.reassign_boosts().unwrap());
     let sent = rig.sent_all("boostChat");
     assert_eq!(sent.len(), 1);

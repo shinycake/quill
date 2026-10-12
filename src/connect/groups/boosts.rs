@@ -103,7 +103,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let now = crate::local_time::now_unix();
         let choice = classify(chat_id, &slots, now);
         let session = &self.session;
-        let decision = decide(&choice, session.my_is_premium(), now, |id| {
+        let receive = session.groups.boosts_per_gift.unwrap_or(0);
+        let decision = decide(&choice, session.my_is_premium(), receive, now, |id| {
             session.chat_is_group(ChatId(id))
         });
         match decision {
@@ -133,6 +134,30 @@ impl<S: JsonSender> ConnectDriver<S> {
                 state.phase = BoostPhase::Main;
                 state.reassigning = None;
             }
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// `getApplicationConfig`, once, for `boosts_per_sent_gift`.
+    pub fn fetch_boosts_per_gift(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.groups.boosts_per_gift.is_some()
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetBoostsPerGift)
+        {
+            return Ok(());
+        }
+        let extra = self.session.request(RequestPurpose::GetBoostsPerGift, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&crate::telegram::requests::get_application_config(extra))
+        {
+            self.session.requests.take(extra);
             return Err(err);
         }
         Ok(())

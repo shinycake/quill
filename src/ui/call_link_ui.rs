@@ -1,6 +1,10 @@
 //! UI half of the voice chat, video chat and live stream links
 //! (`parity:deeplink-voice-chat`, see `quill::call_link`).
 use super::app::QuillApp;
+use super::link_info_boxes::finish;
+use super::shell::{DialogKind, QuillShell};
+use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::call_link::{BAD_LINK_NOTE, CallLinkStep, step_note};
 use quill::ids::ChatId;
@@ -20,7 +24,10 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        match live.driver.offer_call_link(chat_id, invite_hash) {
+        match live
+            .driver
+            .offer_call_link(chat_id, invite_hash, live_stream)
+        {
             Ok(step) => {
                 self.connection.status_note = match step_note(step, live_stream) {
                     Some(note) => note,
@@ -38,4 +45,80 @@ impl QuillApp {
         }
         cx.notify();
     }
+
+    fn cancel_call_link_leave(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.cancel_call_link_leave();
+        }
+        cx.notify();
+    }
+
+    fn confirm_call_link_leave(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.confirm_call_link_leave().is_err()
+        {
+            self.connection.status_note = "Couldn't leave the call.".into();
+        }
+        cx.notify();
+    }
+
+    /// tdesktop `confirmLeaveCurrent`: leave the current call to join the
+    /// link's.
+    pub(super) fn build_call_link_leave_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::CallLinkLeave, |this, _, cx| {
+                this.cancel_call_link_leave(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(ask) = this
+                .session()
+                .and_then(|session| session.calls.call_link_confirm.clone())
+            else {
+                return dialog.overlay(true).on_close(on_close.clone());
+            };
+            let body = div()
+                .id("call-link-leave-text")
+                .text_sm()
+                .child(ask.text())
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("call-link-leave-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.cancel_call_link_leave(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CallLinkLeave, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("call-link-leave-confirm")
+                        .label(ask.button())
+                        .primary()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.confirm_call_link_leave(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CallLinkLeave, window, cx);
+                        })),
+                )
+                .into_any_element();
+            finish(dialog, "Join call", body, footer, on_close)
+        })
+    }
+}
+
+crate::ui::shell::register_dialogs! {
+    /// A call link while another call is on: leave it and join?
+    CallLinkLeave => DialogSpec::new(
+        2960,
+        |app| app.session().is_some_and(|s| s.calls.call_link_confirm.is_some()),
+        QuillApp::build_call_link_leave_dialog,
+    ),
 }

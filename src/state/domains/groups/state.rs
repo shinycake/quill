@@ -142,6 +142,9 @@ pub struct GroupsState {
     pub boost_intent: Option<i64>,
     /// The open boost box (`crate::boost_box`).
     pub boost_box: Option<crate::boost_box::BoostBoxState>,
+    /// `boosts_per_sent_gift` of the app config: boosts a gifted Premium
+    /// subscription gives. `None` until asked.
+    pub boosts_per_gift: Option<i32>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -277,6 +280,7 @@ impl GroupsState {
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
             boost_box: None,
+            boosts_per_gift: None,
             supergroup_usernames: HashMap::new(),
             supergroup_verification: HashMap::new(),
             supergroup_member_status: HashMap::new(),

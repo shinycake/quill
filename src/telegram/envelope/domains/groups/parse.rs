@@ -440,6 +440,9 @@ pub(crate) fn parse_groups_payload(
         "chatBoostFeatures" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostFeatures(
             parse_boost_features(value),
         ))),
+        "jsonValueObject" => Ok(EnvelopePayload::Groups(GroupsPayload::BoostsPerGift(
+            boosts_per_gift(value),
+        ))),
         "chatBoostSlots" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots {
             slots: parse_boost_slots(value),
         })),

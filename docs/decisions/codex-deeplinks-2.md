@@ -10,9 +10,13 @@
 - Call links: `internalLinkTypeVideoChat` keeps its hash and routes to `DeepLinkAction::OpenVideoChat`. `src/call_link.rs` plans the step (not a group, no call, already joined, busy, offer). The driver fetches the call (`getGroupCall`) and stores the hash, which `joinVideoChat` sends. The call screen's Join button is the confirmation, so nothing joins or opens the microphone from the link.
 - Gift codes: the Premium gift code card has an "Open Gift Link" button and boost rows with a code open the gift code box. The code is kept in `SecretCode`, which `Debug` never prints.
 
+## Follow-up in the same PR
+- Leave-and-join: a call link while another call is on raises tdesktop's `confirmLeaveCurrent` question (the six texts, "End call" or "Leave"). Confirming ends the 1:1 call (`discardCall`) or leaves the group call, then offers the link's call once the old one is gone (`maybe_offer_pending_call_link`, run from `ingest` like the swap prompt). Cancel does nothing.
+- Gift lines: TDLib 1.8.68 has `getApplicationConfig` (returns the server's JSON, which carries `boosts_per_sent_gift`; the schema does not list the keys). The box asks for it once on open. With a value above 0 it shows `GiftForBoostsBox` ("More boosts needed"), the gift part of the reassign and cooldown texts, and "Boost Again". With 0 or no answer it behaves as before.
+
 ## Not done
-- "Gift Premium for more boosts" lines and the multi-boost button (they need the `boosts_per_sent_gift` app config), fireworks, user pictures in the reassign list, a live countdown for cooling-down rows (it updates on redraw).
-- Call links while another call is active say to leave it first; tdesktop offers a leave-and-join confirmation. The join-as picker is the call screen's existing one.
+- Fireworks, user pictures in the reassign list, a live countdown for cooling-down rows (it updates on redraw).
+- The join-as picker is the call screen's existing one.
 - tdesktop's "pending gift code" box for boost rows without a code.
 
 ## Verified

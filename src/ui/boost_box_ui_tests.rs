@@ -92,6 +92,10 @@ fn the_box_opens_from_session_state_and_every_phase_renders(cx: &mut TestAppCont
         BoostNotice::Already,
         BoostNotice::PremiumNeeded,
         BoostNotice::GiftedNoBoosts,
+        BoostNotice::GiftMore {
+            receive: 2,
+            again: false,
+        },
         BoostNotice::Flood {
             seconds_left: 7_300,
             group: false,
@@ -135,7 +139,7 @@ fn a_row_click_picks_a_boost_and_a_waiting_row_does_not(cx: &mut TestAppContext)
             panic!("still the reassign list");
         };
         assert_eq!(selected, &vec![1]);
-        assert_eq!(state.note.as_deref(), Some(quill::boost_box::WAITING_NOTE));
+        assert_eq!(state.note, Some(quill::boost_box::waiting_note(0)));
     });
 }
 

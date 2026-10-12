@@ -14,10 +14,12 @@
 //! decision and the box state. `connect::groups::boost_flow` sends the
 //! requests and `ui::boost_box_ui` draws it.
 //!
-//! Left out on purpose: the "gift Premium to get more boosts" lines of
-//! `GiftForBoostsBox` and the multi-boost button (both need the
-//! `boosts_per_sent_gift` app config, which Quill does not read), the
-//! fireworks, and the "lifting" variant that group restriction prompts use.
+//! The gift lines (`GiftForBoostsBox`, the multi-boost button) follow the
+//! `boosts_per_sent_gift` app config, read with `getApplicationConfig`;
+//! 0 or unread means tdesktop's behavior without a gift offer.
+//!
+//! Left out on purpose: the fireworks and the "lifting" variant that group
+//! restriction prompts use.
 
 use crate::local_time::{civil_local, day_label};
 use crate::telegram::envelope::{ParsedBoostSlot, ParsedBoostStatus};
@@ -127,14 +129,19 @@ impl BoostCounters {
         }
     }
 
-    /// `lng_boost_channel_button` and its siblings. Without the gift config
-    /// there is no second boost from the same account, so a viewer who has
-    /// boosted gets "OK".
-    pub fn button(&self, group: bool) -> BoostButton {
-        if self.next_level_boosts == 0 || self.mine > 0 {
+    /// `lng_boost_channel_button` and its siblings. A viewer who has boosted
+    /// gets "Boost Again" when gifts give more boosts (`allow_multi`), and
+    /// "OK" otherwise.
+    pub fn button(&self, group: bool, allow_multi: bool) -> BoostButton {
+        if self.next_level_boosts == 0 || (self.mine > 0 && !allow_multi) {
             BoostButton {
                 label: "OK",
                 closes: true,
+            }
+        } else if self.mine > 0 {
+            BoostButton {
+                label: "Boost Again",
+                closes: false,
             }
         } else {
             BoostButton {
@@ -180,6 +187,9 @@ pub fn classify(chat_id: i64, slots: &[ParsedBoostSlot], now: i64) -> SlotChoice
 pub enum BoostNotice {
     /// Every slot already boosts this chat.
     Already,
+    /// Gifting Premium to a friend gives `receive` more boosts
+    /// (`GiftForBoostsBox`); `again` when the chat is boosted already.
+    GiftMore { receive: i32, again: bool },
     /// Boosting needs Telegram Premium.
     PremiumNeeded,
     /// Premium came as a gift, which cannot boost.
@@ -192,15 +202,25 @@ impl BoostNotice {
     pub fn title(&self) -> &'static str {
         match self {
             Self::Already => "Already Boosted!",
+            Self::GiftMore { .. } => "More boosts needed",
             Self::PremiumNeeded => "Premium needed",
             Self::GiftedNoBoosts => "Can't boost with gifted Premium!",
             Self::Flood { .. } => "Can't boost too often!",
         }
     }
 
-    pub fn text(&self, group: bool) -> String {
+    pub fn text(&self, name: &str, group: bool) -> String {
         let what = if group { "group" } else { "channel" };
         match self {
+            Self::GiftMore { receive, again } => format!(
+                "To boost {name}{}, gift Telegram Premium to a friend and get {}.",
+                if *again { " again" } else { "" },
+                if *again {
+                    plural(*receive, "additional boost", "additional boosts")
+                } else {
+                    plural(*receive, "boost", "boosts")
+                }
+            ),
             Self::Already => format!("You are already boosting this {what}."),
             Self::PremiumNeeded => format!(
                 "Only Telegram Premium subscribers can boost {what}s. Do you want to subscribe to Telegram Premium?"
@@ -259,6 +279,7 @@ pub enum BoostDecision {
 pub fn decide(
     choice: &SlotChoice,
     premium: bool,
+    receive: i32,
     now: i64,
     is_group: impl Fn(i64) -> bool,
 ) -> BoostDecision {
@@ -267,9 +288,21 @@ pub fn decide(
     }
     if choice.other.is_empty() {
         return BoostDecision::Notice(if !choice.already.is_empty() {
-            BoostNotice::Already
+            if receive > 0 {
+                BoostNotice::GiftMore {
+                    receive,
+                    again: true,
+                }
+            } else {
+                BoostNotice::Already
+            }
         } else if !premium {
             BoostNotice::PremiumNeeded
+        } else if receive > 0 {
+            BoostNotice::GiftMore {
+                receive,
+                again: false,
+            }
         } else {
             BoostNotice::GiftedNoBoosts
         });
@@ -332,9 +365,29 @@ pub fn row_status(slot: &ParsedBoostSlot, now: i64) -> String {
     }
 }
 
-/// Tapping a row that is cooling down
-/// (`lng_boost_available_in_toast` without the gift part).
-pub const WAITING_NOTE: &str = "Wait until the boost is available.";
+/// Tapping a row that is cooling down (`lng_boost_available_in_toast`).
+pub fn waiting_note(receive: i32) -> String {
+    if receive > 0 {
+        format!(
+            "Wait until the boost is available or get {} by gifting a Telegram Premium subscription.",
+            plural(receive, "more boost", "more boosts")
+        )
+    } else {
+        "Wait until the boost is available.".into()
+    }
+}
+
+/// The line over the reassign list (`lng_boost_reassign_text`).
+pub fn reassign_text(name: &str, receive: i32) -> String {
+    if receive > 0 {
+        format!(
+            "To boost {name}, reassign a previous boost or gift Telegram Premium to a friend to get {}.",
+            plural(receive, "additional boost", "additional boosts")
+        )
+    } else {
+        format!("To boost {name}, reassign a previous boost.")
+    }
+}
 
 /// "You currently boost A. Do you want to boost B instead?"
 pub fn replace_question(from: &str, to: &str) -> String {
@@ -443,7 +496,7 @@ impl BoostBoxState {
 
     /// Check or uncheck a row. A row that is cooling down stays unchecked
     /// and the note says why.
-    pub fn toggle_slot(&mut self, slot_id: i32, now: i64) {
+    pub fn toggle_slot(&mut self, slot_id: i32, now: i64, receive: i32) {
         let BoostPhase::Reassign { slots, selected } = &mut self.phase else {
             return;
         };
@@ -451,7 +504,7 @@ impl BoostBoxState {
             return;
         };
         if is_waiting(slot, now) {
-            self.note = Some(WAITING_NOTE.into());
+            self.note = Some(waiting_note(receive));
         } else if let Some(at) = selected.iter().position(|id| *id == slot_id) {
             selected.remove(at);
         } else {
@@ -544,7 +597,7 @@ mod tests {
     fn a_free_slot_boosts_with_the_first() {
         let choice = classify(-100, &[slot(7, 0, 0), slot(8, 0, 0)], NOW);
         assert_eq!(
-            decide(&choice, false, NOW, |_| false),
+            decide(&choice, false, 0, NOW, |_| false),
             BoostDecision::Boost(7)
         );
     }
@@ -552,7 +605,7 @@ mod tests {
     #[test]
     fn no_free_slot_picks_the_notice() {
         let decide_for = |slots: &[ParsedBoostSlot], premium| {
-            decide(&classify(-100, slots, NOW), premium, NOW, |_| false)
+            decide(&classify(-100, slots, NOW), premium, 0, NOW, |_| false)
         };
         assert_eq!(
             decide_for(&[slot(1, -100, 0)], true),
@@ -571,13 +624,13 @@ mod tests {
     #[test]
     fn other_slots_go_to_reassign_and_a_lone_cooling_slot_is_flood() {
         let choice = classify(-100, &[slot(1, -200, 0), slot(2, -300, 0)], NOW);
-        match decide(&choice, true, NOW, |_| false) {
+        match decide(&choice, true, 0, NOW, |_| false) {
             BoostDecision::Reassign(list) => assert_eq!(list.len(), 2),
             other => panic!("{other:?}"),
         }
         let one = classify(-100, &[slot(1, -200, NOW as i32 + 7_200)], NOW);
         assert_eq!(
-            decide(&one, true, NOW, |chat| chat == -200),
+            decide(&one, true, 0, NOW, |chat| chat == -200),
             BoostDecision::Notice(BoostNotice::Flood {
                 seconds_left: 7_200,
                 group: true
@@ -593,7 +646,7 @@ mod tests {
             NOW,
         );
         assert!(matches!(
-            decide(&two, true, NOW, |_| false),
+            decide(&two, true, 0, NOW, |_| false),
             BoostDecision::Reassign(_)
         ));
     }
@@ -629,8 +682,8 @@ mod tests {
             first.text("News", false),
             "News needs 2 more boosts to unlock new features."
         );
-        assert_eq!(first.button(false).label, "Boost Channel");
-        assert_eq!(first.button(true).label, "Boost Group");
+        assert_eq!(first.button(false, false).label, "Boost Channel");
+        assert_eq!(first.button(true, false).label, "Boost Group");
         let more = counters(2, 5, 4, 8, 0);
         assert_eq!(more.title("News", false), "Help upgrade channel");
         // The viewer's own boost changes the title and the button.
@@ -639,7 +692,7 @@ mod tests {
         assert_eq!(mine.repeated(), None);
         assert_eq!(counters(1, 3, 3, 5, 3).repeated().as_deref(), Some("x3"));
         assert_eq!(
-            mine.button(false),
+            mine.button(false, false),
             BoostButton {
                 label: "OK",
                 closes: true
@@ -647,7 +700,7 @@ mod tests {
         );
         let top = counters(9, 100, 90, 0, 0);
         assert_eq!(top.title("News", false), "Maximum level reached");
-        assert!(top.button(false).closes);
+        assert!(top.button(false, false).closes);
     }
 
     #[test]
@@ -670,6 +723,51 @@ mod tests {
     }
 
     #[test]
+    fn gifts_that_give_boosts_change_the_notices_and_the_button() {
+        let boosted = counters(1, 3, 3, 5, 1);
+        assert_eq!(boosted.button(false, true).label, "Boost Again");
+        assert!(!boosted.button(false, true).closes);
+        assert!(boosted.button(false, false).closes);
+        let decide_for = |slots: &[ParsedBoostSlot], premium| {
+            decide(&classify(-100, slots, NOW), premium, 3, NOW, |_| false)
+        };
+        assert_eq!(
+            decide_for(&[slot(1, -100, 0)], true),
+            BoostDecision::Notice(BoostNotice::GiftMore {
+                receive: 3,
+                again: true
+            })
+        );
+        // Without Premium the upsell still comes first.
+        assert_eq!(
+            decide_for(&[], false),
+            BoostDecision::Notice(BoostNotice::PremiumNeeded)
+        );
+        let more = BoostNotice::GiftMore {
+            receive: 1,
+            again: false,
+        };
+        assert_eq!(
+            more.text("News", false),
+            "To boost News, gift Telegram Premium to a friend and get 1 boost."
+        );
+        assert_eq!(
+            BoostNotice::GiftMore {
+                receive: 4,
+                again: true
+            }
+            .text("News", false),
+            "To boost News again, gift Telegram Premium to a friend and get 4 additional boosts."
+        );
+        assert!(waiting_note(2).contains("get 2 more boosts by gifting"));
+        assert!(reassign_text("News", 1).ends_with("to get 1 additional boost."));
+        assert_eq!(
+            reassign_text("News", 0),
+            "To boost News, reassign a previous boost."
+        );
+    }
+
+    #[test]
     fn progress_fraction() {
         assert_eq!(counters(1, 4, 2, 6, 0).fraction(), 0.5);
         assert_eq!(counters(9, 90, 80, 0, 0).fraction(), 1.0);
@@ -686,13 +784,13 @@ mod tests {
             group: false,
         };
         assert_eq!(
-            flood.text(false),
+            flood.text("News", false),
             "You can only change the channel you boost once a day. You will be able to boost in 2 hours."
         );
         assert!(BoostNotice::PremiumNeeded.offers_premium());
         assert!(!BoostNotice::Already.offers_premium());
         assert_eq!(
-            BoostNotice::Already.text(true),
+            BoostNotice::Already.text("Club", true),
             "You are already boosting this group."
         );
     }
@@ -714,15 +812,15 @@ mod tests {
         let slots = vec![slot(1, -2, 0), slot(2, -3, NOW as i32 + 60), slot(3, -2, 0)];
         let mut state = BoostBoxState::new(-100, false);
         state.apply_decision(BoostDecision::Reassign(slots));
-        state.toggle_slot(1, NOW);
-        state.toggle_slot(2, NOW);
-        assert_eq!(state.note.as_deref(), Some(WAITING_NOTE));
-        state.toggle_slot(3, NOW);
+        state.toggle_slot(1, NOW, 0);
+        state.toggle_slot(2, NOW, 0);
+        assert_eq!(state.note, Some(waiting_note(0)));
+        state.toggle_slot(3, NOW, 0);
         assert_eq!(state.reassign_selection(NOW), vec![1, 3]);
-        state.toggle_slot(1, NOW);
+        state.toggle_slot(1, NOW, 0);
         assert_eq!(state.reassign_selection(NOW), vec![3]);
         // An unknown slot id changes nothing.
-        state.toggle_slot(99, NOW);
+        state.toggle_slot(99, NOW, 0);
         assert_eq!(state.reassign_selection(NOW), vec![3]);
     }
 

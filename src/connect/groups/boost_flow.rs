@@ -33,6 +33,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.groups.chat_boost_details.remove(&chat_id.0);
         self.fetch_chat_boost_status(chat_id)?;
         self.fetch_chat_boost_features(chat_id)?;
+        // Only the gift lines need it, so a failure is not an error.
+        let _ = self.fetch_boosts_per_gift();
         Ok(true)
     }
 

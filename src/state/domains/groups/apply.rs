@@ -162,6 +162,11 @@ impl Session {
                     self.groups.chat_boost_details.insert(chat_id.0, status);
                 }
             }
+            GroupsPayload::BoostsPerGift(count) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
+                    self.groups.boosts_per_gift = Some(count);
+                }
+            }
             // `getChatBoostFeatures` answer, kept for the chat it was
             // asked for.
             GroupsPayload::ChatBoostFeatures(features) => {

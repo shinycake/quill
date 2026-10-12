@@ -140,7 +140,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The chat a tracked voice chat belongs to (`groupCall` carries no
     /// chat id; the chat's `video_chat` association does).
-    fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
+    pub(super) fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
         self.session
             .chats
             .values()

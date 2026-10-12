@@ -16,7 +16,9 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::boost_box::{BoostBoxState, BoostCounters, BoostPhase, replace_question, row_status};
+use quill::boost_box::{
+    BoostBoxState, BoostCounters, BoostPhase, reassign_text, replace_question, row_status,
+};
 use quill::ids::ChatId;
 use quill::state::{RequestPurpose, Session};
 
@@ -78,11 +80,11 @@ impl QuillApp {
 
     fn boost_box_toggle(&mut self, slot_id: i32, cx: &mut Context<Self>) {
         let now = quill::local_time::now_unix();
-        if let Some(state) = self
-            .boost_session_mut()
-            .and_then(|session| session.groups.boost_box.as_mut())
-        {
-            state.toggle_slot(slot_id, now);
+        if let Some(session) = self.boost_session_mut() {
+            let receive = session.groups.boosts_per_gift.unwrap_or(0);
+            if let Some(state) = session.groups.boost_box.as_mut() {
+                state.toggle_slot(slot_id, now, receive);
+            }
         }
         cx.notify();
     }
@@ -301,7 +303,10 @@ impl QuillApp {
                 .id("boost-box-reassign-text")
                 .text_sm()
                 .text_color(text_muted())
-                .child(format!("To boost {name}, reassign a previous boost.")),
+                .child(reassign_text(
+                    &name,
+                    session.groups.boosts_per_gift.unwrap_or(0),
+                )),
         );
         for slot in slots {
             let slot_id = slot.slot_id;
@@ -376,7 +381,8 @@ impl QuillApp {
                     let working = matches!(state.phase, BoostPhase::Working);
                     footer = footer.child(close_button("Close"));
                     if let Some(counters) = counters {
-                        let button = counters.button(state.group);
+                        let allow_multi = session.groups.boosts_per_gift.unwrap_or(0) > 0;
+                        let button = counters.button(state.group, allow_multi);
                         footer = footer.child(
                             Button::new("boost-box-boost")
                                 .label(button.label)
@@ -455,7 +461,7 @@ impl QuillApp {
                         div()
                             .id("boost-box-notice")
                             .text_sm()
-                            .child(notice.text(state.group))
+                            .child(notice.text(&chat_title(session, state.chat_id), state.group))
                             .into_any_element(),
                     )
                 }

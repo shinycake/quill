@@ -87,6 +87,11 @@ pub struct CallsState {
     /// A voice chat, video chat or live stream link offered this call;
     /// its invite hash goes out with the join (`crate::call_link`).
     pub call_link: Option<crate::call_link::PendingCallLink>,
+    /// A call link arrived while a call is on: the question to leave it.
+    pub call_link_confirm: Option<crate::call_link::CallLinkConfirm>,
+    /// The confirmed link `(chat id, hash)`, offered once the old call has
+    /// ended.
+    pub call_link_after_leave: Option<(i64, String)>,
 }
 
 impl CallsState {
@@ -115,6 +120,8 @@ impl CallsState {
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
             call_link: None,
+            call_link_confirm: None,
+            call_link_after_leave: None,
         }
     }
 }
