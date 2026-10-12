@@ -98,6 +98,7 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, _, cx| this.pick_edit_replacement(cx)))
                 .into_any_element()
         });
+        let replace_button = self.edit_media_trailing(edit, replace_button, cx);
         composer_context_bar_rich(
             "composer-edit-header",
             gpui_kit::assets::IconName::Pencil,

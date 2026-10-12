@@ -13,6 +13,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
+mod edit_cover;
 mod edits;
 mod group_admin;
 
@@ -375,6 +376,7 @@ fn driver_edit_snapshot_with_replacement_sends_edit_message_media() {
                 kind: EditMediaKind::Photo,
                 spoiler: true,
             }),
+            ..MediaEdit::default()
         },
         link_preview: Default::default(),
     };

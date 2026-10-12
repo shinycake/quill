@@ -106,6 +106,35 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .ok_or(ConnectSendError::InvalidRequest)?,
             );
         }
+        // "Edit Cover": a staged cover rides on the replacement video, or
+        // resends the video already on the message by file id (tdesktop
+        // `MediaEditManager::videoCover`). Same peers as tdesktop's
+        // `CanEditVideoCover`; TDLib rejects covers in secret chats.
+        if let Some(cover) = edit.effective_cover() {
+            if !crate::composer::session_allows_cover(&self.session, edit.chat_id) {
+                return Err(ConnectSendError::InvalidRequest);
+            }
+            let cover_path =
+                crate::composer::cover_send_path(cover).ok_or(ConnectSendError::InvalidRequest)?;
+            let cover_path = cover_path.to_string_lossy();
+            let caption_above = edit.caption_above && !strip_blockquote;
+            replacement_content = match (replacement_content, edit.media_edit.video.as_ref()) {
+                (Some(content), _) => Some(crate::telegram::requests::with_video_cover(
+                    content,
+                    &cover_path,
+                )),
+                (None, Some(video)) => {
+                    Some(crate::telegram::requests::existing_video_cover_content(
+                        video,
+                        &cover_path,
+                        caption,
+                        caption_above,
+                        strip_blockquote,
+                    ))
+                }
+                (None, None) => return Err(ConnectSendError::InvalidRequest),
+            };
+        }
         let extra = self
             .session
             .request(RequestPurpose::EditMessage, Some(edit.chat_id));

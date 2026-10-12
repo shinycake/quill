@@ -73,6 +73,9 @@ enum CropDrag {
 pub(super) struct PhotoEditor {
     /// Index of the attachment being edited.
     index: usize,
+    /// Editing the media of a message being edited, not a pending
+    /// attachment (`edit_media_tools.rs`).
+    message_edit: bool,
     working: RgbaImage,
     preview: Arc<RenderImage>,
     crop: CropRect,
@@ -115,6 +118,7 @@ impl PhotoEditor {
     fn new(index: usize, working: RgbaImage) -> Self {
         Self {
             index,
+            message_edit: false,
             preview: preview_of(&working),
             working,
             crop: CropRect::FULL,
@@ -128,6 +132,14 @@ impl PhotoEditor {
             selected: None,
             item_drag: None,
             image_bounds: Rc::new(Cell::new(None)),
+        }
+    }
+
+    /// An editor on the photo of a message being edited.
+    pub(super) fn for_message_edit(working: RgbaImage) -> Self {
+        Self {
+            message_edit: true,
+            ..Self::new(0, working)
         }
     }
 
@@ -393,15 +405,11 @@ impl QuillApp {
         };
         let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
         let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
-        let dir = std::env::temp_dir().join("quill-edits");
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let path = dir.join(format!("edit-{stamp}.png"));
-        let saved = std::fs::create_dir_all(&dir)
-            .ok()
-            .and_then(|()| edited.save(&path).ok())
-            .and_then(|()| std::fs::canonicalize(&path).ok());
+        let saved = super::edit_media_tools::write_edited_png(&edited);
+        if editor.message_edit {
+            self.finish_edit_image(saved, cx);
+            return;
+        }
         match (
             saved,
             self.composer_ui.pending_attachments.get_mut(editor.index),

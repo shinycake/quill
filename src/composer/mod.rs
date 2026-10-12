@@ -12,6 +12,7 @@ mod attachments;
 mod commands;
 mod draft_topic;
 mod edit;
+mod edit_media_tools;
 mod markup;
 mod reply;
 mod send;
@@ -31,6 +32,10 @@ pub use edit::{
     ComposerEdit, ComposerEditKind, EDIT_MEDIA_ALBUM_ERROR, EDIT_MEDIA_INVALID_FILE, EditMediaKind,
     EditMediaReplacement, EditableMedia, LinkPreviewChoice, MediaEdit, begin_edit_draft,
     begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply,
+};
+pub use edit_media_tools::{
+    CLEAR_COVER_LABEL, EditMediaTool, ExistingVideo, cover_peer_allows, cover_send_path,
+    session_allows_cover,
 };
 pub use markup::{
     ComposerEntity, FormatAction, FormatKind, apply_format_markup, clear_format_markup,
