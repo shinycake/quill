@@ -43,6 +43,7 @@ mod sessions;
 mod shared_media;
 mod shared_media_profile;
 mod similar_strip;
+mod status_badges;
 mod stickers;
 mod stories;
 mod stories_more;

@@ -148,7 +148,8 @@ impl Session {
 
     /// The badge after a chat row's title (`peer_badge::title_badge`):
     /// users carry verification, Premium and an emoji status; supergroups
-    /// and channels carry verification only; basic groups have none.
+    /// and channels carry verification and an emoji status; basic groups
+    /// have none.
     pub fn chat_title_badge(&self, chat: &ChatSummary) -> Option<crate::peer_badge::TitleBadge> {
         let (verification, premium, status) = self.chat_badge_inputs(chat)?;
         crate::peer_badge::title_badge(verification, premium, status)
@@ -214,6 +215,32 @@ impl Session {
             .as_ref()
     }
 
+    /// What follows a message sender's name in a group
+    /// (`Message::validateFromNameText`): a Premium user's emoji status id,
+    /// `Some(0)` for the bare Premium star, or a channel sender's emoji
+    /// status (not the chat's own).
+    pub fn sender_status(&self, message: &crate::state::HistoryMessage) -> Option<i64> {
+        use crate::telegram::envelope::MessageSender;
+        match message.sender? {
+            MessageSender::User { user_id } => {
+                let user = self.user(user_id)?;
+                (user.is_premium && self.premium_badges_shown()).then_some(user.emoji_status_id)
+            }
+            MessageSender::Chat { chat_id } if chat_id != message.chat_id.0 => self
+                .chats_state
+                .chat_looks
+                .get(&chat_id)
+                .map(|look| look.emoji_status_id)
+                .filter(|id| *id != 0 && self.premium_badges_shown()),
+            MessageSender::Chat { .. } => None,
+        }
+    }
+
+    /// [`Self::sender_status`] when it is a custom emoji.
+    pub fn sender_status_id(&self, message: &crate::state::HistoryMessage) -> Option<i64> {
+        self.sender_status(message).filter(|id| *id != 0)
+    }
+
     fn chat_badge_inputs(
         &self,
         chat: &ChatSummary,
@@ -222,17 +249,30 @@ impl Session {
         match chat.kind {
             ChatKind::Private { user_id } | ChatKind::Secret { user_id, .. } => {
                 let user = self.user(user_id.0)?;
-                Some((user.verification, user.is_premium, user.emoji_status_id))
+                Some((
+                    user.verification,
+                    user.is_premium && self.premium_badges_shown(),
+                    user.emoji_status_id,
+                ))
             }
-            ChatKind::Supergroup { supergroup_id, .. } => Some((
-                self.groups
-                    .supergroup_verification
-                    .get(&supergroup_id)
-                    .copied()
-                    .unwrap_or_default(),
-                false,
-                0,
-            )),
+            // A channel (not a Premium user) can carry an emoji status too
+            // (tdesktop `drawGetWidth`: `isPremium() || isChannel()`).
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                let status = self
+                    .chats_state
+                    .chat_looks
+                    .get(&chat.id.0)
+                    .map_or(0, |look| look.emoji_status_id);
+                Some((
+                    self.groups
+                        .supergroup_verification
+                        .get(&supergroup_id)
+                        .copied()
+                        .unwrap_or_default(),
+                    status != 0 && self.premium_badges_shown(),
+                    status,
+                ))
+            }
             ChatKind::BasicGroup { .. } | ChatKind::Unknown => None,
         }
     }

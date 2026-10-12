@@ -170,6 +170,7 @@ impl QuillApp {
                         SenderLabel {
                             name: name.clone(),
                             accent: accent.filter(|_| is_group),
+                            status: session.and_then(|s| s.sender_status(message)),
                         }
                     });
                 let receipt = if message.is_outgoing {

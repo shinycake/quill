@@ -276,6 +276,13 @@ impl QuillApp {
     /// screen and what they look like — so they can crumble once the
     /// deletion lands.
     pub(super) fn begin_vanish(&self, chat_id: ChatId, ids: &[MessageId]) {
+        // `ThanosEffect::Supported`: not with "Effects in messages" or
+        // interface animations saving power.
+        if quill::power_saving::on(quill::power_saving::Flag::ChatEffects)
+            || quill::power_saving::reduce_motion_now()
+        {
+            return;
+        }
         let Some(history) = self.session().and_then(|s| s.histories.get(&chat_id.0)) else {
             return;
         };

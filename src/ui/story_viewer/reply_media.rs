@@ -193,11 +193,7 @@ impl QuillApp {
         else {
             return false;
         };
-        if self.session().is_some_and(|session| {
-            session.sticker_requires_premium(file_id) && !session.my_is_premium()
-        }) {
-            self.connection.status_note = "Sending this sticker requires Telegram Premium".into();
-            cx.notify();
+        if self.premium_sticker_blocked(file_id, cx) {
             return true;
         }
         if self.slow_mode_blocked(chat_id, cx) {

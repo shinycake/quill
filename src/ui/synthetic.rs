@@ -255,6 +255,9 @@ pub(crate) struct MessageChrome {
     pub sender: Option<SharedString>,
     /// The sender's name color (groups); `None` keeps the default text.
     pub sender_color: Option<Hsla>,
+    /// The Premium status or star after the sender's name
+    /// (`status_emoji::sender_status_element`).
+    pub sender_status: Option<AnyElement>,
     /// Incoming sender avatar → kit `Message` avatar slot. `None` where the
     /// sender can't be identified (groups) — never invented.
     pub avatar: Option<AnyElement>,
@@ -373,6 +376,7 @@ fn message_bubble_with_quote(
     let MessageChrome {
         sender,
         sender_color,
+        sender_status,
         avatar,
         footer,
         footer_inline,
@@ -385,6 +389,7 @@ fn message_bubble_with_quote(
         media_width,
         max_width,
     } = chrome;
+    let has_sender_status = sender_status.is_some();
     let group: SharedString = format!("message-row-{}", row.id).into();
     let alignment = if row.outgoing {
         component::message::MessageAlignment::End
@@ -439,9 +444,17 @@ fn message_bubble_with_quote(
                     .pb_0p5()
                     .text_size(look.font * 0.93)
                     .font_weight(FontWeight::SEMIBOLD)
-                    .truncate()
                     .when_some(sender_color, |this, color| this.text_color(color))
-                    .child(sender),
+                    .when_some(sender_status, |this, status| {
+                        // The status sits right after the name, which
+                        // shortens first (`Message::paintFromName`).
+                        this.flex()
+                            .items_center()
+                            .gap_1()
+                            .child(div().min_w_0().truncate().child(sender.clone()))
+                            .child(status)
+                    })
+                    .when(!has_sender_status, |this| this.truncate().child(sender)),
             )
         })
         .when_some(quote, |this, quote| this.child(quote))

@@ -78,6 +78,10 @@ pub struct EmojiPanel {
     pub keyword_emojis: Vec<String>,
     /// Slice S10: `getEmojiCategories` rows for the picker.
     pub categories: Vec<EmojiCategory>,
+    /// `getEmojiCategories` for the sticker panel (`GetStickerCategories`).
+    pub sticker_categories: Vec<EmojiCategory>,
+    /// The sticker categories were asked for.
+    pub sticker_categories_asked: bool,
 }
 
 /// B11: input-language codes for `getKeywordEmojis`: the script of what
@@ -415,6 +419,9 @@ impl Session {
         if purpose == Some(RequestPurpose::GetEmojiCategories) {
             self.remember_files(&files);
             self.stickers.emoji.categories = categories;
+        } else if purpose == Some(RequestPurpose::GetStickerCategories) {
+            self.remember_files(&files);
+            self.stickers.emoji.sticker_categories = categories;
         }
     }
 
@@ -461,6 +468,15 @@ impl Session {
                 }));
             }
             ids.extend(viewer_caption_custom_emoji(&message.content));
+            // The status after a sender's name in a group.
+            ids.extend(self.sender_status_id(message));
+        }
+        // The status next to the name in the open profile panel.
+        if let Some(crate::state::InfoPanelTarget::User(user_id)) = self.users_state.open_info_panel
+            && let Some(user) = self.user(user_id)
+            && user.is_premium
+        {
+            ids.push(user.emoji_status_id);
         }
         // The emoji repeated behind reply strips.
         ids.extend(self.reply_background_emoji_ids());

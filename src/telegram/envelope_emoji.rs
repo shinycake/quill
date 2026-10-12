@@ -49,6 +49,43 @@ pub struct EmojiCategory {
     pub name: String,
     pub icon: Option<StickerItem>,
     pub is_greeting: bool,
+    /// Where the category's stickers come from.
+    pub source: EmojiCategorySource,
+}
+
+/// `emojiCategorySource` (schema 1.8.68, line 6815).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum EmojiCategorySource {
+    /// `emojiCategorySourceSearch`: stickers for these emoji, found with
+    /// `searchStickers`.
+    Search(Vec<String>),
+    /// `emojiCategorySourcePremium`: the Premium stickers, found with
+    /// `getPremiumStickers`.
+    Premium,
+    /// A source a newer TDLib adds: nothing to search with.
+    #[default]
+    Unknown,
+}
+
+impl EmojiCategorySource {
+    pub(crate) fn parse(source: Option<&Value>) -> Self {
+        let Some(source) = source else {
+            return Self::Unknown;
+        };
+        match source.get("@type").and_then(Value::as_str) {
+            Some("emojiCategorySourceSearch") => Self::Search(
+                source
+                    .get("emojis")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|emoji| emoji.as_str().map(str::to_string))
+                    .collect(),
+            ),
+            Some("emojiCategorySourcePremium") => Self::Premium,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// Slice S10: `emojiStatuses` — `getRecentEmojiStatuses` /
@@ -164,6 +201,7 @@ pub(crate) fn parse_emoji_categories(value: &Value) -> EnvelopePayload {
                     .get("is_greeting")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                source: EmojiCategorySource::parse(entry.get("source")),
             });
         }
     }

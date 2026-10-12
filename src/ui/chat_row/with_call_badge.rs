@@ -1,6 +1,7 @@
 //! Methods moved out of `chat_row.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_emoji::{StatusGlyph, status_element};
 
 /// The active-video-chat badge on a group or channel avatar, bottom-right
 /// and ringed in the sidebar color like the online dot (tdesktop paints a
@@ -142,7 +143,7 @@ pub(in crate::ui) fn draft_prefix(reply: bool, bare: bool) -> impl IntoElement {
 /// emoji, or a bordered SCAM / FAKE label (`Ui::PeerBadge`).
 pub(in crate::ui) fn title_badge_element(
     badge: TitleBadge,
-    emoji: Option<std::path::PathBuf>,
+    emoji: Option<StatusGlyph>,
     cx: &App,
 ) -> AnyElement {
     if let Some(label) = badge.label() {
@@ -167,12 +168,9 @@ pub(in crate::ui) fn title_badge_element(
             .flex_none()
             .text_color(Hsla::from(accent_strong()))
             .into_any_element(),
-        TitleBadge::EmojiStatus(_) if emoji.is_some() => img(emoji.unwrap_or_default())
-            .size(px(14.))
-            .aspect_square()
-            .flex_none()
-            .object_fit(ObjectFit::Contain)
-            .into_any_element(),
+        TitleBadge::EmojiStatus(_) if emoji.is_some() => {
+            status_element(emoji.expect("checked by the guard"), 14.)
+        }
         // A status that has not downloaded yet shows the star.
         TitleBadge::EmojiStatus(_) | TitleBadge::PremiumStar => div()
             .flex_none()

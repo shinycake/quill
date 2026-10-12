@@ -29,6 +29,20 @@ const ICON_TINTS: [(u32, u32); 5] = [
     (0x4cb8a0, 0x4c9fe0),
 ];
 
+/// The stickers the stickers preview shows: the one that was clicked
+/// first, then the examples.
+fn preview_stickers(
+    hub: &quill::premium_hub::PremiumHub,
+) -> impl Iterator<Item = &quill::telegram::envelope::StickerItem> {
+    let requested = hub.premium_requested.as_ref();
+    requested
+        .into_iter()
+        .chain(hub.premium_stickers.iter().filter(move |sticker| {
+            requested.is_none_or(|requested| requested.file_id != sticker.file_id)
+        }))
+        .take(STICKER_TILES)
+}
+
 fn feature_icon(index: usize) -> Div {
     let (from, to) = ICON_TINTS[index % ICON_TINTS.len()];
     div()
@@ -84,11 +98,7 @@ impl QuillApp {
                     let ids: Vec<FileId> = this
                         .session()
                         .map(|s| {
-                            s.payments
-                                .hub
-                                .premium_stickers
-                                .iter()
-                                .take(STICKER_TILES)
+                            preview_stickers(&s.payments.hub)
                                 .filter_map(|st| st.display_file_id())
                                 .collect()
                         })
@@ -100,6 +110,66 @@ impl QuillApp {
                     }
                     cx.notify();
                 });
+            }
+        })
+        .detach();
+    }
+
+    /// A Premium sticker was chosen without Premium: show the Premium
+    /// stickers preview with that sticker first (tdesktop
+    /// `ShowSendPremiumError` → `ShowStickerPreviewBox`).
+    pub(in crate::ui) fn show_premium_sticker_preview(
+        &mut self,
+        sticker: Option<quill::telegram::envelope::StickerItem>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(hub) = self.hub_mut() {
+            hub.premium_requested = sticker;
+        }
+        self.open_premium(cx);
+        self.go_to_stickers_preview(cx);
+    }
+
+    /// Page the open Premium dialog to its stickers feature: at once when
+    /// the feature list is known, else as soon as it arrives.
+    fn go_to_stickers_preview(&mut self, cx: &mut Context<Self>) {
+        let stickers_page = |this: &Self| {
+            this.session()?
+                .payments
+                .hub
+                .premium
+                .as_ref()?
+                .features
+                .iter()
+                .position(|feature| feature.title == STICKERS_FEATURE)
+        };
+        if let Some(index) = stickers_page(self) {
+            self.set_promo_page(PromoPage::Preview(index), cx);
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            for _ in 0..24 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(250))
+                    .await;
+                let done = this
+                    .update(cx, |this, cx| {
+                        let open = this.session().is_some_and(|s| s.payments.hub.premium_open);
+                        if !open {
+                            return true;
+                        }
+                        match stickers_page(this) {
+                            Some(index) => {
+                                this.set_promo_page(PromoPage::Preview(index), cx);
+                                true
+                            }
+                            None => false,
+                        }
+                    })
+                    .unwrap_or(true);
+                if done {
+                    break;
+                }
             }
         })
         .detach();
@@ -477,7 +547,7 @@ impl QuillApp {
                 self.request_animation_tick(30, cx);
                 stage.child(picture.element(side, height, ObjectFit::Cover, Corners::all(px(12.))))
             }
-            None if feature.title == STICKERS_FEATURE && !hub.premium_stickers.is_empty() => {
+            None if feature.title == STICKERS_FEATURE && preview_stickers(hub).next().is_some() => {
                 let roots = self.media_display_roots();
                 let mut grid = div()
                     .flex()
@@ -486,7 +556,7 @@ impl QuillApp {
                     .gap_2()
                     .p_3()
                     .size_full();
-                for (i, sticker) in hub.premium_stickers.iter().take(STICKER_TILES).enumerate() {
+                for (i, sticker) in preview_stickers(hub).enumerate() {
                     let path = [sticker.display_file_id(), sticker.thumb_file_id]
                         .into_iter()
                         .flatten()

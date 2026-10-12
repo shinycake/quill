@@ -57,6 +57,9 @@ pub(crate) struct HistoryRowInputs {
 pub(crate) struct SenderLabel {
     pub(crate) name: String,
     pub(crate) accent: Option<i32>,
+    /// What follows the name: `Some(id)` a Premium emoji status, `Some(0)`
+    /// the bare Premium star (`Session::sender_status`).
+    pub(crate) status: Option<i64>,
 }
 
 #[derive(Clone)]

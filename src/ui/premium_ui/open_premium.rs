@@ -20,6 +20,7 @@ impl QuillApp {
         self.premium_preview.stop();
         if let Some(hub) = self.hub_mut() {
             hub.premium_open = false;
+            hub.premium_requested = None;
         }
         cx.notify();
     }

@@ -83,7 +83,14 @@ impl QuillApp {
         let source = animated
             .map(ImageSource::Render)
             .or_else(|| still.map(ImageSource::from));
+        // What flies into the chat when this sticker is sent.
+        let fly_image = source.clone();
         let file_id = item.file_id;
+        // A Premium sticker carries the lock (or, with Premium, the star).
+        let premium_mark = self
+            .session()
+            .filter(|s| item.requires_premium && s.premium_badges_shown())
+            .map(|s| crate::ui::premium_mark::premium_mark(s.my_is_premium()));
         let favorite = self.session().is_some_and(|s| {
             s.stickers
                 .stickers
@@ -107,6 +114,7 @@ impl QuillApp {
             .map(|id| (id, item.thumb_width, item.thumb_height));
         div()
             .id(("panel-sticker", id))
+            .relative()
             .size(px(STICKER_CELL))
             .p_1()
             .flex()
@@ -127,7 +135,9 @@ impl QuillApp {
                 }
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
+                crate::ui::send_fly::note_source(file_id, fly_image.clone(), (width, height));
                 this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
+                crate::ui::send_fly::note_source(file_id, None, (width, height));
                 this.close_media_panel(cx);
             }))
             .context_menu(move |menu, _, _| {
@@ -183,6 +193,8 @@ impl QuillApp {
                     .bg(cx.theme().muted.opacity(0.5))
                     .into_any_element(),
             })
+            .children(premium_mark)
+            .child(crate::ui::send_fly::cell_probe(file_id))
             .into_any_element()
     }
 
@@ -385,6 +397,11 @@ impl QuillApp {
                     });
                 });
             }
+            let strip = (tab == PanelTab::Stickers
+                && self.pickers.media_panel.reaction.is_none()
+                && self.panel_query(cx).is_empty())
+            .then(|| self.sticker_category_strip(cx))
+            .flatten();
             let empty = self.pickers.media_panel.rows.is_empty();
             let list = list(
                 self.pickers.media_panel.list.clone(),
@@ -462,6 +479,7 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .child(search)
+                .children(strip)
                 .child(if empty {
                     div()
                         .flex_1()

@@ -42,6 +42,8 @@ fn flag_id(flag: Flag) -> &'static str {
         Flag::ChatBackground => "power-chat-background",
         Flag::ChatSpoiler => "power-spoiler",
         Flag::Calls => "power-calls",
+        Flag::EmojiStatus => "power-emoji-status",
+        Flag::ChatEffects => "power-chat-effects",
     }
 }
 

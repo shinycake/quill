@@ -3,6 +3,22 @@ use crate::telegram::requests::*;
 use serde_json::Value;
 
 #[test]
+fn premium_stickers_request_is_clamped_to_the_documented_range() {
+    let v: Value = serde_json::from_str(&get_premium_stickers(RequestId(5), 500)).unwrap();
+    assert_eq!(v["@type"], "getPremiumStickers");
+    assert_eq!(v["limit"], 100);
+    let v: Value = serde_json::from_str(&get_premium_stickers(RequestId(5), 0)).unwrap();
+    assert_eq!(v["limit"], 1);
+}
+
+#[test]
+fn sticker_categories_ask_for_the_regular_stickers_type() {
+    let v: Value = serde_json::from_str(&get_sticker_categories(RequestId(6))).unwrap();
+    assert_eq!(v["@type"], "getEmojiCategories");
+    assert_eq!(v["type"]["@type"], "emojiCategoryTypeRegularStickers");
+}
+
+#[test]
 fn send_sticker_uses_input_file_id_and_int64_set() {
     let json = send_sticker(
         RequestId(13),

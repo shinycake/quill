@@ -133,6 +133,9 @@ pub enum StickersPurpose {
     GetGreetingStickers,
     /// Slice S10: `getEmojiCategories` (td_api.tl:14738). Response is `emojiCategories`.
     GetEmojiCategories,
+    /// `getEmojiCategories` with `emojiCategoryTypeRegularStickers`: the
+    /// sticker panel's category strip. Response is `emojiCategories`.
+    GetStickerCategories,
     /// Slice S10: `getInstalledStickerSets` with `stickerTypeCustomEmoji` (td_api.tl:14657). Response is `stickerSets`.
     GetInstalledEmojiSets,
     /// Slice S10: `getArchivedStickerSets` with `stickerTypeCustomEmoji` (td_api.tl:14663). Response is `stickerSets`.
@@ -200,6 +203,7 @@ flat_purposes!(Stickers(StickersPurpose) {
     GetKeywordEmojis,
     GetGreetingStickers,
     GetEmojiCategories,
+    GetStickerCategories,
     GetInstalledEmojiSets,
     GetTrendingEmojiSets,
     SearchEmojiSets,

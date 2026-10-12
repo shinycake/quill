@@ -181,6 +181,7 @@ pub(super) fn album_history_row(
     // avatar) computed at row-build time so the virtualized row doesn't
     // carry the chat.
     sender: Option<SenderLabel>,
+    sender_status: Option<AnyElement>,
     receipt: OutboxReceipt,
     sender_avatar: Option<(String, Option<PathBuf>)>,
     // Settings → Appearance: font size + bubble/plain style.
@@ -255,6 +256,7 @@ pub(super) fn album_history_row(
     {
         chrome.avatar = Some(link.wrap(avatar));
     }
+    chrome.sender_status = sender_status;
     chrome.media_led = true;
     chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.)));
     chrome.footer_overlay = !has_caption;

@@ -18,11 +18,7 @@ impl QuillApp {
         if self.route_business_start_page_sticker(file_id, cx) {
             return;
         }
-        if self.session().is_some_and(|session| {
-            session.sticker_requires_premium(file_id) && !session.my_is_premium()
-        }) {
-            self.connection.status_note = "Sending this sticker requires Telegram Premium".into();
-            cx.notify();
+        if self.premium_sticker_blocked(file_id, cx) {
             return;
         }
         let chat_id = self.session().and_then(|session| session.open_chat);
@@ -69,6 +65,7 @@ impl QuillApp {
         };
         if sent {
             self.consume_sent_reply(chat_id, cx);
+            self.arm_send_fly(chat_id, file_id, cx);
         }
         cx.notify();
     }
