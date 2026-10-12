@@ -278,7 +278,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Send as another identity (channel or anonymous) picker <!-- parity:composer-send-as -->
 - [x] Forward bar in the composer: change recipient, hide sender or captions, add a comment <!-- parity:composer-forward-bar -->
 - [x] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
-- [ ] Repeating scheduled messages (Premium) <!-- parity:composer-repeat-schedule -->
+- [x] Repeating scheduled messages (Premium) <!-- parity:composer-repeat-schedule -->
 - [x] Send a dice, dart, basketball, football, bowling or slot machine by sending its emoji alone <!-- parity:composer-send-dice -->
 - [x] Share a contact card from a profile <!-- parity:composer-share-contact -->
 - [x] Create checklists <!-- parity:composer-checklist -->
@@ -295,7 +295,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Inline bot results in a grid and the "switch to PM" button <!-- parity:composer-inline-grid -->
 - [x] Recent inline bots suggested when typing @ <!-- parity:composer-recent-inline-bots -->
 - [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
-- [ ] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
+- [x] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
 - [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
 - [x] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
 - [x] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
@@ -790,7 +790,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Masks tab and mask stickers <!-- parity:stickers-masks -->
 - [x] Emoji search by keyword in all languages <!-- parity:emoji-keyword-search -->
 - [ ] Emoji set style picker (blocked: needs bitmap-sprite emoji glyphs in GPUI text layout; see docs/decisions/codex-emoji-set-style.md) <!-- parity:emoji-set-style -->
-- [ ] "Replace emoji automatically" setting <!-- parity:emoji-replace-auto -->
+- [x] "Replace emoji automatically" setting <!-- parity:emoji-replace-auto -->
 - [x] Quick reaction on double-click and choose the default quick reaction <!-- parity:reactions-quick-double-click -->
 - [x] Double-click-to-reply setting and reply or reaction corner buttons <!-- parity:reactions-corner-settings -->
 - [x] Reaction animation when you send a reaction <!-- parity:reactions-fly-animation -->
@@ -1124,7 +1124,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Ctrl+1 to 8 open pinned chats, Ctrl+0 Saved Messages, Ctrl+9 Archive, Ctrl+J Contacts <!-- parity:platform-shortcut-pinned -->
 - [x] Ctrl+Shift+Up and Down switch folders <!-- parity:platform-shortcut-folders -->
 - [x] Ctrl+R mark chat read, Ctrl+\ chat menu <!-- parity:platform-shortcut-chat-actions -->
-- [ ] Shortcuts for scheduled messages, silent send, schedule, link preview toggle, round video, archive chat, admin log and reopen closed window <!-- parity:platform-shortcut-commands -->
+- [x] Shortcuts for scheduled messages, silent send, schedule, link preview toggle, round video, archive chat, admin log and reopen closed window <!-- parity:platform-shortcut-commands -->
 - [x] Open a chat in a new window <!-- parity:platform-new-window -->
 - [ ] Dock menu on macOS (deferred: low impact) <!-- parity:platform-dock-menu -->
 - [ ] Touch Bar and extra window menu items (deferred: low impact) <!-- parity:platform-touch-bar -->

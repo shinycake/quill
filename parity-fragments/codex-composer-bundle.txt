@@ -1,4 +1,0 @@
-parity:composer-repeat-schedule
-parity:composer-up-edit-media
-parity:emoji-replace-auto
-parity:platform-shortcut-commands
