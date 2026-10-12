@@ -212,8 +212,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Service rows for users or chats shared with a bot, web-app data sent and bot write access allowed <!-- parity:render-service-bot-shared -->
 - [x] Protected-content toggled and disable-requested service rows <!-- parity:render-service-protected-content -->
 - [x] Payment refunded, paid-message refunded and price-changed service rows <!-- parity:render-service-payment-refund -->
-- [ ] Forwarded story messages and story mentions <!-- parity:render-story-message -->
-- [ ] Paid media shows a blurred locked preview with an unlock button <!-- parity:render-paid-media -->
+- [x] Forwarded story messages and story mentions <!-- parity:render-story-message -->
+- [x] Paid media shows a blurred locked preview with an unlock button <!-- parity:render-paid-media -->
 - [x] Checklist messages render with tasks and done marks <!-- parity:render-checklist -->
 - [x] Gift and giveaway messages render as cards (regular, unique, refunded, prize, winners, gift code) <!-- parity:render-gift-cards -->
 - [x] Contact cards show an avatar with Message, Add contact and View buttons <!-- parity:render-contact-card-actions -->
