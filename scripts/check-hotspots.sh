@@ -58,7 +58,9 @@ while IFS= read -r entry; do
   case $rule in
     none) bad=$changed ;;
     mod-lines)
-      bad=$(printf '%s\n' "$changed" | grep -vE '^[+-][[:space:]]*(((pub(\([a-z]+\))? )?mod [A-Za-z0-9_]+;)|((pub(\([a-z]+\))? )?use [^;]*;))?[[:space:]]*$') ;;
+      # Also allow rustfmt-wrapped use blocks: the `use x::{` opener, lines that
+      # only list paths, and the closing `};`.
+      bad=$(printf '%s\n' "$changed" | grep -vE '^[+-][[:space:]]*(((pub(\([a-z]+\))? )?mod [A-Za-z0-9_]+;)|((pub(\([a-z]+\))? )?use [^;]*;)|((pub(\([a-z]+\))? )?use [A-Za-z0-9_:]+::\{)|([A-Za-z0-9_:]+(, *[A-Za-z0-9_:]+)*,?)|(\};))?[[:space:]]*$') ;;
     max:*)
       [ "$n" -gt "${rule#max:}" ] && bad="$n changed lines (allowed ${rule#max:})" ;;
     re:*)
