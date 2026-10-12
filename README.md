@@ -471,7 +471,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Video viewer: Copy Frame, Share at current time, quality picker, rotate video <!-- parity:viewer-video-extras -->
 - [x] Caption overlay in the viewer with formatted text and links <!-- parity:viewer-caption-entities -->
 - [x] Viewer header shows the sender (opens profile) and send time <!-- parity:viewer-sender-header -->
-- [ ] "Disappears in" countdown on timed photos and videos <!-- parity:viewer-ttl-countdown -->
+- [x] "Disappears in" countdown on timed photos and videos <!-- parity:viewer-ttl-countdown -->
 - [x] "View all photos / files" link to shared media <!-- parity:viewer-view-all -->
 - [x] "Saved to Downloads" toast with a folder link <!-- parity:viewer-saved-toast -->
 - [x] Video playback in the viewer and inline on Linux and Windows <!-- parity:viewer-video-cross-platform -->
@@ -479,7 +479,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Audio playlist with repeat, shuffle and autoplay of the next voice message <!-- parity:viewer-audio-playlist -->
 - [x] OS media keys and Now Playing integration <!-- parity:viewer-os-media-keys -->
 - [x] Voice and round playback speed dial with custom speeds <!-- parity:viewer-speed-dial -->
-- [ ] Save music to Profile, Saved Messages or Downloads <!-- parity:viewer-save-music -->
+- [x] Save music to Profile, Saved Messages or Downloads <!-- parity:viewer-save-music -->
 
 ### Groups, supergroups & channels
 
@@ -1011,7 +1011,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
 - [x] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
 - [x] Profile photo from camera, emoji avatar builder and video avatar with frame choice <!-- parity:settings-photo-sources -->
-- [ ] Profile music (saved music) management <!-- parity:settings-profile-music -->
+- [x] Profile music (saved music) management <!-- parity:settings-profile-music -->
 - [x] Choose the main profile tab <!-- parity:settings-main-profile-tab -->
 - [x] Phone number display and "Is this still your number?" suggestion <!-- parity:settings-phone-suggestion -->
 - [x] Ask a Question, FAQ, Features and Privacy Policy links <!-- parity:settings-support-links -->

@@ -1,3 +1,0 @@
-parity:viewer-ttl-countdown
-parity:viewer-save-music
-parity:settings-profile-music
