@@ -54,6 +54,11 @@ impl Session {
                     );
                 }
             }
+            Some(RequestPurpose::GetStory) => {
+                if let Some((chat, story)) = pending.and_then(|p| Some((p.chat_id?, p.story_id?))) {
+                    self.stories.missing.insert((chat.0, story));
+                }
+            }
             Some(RequestPurpose::SearchPublicStories) => {
                 self.fail_story_search(format!("Could not search stories: {}", error_reason(err)));
             }

@@ -104,6 +104,7 @@ mod session_history_window;
 mod session_links_boosts;
 mod session_members;
 mod session_message_menu;
+mod session_message_story;
 mod session_new;
 mod session_notifications;
 mod session_peer_color;
@@ -178,6 +179,7 @@ pub use session_message_menu::{
     Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
     StickerSetView, StickerSetViewStage, reaction_filter_key,
 };
+pub use session_message_story::{StoryCardState, StoryPreview, message_story_key};
 pub use session_privacy_data::{PasswordCheck, PrivacyData};
 pub use session_proxy::LINK_PING_ID;
 pub use session_reply::{

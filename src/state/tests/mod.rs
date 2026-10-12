@@ -24,6 +24,7 @@ mod history_window_cap;
 mod inline_members;
 mod main_profile_tab;
 mod masks;
+mod message_story;
 mod messages;
 mod messages_more;
 mod notifications;

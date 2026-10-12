@@ -576,6 +576,7 @@ impl Session {
                 }
             }
         }
+        ids.extend(self.message_story_thumb_ids());
         ids
     }
 
@@ -596,6 +597,7 @@ impl Session {
                     && !self.stories.reply_attempted.contains(&(chat.0, *story))
             })
             .collect();
+        wanted.extend(self.message_story_candidates());
         wanted.sort_by_key(|(chat, story)| (chat.0, *story));
         wanted.dedup();
         wanted.truncate(REPLY_FETCH_BATCH);

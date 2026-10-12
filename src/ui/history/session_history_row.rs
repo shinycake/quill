@@ -533,12 +533,9 @@ pub(in crate::ui) fn session_history_row(
             dice_layers,
             cx,
         )),
-        MessageContent::Action(_) if super::super::service_row::locked_paid_media(&message.content).is_some() => {
-            super::super::service_row::locked_paid_media(&message.content)
-                .map(|(stars, locked, caption)| paid_media_card(message.id.0 as u64, stars, locked, caption))
-        }
-        MessageContent::Action(_)
-        | MessageContent::Text(_)
+        // Locked paid media and forwarded stories are bubble cards.
+        MessageContent::Action(_) => action_card(message, session, files, media_roots, cx),
+        MessageContent::Text(_)
         | MessageContent::RichMessage(_)
         | MessageContent::Game(_)
         | MessageContent::GroupCallInvitation { .. }

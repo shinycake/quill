@@ -90,6 +90,10 @@ pub struct StoriesState {
     /// Stories replied to that `getStory` was already asked for, so a
     /// deleted one is not requested again on every refresh.
     pub reply_attempted: HashSet<(i64, i32)>,
+    /// Stories `getStory` answered with an error (deleted, expired or not
+    /// reachable): a forwarded-story card then says "This story has
+    /// expired" (tdesktop `NoStory::Deleted`).
+    pub missing: HashSet<(i64, i32)>,
 }
 
 impl StoriesState {
@@ -118,6 +122,7 @@ impl StoriesState {
             close_friends_pending: None,
             stories_active_loaded: false,
             reply_attempted: HashSet::new(),
+            missing: HashSet::new(),
         }
     }
 }

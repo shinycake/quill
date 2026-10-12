@@ -227,7 +227,19 @@ wording!(
     story_mention,
     BY_DANA,
     r#"{"@type":"messageStory","story_poster_chat_id":1,"story_id":4,"via_mention":true}"#,
-    "Mentioned in a story"
+    "Design Club mentioned you in a story"
+);
+wording!(
+    story_mention_by_me,
+    BY_ME,
+    r#"{"@type":"messageStory","story_poster_chat_id":1,"story_id":4,"via_mention":true}"#,
+    "You mentioned Design Club in a story"
+);
+wording!(
+    story_forward,
+    BY_DANA,
+    r#"{"@type":"messageStory","story_poster_chat_id":1,"story_id":4,"via_mention":false}"#,
+    "Story"
 );
 wording!(
     paid_media,

@@ -51,6 +51,15 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
+        // A story opened from a message (forward or mention) may not be in
+        // the poster's tray at all; fetch it too when it is not cached.
+        let mut missing = missing;
+        let cached = self
+            .session()
+            .is_some_and(|s| s.stories.stories.contains_key(&(chat_id.0, story_id)));
+        if !cached && !missing.contains(&story_id) {
+            missing.push(story_id);
+        }
         if let Some(live) = self.live.as_mut() {
             for id in missing {
                 let _ = live.driver.get_story(chat_id, id);
@@ -82,6 +91,19 @@ impl QuillApp {
                     .map(|tray| collect_story_items(chat_id, tray, &session.stories.stories))
             })
             .unwrap_or_default();
+        // A story that is not in the poster's tray opens alone.
+        let items = if items.iter().any(|item| item.story_id == story_id) {
+            items
+        } else {
+            self.session()
+                .map(|s| {
+                    quill::story_viewer::collect_found_story_items(
+                        &[(chat_id.0, story_id)],
+                        &s.stories.stories,
+                    )
+                })
+                .unwrap_or_default()
+        };
         let Some(index) = items.iter().position(|item| item.story_id == story_id) else {
             return false;
         };

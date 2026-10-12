@@ -474,6 +474,9 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
         Some("messageSticker") => parse_message_sticker(value),
         Some("messageAnimation") => parse_message_animation(value),
         Some("messageVideo") => parse_message_video(value),
+        // A bought `messagePaidMedia` is a photo or video; a locked one
+        // falls through to `ServiceAction::PaidMedia`.
+        Some("messagePaidMedia") => super::paid_media::parse_paid_media(value),
         Some("messageVideoNote") => parse_message_video_note(value),
         Some("messageVoiceNote") => parse_message_voice_note(value),
         Some("messageAudio") => parse_message_audio(value),
