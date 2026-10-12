@@ -264,6 +264,7 @@ impl QuillApp {
                 })
                 .unwrap_or_default()
         };
+        let chat_id_for_status = actions.map_or(0, |(chat_id, _, _, _)| chat_id.0);
         let verify_icon = if thread_header.is_some() || saved || saved_header.is_some() {
             None
         } else {
@@ -300,9 +301,13 @@ impl QuillApp {
                             )
                             .children(badges.into_iter().map(|badge| {
                                 let emoji = match badge {
-                                    quill::peer_badge::TitleBadge::EmojiStatus(id) => {
-                                        self.custom_emoji_still(id)
-                                    }
+                                    quill::peer_badge::TitleBadge::EmojiStatus(id) => self
+                                        .status_glyph(
+                                            super::status_emoji::StatusSurface::Header,
+                                            chat_id_for_status,
+                                            id,
+                                            cx,
+                                        ),
                                     _ => None,
                                 };
                                 super::chat_row::title_badge_element(badge, emoji, cx)

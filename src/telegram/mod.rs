@@ -35,7 +35,9 @@ pub use envelope::{
     VoiceNoteContent, effective_content, parse_chat_admin_rights, parse_chat_permissions,
     parse_envelope, toggle_chosen_emoji_reaction,
 };
-pub use envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem, UpgradedGiftEmojiStatus};
+pub use envelope_emoji::{
+    EmojiCategory, EmojiCategorySource, EmojiKeyword, EmojiStatusItem, UpgradedGiftEmojiStatus,
+};
 pub use ffi::{LibraryOrigin, TdJson, loaded_library_origin, resolve_tdjson_path};
 pub use name_accent::{NameAccentColor, parse_name_accent_color};
 pub use profile_accent::{ProfileAccentColor, parse_profile_accent_color};

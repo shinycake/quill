@@ -886,6 +886,9 @@ pub struct PremiumHub {
     pub premium_stickers: Vec<crate::telegram::envelope::StickerItem>,
     pub premium_stickers_loading: bool,
     pub premium_stickers_asked: bool,
+    /// The locked sticker whose click opened the stickers preview; it leads
+    /// the preview (tdesktop `Descriptor::requestedSticker`).
+    pub premium_requested: Option<crate::telegram::envelope::StickerItem>,
     /// The page of the Premium dialog: the overview or "Doubled limits".
     pub promo_page: promo::PromoPage,
     /// The limit box that is open (pins, caption, GIFs, ...), with how far

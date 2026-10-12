@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.stickers.stickers.close();
     }
 
-    fn sticker_request(
+    pub(super) fn sticker_request(
         &mut self,
         purpose: RequestPurpose,
         build: impl FnOnce(RequestId) -> String,

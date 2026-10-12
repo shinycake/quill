@@ -100,10 +100,15 @@ impl QuillApp {
                 } else {
                     self.session().and_then(|s| s.chat_title_badge(chat))
                 };
-                // Status emoji: the still image (never animated in the
-                // list, so many Premium rows keep the window idle).
+                // Status emoji: two loops in the animation layer, then
+                // the first frame (`status_emoji`).
                 let badge_emoji = match title_badge {
-                    Some(TitleBadge::EmojiStatus(id)) => self.custom_emoji_still(id),
+                    Some(TitleBadge::EmojiStatus(id)) => self.status_glyph(
+                        crate::ui::status_emoji::StatusSurface::ListRow,
+                        chat.id.0,
+                        id,
+                        cx,
+                    ),
                     _ => None,
                 };
                 // Peers with active stories get the ring (tdesktop

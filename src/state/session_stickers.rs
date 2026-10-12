@@ -2,10 +2,26 @@
 use super::*;
 
 impl Session {
+    /// A sticker the panel lists (its sets, recent, favorites, found and
+    /// suggested stickers, the Premium examples) by file.
+    pub fn panel_sticker(&self, file_id: FileId) -> Option<&StickerItem> {
+        [
+            &self.stickers.stickers.stickers,
+            &self.stickers.stickers.recent,
+            &self.stickers.stickers.favorites,
+            &self.stickers.stickers.found_stickers,
+            &self.stickers.stickers.suggestions,
+            &self.payments.hub.premium_stickers,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(self.media.media_library.set_stickers.values().flatten())
+        .find(|sticker| sticker.file_id == file_id)
+    }
+
     pub fn sticker_requires_premium(&self, file_id: FileId) -> bool {
-        [&self.stickers.stickers.stickers, &self.stickers.stickers.recent, &self.stickers.stickers.favorites,
-            &self.stickers.stickers.found_stickers, &self.stickers.stickers.suggestions].into_iter()
-            .flatten().any(|sticker| sticker.file_id == file_id && sticker.requires_premium)
+        self.panel_sticker(file_id)
+            .is_some_and(|sticker| sticker.requires_premium)
             || self.histories.values().flat_map(|history| history.messages.values()).chain(self.threads.topic_histories.values().flat_map(|history| history.messages.values())).any(|message| {
                 matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium)
             })

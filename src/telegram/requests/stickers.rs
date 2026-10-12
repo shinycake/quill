@@ -90,6 +90,30 @@ pub fn search_stickers(
     .to_string()
 }
 
+/// `getPremiumStickers` (`schema/td_api.tl:15048`): the Premium stickers of
+/// regular sets, behind the sticker panel's Premium category. `limit` is
+/// 0-100. Response is `stickers`.
+pub fn get_premium_stickers(extra: RequestId, limit: i32) -> String {
+    json!({
+        "@type": "getPremiumStickers",
+        "@extra": extra.as_extra(),
+        "limit": limit.clamp(1, 100),
+    })
+    .to_string()
+}
+
+/// `getEmojiCategories` for the sticker panel
+/// (`emojiCategoryTypeRegularStickers`, `schema/td_api.tl:6843`): the
+/// category strip beside its search field. Response is `emojiCategories`.
+pub fn get_sticker_categories(extra: RequestId) -> String {
+    json!({
+        "@type": "getEmojiCategories",
+        "@extra": extra.as_extra(),
+        "type": { "@type": "emojiCategoryTypeRegularStickers" },
+    })
+    .to_string()
+}
+
 /// Slice S8: `getFavoriteStickers`. Response is `stickers`.
 pub fn get_favorite_stickers(extra: RequestId) -> String {
     json!({

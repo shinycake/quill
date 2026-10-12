@@ -173,11 +173,16 @@ impl QuillApp {
                 .child(label)
                 .into_any_element()
         };
+        let premium_mark = self
+            .session()
+            .filter(|s| sticker.requires_premium && s.premium_badges_shown())
+            .map(|s| crate::ui::premium_mark::premium_mark(s.my_is_premium()));
         let cell = div()
             .id(SharedString::from(format!(
                 "sticker-button-{prefix}-{}-{}",
                 sticker.set_id, sticker.id
             )))
+            .relative()
             .w(px(72.))
             .h(px(72.))
             .rounded_md()
@@ -189,16 +194,13 @@ impl QuillApp {
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
             }))
-            .child(cell);
+            .child(cell)
+            .children(premium_mark);
         div()
             .flex()
             .flex_col()
             .gap_1()
             .child(cell)
-            .when(
-                sticker.requires_premium && !self.session().is_some_and(|s| s.my_is_premium()),
-                |cell| cell.child(div().text_xs().child("Premium")),
-            )
             .into_any_element()
     }
 

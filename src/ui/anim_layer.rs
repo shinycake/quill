@@ -78,6 +78,10 @@ pub(super) struct LayeredClip {
     pub(super) started: Instant,
     pub(super) duration: Duration,
     pub(super) looping: bool,
+    /// Plays this many times, then rests on its first frame (tdesktop
+    /// `LimitedLoopsEmoji`, used by Premium emoji statuses). `looping` is
+    /// then ignored.
+    pub(super) loops: Option<u32>,
     /// When the clip was last drawn, for its cache's eviction: a clip the
     /// layer draws is on screen although its row doesn't render.
     pub(super) shown: Option<Rc<Cell<Instant>>>,
@@ -85,13 +89,21 @@ pub(super) struct LayeredClip {
 
 impl LayeredClip {
     pub(super) fn animates(&self) -> bool {
+        if let Some(loops) = self.loops {
+            return self.frames.len() > 1 && self.started.elapsed() < self.duration * loops;
+        }
         self.frames.len() > 1 && (self.looping || self.started.elapsed() < self.duration)
     }
 
     pub(super) fn frame_now(&self) -> Option<&Arc<RenderImage>> {
         let count = self.frames.len();
         let elapsed = self.started.elapsed();
-        let index = if !self.looping && elapsed >= self.duration {
+        if let Some(loops) = self.loops
+            && elapsed >= self.duration * loops
+        {
+            return self.frames.first();
+        }
+        let index = if self.loops.is_none() && !self.looping && elapsed >= self.duration {
             count.saturating_sub(1)
         } else {
             (elapsed.as_secs_f64() * self.fps) as usize % count.max(1)
@@ -824,8 +836,23 @@ mod tests {
             started: Instant::now() - Duration::from_millis(elapsed_ms),
             duration: Duration::from_millis(400),
             looping,
+            loops: None,
             shown: None,
         }
+    }
+
+    #[test]
+    fn limited_loops_play_then_rest_on_the_first_frame() {
+        let limited = |elapsed_ms| LayeredClip {
+            loops: Some(2),
+            ..clip(false, elapsed_ms)
+        };
+        // 400 ms per loop: frame 2 of the second loop, then at rest.
+        assert_eq!(index(&limited(650)), 2);
+        assert!(limited(650).animates());
+        assert_eq!(index(&limited(800)), 0);
+        assert!(!limited(800).animates());
+        assert_eq!(index(&limited(5000)), 0);
     }
 
     fn index(clip: &LayeredClip) -> usize {

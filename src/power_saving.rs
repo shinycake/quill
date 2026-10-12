@@ -2,8 +2,8 @@
 //!
 //! A flag set means "save power here": that animation stays still. Only the
 //! categories that animate something in Quill are offered. tdesktop also has
-//! reaction-menu emoji, premium-status emoji and message effects; Quill has
-//! none of those animations, so there is nothing to gate.
+//! reaction-menu emoji; Quill has no such animation, so there is nothing to
+//! gate.
 //!
 //! The bits keep tdesktop's values so a future import of its settings maps
 //! one to one. The current set lives in a process-wide atomic: the views read
@@ -31,6 +31,13 @@ pub enum Flag {
     ChatSpoiler,
     /// The pulses and rings on the call panels.
     Calls,
+    /// Animated Premium emoji statuses next to names (tdesktop
+    /// `kEmojiStatus`).
+    EmojiStatus,
+    /// Effects in messages: the sticker flying in from the panel, the
+    /// dust of a deleted message and the Premium sticker effects (tdesktop
+    /// `kChatEffects`).
+    ChatEffects,
 }
 
 impl Flag {
@@ -44,18 +51,22 @@ impl Flag {
             Self::ChatBackground => 1 << 6,
             Self::ChatSpoiler => 1 << 7,
             Self::Calls => 1 << 8,
+            Self::EmojiStatus => 1 << 9,
+            Self::ChatEffects => 1 << 10,
         }
     }
 }
 
 /// All categories Quill offers, in the dialog's order.
-pub const ALL_FLAGS: [Flag; 8] = [
+pub const ALL_FLAGS: [Flag; 10] = [
     Flag::StickersPanel,
     Flag::StickersChat,
     Flag::EmojiPanel,
     Flag::EmojiChat,
+    Flag::EmojiStatus,
     Flag::ChatBackground,
     Flag::ChatSpoiler,
+    Flag::ChatEffects,
     Flag::Calls,
     Flag::Animations,
 ];
@@ -68,7 +79,9 @@ pub const ALL_BITS: u32 = Flag::Animations.bit()
     | Flag::EmojiChat.bit()
     | Flag::ChatBackground.bit()
     | Flag::ChatSpoiler.bit()
-    | Flag::Calls.bit();
+    | Flag::Calls.bit()
+    | Flag::EmojiStatus.bit()
+    | Flag::ChatEffects.bit();
 
 /// A titled group of switches (`lng_settings_power_*`).
 pub struct Group {
@@ -90,6 +103,7 @@ pub const GROUPS: [Group; 5] = [
         items: &[
             (Flag::EmojiPanel, "Autoplay in panel"),
             (Flag::EmojiChat, "Autoplay in messages"),
+            (Flag::EmojiStatus, "Autoplay in premium status"),
         ],
     },
     Group {
@@ -97,6 +111,7 @@ pub const GROUPS: [Group; 5] = [
         items: &[
             (Flag::ChatBackground, "Wallpaper rotation"),
             (Flag::ChatSpoiler, "Animated spoiler effect"),
+            (Flag::ChatEffects, "Effects in messages"),
         ],
     },
     Group {
@@ -208,6 +223,8 @@ mod tests {
         assert_eq!(Flag::ChatBackground.bit(), 64);
         assert_eq!(Flag::ChatSpoiler.bit(), 128);
         assert_eq!(Flag::Calls.bit(), 256);
+        assert_eq!(Flag::EmojiStatus.bit(), 512);
+        assert_eq!(Flag::ChatEffects.bit(), 1024);
     }
 
     #[test]

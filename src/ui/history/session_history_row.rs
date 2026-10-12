@@ -12,6 +12,8 @@ pub(in crate::ui) fn session_history_row(
     // avatar) computed at row-build time so the virtualized row doesn't
     // carry the chat.
     sender: Option<SenderLabel>,
+    // The Premium status or star after the sender's name.
+    sender_status: Option<AnyElement>,
     receipt: OutboxReceipt,
     sender_avatar: Option<(String, Option<PathBuf>)>,
     reply_header: Option<quill::state::ReplyHeader>,
@@ -393,23 +395,27 @@ pub(in crate::ui) fn session_history_row(
             look.plain,
             cx,
         )),
-        MessageContent::Sticker(sticker) => Some(crate::ui::premium_sticker_effect::wrap(
-            message.id.0 as u64,
+        MessageContent::Sticker(sticker) => Some(crate::ui::send_fly::wrap(
+            message,
             sticker,
-            message.pending,
-            message.chat_id.0,
-            message.id.0,
-            message.is_outgoing,
-            sticker_attachment(
+            crate::ui::premium_sticker_effect::wrap(
                 message.id.0 as u64,
                 sticker,
-                files,
-                downloading,
-                media_roots,
-                sticker_frame,
+                message.pending,
+                message.chat_id.0,
+                message.id.0,
+                message.is_outgoing,
+                sticker_attachment(
+                    message.id.0 as u64,
+                    sticker,
+                    files,
+                    downloading,
+                    media_roots,
+                    sticker_frame,
+                    cx,
+                ),
                 cx,
             ),
-            cx,
         )),
         MessageContent::VoiceNote(note) => Some(voice_note_row(
             message.chat_id,
@@ -879,6 +885,7 @@ pub(in crate::ui) fn session_history_row(
     let max_width = bubble_width::message_width_limit(cx, content, look.font, look.plain);
     let mut more_btn = Some(more_btn);
     let mut avatar_link = avatar_link(&sender_avatar, message, cx);
+    let mut sender_status = sender_status;
     let mut chrome = |footer_inline: bool| {
         let mut chrome = message_chrome(
             sender.clone(),
@@ -893,6 +900,7 @@ pub(in crate::ui) fn session_history_row(
         {
             chrome.avatar = Some(link.wrap(avatar));
         }
+        chrome.sender_status = sender_status.take();
         chrome.footer = message_footer_meta(&footer_meta);
         if has_chips {
             // The reaction row carries the time.

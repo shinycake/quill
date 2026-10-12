@@ -317,7 +317,7 @@ pub(super) fn session_chat_row(
     // Verified / Premium / SCAM mark after the title.
     title_badge: Option<TitleBadge>,
     // Still image for a Premium emoji status, once downloaded.
-    badge_emoji: Option<std::path::PathBuf>,
+    badge_emoji: Option<crate::ui::status_emoji::StatusGlyph>,
     // The verifying bot's icon before the title, once downloaded.
     verify_icon: Option<std::path::PathBuf>,
     // Slice chatlist-list-style: preview line count, media icons, and
@@ -588,7 +588,7 @@ pub(super) fn session_chat_row(
                                         .when_some(title_badge, |this, badge| {
                                             this.child(title_badge_element(
                                                 badge,
-                                                badge_emoji.clone(),
+                                                badge_emoji,
                                                 cx,
                                             ))
                                         })

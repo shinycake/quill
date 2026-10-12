@@ -33,4 +33,11 @@ impl Session {
     pub fn premium_possible(&self) -> bool {
         self.payments.premium_available.unwrap_or(true)
     }
+
+    /// Whether Premium marks show next to names and on stickers (tdesktop
+    /// `Session::premiumBadgesShown`): a Premium account sees them, anyone
+    /// else only where Premium can be bought.
+    pub fn premium_badges_shown(&self) -> bool {
+        self.my_is_premium() || self.premium_possible()
+    }
 }

@@ -71,6 +71,32 @@ impl QuillApp {
         };
         let name_for_copy = name.clone();
         let verify_icon = self.user_bot_verify_icon_path(user_id);
+        // Verified check, Premium star or animated status after the name
+        // (`Info::Profile::Badge`).
+        let badges: Vec<AnyElement> = user
+            .as_ref()
+            .map(|u| {
+                quill::peer_badge::header_badges(
+                    u.verification,
+                    u.is_premium && session.is_some_and(|s| s.premium_badges_shown()),
+                    u.emoji_status_id,
+                )
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|badge| {
+                let glyph = match badge {
+                    quill::peer_badge::TitleBadge::EmojiStatus(id) => self.status_glyph(
+                        crate::ui::status_emoji::StatusSurface::Profile,
+                        user_id,
+                        id,
+                        cx,
+                    ),
+                    _ => None,
+                };
+                crate::ui::chat_row::title_badge_element(badge, glyph, cx)
+            })
+            .collect();
         let mut body = div()
             .flex()
             .flex_col()
@@ -109,7 +135,8 @@ impl QuillApp {
                                     .max_w_full()
                                     .truncate()
                                     .child(super::bidi_line::one_line_plain(name.clone())),
-                            ),
+                            )
+                            .children(badges),
                     )
                     .child(
                         div()

@@ -98,6 +98,7 @@ pub(super) struct PanelKey {
     session_revision: u64,
     recent_emoji: usize,
     premium: bool,
+    category: Option<usize>,
 }
 
 /// The message the panel is choosing a reaction for (Telegram Desktop's
@@ -124,6 +125,9 @@ pub(super) struct MediaPanel {
     pub searched: String,
     /// The emoji query `getKeywordEmojis` last went out for.
     pub keyword_searched: String,
+    /// The sticker category chosen in the strip under the search field
+    /// (an index into `Session::stickers.emoji.sticker_categories`).
+    pub category: Option<usize>,
 }
 
 impl Default for MediaPanel {
@@ -140,6 +144,7 @@ impl Default for MediaPanel {
             hovered: None,
             searched: String::new(),
             keyword_searched: String::new(),
+            category: None,
         }
     }
 }
@@ -257,6 +262,7 @@ impl QuillApp {
             self.cancel_recording(cx);
         }
         self.pickers.media_panel.open = true;
+        self.pickers.media_panel.category = None;
         self.set_media_panel_tab(tab, cx);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.open_media_panel();
@@ -337,6 +343,7 @@ impl QuillApp {
     fn set_media_panel_tab(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.pickers.media_panel.tab != tab {
             self.pickers.media_panel.tab = tab;
+            self.pickers.media_panel.category = None;
             self.pickers.media_panel.key = None;
             self.pickers.media_panel.active_section = 0;
             if tab == PanelTab::Gifs {
@@ -362,7 +369,7 @@ impl QuillApp {
         }
     }
 
-    fn panel_query(&self, cx: &App) -> String {
+    pub(super) fn panel_query(&self, cx: &App) -> String {
         match self.pickers.media_panel.tab {
             PanelTab::Emoji if self.pickers.media_panel.reaction.is_some() => self
                 .pickers
@@ -393,6 +400,11 @@ impl QuillApp {
     /// scroll position across rebuilds of the same tab and query.
     fn sync_media_panel_rows(&mut self, cx: &mut Context<Self>) {
         let query = self.panel_query(cx);
+        // Typing leaves the chosen category (tdesktop hides the strip
+        // while the field has text).
+        if !query.is_empty() {
+            self.pickers.media_panel.category = None;
+        }
         let key = PanelKey {
             tab: self.pickers.media_panel.tab,
             reaction: self.pickers.media_panel.reaction.is_some(),
@@ -402,13 +414,23 @@ impl QuillApp {
                 .session()
                 .map_or(0, |s| s.settings.media_prefs.recent_emoji.len()),
             premium: self.session().is_some_and(|s| s.my_is_premium()),
+            category: self.pickers.media_panel.category,
         };
         if self.pickers.media_panel.key.as_ref() == Some(&key) {
             return;
         }
         let same_view = self.pickers.media_panel.key.as_ref().is_some_and(|old| {
-            old.tab == key.tab && old.query == key.query && old.reaction == key.reaction
+            old.tab == key.tab
+                && old.query == key.query
+                && old.reaction == key.reaction
+                && old.category == key.category
         });
+        let category_changed = self
+            .pickers
+            .media_panel
+            .key
+            .as_ref()
+            .is_none_or(|old| old.category != key.category);
         let (rows, sections) = match key.tab {
             PanelTab::Emoji if key.reaction => self.build_reaction_rows(&query),
             PanelTab::Emoji => self.build_emoji_rows(&query),
@@ -431,6 +453,9 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.search_keyword_emojis(&query);
             }
+        }
+        if category_changed && self.pickers.media_panel.tab == PanelTab::Stickers {
+            self.search_chosen_sticker_category();
         }
         // Sticker search goes to TDLib (by emoji or keyword).
         if self.pickers.media_panel.tab == PanelTab::Stickers
@@ -622,17 +647,20 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return (rows, sections);
         };
-        if !query.is_empty() {
+        let category = self.chosen_category_name();
+        if !query.is_empty() || category.is_some() {
             rows.push(PanelRow::Header {
-                label: "Search results".into(),
+                label: category.unwrap_or_else(|| "Search results".into()),
                 set_id: None,
             });
             push_grid(
                 &mut rows,
-                (0..session.stickers.stickers.found_stickers.len()).map(|ix| PanelCell::Sticker {
-                    source: StickerSource::Found,
-                    ix,
-                }),
+                (0..session.stickers.stickers.found_stickers.len())
+                    .filter(|ix| self.sticker_listed(StickerSource::Found, *ix))
+                    .map(|ix| PanelCell::Sticker {
+                        source: StickerSource::Found,
+                        ix,
+                    }),
                 STICKER_COLS,
                 true,
             );
@@ -666,7 +694,10 @@ impl QuillApp {
             });
             push_grid(
                 &mut rows,
-                (0..len.min(STICKER_COLS * 4)).map(|ix| PanelCell::Sticker { source, ix }),
+                (0..len)
+                    .filter(|ix| self.sticker_listed(source, *ix))
+                    .take(STICKER_COLS * 4)
+                    .map(|ix| PanelCell::Sticker { source, ix }),
                 STICKER_COLS,
                 true,
             );
@@ -689,10 +720,12 @@ impl QuillApp {
             match session.media.media_library.set_stickers.get(&set.id) {
                 Some(items) => push_grid(
                     &mut rows,
-                    (0..items.len()).map(|ix| PanelCell::Sticker {
-                        source: StickerSource::Set(set.id),
-                        ix,
-                    }),
+                    (0..items.len())
+                        .filter(|ix| self.sticker_listed(StickerSource::Set(set.id), *ix))
+                        .map(|ix| PanelCell::Sticker {
+                            source: StickerSource::Set(set.id),
+                            ix,
+                        }),
                     STICKER_COLS,
                     true,
                 ),
@@ -882,7 +915,10 @@ fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+mod categories;
 mod custom_emoji_cell;
+#[cfg(all(test, feature = "demo-capture"))]
+mod panel_tests;
 
 #[cfg(test)]
 mod tests {

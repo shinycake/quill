@@ -588,6 +588,7 @@ impl QuillApp {
                 started: clip.started,
                 duration: clip.duration,
                 looping,
+                loops: None,
                 shown: Some(clip.used.clone()),
             });
         let weak = cx.entity().downgrade();

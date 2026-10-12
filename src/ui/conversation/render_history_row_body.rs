@@ -29,6 +29,9 @@ impl QuillApp {
                 ..
             } => {
                 let refs: Vec<&HistoryMessage> = messages.iter().collect();
+                let sender_status = refs
+                    .first()
+                    .and_then(|first| self.sender_status_element(sender.as_ref(), first.id.0, cx));
                 album_history_row(
                     *album_id,
                     &refs,
@@ -36,6 +39,7 @@ impl QuillApp {
                     downloading,
                     &shared.media_roots,
                     sender.clone(),
+                    sender_status,
                     *receipt,
                     sender_avatar.clone(),
                     // Settings → Appearance: font size + bubble/plain style.
@@ -69,6 +73,8 @@ impl QuillApp {
                 {
                     self.request_animation_tick(30, cx);
                 }
+                let sender_status =
+                    self.sender_status_element(inputs.sender.as_ref(), message.id.0, cx);
                 let row = session_history_row(
                     message,
                     files,
@@ -76,6 +82,7 @@ impl QuillApp {
                     failed,
                     &shared.media_roots,
                     inputs.sender.clone(),
+                    sender_status,
                     inputs.receipt,
                     inputs.sender_avatar.clone(),
                     inputs.reply_header.clone(),
