@@ -63,3 +63,11 @@ Added in 2026 for the formatted composer field
 - Modified: `src/input/mod.rs`, `src/input/base/{change,element,inline_tokens,state,undo_manager}.rs`,
   `src/input/editor/display_map/{display_map,inline_line,mod,text_wrapper,wrap_map}.rs`.
   Inputs without spans or tokens take the unchanged code paths.
+
+## Tooltips hide when the pointer leaves
+
+`src/tooltip.rs`: `TooltipOverlay::request_hide` clears the tooltip at once
+instead of after the 300 ms grace period, which left it on screen after the
+pointer moved off (or a scroll carried the trigger away). The grace period
+still keeps the "recently shown" state, so a neighbouring trigger shows its
+tooltip without the show delay.

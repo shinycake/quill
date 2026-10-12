@@ -288,6 +288,9 @@ pub(super) fn inline_paragraph(
         });
         let _ = hover_owner.update(cx, |this, cx| this.set_link_tooltip(tooltip, cx));
     });
+    // `text_right` does not move this element: it paints its own glyphs.
+    // A media bubble is wider than the caption, and without `justify_end`
+    // a Hebrew block stays on the left (Telegram Desktop right-aligns it).
     div()
         .id(format!(
             "msg-par-wrap-{}-{}-{first_index}",
@@ -296,7 +299,7 @@ pub(super) fn inline_paragraph(
         .role(Role::Label)
         .aria_label(label)
         .min_w_0()
-        .when(rtl, |this| this.w_full().text_right())
+        .when(rtl, |this| this.w_full().flex().justify_end())
         .child(paragraph)
         .into_any_element()
 }

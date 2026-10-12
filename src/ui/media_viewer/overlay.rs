@@ -866,9 +866,14 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .when_some(caption, |this, caption| {
+                        let plate = media_w.max(240.).min(fit.0);
                         this.child(
                             div()
-                                .max_w(px(720.))
+                                .w(px(plate))
+                                .max_w_full()
+                                .px_3()
+                                .py_2()
+                                .bg(gpui_kit::black().opacity(0.55))
                                 .text_color(gpui_kit::white())
                                 .child(caption),
                         )
