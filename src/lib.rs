@@ -14,6 +14,7 @@ pub mod boost_box;
 pub mod bot_invite;
 pub mod bot_verification;
 pub mod bubble_layout;
+pub mod business_bot_bar;
 pub mod business_bots;
 pub mod business_chat_links;
 pub mod business_hours_edit;

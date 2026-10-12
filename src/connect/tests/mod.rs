@@ -7,6 +7,7 @@ mod boost_box;
 mod bot_pending;
 mod bot_verification;
 mod bots;
+mod business_bot_bar;
 mod business_extra;
 mod business_settings;
 mod call_audio;

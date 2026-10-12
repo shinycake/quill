@@ -5,6 +5,7 @@ mod auth;
 mod backgrounds;
 mod bot_verification;
 mod bots;
+mod business_bot_bar;
 mod business_extra;
 mod business_settings;
 mod call_audio;
