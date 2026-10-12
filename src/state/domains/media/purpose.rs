@@ -28,6 +28,23 @@ pub enum MediaPurpose {
     GetProfileAudios {
         append: bool,
     },
+    /// "Save to... Profile" on a song: `addProfileAudio`. Response is `Ok`.
+    AddProfileAudio {
+        file_id: i32,
+    },
+    /// `isProfileAudio` for a song's menu: `Ok` means it is in the current
+    /// user's saved music, a 404 error means it is not.
+    IsProfileAudio {
+        file_id: i32,
+    },
+    /// Removing a track from the Playlist page: `removeProfileAudio`.
+    RemoveProfileAudio {
+        file_id: i32,
+    },
+    /// Dragging a track on the Playlist page: `setProfileAudioPosition`.
+    SetProfileAudioPosition {
+        file_id: i32,
+    },
     /// "Cancel Upload": `deleteMessages` on a message still being sent.
     CancelUpload,
     /// `getMapThumbnailFile` for a location or venue message. Response is

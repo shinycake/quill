@@ -55,6 +55,7 @@ mod payments;
 mod peer_color;
 mod polls_checklists;
 mod privacy_data;
+mod profile_music;
 mod profile_panels;
 mod proxy;
 mod quick_replies;

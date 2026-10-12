@@ -333,6 +333,8 @@ pub struct Playlist {
     pub loaded: bool,
     pub loading: bool,
     pub error: Option<String>,
+    /// A change of the playlist failed: the driver loads it again.
+    pub stale: bool,
 }
 
 impl Playlist {

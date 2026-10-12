@@ -56,8 +56,10 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             || app.chat_list.menu.is_some()
             || app.chat_list.archive_menu.is_some()
             || app.chat_list.global.story_menu.is_some()
-            || app.folders.tab_menu.is_some(),
+            || app.folders.tab_menu.is_some()
+            || app.playback.playlist_menu.is_some(),
         |app, _, cx| {
+            app.playback.playlist_menu = None;
             app.message_ui.menu = None;
             app.chat_list.menu = None;
             app.chat_list.archive_menu = None;

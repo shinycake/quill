@@ -373,20 +373,39 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// "Save to... Profile": add a song to the profile's music.
+    /// "Save to... Profile": add a song to the profile's music. Like
+    /// tdesktop's `SavedMusic::save`, a song already saved is left alone and
+    /// the track shows at the top of the playlist at once.
     pub fn save_audio_to_profile(
         &mut self,
         file_id: crate::ids::FileId,
         duration: i32,
         title: &str,
         performer: &str,
+        file_name: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || file_id.0 <= 0 {
+        if !self.chats_path_active()
+            || file_id.0 <= 0
+            || self.session.profile_audio_known(file_id) == Some(true)
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self.session.request(RequestPurpose::AddProfileAudio, None);
+        let extra = self.session.request(
+            RequestPurpose::Media(crate::state::MediaPurpose::AddProfileAudio {
+                file_id: file_id.0,
+            }),
+            None,
+        );
         let json = add_profile_audio(extra, file_id.0, duration, title, performer);
         self.send_audience(extra, &json)?;
+        self.session
+            .local_save_profile_audio(crate::telegram::envelope::ProfileAudio {
+                file_id,
+                title: title.to_string(),
+                performer: performer.to_string(),
+                file_name: file_name.to_string(),
+                duration,
+            });
         Ok(extra)
     }
 

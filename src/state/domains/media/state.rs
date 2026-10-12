@@ -61,6 +61,9 @@ pub struct MediaState {
     /// Saved music per user (`getUserProfileAudios`), for the profile's
     /// music button and the Playlist page.
     pub playlists: HashMap<i64, Playlist>,
+    /// Songs checked against the current user's saved music
+    /// (`isProfileAudio`), by file id: `true` when saved.
+    pub profile_audio_ids: HashMap<i32, bool>,
     /// Thumbnails of the Stories and Gifts grids waiting for a download.
     pub(crate) profile_thumbs_due: Vec<FileId>,
 }
@@ -86,6 +89,7 @@ impl MediaState {
             map_thumbs: MapThumbs::default(),
             chat_media_counts: HashMap::new(),
             playlists: HashMap::new(),
+            profile_audio_ids: HashMap::new(),
             profile_thumbs_due: Vec::new(),
         }
     }

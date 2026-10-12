@@ -243,6 +243,7 @@ impl QuillApp {
                     .any(|item| item.file_id == target.file_id)
             }),
             in_saved_messages: session.is_saved_messages(chat_id),
+            in_profile: session.profile_audio_known(target.file_id),
             tone_ok: message.self_destruct.is_none()
                 && quill::message_menu::tone_offered(
                     target,

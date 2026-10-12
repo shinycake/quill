@@ -304,8 +304,19 @@ impl Session {
                 chat_id,
                 message_id,
             } => {
+                let now_ms = unix_ms_now();
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.content.mark_content_opened();
+                    // Opening starts a timed message's countdown. TDLib
+                    // sets the end to now plus the timer (`ttl_on_open`),
+                    // but sends no new `self_destruct_in` with the update.
+                    if let Some(sd) = message.self_destruct.as_mut()
+                        && let crate::telegram::envelope::SelfDestructKind::Timer { secs } = sd.kind
+                        && sd.expires_in_ms <= 0
+                    {
+                        sd.expires_in_ms = i64::from(secs) * 1000;
+                        sd.fetched_at_ms = now_ms;
+                    }
                 });
             }
             MessagesPayload::UpdateMessageEdited {

@@ -7,9 +7,10 @@
 //! `downloadFile` when nothing viewable is local yet.
 //!
 //! Scope: photos, videos and animations (GIFs). Documents, stickers,
-//! voice notes, and audio never open the viewer. Secret and spoiler media are
-//! excluded too — the viewer is a full-bleed surface and must not bypass
-//! their hidden-until-revealed contract.
+//! voice notes, and audio never open the viewer. Spoiler media opens once
+//! revealed. Secret media is left out of the chat's list, so paging never
+//! uncovers it; a photo or video with a self-destruct timer opens alone
+//! when it is clicked (`timed_viewer_item`), as in Telegram Desktop.
 
 use crate::ids::{ChatId, FileId, MessageId};
 use crate::state::HistoryMessage;
@@ -22,13 +23,14 @@ mod items;
 mod quality;
 mod save;
 mod transform;
+mod ttl;
 
 pub use controls::{
     VIEWER_FADE_MS, VIEWER_SEEK_LONG_SECS, VIEWER_SEEK_SECS, VIEWER_SHOW_MS, VIEWER_WAIT_HIDE_MS,
     ViewerKeyAction, ViewerKeyMods, ViewerVideoStart, controls_hide_wait_ms, controls_should_hide,
     decide_viewer_video_start, seek_target_secs, viewer_delete_gate, viewer_key_action,
 };
-pub use items::{collect_media_items, profile_photo_items};
+pub use items::{collect_media_items, profile_photo_items, timed_viewer_item};
 pub use quality::{VideoQualityOption, build_quality_options, current_quality, pick_quality};
 pub use save::{
     downloads_dir, os_downloads_dir, save_media_to_downloads, save_media_to_downloads_in_dir,
@@ -39,6 +41,7 @@ pub use transform::{
     VIEWER_ZOOM_STEP, ViewerOrientation, ViewerZoom, fit_within, flip_rgba, orient_rgba,
     rotate_rgba_quarter_turns, wheel_zoom_factor,
 };
+pub use ttl::{ViewerTtl, disappearing_label, seconds_tiny, viewer_ttl};
 
 /// Media kinds the viewer opens this slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

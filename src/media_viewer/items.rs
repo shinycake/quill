@@ -94,11 +94,41 @@ fn photo_viewer_item(message: &HistoryMessage, photo: &PhotoContent) -> Option<M
     })
 }
 
+/// The viewer item of a photo or video with a self-destruct timer, which
+/// opens alone (tdesktop shows timed media without paging to its
+/// neighbours, so no other timer starts by browsing). View-once media has
+/// none: TDLib deletes it the moment it is opened, so the viewer would have
+/// nothing left to show.
+pub fn timed_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
+    let timed = message.self_destruct.is_some_and(|sd| {
+        matches!(
+            sd.kind,
+            crate::telegram::envelope::SelfDestructKind::Timer { .. }
+        )
+    });
+    if !timed
+        || !matches!(
+            message.content,
+            MessageContent::Photo(_) | MessageContent::Video(_)
+        )
+    {
+        return None;
+    }
+    viewer_item_for(message, true)
+}
+
 fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
+    viewer_item_for(message, false)
+}
+
+fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<MediaViewerItem> {
     match &message.content {
         // Spoilers are viewable once revealed (the cover takes the click
-        // before that), as in Telegram Desktop; secret media never.
-        MessageContent::Photo(photo) if !photo.is_secret => photo_viewer_item(message, photo),
+        // before that), as in Telegram Desktop; secret media only through
+        // `timed_viewer_item`.
+        MessageContent::Photo(photo) if allow_secret || !photo.is_secret => {
+            photo_viewer_item(message, photo)
+        }
         // A chat-photo change or a suggested profile photo opens in the
         // viewer like any photo.
         MessageContent::Action(action) => match action.as_ref() {
@@ -108,7 +138,7 @@ fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
             } => photo_viewer_item(message, photo),
             _ => None,
         },
-        MessageContent::Video(video) if !video.is_secret => {
+        MessageContent::Video(video) if allow_secret || !video.is_secret => {
             let thumb = video.thumb_file_id.filter(|id| id.0 != 0);
             let download = thumb.unwrap_or(video.file_id);
             if download.0 == 0 {
@@ -351,6 +381,42 @@ mod tests {
         let items = collect_media_items(&[secret, spoiler]);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].message_id, MessageId(6));
+    }
+
+    #[test]
+    fn timed_photos_and_videos_open_alone_and_view_once_never() {
+        use crate::telegram::envelope::{MessageSelfDestruct, SelfDestructKind};
+        let sd = |kind| {
+            Some(MessageSelfDestruct {
+                kind,
+                expires_in_ms: 0,
+                fetched_at_ms: 0,
+            })
+        };
+        let mut photo = photo_message(7, 5, vec![(70, 100, 100)], "");
+        if let MessageContent::Photo(p) = &mut photo.content {
+            p.is_secret = true;
+        }
+        // No timer, no item.
+        assert!(timed_viewer_item(&photo).is_none());
+        photo.self_destruct = sd(SelfDestructKind::Timer { secs: 10 });
+        let item = timed_viewer_item(&photo).expect("timed photo");
+        assert_eq!(item.message_id, MessageId(5));
+        // Paging over the chat's media never reaches it.
+        assert!(collect_media_items(std::slice::from_ref(&photo)).is_empty());
+        // A timed video opens too.
+        let mut video = video_message(7, 6, 71, Some(72));
+        if let MessageContent::Video(v) = &mut video.content {
+            v.is_secret = true;
+        }
+        video.self_destruct = sd(SelfDestructKind::Timer { secs: 5 });
+        assert_eq!(
+            timed_viewer_item(&video).map(|item| item.kind),
+            Some(MediaViewerKind::Video)
+        );
+        // View-once media is deleted by TDLib when opened: no item.
+        photo.self_destruct = sd(SelfDestructKind::Immediately);
+        assert!(timed_viewer_item(&photo).is_none());
     }
 
     #[test]
