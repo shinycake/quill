@@ -251,7 +251,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
 - [x] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
 - [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
-- [ ] Edit Image, Edit Video and Edit Cover on your own media <!-- parity:menu-edit-media-items -->
+- [ ] Edit Image, Edit Video and Edit Cover on your own media (partial: Edit Image and Edit Cover in the edit box; Edit Video needs a video editor for staged files) <!-- parity:menu-edit-media-items -->
 - [x] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
 - [x] Go To Message from search, pinned and saved lists <!-- parity:menu-go-to-message -->
 - [x] Add or edit a fact check as a channel admin <!-- parity:menu-fact-check-edit -->
