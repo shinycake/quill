@@ -44,6 +44,8 @@ pub struct QuillApp {
     pub(super) search_ui: super::search_state::SearchUi,
     /// Forwarding and the share box (`ui/share_state.rs`).
     pub(super) share: super::share_state::ShareUi,
+    /// Files sent to Quill from outside (`ui/start_files_state.rs`).
+    pub(super) start_files: super::start_files_state::StartFilesUi,
     pub(super) focus_sidebar: FocusHandle,
     /// Connection status, the status line and presence sync (`ui/connection_state.rs`).
     pub(super) connection: super::connection_state::ConnectionUi,

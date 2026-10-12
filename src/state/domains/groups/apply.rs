@@ -640,6 +640,7 @@ impl Session {
                 supergroup_id,
                 verification,
                 member_count,
+                boost_level,
                 is_forum,
                 has_forum_tabs,
                 has_automatic_translation,
@@ -670,6 +671,7 @@ impl Session {
                 } else {
                     self.groups.supergroup_restricted.remove(&supergroup_id);
                 }
+                self.note_supergroup_boost_level(supergroup_id, boost_level);
                 self.set_supergroup_usernames(supergroup_id, usernames);
                 self.groups
                     .supergroup_join_to_send

@@ -152,6 +152,12 @@ pub struct GroupsState {
     /// Chat-row title badge: `supergroup.verification_status` per
     /// supergroup (`updateSupergroup`), keyed by supergroup id.
     pub supergroup_verification: HashMap<i64, crate::peer_badge::VerificationStatus>,
+    /// `supergroup.boost_level` per supergroup (`updateSupergroup`), keyed by
+    /// supergroup id: the last level seen, to tell when it moved.
+    pub supergroup_boost_levels: HashMap<i64, i32>,
+    /// Supergroups whose boost level moved since the driver last looked; it
+    /// refetches the boost status of the ones it has cached.
+    pub boost_level_moved: Vec<i64>,
     /// Phase A1: the viewer's own `chatMemberStatus*` per supergroup
     /// (`supergroup.status` / `updateSupergroup`, schema 1.8.67 line 2746).
     /// Drives the slow-mode bypass (admins/creators are exempt) and gates
@@ -286,6 +292,8 @@ impl GroupsState {
             boosts_per_gift: None,
             supergroup_usernames: HashMap::new(),
             supergroup_verification: HashMap::new(),
+            supergroup_boost_levels: HashMap::new(),
+            boost_level_moved: Vec::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
             supergroup_invite_right: HashMap::new(),

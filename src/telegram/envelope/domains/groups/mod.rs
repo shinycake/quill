@@ -48,6 +48,9 @@ pub enum GroupsPayload {
         usernames: SupergroupUsernames,
         /// `supergroup.member_count` — may be 0 until full info is known.
         member_count: i32,
+        /// `supergroup.boost_level` ("approximate boost level"): when it
+        /// moves, the cached boost status is out of date.
+        boost_level: i32,
         /// Phase A1: own `chatMemberStatus*` (`supergroup.status`, schema
         /// 1.8.67 line 2746 — "Current user status in the supergroup or
         /// channel"). Drives slow-mode bypass (admins/creators are exempt).

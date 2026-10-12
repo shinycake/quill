@@ -1,6 +1,7 @@
 //! Unit tests for the session reducer, grouped by area.
 use super::*;
 
+mod boost_level;
 mod boosts;
 mod bots;
 mod bubble_headers;

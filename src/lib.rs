@@ -143,6 +143,7 @@ pub mod selection_drag;
 pub mod selection_pin;
 pub mod send_button;
 pub mod send_rights;
+pub mod send_to_menu;
 pub mod service_text;
 #[cfg(test)]
 mod service_text_tests;
@@ -159,6 +160,7 @@ pub mod spell_win;
 pub mod spellcheck;
 pub mod star_packs;
 pub mod stars_gift;
+pub mod start_files;
 pub mod stat_chart;
 pub mod state;
 pub mod sticker_playback;

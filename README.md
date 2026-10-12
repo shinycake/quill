@@ -955,7 +955,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Dice emoji list and animated emoji click updates <!-- parity:updates-dice-emoji -->
 - [x] Frozen-account banner <!-- parity:updates-freeze-state -->
 - [x] Free transcription quota hints <!-- parity:updates-speech-trial -->
-- [ ] Owned Stars count and chat boost updates <!-- parity:updates-stars-boosts -->
+- [x] Owned Stars count and chat boost updates <!-- parity:updates-stars-boosts -->
 - [x] Active live location and viewed-live-location updates <!-- parity:updates-live-location -->
 - [x] Age verification parameters <!-- parity:updates-age-verification -->
 
@@ -1058,7 +1058,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Interface scale <!-- parity:appearance-scale -->
 - [x] Font family choice <!-- parity:appearance-font -->
 - [ ] Interface language packs (English only today) <!-- parity:appearance-localization -->
-- [ ] Adaptive layout for wide screens (centered column) <!-- parity:appearance-wide-layout -->
+- [ ] Adaptive layout for wide screens (all messages on the left with photos; off by default in Quill) <!-- parity:appearance-wide-layout -->
 - [x] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
 - [x] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
 - [x] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
@@ -1130,7 +1130,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Touch Bar and extra window menu items (deferred: low impact) <!-- parity:platform-touch-bar -->
 - [x] Online status follows window focus and idle time <!-- parity:platform-idle-presence -->
 - [x] Online status is set so contacts see you as online while you are active <!-- parity:platform-online-option -->
-- [ ] Windows "Send to" menu and share extension <!-- parity:platform-sendto-menu -->
+- [x] Windows "Send to" menu and share extension <!-- parity:platform-sendto-menu -->
 - [ ] Screen reader announcements for new messages (deferred: low impact) <!-- parity:platform-screen-reader-announce -->
 
 ## License
