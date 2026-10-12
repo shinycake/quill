@@ -286,6 +286,47 @@ fn payment_recurring_star_subscriptions_tolerate_gaps() {
 }
 
 #[test]
+fn a_bought_paid_photo_parses_as_a_photo() {
+    let env = parse_envelope(
+        r#"{"@type":"updateNewMessage","message":{"id":403,"chat_id":21,"is_outgoing":false,"content":{"@type":"messagePaidMedia","star_count":25,"media":[{"@type":"paidMediaPhoto","photo":{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{"@type":"photoSize","type":"x","width":800,"height":600,"photo":{"@type":"file","id":31,"size":9,"expected_size":9,"local":{"path":"","can_be_downloaded":true}}}]}}],"caption":{"@type":"formattedText","text":"Unlocked","entities":[]},"show_caption_above_media":false}}}"#,
+    )
+    .unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Photo(photo) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    assert_eq!(photo.caption, "Unlocked");
+    assert_eq!(
+        photo.largest_size().map(|s| (s.width, s.height)),
+        Some((800, 600))
+    );
+}
+
+#[test]
+fn story_messages_keep_poster_and_story_id() {
+    let env = parse_envelope(
+        r#"{"@type":"updateNewMessage","message":{"id":404,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageStory","story_poster_chat_id":77,"story_id":5,"via_mention":true}}}"#,
+    )
+    .unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Action(action) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    assert_eq!(
+        **action,
+        ServiceAction::Story {
+            via_mention: true,
+            poster_chat_id: 77,
+            story_id: 5,
+        }
+    );
+}
+
+#[test]
 fn paid_media_keeps_locked_previews_and_caption() {
     let env = parse_envelope(
         r#"{"@type":"updateNewMessage","message":{"id":402,"chat_id":21,"is_outgoing":false,"content":{"@type":"messagePaidMedia","star_count":25,"media":[{"@type":"paidMediaPreview","width":800,"height":600,"duration":0,"minithumbnail":{"@type":"minithumbnail","width":40,"height":30,"data":"AQID"}},{"@type":"paidMediaPreview","width":400,"height":400,"duration":12,"minithumbnail":null},{"@type":"paidMediaUnsupported"}],"caption":{"@type":"formattedText","text":"Behind the scenes","entities":[]},"show_caption_above_media":false}}}"#,
@@ -301,6 +342,7 @@ fn paid_media_keeps_locked_previews_and_caption() {
         stars,
         locked,
         caption,
+        ..
     } = action.as_ref()
     else {
         panic!("{action:?}");

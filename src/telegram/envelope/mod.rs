@@ -39,6 +39,7 @@ mod message_reactions;
 mod message_sponsored;
 mod message_sticker;
 mod message_thread;
+mod paid_media;
 mod payload;
 mod payments;
 mod profile_audios;

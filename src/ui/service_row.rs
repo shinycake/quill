@@ -37,26 +37,9 @@ fn action_photo(content: &MessageContent) -> Option<&PhotoContent> {
     }
 }
 
-/// Locked paid media draws as a bubble card, not a service row.
-pub(super) fn locked_paid_media(
-    content: &MessageContent,
-) -> Option<(i64, &[quill::telegram::envelope::PaidMediaPreview], &str)> {
-    match content {
-        MessageContent::Action(action) => match action.as_ref() {
-            ServiceAction::PaidMedia {
-                stars,
-                locked,
-                caption,
-            } if !locked.is_empty() => Some((*stars, locked.as_slice(), caption.as_str())),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
 /// Whether the content is drawn as a service row.
 pub(super) fn is_service_row(content: &MessageContent) -> bool {
-    locked_paid_media(content).is_none()
+    !super::message_media::is_bubble_card(content)
         && matches!(
             content,
             MessageContent::Action(_)
@@ -248,6 +231,29 @@ pub(super) fn service_message_row(
                 }],
             }
         });
+    // A story mention: the round story picture and a View Story button, or
+    // the "no longer available" wording once the story is gone.
+    let mention = quill::state::message_story_key(&message.content)
+        .filter(|(_, _, via_mention)| *via_mention);
+    let text = match (mention, session) {
+        (Some((poster, story, _)), Some(s))
+            if s.story_card_state(poster, story) == quill::state::StoryCardState::Expired =>
+        {
+            super::message_media::expired_mention_text(&text, message.is_outgoing)
+        }
+        _ => text,
+    };
+    let mention_extras = mention.and_then(|(poster, story, _)| {
+        super::message_media::story_mention_extras(
+            row_id,
+            quill::ids::ChatId(poster),
+            story,
+            session,
+            files,
+            media_roots,
+            cx,
+        )
+    });
     let photo = action_photo(&message.content).map(|photo| {
         photo_tile(
             row_id,
@@ -353,6 +359,7 @@ pub(super) fn service_message_row(
         })
         .when_some(similar_strip, |this, strip| this.child(strip))
         .when_some(photo, |this, photo| this.child(photo))
+        .when_some(mention_extras, |this, extras| this.child(extras))
         .when_some(birthday, |this, birthday| this.child(birthday))
         .when_some(card, |this, card| this.child(card))
         .when_some(learn_more, |this, button| this.child(button))

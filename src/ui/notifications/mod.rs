@@ -609,6 +609,14 @@ impl QuillApp {
             self.connection.status_note = err;
             progressed = true;
         }
+        if let Some(note) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.payments.unlocked_notice.take())
+        {
+            self.connection.status_note = note;
+            progressed = true;
+        }
         if let Some(notice) = self
             .live
             .as_mut()

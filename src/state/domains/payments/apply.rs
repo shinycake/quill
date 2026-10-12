@@ -51,6 +51,7 @@ impl Session {
                     self.payments.sending = false;
                     if result.success {
                         self.payments.form_paid = true;
+                        self.note_paid_media_unlocked();
                         self.payments.note = Some("✅ Payment successful".to_string());
                     } else if !result.verification_url.is_empty() {
                         // Schema: the URL is for additional payment

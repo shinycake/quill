@@ -29,7 +29,35 @@ pub fn profile_photo_items(photos: &[crate::state::ProfilePhoto]) -> Vec<MediaVi
 }
 
 pub fn collect_media_items(messages: &[HistoryMessage]) -> Vec<MediaViewerItem> {
-    messages.iter().filter_map(media_viewer_item).collect()
+    messages
+        .iter()
+        .flat_map(|message| match paid_album_items(message) {
+            // A bought paid-media album pages through its items, all under
+            // the one message id.
+            Some(contents) => contents
+                .iter()
+                .filter_map(|content| {
+                    let mut part = message.clone();
+                    part.content = content.clone();
+                    media_viewer_item(&part)
+                })
+                .collect::<Vec<_>>(),
+            None => media_viewer_item(message).into_iter().collect(),
+        })
+        .collect()
+}
+
+/// The bought items of a paid-media album message.
+fn paid_album_items(message: &HistoryMessage) -> Option<&[MessageContent]> {
+    match &message.content {
+        MessageContent::Action(action) => match action.as_ref() {
+            ServiceAction::PaidMedia { unlocked, .. } if !unlocked.is_empty() => {
+                Some(unlocked.as_slice())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn photo_viewer_item(message: &HistoryMessage, photo: &PhotoContent) -> Option<MediaViewerItem> {

@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod action_card;
 mod audio;
 mod call;
 mod cards;
@@ -28,14 +29,17 @@ mod document;
 mod fixtures;
 mod layout;
 mod location;
+mod paid_media;
 mod sticker;
+mod story_card;
 mod surfaces;
 mod video_note;
 mod visual;
 
+pub(super) use action_card::{action_card, is_bubble_card};
 pub(super) use audio::{audio_row, transcription_row, voice_note_row, waveform_row};
 pub(super) use call::call_card;
-pub(super) use cards::{ContactCardState, contact_row, dice_row, paid_media_card};
+pub(super) use cards::{ContactCardState, contact_row, dice_row};
 pub(super) use document::{
     action_disc, bubble_accent, document_chip, download_display_name, format_bytes, inline_link,
 };
@@ -45,6 +49,7 @@ pub(super) use layout::{
 };
 pub(super) use location::{location_row, venue_row};
 pub(super) use sticker::{sticker_attachment, sticker_box};
+pub(super) use story_card::{expired_mention_text, story_mention_extras};
 pub(super) use surfaces::spoiler_cover;
 pub(super) use video_note::{VIDEO_NOTE_DIAMETER, video_note_attachment};
 pub(super) use visual::{animation_attachment, photo_attachment, video_attachment};

@@ -6,8 +6,8 @@ use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::message_checklist::checklist_body;
 use super::message_games::game_card;
 use super::message_media::{
-    ContactCardState, animation_attachment, audio_row, call_card, contact_row, dice_row,
-    document_chip, location_row, paid_media_card, photo_attachment, sticker_attachment, venue_row,
+    ContactCardState, action_card, animation_attachment, audio_row, call_card, contact_row,
+    dice_row, document_chip, location_row, photo_attachment, sticker_attachment, venue_row,
     video_attachment, video_note_attachment, voice_note_row,
 };
 use super::message_media::{
@@ -232,6 +232,7 @@ pub(super) fn album_history_row(
             files,
             downloading,
             media_roots,
+            0,
             cx,
         );
         mosaic = mosaic.child(tile);
@@ -402,9 +403,14 @@ pub(super) fn album_tile(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
+    // Which item of the message the tile is (a bought paid-media album
+    // holds several under one message id); 0 for ordinary albums.
+    item_offset: usize,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let row_id = message.id.0 as u64;
+    let row_id = (message.id.0 as u64)
+        .wrapping_mul(64)
+        .wrapping_add(item_offset as u64);
     let corners = mosaic_corners.tile(
         part.x <= 0,
         part.y <= 0,
@@ -431,7 +437,7 @@ pub(super) fn album_tile(
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.open_media_viewer(chat_id, message_id, cx);
+            this.open_media_viewer_at(chat_id, message_id, item_offset, cx);
         }));
     match &message.content {
         MessageContent::Photo(photo) => {

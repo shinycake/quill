@@ -724,11 +724,21 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
                 from().t(verb_other).done()
             }
         }
-        A::Story { via_mention } => text(if *via_mention {
-            "Mentioned in a story"
-        } else {
-            "Story"
-        }),
+        // tdesktop `prepareStoryMentionText`: the chat's peer is named.
+        A::Story {
+            via_mention: true, ..
+        } => {
+            if ctx.is_outgoing {
+                B::default()
+                    .t("You mentioned ")
+                    .extend(ctx.chat(ctx.chat_id))
+                    .t(" in a story")
+                    .done()
+            } else {
+                ctx.chat(ctx.chat_id).t(" mentioned you in a story").done()
+            }
+        }
+        A::Story { .. } => text("Story"),
         A::PaidMedia { stars, .. } => text(&format!("Paid media \u{B7} {}", stars_cost(*stars))),
     }
 }

@@ -1,0 +1,2 @@
+parity:render-story-message
+parity:render-paid-media

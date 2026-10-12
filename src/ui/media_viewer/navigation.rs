@@ -15,6 +15,18 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
+        self.open_media_viewer_at(chat_id, message_id, 0, cx);
+    }
+
+    /// Like [`Self::open_media_viewer`], on the `offset`-th item of a
+    /// message that holds several (a bought paid-media album).
+    pub(in crate::ui) fn open_media_viewer_at(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        offset: usize,
+        cx: &mut Context<Self>,
+    ) {
         let items = self
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
@@ -25,7 +37,16 @@ impl QuillApp {
         if items.is_empty() {
             return;
         }
-        let index = items.iter().position(|item| item.message_id == message_id);
+        let index = items
+            .iter()
+            .position(|item| item.message_id == message_id)
+            .map(|first| {
+                let run = items[first..]
+                    .iter()
+                    .take_while(|item| item.message_id == message_id)
+                    .count();
+                first + offset.min(run - 1)
+            });
         // The clicked message may not be viewer-openable (e.g. an album
         // tile for a non-photo/video part) — then stay closed instead of
         // opening on an unrelated item.

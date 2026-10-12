@@ -312,16 +312,22 @@ pub enum ServiceAction {
         stake: i64,
         prize: i64,
     },
+    /// `messageStory`: a forwarded story, or a mention of the viewer in
+    /// one (`via_mention`). The story itself comes from `getStory`.
     Story {
         via_mention: bool,
+        poster_chat_id: i64,
+        story_id: i32,
     },
     /// `messagePaidMedia`: media sold for Stars. `locked` holds one entry
     /// per `paidMediaPreview` (blurred thumbnail, size, duration) while
-    /// the media is still locked; it is empty once the viewer bought it
-    /// (the unlocked photos and videos are not rendered yet).
+    /// the media is still locked. Once the viewer bought an album, `locked`
+    /// is empty and `unlocked` holds its photos and videos (a single bought
+    /// item parses as an ordinary photo or video message instead).
     PaidMedia {
         stars: i64,
         locked: Vec<PaidMediaPreview>,
+        unlocked: Vec<MessageContent>,
         caption: String,
     },
 }
@@ -860,10 +866,13 @@ impl ServiceAction {
             },
             "messageStory" => A::Story {
                 via_mention: flag(value, "via_mention"),
+                poster_chat_id: i(value, "story_poster_chat_id"),
+                story_id: n(value, "story_id"),
             },
             "messagePaidMedia" => A::PaidMedia {
                 stars: i(value, "star_count"),
                 locked: paid_media_previews(value),
+                unlocked: Vec::new(),
                 caption: value
                     .get("caption")
                     .and_then(|caption| caption.get("text"))
