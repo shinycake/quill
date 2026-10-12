@@ -1,9 +1,7 @@
 //! "Battery and animations": tdesktop's `PowerSaving` flags (`ui/power_saving.h`).
 //!
 //! A flag set means "save power here": that animation stays still. Only the
-//! categories that animate something in Quill are offered. tdesktop also has
-//! reaction-menu emoji; Quill has no such animation, so there is nothing to
-//! gate.
+//! categories that animate something in Quill are offered.
 //!
 //! The bits keep tdesktop's values so a future import of its settings maps
 //! one to one. The current set lives in a process-wide atomic: the views read
@@ -22,6 +20,9 @@ pub enum Flag {
     StickersChat,
     /// Animated emoji in the emoji panel.
     EmojiPanel,
+    /// Animated custom emoji in the expanded reaction selector (tdesktop
+    /// `kEmojiReactions`).
+    EmojiReactions,
     /// Animated emoji in messages and the chat list.
     EmojiChat,
     /// Wallpaper rotation: the freeform gradient turning on each sent
@@ -47,6 +48,7 @@ impl Flag {
             Self::StickersPanel => 1 << 1,
             Self::StickersChat => 1 << 2,
             Self::EmojiPanel => 1 << 3,
+            Self::EmojiReactions => 1 << 4,
             Self::EmojiChat => 1 << 5,
             Self::ChatBackground => 1 << 6,
             Self::ChatSpoiler => 1 << 7,
@@ -58,10 +60,11 @@ impl Flag {
 }
 
 /// All categories Quill offers, in the dialog's order.
-pub const ALL_FLAGS: [Flag; 10] = [
+pub const ALL_FLAGS: [Flag; 11] = [
     Flag::StickersPanel,
     Flag::StickersChat,
     Flag::EmojiPanel,
+    Flag::EmojiReactions,
     Flag::EmojiChat,
     Flag::EmojiStatus,
     Flag::ChatBackground,
@@ -76,6 +79,7 @@ pub const ALL_BITS: u32 = Flag::Animations.bit()
     | Flag::StickersPanel.bit()
     | Flag::StickersChat.bit()
     | Flag::EmojiPanel.bit()
+    | Flag::EmojiReactions.bit()
     | Flag::EmojiChat.bit()
     | Flag::ChatBackground.bit()
     | Flag::ChatSpoiler.bit()
@@ -102,6 +106,7 @@ pub const GROUPS: [Group; 5] = [
         title: Some("Animated Emoji"),
         items: &[
             (Flag::EmojiPanel, "Autoplay in panel"),
+            (Flag::EmojiReactions, "Autoplay in reactions menu"),
             (Flag::EmojiChat, "Autoplay in messages"),
             (Flag::EmojiStatus, "Autoplay in premium status"),
         ],
@@ -220,6 +225,7 @@ mod tests {
         // ui/power_saving.h
         assert_eq!(Flag::Animations.bit(), 1);
         assert_eq!(Flag::StickersChat.bit(), 4);
+        assert_eq!(Flag::EmojiReactions.bit(), 16);
         assert_eq!(Flag::ChatBackground.bit(), 64);
         assert_eq!(Flag::ChatSpoiler.bit(), 128);
         assert_eq!(Flag::Calls.bit(), 256);
@@ -235,7 +241,8 @@ mod tests {
             Flag::ChatBackground.bit(),
             "wallpaper rotation"
         );
-        assert_eq!(sanitize(1 << 4), 0, "reaction emoji are not offered");
+        assert_eq!(sanitize(1 << 4), Flag::EmojiReactions.bit());
+        assert_eq!(sanitize(1 << 11), 0, "bits past kAll are dropped");
         assert_eq!(sanitize(Flag::Calls.bit()), Flag::Calls.bit());
     }
 
@@ -249,6 +256,37 @@ mod tests {
         let bits = with_flag(bits, Flag::StickersChat, false);
         assert!(!is_on(bits, false, Flag::StickersChat));
         assert!(is_on(bits, false, Flag::Calls));
+    }
+
+    #[test]
+    fn every_flag_gates_independently_of_the_others() {
+        for flag in ALL_FLAGS {
+            let bits = with_flag(0, flag, true);
+            for other in ALL_FLAGS {
+                assert_eq!(
+                    is_on(bits, false, other),
+                    other == flag,
+                    "{flag:?} must not leak into {other:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn global_gate_follows_the_set_and_the_forced_state() {
+        // One test owns the process-wide state so parallel tests cannot
+        // interleave with it.
+        set(0);
+        set_force_all(false);
+        assert!(!on(Flag::EmojiReactions));
+        set(Flag::EmojiReactions.bit());
+        assert!(on(Flag::EmojiReactions));
+        assert!(!on(Flag::EmojiPanel));
+        set(0);
+        set_force_all(true);
+        assert!(on(Flag::EmojiPanel));
+        set_force_all(false);
+        assert!(!on(Flag::EmojiPanel));
     }
 
     #[test]
