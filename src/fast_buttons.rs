@@ -27,6 +27,11 @@ pub fn set_persistence(enabled: bool) {
     PERSIST.store(enabled, Ordering::SeqCst);
 }
 
+/// Whether settings files are written (tests turn it off).
+pub fn persistence_enabled() -> bool {
+    PERSIST.load(Ordering::SeqCst)
+}
+
 fn path() -> Option<PathBuf> {
     crate::settings::safe_app_root().map(|root| root.join("fast_buttons.json"))
 }
@@ -47,9 +52,10 @@ fn current() -> Stored {
     loaded
 }
 
-/// Whether fast buttons mode is on for this bot.
+/// Whether fast buttons mode is on for this bot. It only exists while the
+/// experimental option is on (`advanced::experimental`), as in tdesktop.
 pub fn is_enabled(bot_id: i64) -> bool {
-    current().ids.contains(&bot_id)
+    crate::advanced::experimental::fast_buttons_mode() && current().ids.contains(&bot_id)
 }
 
 /// Switch the mode for one bot and persist it.

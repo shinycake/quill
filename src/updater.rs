@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 
 pub const RELEASES_URL: &str = "https://github.com/shinycake/quill/releases";
 pub const LATEST_API_URL: &str = "https://api.github.com/repos/shinycake/quill/releases/latest";
+/// The beta channel reads the newest releases, pre-releases included
+/// (`/releases/latest` never returns a pre-release).
+pub const RELEASES_API_URL: &str =
+    "https://api.github.com/repos/shinycake/quill/releases?per_page=30";
 const MAX_RESPONSE_BYTES: u64 = 1_048_576;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,12 +101,7 @@ pub fn interpret_release(status: u16, body: &[u8], current: &str) -> UpdateState
     let Ok(release) = serde_json::from_slice::<GithubRelease>(body) else {
         return UpdateState::Failed("Invalid release information. Retry the check.");
     };
-    let Ok(version) = Version::parse(
-        release
-            .tag_name
-            .strip_prefix('v')
-            .unwrap_or(&release.tag_name),
-    ) else {
+    let Some(version) = release_version(&release.tag_name) else {
         return UpdateState::Failed("Unrecognized release version. Retry the check.");
     };
     let Ok(current) = Version::parse(current) else {
@@ -111,7 +110,46 @@ pub fn interpret_release(status: u16, body: &[u8], current: &str) -> UpdateState
     if release.draft || release.prerelease || !version.pre.is_empty() {
         return UpdateState::Failed("No stable release information. Retry the check.");
     }
-    if !version.cmp_precedence(&current).is_gt() {
+    release_state(release, version, &current)
+}
+
+fn release_version(tag: &str) -> Option<Version> {
+    Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()
+}
+
+/// The beta channel ("Install beta versions"): `body` is the releases list.
+/// The newest published release wins, pre-release or not, and drafts never
+/// count. An empty list is `NoRelease`.
+pub fn interpret_release_list(status: u16, body: &[u8], current: &str) -> UpdateState {
+    if status == 404 {
+        return UpdateState::NoRelease;
+    }
+    if status != 200 {
+        return UpdateState::Failed("Release server unavailable. Retry the check.");
+    }
+    if body.len() as u64 > MAX_RESPONSE_BYTES {
+        return UpdateState::Failed("Release information is too large. Retry the check.");
+    }
+    let Ok(releases) = serde_json::from_slice::<Vec<GithubRelease>>(body) else {
+        return UpdateState::Failed("Invalid release information. Retry the check.");
+    };
+    let Ok(current) = Version::parse(current) else {
+        return UpdateState::Failed("Unrecognized installed version.");
+    };
+    let newest = releases
+        .into_iter()
+        .filter(|release| !release.draft)
+        .filter_map(|release| Some((release_version(&release.tag_name)?, release)))
+        .max_by(|(a, _), (b, _)| a.cmp_precedence(b));
+    match newest {
+        Some((version, release)) => release_state(release, version, &current),
+        None => UpdateState::NoRelease,
+    }
+}
+
+/// The state for a release that passed its channel's filter.
+fn release_state(release: GithubRelease, version: Version, current: &Version) -> UpdateState {
+    if !version.cmp_precedence(current).is_gt() {
         return UpdateState::UpToDate;
     }
     if !release
@@ -140,8 +178,23 @@ pub fn interpret_release(status: u16, body: &[u8], current: &str) -> UpdateState
 }
 
 /// Blocking, bounded check; callers run it on the background executor.
+/// "Install beta versions" (`advanced::update_channel`) picks the channel.
 #[cfg(feature = "ui")]
 pub fn check_latest_release() -> UpdateState {
+    check_release(crate::advanced::update_channel::install_beta())
+}
+
+/// The check for one channel: the latest stable release, or with `beta` the
+/// newest release of any kind.
+#[cfg(feature = "ui")]
+pub fn check_release(beta: bool) -> UpdateState {
+    let interpret = |status: u16, body: &[u8]| {
+        if beta {
+            interpret_release_list(status, body, crate::version::APP)
+        } else {
+            interpret_release(status, body, crate::version::APP)
+        }
+    };
     let agent = ureq::Agent::config_builder()
         .https_only(true)
         .max_redirects(0)
@@ -150,7 +203,11 @@ pub fn check_latest_release() -> UpdateState {
         .build()
         .new_agent();
     let response = agent
-        .get(LATEST_API_URL)
+        .get(if beta {
+            RELEASES_API_URL
+        } else {
+            LATEST_API_URL
+        })
         .header("User-Agent", format!("Quill/{}", crate::version::APP))
         .header("Accept", "application/vnd.github+json")
         .call();
@@ -161,7 +218,7 @@ pub fn check_latest_release() -> UpdateState {
     };
     let status = response.status().as_u16();
     if status != 200 {
-        return interpret_release(status, &[], crate::version::APP);
+        return interpret(status, &[]);
     }
     let Ok(body) = response
         .body_mut()
@@ -171,7 +228,7 @@ pub fn check_latest_release() -> UpdateState {
     else {
         return UpdateState::Failed("Could not read release information. Retry the check.");
     };
-    interpret_release(status, &body, crate::version::APP)
+    interpret(status, &body)
 }
 
 #[cfg(test)]
@@ -263,5 +320,93 @@ mod tests {
             interpret_release(200, &vec![b' '; MAX_RESPONSE_BYTES as usize + 1], "0.1.0"),
             UpdateState::Failed(_)
         ));
+    }
+    fn listed(tag: &str, prerelease: bool, draft: bool) -> serde_json::Value {
+        json!({"tag_name":tag,"html_url":format!("{RELEASES_URL}/tag/{tag}"),"body":"notes","draft":draft,"prerelease":prerelease})
+    }
+
+    #[test]
+    fn the_beta_channel_takes_the_newest_published_release() {
+        let list = |items: Vec<serde_json::Value>| serde_json::to_vec(&items).unwrap();
+        let body = list(vec![
+            listed("v2026.1012.1300", true, false),
+            listed("v2026.1011.1200", false, false),
+        ]);
+        let UpdateState::Available(info) = interpret_release_list(200, &body, "2026.1011.1200")
+        else {
+            panic!("the pre-release is newer");
+        };
+        assert_eq!(info.version, "2026.1012.1300");
+        // Stable only: the same list through the stable reader refuses a
+        // pre-release outright.
+        assert!(matches!(
+            interpret_release(
+                200,
+                &serde_json::to_vec(&listed("v2026.1012.1300", true, false)).unwrap(),
+                "2026.1011.1200"
+            ),
+            UpdateState::Failed(_)
+        ));
+        // A draft never counts, however new.
+        let body = list(vec![
+            listed("v2026.1013.1400", true, true),
+            listed("v2026.1011.1200", false, false),
+        ]);
+        assert_eq!(
+            interpret_release_list(200, &body, "2026.1011.1200"),
+            UpdateState::UpToDate
+        );
+        // The order of the list does not matter.
+        let body = list(vec![
+            listed("v2026.1011.1200", false, false),
+            listed("v2026.1012.1300", true, false),
+        ]);
+        assert!(matches!(
+            interpret_release_list(200, &body, "2026.1011.1200"),
+            UpdateState::Available(_)
+        ));
+        // A newer stable release beats an older pre-release.
+        let body = list(vec![
+            listed("v2026.1012.1300", true, false),
+            listed("v2026.1014.1500", false, false),
+        ]);
+        let UpdateState::Available(info) = interpret_release_list(200, &body, "2026.1011.1200")
+        else {
+            panic!("newer stable");
+        };
+        assert_eq!(info.version, "2026.1014.1500");
+    }
+
+    #[test]
+    fn the_beta_list_handles_empty_and_broken_answers() {
+        assert_eq!(
+            interpret_release_list(200, b"[]", "0.1.0"),
+            UpdateState::NoRelease
+        );
+        assert_eq!(
+            interpret_release_list(404, b"", "0.1.0"),
+            UpdateState::NoRelease
+        );
+        for (status, body) in [
+            (403, b"[]".as_slice()),
+            (500, b"x"),
+            (200, b"{}"),
+            (200, b"nope"),
+        ] {
+            assert!(matches!(
+                interpret_release_list(status, body, "0.1.0"),
+                UpdateState::Failed(_)
+            ));
+        }
+        assert!(matches!(
+            interpret_release_list(200, &vec![b' '; MAX_RESPONSE_BYTES as usize + 1], "0.1.0"),
+            UpdateState::Failed(_)
+        ));
+        // Tags that are not versions are skipped, not fatal.
+        let body = serde_json::to_vec(&vec![listed("nightly", true, false)]).unwrap();
+        assert_eq!(
+            interpret_release_list(200, &body, "0.1.0"),
+            UpdateState::NoRelease
+        );
     }
 }

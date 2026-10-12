@@ -88,6 +88,7 @@ pub(super) fn using_test_dc() -> bool {
     std::env::var("QUILL_USE_TEST_DC")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
+        || quill::advanced::test_environment::active_is_test()
 }
 
 /// `YYYY-MM-DDTHH:MM:00` of a unix time in the local zone, the shape

@@ -143,6 +143,13 @@ impl TdHub {
         // install_redacted_log alone does not stop TDLib writing to stderr.
         api.secure_native_logging()?;
         api.install_redacted_log(MAX_NATIVE_LOG_VERBOSITY);
+        // Debug mode (`advanced::debug_mode`) opens the native log file only
+        // after the stream above is closed, so a failure leaves it closed.
+        if crate::advanced::debug_mode::enabled()
+            && let Some(root) = crate::settings::safe_app_root()
+        {
+            let _ = crate::advanced::debug_mode::start_tdlib_log(&api, &root);
+        }
         let receive = api.clone();
         let source: ReceiveSource = Box::new(move |timeout| receive.receive(timeout));
         let mut hub = TdHub::with_source(source, sink).map_err(|_| TdJsonError::Load)?;
@@ -150,6 +157,11 @@ impl TdHub {
         let hub = Arc::new(hub);
         *slot = Some(hub.clone());
         Ok(hub)
+    }
+
+    /// The loaded `libtdjson` of the process-wide hub, if one was made.
+    pub fn shared_api() -> Option<Arc<TdJson>> {
+        lock(&SHARED).as_ref().and_then(|hub| hub.api().cloned())
     }
 
     /// A hub reading from `source` on its own thread.

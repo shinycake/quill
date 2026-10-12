@@ -3,6 +3,7 @@
 
 pub mod about;
 pub mod admin_extras;
+pub mod advanced;
 pub mod album;
 pub mod animation;
 pub mod app_theme;

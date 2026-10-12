@@ -4,6 +4,8 @@ name: release
 # docs/decisions/codex-release-pipeline.md
 #
 #   gh workflow run release.yml -f release=true   -> draft release (owner publishes it)
+#   gh workflow run release.yml -f release=true -f prerelease=true
+#                                                 -> draft flagged as a pre-release (beta)
 #   gh workflow run release.yml                   -> dry run: same build, artifacts only
 #
 # The version is computed, never chosen: YEAR.MONTHDAY.COMMITS from the
@@ -12,6 +14,11 @@ name: release
 # commit always gets the same version. The workflow stamps it into the
 # binaries (QUILL_RELEASE_VERSION, src/version.rs), so Cargo.toml never
 # changes. Pushing a vYEAR.MONTHDAY.COMMITS tag by hand also works.
+#
+# A beta is the same build with GitHub's pre-release flag. "Install beta
+# versions" in Quill's Advanced settings reads the releases list and takes the
+# newest published release; /releases/latest, the product page and everyone
+# without the switch only ever see stable releases.
 #
 # The release is ALWAYS created as a draft. Nothing here publishes it: the
 # owner reviews the draft and clicks Publish, which creates the tag and fires
@@ -28,6 +35,11 @@ on:
     inputs:
       release:
         description: 'Create a draft release (otherwise a dry run that only uploads artifacts)'
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: 'Flag the draft release as a pre-release (a beta for "Install beta versions")'
         required: false
         default: false
         type: boolean
@@ -58,6 +70,7 @@ jobs:
       embed: ${{ steps.v.outputs.embed }}
       credentials: ${{ steps.v.outputs.credentials }}
       publish: ${{ steps.v.outputs.publish }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -67,6 +80,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_RELEASE: ${{ inputs.release }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
           INPUT_EMBED: ${{ inputs.embed_credentials }}
           # Only "true"/"false" leave this step; the values never do.
           HAVE_SECRETS: ${{ secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}
@@ -112,6 +126,7 @@ jobs:
             echo "version=$version"
             echo "tag=v$version"
             echo "publish=$publish"
+            echo "prerelease=$([ "$INPUT_PRERELEASE" = true ] && [ "$publish" = true ] && echo true || echo false)"
             echo "embed=$embed"
             echo "credentials=$credentials"
           } >> "$GITHUB_OUTPUT"
@@ -181,6 +196,7 @@ jobs:
       TAG: ${{ needs.prepare.outputs.tag }}
       CREDENTIALS: ${{ needs.prepare.outputs.credentials }}
       PUBLISH: ${{ needs.prepare.outputs.publish }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -289,8 +305,14 @@ jobs:
           fi
           verify=()
           [ "$GITHUB_REF_TYPE" = tag ] && verify=(--verify-tag)
-          gh release create "$TAG" --draft "${verify[@]}" --target "$GITHUB_SHA" \
-            --title "Quill $VERSION" --notes-file release-notes.md release-out/*
+          flags=()
+          title="Quill $VERSION"
+          if [ "$PRERELEASE" = true ]; then
+            flags=(--prerelease)
+            title="Quill $VERSION (beta)"
+          fi
+          gh release create "$TAG" --draft "${verify[@]}" "${flags[@]}" --target "$GITHUB_SHA" \
+            --title "$title" --notes-file release-notes.md release-out/*
           gh release view "$TAG" --json isDraft,url --jq '"draft=\(.isDraft) \(.url)"'
       # A release step that fails part-way must not leave a half-uploaded draft.
       - name: remove a partial draft

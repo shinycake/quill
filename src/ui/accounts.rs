@@ -169,6 +169,7 @@ impl QuillApp {
             self.fail_account_switch(format!("Could not switch account: {e}"), window, cx);
             return;
         }
+        self.refresh_test_environment();
         match self.take_background_live(key) {
             Some(live) => self.adopt_live(live, cx),
             None => self.start_connection(cx),

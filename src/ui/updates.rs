@@ -4,7 +4,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::updater::{UpdateState, check_latest_release};
+use quill::updater::{UpdateState, check_release};
 
 impl QuillApp {
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
@@ -16,12 +16,20 @@ impl QuillApp {
         }
         self.settings.update_state = UpdateState::Checking;
         self.settings.update_banner_dismissed = false;
+        let beta = quill::advanced::update_channel::install_beta();
         let check = cx
             .background_executor()
-            .spawn(async { check_latest_release() });
+            .spawn(async move { check_release(beta) });
         cx.spawn(async move |this, cx| {
             let state = check.await;
             let _ = this.update(cx, |this, cx| {
+                // "Install beta versions" changed while this ran: the
+                // answer is for the other channel, ask again.
+                if quill::advanced::update_channel::install_beta() != beta {
+                    this.settings.update_state = UpdateState::Idle;
+                    this.check_for_updates(cx);
+                    return;
+                }
                 this.settings.update_state = state;
                 cx.notify();
             });
@@ -103,6 +111,7 @@ impl QuillApp {
                     .text_sm()
                     .child(self.settings.update_state.label()),
             )
+            .children(self.install_beta_row(cx))
             .child(
                 Button::new("check-for-updates")
                     .label("Check for updates")
