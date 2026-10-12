@@ -131,6 +131,9 @@ impl QuillApp {
                 })),
             );
         }
+        if let Some(section) = self.bot_permissions_section(user_id, cx) {
+            column = column.child(section);
+        }
         if let Some(facts) = self.bot_invite_facts(user_id)
             && let Some(label) = invite_label(&facts)
         {

@@ -76,18 +76,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         message_id: MessageId,
         text: &str,
+        media: Option<&crate::poll::PollOptionInput>,
     ) -> Result<RequestId, ConnectSendError> {
         let text = match self.sent_message_content(chat_id, message_id)? {
             MessageContent::Poll(content)
                 if can_offer_add_option(content.can_add_option, &content.poll) =>
             {
-                validate_new_option(&content.poll, text)
-                    .map_err(|_| ConnectSendError::InvalidRequest)?
+                // The text may carry custom emoji as composer markup: the
+                // rules apply to what it reads as.
+                validate_new_option(&content.poll, &crate::composer::parse_format_markup(text).0)
+                    .map_err(|_| ConnectSendError::InvalidRequest)?;
+                text.trim().to_string()
             }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         self.send_tracked(RequestPurpose::AddPollOption, chat_id, |extra| {
-            add_poll_option(extra, chat_id, message_id, &text)
+            add_poll_option(extra, chat_id, message_id, &text, media)
         })
     }
 

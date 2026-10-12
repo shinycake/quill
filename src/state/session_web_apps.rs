@@ -116,6 +116,12 @@ impl Session {
             Some(RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id })) => {
                 self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Granted));
             }
+            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
+                bot_user_id,
+                ..
+            })) => {
+                self.bots.web_apps.emoji_access = Some((bot_user_id, true));
+            }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
                 bot_user_id,
                 added,
@@ -161,6 +167,16 @@ impl Session {
             }
             RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }) => {
                 self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Denied));
+            }
+            RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
+                bot_user_id,
+                allowed,
+            }) => {
+                // The switch moved at once; put it back.
+                if let Some(Some(info)) = self.bots.bot_info.get_mut(&bot_user_id) {
+                    info.can_manage_emoji_status = !allowed;
+                }
+                self.bots.web_apps.emoji_access = Some((bot_user_id, false));
             }
             RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. }) => {
                 self.bots.web_apps.attachment_menu_bot = Some(Err(web_app_error_text(err)));

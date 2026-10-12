@@ -869,7 +869,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
-- [ ] Links and media in poll options <!-- parity:polls-option-media -->
+- [x] Links and media in poll options <!-- parity:polls-option-media -->
 - [x] Poll statistics, "Show more" voters and admin vote view <!-- parity:polls-stats -->
 - [x] Unread poll-vote badges and "Read all poll votes" <!-- parity:polls-unread-votes -->
 - [x] Retract a vote from the message menu <!-- parity:polls-retract-menu -->
@@ -1075,12 +1075,12 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [x] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
-- [ ] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
-- [ ] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
+- [x] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
+- [x] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
 - [x] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
 - [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
 - [x] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
-- [ ] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
+- [x] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
 - [ ] Hardware decoding and renderer toggles (blocked: tdesktop-specific renderer options do not apply to GPUI) <!-- parity:data-hw-decode -->
 
 ### Platform & edge cases

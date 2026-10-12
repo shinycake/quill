@@ -237,6 +237,7 @@ impl QuillApp {
         div()
             .id("onboarding")
             .size_full()
+            .relative()
             .flex()
             .items_center()
             .justify_center()
@@ -244,6 +245,22 @@ impl QuillApp {
             .p_6()
             .bg(cx.theme().background)
             .child(card)
+            // The intro says "Test Mode" in its corner while the account on
+            // screen belongs to the test environment.
+            .when(self.settings.advanced.test_environment, |this| {
+                this.child(
+                    div()
+                        .id("auth-test-mode-label")
+                        .role(Role::Label)
+                        .aria_label("Test Mode")
+                        .absolute()
+                        .top(px(12.))
+                        .right(px(16.))
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Test Mode"),
+                )
+            })
             .into_any_element()
     }
 }

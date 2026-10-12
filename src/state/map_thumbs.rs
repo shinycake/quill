@@ -91,12 +91,19 @@ impl MapThumbs {
     }
 }
 
-/// The place a location or venue message shows.
-fn message_location(content: &MessageContent) -> Option<GeoLocation> {
+/// The places a message shows a map tile for: its location or venue, or the
+/// places attached to a poll's options.
+fn message_locations(content: &MessageContent) -> Vec<GeoLocation> {
     match content {
-        MessageContent::Location(location) => Some(location.location),
-        MessageContent::Venue(venue) => Some(venue.location),
-        _ => None,
+        MessageContent::Location(location) => vec![location.location],
+        MessageContent::Venue(venue) => vec![venue.location],
+        MessageContent::Poll(poll) => poll
+            .poll
+            .options
+            .iter()
+            .filter_map(|option| option.media.as_ref()?.place())
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -112,7 +119,7 @@ impl Session {
         };
         let mut wanted: Vec<MapKey> = Vec::new();
         for message in history.messages.values() {
-            if let Some(location) = message_location(&message.content) {
+            for location in message_locations(&message.content) {
                 let key = MapKey::of(&location);
                 if !self.media.map_thumbs.has_asked(&key) && !wanted.contains(&key) {
                     wanted.push(key);
@@ -132,12 +139,13 @@ impl Session {
         };
         let mut ids = Vec::new();
         for message in history.messages.values() {
-            if let Some(location) = message_location(&message.content)
-                && let Some(file_id) = self.media.map_thumbs.file_id(&location)
-                && self.should_download(FileId(file_id))
-                && !ids.contains(&FileId(file_id))
-            {
-                ids.push(FileId(file_id));
+            for location in message_locations(&message.content) {
+                if let Some(file_id) = self.media.map_thumbs.file_id(&location)
+                    && self.should_download(FileId(file_id))
+                    && !ids.contains(&FileId(file_id))
+                {
+                    ids.push(FileId(file_id));
+                }
             }
         }
         ids

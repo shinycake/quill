@@ -97,6 +97,29 @@ impl Session {
         self.media.files.get(&id.0)
     }
 
+    /// The display files of the custom emoji in `entities` that are known
+    /// but not downloaded yet.
+    fn custom_emoji_files_to_download(&self, entities: &[crate::text::TextEntity]) -> Vec<FileId> {
+        let mut ids = Vec::new();
+        for entity in entities {
+            let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
+                continue;
+            };
+            let resolved = self
+                .stickers
+                .emoji
+                .custom_emoji_stickers
+                .iter()
+                .find(|s| s.custom_emoji_id == Some(custom_emoji_id));
+            if let Some(file_id) = resolved.and_then(|s| s.display_file_id())
+                && self.should_download(file_id)
+            {
+                ids.push(file_id);
+            }
+        }
+        ids
+    }
+
     pub fn should_download(&self, file_id: FileId) -> bool {
         if file_id.0 == 0 {
             return false;
@@ -288,6 +311,22 @@ impl Session {
                         && self.should_download(file_id)
                     {
                         ids.push(file_id);
+                    }
+                }
+                // The pictures beside poll options, and the custom emoji in
+                // their text.
+                MessageContent::Poll(poll) => {
+                    for option in &poll.poll.options {
+                        let thumb = option
+                            .media
+                            .as_ref()
+                            .and_then(|media| media.thumb_candidates().into_iter().next());
+                        if let Some(file_id) = thumb
+                            && self.should_download(file_id)
+                        {
+                            ids.push(file_id);
+                        }
+                        ids.extend(self.custom_emoji_files_to_download(&option.entities));
                     }
                 }
                 _ => {}

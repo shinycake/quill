@@ -3,7 +3,45 @@ use gpui_kit::component::date_picker::DatePickerState;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
-use quill::poll::{POLL_OPTIONS_MIN, PollDraft};
+use quill::poll::{POLL_OPTIONS_MIN, PollDraft, PollOptionInput};
+
+/// What an option of the new poll carries beside its text.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum OptionMediaSlot {
+    #[default]
+    None,
+    /// A picked video being read (duration and size) off the UI thread.
+    Preparing(String),
+    Ready(PollOptionInput),
+}
+
+impl OptionMediaSlot {
+    /// The media, once it is ready to send.
+    pub(crate) fn ready(&self) -> Option<&PollOptionInput> {
+        match self {
+            Self::Ready(media) => Some(media),
+            _ => None,
+        }
+    }
+}
+
+/// The media of one option being written (a row of the new poll, or the
+/// option added to an open poll), and the little UI around it.
+#[derive(Default)]
+pub(crate) struct OptionAttach {
+    pub(crate) media: OptionMediaSlot,
+    /// The attach menu is open.
+    pub(crate) menu_open: bool,
+    /// The link field, while an address is being typed.
+    pub(crate) link_input: Option<Entity<TextareaState>>,
+    /// Waiting for a sticker chosen in the sticker panel.
+    pub(crate) sticker_wait: bool,
+    /// The emoji panel is open for this option's field.
+    pub(crate) emoji_wait: bool,
+    /// A frame of a picked video, drawn while it is attached.
+    pub(crate) preview: Option<std::path::PathBuf>,
+}
+
 /// Phase 4.2: poll creation dialog above the composer. Textarea entities are
 /// created when the dialog opens (option rows are dynamic); the dialog
 /// freezes into a validated `PollDraft` on "Create poll".
@@ -14,6 +52,8 @@ pub struct PollDialog {
     pub(crate) description_input: Entity<TextareaState>,
     pub(crate) question_input: Entity<TextareaState>,
     pub(crate) option_inputs: Vec<Entity<TextareaState>>,
+    /// The media of each option, by the same index as `option_inputs`.
+    pub(crate) attach: Vec<OptionAttach>,
     pub(crate) explanation_input: Entity<TextareaState>,
     pub(crate) duration_input: Entity<TextareaState>,
     pub(crate) countries_input: Entity<TextareaState>,
@@ -42,6 +82,7 @@ pub struct PollAddOption {
     pub(crate) chat_id: ChatId,
     pub(crate) message_id: MessageId,
     pub(crate) input: Entity<TextareaState>,
+    pub(crate) attach: OptionAttach,
     pub(crate) error: Option<&'static str>,
 }
 
@@ -66,6 +107,9 @@ impl PollDialog {
         Self {
             description_input,
             question_input,
+            attach: (0..POLL_OPTIONS_MIN)
+                .map(|_| OptionAttach::default())
+                .collect(),
             option_inputs,
             explanation_input,
             duration_input,
@@ -87,7 +131,12 @@ impl PollDialog {
     /// Freeze the dialog inputs into a `PollDraft` (validated by the caller).
     pub(crate) fn draft(&self, cx: &App) -> PollDraft {
         let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
-        let options: Vec<String> = self.option_inputs.iter().map(&value).collect();
+        // Options carry their custom emoji as composer markup.
+        let options: Vec<String> = self
+            .option_inputs
+            .iter()
+            .map(|input| crate::ui::composer_field::field_doc(input.read(cx)).to_markup())
+            .collect();
         // Map the marked row to its index among the usable (non-empty) options.
         let quiz_correct = self.quiz_correct_row.and_then(|row| {
             options
@@ -105,6 +154,11 @@ impl PollDialog {
         PollDraft {
             question: value(&self.question_input),
             description: value(&self.description_input),
+            option_media: self
+                .attach
+                .iter()
+                .map(|attach| attach.media.ready().cloned())
+                .collect(),
             options,
             is_anonymous: self.is_anonymous,
             allows_multiple_answers: self.allows_multiple_answers,
@@ -136,6 +190,13 @@ impl PollDialog {
             .map(|civil| quill::schedule::civil_to_unix(&civil))
     }
 
+    /// A picked video is still being read: sending now would drop it.
+    pub(crate) fn media_preparing(&self) -> bool {
+        self.attach
+            .iter()
+            .any(|attach| matches!(attach.media, OptionMediaSlot::Preparing(_)))
+    }
+
     /// `true` when closing would lose user input (drives the discard prompt).
     pub(crate) fn is_dirty(&self, cx: &App) -> bool {
         let value = |input: &Entity<TextareaState>| input.read(cx).value();
@@ -148,6 +209,10 @@ impl PollDialog {
             || self.hide_results_until_closes
             || self.members_only
             || self.deadline.is_some()
+            || self
+                .attach
+                .iter()
+                .any(|attach| attach.media != OptionMediaSlot::None)
             || !value(&self.question_input).trim().is_empty()
             || !value(&self.description_input).trim().is_empty()
             || !value(&self.explanation_input).trim().is_empty()

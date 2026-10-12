@@ -81,6 +81,8 @@ pub enum MessagesPayload {
     /// message id — so the reducer matches it by `poll.id` (Phase 4.2).
     UpdatePoll {
         poll: Poll,
+        /// The files the options' media name.
+        files: Vec<ParsedFile>,
     },
     /// B15: `pollVoteStatistics` (schema 1.8.67, line 10263) — the
     /// `getPollVoteStatistics` answer (line 12947).

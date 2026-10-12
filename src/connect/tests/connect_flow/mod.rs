@@ -87,6 +87,25 @@ fn set_tdlib_parameters_shape_includes_hash_but_debug_redacts_credentials() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The `testmode` code's accounts connect to the test environment; every
+/// other account does not (an unset `QUILL_USE_TEST_DC` assumed).
+#[test]
+fn test_environment_accounts_connect_with_use_test_dc() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let creds = test_credentials();
+    let params_for = |paths: &crate::settings::AccountPaths| {
+        let params = build_set_tdlib_parameters(&creds, paths, &prepared.database_key, "en", "");
+        serde_json::from_str::<Value>(&params.to_json(RequestId(1))).unwrap()
+    };
+    if std::env::var_os("QUILL_USE_TEST_DC").is_none() {
+        assert_eq!(params_for(&prepared.paths)["use_test_dc"], false);
+        crate::advanced::test_environment::mark_test_environment(&prepared.paths).unwrap();
+        assert_eq!(params_for(&prepared.paths)["use_test_dc"], true);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Bots slice: `ConnectDriver::inline_query` — a first page sets the
 /// slot to `Loading` and sends one `getInlineQueryResults`, a second
 /// call while in flight is a no-op that leaves the slot alone, and a

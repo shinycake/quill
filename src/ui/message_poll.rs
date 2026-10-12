@@ -1,10 +1,12 @@
 //! poll message rendering.
 
 use super::app::QuillApp;
+use super::polls::option_thumb::{PollMediaView, option_thumb};
 use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::local_time::now_unix;
@@ -22,6 +24,8 @@ pub(super) fn poll_body(
     chat_id: ChatId,
     message_id: MessageId,
     content: &PollContent,
+    // The options' pictures and custom emoji, as far as downloaded.
+    media: &PollMediaView,
     // The bubble look: a plain bubble has no padding to take off the width.
     plain: bool,
     cx: &mut Context<QuillApp>,
@@ -103,6 +107,7 @@ pub(super) fn poll_body(
             option,
             poll,
             results_hidden,
+            media,
             cx,
         ));
     }
@@ -147,6 +152,24 @@ pub(super) fn poll_body(
     body.into_any_element()
 }
 
+/// The poll row of a history message: the options' pictures and custom emoji
+/// come from the files the session has.
+pub(super) fn session_poll_body(
+    message: &quill::state::HistoryMessage,
+    content: &PollContent,
+    (files, media_roots, session): (
+        &std::collections::HashMap<i32, quill::telegram::envelope::ParsedFile>,
+        &[std::path::PathBuf],
+        Option<&quill::state::Session>,
+    ),
+    look: super::synthetic::BubbleLook,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let media =
+        super::polls::option_thumb::poll_media_view(&content.poll, files, media_roots, session);
+    poll_body(message.chat_id, message.id, content, &media, look.plain, cx)
+}
+
 /// One poll option: text + percentage, a bar split by `flex_grow`
 /// (no percentage widths in GPUI), the per-option voter count, and the
 /// chosen / quiz-correct marks. Tappable while the poll is open.
@@ -157,6 +180,7 @@ pub(super) fn poll_option_row(
     option: &PollOption,
     poll: &quill::telegram::Poll,
     results_hidden: bool,
+    media: &PollMediaView,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let fill = if results_hidden {
@@ -169,15 +193,40 @@ pub(super) fn poll_option_row(
     let quiz_correct = poll.is_closed
         && matches!(&poll.poll_type, PollType::Quiz { correct_option_ids, .. }
             if correct_option_ids.contains(&(index as i32)));
-    let option_label = if chosen {
-        format!("✓ {}", option.text)
+    // The text: plain, or with its custom emoji drawn (the marks go around
+    // it, so the entity offsets stay right).
+    let label_text = if option.entities.is_empty() {
+        let option_label = if chosen {
+            format!("✓ {}", option.text)
+        } else {
+            option.text.clone()
+        };
+        let option_label = if quiz_correct {
+            format!("{option_label} · correct answer")
+        } else {
+            option_label
+        };
+        super::bidi_line::aligned_block(option_label).into_any_element()
     } else {
-        option.text.clone()
-    };
-    let option_label = if quiz_correct {
-        format!("{option_label} · correct answer")
-    } else {
-        option_label
+        let key = (message_id.0, index as u64);
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_1()
+            .when(chosen, |this| this.child("✓"))
+            .child(super::message_text::rich_text_line(
+                &option.text,
+                &option.entities,
+                (chat_id.0, key.0 as u64 * 64 + key.1),
+                false,
+                &Default::default(),
+                px(14.),
+                &media.emoji,
+                cx,
+            ))
+            .when(quiz_correct, |this| this.child("· correct answer"))
+            .into_any_element()
     };
     let stats = if results_hidden {
         String::new()
@@ -206,21 +255,36 @@ pub(super) fn poll_option_row(
         .border_1()
         .border_color(if chosen { accent() } else { border() })
         .bg(bg_canvas())
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(if quiz_correct { success() } else { text_menu() })
-                        .flex_1()
-                        .min_w_0()
-                        .child(super::bidi_line::aligned_block(option_label)),
-                )
-                .child(div().text_sm().text_color(text_muted()).child(stats)),
-        )
+        .child({
+            let label = div()
+                .text_sm()
+                .text_color(if quiz_correct { success() } else { text_menu() })
+                .flex_1()
+                .min_w_0()
+                .child(label_text);
+            let stats = div().text_sm().text_color(text_muted()).child(stats);
+            let thumb = media
+                .thumb(index)
+                .map(|thumb| option_thumb(chat_id, message_id, index, thumb, cx));
+            if media.any_thumb() {
+                // tdesktop's layout once an option has a picture: the
+                // percentage first, the picture at the end.
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(stats.flex_none().min_w(px(56.)))
+                    .child(label)
+                    .children(thumb)
+            } else {
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(label)
+                    .child(stats)
+            }
+        })
         .child(
             div()
                 .flex()

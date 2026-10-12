@@ -18,6 +18,9 @@ impl QuillApp {
         if self.route_business_start_page_sticker(file_id, cx) {
             return;
         }
+        if self.route_poll_option_sticker(file_id, &emoji, (width, height), cx) {
+            return;
+        }
         if self.premium_sticker_blocked(file_id, cx) {
             return;
         }

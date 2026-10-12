@@ -136,6 +136,8 @@ fn a_quick_flick_or_a_chat_springs_back_without_opening_anything(cx: &mut TestAp
     frames(vcx);
     open_channel_with_a_next_one(&app, vcx);
     let at = history_centre(&app, vcx);
+    // A long dwell keeps a loaded machine from reaching "ready" mid-pull.
+    quill::pull_next::set_ready_dwell_for_tests(Some(60_000));
     // Released before the dwell: nothing opens.
     pull(vcx, at, 12);
     wheel(vcx, at, TouchPhase::Ended, 0.);

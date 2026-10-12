@@ -17,7 +17,7 @@ use super::message_media::{
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,
 };
-use super::message_poll::poll_body;
+use super::message_poll::session_poll_body as poll_row;
 use super::message_text::{
     FooterMeta, caption_above_media, message_chrome, message_footer_meta, message_rich_block,
     message_text_block, rich_text_reserving,
@@ -605,7 +605,7 @@ pub(super) fn service_pill(
 }
 
 /// The downloaded map tile of a place, if TDLib has produced one.
-fn map_tile_path(
+pub(in crate::ui) fn map_tile_path(
     session: Option<&Session>,
     location: &quill::telegram::envelope::GeoLocation,
     files: &HashMap<i32, ParsedFile>,

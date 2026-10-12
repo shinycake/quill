@@ -329,6 +329,7 @@ fn ui_main(args: &[String]) {
     let credentials = quill::credentials::load();
     let appearance = ui::QuillApp::load_appearance();
     quill::tray::set_tray_enabled(appearance.show_tray_icon);
+    ui::window_frame::set_native(appearance.native_window_frame);
     let start_in_tray =
         args.iter().any(|arg| arg == "--start-minimized") || appearance.start_in_tray;
     let application = quill_application(appearance.interface_scale_pct).with_assets(QuillAssets);
@@ -368,7 +369,7 @@ fn ui_main(args: &[String]) {
                     app_id: Some("org.shinycake.quill".into()),
                     show: !start_in_tray,
                     focus: !start_in_tray,
-                    ..quill_window_options("Quill")
+                    ..ui::window_frame::window_options("Quill")
                 },
                 move |window, cx| {
                     let view = cx.new(|cx| {
@@ -643,23 +644,6 @@ fn quill_application(interface_scale_pct: u16) -> gpui_kit::Application {
     gpui_kit::Application::with_platform(std::rc::Rc::new(ZoomPlatform::new(platform)))
 }
 
-/// kit Phase 7: window options compatible with kit's `TitleBar` — the title
-/// bar owns dragging (double-click zoom included), so the platform must not
-/// also treat it as a system move region.
-#[cfg(feature = "ui")]
-fn quill_window_options(title: &str) -> gpui_kit::WindowOptions {
-    use gpui_kit::component::TitleBar;
-    use gpui_kit::{TitlebarOptions, WindowOptions};
-    WindowOptions {
-        titlebar: Some(TitlebarOptions {
-            title: Some(title.into()),
-            ..TitleBar::title_bar_options()
-        }),
-        app_owns_titlebar_drag: true,
-        ..Default::default()
-    }
-}
-
 #[cfg(feature = "ui")]
 fn demo_kinds() -> String {
     ui::ScreenshotDemo::all()
@@ -839,7 +823,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 size: size(px(demo_w), px(demo_h)),
                             })),
                             app_id: Some("org.shinycake.quill".into()),
-                            ..quill_window_options(kind.window_title())
+                            ..ui::window_frame::window_options(kind.window_title())
                         },
                         move |window, cx| {
                             let view = cx.new(|cx| {

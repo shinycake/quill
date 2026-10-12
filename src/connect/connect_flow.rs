@@ -67,9 +67,12 @@ pub fn build_set_tdlib_parameters(
     custom_device_model: &str,
 ) -> SetTdlibParameters {
     SetTdlibParameters {
+        // The `testmode` code makes a test account (`advanced::test_environment`);
+        // the environment variable stays for developers.
         use_test_dc: std::env::var("QUILL_USE_TEST_DC")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false),
+            .unwrap_or(false)
+            || crate::advanced::test_environment::is_test_environment(paths),
         database_directory: paths.tdlib_database.to_string_lossy().into_owned(),
         files_directory: paths.tdlib_files.to_string_lossy().into_owned(),
         database_encryption_key_b64: database_key.tdlib_base64(),
