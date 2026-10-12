@@ -11,8 +11,14 @@ use std::time::Duration;
 
 const POLL: Duration = Duration::from_secs(5);
 
-/// Start the watcher. Call once at startup.
+/// Start the watcher; later calls do nothing.
 pub(crate) fn watch(cx: &mut App) {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    let mut first = false;
+    STARTED.call_once(|| first = true);
+    if !first {
+        return;
+    }
     cx.spawn(async move |cx| {
         loop {
             let answer = cx

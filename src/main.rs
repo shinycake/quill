@@ -351,7 +351,6 @@ fn ui_main(args: &[String]) {
         // kit Phase 9: honor the OS reduce-motion preference.
         quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
         cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
-        ui::battery_watch::watch(cx);
         ui::bind_keys(cx);
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
