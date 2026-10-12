@@ -215,4 +215,42 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &get_message(extra, chat_id, message_id))
             .map(Some)
     }
+
+    /// `getPollVoteStatistics` for a poll's message statistics (tdesktop
+    /// `fillPollVotesGraph`). Once per post; a refusal leaves the chart
+    /// out.
+    pub fn fetch_stats_poll_votes(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_dark: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let key = (chat_id.0, message_id.0);
+        if self.session.messages.poll_stats.contains_key(&key) {
+            return Ok(None);
+        }
+        self.session
+            .messages
+            .poll_stats
+            .insert(key, crate::state::PollStatsFetch::Loading);
+        let purpose =
+            RequestPurpose::Messages(crate::state::MessagesPurpose::GetPollVoteStatistics {
+                chat_id,
+                message_id,
+            });
+        let extra = self.session.request(purpose, Some(chat_id));
+        let sent = self.send_json_request(
+            extra,
+            &crate::telegram::requests::get_poll_vote_statistics(
+                extra, chat_id, message_id, is_dark,
+            ),
+        );
+        if sent.is_err() {
+            self.session.messages.poll_stats.remove(&key);
+        }
+        sent.map(Some)
+    }
 }

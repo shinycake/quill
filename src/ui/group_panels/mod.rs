@@ -205,6 +205,7 @@ impl QuillApp {
             {
                 let _ = live.driver.fetch_chat_media_counts(chat_id);
             }
+            let stats_dark = super::chat_theme::is_dark_palette();
             let fetch = match target {
                 InfoPanelTarget::User(user_id) => {
                     // The saved music behind the profile's music button.
@@ -279,12 +280,10 @@ impl QuillApp {
                     }
                     result
                 }
-                // Phase D2: `is_dark` only tints server-rendered graph
-                // images; Quill draws its own sparklines from `json_data`
-                // and the app has no dark-mode concept, so `false`.
+                // The graphs' colors follow the theme (`is_dark`).
                 InfoPanelTarget::Statistics(chat_id) => live
                     .driver
-                    .fetch_chat_statistics(ChatId(chat_id), false)
+                    .fetch_chat_statistics(ChatId(chat_id), stats_dark)
                     .map(|_| ()),
                 // Slice G1: basic-group member list; the chat lookup
                 // happened before the driver borrow.
@@ -307,7 +306,7 @@ impl QuillApp {
                 self.connection.status_note = format!("photo download failed: {err:?}");
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.users_state.open_info_panel = Some(target);
+            session.set_open_info_panel(Some(target));
         }
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin

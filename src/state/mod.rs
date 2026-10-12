@@ -180,6 +180,7 @@ pub use session_message_menu::{
 };
 pub use session_privacy_data::{PasswordCheck, PrivacyData};
 pub use session_proxy::LINK_PING_ID;
+pub use session_reply::story_thumb_candidates;
 pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,
     thumb_candidates,

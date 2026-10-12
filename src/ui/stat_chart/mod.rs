@@ -5,8 +5,12 @@
 //! this module owns the interaction state and the drawing.
 
 mod details;
+mod elements;
 mod paint;
+mod pie_paint;
 mod state;
+mod state_zoom;
+mod tween;
 
 use super::chat_theme::text_muted;
 use gpui_kit::component::button::*;
@@ -185,12 +189,30 @@ impl StatChartView {
         });
         state.update(cx, |state, cx| state.sync(&chart, kind, cx));
         let snapshot = state.read(cx).snapshot();
-        let (start, end) = chart.visible_indices(snapshot.range);
+        let local = snapshot.local.as_ref().filter(|local| !local.leaving);
+        let (start, end) = match local {
+            Some(local) => local.indices,
+            None => chart.visible_indices(snapshot.range),
+        };
         let subtitle: SharedString = self
             .day_title
             .clone()
+            .filter(|_| local.is_none())
             .unwrap_or_else(|| chart.range_title(start, end).into());
-        let trailing = if self.day_title.is_some() {
+        let trailing = if local.is_some() {
+            // The pie's "Zoom out" (tdesktop `processLocalZoom`).
+            let state = state.clone();
+            Some(
+                Button::new(SharedString::from(format!("{}-pie-zoom-out", self.id)))
+                    .label("Zoom out")
+                    .small()
+                    .outline()
+                    .on_click(move |_, _, cx| {
+                        state.update(cx, |s, cx| s.exit_local_zoom(cx));
+                    })
+                    .into_any_element(),
+            )
+        } else if self.day_title.is_some() {
             self.zoom_out_button(&self.id)
         } else {
             None
@@ -202,18 +224,19 @@ impl StatChartView {
             .flex_col()
             .gap_2()
             .child(self.header(subtitle, trailing, cx))
-            .child(paint::plot(
+            .child(elements::plot(
                 &self.id,
                 &state,
                 &chart,
                 kind,
                 &snapshot,
                 self.on_zoom.clone().filter(|_| zoomable),
-                window,
                 cx,
             ));
         if !chart.footer_hidden && chart.x.len() > 1 {
-            section = section.child(paint::footer(&self.id, &state, &chart, kind, &snapshot, cx));
+            section = section.child(elements::footer(
+                &self.id, &state, &chart, kind, &snapshot, cx,
+            ));
         }
         if chart.lines.len() > 1 {
             section = section.child(legend(&self.id, &state, &chart, &snapshot.enabled, cx));

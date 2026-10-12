@@ -13,13 +13,16 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::ids::FileId;
 use quill::ids::{ChatId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::local_time::{civil_local, full_stamp};
 use quill::stat_chart::{ChartKind, format_short};
+use quill::state::story_thumb_candidates;
 use quill::state::{
-    ChatStatisticsFetch, MessageStatsFetch, PostLookup, StatsPage, StoryStatsFetch,
+    ChatStatisticsFetch, MessageStatsFetch, PollStatsFetch, PostLookup, StatsPage, StoryStatsFetch,
     private_share_count,
 };
 use quill::telegram::envelope::{
@@ -43,6 +46,28 @@ fn request_post(chat_id: i64, message_id: i64, cx: &mut Context<QuillApp>) {
                 && matches!(
                     live.driver
                         .fetch_stats_post(ChatId(chat_id), MessageId(message_id)),
+                    Ok(Some(_))
+                )
+            {
+                cx.notify();
+            }
+        });
+    });
+}
+
+/// Ask once for a poll's votes chart.
+fn request_poll_votes(chat_id: i64, message_id: i64, cx: &mut Context<QuillApp>) {
+    let weak = cx.weak_entity();
+    cx.defer(move |cx| {
+        let _ = weak.update(cx, |this, cx| {
+            let is_dark = super::chat_theme::is_dark_palette();
+            if let Some(live) = this.live.as_mut()
+                && matches!(
+                    live.driver.fetch_stats_poll_votes(
+                        ChatId(chat_id),
+                        MessageId(message_id),
+                        is_dark
+                    ),
                     Ok(Some(_))
                 )
             {
@@ -102,35 +127,40 @@ impl QuillApp {
             .child(section_title("Recent posts"));
         let mut rows = 0;
         for (index, info) in stats.recent_interactions.iter().take(shown).enumerate() {
-            let (text, date, open): (String, i32, StatsPage) = match info.object {
-                ChatStatisticsObject::Message { message_id } => {
-                    match session.stats_post(chat_id, message_id) {
-                        PostLookup::Ready(post) => {
-                            (post.text, post.date, StatsPage::Message(message_id))
-                        }
-                        PostLookup::Missing => continue,
-                        PostLookup::Unknown => {
-                            request_post(chat_id, message_id, cx);
-                            continue;
+            let (text, date, open, thumbs): (String, i32, StatsPage, Vec<FileId>) =
+                match info.object {
+                    ChatStatisticsObject::Message { message_id } => {
+                        match session.stats_post(chat_id, message_id) {
+                            PostLookup::Ready(post) => (
+                                post.text,
+                                post.date,
+                                StatsPage::Message(message_id),
+                                post.thumbs,
+                            ),
+                            PostLookup::Missing => continue,
+                            PostLookup::Unknown => {
+                                request_post(chat_id, message_id, cx);
+                                continue;
+                            }
                         }
                     }
-                }
-                // tdesktop lists a story only when it is loaded.
-                ChatStatisticsObject::Story { story_id } => {
-                    match session.stories.stories.get(&(chat_id, story_id)) {
-                        Some(story) => (
-                            if story.caption.is_empty() {
-                                "Story".to_string()
-                            } else {
-                                story.caption.clone()
-                            },
-                            story.date,
-                            StatsPage::Story(story_id),
-                        ),
-                        None => continue,
+                    // tdesktop lists a story only when it is loaded.
+                    ChatStatisticsObject::Story { story_id } => {
+                        match session.stories.stories.get(&(chat_id, story_id)) {
+                            Some(story) => (
+                                if story.caption.is_empty() {
+                                    "Story".to_string()
+                                } else {
+                                    story.caption.clone()
+                                },
+                                story.date,
+                                StatsPage::Story(story_id),
+                                story_thumb_candidates(story),
+                            ),
+                            None => continue,
+                        }
                     }
-                }
-            };
+                };
             rows += 1;
             let title = if text.is_empty() {
                 "Post".to_string()
@@ -140,6 +170,7 @@ impl QuillApp {
             list = list.child(
                 stats_row(format!("recent-post-{index}").into(), cx)
                     .aria_label(SharedString::from(format!("Statistics of {title}")))
+                    .child(self.post_thumb(&thumbs, matches!(open, StatsPage::Story(_)), cx))
                     .child(row_text(title, stamp(date)))
                     .child(post_counts(
                         info.view_count,
@@ -172,6 +203,48 @@ impl QuillApp {
             return None;
         }
         Some(list.into_any_element())
+    }
+
+    /// A post's picture, rounded, or a story's in a ring (tdesktop
+    /// `MessagePreview`); the slot stays for text posts so rows align.
+    fn post_thumb(&self, files: &[FileId], story: bool, cx: &App) -> AnyElement {
+        const SIZE: f32 = 40.;
+        let roots = self.media_display_roots();
+        let path = self.session().and_then(|session| {
+            files.iter().find_map(|id| {
+                session
+                    .media
+                    .files
+                    .get(&id.0)
+                    .and_then(|file| file.usable_path())
+                    .and_then(|path| sandboxed_display_path(path, &roots))
+            })
+        });
+        let slot = div().size(px(SIZE)).flex_none();
+        let Some(path) = path else {
+            return slot.into_any_element();
+        };
+        if story {
+            slot.p_0p5()
+                .rounded_full()
+                .border_2()
+                .border_color(cx.theme().primary)
+                .child(
+                    img(path)
+                        .size_full()
+                        .rounded_full()
+                        .object_fit(ObjectFit::Cover),
+                )
+                .into_any_element()
+        } else {
+            slot.child(
+                img(path)
+                    .size_full()
+                    .rounded_md()
+                    .object_fit(ObjectFit::Cover),
+            )
+            .into_any_element()
+        }
     }
 
     fn stats_session(&mut self) -> Option<&mut quill::state::Session> {
@@ -311,6 +384,9 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_2()
+                    .when(!post.thumbs.is_empty(), |row| {
+                        row.child(self.post_thumb(&post.thumbs, false, cx))
+                    })
                     .child(row_text(title, stamp(post.date)))
                     .child(
                         Button::new("stats-go-to-message")
@@ -403,6 +479,26 @@ impl QuillApp {
                 }
             }
         }
+        // A poll adds its votes (tdesktop `fillPollVotesGraph`).
+        if post.as_ref().is_some_and(|post| post.is_poll) {
+            match session.messages.poll_stats.get(&(chat_id, message_id)) {
+                None => request_poll_votes(chat_id, message_id, cx),
+                Some(PollStatsFetch::Loaded(graph)) => {
+                    let id = format!("message-{chat_id}-{message_id}-poll");
+                    if let Some(section) = self.stat_graph_section(
+                        chat_id,
+                        &id,
+                        "Poll votes",
+                        graph,
+                        ChartKind::Linear,
+                        cx,
+                    ) {
+                        page = page.child(divider(cx)).child(section);
+                    }
+                }
+                _ => {}
+            }
+        }
         if let Some(state) = state {
             let forwards = &state.forwards;
             let more = (!forwards.next_offset.is_empty()).then(|| {
@@ -427,6 +523,12 @@ impl QuillApp {
                 more,
                 cx,
             ));
+        }
+        if matches!(
+            state.map(|s| &s.statistics),
+            Some(MessageStatsFetch::Loaded(_))
+        ) {
+            page = page.child(super::statistics_export::export_button(chat_id, cx));
         }
         page.into_any_element()
     }
@@ -453,7 +555,14 @@ impl QuillApp {
             } else {
                 story.caption.clone()
             };
-            page = page.child(row_text(title, stamp(story.date)));
+            page = page.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(self.post_thumb(&story_thumb_candidates(story), true, cx))
+                    .child(row_text(title, stamp(story.date))),
+            );
         }
         let state = session
             .stories
@@ -524,6 +633,9 @@ impl QuillApp {
                 }))
                 .into_any_element()
         });
+        if matches!(state.statistics, StoryStatsFetch::Loaded(_)) {
+            page = page.child(super::statistics_export::export_button(chat_id, cx));
+        }
         page.child(self.public_shares(
             "story-forward",
             state.forwards_total,

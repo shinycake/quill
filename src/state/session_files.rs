@@ -378,6 +378,12 @@ impl Session {
                 ids.push(file_id);
             }
         }
+        // Recent-post thumbnails of the open statistics panel.
+        for file_id in self.stats_thumb_file_ids() {
+            if self.should_download(file_id) {
+                ids.push(file_id);
+            }
+        }
         ids.extend(self.map_thumb_file_ids_to_download());
         ids.sort_by_key(|id| id.0);
         ids.dedup();

@@ -42,7 +42,7 @@ pub fn rulers(limits: Limits, right_ratio: f64) -> Vec<Ruler> {
         }
     };
     let skip_floats = right_ratio > 0.0 && step / right_ratio < 1.0;
-    let mut lines: Vec<Ruler> = (0..n)
+    (0..n)
         .map(|i| {
             let value = min + (i as f64 * step) as i64;
             let right_caption = if right_ratio > 0.0 {
@@ -61,15 +61,7 @@ pub fn rulers(limits: Limits, right_ratio: f64) -> Vec<Ruler> {
                 right_caption,
             }
         })
-        .collect();
-    // A narrow band of big values (one day of a 12K-follower channel)
-    // would read "12K" on every ruler: spell those out.
-    if lines.windows(2).any(|w| w[0].caption == w[1].caption) {
-        for ruler in &mut lines {
-            ruler.caption = super::format_decimal(ruler.value as i64);
-        }
-    }
-    lines
+        .collect()
 }
 
 /// Rulers for a chart of `kind` with y limits `limits`: a double-linear
@@ -123,11 +115,29 @@ pub fn label_step(chart: &StatChart, range: Limits, width: f64) -> usize {
 /// wide, with `label_width` pixels per label. Includes a point past each
 /// edge so labels slide in.
 pub fn label_indices(chart: &StatChart, range: Limits, width: f64, label_width: f64) -> Vec<usize> {
+    label_indices_for_step(
+        chart,
+        range,
+        width,
+        label_width,
+        label_step(chart, range, width),
+    )
+}
+
+/// [`label_indices`] for a given step: the labels of a step that is
+/// fading out keep their places while the new step fades in.
+pub fn label_indices_for_step(
+    chart: &StatChart,
+    range: Limits,
+    width: f64,
+    label_width: f64,
+    step: usize,
+) -> Vec<usize> {
     let n = chart.x.len();
     if n < 2 {
         return Vec::new();
     }
-    let step = label_step(chart, range, width) as i64;
+    let step = step.max(1) as i64;
     let per_point = ((width / n as f64) as i64).max(1);
     let offset = label_width as i64 / per_point;
     let (start, end) = chart.visible_indices(range);

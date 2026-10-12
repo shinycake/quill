@@ -6,12 +6,20 @@
 
 mod axis;
 mod format;
+mod pie;
 mod range;
+mod slots;
+mod xlsx;
 
 pub use axis::*;
 pub use format::*;
+pub use pie::*;
 pub use range::*;
+pub use slots::*;
+pub use xlsx::*;
 
+#[cfg(test)]
+mod export_tests;
 #[cfg(test)]
 mod tests;
 

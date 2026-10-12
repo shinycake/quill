@@ -3,7 +3,6 @@
 //! chart it carries a chevron and a click opens that day
 //! (`point_details_widget.cpp`).
 
-use super::ZoomFn;
 use super::paint::plot_rect_top;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
@@ -22,7 +21,8 @@ pub(super) fn details(
     // `Ok`: left edge from the plot's left; `Err`: right edge from its
     // right.
     place: Result<Pixels, Pixels>,
-    on_zoom: Option<ZoomFn>,
+    on_click: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    opacity: f32,
     cx: &App,
 ) -> AnyElement {
     let theme = cx.theme();
@@ -31,7 +31,7 @@ pub(super) fn details(
     let shares = (chart.has_percentages || kind == ChartKind::StackLinear)
         .then(|| percentages(&values, enabled));
     // Zooming needs something to zoom into (tdesktop: a positive value).
-    let zoomable = on_zoom.is_some() && values.iter().any(|v| *v > 0);
+    let zoomable = on_click.is_some() && values.iter().any(|v| *v > 0);
     let title = chart.point_title(index, offset);
     let mut header = div()
         .flex()
@@ -89,12 +89,43 @@ pub(super) fn details(
             ),
         );
     }
-    if zoomable && let (Some(on_zoom), Some(x)) = (on_zoom, chart.x.get(index).copied()) {
+    if zoomable && let Some(on_click) = on_click {
         body = body
             .role(gpui_kit::Role::Button)
             .aria_label(SharedString::from(format!("Zoom into {title}")))
             .hover(|style| style.bg(theme.accent))
-            .on_click(move |_, window, cx| on_zoom(x as i64, window, cx));
+            .on_click(move |_, window, cx| on_click(window, cx));
     }
-    body.into_any_element()
+    body.opacity(opacity).into_any_element()
+}
+
+/// The total of the hovered pie slice over the selected days, at the
+/// plot's top right (tdesktop `PaintDetails`).
+pub(super) fn pie_details(id: &str, name: &str, value: i64, color: u32, cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    div()
+        .id(ElementId::Name(format!("{id}-pie-details").into()))
+        .debug_selector(|| format!("{id}-pie-details"))
+        .absolute()
+        .top(px(plot_rect_top()))
+        .right(px(4.))
+        .flex()
+        .gap_3()
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.popover)
+        .text_color(theme.popover_foreground)
+        .shadow_md()
+        .text_xs()
+        .child(div().child(name.to_string()))
+        .child(
+            div()
+                .font_semibold()
+                .text_color(rgb(color))
+                .child(format_decimal(value)),
+        )
+        .into_any_element()
 }

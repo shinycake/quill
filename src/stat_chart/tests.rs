@@ -287,11 +287,9 @@ fn rulers_pick_round_steps() {
     assert_eq!(lines[1].caption, "10K");
     let lines = rulers(Limits::new(0.0, 5_000.0), 0.0);
     assert_eq!(lines[1].caption, "1,000");
-    // A narrow band of big values is spelled out rather than "12K" six
-    // times.
+    // tdesktop shortens from 10,000 even when that repeats a caption.
     let lines = rulers(Limits::new(12_000.0, 12_092.0), 0.0);
-    assert_eq!(lines[0].caption, "12,000");
-    assert_ne!(lines[0].caption, lines[1].caption);
+    assert_eq!(lines[0].caption, "12K");
 }
 
 #[test]
@@ -361,7 +359,8 @@ fn labels_and_titles_read_like_telegram_desktop() {
     assert_eq!(hourly.day_label(14, 0), "14:00");
     assert_eq!(hourly.day_label(14, 7200), "16:00");
     assert_eq!(hourly.point_title(14, 0), "Tue, 1 Oct 14:00");
-    assert_eq!(hourly.range_title(0, 23), "1 Oct 2024");
+    // tdesktop names both ends even within one day.
+    assert_eq!(hourly.range_title(0, 23), "1 Oct 2024 \u{2014} 1 Oct 2024");
     // Weeks.
     let weekly = parse_chart(&chart_json(
         &days(2),

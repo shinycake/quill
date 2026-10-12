@@ -14,7 +14,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::local_path::sandboxed_display_path;
-use quill::stat_chart::{ChartKind, day_month_year, percent_label};
+use quill::stat_chart::{ChartKind, chart_slots, day_month_year, percent_label};
 use quill::state::{ChatStatisticsFetch, InfoPanelTarget, StatsPage};
 use quill::telegram::envelope::{
     ChannelStatistics, ChatKind, ChatStatistics, StatisticalGraph, SupergroupStatistics,
@@ -192,7 +192,8 @@ impl QuillApp {
         if let ChatStatistics::Channel(stats) = statistics {
             body = body.child(overview_grid(channel_story_cells(stats)));
         }
-        for (id, title, graph, kind) in chart_slots(statistics) {
+        for slot in chart_slots(statistics) {
+            let (id, title, graph, kind) = (slot.id, slot.title, slot.graph, slot.kind);
             if let Some(section) = self.stat_graph_section(
                 chat_id,
                 &format!("stats-{chat_id}-{id}"),
@@ -217,13 +218,19 @@ impl QuillApp {
             }
         }
         body.child(
-            Button::new("statistics-refresh")
-                .label("Refresh")
-                .ghost()
-                .small()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.refresh_statistics(chat_id, cx);
-                })),
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("statistics-refresh")
+                        .label("Refresh")
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.refresh_statistics(chat_id, cx);
+                        })),
+                )
+                .child(super::statistics_export::export_button(chat_id, cx)),
         )
     }
 
@@ -418,85 +425,6 @@ fn channel_story_cells(s: &ChannelStatistics) -> Vec<OverviewCell> {
         "Reactions per story",
     ));
     cells
-}
-
-/// Every chart of the statistics, with its title and how tdesktop draws
-/// it (`FillStatistic`).
-fn chart_slots(
-    statistics: &ChatStatistics,
-) -> Vec<(&'static str, &'static str, &StatisticalGraph, ChartKind)> {
-    use ChartKind::*;
-    match statistics {
-        ChatStatistics::Channel(s) => vec![
-            ("growth", "Growth", &s.member_count_graph, Linear),
-            ("followers", "Followers", &s.join_graph, Linear),
-            ("mute", "Notifications", &s.mute_graph, Linear),
-            (
-                "hours",
-                "Views by hours (UTC)",
-                &s.view_count_by_hour_graph,
-                Linear,
-            ),
-            (
-                "view-sources",
-                "Views by source",
-                &s.view_count_by_source_graph,
-                StackBar,
-            ),
-            (
-                "join-sources",
-                "New followers by source",
-                &s.join_by_source_graph,
-                StackBar,
-            ),
-            ("languages", "Languages", &s.language_graph, StackLinear),
-            (
-                "interactions",
-                "Interactions",
-                &s.message_interaction_graph,
-                DoubleLinear,
-            ),
-            (
-                "iv",
-                "IV interactions",
-                &s.instant_view_interaction_graph,
-                DoubleLinear,
-            ),
-            ("reactions", "Reactions", &s.message_reaction_graph, Bar),
-            (
-                "story-interactions",
-                "Story interactions",
-                &s.story_interaction_graph,
-                DoubleLinear,
-            ),
-            (
-                "story-reactions",
-                "Story reactions",
-                &s.story_reaction_graph,
-                Bar,
-            ),
-        ],
-        ChatStatistics::Supergroup(s) => vec![
-            ("growth", "Growth", &s.member_count_graph, Linear),
-            ("members", "Group members", &s.join_graph, Linear),
-            (
-                "join-sources",
-                "New members by source",
-                &s.join_by_source_graph,
-                StackBar,
-            ),
-            (
-                "languages",
-                "Members' primary language",
-                &s.language_graph,
-                StackLinear,
-            ),
-            ("messages", "Messages", &s.message_content_graph, StackBar),
-            ("actions", "Actions", &s.action_graph, DoubleLinear),
-            ("hours", "Views by hours", &s.day_graph, Linear),
-            ("weekdays", "Top days of week", &s.week_graph, StackLinear),
-        ],
-    }
 }
 
 #[cfg(all(test, feature = "demo-capture"))]

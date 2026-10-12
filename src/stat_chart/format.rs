@@ -184,12 +184,7 @@ impl StatChart {
             return left_text;
         }
         let right = (right / 1000.0) as i64 + if self.week_format { SEVEN_DAYS } else { 0 };
-        let right_text = day_month_year(right);
-        // An hourly series within one day names that day once.
-        if right_text == left_text {
-            return left_text;
-        }
-        format!("{left_text} \u{2014} {right_text}")
+        format!("{left_text} \u{2014} {}", day_month_year(right))
     }
 
     /// The tooltip header for point `i`.
@@ -228,27 +223,8 @@ pub fn percentages(values: &[i64], enabled: &[bool]) -> Vec<String> {
             }
         })
         .collect();
-    let total: f64 = sums.iter().sum();
-    let mut parts: Vec<f64> = Vec::with_capacity(sums.len());
-    let mut diff_sum = 0.0;
-    let (mut max_diff, mut max_index) = (0.0, None);
-    for (k, sum) in sums.iter().enumerate() {
-        let raw = if total > 0.0 { sum / total } else { 0.0 };
-        let rounded = (raw * 100.0).round() * 0.01;
-        diff_sum += raw - rounded;
-        if (raw - rounded).abs() > max_diff {
-            max_diff = (raw - rounded).abs();
-            max_index = Some(k);
-        }
-        parts.push(rounded);
-    }
-    // tdesktop's min and max trackers both keep the largest error, so
-    // the correction always lands on that part.
-    if let Some(index) = max_index {
-        parts[index] += diff_sum;
-    }
-    parts
-        .iter()
-        .map(|part| format!("{}%", (part * 100.0 + 1e-9) as i64))
+    super::pie_parts(&sums, true)
+        .into_iter()
+        .map(|part| part.text)
         .collect()
 }

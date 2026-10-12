@@ -413,6 +413,7 @@ impl Session {
                     message_id,
                 })) = pending.map(|p| p.purpose)
                 {
+                    self.remember_files(&message.files);
                     self.groups.stats.accept_post(chat_id, message_id, &message);
                     return;
                 }
