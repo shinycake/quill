@@ -1,0 +1,3 @@
+# Adaptive layout for wide screens and the pull to the next unread channel
+parity:appearance-wide-layout
+parity:settings-pull-next-channel

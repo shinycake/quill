@@ -123,6 +123,12 @@ pub struct AppearancePrefs {
     pub wallpaper_tile_day: bool,
     #[serde(default)]
     pub wallpaper_tile_night: bool,
+    /// tdesktop `adaptiveForWide` ("Adaptive layout for wide screens"):
+    /// in a chat at least `chat_wide::ADAPTIVE_CHAT_WIDE_WIDTH` wide, every
+    /// message sits on the left in one column. tdesktop turns it on by
+    /// default; Quill keeps it off so its default look is unchanged.
+    #[serde(default)]
+    pub adaptive_for_wide: bool,
     /// Interface scale in percent (tdesktop 100-300%). Scales the kit's
     /// rem size, so text and rem-based spacing grow together; widths drawn
     /// in fixed pixels do not.
@@ -229,6 +235,7 @@ impl Default for AppearancePrefs {
             telegram_wallpaper: false,
             wallpaper_tile_day: false,
             wallpaper_tile_night: false,
+            adaptive_for_wide: false,
             interface_scale_pct: INTERFACE_SCALE_DEFAULT,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
@@ -385,6 +392,7 @@ mod tests {
             telegram_wallpaper: true,
             wallpaper_tile_day: true,
             wallpaper_tile_night: false,
+            adaptive_for_wide: true,
             interface_scale_pct: 150,
             font_size_px: 17,
             bubbles: false,

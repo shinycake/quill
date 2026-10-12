@@ -327,6 +327,7 @@ impl QuillApp {
             out_fill: self
                 .chat_look(self.open_chat_id().map(|c| c.0), cx)
                 .outgoing,
+            wide: self.chat_wide(),
         }
     }
 

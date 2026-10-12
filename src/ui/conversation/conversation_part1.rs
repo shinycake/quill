@@ -878,6 +878,8 @@ impl QuillApp {
         fact_checks.sort_unstable();
         fact_checks.hash(&mut hasher);
         self.vanish_rows_hash().hash(&mut hasher);
+        // The wide layout gives every row a photo.
+        self.chat_wide().hash(&mut hasher);
         Some(hasher.finish())
     }
 }

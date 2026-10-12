@@ -10,6 +10,16 @@ impl Session {
         _extra: Option<RequestId>,
         seq: u64,
     ) {
+        // The pull to the next channel preloaded this chat's history: TDLib
+        // now has it, the chat is not open, so nothing else changes.
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::PreloadHistory
+        {
+            if let Some(chat_id) = pending.chat_id {
+                self.chat_list.preloaded_histories.insert(chat_id.0);
+            }
+            return;
+        }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::SendMessageAlbum
         {

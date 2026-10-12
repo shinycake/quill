@@ -74,13 +74,19 @@ pub(in crate::ui) fn session_history_row(
     // Service actions (members, pins, gifts, topics…), timer changes and
     // screenshots: Telegram Desktop's wording as a centered pill — no
     // bubble, no reply/react/edit/delete controls.
+    // The wide layout centres service messages in its column
+    // (`Service::countGeometry`).
+    let wide = look.wide;
     if super::super::service_row::is_service_row(&message.content) {
-        return super::super::service_row::service_message_row(
-            message,
-            session,
-            files,
-            media_roots,
-            cx,
+        return super::super::chat_wide_ui::wide_column(
+            wide,
+            super::super::service_row::service_message_row(
+                message,
+                session,
+                files,
+                media_roots,
+                cx,
+            ),
         );
     }
     // Slice G9: community service rows (`messageChatAddedToCommunity`,
@@ -100,7 +106,10 @@ pub(in crate::ui) fn session_history_row(
         })
     };
     let community_service_row = |text: String| {
-        service_pill(("community-service-row", message.id.0 as u64), text, cx).into_any_element()
+        super::super::chat_wide_ui::wide_column(
+            wide,
+            service_pill(("community-service-row", message.id.0 as u64), text, cx),
+        )
     };
     if let MessageContent::ChatAddedToCommunity { community_id } = &message.content {
         let text = match community_name(*community_id) {
@@ -143,14 +152,10 @@ pub(in crate::ui) fn session_history_row(
         ..
     } = &message.content
     {
-        return QuillApp::group_call_invitation_row(
-            message,
-            *is_active,
-            *was_missed,
-            *is_video,
-            cx,
-        )
-        .into_any_element();
+        return super::super::chat_wide_ui::wide_column(
+            wide,
+            QuillApp::group_call_invitation_row(message, *is_active, *was_missed, *is_video, cx),
+        );
     }
     let on_fill = message.is_outgoing && !look.plain;
     let quote = reply_header.map(|header| {
@@ -404,7 +409,8 @@ pub(in crate::ui) fn session_history_row(
                 message.pending,
                 message.chat_id.0,
                 message.id.0,
-                message.is_outgoing,
+                // The effect plays toward the side the sticker faces.
+                quill::chat_wide::has_right_layout(message.is_outgoing, look.wide),
                 sticker_attachment(
                     message.id.0 as u64,
                     sticker,

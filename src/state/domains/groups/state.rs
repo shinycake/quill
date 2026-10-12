@@ -184,6 +184,9 @@ pub struct GroupsState {
     /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line 2746),
     /// keyed by supergroup id.
     pub supergroup_join_to_send: HashMap<i64, bool>,
+    /// `supergroup.restriction_info.restriction_reason` is set: the
+    /// content must be restricted (tdesktop `computeUnavailableReason`).
+    pub supergroup_restricted: HashSet<i64>,
     /// B7: the viewer's own `basicGroup.status`, keyed by basic group id.
     pub basic_group_status: HashMap<i64, ChannelMemberStatus>,
     /// B7: `can_change_info` of the viewer's administrator status in a
@@ -291,6 +294,7 @@ impl GroupsState {
             basic_group_members: HashMap::new(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_join_to_send: HashMap::new(),
+            supergroup_restricted: HashSet::new(),
             basic_group_status: HashMap::new(),
             basic_group_change_info_right: HashMap::new(),
             basic_group_active: HashMap::new(),

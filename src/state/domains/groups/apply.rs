@@ -659,11 +659,17 @@ impl Session {
                 show_message_sender,
                 join_to_send_messages,
                 paid_message_star_count,
+                restricted,
             } => {
                 self.payments
                     .paid_messages
                     .dm_price
                     .insert(supergroup_id, paid_message_star_count);
+                if restricted {
+                    self.groups.supergroup_restricted.insert(supergroup_id);
+                } else {
+                    self.groups.supergroup_restricted.remove(&supergroup_id);
+                }
                 self.set_supergroup_usernames(supergroup_id, usernames);
                 self.groups
                     .supergroup_join_to_send

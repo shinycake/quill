@@ -102,6 +102,11 @@ pub(crate) struct HistoryUi {
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.
     pub(super) thread_info_open: bool,
+    /// The history's width class at the last paint (tdesktop
+    /// `Adaptive::ChatLayout`, `chat_wide_ui`).
+    pub(super) chat_layout: std::rc::Rc<std::cell::Cell<quill::chat_wide::ChatLayout>>,
+    /// The pull to the next unread channel (`pull_next_ui`).
+    pub(super) pull: super::pull_next_ui::PullUi,
 }
 
 impl HistoryUi {
@@ -141,6 +146,8 @@ impl HistoryUi {
             live_location_tick_chat: None,
             topic_info_open: false,
             thread_info_open: false,
+            chat_layout: Default::default(),
+            pull: Default::default(),
         }
     }
 }

@@ -667,6 +667,7 @@ impl QuillApp {
             .child(self.quick_action_radios(cx))
             .child(self.quick_reaction_picker(cx))
             .child(self.corner_button_switches(cx))
+            .child(self.pull_next_switch(cx))
             .child(
                 div()
                     .flex()

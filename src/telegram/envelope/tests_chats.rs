@@ -297,6 +297,7 @@ fn update_supergroup_parses_forum_flag() {
             join_to_send_messages: _,
             usernames: _,
             paid_message_star_count: _,
+            restricted: _,
         }) => {
             assert_eq!(supergroup_id, 16);
             assert!(is_forum);
@@ -348,6 +349,7 @@ fn update_supergroup_parses_username() {
             join_to_send_messages: _,
             usernames: _,
             paid_message_star_count: _,
+            restricted: _,
         }) => {
             assert_eq!(supergroup_id, 18);
             assert!(!is_forum);

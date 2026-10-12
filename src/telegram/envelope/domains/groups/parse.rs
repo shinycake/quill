@@ -130,6 +130,11 @@ pub(crate) fn parse_groups_payload(
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 paid_message_star_count: int53_or_zero(supergroup.get("paid_message_star_count")),
+                restricted: supergroup
+                    .get("restriction_info")
+                    .and_then(|info| info.get("restriction_reason"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|reason| !reason.is_empty()),
             }))
         }
         "supergroup" => Ok(EnvelopePayload::Groups(GroupsPayload::Supergroup {

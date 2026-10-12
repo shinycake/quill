@@ -61,6 +61,9 @@ impl QuillApp {
         chat_id: ChatId,
         message_id: MessageId,
         pending: bool,
+        // The wide layout's check position from the history's left edge
+        // (`chat_wide::selection_right`); `None` puts it at the right edge.
+        wide_right: Option<f32>,
         cx: &mut Context<Self>,
     ) -> SelectionRow {
         let (mode, _) = self.selection_motion(chat_id, cx);
@@ -114,7 +117,15 @@ impl QuillApp {
                 .child(super::anim_layer::occluder(
                     div()
                         .absolute()
-                        .right(px(edge))
+                        .map(|this| match wide_right {
+                            // Right of the wide column, not at the edge
+                            // (`Message::draw`, `ElementChatMode::Wide`).
+                            Some(right) => this.left(px(right
+                                - 2. * super::chat_wide_ui::ROW_INSET
+                                - edge
+                                - size)),
+                            None => this.right(px(edge)),
+                        })
                         .bottom(px(motion::CHECK_BOTTOM_SKIP + 1.))
                         .size(px(size))
                         .opacity(mode)

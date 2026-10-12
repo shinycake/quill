@@ -311,6 +311,22 @@ impl QuillApp {
         super::image_budget::slice_shown(parts.slice.entity_id());
         super::image_budget::slice_shown(composer.entity_id());
         let height = self.slices.composer_height.get();
+        // A chat the pull to the next channel opened slides in from below.
+        let slide = self.pull_slide_offset(cx);
+        let hint = self.pull_hint_overlay(cx).map(|hint| {
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .h(height)
+                .child(hint)
+        });
+        let slot = if slide > 0. {
+            slot.top(relative(slide))
+        } else {
+            slot
+        };
         slot.flex_col()
             .child(
                 div()
@@ -327,6 +343,7 @@ impl QuillApp {
                     .clone()
                     .cached(StyleRefinement::default().w_full().h(height).flex_none()),
             )
+            .children(hint)
             .children(drop_overlay)
             .children(emoji_effects)
             .children(send_fly)
