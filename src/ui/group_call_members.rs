@@ -37,6 +37,7 @@ impl QuillApp {
         let owner = cx.entity().downgrade();
         let call = call.clone();
         let chat_shown = self.group_call.chat_shown;
+        let share_link = self.group_call_can_share_link(&call);
         let screen_source = self
             .live
             .as_ref()
@@ -68,20 +69,11 @@ impl QuillApp {
                         },
                     ));
                 }
-                match &call.invite_link {
-                    Some(link) => {
-                        let link = link.clone();
-                        let owner = owner.clone();
-                        menu = menu.item(PopupMenuItem::new("Copy Invite Link").on_click(move |_, _, cx| {
-                            let _ = owner.update(cx, |this, cx| this.copy_video_chat_invite_link(&link, cx));
-                        }));
-                    }
-                    None => {
-                        menu = menu.item(item("Share Invite Link", |this, _, cx| this.fetch_group_call_invite_link(cx)));
-                    }
+                if share_link {
+                    menu = menu.item(item("Share Invite Link", |this, _, cx| this.open_group_call_share_links(cx)));
                 }
                 if call.can_be_managed {
-                    if call.invite_link.is_some() {
+                    if call.share_links.listener.is_some() {
                         menu = menu.item(item("Revoke Invite Link", |this, _, cx| this.revoke_group_call_invite_link(cx)));
                     }
                     menu = menu.item(item("Stream With…", |this, _, cx| this.fetch_video_chat_rtmp_url(cx)));

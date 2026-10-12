@@ -60,34 +60,51 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C3a: `getVideoChatInviteLink` (schema 1.8.67, :14395). The
-    /// `HttpUrl` answer is stored on the tracked call for the UI to
-    /// show. `can_self_unmute: true` requires `can_be_managed` — the
-    /// caller passes `call.can_be_managed`.
-    pub fn fetch_video_chat_invite_link(
-        &mut self,
-        can_self_unmute: bool,
-    ) -> Result<RequestId, ConnectSendError> {
+    /// "Share Invite Link" (tdesktop `ShareInviteLinkAction`): ask for the
+    /// listener link and, when you can manage a call that isn't an RTMP
+    /// stream, the speaker link (`getVideoChatInviteLink` with
+    /// `can_self_unmute`). Returns whether both links are already known, so
+    /// the share box can open now; otherwise it opens once the answers
+    /// land on the tracked call.
+    pub fn request_video_chat_share_links(&mut self) -> Result<bool, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let group_call_id = match &self.session.calls.active_group_call {
-            Some(call) => call.id,
-            None => return Err(ConnectSendError::InvalidRequest),
+        let Some(call) = self.session.calls.active_group_call.as_mut() else {
+            return Err(ConnectSendError::InvalidRequest);
         };
-        let extra = self.session.request(
-            RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink { group_call_id }),
-            None,
-        );
-        if let Err(err) = self.sender.send_json(&get_video_chat_invite_link(
-            extra,
-            group_call_id,
-            can_self_unmute,
-        )) {
-            self.session.requests.take(extra);
-            return Err(err);
+        if !call.is_video_chat {
+            return Err(ConnectSendError::InvalidRequest);
         }
-        Ok(extra)
+        let group_call_id = call.id;
+        let (can_manage, rtmp) = (call.can_be_managed, call.is_rtmp_stream);
+        let wanted = call.share_links.plan(can_manage, rtmp);
+        let ready = call.share_links.ready();
+        for (send, can_self_unmute) in [(wanted.listener, false), (wanted.speaker, true)] {
+            if !send {
+                continue;
+            }
+            let extra = self.session.request(
+                RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
+                    group_call_id,
+                    can_self_unmute,
+                }),
+                None,
+            );
+            if let Err(err) = self.sender.send_json(&get_video_chat_invite_link(
+                extra,
+                group_call_id,
+                can_self_unmute,
+            )) {
+                self.session.requests.take(extra);
+                if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                    call.share_links.failed(can_self_unmute);
+                    call.share_links.generating = false;
+                }
+                return Err(err);
+            }
+        }
+        Ok(ready)
     }
 
     /// Phase C2h: `revokeGroupCallInviteLink` (schema 1.8.67,

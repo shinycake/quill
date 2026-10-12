@@ -213,6 +213,7 @@ mod group_admin_settings;
 mod group_call_extras;
 mod group_call_members;
 mod group_call_panel;
+mod group_call_share;
 mod group_call_tiles;
 mod group_call_ui;
 mod group_calls;

@@ -197,9 +197,10 @@ impl Session {
             CommonPayload::HttpUrl { url } => {
                 if let Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
                     group_call_id,
+                    can_self_unmute,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.set_group_call_invite_link(group_call_id, url);
+                    self.set_group_call_invite_link(group_call_id, can_self_unmute, url);
                 // B1: `getLoginUrl` returns `httpUrl` too (schema 1.8.67,
                 // line 7458) — the authorized URL after consent.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {

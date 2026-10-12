@@ -358,7 +358,12 @@ fn group_call_request_shapes() {
     let v: serde_json::Value =
         serde_json::from_str(&get_video_chat_invite_link(RequestId(18), 555, true)).unwrap();
     assert_eq!(v["@type"], "getVideoChatInviteLink");
+    assert_eq!(v["@extra"], "18");
+    assert_eq!(v["group_call_id"], 555);
     assert_eq!(v["can_self_unmute"], true);
+    let v: serde_json::Value =
+        serde_json::from_str(&get_video_chat_invite_link(RequestId(18), 555, false)).unwrap();
+    assert_eq!(v["can_self_unmute"], false);
 
     let v: serde_json::Value =
         serde_json::from_str(&get_video_chat_available_participants(RequestId(19), -100)).unwrap();
@@ -463,6 +468,15 @@ fn group_call_participant_management_shapes_match_1_8_67() {
     assert_eq!(v["group_call_id"], 555);
     assert_eq!(v["user_id"], 42);
     assert_eq!(v["is_video"], true);
+
+    // `inviteVideoChatParticipants group_call_id:int32
+    // user_ids:vector<int53> = Ok` (schema 1.8.68).
+    let v: serde_json::Value =
+        serde_json::from_str(&invite_video_chat_participants(RequestId(34), 555, &[42])).unwrap();
+    assert_eq!(v["@type"], "inviteVideoChatParticipants");
+    assert_eq!(v["@extra"], "34");
+    assert_eq!(v["group_call_id"], 555);
+    assert_eq!(v["user_ids"], serde_json::json!([42]));
 
     // Phase C2f: `banGroupCallParticipants group_call_id:int32
     // user_ids:vector<int64> = Ok` (schema 1.8.67, line 14385).

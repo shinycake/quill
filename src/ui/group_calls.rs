@@ -352,6 +352,7 @@ impl QuillApp {
     /// Phase C2f: open the invite picker; fetch contacts first when
     /// the cache is empty.
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
+        self.group_call_needs_unlock(cx);
         self.group_call.invite_open = true;
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.is_none()
@@ -535,25 +536,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase C3a: `getVideoChatInviteLink` — the `HttpUrl` answer lands
-    /// on the tracked call via the state router.
-    pub(super) fn fetch_group_call_invite_link(&mut self, cx: &mut Context<Self>) {
-        let can_self_unmute = self
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .is_some_and(|c| c.can_be_managed);
-        if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
-                match live.driver.fetch_video_chat_invite_link(can_self_unmute) {
-                    Ok(_) => "Fetching invite link…".into(),
-                    Err(_) => "Couldn't fetch the invite link.".into(),
-                };
-        } else {
-            self.connection.status_note = "Invite links need a live connection.".into();
-        }
-        cx.notify();
-    }
-
     /// Phase C3a: `loadGroupCallParticipants` — page more participants.
     pub(super) fn load_more_group_call_participants(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
@@ -680,13 +662,6 @@ impl QuillApp {
         } else {
             self.connection.status_note = "Invite links need a live connection.".into();
         }
-        cx.notify();
-    }
-
-    /// Phase C2h: copy the video-chat invite link.
-    pub(super) fn copy_video_chat_invite_link(&mut self, link: &str, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(link.to_string()));
-        self.connection.status_note = "Invite link copied".into();
         cx.notify();
     }
 

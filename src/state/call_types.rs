@@ -175,8 +175,11 @@ pub struct ActiveGroupCall {
     /// `startGroupCallScreenSharing`; consumed by the driver pump to
     /// finish the presentation handshake.
     pub screen_share_answer: String,
-    /// `HttpUrl` from `getVideoChatInviteLink`, fetched on demand.
-    pub invite_link: Option<String>,
+    /// Speaker and listener links from `getVideoChatInviteLink`,
+    /// fetched on demand (`crate::calls::share_links`).
+    pub share_links: crate::calls::share_links::VideoChatShareLinks,
+    /// `groupCall.is_rtmp_stream`: an RTMP stream has no speaker link.
+    pub is_rtmp_stream: bool,
     /// Phase C2h: `scheduled_start_date` of a not-yet-started video
     /// chat (0 = live or unknown). Drives the "starts in …" card.
     pub scheduled_start_date: i32,
@@ -252,7 +255,8 @@ impl ActiveGroupCall {
             screen_share_pending: false,
             screen_sharing: false,
             screen_share_answer: String::new(),
-            invite_link: None,
+            share_links: Default::default(),
+            is_rtmp_stream: false,
             scheduled_start_date: 0,
             enabled_start_notification: false,
             rtmp_url: None,

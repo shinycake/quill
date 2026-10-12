@@ -71,8 +71,12 @@ pub enum CallsPurpose {
     GetVideoChatAvailableParticipants { group_call_id: i32 },
     /// `setVideoChatDefaultParticipant`. Response is `ok`.
     SetVideoChatDefaultParticipant { group_call_id: i32 },
-    /// Phase C3a: `getVideoChatInviteLink`. Response is `httpUrl`.
-    GetVideoChatInviteLink { group_call_id: i32 },
+    /// `getVideoChatInviteLink`. Response is `httpUrl`: the speaker link
+    /// when `can_self_unmute`, otherwise the listener link.
+    GetVideoChatInviteLink {
+        group_call_id: i32,
+        can_self_unmute: bool,
+    },
     /// Phase C3a: `setVideoChatTitle`. Response is `ok`; the new title
     /// arrives as `updateGroupCall`.
     SetVideoChatTitle { group_call_id: i32 },
@@ -123,6 +127,9 @@ pub enum CallsPurpose {
     /// `inviteGroupCallParticipantResult*`; non-success results
     /// surface via `group_call_error`.
     InviteGroupCallParticipant { group_call_id: i32 },
+    /// `inviteVideoChatParticipants`, the invite for a call bound to a
+    /// chat. Response is `ok`.
+    InviteVideoChatParticipants { group_call_id: i32 },
     /// Phase C2f: `banGroupCallParticipants`. Response is `ok`;
     /// the roster refreshes via participant updates.
     BanGroupCallParticipants { group_call_id: i32 },
