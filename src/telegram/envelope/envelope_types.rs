@@ -379,6 +379,9 @@ pub struct SupergroupFullAdmin {
     /// `can_enable_paid_messages` — a positive direct messages price may
     /// be set.
     pub can_enable_paid_messages: bool,
+    /// `outgoing_paid_message_star_count`: Stars the account pays per
+    /// message in this supergroup (0 for administrators and free groups).
+    pub outgoing_paid_message_star_count: i64,
 }
 
 /// A chat's name color and reply emoji (`chat.accent_color_id`,

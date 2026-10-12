@@ -499,7 +499,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // B7: the step waiting for this answer (basic group upgrade,
         // history before a discussion link), taken before `apply`.
         let admin_followup = self.capture_admin_followup(&owned);
+        let paid_prices_change = Self::changes_paid_prices(&owned.envelope.payload);
         self.session.apply(owned);
+        if paid_prices_change {
+            self.sync_paid_guard();
+        }
         if let Some((followup, ok)) = admin_followup {
             self.run_admin_followup(followup, ok);
         }

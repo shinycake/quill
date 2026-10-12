@@ -123,6 +123,7 @@ impl Session {
                 | RequestPurpose::GetPaidMessageRevenue
                 | RequestPurpose::AllowUnpaidMessages
                 | RequestPurpose::SetDirectMessagesGroup
+                | RequestPurpose::LoadDirectMessagesChat
                 | RequestPurpose::SetGiftSettings
                 | RequestPurpose::SetInactiveSessionTtl
                 | RequestPurpose::SetSensitiveContent

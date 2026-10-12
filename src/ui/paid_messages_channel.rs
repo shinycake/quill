@@ -108,6 +108,10 @@ impl QuillApp {
             return;
         };
         let max = session.payments.paid_messages.max();
+        if let Some(live) = self.live.as_mut() {
+            // The price of an enabled group may not have arrived yet.
+            let _ = live.driver.fetch_direct_messages_price(chat_id);
+        }
         let price = state.price.unwrap_or(DEFAULT_CHANNEL_PRICE).clamp(0, max);
         let steps = price_steps(price, 0, max);
         let slider = price_slider(cx, steps, price, |this, price| {
@@ -279,6 +283,14 @@ impl QuillApp {
                                     cx.notify();
                                 })),
                         ),
+                );
+            }
+            if was_enabled && known.is_none() && !boxed.touched {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("The current price is still loading. Move the slider to set a new one."),
                 );
             }
             if let Some(line) = error {

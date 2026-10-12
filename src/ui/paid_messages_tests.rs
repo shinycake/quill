@@ -48,9 +48,6 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 25);
-        // Nothing agreed yet: the send carries no price, so TDLib would
-        // refuse it instead of charging.
-        assert_eq!(app.paid_stars_for_send(), 0);
         assert!(app.paid_send_waits(ChatId(11), "hello", cx));
     });
     app.read_with(vcx, |app, _| {
@@ -67,28 +64,13 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     });
     app.update_in(vcx, |app, _, cx| {
         assert!(!app.paid_send_waits(ChatId(11), "again", cx));
-        assert_eq!(app.paid_stars_for_send(), 25);
     });
-    // A new price asks again and drops the trust.
+    // A lower price is covered, a higher one asks again.
     app.update_in(vcx, |app, _, cx| {
+        charge_in_chat(app, 10);
+        assert!(!app.paid_send_waits(ChatId(11), "x", cx));
         charge_in_chat(app, 30);
-        assert_eq!(app.paid_stars_for_send(), 0);
         assert!(app.paid_send_waits(ChatId(11), "x", cx));
-    });
-}
-
-#[gpui_kit::test]
-fn a_confirmed_send_carries_only_the_confirmed_price(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app(cx, "ready-chats");
-    let vcx = &mut vcx;
-    app.update_in(vcx, |app, _, _| {
-        charge_in_chat(app, 25);
-        app.paid_messages.confirmed = Some((11, 25));
-        assert_eq!(app.paid_stars_for_send(), 25);
-        app.paid_messages.confirmed = Some((11, 10));
-        assert_eq!(app.paid_stars_for_send(), 0, "an old price does not carry");
-        app.paid_messages.confirmed = Some((12, 25));
-        assert_eq!(app.paid_stars_for_send(), 0, "another chat does not carry");
     });
 }
 
@@ -100,7 +82,6 @@ fn free_chats_never_wait(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().unwrap();
         session.open_chat(ChatId(11));
         assert!(!app.paid_send_waits(ChatId(11), "hi", cx));
-        assert_eq!(app.paid_stars_for_send(), 0);
         assert!(app.paid_messages.confirm.is_none());
     });
 }

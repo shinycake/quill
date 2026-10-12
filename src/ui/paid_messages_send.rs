@@ -34,26 +34,6 @@ impl QuillApp {
         }
     }
 
-    /// The Stars per message the next send carries: the chat's price, but
-    /// only after it was confirmed or trusted. Otherwise 0, and TDLib
-    /// refuses a paid chat's message instead of charging for it.
-    pub(super) fn paid_stars_for_send(&self) -> i64 {
-        let Some(session) = self.session() else {
-            return 0;
-        };
-        let Some(chat) = session.open_chat else {
-            return 0;
-        };
-        let stars = session.send_gate(chat).stars();
-        let agreed = self.paid_messages.confirmed == Some((chat.0, stars))
-            || session
-                .payments
-                .paid_messages
-                .trust
-                .is_trusted(chat.0, stars);
-        if stars > 0 && agreed { stars } else { 0 }
-    }
-
     /// Before a send in `chat_id`: opens the confirmation when it costs
     /// Stars the user has not agreed to yet. True when the send waits.
     pub(super) fn paid_send_waits(
@@ -66,9 +46,7 @@ impl QuillApp {
             return false;
         };
         let stars = session.send_gate(chat_id).stars();
-        if !needs_confirmation(&session.payments.paid_messages.trust, chat_id.0, stars)
-            || self.paid_messages.confirmed == Some((chat_id.0, stars))
-        {
+        if !needs_confirmation(&session.payments.paid_messages.trust, chat_id.0, stars) {
             return false;
         }
         let name = session
@@ -92,28 +70,84 @@ impl QuillApp {
         true
     }
 
-    fn close_paid_confirm(&mut self, cx: &mut Context<Self>) {
-        self.paid_messages.confirm = None;
+    /// The confirmation on screen: the one opened for a composer send, or
+    /// a send the guard holds (a sticker, GIF, voice note, forward...).
+    /// The flag is true for a held send.
+    pub(super) fn paid_confirm_view(&self) -> Option<(PaidConfirm, bool)> {
+        if let Some(confirm) = self.paid_messages.confirm.clone() {
+            return Some((confirm, false));
+        }
+        let held = self.live.as_ref()?.driver.held_paid_send()?;
+        let name = self
+            .session()?
+            .chats
+            .get(&held.chat_id)
+            .map_or_else(|| "This chat".to_string(), |chat| chat.title.clone());
+        Some((
+            PaidConfirm {
+                chat_id: held.chat_id,
+                name,
+                per_message: held.per_message,
+                messages: held.messages,
+                text: String::new(),
+            },
+            true,
+        ))
+    }
+
+    /// Cancel: a composer send keeps its text; a held send is dropped.
+    fn cancel_paid_confirm(&mut self, cx: &mut Context<Self>) {
+        if self.paid_messages.confirm.take().is_none()
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.discard_paid_send();
+        }
         cx.notify();
     }
 
-    /// Pay: remember the price when asked to, then send the held text.
+    /// Pay: remember the price when asked to, then send. A composer send
+    /// goes out again and is released from the guard; a held send is
+    /// released as it is.
     pub(super) fn confirm_paid_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(confirm) = self.paid_messages.confirm.take() else {
+        let remember = self.paid_messages.confirm_trust;
+        let Some((confirm, held)) = self.paid_confirm_view() else {
             return;
         };
-        if self.paid_messages.confirm_trust
-            && let Some(session) = self.paid_session_mut()
-        {
-            session
-                .payments
-                .paid_messages
-                .trust
-                .trust(confirm.chat_id, confirm.per_message);
+        let chat = ChatId(confirm.chat_id);
+        self.paid_messages.confirm = None;
+        if held {
+            if let Some(live) = self.live.as_mut()
+                && live.driver.release_paid_send(remember).is_err()
+            {
+                self.connection.status_note = "Couldn't send the paid message.".into();
+            }
+            cx.notify();
+            return;
         }
-        self.paid_messages.confirmed = Some((confirm.chat_id, confirm.per_message));
+        if remember {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.remember_paid_trust(chat, confirm.per_message);
+            } else if let Some(session) = self.paid_session_mut() {
+                session
+                    .payments
+                    .paid_messages
+                    .trust
+                    .trust(chat.0, confirm.per_message);
+            }
+        }
+        let total = confirm.total();
         self.submit_composer(confirm.text, window, cx);
-        self.paid_messages.confirmed = None;
+        // Not trusted: what the send left held is released up to the total
+        // the user just agreed to, never more.
+        let mut budget = total;
+        while let Some(live) = self.live.as_mut()
+            && let Some(next) = live.driver.held_paid_send()
+            && next.chat_id == chat.0
+            && next.total() <= budget
+        {
+            budget -= next.total();
+            let _ = live.driver.release_paid_send(false);
+        }
         cx.notify();
     }
 
@@ -236,10 +270,10 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::PaidSendConfirm, |this, _, cx| {
-                this.close_paid_confirm(cx);
+                this.cancel_paid_confirm(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(confirm) = this.paid_messages.confirm.clone() else {
+            let Some((confirm, _)) = this.paid_confirm_view() else {
                 return dialog.overlay(true).on_close(on_close);
             };
             let balance = this
@@ -278,7 +312,7 @@ impl QuillApp {
                         .label("Cancel")
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_paid_confirm(cx);
+                            this.cancel_paid_confirm(cx);
                             this.close_kit_dialog_if_done(DialogKind::PaidSendConfirm, window, cx);
                         })),
                 )
@@ -398,7 +432,7 @@ crate::ui::shell::register_dialogs! {
     /// Confirm payment before a message that costs Stars.
     PaidSendConfirm => DialogSpec::new(
         3855,
-        |app| app.paid_messages.confirm.is_some(),
+        |app| app.paid_confirm_view().is_some(),
         QuillApp::build_paid_confirm_dialog,
     ),
     /// Allow a user to write for free, optionally refunding what they paid.

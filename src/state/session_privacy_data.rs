@@ -208,7 +208,9 @@ impl Session {
                     err,
                 ));
             }
-            RequestPurpose::CanSendMessageToUser | RequestPurpose::GetPaidMessageRevenue => {
+            RequestPurpose::CanSendMessageToUser
+            | RequestPurpose::GetPaidMessageRevenue
+            | RequestPurpose::LoadDirectMessagesChat => {
                 // Nothing to show: the chat stays free and the Remove Fee
                 // box hides the refund line.
             }

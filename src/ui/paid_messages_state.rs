@@ -38,9 +38,6 @@ pub(crate) struct PaidMessagesUi {
     pub(super) confirm: Option<PaidConfirm>,
     /// "Don't ask me again" in the confirmation.
     pub(super) confirm_trust: bool,
-    /// `(chat id, Stars per message)` the user just confirmed: the send
-    /// that follows carries that price, and only that one.
-    pub(super) confirmed: Option<(i64, i64)>,
     pub(super) remove_fee: Option<RemoveFeeBox>,
     pub(super) direct: Option<DirectMessagesBox>,
 }
@@ -51,7 +48,6 @@ impl PaidMessagesUi {
             charge: None,
             confirm: None,
             confirm_trust: false,
-            confirmed: None,
             remove_fee: None,
             direct: None,
         }

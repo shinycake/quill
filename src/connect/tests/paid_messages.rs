@@ -12,7 +12,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-type Fixture = (
+pub(super) type Fixture = (
     std::path::PathBuf,
     ConnectDriver<Arc<RecordingSender>>,
     Arc<RecordingSender>,
@@ -20,7 +20,7 @@ type Fixture = (
     AtomicU64,
 );
 
-fn fixture() -> Fixture {
+pub(super) fn fixture() -> Fixture {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -30,18 +30,18 @@ fn fixture() -> Fixture {
     (dir, driver, recorder, sink, seq)
 }
 
-fn cleanup(f: Fixture) {
+pub(super) fn cleanup(f: Fixture) {
     let (dir, driver, ..) = f;
     drop(driver);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-fn ingest(f: &mut Fixture, json: &str) {
+pub(super) fn ingest(f: &mut Fixture, json: &str) {
     let owned = copy_and_parse(json, &f.4, &f.3).unwrap();
     f.1.ingest(owned).unwrap();
 }
 
-fn requests(f: &Fixture, type_name: &str) -> Vec<Value> {
+pub(super) fn requests(f: &Fixture, type_name: &str) -> Vec<Value> {
     f.2.snapshot()
         .iter()
         .filter_map(|json| serde_json::from_str::<Value>(json).ok())
@@ -49,12 +49,12 @@ fn requests(f: &Fixture, type_name: &str) -> Vec<Value> {
         .collect()
 }
 
-fn extra_of(request: &Value) -> String {
+pub(super) fn extra_of(request: &Value) -> String {
     request["@extra"].as_str().unwrap().to_string()
 }
 
 /// A private chat `chat_id` with user `user_id`, open in the driver.
-fn open_private(f: &mut Fixture, chat_id: i64, user_id: i64, contact: bool, bot: bool) {
+pub(super) fn open_private(f: &mut Fixture, chat_id: i64, user_id: i64, contact: bool, bot: bool) {
     ingest(
         f,
         &format!(

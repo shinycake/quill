@@ -25,6 +25,11 @@ pub(crate) fn parse_supergroup_full_admin(info: Option<&Value>) -> SupergroupFul
         can_enable_paid_reaction: flag("can_enable_paid_reaction"),
         can_have_sponsored_messages: flag("can_have_sponsored_messages"),
         can_enable_paid_messages: flag("can_enable_paid_messages"),
+        outgoing_paid_message_star_count: info
+            .and_then(|info| info.get("outgoing_paid_message_star_count"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .max(0),
         bot_verification: info.and_then(|info| {
             crate::bot_verification::parse_bot_verification(info.get("bot_verification"))
         }),

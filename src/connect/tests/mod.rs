@@ -47,6 +47,7 @@ mod message_ops;
 mod messaging;
 mod owned_bots;
 mod paid_messages;
+mod paid_messages_guard;
 mod paid_reaction;
 mod payments;
 mod peer_color;

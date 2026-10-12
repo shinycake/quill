@@ -273,6 +273,9 @@ pub enum SettingsPurpose {
     /// `setChatDirectMessagesGroup`. Response is `ok`; the new state
     /// arrives as `updateSupergroupFullInfo` and `updateSupergroup`.
     SetDirectMessagesGroup,
+    /// `getChat` of a channel's direct messages group that is not loaded
+    /// yet; its price arrives with the `updateSupergroup` before the chat.
+    LoadDirectMessagesChat,
 }
 
 flat_purposes!(Settings(SettingsPurpose) {
@@ -327,4 +330,5 @@ flat_purposes!(Settings(SettingsPurpose) {
     GetPaidMessageRevenue,
     AllowUnpaidMessages,
     SetDirectMessagesGroup,
+    LoadDirectMessagesChat,
 });

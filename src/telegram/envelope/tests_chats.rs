@@ -390,6 +390,7 @@ fn supergroup_response_parses_forum_flag() {
             show_message_sender: _,
             is_broadcast_group,
             join_to_send_messages: _,
+            paid_message_star_count: _,
         }) => {
             assert_eq!(supergroup_id, 17);
             assert!(!is_forum);

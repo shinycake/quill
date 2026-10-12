@@ -92,6 +92,7 @@ pub mod notify_focus;
 pub mod notify_prefs;
 pub mod owned_bots;
 pub mod paid_messages;
+pub mod paid_messages_guard;
 pub mod paid_reaction;
 pub mod passcode;
 pub mod payment_invoice;

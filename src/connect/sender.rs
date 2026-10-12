@@ -20,6 +20,12 @@ pub trait JsonSender: Send {
 
     /// Q1: the request was answered; drop its retained JSON.
     fn forget_retained(&self, _extra: RequestId) {}
+
+    /// The guard that screens sends into paid chats; senders that do not
+    /// talk to TDLib have none.
+    fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
+        None
+    }
 }
 
 /// Q1: TDLib `@type`s that are safe to re-send verbatim after a rate
@@ -105,6 +111,7 @@ impl RetryStash {
 pub struct RecordingSender {
     pub sent: Mutex<Vec<String>>,
     stash: RetryStash,
+    guard: crate::paid_messages_guard::PaidGuard,
 }
 
 impl RecordingSender {
@@ -119,12 +126,20 @@ impl RecordingSender {
 
 impl JsonSender for RecordingSender {
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        // A send into a paid chat waits for the user's confirmation.
+        let Some(request) = self.guard.screen(request) else {
+            return Ok(());
+        };
         self.sent
             .lock()
             .expect("recording sender")
-            .push(request.to_string());
-        self.stash.note(request);
+            .push(request.clone());
+        self.stash.note(&request);
         Ok(())
+    }
+
+    fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
+        Some(&self.guard)
     }
 
     fn take_retained(&self, extra: RequestId) -> Option<String> {
@@ -148,6 +163,10 @@ impl JsonSender for Arc<RecordingSender> {
     fn forget_retained(&self, extra: RequestId) {
         (**self).forget_retained(extra)
     }
+
+    fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
+        (**self).paid_guard()
+    }
 }
 
 /// Live `td_send` wrapper.
@@ -155,6 +174,7 @@ pub struct LiveSender {
     pub(crate) api: Arc<crate::telegram::ffi::TdJson>,
     client_id: i32,
     stash: RetryStash,
+    guard: crate::paid_messages_guard::PaidGuard,
 }
 
 impl LiveSender {
@@ -163,12 +183,18 @@ impl LiveSender {
             api: live.api.clone(),
             client_id: live.client_id,
             stash: RetryStash::default(),
+            guard: Default::default(),
         }
     }
 }
 
 impl JsonSender for LiveSender {
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        // A send into a paid chat waits for the user's confirmation.
+        let Some(request) = self.guard.screen(request) else {
+            return Ok(());
+        };
+        let request = request.as_str();
         self.api
             .send(self.client_id, request)
             .map_err(|e| match e {
@@ -185,6 +211,10 @@ impl JsonSender for LiveSender {
 
     fn forget_retained(&self, extra: RequestId) {
         self.stash.take(extra);
+    }
+
+    fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
+        Some(&self.guard)
     }
 }
 

@@ -265,7 +265,8 @@ impl SendGate {
 }
 
 /// Prices the user agreed to pay without being asked again, per chat
-/// (tdesktop `markPeerTrustedPayForMessage`). A different price asks again.
+/// (tdesktop `markPeerTrustedPayForMessage`). A price up to the trusted one
+/// goes out; a higher price asks again. Kept per account on disk.
 #[derive(Debug, Clone, Default)]
 pub struct PaidTrust {
     chats: HashMap<i64, i64>,
@@ -276,8 +277,42 @@ impl PaidTrust {
         self.chats.insert(chat_id, stars);
     }
 
+    /// tdesktop `isPeerTrustedPayForMessage`: free is always fine, a
+    /// stored price covers prices up to it.
     pub fn is_trusted(&self, chat_id: i64, stars: i64) -> bool {
-        self.chats.get(&chat_id) == Some(&stars)
+        stars <= 0 || self.chats.get(&chat_id).is_some_and(|t| *t >= stars)
+    }
+
+    /// tdesktop `clearPeerTrustedPayForMessage`: the chat is free again.
+    /// True when an entry went away.
+    pub fn forget(&mut self, chat_id: i64) -> bool {
+        self.chats.remove(&chat_id).is_some()
+    }
+
+    pub fn entries(&self) -> HashMap<i64, i64> {
+        self.chats.clone()
+    }
+
+    /// The file contents: `{"<chat id>": stars}`.
+    pub fn to_json(&self) -> String {
+        let map: std::collections::BTreeMap<String, i64> = self
+            .chats
+            .iter()
+            .map(|(chat, stars)| (chat.to_string(), *stars))
+            .collect();
+        serde_json::to_string(&map).unwrap_or_else(|_| "{}".into())
+    }
+
+    /// Reads what [`PaidTrust::to_json`] wrote; anything unreadable is
+    /// an empty list (the user is asked again).
+    pub fn from_json(text: &str) -> Self {
+        let chats = serde_json::from_str::<HashMap<String, i64>>(text)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(chat, stars)| Some((chat.parse().ok()?, stars)))
+            .filter(|(_, stars): &(i64, i64)| *stars > 0)
+            .collect();
+        Self { chats }
     }
 }
 
@@ -403,6 +438,10 @@ pub struct PaidMessages {
     pub revenue: HashMap<i64, i64>,
     /// Channel direct messages price per supergroup id.
     pub dm_price: HashMap<i64, i64>,
+    /// The trusted prices were read from disk.
+    pub trust_loaded: bool,
+    /// The trusted prices changed and are not written yet.
+    pub trust_dirty: bool,
     /// A paid-message request is in flight.
     pub saving: bool,
     /// The last paid-message request failed with this line.
@@ -446,10 +485,27 @@ impl PaidMessages {
         self.gates.get(&user_id).map(|(answer, _)| *answer)
     }
 
-    /// Stores an answer and ends the wait for it.
+    /// Stores an answer and ends the wait for it. A user who no longer
+    /// charges loses the trusted price (tdesktop `checkTrustedPayForMessage`;
+    /// a private chat has the user's id).
     pub fn record_answer(&mut self, user_id: i64, answer: CanSend, now_ms: u64) {
         self.gates.insert(user_id, (answer, now_ms));
         self.asking.remove(&user_id);
+        if !matches!(answer, CanSend::HasPaidMessages { stars } if stars > 0)
+            && self.trust.forget(user_id)
+        {
+            self.trust_dirty = true;
+        }
+    }
+
+    /// Users that charge, with the price.
+    pub fn charging_users(&self) -> impl Iterator<Item = (i64, i64)> + '_ {
+        self.gates
+            .iter()
+            .filter_map(|(user, (answer, _))| match answer {
+                CanSend::HasPaidMessages { stars } if *stars > 0 => Some((*user, *stars)),
+                _ => None,
+            })
     }
 
     /// Whether the chat with `user_id` should ask `canSendMessageToUser`
@@ -490,7 +546,15 @@ impl crate::state::Session {
     /// or nothing. Only private chats with another user gate.
     pub fn send_gate(&self, chat_id: crate::ids::ChatId) -> SendGate {
         let Some(user_id) = self.private_chat_user_id(chat_id) else {
-            return SendGate::Free;
+            // A supergroup with paid messages, or a channel's direct
+            // messages group, charges everyone but its administrators; the
+            // full info already holds the viewer's own price.
+            let stars = self.supergroup_send_price(chat_id);
+            return if stars > 0 {
+                SendGate::Charges { stars }
+            } else {
+                SendGate::Free
+            };
         };
         send_gate(&GateFacts {
             is_self: Some(user_id) == self.my_user_id,
@@ -498,6 +562,32 @@ impl crate::state::Session {
             viewer_premium: self.my_is_premium(),
             answer: self.payments.paid_messages.gate_answer(user_id),
         })
+    }
+
+    /// `supergroupFullInfo.outgoing_paid_message_star_count` of a chat.
+    fn supergroup_send_price(&self, chat_id: crate::ids::ChatId) -> i64 {
+        self.chat_supergroup(chat_id)
+            .and_then(|id| self.supergroup_full_info(id))
+            .map_or(0, |info| info.admin.outgoing_paid_message_star_count)
+    }
+
+    /// Every chat the account pays to write in, with the price per
+    /// message: what the send guard screens against.
+    pub fn paid_send_prices(&self) -> HashMap<i64, i64> {
+        // A private chat has the id of its user.
+        let mut prices: HashMap<i64, i64> = self
+            .payments
+            .paid_messages
+            .charging_users()
+            .filter(|(user, _)| !self.is_bot_user(*user) && Some(*user) != self.my_user_id)
+            .collect();
+        for chat in self.chats.values() {
+            let stars = self.supergroup_send_price(chat.id);
+            if stars > 0 {
+                prices.insert(chat.id.0, stars);
+            }
+        }
+        prices
     }
 
     /// Stars the user of a private chat pays per message to the account
@@ -608,8 +698,45 @@ mod tests {
         assert!(!needs_confirmation(&trust, 7, 0));
         trust.trust(7, 10);
         assert!(!needs_confirmation(&trust, 7, 10));
-        assert!(needs_confirmation(&trust, 7, 11), "a new price asks again");
+        assert!(
+            !needs_confirmation(&trust, 7, 4),
+            "a lower price is covered"
+        );
+        assert!(
+            needs_confirmation(&trust, 7, 11),
+            "a higher price asks again"
+        );
         assert!(needs_confirmation(&trust, 8, 10), "another chat asks");
+        assert!(trust.forget(7));
+        assert!(!trust.forget(7));
+        assert!(needs_confirmation(&trust, 7, 10));
+    }
+
+    #[test]
+    fn trust_survives_a_round_trip_through_the_file() {
+        let mut trust = PaidTrust::default();
+        trust.trust(7, 10);
+        trust.trust(-1001, 250);
+        let back = PaidTrust::from_json(&trust.to_json());
+        assert_eq!(back.entries(), trust.entries());
+        assert!(PaidTrust::from_json("not json").entries().is_empty());
+        assert_eq!(
+            PaidTrust::from_json(r#"{"x":5,"3":0,"4":9}"#).entries(),
+            HashMap::from([(4, 9)]),
+            "bad ids and non-positive prices are dropped"
+        );
+    }
+
+    #[test]
+    fn a_user_who_stops_charging_loses_the_trusted_price() {
+        let mut state = PaidMessages::default();
+        state.trust.trust(5, 10);
+        state.record_answer(5, CanSend::HasPaidMessages { stars: 10 }, 1);
+        assert!(state.trust.is_trusted(5, 10));
+        assert!(!state.trust_dirty);
+        state.record_answer(5, CanSend::Ok, 2);
+        assert!(!state.trust.is_trusted(5, 10));
+        assert!(state.trust_dirty);
     }
 
     #[test]
