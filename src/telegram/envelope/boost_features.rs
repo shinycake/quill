@@ -18,6 +18,9 @@ pub struct ParsedBoostStatus {
     pub premium_member_percentage: f64,
     /// Giveaways already paid for and waiting to be started.
     pub prepaid_giveaways: Vec<ParsedPrepaidGiveaway>,
+    /// How many of the viewer's own boosts are on this chat
+    /// (`applied_slot_ids`).
+    pub my_boost_count: i32,
 }
 
 impl ParsedBoostStatus {
@@ -68,6 +71,10 @@ pub(crate) fn parse_boost_status(value: &Value) -> ParsedBoostStatus {
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
         prepaid_giveaways: parse_prepaid_giveaways(value.get("prepaid_giveaways")),
+        my_boost_count: value
+            .get("applied_slot_ids")
+            .and_then(Value::as_array)
+            .map_or(0, |ids| ids.len().try_into().unwrap_or(i32::MAX)),
     }
 }
 
@@ -281,10 +288,12 @@ mod tests {
         let v: Value = serde_json::from_str(
             r#"{"@type":"chatBoostStatus","level":3,"boost_count":42,"gift_code_boost_count":5,
                 "current_level_boost_count":30,"next_level_boost_count":50,
-                "premium_member_count":9,"premium_member_percentage":1.25}"#,
+                "premium_member_count":9,"premium_member_percentage":1.25,
+                "applied_slot_ids":[4,9]}"#,
         )
         .unwrap();
         let s = parse_boost_status(&v);
+        assert_eq!(s.my_boost_count, 2);
         assert_eq!(
             (s.level, s.boost_count, s.gift_code_boost_count),
             (3, 42, 5)

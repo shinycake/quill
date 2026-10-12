@@ -378,6 +378,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = match &action {
             DeepLinkAction::OpenUsername { domain, .. }
             | DeepLinkAction::OpenPublicChatDraft { domain, .. }
+            | DeepLinkAction::OpenVideoChat { domain, .. }
             | DeepLinkAction::ShareGame { domain, .. }
             | DeepLinkAction::AddBot { domain, .. }
             | DeepLinkAction::OpenWebAppLink { domain, .. }

@@ -677,10 +677,11 @@ fn g2_boost_slots_stashed_for_chain() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.groups.boost_slots_by_chat.get(&13),
-        Some(&vec![3, 7])
-    );
+    let ids: Vec<i32> = session.groups.boost_slots_by_chat[&13]
+        .iter()
+        .map(|slot| slot.slot_id)
+        .collect();
+    assert_eq!(ids, vec![3, 7]);
 }
 
 #[test]

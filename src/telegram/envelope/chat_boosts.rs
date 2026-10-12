@@ -37,11 +37,15 @@ pub struct ParsedChatBoost {
     pub source: ParsedBoostSource,
     pub start_date: i32,
     pub expiration_date: i32,
+    /// The Premium gift code of a gift or giveaway boost, when TDLib
+    /// shares it (empty otherwise). `Debug` never prints it.
+    pub gift_code: SecretCode,
 }
 
 pub(crate) fn parse_chat_boost(value: Option<&Value>) -> Option<ParsedChatBoost> {
     let value = value?;
-    let source = value.get("source")?;
+    let raw = value.get("source")?;
+    let source = raw;
     let user_id = int53(source.get("user_id")).unwrap_or(0);
     let source = match source.get("@type").and_then(Value::as_str)? {
         "chatBoostSourcePremium" => ParsedBoostSource::Premium { user_id },
@@ -55,12 +59,19 @@ pub(crate) fn parse_chat_boost(value: Option<&Value>) -> Option<ParsedChatBoost>
         },
         _ => return None,
     };
+    let gift_code = SecretCode(
+        raw.get("gift_code")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned(),
+    );
     Some(ParsedChatBoost {
         id: value.get("id").and_then(Value::as_str)?.to_owned(),
         count: int53(value.get("count")).unwrap_or(1).sat_i32().max(1),
         source,
         start_date: int53(value.get("start_date")).unwrap_or(0).sat_i32(),
         expiration_date: int53(value.get("expiration_date")).unwrap_or(0).sat_i32(),
+        gift_code,
     })
 }
 
@@ -139,6 +150,19 @@ mod tests {
                         ..
                     }
                 ));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gift_and_giveaway_boosts_keep_their_code_out_of_debug() {
+        let json = r#"{"@type":"foundChatBoosts","total_count":2,"boosts":[{"@type":"chatBoost","id":"g1","count":1,"source":{"@type":"chatBoostSourceGiftCode","user_id":4,"gift_code":"ABC123"},"start_date":1,"expiration_date":2},{"@type":"chatBoost","id":"g2","count":1,"source":{"@type":"chatBoostSourceGiveaway","user_id":5,"gift_code":"","star_count":0,"giveaway_message_id":4,"is_unclaimed":false},"start_date":1,"expiration_date":2}],"next_offset":""}"#;
+        match parse_envelope(json).unwrap().payload {
+            EnvelopePayload::Groups(GroupsPayload::FoundChatBoosts { boosts, .. }) => {
+                assert_eq!(boosts[0].gift_code.0, "ABC123");
+                assert!(boosts[1].gift_code.0.is_empty());
+                assert!(!format!("{:?}", boosts[0]).contains("ABC123"));
             }
             other => panic!("unexpected {other:?}"),
         }

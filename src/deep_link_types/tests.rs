@@ -64,10 +64,11 @@ fn parses_every_handled_type() {
     );
     assert_eq!(
         parsed(
-            json!({"@type":"internalLinkTypeVideoChat","chat_username":"g","invite_hash":"","is_live_stream":true})
+            json!({"@type":"internalLinkTypeVideoChat","chat_username":"g","invite_hash":"h1","is_live_stream":true})
         ),
         InternalLink::VideoChat {
             username: "g".into(),
+            invite_hash: "h1".into(),
             live_stream: true
         }
     );

@@ -32,18 +32,10 @@ pub(super) struct SupergroupHeaderExtras {
 }
 
 impl QuillApp {
-    /// Slice G2: boost the channel (`getAvailableChatBoostSlots` →
-    /// `boostChat` with the first slot; the driver chains them).
+    /// Slice G2: the info panel's Boost button opens the boost box, where
+    /// the boost itself needs one more click.
     pub(super) fn boost_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            match live.driver.request_chat_boost(chat_id) {
-                Ok(_) => self.connection.status_note = "boost requested".into(),
-                Err(_) => self.connection.status_note = "could not boost channel".into(),
-            }
-        } else {
-            self.connection.status_note = "boosts need a live connection (demo)".into();
-        }
-        cx.notify();
+        self.open_boost_box_for(chat_id, cx);
     }
 
     /// Slice G10: community info panel body (delegates to

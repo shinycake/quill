@@ -24,6 +24,7 @@ use crate::telegram::requests::{
 mod admin;
 mod controls;
 mod join;
+mod link;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: native group-call transport lifecycle, after every

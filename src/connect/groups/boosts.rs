@@ -1,5 +1,6 @@
 //! Connect driver: chat boosts.
 use super::*;
+use crate::boost_box::{BoostDecision, BoostPhase, classify, decide};
 use crate::telegram::requests::{get_chat_boost_features, set_supergroup_unrestrict_boost_count};
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -79,13 +80,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session.groups.boost_intent = Some(chat_id.0);
+        if let Some(state) = self.boost_box_for(chat_id) {
+            state.phase = BoostPhase::Working;
+            state.note = None;
+        }
         Ok(Some(extra))
     }
 
     /// Slice G2: `boostChat` chain — once the slots answer for a pending
-    /// boost intent arrives, send `boostChat` with the first slot id.
-    /// An empty slot list (or a failed slots request) just drops the
-    /// intent; `boostChat` errors are reported by the reducer.
+    /// boost intent arrives, sort the slots (`crate::boost_box`). A free
+    /// slot sends `boostChat` with it; otherwise the open boost box shows
+    /// what tdesktop shows (reassign list, "already boosted", Premium
+    /// needed). `boostChat` errors are reported by the reducer.
     pub(crate) fn maybe_continue_boost(&mut self) -> Result<(), ConnectSendError> {
         let Some(chat_id) = self.session.groups.boost_intent else {
             return Ok(());
@@ -94,13 +100,39 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         self.session.groups.boost_intent = None;
-        let Some(slot_id) = slots.into_iter().next() else {
-            return Ok(());
-        };
-        let chat = ChatId(chat_id);
+        let now = crate::local_time::now_unix();
+        let choice = classify(chat_id, &slots, now);
+        let session = &self.session;
+        let decision = decide(&choice, session.my_is_premium(), now, |id| {
+            session.chat_is_group(ChatId(id))
+        });
+        match decision {
+            BoostDecision::Boost(slot_id) => {
+                self.send_boost_chat(ChatId(chat_id), &[slot_id])?;
+            }
+            other => {
+                if let Some(state) = self.boost_box_for(ChatId(chat_id)) {
+                    state.apply_decision(other);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `boostChat` for these slots; the answer returns the box to its
+    /// counters.
+    pub(super) fn send_boost_chat(
+        &mut self,
+        chat: ChatId,
+        slot_ids: &[i32],
+    ) -> Result<(), ConnectSendError> {
         let extra = self.session.request(RequestPurpose::BoostChat, Some(chat));
-        if let Err(err) = self.sender.send_json(&boost_chat(extra, chat, &[slot_id])) {
+        if let Err(err) = self.sender.send_json(&boost_chat(extra, chat, slot_ids)) {
             self.session.requests.take(extra);
+            if let Some(state) = self.boost_box_for(chat) {
+                state.phase = BoostPhase::Main;
+                state.reassigning = None;
+            }
             return Err(err);
         }
         Ok(())

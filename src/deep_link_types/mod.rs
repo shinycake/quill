@@ -99,8 +99,11 @@ pub enum InternalLink {
     LanguagePack {
         id: String,
     },
+    /// `internalLinkTypeVideoChat`: `?voicechat=`, `?videochat=` and
+    /// `?livestream=` on a public group or channel link.
     VideoChat {
         username: String,
+        invite_hash: String,
         live_stream: bool,
     },
     GroupCall,
@@ -366,6 +369,7 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
         },
         "VideoChat" => InternalLink::VideoChat {
             username: text(value, "chat_username"),
+            invite_hash: text(value, "invite_hash"),
             live_stream: flag(value, "is_live_stream"),
         },
         "GroupCall" => InternalLink::GroupCall,
@@ -620,21 +624,22 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
                 LinkRoute::Ui(DeepLinkUi::LanguagePack { id: id.clone() })
             }
         }
-        // Opens the group or channel, whose header has the join button.
-        // Joining straight from a link would open the microphone unasked, so
-        // the call itself is not joined here.
-        InternalLink::VideoChat { username, .. } if !username.is_empty() => {
-            LinkRoute::Resolve(A::OpenUsername {
-                domain: username.clone(),
-                start_param: None,
-                post: None,
-                story_id: None,
-            })
-        }
+        // tdesktop `joinVoiceChatFromLink`: open the channel, then offer its
+        // call with the link's invite hash. The join itself waits for the
+        // click on the call screen (`call_link`).
+        InternalLink::VideoChat {
+            username,
+            invite_hash,
+            live_stream,
+        } if !username.is_empty() => LinkRoute::Resolve(A::OpenVideoChat {
+            domain: username.clone(),
+            invite_hash: invite_hash.clone(),
+            live_stream: *live_stream,
+        }),
         InternalLink::VideoChat { live_stream, .. } => LinkRoute::Message(if *live_stream {
-            format!("Joining a live stream from a link {NOT_SUPPORTED}")
+            "This live stream link is broken.".into()
         } else {
-            format!("Joining a video chat from a link {NOT_SUPPORTED}")
+            "This video chat link is broken.".into()
         }),
         InternalLink::GroupCall => {
             LinkRoute::Message(format!("Joining a call from a link {NOT_SUPPORTED}"))
@@ -727,3 +732,6 @@ mod web_app_link_tests;
 
 #[cfg(test)]
 mod premium_language_link_tests;
+
+#[cfg(test)]
+mod call_link_tests;

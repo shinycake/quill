@@ -6,6 +6,7 @@ use super::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::local_time::{civil_local, day_label, now_unix};
@@ -337,12 +338,21 @@ impl QuillApp {
                     } else {
                         self.contact_display_name(uid)
                     };
+                    // tdesktop opens the gift code box from a boost row that
+                    // carries the code (`ResolveGiftCode`).
+                    let code = boost.gift_code.0.clone();
                     let mut row = div()
                         .id(("boost-row", index as u64))
                         .flex()
                         .items_center()
                         .w_full()
                         .gap_1()
+                        .when(!code.is_empty(), |row| {
+                            row.cursor_pointer()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open_gift_code_link(code.clone(), cx)
+                                }))
+                        })
                         .child(
                             div()
                                 .flex()
@@ -486,6 +496,7 @@ mod tests {
             source,
             start_date: 1,
             expiration_date: 1_800_000_000,
+            gift_code: Default::default(),
         }
     }
 

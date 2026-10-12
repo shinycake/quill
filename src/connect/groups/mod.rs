@@ -22,6 +22,7 @@ use crate::telegram::requests_group_stickers::{
     set_supergroup_custom_emoji_sticker_set, set_supergroup_sticker_set,
 };
 
+mod boost_flow;
 mod boosts;
 mod community;
 mod forum;

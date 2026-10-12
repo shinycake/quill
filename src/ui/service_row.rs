@@ -335,6 +335,8 @@ pub(super) fn service_message_row(
     let learn_more = super::premium_ui::gift_card_of(&message.content).and_then(|(_, card)| {
         super::giveaway_info_ui::giveaway_learn_more(row_id, message.chat_id, message.id, card, cx)
     });
+    let open_code = super::premium_ui::gift_card_of(&message.content)
+        .and_then(|(_, card)| super::link_info_boxes::gift_code_open_button(row_id, card, cx));
     div()
         .id(("service-row", row_id))
         .flex()
@@ -363,6 +365,7 @@ pub(super) fn service_message_row(
         .when_some(birthday, |this, birthday| this.child(birthday))
         .when_some(card, |this, card| this.child(card))
         .when_some(learn_more, |this, button| this.child(button))
+        .when_some(open_code, |this, button| this.child(button))
         .when_some(buttons, |this, buttons| this.child(buttons))
         .into_any_element()
 }

@@ -101,7 +101,9 @@ pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> S
             ..
         }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
         Some(DeepLinkState::ResolvingChat {
-            action: DeepLinkAction::OpenPublicChatDraft { domain, .. },
+            action:
+                DeepLinkAction::OpenPublicChatDraft { domain, .. }
+                | DeepLinkAction::OpenVideoChat { domain, .. },
             ..
         }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
         Some(DeepLinkState::ResolvingChat {

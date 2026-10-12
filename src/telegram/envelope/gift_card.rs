@@ -36,6 +36,8 @@ pub struct GiftCard {
     pub received_gift_id: String,
     /// What the "Learn more" box of a giveaway card needs.
     pub giveaway: Option<GiveawaySummary>,
+    /// The code of a Premium gift code card; the card opens its box.
+    pub gift_code: SecretCode,
 }
 
 fn str_of(value: &Value, key: &str) -> String {
@@ -105,6 +107,7 @@ pub(crate) fn build_gift_card(
         facts: Vec::new(),
         received_gift_id: String::new(),
         giveaway: None,
+        gift_code: SecretCode::default(),
     };
     match kind {
         "messageGift" => {
@@ -181,6 +184,7 @@ pub(crate) fn build_gift_card(
         "messagePremiumGiftCode" => {
             card.kind = GiftCardKind::GiftCode;
             card.title = "Gift Code".into();
+            card.gift_code = SecretCode(str_of(value, "code"));
             card.subtitle = format!(
                 "Telegram Premium for {}",
                 duration(int_of(value, "month_count"), int_of(value, "day_count"))
@@ -337,7 +341,8 @@ mod tests {
         );
         let code = code.unwrap();
         assert_eq!(code.subtitle, "Telegram Premium for 3 months");
-        // The redeemable code never lands in the card.
+        // The code is kept for the card's button but never printed.
+        assert_eq!(code.gift_code.0, "secret");
         assert!(!format!("{code:?}").contains("secret"));
         let (giveaway, _) = build(
             "messageGiveaway",

@@ -136,10 +136,12 @@ pub struct GroupsState {
     /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
     /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
     /// them to chain `boostChat` once per boost intent.
-    pub boost_slots_by_chat: HashMap<i64, Vec<i32>>,
+    pub boost_slots_by_chat: HashMap<i64, Vec<crate::telegram::envelope::ParsedBoostSlot>>,
     /// Slice G2: the chat id of a pending user boost intent — set by
     /// `request_chat_boost`, consumed by the driver's `boostChat` chain.
     pub boost_intent: Option<i64>,
+    /// The open boost box (`crate::boost_box`).
+    pub boost_box: Option<crate::boost_box::BoostBoxState>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -274,6 +276,7 @@ impl GroupsState {
             unrestrict_boost_pending: HashMap::new(),
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
+            boost_box: None,
             supergroup_usernames: HashMap::new(),
             supergroup_verification: HashMap::new(),
             supergroup_member_status: HashMap::new(),
