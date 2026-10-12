@@ -223,7 +223,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
 - [x] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
 - [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
-- [ ] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
+- [x] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
 - [x] Similar channels carousel after joining a channel <!-- parity:render-similar-channels -->
 - [x] Link-preview "View channel / bot / message" buttons <!-- parity:render-preview-view-button -->
 - [x] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
