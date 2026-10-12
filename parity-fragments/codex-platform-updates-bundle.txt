@@ -1,0 +1,3 @@
+# Stars/boost updates and the Windows Send to menu
+parity:updates-stars-boosts
+parity:platform-sendto-menu

@@ -322,6 +322,9 @@ fn ui_main(args: &[String]) {
     // stashed on the app and resolved via `getDeepLinkInfo` once auth is
     // Ready (see `ui::deep_links`).
     let pending_deep_link = quill::connect::detect_deep_link_arg(args);
+    // Files named on the command line ("Send to", `quill photo.png`) wait
+    // for a chat to be picked (see `ui::start_files_ui`).
+    quill::start_files::push_launch_files(args);
 
     let credentials = quill::credentials::load();
     let appearance = ui::QuillApp::load_appearance();
@@ -334,7 +337,9 @@ fn ui_main(args: &[String]) {
     // as argv instead (handled above and via the single-instance socket).
     application.on_open_urls(|urls| {
         for url in urls {
-            quill::deep_link_inbox::push_external_link(&url);
+            if !quill::deep_link_inbox::push_external_link(&url) {
+                quill::start_files::push_file_url(&url);
+            }
         }
     });
     application.run(move |cx| {
@@ -433,18 +438,10 @@ fn forwarded_to_running_instance(args: &[String]) -> bool {
     let Some(root) = quill::settings::safe_app_root() else {
         return false;
     };
-    let forwarded: Vec<String> = args
-        .iter()
-        .skip(1)
-        .filter_map(|arg| quill::deep_link_inbox::sanitize_link(arg))
-        .chain(
-            args.iter()
-                .any(|arg| arg == "--start-minimized")
-                .then(|| "--start-minimized".to_string()),
-        )
-        .collect();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let forwarded = quill::start_files::forwarded_args(args.get(1..).unwrap_or_default(), &cwd);
     match acquire(&Endpoint::for_root(&root), &forwarded, |args| {
-        quill::deep_link_inbox::handle_forwarded_launch(&args)
+        quill::start_files::handle_forwarded_launch(&args)
     }) {
         Ok(Acquired::Forwarded) => true,
         Ok(Acquired::Primary) => false,

@@ -158,6 +158,20 @@ impl SendRights {
         self.exempt() || !(self.denied_for_everyone(kind) || self.denied_for_me(kind))
     }
 
+    /// `Data::CanSendAnyOf(thread, FilesSendRestrictions())`: at least one
+    /// of photos, videos, music or files may be sent, so a file is worth
+    /// offering to this chat.
+    pub fn allows_any_file(&self) -> bool {
+        [
+            SendKind::Photos,
+            SendKind::Videos,
+            SendKind::Music,
+            SendKind::Files,
+        ]
+        .into_iter()
+        .any(|kind| self.allows(kind))
+    }
+
     /// `!Data::CanSendAnyOf(all but polls)`: nothing can be sent at all, so
     /// the composer gives way to the sentence.
     pub fn blocks_everything(&self) -> bool {
@@ -533,5 +547,16 @@ mod tests {
                 .as_deref(),
             Some("Sending video messages isn't allowed in this group.")
         );
+    }
+
+    #[test]
+    fn files_are_offered_while_any_file_kind_is_allowed() {
+        assert!(rights().allows_any_file());
+        let mut some = rights();
+        some.defaults = Some(only(|p| p.can_send_audios = true));
+        assert!(some.allows_any_file());
+        let mut none = rights();
+        none.defaults = Some(only(|p| p.can_send_basic_messages = true));
+        assert!(!none.allows_any_file());
     }
 }

@@ -397,6 +397,9 @@ impl QuillApp {
                 body = body.child(this.appearance_language_section(cx));
                 body = body.child(this.general_autostart_section(cx));
                 body = body.child(this.general_link_handler_section(cx));
+                if let Some(section) = this.general_send_to_section(cx) {
+                    body = body.child(section);
+                }
                 body = body.child(this.update_settings_section(cx));
                 body = body.child(this.about_settings_section(cx));
                 for section in this.window_behavior_sections(quill::tray::tray_available(), cx) {
@@ -709,6 +712,7 @@ crate::ui::shell::register_dialogs! {
 
 mod appearance_keybindings_section;
 mod new_accent_picker;
+mod send_to_menu_section;
 mod telegram_wallpapers;
 
 #[cfg(test)]

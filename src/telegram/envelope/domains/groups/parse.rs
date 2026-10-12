@@ -69,6 +69,9 @@ pub(crate) fn parse_groups_payload(
                     .unwrap_or(0),
                 },
                 member_count: int53(supergroup.get("member_count")).unwrap_or(0).sat_i32(),
+                boost_level: int53_or_zero(supergroup.get("boost_level"))
+                    .sat_i32()
+                    .max(0),
                 is_forum: supergroup
                     .get("is_forum")
                     .and_then(Value::as_bool)
