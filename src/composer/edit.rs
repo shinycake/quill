@@ -105,6 +105,14 @@ pub struct MediaEdit {
     /// replacement must then fit that album's type.
     pub in_album: bool,
     pub replacement: Option<EditMediaReplacement>,
+    /// The video already on the message, for "Edit Cover" without
+    /// replacing the video (`edit_media_tools.rs`).
+    pub video: Option<super::edit_media_tools::ExistingVideo>,
+    /// A cover picked with "Edit Cover", applied when the edit is saved.
+    pub cover: Option<PathBuf>,
+    /// The photo or video on the message is under a spoiler; an edited
+    /// image keeps it (tdesktop `MediaEditManager::_spoilered`).
+    pub had_spoiler: bool,
 }
 
 /// Audio extensions that go as `inputMessageAudio` (tdesktop treats
@@ -316,6 +324,18 @@ impl ComposerEdit {
                 },
                 in_album: false,
                 replacement: None,
+                video: match content {
+                    MessageContent::Video(video) => {
+                        super::edit_media_tools::ExistingVideo::from_content(video)
+                    }
+                    _ => None,
+                },
+                cover: None,
+                had_spoiler: match content {
+                    MessageContent::Photo(photo) => photo.has_spoiler,
+                    MessageContent::Video(video) => video.has_spoiler,
+                    _ => false,
+                },
             },
             link_preview: match content {
                 // tdesktop seeds the draft with the message's own preview.
@@ -395,7 +415,7 @@ mod tests {
             media_edit: MediaEdit {
                 media,
                 in_album,
-                replacement: None,
+                ..MediaEdit::default()
             },
             link_preview: LinkPreviewChoice::default(),
         }
