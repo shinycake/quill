@@ -4,6 +4,8 @@
 //! (`lng_polls_add_option*`).
 
 use super::app::QuillApp;
+use super::dialogs::OptionMediaSlot;
+use super::polls::AttachTarget;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -453,6 +455,7 @@ impl QuillApp {
             chat_id,
             message_id,
             input,
+            attach: Default::default(),
             error: None,
         });
         cx.notify();
@@ -492,8 +495,26 @@ impl QuillApp {
                 return;
             }
         };
+        if self
+            .message_ui
+            .poll_add_option
+            .as_ref()
+            .is_some_and(|panel| matches!(panel.attach.media, OptionMediaSlot::Preparing(_)))
+        {
+            self.connection.status_note = "wait for the video to be ready".into();
+            cx.notify();
+            return;
+        }
+        let media = self
+            .message_ui
+            .poll_add_option
+            .as_ref()
+            .and_then(|panel| panel.attach.media.ready().cloned());
         if let Some(live) = self.live.as_mut() {
-            match live.driver.add_poll_option(chat_id, message_id, &text) {
+            match live
+                .driver
+                .add_poll_option(chat_id, message_id, &text, media.as_ref())
+            {
                 Ok(_) => {
                     self.message_ui.poll_add_option = None;
                     self.connection.status_note = "adding option…".into();
@@ -510,13 +531,13 @@ impl QuillApp {
                 .and_then(|history| history.messages.get_mut(&message_id.0))
                 && let MessageContent::Poll(content) = &mut message.content
             {
-                content.poll.options.push(quill::telegram::PollOption {
-                    id: format!("added-{}", content.poll.options.len()),
-                    text,
-                    voter_count: 0,
-                    vote_percentage: 0,
-                    is_chosen: false,
-                });
+                content
+                    .poll
+                    .options
+                    .push(quill::telegram::PollOption::plain(
+                        format!("added-{}", content.poll.options.len()),
+                        text,
+                    ));
             }
             self.message_ui.poll_add_option = None;
             self.connection.status_note = "option added (demo)".into();
@@ -538,10 +559,20 @@ impl QuillApp {
             .bg(bg_canvas())
             .child(div().text_sm().font_semibold().child("Add an Option"))
             .child(
-                Textarea::new(&panel.input)
-                    .aria_label("New poll option")
-                    .h(px(40.)),
-            );
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div().flex_1().child(
+                            Textarea::new(&panel.input)
+                                .aria_label("New poll option")
+                                .h(px(40.)),
+                        ),
+                    )
+                    .child(self.poll_option_attach_button(AttachTarget::Added, cx)),
+            )
+            .children(self.poll_option_attach_area(AttachTarget::Added, cx));
         if let Some(error) = panel.error {
             body = body.child(
                 div()

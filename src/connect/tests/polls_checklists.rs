@@ -37,15 +37,15 @@ fn add_poll_option_guards_and_request() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = poll_driver();
     ingest(&mut driver, &seq, &dyn_sink, ADDABLE_POLL_JSON);
     // Not addable (can_add_option false), missing, and not a poll.
-    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(106), "Tacos"));
-    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(404), "Tacos"));
-    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(50), "Tacos"));
+    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(106), "Tacos", None));
+    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(404), "Tacos", None));
+    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(50), "Tacos", None));
     // Empty and duplicate (case-insensitive) texts never leave the client.
-    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(120), "   "));
-    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(120), "TEA"));
+    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(120), "   ", None));
+    assert_invalid(driver.add_poll_option(ChatId(7), MessageId(120), "TEA", None));
     let before = recorder.snapshot().len();
     let extra = driver
-        .add_poll_option(ChatId(7), MessageId(120), "  Coffee ")
+        .add_poll_option(ChatId(7), MessageId(120), "  Coffee ", None)
         .unwrap();
     assert_eq!(recorder.snapshot().len(), before + 1);
     let v = last_json(&recorder);
@@ -62,7 +62,7 @@ fn add_poll_option_error_surfaces_a_note() {
     let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = poll_driver();
     ingest(&mut driver, &seq, &dyn_sink, ADDABLE_POLL_JSON);
     let extra = driver
-        .add_poll_option(ChatId(7), MessageId(120), "Coffee")
+        .add_poll_option(ChatId(7), MessageId(120), "Coffee", None)
         .unwrap();
     ingest(
         &mut driver,

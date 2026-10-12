@@ -255,7 +255,7 @@ impl QuillApp {
         // does not mean deleted.
         if matches!(
             self.viewer.state.source(),
-            ViewerSource::SharedMedia | ViewerSource::Profile
+            ViewerSource::SharedMedia | ViewerSource::Profile | ViewerSource::Poll
         ) {
             return;
         }

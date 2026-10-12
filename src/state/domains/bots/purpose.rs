@@ -111,6 +111,12 @@ pub enum BotsPurpose {
     AllowBotToSendMessages {
         bot_user_id: i64,
     },
+    /// `toggleBotCanManageEmojiStatus`: the profile's "Emoji Status" switch
+    /// or a mini app's access request. `allowed` is what was asked for.
+    ToggleBotEmojiStatusAccess {
+        bot_user_id: i64,
+        allowed: bool,
+    },
     GetAttachmentMenuBot {
         bot_user_id: i64,
     },

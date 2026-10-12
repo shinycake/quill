@@ -344,6 +344,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(str::to_string)
             .collect();
         let option_refs: Vec<&str> = options.iter().map(String::as_str).collect();
+        let option_media: Vec<Option<crate::poll::PollOptionInput>> = draft
+            .usable_option_media()
+            .into_iter()
+            .map(|media| media.cloned())
+            .collect();
         let country_refs: Vec<&str> = draft.country_codes.iter().map(String::as_str).collect();
         let extra = self
             .session
@@ -358,6 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             PollSend {
                 question: &question,
                 options: &option_refs,
+                option_media: &option_media,
                 description: &description,
                 is_anonymous: draft.is_anonymous,
                 allows_multiple_answers: draft.allows_multiple_answers && !draft.is_quiz,

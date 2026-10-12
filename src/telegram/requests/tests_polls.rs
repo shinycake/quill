@@ -1,4 +1,5 @@
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::poll::PollOptionInput;
 use crate::telegram::requests::*;
 
 #[test]
@@ -142,6 +143,7 @@ fn send_poll_shape_matches_1_8_67() {
         PollSend {
             question: "Where should we eat lunch?",
             options: &options,
+            option_media: &[],
             description: "team lunch",
             is_anonymous: true,
             allows_multiple_answers: false,
@@ -204,6 +206,7 @@ fn send_poll_quiz_shape_matches_1_8_67() {
         PollSend {
             question: "Capital of France?",
             options: &options,
+            option_media: &[],
             description: "",
             is_anonymous: true,
             allows_multiple_answers: false,
@@ -234,4 +237,71 @@ fn send_poll_quiz_shape_matches_1_8_67() {
     assert_eq!(quiz["explanation"]["@type"], "formattedText");
     assert_eq!(quiz["explanation"]["text"], "Paris is the capital");
     assert!(quiz["explanation_media"].is_null());
+}
+
+#[test]
+fn option_media_goes_into_input_poll_option() {
+    let options = ["Sushi", "Pizza", "Tacos", "Soup", "Plain"];
+    let media = [
+        Some(PollOptionInput::Photo {
+            path: "/tmp/a.png".into(),
+        }),
+        Some(PollOptionInput::Video {
+            path: "/tmp/b.mp4".into(),
+            duration: 7,
+            width: 640,
+            height: 360,
+        }),
+        Some(PollOptionInput::Sticker {
+            file_id: 55,
+            width: 512,
+            height: 512,
+            emoji: "x".into(),
+        }),
+        Some(PollOptionInput::Link {
+            url: "https://example.com".into(),
+        }),
+    ];
+    let json = send_poll(
+        RequestId(1),
+        ChatId(7),
+        PollSend {
+            question: "Lunch?",
+            options: &options,
+            option_media: &media,
+            description: "",
+            is_anonymous: true,
+            allows_multiple_answers: false,
+            allows_revoting: true,
+            shuffle_options: false,
+            country_codes: &[],
+            poll_type: PollTypeSend::Regular,
+            open_period: 0,
+            allow_adding_options: false,
+            hide_results_until_closes: false,
+            members_only: false,
+            close_date: 0,
+            reply_to: None,
+            topic_id: None,
+        },
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let options = &v["input_message_content"]["options"];
+    let photo = &options[0]["media"];
+    assert_eq!(photo["@type"], "inputPollMediaPhoto");
+    assert_eq!(photo["photo"]["photo"]["@type"], "inputFileLocal");
+    assert_eq!(photo["photo"]["photo"]["path"], "/tmp/a.png");
+    let video = &options[1]["media"];
+    assert_eq!(video["@type"], "inputPollMediaVideo");
+    assert_eq!(video["video"]["video"]["path"], "/tmp/b.mp4");
+    assert_eq!(video["video"]["duration"], 7);
+    assert_eq!(video["video"]["width"], 640);
+    let sticker = &options[2]["media"];
+    assert_eq!(sticker["@type"], "inputPollMediaSticker");
+    assert_eq!(sticker["sticker"]["sticker"]["@type"], "inputFileId");
+    assert_eq!(sticker["sticker"]["sticker"]["id"], 55);
+    let link = &options[3]["media"];
+    assert_eq!(link["@type"], "inputPollMediaLink");
+    assert_eq!(link["url"], "https://example.com");
+    assert!(options[4]["media"].is_null(), "no media past the list");
 }

@@ -76,6 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         message_id: MessageId,
         text: &str,
+        media: Option<&crate::poll::PollOptionInput>,
     ) -> Result<RequestId, ConnectSendError> {
         let text = match self.sent_message_content(chat_id, message_id)? {
             MessageContent::Poll(content)
@@ -87,7 +88,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         self.send_tracked(RequestPurpose::AddPollOption, chat_id, |extra| {
-            add_poll_option(extra, chat_id, message_id, &text)
+            add_poll_option(extra, chat_id, message_id, &text, media)
         })
     }
 

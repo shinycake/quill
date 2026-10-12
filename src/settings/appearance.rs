@@ -194,6 +194,10 @@ pub struct AppearancePrefs {
     pub mac_warn_before_quit: bool,
     #[serde(default = "default_true")]
     pub check_updates_on_launch: bool,
+    /// tdesktop `nativeWindowFrame` ("Use system window frame", Linux and
+    /// Windows): the operating system draws the title bar. Off by default.
+    #[serde(default)]
+    pub native_window_frame: bool,
 }
 
 fn default_night_start() -> u16 {
@@ -254,6 +258,7 @@ impl Default for AppearancePrefs {
             tray_icon_monochrome: true,
             mac_warn_before_quit: true,
             check_updates_on_launch: true,
+            native_window_frame: false,
         }
     }
 }
@@ -411,6 +416,7 @@ mod tests {
             tray_icon_monochrome: false,
             mac_warn_before_quit: false,
             check_updates_on_launch: false,
+            native_window_frame: true,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_appearance_prefs(&paths), prefs);

@@ -30,7 +30,9 @@ pub use controls::{
     ViewerKeyAction, ViewerKeyMods, ViewerVideoStart, controls_hide_wait_ms, controls_should_hide,
     decide_viewer_video_start, seek_target_secs, viewer_delete_gate, viewer_key_action,
 };
-pub use items::{collect_media_items, profile_photo_items, timed_viewer_item};
+pub use items::{
+    collect_media_items, poll_option_viewer_item, profile_photo_items, timed_viewer_item,
+};
 pub use quality::{VideoQualityOption, build_quality_options, current_quality, pick_quality};
 pub use save::{
     downloads_dir, os_downloads_dir, save_media_to_downloads, save_media_to_downloads_in_dir,
@@ -88,6 +90,10 @@ pub enum ViewerSource {
     /// chat, so the message-bound actions (forward, delete, show in chat,
     /// album pin) do not apply.
     Profile,
+    /// The picture or clip of one poll option. The item carries the poll's
+    /// chat and message, but it is not a message of its own: forward, delete
+    /// and the other message actions do not apply.
+    Poll,
 }
 
 /// Items left before the loaded edge at which the viewer asks for the
@@ -179,6 +185,13 @@ impl MediaViewer {
     pub fn open_profile(items: Vec<MediaViewerItem>, index: usize) -> Self {
         let mut viewer = Self::open(items, index);
         viewer.source = ViewerSource::Profile;
+        viewer
+    }
+
+    /// Open on the media of one poll option.
+    pub fn open_poll(item: MediaViewerItem) -> Self {
+        let mut viewer = Self::open(vec![item], 0);
+        viewer.source = ViewerSource::Poll;
         viewer
     }
 

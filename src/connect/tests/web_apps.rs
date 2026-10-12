@@ -211,6 +211,63 @@ fn write_access_goes_through_consent_on_404() {
     );
 }
 
+fn bot_with_emoji_status_access(h: &mut Harness, allowed: bool) {
+    h.driver.session.bots.bot_info.insert(
+        42,
+        Some(crate::telegram::envelope::BotInfo {
+            can_manage_emoji_status: allowed,
+            ..Default::default()
+        }),
+    );
+}
+
+fn emoji_access(h: &Harness) -> Option<bool> {
+    h.driver
+        .session
+        .bots
+        .bot_info
+        .get(&42)
+        .and_then(|info| info.as_ref())
+        .map(|info| info.can_manage_emoji_status)
+}
+
+#[test]
+fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
+    let mut h = Harness::ready();
+    bot_with_emoji_status_access(&mut h, true);
+    let extra = h
+        .driver
+        .set_bot_emoji_status_access(42, false)
+        .expect("sent");
+    let sent = h.last("toggleBotCanManageEmojiStatus");
+    assert_eq!(sent["bot_user_id"], 42);
+    assert_eq!(sent["can_manage_emoji_status"], false);
+    assert_eq!(emoji_access(&h), Some(false), "the switch moves at once");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOT_INVALID"}}"#,
+        extra.as_extra()
+    ));
+    assert_eq!(emoji_access(&h), Some(true), "put back");
+    assert_eq!(
+        h.driver.session.bots.web_apps.emoji_access,
+        Some((42, false))
+    );
+
+    let extra = h
+        .driver
+        .set_bot_emoji_status_access(42, false)
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"ok","@extra":"{}"}}"#,
+        extra.as_extra()
+    ));
+    assert_eq!(emoji_access(&h), Some(false));
+    assert_eq!(
+        h.driver.session.bots.web_apps.emoji_access,
+        Some((42, true))
+    );
+}
+
 #[test]
 fn grossing_apps_load_once_and_land_in_the_session() {
     let mut h = Harness::ready();

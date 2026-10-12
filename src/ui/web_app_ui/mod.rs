@@ -121,6 +121,10 @@ enum PopupPurpose {
     Clipboard { req_id: String },
     /// "Close anyway" after `web_app_setup_closing_behavior`.
     CloseConfirm,
+    /// `web_app_request_emoji_status_access`: "Allow" grants it.
+    EmojiStatusAccess,
+    /// `web_app_set_emoji_status`: "Confirm" sets the status.
+    EmojiStatus,
 }
 
 /// Something only a render (with the `Window`) can do.
@@ -148,6 +152,7 @@ pub(super) struct MiniAppWindow {
     data_sent: bool,
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
+    emoji: emoji_status::EmojiStatusFlow,
 }
 
 impl Drop for MiniAppWindow {
@@ -228,6 +233,9 @@ pub(super) struct MiniApps {
     /// A launch waiting for `toggleBotIsAddedToAttachmentMenu`.
     awaiting_toggle: Option<PendingOpen>,
     render_action: Option<RenderAction>,
+    /// Bots whose "Emoji Status" switch has been on screen this run, so it
+    /// stays when the person turns it off (`bot_permissions`).
+    pub(super) emoji_access_shown: std::collections::HashSet<i64>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
     generation: u64,
@@ -880,6 +888,7 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
     }
 }
 
+mod emoji_status;
 mod inline_results_button;
 mod spawn_mini_app_window;
 

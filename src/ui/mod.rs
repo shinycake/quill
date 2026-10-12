@@ -135,6 +135,7 @@ mod boosts_overview;
 mod bot_create_dialog;
 mod bot_edit_dialog;
 mod bot_pending;
+mod bot_permissions;
 mod bot_stream;
 mod bot_verify_dialog;
 mod bot_verify_icon;
@@ -376,6 +377,7 @@ mod web_app_tab;
 mod web_app_ui;
 mod window_chrome;
 pub(crate) mod window_control;
+pub(crate) mod window_frame;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

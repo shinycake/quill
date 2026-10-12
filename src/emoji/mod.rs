@@ -467,6 +467,22 @@ impl Session {
                     _ => None,
                 }));
             }
+            // The custom emoji in the text of a poll's options.
+            if let MessageContent::Poll(poll) = &message.content {
+                for option in &poll.poll.options {
+                    ids.extend(
+                        option
+                            .entities
+                            .iter()
+                            .filter_map(|entity| match entity.kind {
+                                TextEntityKind::CustomEmoji { custom_emoji_id } => {
+                                    Some(custom_emoji_id)
+                                }
+                                _ => None,
+                            }),
+                    );
+                }
+            }
             ids.extend(viewer_caption_custom_emoji(&message.content));
             // The status after a sender's name in a group.
             ids.extend(self.sender_status_id(message));

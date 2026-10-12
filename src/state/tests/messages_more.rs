@@ -348,7 +348,7 @@ fn update_poll_reaches_polls_loaded_by_every_path() {
             &(sink.clone() as Arc<dyn DiagnosticSink>),
         )
         .unwrap();
-        let EnvelopePayload::Messages(MessagesPayload::UpdatePoll { poll }) =
+        let EnvelopePayload::Messages(MessagesPayload::UpdatePoll { poll, .. }) =
             owned.envelope.payload
         else {
             panic!("updatePoll");

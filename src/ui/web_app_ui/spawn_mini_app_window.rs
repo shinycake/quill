@@ -92,6 +92,7 @@ impl QuillApp {
             data_sent: false,
             privacy_policy_url,
             in_attachment_menu,
+            emoji: Default::default(),
         });
         self.ensure_mini_app_poll(cx);
     }
@@ -161,6 +162,7 @@ impl QuillApp {
 
     /// The session's one-shot answers.
     pub(super) fn poll_mini_app_session(&mut self, cx: &mut Context<Self>) {
+        self.poll_emoji_status(cx);
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -538,6 +540,11 @@ impl QuillApp {
                     text: "Sharing your phone number with mini apps isn't supported yet.".into(),
                 });
             }),
+            WebAppEvent::RequestEmojiStatusAccess => self.request_emoji_status_access(cx),
+            WebAppEvent::SetEmojiStatus {
+                custom_emoji_id,
+                duration_secs,
+            } => self.request_set_emoji_status(custom_emoji_id, duration_secs, cx),
             WebAppEvent::ReadTextFromClipboard { req_id } => self.with_window(|window| {
                 window.show_popup(
                     PopupPurpose::Clipboard { req_id },
@@ -694,6 +701,10 @@ impl QuillApp {
                             self.close_mini_app_window(cx);
                         }
                     }
+                    PopupPurpose::EmojiStatusAccess => {
+                        self.answer_emoji_status_access(&button, cx);
+                    }
+                    PopupPurpose::EmojiStatus => self.answer_set_emoji_status(&button, cx),
                 }
             }
         }

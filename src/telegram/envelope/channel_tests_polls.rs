@@ -72,7 +72,7 @@ fn update_poll_parses_and_applies_new_counts() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::Messages(MessagesPayload::UpdatePoll { poll }) => {
+        EnvelopePayload::Messages(MessagesPayload::UpdatePoll { poll, .. }) => {
             assert_eq!(poll.id, 9001);
             assert_eq!(poll.total_voter_count, 23);
             assert_eq!(poll.options[0].voter_count, 13);
@@ -81,4 +81,38 @@ fn update_poll_parses_and_applies_new_counts() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+// TDLib 1.8.68 `pollOption.media` (schema line 456) and its custom emoji text.
+#[test]
+fn poll_options_keep_their_media_files_and_custom_emoji() {
+    let file = |id: i32| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":5,"expected_size":5,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":5}}}}"#
+        )
+    };
+    let json = format!(
+        r#"{{"@type":"updatePoll","poll":{{"@type":"poll","id":9003,"question":{{"@type":"formattedText","text":"Pick","entities":[]}},"options":[
+        {{"@type":"pollOption","id":"a","text":{{"@type":"formattedText","text":"⭐ Star","entities":[{{"@type":"textEntity","offset":0,"length":1,"type":{{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"5368324170671202286"}}}}]}},"media":{{"@type":"pollMediaPhoto","video":null,"photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{},"width":320,"height":320,"progressive_sizes":[]}}]}}}},"voter_count":0,"vote_percentage":0,"is_chosen":false}},
+        {{"@type":"pollOption","id":"b","text":{{"@type":"formattedText","text":"Plain","entities":[]}},"media":null,"voter_count":0,"vote_percentage":0,"is_chosen":false}}],
+        "total_voter_count":0,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{{"@type":"pollTypeRegular"}}}}}}"#,
+        file(44)
+    );
+    let env = parse_envelope(&json).unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdatePoll { poll, files }) = env.payload else {
+        panic!("an updatePoll");
+    };
+    assert_eq!(files.iter().map(|f| f.id.0).collect::<Vec<_>>(), [44]);
+    assert!(matches!(
+        poll.options[0].media,
+        Some(PollOptionMedia::Photo(_))
+    ));
+    assert!(poll.options[1].media.is_none());
+    assert!(matches!(
+        poll.options[0].entities[0].kind,
+        crate::text::TextEntityKind::CustomEmoji {
+            custom_emoji_id: 5368324170671202286
+        }
+    ));
+    assert!(poll.options[1].entities.is_empty());
 }

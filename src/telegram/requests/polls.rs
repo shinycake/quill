@@ -1,5 +1,6 @@
 use super::{SendReply, message_topic_value, send_reply_value};
 use crate::ids::{ChatId, MessageId, RequestId};
+use crate::poll::PollOptionInput;
 use serde_json::{Value, json};
 
 /// `getPollVoters` (TDLib 1.8.67, `schema/td_api.tl:12941`):
@@ -123,6 +124,8 @@ pub fn set_poll_answer(
 pub struct PollSend<'a> {
     pub question: &'a str,
     pub options: &'a [&'a str],
+    /// The media of each option, by the same index (may be shorter).
+    pub option_media: &'a [Option<PollOptionInput>],
     pub description: &'a str,
     pub is_anonymous: bool,
     pub allows_multiple_answers: bool,
@@ -146,6 +149,66 @@ pub struct PollSend<'a> {
     pub topic_id: Option<i32>,
 }
 
+/// `InputPollMedia` of an option (TDLib 1.8.68, `schema/td_api.tl:6279`):
+/// `inputPollMediaPhoto`, `inputPollMediaVideo`, `inputPollMediaSticker` or
+/// `inputPollMediaLink`. Files go as `inputFileLocal`; the path must be one
+/// the person picked.
+pub fn input_poll_media(media: &PollOptionInput) -> Value {
+    match media {
+        PollOptionInput::Photo { path } => json!({
+            "@type": "inputPollMediaPhoto",
+            "photo": {
+                "@type": "inputPhoto",
+                "photo": { "@type": "inputFileLocal", "path": path },
+                "thumbnail": Value::Null,
+                "video": Value::Null,
+                "added_sticker_file_ids": [],
+                "width": 0,
+                "height": 0
+            }
+        }),
+        PollOptionInput::Video {
+            path,
+            duration,
+            width,
+            height,
+        } => json!({
+            "@type": "inputPollMediaVideo",
+            "video": {
+                "@type": "inputVideo",
+                "video": { "@type": "inputFileLocal", "path": path },
+                "thumbnail": Value::Null,
+                "cover": Value::Null,
+                "start_timestamp": 0,
+                "added_sticker_file_ids": [],
+                "duration": duration,
+                "width": width,
+                "height": height,
+                "supports_streaming": true
+            }
+        }),
+        PollOptionInput::Sticker {
+            file_id,
+            width,
+            height,
+            ..
+        } => json!({
+            "@type": "inputPollMediaSticker",
+            "sticker": {
+                "@type": "inputSticker",
+                "sticker": { "@type": "inputFileId", "id": file_id },
+                "thumbnail": Value::Null,
+                "width": width,
+                "height": height
+            }
+        }),
+        PollOptionInput::Link { url } => json!({
+            "@type": "inputPollMediaLink",
+            "url": url
+        }),
+    }
+}
+
 /// `InputPollType` for `inputMessagePoll` (TDLib 1.8.67).
 pub enum PollTypeSend<'a> {
     Regular,
@@ -165,7 +228,13 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
     let options: Vec<Value> = poll
         .options
         .iter()
-        .map(|text| {
+        .enumerate()
+        .map(|(index, text)| {
+            let media = poll
+                .option_media
+                .get(index)
+                .and_then(Option::as_ref)
+                .map_or(Value::Null, input_poll_media);
             json!({
                 "@type": "inputPollOption",
                 "text": {
@@ -173,7 +242,7 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
                     "text": text,
                     "entities": []
                 },
-                "media": Value::Null
+                "media": media
             })
         })
         .collect();

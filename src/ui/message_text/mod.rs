@@ -522,7 +522,7 @@ pub(super) const MONO_FONT: &str = "monospace";
 /// EmojiPanel's `getCustomEmojiStickers` cache (thumbnail first, else static
 /// WEBP — `StickerItem::display_file_id`). Ids without a resolved, downloaded
 /// sticker are absent; the renderer falls back to the span text.
-pub(super) fn custom_emoji_paths(
+pub(in crate::ui) fn custom_emoji_paths(
     entities: &[TextEntity],
     stickers: &[StickerItem],
     files: &HashMap<i32, ParsedFile>,
@@ -863,7 +863,7 @@ fn quote_block(
 /// `(row_id, run index, is_caption)`. Links keep their existing
 /// accent-color + open-on-click behavior. Consecutive quote runs render as
 /// one blockquote block, collapsing past `QUOTE_COLLAPSE_LINES` lines.
-pub(super) fn rich_text_line(
+pub(in crate::ui) fn rich_text_line(
     text: &str,
     entities: &[TextEntity],
     msg_key: (i64, u64),

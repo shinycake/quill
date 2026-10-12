@@ -1,18 +1,40 @@
+use super::poll_option_media::parse_poll_option_media;
 use super::*;
+use crate::text::TextEntity;
 use serde_json::Value;
 
-/// `pollOption` (TDLib 1.8.67, `schema/td_api.tl:456`). `media`,
-/// `recent_voter_ids`, `is_being_chosen`, `author`, and `addition_date` are
-/// not kept — Quill renders the bar, the count, and the chosen mark only.
+/// `pollOption` (TDLib 1.8.68, `schema/td_api.tl:456`). `recent_voter_ids`,
+/// `is_being_chosen`, `author`, and `addition_date` are not kept — Quill
+/// renders the text, the picture, the bar, the count, and the chosen mark.
 /// Note: `id` is a string identifier for the option, while `setPollAnswer`
 /// takes 0-based **indexes** into `poll.options` (schema line 12932).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PollOption {
     pub id: String,
     pub text: String,
+    /// The option text's entities: TDLib allows only custom emoji.
+    pub entities: Vec<TextEntity>,
+    /// `pollOption.media`: the picture, clip, sticker, link or place
+    /// shown beside the text.
+    pub media: Option<PollOptionMedia>,
     pub voter_count: i32,
     pub vote_percentage: i32,
     pub is_chosen: bool,
+}
+
+impl PollOption {
+    /// An option with nothing but its text (a locally added one).
+    pub fn plain(id: String, text: String) -> Self {
+        Self {
+            id,
+            text,
+            entities: Vec::new(),
+            media: None,
+            voter_count: 0,
+            vote_percentage: 0,
+            is_chosen: false,
+        }
+    }
 }
 
 /// `pollType` (TDLib 1.8.67, `schema/td_api.tl:468` / `:475`).
@@ -107,15 +129,20 @@ pub struct PollContent {
     pub can_add_option: bool,
 }
 
-/// `pollOption` (TDLib 1.8.67, `schema/td_api.tl:456`).
-pub(crate) fn parse_poll_option(value: &Value) -> PollOption {
-    PollOption {
+/// `pollOption` (TDLib 1.8.68, `schema/td_api.tl:456`), with the files its
+/// media names.
+pub(crate) fn parse_poll_option(value: &Value) -> (PollOption, Vec<ParsedFile>) {
+    let (media, files) = parse_poll_option_media(value.get("media"));
+    let (text, entities) = parse_caption(value.get("text"));
+    let option = PollOption {
         id: value
             .get("id")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-        text: parse_formatted_text(value.get("text")),
+        text,
+        entities,
+        media,
         voter_count: value
             .get("voter_count")
             .and_then(Value::as_i64)
@@ -130,7 +157,8 @@ pub(crate) fn parse_poll_option(value: &Value) -> PollOption {
             .get("is_chosen")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-    }
+    };
+    (option, files)
 }
 
 /// `pollType` (TDLib 1.8.67, `schema/td_api.tl:468` / `:475`).
@@ -192,20 +220,31 @@ pub(crate) fn parse_poll_vote_restriction_reason(
 /// `poll` (TDLib 1.8.67, `schema/td_api.tl:711`). `None` when the `poll`
 /// object itself is missing or null.
 pub(crate) fn parse_poll(value: Option<&Value>) -> Option<Poll> {
+    parse_poll_with_files(value).map(|(poll, _)| poll)
+}
+
+/// [`parse_poll`] with the files the options' media name.
+pub(crate) fn parse_poll_with_files(value: Option<&Value>) -> Option<(Poll, Vec<ParsedFile>)> {
     let value = value?;
     if value.is_null() {
         return None;
     }
-    Some(Poll {
+    let mut files = Vec::new();
+    let options = value
+        .get("options")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|option| {
+            let (option, option_files) = parse_poll_option(option);
+            files.extend(option_files);
+            option
+        })
+        .collect();
+    let poll = Poll {
         id: int64(value.get("id")).unwrap_or(0),
         question: parse_formatted_text(value.get("question")),
-        options: value
-            .get("options")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .map(parse_poll_option)
-            .collect(),
+        options,
         total_voter_count: value
             .get("total_voter_count")
             .and_then(Value::as_i64)
@@ -254,13 +293,14 @@ pub(crate) fn parse_poll(value: Option<&Value>) -> Option<Poll> {
             .and_then(Value::as_i64)
             .unwrap_or(0)
             .sat_i32(),
-    })
+    };
+    Some((poll, files))
 }
 
 /// `messagePoll` (TDLib 1.8.67, `schema/td_api.tl:5241`).
 pub(crate) fn parse_message_poll(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
-    match parse_poll(value.get("poll")) {
-        Some(poll) => (
+    match parse_poll_with_files(value.get("poll")) {
+        Some((poll, files)) => (
             MessageContent::Poll(PollContent {
                 poll,
                 description: parse_formatted_text(value.get("description")),
@@ -269,7 +309,7 @@ pub(crate) fn parse_message_poll(value: &Value) -> (MessageContent, Vec<ParsedFi
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
             }),
-            Vec::new(),
+            files,
         ),
         None => (
             MessageContent::Unsupported {

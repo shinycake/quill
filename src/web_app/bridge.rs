@@ -121,6 +121,15 @@ pub enum WebAppEvent {
     OpenPopup(PopupSpec),
     RequestWriteAccess,
     RequestPhone,
+    /// `web_app_request_emoji_status_access`.
+    RequestEmojiStatusAccess,
+    /// `web_app_set_emoji_status`, checked as tdesktop's
+    /// `Panel::processEmojiStatusRequest` does: a custom emoji id and a
+    /// duration in seconds (0 = no expiry).
+    SetEmojiStatus {
+        custom_emoji_id: i64,
+        duration_secs: i32,
+    },
     ReadTextFromClipboard {
         req_id: String,
     },
@@ -176,6 +185,23 @@ impl BridgeReply {
     }
 
     /// `None` text means the person declined (or nothing was there).
+    pub fn emoji_status_access_requested(allowed: bool) -> Self {
+        Self::new(
+            "emoji_status_access_requested",
+            json!({ "status": if allowed { "allowed" } else { "cancelled" } }),
+        )
+    }
+
+    pub fn emoji_status_set() -> Self {
+        Self::new("emoji_status_set", json!({}))
+    }
+
+    /// `error` is one of the bridge's words: `SUGGESTED_EMOJI_INVALID`,
+    /// `DURATION_INVALID`, `USER_DECLINED`, `UNKNOWN_ERROR`.
+    pub fn emoji_status_failed(error: &str) -> Self {
+        Self::new("emoji_status_failed", json!({ "error": error }))
+    }
+
     pub fn clipboard_text_received(req_id: &str, text: Option<&str>) -> Self {
         let mut data = Map::new();
         data.insert("req_id".into(), Value::String(req_id.to_string()));
@@ -309,6 +335,8 @@ pub fn parse_event(name: &str, data: &str) -> Result<WebAppEvent, BridgeError> {
         "web_app_open_popup" => WebAppEvent::OpenPopup(popup_spec(&args)?),
         "web_app_request_write_access" => WebAppEvent::RequestWriteAccess,
         "web_app_request_phone" => WebAppEvent::RequestPhone,
+        "web_app_request_emoji_status_access" => WebAppEvent::RequestEmojiStatusAccess,
+        "web_app_set_emoji_status" => set_emoji_status_event(&args),
         "web_app_read_text_from_clipboard" => WebAppEvent::ReadTextFromClipboard {
             req_id: text("req_id").chars().take(64).collect(),
         },
@@ -346,6 +374,39 @@ pub fn parse_event(name: &str, data: &str) -> Result<WebAppEvent, BridgeError> {
             None => return Err(BridgeError::UnknownEvent(other.to_string())),
         },
     })
+}
+
+/// `web_app_set_emoji_status` as tdesktop reads it: no arguments at all
+/// closes the app; an id that is not a positive number or a negative duration
+/// fails the request at once.
+fn set_emoji_status_event(args: &Map<String, Value>) -> WebAppEvent {
+    if args.is_empty() {
+        return WebAppEvent::Close;
+    }
+    let failed = |error: &str| WebAppEvent::Unsupported {
+        name: "web_app_set_emoji_status".into(),
+        reply: Some(BridgeReply::emoji_status_failed(error)),
+    };
+    let id = args
+        .get("custom_emoji_id")
+        .and_then(Value::as_str)
+        .and_then(|id| id.trim().parse::<u64>().ok())
+        .and_then(|id| i64::try_from(id).ok())
+        .filter(|id| *id > 0);
+    // `QJsonValue::toDouble` is 0 for anything that is not a number.
+    let duration = args
+        .get("duration")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        .round();
+    match id {
+        None => failed("SUGGESTED_EMOJI_INVALID"),
+        Some(_) if duration < 0.0 => failed("DURATION_INVALID"),
+        Some(custom_emoji_id) => WebAppEvent::SetEmojiStatus {
+            custom_emoji_id,
+            duration_secs: duration.min(f64::from(i32::MAX)) as i32,
+        },
+    }
 }
 
 /// `https://t.me` + `path_full`, when the path is one (tdesktop
@@ -582,11 +643,6 @@ pub fn refusal(name: &str, args: &Map<String, Value>) -> Option<BridgeReply> {
             json!({ "status": "cancelled" }),
         )),
         "web_app_send_prepared_message" => unsupported("prepared_message_failed"),
-        "web_app_set_emoji_status" => unsupported("emoji_status_failed"),
-        "web_app_request_emoji_status_access" => Some(BridgeReply::new(
-            "emoji_status_access_requested",
-            json!({ "status": "cancelled" }),
-        )),
         "web_app_device_storage_save_key"
         | "web_app_device_storage_get_key"
         | "web_app_device_storage_clear" => unsupported_req("device_storage_failed"),
@@ -829,6 +885,70 @@ mod tests {
             }
         );
         assert!(parse_event("web_app_invoke_custom_method", r##"{"req_id":"7"}"##).is_err());
+    }
+
+    #[test]
+    fn emoji_status_requests_are_checked_like_tdesktop() {
+        assert_eq!(
+            parse("web_app_request_emoji_status_access", "{}"),
+            WebAppEvent::RequestEmojiStatusAccess
+        );
+        assert_eq!(
+            parse(
+                "web_app_set_emoji_status",
+                r##"{"custom_emoji_id":"5368324170671202286","duration":86400}"##
+            ),
+            WebAppEvent::SetEmojiStatus {
+                custom_emoji_id: 5368324170671202286,
+                duration_secs: 86400
+            }
+        );
+        // No duration means no expiry; a fractional one rounds.
+        assert_eq!(
+            parse("web_app_set_emoji_status", r##"{"custom_emoji_id":"7"}"##),
+            WebAppEvent::SetEmojiStatus {
+                custom_emoji_id: 7,
+                duration_secs: 0
+            }
+        );
+        assert_eq!(
+            parse(
+                "web_app_set_emoji_status",
+                r##"{"custom_emoji_id":"7","duration":59.6}"##
+            ),
+            WebAppEvent::SetEmojiStatus {
+                custom_emoji_id: 7,
+                duration_secs: 60
+            }
+        );
+        // No arguments at all closes the app.
+        assert_eq!(parse("web_app_set_emoji_status", ""), WebAppEvent::Close);
+        let failure = |data: &str| match parse("web_app_set_emoji_status", data) {
+            WebAppEvent::Unsupported { reply, .. } => reply.unwrap().data["error"].clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(failure(r##"{"duration":5}"##), "SUGGESTED_EMOJI_INVALID");
+        assert_eq!(
+            failure(r##"{"custom_emoji_id":"0"}"##),
+            "SUGGESTED_EMOJI_INVALID"
+        );
+        assert_eq!(
+            failure(r##"{"custom_emoji_id":"abc"}"##),
+            "SUGGESTED_EMOJI_INVALID"
+        );
+        assert_eq!(
+            failure(r##"{"custom_emoji_id":"7","duration":-1}"##),
+            "DURATION_INVALID"
+        );
+        assert_eq!(
+            BridgeReply::emoji_status_access_requested(true).data,
+            json!({ "status": "allowed" })
+        );
+        assert_eq!(
+            BridgeReply::emoji_status_access_requested(false).data,
+            json!({ "status": "cancelled" })
+        );
+        assert_eq!(BridgeReply::emoji_status_set().event, "emoji_status_set");
     }
 
     #[test]

@@ -334,7 +334,8 @@ impl Session {
                     message.extras.edit_date = edit_date;
                 });
             }
-            MessagesPayload::UpdatePoll { poll } => {
+            MessagesPayload::UpdatePoll { poll, files } => {
+                self.remember_files(&files);
                 // Phase 4.2: `updatePoll` (schema 1.8.67 line 11179) carries
                 // only the new `poll` — no chat or message id — so its rows
                 // are found through the poll-id index and the poll is

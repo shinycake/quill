@@ -20,6 +20,11 @@ use quill::telegram::envelope::{MessageContent, MessageSender};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+mod option_attach;
+pub(in crate::ui) use option_attach::AttachTarget;
+mod option_media;
+pub(in crate::ui) mod option_thumb;
+
 impl QuillApp {
     /// B4: open the "Stop poll" / "Stop quiz" confirm banner. TGX
     /// `StopPollWarn` / `StopQuizWarn`: nobody can vote afterwards and
@@ -548,6 +553,7 @@ impl QuillApp {
                 .auto_grow(1, 2)
                 .submit_on_enter(false)
         }));
+        dialog.attach.push(Default::default());
         cx.notify();
     }
 
@@ -559,6 +565,10 @@ impl QuillApp {
             return;
         }
         dialog.option_inputs.remove(index);
+        // The media, its menu, link field and sticker choice go with the row.
+        if index < dialog.attach.len() {
+            dialog.attach.remove(index);
+        }
         // Keep the marked correct-answer row pointing at the same option.
         if let Some(marked) = dialog.quiz_correct_row {
             dialog.quiz_correct_row = if marked == index {
@@ -582,6 +592,16 @@ impl QuillApp {
         };
         if let Some(reason) = draft.validate() {
             self.connection.status_note = reason.to_string();
+            cx.notify();
+            return;
+        }
+        if self
+            .composer_ui
+            .poll_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.media_preparing())
+        {
+            self.connection.status_note = "wait for the video to be ready".into();
             cx.notify();
             return;
         }
@@ -757,6 +777,7 @@ impl QuillApp {
                     .flex_1()
                     .child(Textarea::new(input).aria_label("Poll answer").h(px(40.))),
             );
+            row = row.child(self.poll_option_attach_button(AttachTarget::Row(index), cx));
             if dialog.option_inputs.len() > POLL_OPTIONS_MIN {
                 row = row.child(
                     Button::new(format!("poll-remove-option-{index}"))
@@ -769,6 +790,9 @@ impl QuillApp {
                 );
             }
             panel = panel.child(row);
+            if let Some(extra) = self.poll_option_attach_area(AttachTarget::Row(index), cx) {
+                panel = panel.child(extra);
+            }
         }
         if dialog.option_inputs.len() < POLL_OPTIONS_MAX {
             panel = panel.child(
