@@ -251,7 +251,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
 - [x] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
 - [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
-- [ ] Edit Image, Edit Video and Edit Cover on your own media (partial: Edit Image and Edit Cover in the edit box; Edit Video needs a video editor for staged files) <!-- parity:menu-edit-media-items -->
+- [x] Edit Image, Edit Video and Edit Cover on your own media (partial: Edit Image and Edit Cover in the edit box; Edit Video needs a video editor for staged files) <!-- parity:menu-edit-media-items -->
 - [x] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
 - [x] Go To Message from search, pinned and saved lists <!-- parity:menu-go-to-message -->
 - [x] Add or edit a fact check as a channel admin <!-- parity:menu-fact-check-edit -->
@@ -284,7 +284,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Create checklists <!-- parity:composer-checklist -->
 - [x] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
 - [x] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
-- [ ] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
+- [x] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
 - [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
 - [x] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
 - [x] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->

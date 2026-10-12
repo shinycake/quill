@@ -1,3 +1,0 @@
-# send box options (HD, GIF caption, paid media, video cover) and the video editor
-parity:composer-send-options
-parity:menu-edit-media-items
