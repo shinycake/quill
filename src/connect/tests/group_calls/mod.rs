@@ -14,6 +14,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 mod link;
+mod share_links;
 mod transport;
 
 /// Phase C2f: participant-management request shapes and gates

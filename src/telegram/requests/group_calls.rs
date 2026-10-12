@@ -676,6 +676,24 @@ pub fn invite_group_call_participant(
     .to_string()
 }
 
+/// `inviteVideoChatParticipants group_call_id:int32 user_ids:vector<int53>
+/// = Ok;` (TDLib 1.8.68): "Invites users to an active video chat. Sends a
+/// service message of the type messageInviteVideoChatParticipants to the
+/// chat bound to the group call". At most 10 users at once.
+pub fn invite_video_chat_participants(
+    extra: RequestId,
+    group_call_id: i32,
+    user_ids: &[i64],
+) -> String {
+    json!({
+        "@type": "inviteVideoChatParticipants",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "user_ids": user_ids,
+    })
+    .to_string()
+}
+
 /// Phase C2f: `banGroupCallParticipants` (TDLib 1.8.67,
 /// `schema/td_api.tl:14385`):
 /// `banGroupCallParticipants group_call_id:int32 user_ids:vector<int64>

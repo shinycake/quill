@@ -360,7 +360,7 @@ impl Session {
                 .is_some_and(|c| c.id == group_call_id) =>
             {
                 if let Some(tracked) = self.calls.active_group_call.as_mut() {
-                    tracked.invite_link = None;
+                    tracked.share_links = Default::default();
                 }
             }
             // Slice G2: forum-topic mutations confirmed — drop

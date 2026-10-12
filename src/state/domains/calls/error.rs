@@ -156,7 +156,6 @@ impl Session {
                 | RequestPurpose::Calls(CallsPurpose::EndGroupCall { .. })
                 | RequestPurpose::Calls(CallsPurpose::GetGroupCall { .. })
                 | RequestPurpose::Calls(CallsPurpose::LoadGroupCallParticipants { .. })
-                | RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatDefaultParticipant { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatTitle { .. })
                 | RequestPurpose::Calls(CallsPurpose::RevokeVideoChatInviteLink { .. })
@@ -175,6 +174,7 @@ impl Session {
                 | RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantHand { .. })
                 | RequestPurpose::Calls(CallsPurpose::ToggleVideoChatMuteNew { .. })
                 | RequestPurpose::Calls(CallsPurpose::InviteGroupCallParticipant { .. })
+                | RequestPurpose::Calls(CallsPurpose::InviteVideoChatParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::BanGroupCallParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetGroupCallParticipantVolumeLevel { .. })
                 | RequestPurpose::JoinGroupCallInvitation
@@ -182,6 +182,23 @@ impl Session {
             ) => {
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
+            }
+            // A failed speaker link is left out of the share box (tdesktop's
+            // `fail` handler); a failed listener link is reported and can be
+            // asked for again.
+            Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
+                group_call_id,
+                can_self_unmute,
+            })) => {
+                if let Some(tracked) = self.calls.active_group_call.as_mut()
+                    && tracked.id == group_call_id
+                {
+                    tracked.share_links.failed(can_self_unmute);
+                }
+                if !can_self_unmute {
+                    self.calls.group_call_error =
+                        Some(call_request_error_line(err, "Couldn't get the invite link"));
+                }
             }
             // The "join as" list is optional: a failure just leaves the
             // picker out and the join goes ahead as yourself.

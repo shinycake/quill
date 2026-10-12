@@ -268,8 +268,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C2f: `inviteGroupCallParticipant` (schema 1.8.67,
-    /// :14375). `is_video` follows the tracked call's `is_video_chat`.
+    /// Invite a user to the tracked call. A video chat (bound to a chat)
+    /// takes `inviteVideoChatParticipants`; a group call that isn't bound
+    /// to a chat takes `inviteGroupCallParticipant` ("for group calls not
+    /// bound to a chat only", schema 1.8.68), whose `is_video` is false:
+    /// Quill joins those calls without video.
     pub fn invite_group_call_participant(
         &mut self,
         user_id: i64,
@@ -277,20 +280,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (group_call_id, is_video) = match &self.session.calls.active_group_call {
+        let (group_call_id, is_video_chat) = match &self.session.calls.active_group_call {
             Some(call) => (call.id, call.is_video_chat),
             None => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self.session.request(
-            RequestPurpose::Calls(CallsPurpose::InviteGroupCallParticipant { group_call_id }),
-            None,
-        );
-        if let Err(err) = self.sender.send_json(&invite_group_call_participant(
-            extra,
-            group_call_id,
-            user_id,
-            is_video,
-        )) {
+        let purpose = if is_video_chat {
+            CallsPurpose::InviteVideoChatParticipants { group_call_id }
+        } else {
+            CallsPurpose::InviteGroupCallParticipant { group_call_id }
+        };
+        let extra = self.session.request(RequestPurpose::Calls(purpose), None);
+        let json = if is_video_chat {
+            invite_video_chat_participants(extra, group_call_id, &[user_id])
+        } else {
+            invite_group_call_participant(extra, group_call_id, user_id, false)
+        };
+        if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
             return Err(err);
         }

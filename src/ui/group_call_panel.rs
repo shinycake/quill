@@ -177,7 +177,7 @@ impl QuillApp {
         // Video tiles: every stream, yours included; one can be pinned.
         let tiles = self.group_call_tiles(&call, cx);
 
-        let can_invite = call.is_joined;
+        let can_invite = call.is_joined && self.group_call_invite_row(&call).is_some();
         let invite_row = can_invite.then(|| {
             div()
                 .id("group-call-invite")
@@ -189,7 +189,7 @@ impl QuillApp {
                 .cursor_pointer()
                 .text_color(rgb(ACTIVE_FG))
                 .hover(|style| style.bg(rgb(MEMBERS_BG_OVER)))
-                .on_click(cx.listener(|this, _, _, cx| this.open_group_call_invite(cx)))
+                .on_click(cx.listener(|this, _, _, cx| this.group_call_invite_row_clicked(cx)))
                 .child(
                     div()
                         .size(px(40.))
@@ -317,7 +317,7 @@ impl QuillApp {
                 .child("Connection lost. Click to rejoin.")
         });
 
-        let invite = self.group_call.invite_open.then(|| {
+        let invite = (self.group_call.invite_open && !self.account.passcode.locked).then(|| {
             div()
                 .absolute()
                 .inset_0()
@@ -451,6 +451,7 @@ impl QuillApp {
             .child(members)
             .child(self.group_call_controls(&call, state, level_reach, cx))
             .children(invite)
+            .children(self.group_call_share_overlay(&call, cx))
             .children(rename)
             .into_any_element()
     }

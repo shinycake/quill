@@ -196,6 +196,8 @@ impl Session {
                 tracked.is_owned = group_call.is_owned;
                 tracked.is_video_chat = group_call.is_video_chat;
                 tracked.is_live_story = group_call.is_live_story;
+                tracked.is_rtmp_stream = group_call.is_rtmp_stream;
+                tracked.is_rtmp_stream = group_call.is_rtmp_stream;
                 tracked.scheduled_start_date = group_call.scheduled_start_date;
                 tracked.enabled_start_notification = group_call.enabled_start_notification;
                 return;
@@ -234,6 +236,7 @@ impl Session {
         tracked.title = group_call.title.clone();
         tracked.is_video_chat = group_call.is_video_chat;
         tracked.is_live_story = group_call.is_live_story;
+        tracked.is_rtmp_stream = group_call.is_rtmp_stream;
         tracked.scheduled_start_date = 0;
         tracked.is_joined = group_call.is_joined;
         tracked.need_rejoin = group_call.need_rejoin;
@@ -484,13 +487,13 @@ impl Session {
         }
     }
 
-    /// Phase C3a: store the `getVideoChatInviteLink` `HttpUrl` response
-    /// on the tracked call.
-    pub fn set_group_call_invite_link(&mut self, group_call_id: i32, link: String) {
+    /// Store a `getVideoChatInviteLink` `HttpUrl` answer on the tracked
+    /// call: the speaker link when the request had `can_self_unmute`.
+    pub fn set_group_call_invite_link(&mut self, group_call_id: i32, speaker: bool, link: String) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.invite_link = Some(link);
+            tracked.share_links.answered(speaker, link);
         }
     }
 }

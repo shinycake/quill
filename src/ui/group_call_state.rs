@@ -16,6 +16,12 @@ pub(crate) struct GroupCallUi {
     pub(super) composer: Entity<TextareaState>,
     /// Phase C2f: voice-chat invite picker overlay (contacts list).
     pub(super) invite_open: bool,
+    /// "Share Invite Link" box: asked for (it shows once both links are
+    /// in), its "Users with this link can speak" checkbox, and whether
+    /// the link was just copied.
+    pub(super) share_open: bool,
+    pub(super) share_speaker: bool,
+    pub(super) share_copied: bool,
     /// The voice / video chat window, as for 1:1 calls; the in-call
     /// chat shows under the members when asked.
     pub(super) window: Option<AnyWindowHandle>,
@@ -53,6 +59,9 @@ impl GroupCallUi {
             title_dialog: None,
             start_dialog: None,
             invite_open: false,
+            share_open: false,
+            share_speaker: true,
+            share_copied: false,
             window: None,
             window_opening: false,
             window_closed_by_user: None,

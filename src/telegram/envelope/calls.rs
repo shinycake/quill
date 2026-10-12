@@ -355,6 +355,8 @@ pub struct ParsedGroupCall {
     pub is_active: bool,
     pub is_video_chat: bool,
     pub is_live_story: bool,
+    /// `is_rtmp_stream`: an RTMP stream instead of an ordinary video chat.
+    pub is_rtmp_stream: bool,
     pub is_joined: bool,
     pub need_rejoin: bool,
     pub is_owned: bool,
@@ -426,6 +428,10 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
             .unwrap_or(false),
         is_live_story: value
             .get("is_live_story")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_rtmp_stream: value
+            .get("is_rtmp_stream")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         is_joined: value
