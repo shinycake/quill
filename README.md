@@ -884,7 +884,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Received gifts on a profile: show or hide, pin, convert, upgrade, transfer, sell, collections <!-- parity:premium-received-gifts -->
 - [ ] Gift auctions, crafting and resale filters (deferred: low impact) <!-- parity:premium-gift-auctions -->
 - [x] Create and view giveaways (partial: info box, form and prepaid launch shipped; paying for a new giveaway, specific-user gift codes and country picker left) <!-- parity:premium-giveaways -->
-- [ ] Check and apply Premium gift codes <!-- parity:premium-gift-codes -->
+- [x] Check and apply Premium gift codes <!-- parity:premium-gift-codes -->
 - [x] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
 - [x] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
 - [ ] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
@@ -932,9 +932,9 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Settings links open the matching settings page <!-- parity:deeplink-settings -->
 - [x] Login code links fill in the code <!-- parity:deeplink-login-code -->
 - [x] Invoice links open the payment checkout <!-- parity:deeplink-invoice -->
-- [ ] Boost links open the boost dialog <!-- parity:deeplink-boost -->
+- [x] Boost links open the boost dialog <!-- parity:deeplink-boost -->
 - [x] Premium gift code links offer to apply the code <!-- parity:deeplink-giftcode -->
-- [ ] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
+- [x] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
 - [x] addlist links add a shared folder <!-- parity:deeplink-addlist -->
 - [ ] Background and theme links preview and apply them (partial: bg/ links done; addtheme/ links blocked: TDLib has no cloud theme support) <!-- parity:deeplink-bg-theme -->
 - [x] +phone links open a chat with that number <!-- parity:deeplink-phone -->

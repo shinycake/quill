@@ -1,3 +1,0 @@
-parity:deeplink-boost
-parity:deeplink-voice-chat
-parity:premium-gift-codes
