@@ -1058,7 +1058,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Interface scale <!-- parity:appearance-scale -->
 - [x] Font family choice <!-- parity:appearance-font -->
 - [ ] Interface language packs (English only today) <!-- parity:appearance-localization -->
-- [ ] Adaptive layout for wide screens (centered column) <!-- parity:appearance-wide-layout -->
+- [ ] Adaptive layout for wide screens (all messages on the left with photos; off by default in Quill) <!-- parity:appearance-wide-layout -->
 - [x] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
 - [x] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
 - [x] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
