@@ -44,6 +44,14 @@ impl Session {
                 self.chats_state.chat_action_error =
                     Some(format!("could not hide the bar (error {})", err.code));
             }
+            Some(RequestPurpose::ToggleBusinessBotPaused) => {
+                self.chats_state.chat_action_error =
+                    Some(format!("could not change the bot (error {})", err.code));
+            }
+            Some(RequestPurpose::RemoveBusinessBotFromChat) => {
+                self.chats_state.chat_action_error =
+                    Some(format!("could not remove the bot (error {})", err.code));
+            }
             Some(RequestPurpose::CreatePrivateChat) => {
                 self.chats_state.chat_action_error = Some(format!(
                     "could not open Saved Messages (error {})",

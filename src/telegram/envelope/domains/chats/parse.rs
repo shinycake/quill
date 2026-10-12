@@ -81,6 +81,14 @@ pub(crate) fn parse_chats_payload(
             chat_id: ChatId(int53(value.get("chat_id"))?),
             action_bar: parse_chat_action_bar(value.get("action_bar")),
         })),
+        "updateChatBusinessBotManageBar" => Ok(EnvelopePayload::Chats(
+            ChatsPayload::UpdateChatBusinessBotManageBar {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                bar: crate::business_bot_bar::parse_business_bot_manage_bar(
+                    value.get("business_bot_manage_bar"),
+                ),
+            },
+        )),
         // Slice CL3: `reportChat` result (schema 1.8.67, lines
         // 9210–9219) — collapsed to Ok vs "more info required".
         "reportChatResultOk" => Ok(EnvelopePayload::Chats(ChatsPayload::ReportChatResult(

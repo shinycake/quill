@@ -59,6 +59,12 @@ pub enum ChatsPayload {
         chat_id: ChatId,
         action_bar: Option<ChatActionBar>,
     },
+    /// `updateChatBusinessBotManageBar` (schema 1.8.68) — `None` when the
+    /// chat is no longer managed by a business bot.
+    UpdateChatBusinessBotManageBar {
+        chat_id: ChatId,
+        bar: Option<crate::business_bot_bar::BusinessBotManageBar>,
+    },
     /// Slice CL3: `reportChat` result (schema 1.8.67, lines 9210–9219).
     /// The chat list only sends the simple spam report (empty
     /// option_id/message_ids/text, schema:3667), so every non-Ok
@@ -169,6 +175,9 @@ pub enum ChatsPayload {
         /// Batch 8: `chat.action_bar` (schema 1.8.67, line 3627). Refreshed
         /// by `updateChatActionBar`.
         action_bar: Option<ChatActionBar>,
+        /// `chat.business_bot_manage_bar` (schema 1.8.68). Refreshed by
+        /// `updateChatBusinessBotManageBar`.
+        business_bot_bar: Option<crate::business_bot_bar::BusinessBotManageBar>,
         /// Slice CL3: `chat.block_list` is `blockListMain` (schema 1.8.67,
         /// lines 3627 / 9692). Refreshed by `updateChatBlockList`
         /// (schema line 10594); drives the row-menu Block/Unblock label.

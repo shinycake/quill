@@ -53,6 +53,8 @@ pub struct ChatsState {
     /// Batch 8: `chat.action_bar` / `updateChatActionBar` per chat — the
     /// Add contact / Block / Report spam / Share phone strip.
     pub chat_action_bars: HashMap<i64, ChatActionBar>,
+    /// `chat.business_bot_manage_bar` / `updateChatBusinessBotManageBar`.
+    pub business_bot_bars: HashMap<i64, crate::business_bot_bar::BusinessBotManageBar>,
     /// Chats whose content is protected (`chat.has_protected_content`,
     /// schema 1.8.67 line 3598): no saving, forwarding or copying.
     pub protected_chats: HashSet<i64>,
@@ -114,6 +116,7 @@ impl ChatsState {
             chat_message_sender: HashMap::new(),
             send_as_options: HashMap::new(),
             chat_action_bars: HashMap::new(),
+            business_bot_bars: HashMap::new(),
             protected_chats: HashSet::new(),
             scheduled_chats: HashSet::new(),
             chat_accents: HashMap::new(),

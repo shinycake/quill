@@ -57,6 +57,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 mod account_notices;
+mod business_bot_bar;
 mod call_types;
 mod chat_activity;
 mod chat_types;

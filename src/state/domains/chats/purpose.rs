@@ -30,6 +30,11 @@ pub enum ChatsPurpose {
     /// Batch 8: `removeChatActionBar` (the bar's close button). Response
     /// is `ok`; the bar is dropped optimistically.
     RemoveChatActionBar,
+    /// `toggleBusinessConnectedBotChatIsPaused` from the business bot bar.
+    /// Response is `ok`; `updateChatBusinessBotManageBar` follows.
+    ToggleBusinessBotPaused,
+    /// `removeBusinessConnectedBotFromChat` from the bar's menu.
+    RemoveBusinessBotFromChat,
     /// Slice CL2: `createPrivateChat` for Saved Messages (schema
     /// 1.8.67, line 9590 — "Call createPrivateChat with
     /// getOption("my_id") and open the chat"). The `chat` answer opens
@@ -76,6 +81,8 @@ pub enum ChatsPurpose {
 flat_purposes!(Chats(ChatsPurpose) {
     ReportChat,
     RemoveChatActionBar,
+    ToggleBusinessBotPaused,
+    RemoveBusinessBotFromChat,
     CreatePrivateChat,
     GetInstalledBackgrounds,
     SetDefaultBackground,

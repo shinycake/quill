@@ -69,6 +69,7 @@ impl Session {
                 unread_poll_vote_count,
                 can_be_reported,
                 action_bar,
+                business_bot_bar,
                 blocked,
                 positions,
                 last_message,
@@ -107,6 +108,7 @@ impl Session {
                         .insert(chat_id.0, reply_markup_message_id.0);
                 }
                 self.set_chat_action_bar(chat_id.0, action_bar);
+                self.set_business_bot_bar(chat_id.0, business_bot_bar);
                 self.apply_update_new_chat(
                     chat_id,
                     title,
@@ -240,6 +242,9 @@ impl Session {
                 chat_id,
                 action_bar,
             } => self.set_chat_action_bar(chat_id.0, action_bar),
+            ChatsPayload::UpdateChatBusinessBotManageBar { chat_id, bar } => {
+                self.set_business_bot_bar(chat_id.0, bar)
+            }
             ChatsPayload::UpdateChatNotificationSettings {
                 chat_id,
                 notification_settings,

@@ -64,6 +64,7 @@ impl QuillApp {
     pub(super) fn chat_top_bars(&self, chat_id: ChatId, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut bars: Vec<AnyElement> = [
             self.chat_action_bar_view(chat_id, cx),
+            self.business_bot_bar_view(chat_id, cx),
             self.join_requests_bar(chat_id, cx),
             self.voice_chat_bar(chat_id, cx),
         ]
@@ -77,7 +78,7 @@ impl QuillApp {
         bars
     }
 
-    fn bar_shell(&self, id: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn bar_shell(&self, id: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
         div()
             .id(id)
             .flex()
@@ -92,7 +93,7 @@ impl QuillApp {
             .bg(bg_canvas())
     }
 
-    fn bar_button(id: String, label: impl Into<SharedString>, danger: bool) -> Button {
+    pub(super) fn bar_button(id: String, label: impl Into<SharedString>, danger: bool) -> Button {
         let label: SharedString = label.into();
         let button = Button::new(SharedString::from(id))
             .label(label.clone())
