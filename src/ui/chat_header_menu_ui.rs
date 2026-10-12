@@ -151,7 +151,7 @@ impl QuillApp {
                     self.open_info_panel_target(target, window, cx);
                 }
             }
-            HeaderEntry::Boost(_) => self.open_boost_panel(chat_id, window, cx),
+            HeaderEntry::Boost(_) => self.open_boost_box_for(chat_id, cx),
             HeaderEntry::Statistics => {
                 self.open_info_panel_target(InfoPanelTarget::Statistics(chat_id.0), window, cx);
             }

@@ -148,6 +148,12 @@ impl QuillApp {
         {
             return;
         }
+        // A boost link shows the boost box over the current view; like
+        // tdesktop's `resolveBoostState` it does not open the channel.
+        if matches!(action, DeepLinkAction::OpenChannelBoost { .. }) {
+            self.open_boost_box_for(chat_id, cx);
+            return;
+        }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live

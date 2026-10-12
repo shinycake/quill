@@ -162,6 +162,11 @@ impl Session {
                     self.groups.chat_boost_details.insert(chat_id.0, status);
                 }
             }
+            GroupsPayload::BoostsPerGift(count) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
+                    self.groups.boosts_per_gift = Some(count);
+                }
+            }
             // `getChatBoostFeatures` answer, kept for the chat it was
             // asked for.
             GroupsPayload::ChatBoostFeatures(features) => {
@@ -187,6 +192,23 @@ impl Session {
                 {
                     self.groups.chat_boost_status.remove(&chat_id.0);
                     self.groups.chat_boost_details.remove(&chat_id.0);
+                    // The boost box goes back to its counters, with a line
+                    // about boosts that moved here (`lng_boost_reassign_done`).
+                    if let Some(state) = self
+                        .groups
+                        .boost_box
+                        .as_mut()
+                        .filter(|state| state.chat_id == chat_id.0)
+                    {
+                        state.phase = crate::boost_box::BoostPhase::Main;
+                        state.note = state.reassigning.take().map(|moved| {
+                            crate::boost_box::reassign_done_text(
+                                moved.count,
+                                moved.groups,
+                                moved.channels,
+                            )
+                        });
+                    }
                 }
             }
             // Phase D2: `getChatStatistics` answer — the response carries

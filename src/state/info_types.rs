@@ -482,6 +482,14 @@ pub enum DeepLinkAction {
     /// Result of [`Self::BoostLink`]: `getChat`, then the channel's info
     /// panel with its boost status and the Boost button.
     OpenChannelBoost { chat_id: i64 },
+    /// `internalLinkTypeVideoChat`: open the group or channel, then offer
+    /// its voice chat, video chat or live stream with the link's invite
+    /// hash (`crate::call_link`).
+    OpenVideoChat {
+        domain: String,
+        invite_hash: String,
+        live_stream: bool,
+    },
     /// Chosen share target: prefill the composer with `text`.
     ShareDraft { text: String },
     /// `internalLinkTypeGame`: resolve the bot, then pick a chat to send the

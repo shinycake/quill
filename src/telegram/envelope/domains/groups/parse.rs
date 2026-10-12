@@ -440,18 +440,11 @@ pub(crate) fn parse_groups_payload(
         "chatBoostFeatures" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostFeatures(
             parse_boost_features(value),
         ))),
+        "jsonValueObject" => Ok(EnvelopePayload::Groups(GroupsPayload::BoostsPerGift(
+            boosts_per_gift(value),
+        ))),
         "chatBoostSlots" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots {
-            slots: value
-                .get("slots")
-                .and_then(Value::as_array)
-                .map(|slots| {
-                    slots
-                        .iter()
-                        .filter_map(|slot| slot.get("slot_id").and_then(Value::as_i64))
-                        .map(|id| id.sat_i32())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            slots: parse_boost_slots(value),
         })),
         // Phase D3a: invite-link / join-request responses and updates
         // (schema 1.8.67, lines 2627/2630/2688/2691/10555/11210). The

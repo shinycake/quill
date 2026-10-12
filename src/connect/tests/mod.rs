@@ -3,6 +3,7 @@ mod account_hygiene;
 mod admin_extras;
 mod ai_tools;
 mod auth_leftovers;
+mod boost_box;
 mod bot_pending;
 mod bot_verification;
 mod bots;

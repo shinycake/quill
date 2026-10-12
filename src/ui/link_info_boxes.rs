@@ -10,6 +10,7 @@ use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_base::{Disableable, StyledExt};
+use gpui_kit::component::Sizable;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::prelude::FluentBuilder;
@@ -67,6 +68,31 @@ pub(super) fn finish(
         ))
         .footer(footer)
         .on_close(on_close)
+}
+
+/// The "Open Gift Link" button under a Premium gift code card
+/// (tdesktop `PremiumGift::button`, `ResolveGiftCode`). `None` for other
+/// cards and for a code TDLib did not share.
+pub(super) fn gift_code_open_button(
+    row_id: u64,
+    card: &quill::telegram::envelope::GiftCard,
+    cx: &mut Context<QuillApp>,
+) -> Option<AnyElement> {
+    if card.kind != quill::telegram::envelope::GiftCardKind::GiftCode || card.gift_code.0.is_empty()
+    {
+        return None;
+    }
+    let code = card.gift_code.0.clone();
+    Some(
+        Button::new(("gift-code-open", row_id))
+            .label("Open Gift Link")
+            .small()
+            .ghost()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_gift_code_link(code.clone(), cx);
+            }))
+            .into_any_element(),
+    )
 }
 
 impl QuillApp {

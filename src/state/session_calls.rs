@@ -441,6 +441,7 @@ impl Session {
     /// leaves or ends it.
     pub fn leave_group_call_local(&mut self) {
         self.calls.active_group_call = None;
+        self.calls.call_link = None;
     }
 
     /// Phase C3a: flip the local-only self-mute state. There is no

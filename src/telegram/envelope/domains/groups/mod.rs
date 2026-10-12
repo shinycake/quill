@@ -274,10 +274,12 @@ pub enum GroupsPayload {
     ChatBoostStatus(ParsedBoostStatus),
     /// `chatBoostFeatures` — the `getChatBoostFeatures` answer.
     ChatBoostFeatures(ParsedBoostFeatures),
+    /// `jsonValueObject`, the `getApplicationConfig` answer: only
+    /// `boosts_per_sent_gift` is kept (0 when the key is missing).
+    BoostsPerGift(i32),
     /// Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
-    /// `getAvailableChatBoostSlots` / `boostChat` response; only the slot
-    /// ids are kept.
-    ChatBoostSlots { slots: Vec<i32> },
+    /// `getAvailableChatBoostSlots` / `boostChat` response.
+    ChatBoostSlots { slots: Vec<ParsedBoostSlot> },
     /// Phase D2: `chatStatisticsChannel` / `chatStatisticsSupergroup` —
     /// `getChatStatistics` response (schema 1.8.67, line 15760). The
     /// response carries no chat id; it is resolved from the pending

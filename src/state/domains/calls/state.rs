@@ -84,6 +84,14 @@ pub struct CallsState {
     /// group call; the driver issues `join_video_chat` once the
     /// `getGroupCall` answer has created the unjoined tracker.
     pub pending_live_story_join: Option<LiveStoryJoinIntent>,
+    /// A voice chat, video chat or live stream link offered this call;
+    /// its invite hash goes out with the join (`crate::call_link`).
+    pub call_link: Option<crate::call_link::PendingCallLink>,
+    /// A call link arrived while a call is on: the question to leave it.
+    pub call_link_confirm: Option<crate::call_link::CallLinkConfirm>,
+    /// The confirmed link `(chat id, hash)`, offered once the old call has
+    /// ended.
+    pub call_link_after_leave: Option<(i64, String)>,
 }
 
 impl CallsState {
@@ -111,6 +119,9 @@ impl CallsState {
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
+            call_link: None,
+            call_link_confirm: None,
+            call_link_after_leave: None,
         }
     }
 }

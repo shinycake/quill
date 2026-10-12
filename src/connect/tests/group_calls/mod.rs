@@ -13,6 +13,7 @@ use crate::telegram::envelope::{CallState, MessageSender};
 use serde_json::Value;
 use std::sync::Arc;
 
+mod link;
 mod transport;
 
 /// Phase C2f: participant-management request shapes and gates

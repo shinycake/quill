@@ -130,13 +130,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                     MessageSender::User { user_id } => MessageSenderRef::User(user_id),
                     MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
                 });
-            join_video_chat(extra, id, as_ref.as_ref(), params, "")
+            let hash = crate::call_link::PendingCallLink::hash_for(
+                self.session.calls.call_link.as_ref(),
+                id,
+            );
+            join_video_chat(extra, id, as_ref.as_ref(), params, hash)
         }
     }
 
     /// The chat a tracked voice chat belongs to (`groupCall` carries no
     /// chat id; the chat's `video_chat` association does).
-    fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
+    pub(super) fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
         self.session
             .chats
             .values()

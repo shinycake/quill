@@ -259,7 +259,9 @@ fn g2_welcome_and_boost_payloads_parse() {
         .unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots { slots }) => {
-            assert_eq!(slots, vec![1]);
+            assert_eq!(slots.len(), 1);
+            assert_eq!(slots[0].slot_id, 1);
+            assert_eq!(slots[0].chat_id, 0);
         }
         other => panic!("{other:?}"),
     }
