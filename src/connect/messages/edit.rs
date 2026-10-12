@@ -106,6 +106,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .ok_or(ConnectSendError::InvalidRequest)?,
             );
         }
+        // The cover frame chosen in the video editor.
+        if let (Some(content), Some(rep)) = (replacement_content.take(), replacement) {
+            let start = edit.media_edit.video_extras.start_timestamp;
+            replacement_content = Some(if rep.kind == EditMediaKind::Video {
+                crate::telegram::requests::with_video_options(content, None, start)
+            } else {
+                content
+            });
+        }
         // "Edit Cover": a staged cover rides on the replacement video, or
         // resends the video already on the message by file id (tdesktop
         // `MediaEditManager::videoCover`). Same peers as tdesktop's

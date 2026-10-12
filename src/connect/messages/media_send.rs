@@ -119,8 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         let mut contents = Vec::with_capacity(snapshot.album.len());
         for (index, att) in snapshot.album.iter().enumerate() {
-            let path = att
-                .send_path_str()
+            let path = media_options::media_send_path(att, snapshot.media)
                 .ok_or(ConnectSendError::InvalidRequest)?;
             let item_caption = if index == last { caption } else { "" };
             let content = match att.kind {
@@ -152,7 +151,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     return Err(ConnectSendError::InvalidRequest);
                 }
             };
-            let mut content = content;
+            let mut content = match att.kind {
+                AttachmentKind::Video => self.with_attachment_video_options(chat_id, att, content),
+                _ => content,
+            };
             if att.spoiler && matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video) {
                 content["has_spoiler"] = serde_json::Value::Bool(true);
             }

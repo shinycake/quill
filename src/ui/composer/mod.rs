@@ -109,6 +109,14 @@ impl QuillApp {
                     if self.paid_send_waits(chat_id, &text, cx) {
                         return;
                     }
+                    // A video's sound track is still being read: wait, so a
+                    // soundless one is sent as a GIF.
+                    if self.tray_videos_checking() {
+                        self.connection.status_note =
+                            "checking the video… send again in a moment".into();
+                        cx.notify();
+                        return;
+                    }
                     let attachments = self.composer_ui.pending_attachments.clone();
                     // The viewer's own rights in a group: text needs the
                     // basic right, each attachment its media right.
@@ -142,24 +150,48 @@ impl QuillApp {
                     let grouped = self.composer_group_media_effective();
                     let mut snaps = Vec::new();
                     if albumable && grouped {
-                        snaps.push(
-                            ComposerSnapshot::capture_album(
-                                chat_id,
-                                view_generation,
-                                text,
-                                attachments,
-                            )
-                            .with_reply(self.composer_ui.pending_reply.clone())
-                            .with_self_destruct(self_destruct)
-                            // M1: silent / scheduled / when-online /
-                            // link-preview options ride the snapshot to
-                            // `sendMessage.options`.
-                            .with_send_options(self.composer_send_options())
-                            // MED4: caption-above-media toggle.
-                            .with_caption_above_media(
-                                self.composer_ui.caption_above && !self.open_chat_is_secret(),
-                            ),
-                        );
+                        // A video turned into a GIF leaves the album and
+                        // goes alone (tdesktop `GroupRanges`); paid media
+                        // is one message.
+                        let groups = if self.paid_stars_in_effect() > 0 {
+                            vec![attachments]
+                        } else {
+                            ComposerAttachment::split_for_send(&attachments, true)
+                        };
+                        for (i, group) in groups.into_iter().enumerate() {
+                            let text = if i == 0 { text.clone() } else { String::new() };
+                            let snap = if group.len() >= 2 {
+                                ComposerSnapshot::capture_album(
+                                    chat_id,
+                                    view_generation,
+                                    text,
+                                    group,
+                                )
+                            } else {
+                                ComposerSnapshot::capture_with_attachment(
+                                    chat_id,
+                                    view_generation,
+                                    text,
+                                    group.into_iter().next(),
+                                )
+                            };
+                            snaps.push(
+                                snap.with_reply(if i == 0 {
+                                    self.composer_ui.pending_reply.clone()
+                                } else {
+                                    None
+                                })
+                                .with_self_destruct(self_destruct)
+                                // M1: silent / scheduled / when-online /
+                                // link-preview options ride the snapshot to
+                                // `sendMessage.options`.
+                                .with_send_options(self.composer_send_options())
+                                // MED4: caption-above-media toggle.
+                                .with_caption_above_media(
+                                    self.composer_ui.caption_above && !self.open_chat_is_secret(),
+                                ),
+                            );
+                        }
                     } else if attachments.len() >= 2 {
                         // One message per ungrouped attachment, the
                         // caption riding the first.
@@ -203,6 +235,11 @@ impl QuillApp {
                                 self.composer_ui.caption_above && !self.open_chat_is_secret(),
                             ),
                         );
+                    }
+                    // The tray's High quality and price choices.
+                    let media_options = self.composer_media_options();
+                    for snap in &mut snaps {
+                        snap.media = media_options;
                     }
                     if snaps.first().is_none_or(ComposerSnapshot::is_empty) {
                         self.connection.status_note = "type a message or attach a file".into();
@@ -261,6 +298,7 @@ impl QuillApp {
                     match result {
                         Ok(_) => {
                             self.composer_ui.pending_attachments.clear();
+                            self.composer_ui.send_box.reset();
                             // MED1: the grouping override was consumed —
                             // the next composer follows the pref again.
                             self.composer_ui.group_media = None;
@@ -541,6 +579,7 @@ impl QuillApp {
             Ok(count) => format!("Attached {count} files. Send to upload."),
             Err(note) => note.into(),
         };
+        self.check_tray_videos(cx);
         cx.notify();
     }
 
@@ -707,6 +746,7 @@ impl QuillApp {
 
     pub(super) fn clear_attachment(&mut self, cx: &mut Context<Self>) {
         self.composer_ui.pending_attachments.clear();
+        self.composer_ui.send_box.reset();
         self.composer_ui.self_destruct = None;
         // MED1: the grouping override belongs to this composer batch.
         self.composer_ui.group_media = None;

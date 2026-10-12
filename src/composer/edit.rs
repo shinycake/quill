@@ -110,6 +110,9 @@ pub struct MediaEdit {
     pub video: Option<super::edit_media_tools::ExistingVideo>,
     /// A cover picked with "Edit Cover", applied when the edit is saved.
     pub cover: Option<PathBuf>,
+    /// What the video editor did to the staged replacement video: the
+    /// file it started from, the edits and the cover frame (`start_timestamp`).
+    pub video_extras: AttachmentExtras,
     /// The photo or video on the message is under a spoiler; an edited
     /// image keeps it (tdesktop `MediaEditManager::_spoilered`).
     pub had_spoiler: bool,
@@ -331,6 +334,7 @@ impl ComposerEdit {
                     _ => None,
                 },
                 cover: None,
+                video_extras: AttachmentExtras::default(),
                 had_spoiler: match content {
                     MessageContent::Photo(photo) => photo.has_spoiler,
                     MessageContent::Video(video) => video.has_spoiler,

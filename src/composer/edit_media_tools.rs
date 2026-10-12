@@ -6,9 +6,9 @@
 //! the message context menu: "Edit Image" opens its photo editor on the
 //! photo (or on the replacement file), "Edit Cover" picks an image that
 //! becomes the video's cover. Both are applied when the edit is saved, as
-//! an `editMessageMedia`. tdesktop's own video editor ("Edit Video") works
-//! on a prepared local file only; Quill has no video editor, so it is not
-//! offered (see `docs/decisions/codex-edit-media-items.md`).
+//! an `editMessageMedia`. tdesktop's video editor ("Edit Video") works on a
+//! prepared local file only, so it is offered for a staged replacement
+//! video (`video_edit.rs`; `docs/decisions/codex-send-box-options.md`).
 
 use super::*;
 use crate::ids::FileId;
@@ -21,6 +21,9 @@ pub enum EditMediaTool {
     EditImage,
     /// tdesktop `lng_context_edit_cover`: choose a new cover for a video.
     EditCover,
+    /// tdesktop `lng_context_edit_video`: trim, cover frame, quality and
+    /// GIF for a video file staged as the replacement.
+    EditVideo,
 }
 
 impl EditMediaTool {
@@ -29,6 +32,7 @@ impl EditMediaTool {
         match self {
             Self::EditImage => "Edit Image",
             Self::EditCover => "Edit Cover",
+            Self::EditVideo => "Edit Video",
         }
     }
 }
@@ -129,6 +133,15 @@ impl ComposerEdit {
         if image {
             tools.push(EditMediaTool::EditImage);
         }
+        // `canEditVideo`: only a local video that is not sent as a file.
+        if self
+            .media_edit
+            .replacement
+            .as_ref()
+            .is_some_and(|rep| rep.kind == EditMediaKind::Video)
+        {
+            tools.push(EditMediaTool::EditVideo);
+        }
         if cover_peer_ok && self.cover_applies() {
             tools.push(EditMediaTool::EditCover);
         }
@@ -202,6 +215,31 @@ mod tests {
     }
 
     #[test]
+    fn edit_video_is_for_a_staged_replacement_video_only() {
+        let mut edit = edit(Some(EditableMedia::Video), true);
+        // The video already on the message is not a local file.
+        assert!(
+            !edit
+                .edit_media_tools(true)
+                .contains(&EditMediaTool::EditVideo)
+        );
+        edit.media_edit.replacement = Some(replacement(EditMediaKind::Video));
+        assert_eq!(
+            edit.edit_media_tools(true),
+            [EditMediaTool::EditVideo, EditMediaTool::EditCover]
+        );
+        // Without a cover peer the video can still be edited.
+        assert_eq!(edit.edit_media_tools(false), [EditMediaTool::EditVideo]);
+        edit.media_edit.replacement = Some(replacement(EditMediaKind::Document));
+        assert!(
+            !edit
+                .edit_media_tools(true)
+                .contains(&EditMediaTool::EditVideo)
+        );
+        assert_eq!(EditMediaTool::EditVideo.label(), "Edit Video");
+    }
+
+    #[test]
     fn video_without_known_size_has_no_cover_tool() {
         let edit = edit(Some(EditableMedia::Video), false);
         assert!(edit.edit_media_tools(true).is_empty());
@@ -233,7 +271,10 @@ mod tests {
         let mut edit = edit(Some(EditableMedia::Document), false);
         edit.media_edit.replacement = Some(replacement(EditMediaKind::Video));
         edit.media_edit.cover = Some(PathBuf::from("/tmp/c.png"));
-        assert_eq!(edit.edit_media_tools(true), [EditMediaTool::EditCover]);
+        assert_eq!(
+            edit.edit_media_tools(true),
+            [EditMediaTool::EditVideo, EditMediaTool::EditCover]
+        );
         assert!(edit.effective_cover().is_some());
         edit.media_edit.replacement = Some(replacement(EditMediaKind::Document));
         assert!(edit.effective_cover().is_none());
