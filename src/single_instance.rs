@@ -20,7 +20,9 @@
 
 use interprocess::local_socket::{ListenerOptions, Stream, prelude::*};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;

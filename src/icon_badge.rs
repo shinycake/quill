@@ -184,7 +184,7 @@ pub fn set_native_window(hwnd: isize) {
 
 #[cfg(windows)]
 mod windows_overlay {
-    use super::{overlay_description, tray};
+    use super::overlay_description;
     use std::cell::{Cell, RefCell};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
