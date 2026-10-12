@@ -14,6 +14,7 @@ mod accounts;
 mod admin_state;
 mod anim_layer;
 mod app_slice;
+mod app_theme;
 mod appearance;
 mod appearance_power;
 mod auth_recovery;

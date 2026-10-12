@@ -12,6 +12,11 @@
 //! colored fills (accent buttons, chips, badges, avatars, outgoing bubbles)
 //! stays white in both modes, exactly like the official clients.
 //!
+//! App themes (`app_theme`): under a tdesktop or custom theme, the tokens that map
+//! to one of its palette keys (`pick_key`) take the theme's colour; the
+//! dark/light values below are Quill Light and Quill Dark (the defaults), and the tokens
+//! no key covers (warnings, success fills, scrims).
+//!
 //! stories-high-contrast: the orthogonal [`high_contrast()`] flag re-roots
 //! the palette for maximum contrast — pure-black surfaces, white
 //! text/borders, dark semantic fills — while semantic hues keep their
@@ -21,6 +26,7 @@
 
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Rgba, Window};
+use quill::app_theme::PaletteKey as K;
 const fn hex(hex: u32) -> Rgba {
     Rgba {
         r: ((hex >> 16) & 0xff) as f32 / 255.0,
@@ -155,20 +161,36 @@ fn pick_a(dark_hex: u32, light_hex: u32, hc_hex: Option<u32>) -> Rgba {
     super::chat_palette::recolor(hex_a(if dark() { dark_hex } else { light_hex }))
 }
 
+/// [`pick`], or the applied app theme's colour for `key` when one is
+/// installed (outside high contrast).
+#[inline]
+fn pick_key(key: K, dark_hex: u32, light_hex: u32, hc_hex: Option<u32>) -> Rgba {
+    if high_contrast() {
+        return hex(hc_hex.unwrap_or(dark_hex));
+    }
+    match super::app_theme::installed(key) {
+        Some(rgba) => super::chat_palette::recolor(hex_a(rgba)),
+        None => super::chat_palette::recolor(hex(if dark() { dark_hex } else { light_hex })),
+    }
+}
+
 /// The base accent the palette is drawn around (what a chat theme's
 /// colorizer moves away from): `accent_strong` without any theme.
 pub(crate) fn base_accent_hex() -> u32 {
+    if let Some(rgba) = super::app_theme::installed(K::WindowBgActive) {
+        return rgba >> 8;
+    }
     if dark() { 0x1f6feb } else { 0x0969da }
 }
 
 // --- accent ---
 #[inline]
 pub fn accent() -> Rgba {
-    pick(0x58a6ff, 0x0969da, Some(0xffd60a))
+    pick_key(K::WindowActiveTextFg, 0x58a6ff, 0x0969da, Some(0xffd60a))
 }
 #[inline]
 pub fn accent_strong() -> Rgba {
-    pick(0x1f6feb, 0x0969da, Some(0xb3d91))
+    pick_key(K::WindowBgActive, 0x1f6feb, 0x0969da, Some(0xb3d91))
 }
 #[inline]
 pub fn accent_light() -> Rgba {
@@ -176,7 +198,7 @@ pub fn accent_light() -> Rgba {
 }
 #[inline]
 pub fn accent_info() -> Rgba {
-    pick(0x9ecbff, 0x0969da, Some(0xffd60a))
+    pick_key(K::WindowActiveTextFg, 0x9ecbff, 0x0969da, Some(0xffd60a))
 }
 
 // --- text ---
@@ -184,45 +206,50 @@ pub fn accent_info() -> Rgba {
 #[inline]
 pub fn text_on_fill() -> Rgba {
     // Inside an outgoing bubble of a themed chat: the theme's bubble text.
-    super::chat_palette::on_fill_text().unwrap_or(hex(0xffffff))
+    super::chat_palette::on_fill_text().unwrap_or_else(|| {
+        match super::app_theme::installed(K::WindowFgActive) {
+            Some(rgba) if !high_contrast() => hex_a(rgba),
+            _ => hex(0xffffff),
+        }
+    })
 }
 #[inline]
 pub fn text_bright() -> Rgba {
-    pick(0xffffff, 0x1f2328, Some(0xffffff))
+    pick_key(K::WindowBoldFg, 0xffffff, 0x1f2328, Some(0xffffff))
 }
 #[inline]
 pub fn text_primary() -> Rgba {
-    pick(0xc9d1d9, 0x24292f, Some(0xffffff))
+    pick_key(K::WindowFg, 0xc9d1d9, 0x24292f, Some(0xffffff))
 }
 #[inline]
 pub fn text_muted() -> Rgba {
-    pick(0x8b949e, 0x59636e, Some(0xd9d9d9))
+    pick_key(K::WindowSubTextFg, 0x8b949e, 0x59636e, Some(0xd9d9d9))
 }
 #[inline]
 pub fn text_faint() -> Rgba {
-    pick(0x9a9a9a, 0x6e7781, Some(0xd9d9d9))
+    pick_key(K::PlaceholderFg, 0x9a9a9a, 0x6e7781, Some(0xd9d9d9))
 }
 #[inline]
 pub fn text_menu() -> Rgba {
-    pick(0xe6edf3, 0x1f2328, Some(0xffffff))
+    pick_key(K::WindowFg, 0xe6edf3, 0x1f2328, Some(0xffffff))
 }
 
 // --- danger ---
 #[inline]
 pub fn danger() -> Rgba {
-    pick(0xf85149, 0xd1242c, None)
+    pick_key(K::AttentionButtonFg, 0xf85149, 0xd1242c, None)
 }
 #[inline]
 pub fn danger_soft() -> Rgba {
-    pick(0xe17076, 0xd1242c, None)
+    pick_key(K::BoxTextFgError, 0xe17076, 0xd1242c, None)
 }
 #[inline]
 pub fn danger_bright() -> Rgba {
-    pick(0xff7b72, 0xcf222e, None)
+    pick_key(K::BoxTextFgError, 0xff7b72, 0xcf222e, None)
 }
 #[inline]
 pub fn danger_pale() -> Rgba {
-    pick(0xff8a8a, 0xa40e26, None)
+    pick_key(K::BoxTextFgError, 0xff8a8a, 0xa40e26, None)
 }
 #[inline]
 pub fn danger_dark() -> Rgba {
@@ -277,19 +304,19 @@ pub fn warning_bg() -> Rgba {
 // --- surfaces ---
 #[inline]
 pub fn bg_deep() -> Rgba {
-    pick(0x0d1117, 0xffffff, Some(0x0))
+    pick_key(K::WindowBg, 0x0d1117, 0xffffff, Some(0x0))
 }
 #[inline]
 pub fn bg_canvas() -> Rgba {
-    pick(0x161b22, 0xf6f8fa, Some(0x0))
+    pick_key(K::FilterInputInactiveBg, 0x161b22, 0xf6f8fa, Some(0x0))
 }
 #[inline]
 pub fn bg_subtle() -> Rgba {
-    pick(0x21262d, 0xeaeef2, Some(0x0))
+    pick_key(K::WindowBgOver, 0x21262d, 0xeaeef2, Some(0x0))
 }
 #[inline]
 pub fn bg_tile() -> Rgba {
-    pick(0x010409, 0xffffff, Some(0x0))
+    pick_key(K::WindowBg, 0x010409, 0xffffff, Some(0x0))
 }
 #[inline]
 pub fn bg_video() -> Rgba {
@@ -303,16 +330,16 @@ pub fn bg_black() -> Rgba {
 }
 #[inline]
 pub fn bg_code() -> Rgba {
-    pick(0x22262d, 0xf6f8fa, Some(0x0))
+    pick_key(K::FilterInputInactiveBg, 0x22262d, 0xf6f8fa, Some(0x0))
 }
 #[inline]
 pub fn bg_bubble_incoming() -> Rgba {
-    pick(0x2d333b, 0xeaeef2, Some(0x1a1a1a))
+    pick_key(K::MsgInBg, 0x2d333b, 0xeaeef2, Some(0x1a1a1a))
 }
 #[inline]
 pub fn bg_badge_muted() -> Rgba {
     // Mid-gray badge fill with white text works in both modes.
-    hex(0x6e7681)
+    pick_key(K::DialogsUnreadBgMuted, 0x6e7681, 0x6e7681, Some(0x6e7681))
 }
 // 0x444c56 doubles as a muted fill and (once) a spoiler-mask text color.
 #[inline]
@@ -323,7 +350,7 @@ pub fn fill_muted() -> Rgba {
 // --- borders ---
 #[inline]
 pub fn border() -> Rgba {
-    pick(0x30363d, 0xd0d7de, Some(0xffffff))
+    pick_key(K::InputBorderFg, 0x30363d, 0xd0d7de, Some(0xffffff))
 }
 #[inline]
 pub fn border_video() -> Rgba {

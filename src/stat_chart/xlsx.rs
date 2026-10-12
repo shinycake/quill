@@ -389,7 +389,7 @@ pub fn serialize_workbook(sheets: &[Sheet]) -> Vec<u8> {
 }
 
 /// A zip of in-memory parts, deflated, with a central directory.
-fn zip(parts: &[(String, Vec<u8>)]) -> Vec<u8> {
+pub(crate) fn zip(parts: &[(String, Vec<u8>)]) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::new();
     let mut central: Vec<u8> = Vec::new();
     let (time, date) = crate::folder_archive::dos_time(std::time::SystemTime::now());

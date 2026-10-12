@@ -59,7 +59,10 @@ impl ChatPalette {
             ..Self::default()
         };
         if let Some(theme) = theme {
-            palette.accent = Some(Colorizer::from_accent(base, theme.accent_color, dark));
+            // The palette's own accent changes nothing (the app theme's
+            // defaults for chats without a theme of their own).
+            palette.accent = (theme.accent_color != base)
+                .then(|| Colorizer::from_accent(base, theme.accent_color, dark));
             let fill = OutgoingFill::from_theme(theme, dark);
             let text = fill.text_rgb();
             let accent = theme
@@ -147,9 +150,18 @@ impl super::app::QuillApp {
             return None;
         }
         let dark = cx.theme().is_dark();
-        let theme = self
+        // The chat's emoji theme, else the app theme's outgoing bubbles
+        // (whose text follows the fill's lightness).
+        let (theme, dark) = match self
             .viewed_chat()
-            .and_then(|chat| self.session()?.chat_theme_settings(chat.0, dark));
+            .and_then(|chat| self.session()?.chat_theme_settings(chat.0, dark))
+        {
+            Some(theme) => (Some(theme), dark),
+            None => match self.default_chat_theme() {
+                Some((theme, fill_dark)) => (Some(theme), fill_dark),
+                None => (None, dark),
+            },
+        };
         let tone = look
             .wallpaper
             .as_ref()
@@ -283,6 +295,17 @@ mod tests {
         let fine =
             ChatPalette::build(Some(&theme(0xffd6ec, 0xe0569b)), None, false, 0x0969da).unwrap();
         assert!(matches!(fine.outgoing, Some(OutgoingTone::Shift(_))));
+    }
+
+    /// The app theme's defaults (accent = the palette's own) only tone
+    /// outgoing bubbles: incoming rows keep every token as it is.
+    #[test]
+    fn the_palettes_own_accent_recolours_nothing_outside_bubbles() {
+        let palette =
+            ChatPalette::build(Some(&theme(0xeffdde, 0x40a7e3)), None, false, 0x40a7e3).unwrap();
+        assert_eq!(palette.accent, None);
+        assert_eq!(palette.apply(0x168acd, false), 0x168acd);
+        assert!(palette.outgoing.is_some());
     }
 
     #[test]
