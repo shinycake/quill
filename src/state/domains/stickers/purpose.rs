@@ -13,6 +13,11 @@ pub enum StickersPurpose {
         chat_id: i64,
         message_id: i64,
     },
+    /// `getMessageEffect`: the answer describes one effect for the badge
+    /// on a message or the send menu's picker.
+    GetMessageEffect {
+        effect_id: i64,
+    },
     /// `getStickerSet` for the composer's emoji/sticker panel library
     /// (`Session::media_library`), one per installed set as its section
     /// comes into view.

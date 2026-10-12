@@ -16,6 +16,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(Vec::new());
         }
         let mut extras = self.maybe_request_map_thumbs()?;
+        // The badge of a message sent with an effect needs the effect's
+        // description (its icon) first.
+        let effect_ids = self.session.message_effect_ids_in_view();
+        if !effect_ids.is_empty() {
+            extras.extend(self.load_message_effects(effect_ids)?);
+        }
         let ids = self.session.thumb_file_ids_to_download();
         for file_id in ids {
             if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {

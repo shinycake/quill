@@ -150,6 +150,25 @@ pub(crate) fn parse_stickers_payload(
         "sticker" => Ok(crate::telegram::envelope_interaction::parse_effect_sticker(
             value,
         )),
+        "messageEffect" => match crate::message_effects::parse_message_effect(value) {
+            Some((effect, files)) => {
+                Ok(EnvelopePayload::Stickers(StickersPayload::MessageEffect {
+                    effect: Box::new(effect),
+                    files,
+                }))
+            }
+            None => return Ok(None),
+        },
+        "updateAvailableMessageEffects" => {
+            let (reaction_ids, sticker_ids) =
+                crate::message_effects::parse_available_effect_ids(value);
+            Ok(EnvelopePayload::Stickers(
+                StickersPayload::AvailableMessageEffects {
+                    reaction_ids,
+                    sticker_ids,
+                },
+            ))
+        }
         "updateAnimatedEmojiMessageClicked" => {
             Ok(crate::telegram::envelope_interaction::parse_animated_emoji_clicked(value))
         }

@@ -87,6 +87,7 @@ pub mod media_session;
 pub mod media_timestamp;
 pub mod media_tools;
 pub mod media_viewer;
+pub mod message_effects;
 pub mod message_menu;
 pub mod moderation;
 pub mod moderation_exceptions;

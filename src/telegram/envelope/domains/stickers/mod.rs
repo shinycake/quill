@@ -136,4 +136,15 @@ pub enum StickersPayload {
         sticker: Option<StickerItem>,
         files: Vec<ParsedFile>,
     },
+    /// `messageEffect` — the answer to `getMessageEffect`.
+    MessageEffect {
+        effect: Box<crate::message_effects::MessageEffect>,
+        files: Vec<ParsedFile>,
+    },
+    /// `updateAvailableMessageEffects`: the effects the account can send
+    /// with, in the server's order.
+    AvailableMessageEffects {
+        reaction_ids: Vec<i64>,
+        sticker_ids: Vec<i64>,
+    },
 }

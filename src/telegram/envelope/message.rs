@@ -58,6 +58,9 @@ pub struct MessageExtras {
     /// `message.fact_check` (`factCheck`, TDLib 1.8.68 schema line 3418);
     /// `None` when the message has none.
     pub fact_check: Option<FactCheck>,
+    /// `message.effect_id` (int64): the animated effect the sender added
+    /// when sending (private chats); 0 for none.
+    pub effect_id: i64,
 }
 
 /// `factCheck text:formattedText country_code:string` (TDLib 1.8.68, schema
@@ -580,6 +583,7 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
             .unwrap_or(0)
             .sat_i32(),
         via_bot_user_id: int53_or_zero(value.get("via_bot_user_id")),
+        effect_id: int64(value.get("effect_id")).unwrap_or(0).max(0),
         fact_check: parse_fact_check(value.get("fact_check")),
         import_info: value
             .get("import_info")

@@ -19,7 +19,17 @@ impl FooterMeta {
             pinned: message.is_pinned,
             imported: message.extras.import_info.is_some(),
             tooltip: quill::state::footer_tooltip(message, format_unix_date_time),
+            effect: None,
         }
+    }
+
+    /// The footer of a message sent with an effect gets its badge.
+    pub(in crate::ui) fn with_effect(
+        mut self,
+        effect: Option<crate::ui::message_effect_badge::FooterEffect>,
+    ) -> Self {
+        self.effect = effect;
+        self
     }
 
     /// Width the whole footer needs: `base` (time and receipt) plus the
@@ -35,6 +45,11 @@ impl FooterMeta {
         if self.views.is_some() {
             width += px(48.);
         }
+        if self.effect.is_some() {
+            // The cell and the footer's gap after it (tdesktop
+            // `countEffectMaxWidth`).
+            width += px(crate::ui::message_effect_badge::CELL + 8.0);
+        }
         width
     }
 
@@ -44,6 +59,7 @@ impl FooterMeta {
             && !self.edited
             && !self.pinned
             && !self.imported
+            && self.effect.is_none()
             && self.tooltip.is_none()
     }
 }
