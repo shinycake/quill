@@ -1,0 +1,226 @@
+//! Advanced settings in the UI: the secret codes typed on the Settings list,
+//! the Experimental settings page and the update channel switch (needs the
+//! `demo-capture` feature for gpui-kit's test support). Nothing leaves the
+//! app: no connection, and the app data root is a temp directory.
+use crate::ui::advanced_ui::{ADVANCED_PAGE, EXPERIMENTAL_PAGE, parent_page};
+use crate::ui::app::QuillApp;
+use crate::ui::keybindings::bind_keys;
+use crate::ui::screenshot_demo::ScreenshotDemo;
+use crate::ui::shell::{DialogKind, QuillShell};
+use gpui_kit::component::Root;
+use gpui_kit::{
+    AppContext, Entity, Keystroke, Modifiers, TestAppContext, VisualTestContext, px, size,
+};
+use quill::advanced::experimental::{self, Imported, Values};
+
+fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
+    let root = std::env::temp_dir().join(format!("quill-advanced-ui-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&root);
+    quill::settings::use_isolated_app_root(root);
+    quill::fast_buttons::set_persistence(false);
+    cx.update(gpui_kit::init);
+    cx.update(bind_keys);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+        let view = cx.new(|cx| {
+            QuillApp::new_with_demo(
+                window,
+                cx,
+                None,
+                Some(ScreenshotDemo::named("ready-privacy")),
+            )
+        });
+        let shell = cx.new(|_| QuillShell::new(view.clone()));
+        *slot_in.borrow_mut() = Some((view, shell.clone()));
+        Root::new(shell, window, cx)
+    });
+    let (app, shell) = slot.borrow().clone().unwrap();
+    let vcx = VisualTestContext::from_window(handle.into(), cx);
+    (app, shell, vcx)
+}
+
+fn typed(text: &str) -> Vec<Keystroke> {
+    text.chars()
+        .map(|c| Keystroke {
+            modifiers: Modifiers::default(),
+            key: c.to_string(),
+            key_char: Some(c.to_string()),
+        })
+        .collect()
+}
+
+fn type_into(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str) {
+    for keystroke in typed(text) {
+        app.update_in(vcx, |app, window, cx| {
+            app.feed_secret_code(&keystroke, window, cx)
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.settings.open = true;
+        cx.notify();
+    });
+    type_into(&app, vcx, "debugmode");
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.settings.advanced.debug_confirm,
+            Some(quill::advanced::debug_mode::enabled())
+        );
+    });
+    shell.read_with(vcx, |shell, _| {
+        assert_eq!(shell.open_dialog, Some(DialogKind::DebugModeConfirm));
+    });
+    // Cancel keeps the mode as it was and clears the question.
+    let was = quill::advanced::debug_mode::enabled();
+    app.update_in(vcx, |app, _, cx| {
+        app.settings.advanced.debug_confirm = None;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    assert_eq!(quill::advanced::debug_mode::enabled(), was);
+    shell.read_with(vcx, |shell, _| {
+        assert_ne!(shell.open_dialog, Some(DialogKind::DebugModeConfirm));
+    });
+}
+
+#[gpui_kit::test]
+fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, _| {
+        app.settings.open = false;
+    });
+    type_into(&app, vcx, "debugmode");
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.settings.advanced.debug_confirm, None);
+    });
+    // A Settings subpage does not read them either (tdesktop reads the list).
+    app.update_in(vcx, |app, _, _| {
+        app.settings.open = true;
+        app.settings.page = Some(ADVANCED_PAGE);
+    });
+    type_into(&app, vcx, "debugmode");
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.settings.advanced.debug_confirm, None);
+    });
+    // Ctrl-chords are not typed text.
+    app.update_in(vcx, |app, _, _| app.settings.page = None);
+    let chord = Keystroke {
+        modifiers: Modifiers {
+            control: true,
+            ..Modifiers::default()
+        },
+        key: "d".into(),
+        key_char: Some("d".into()),
+    };
+    for _ in 0..1 {
+        app.update_in(vcx, |app, window, cx| {
+            app.feed_secret_code(&chord, window, cx)
+        });
+    }
+    type_into(&app, vcx, "ebugmod");
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.settings.advanced.debug_confirm, None);
+    });
+}
+
+#[gpui_kit::test]
+fn numberbuttons_switches_fast_buttons_mode_and_lists_it_on_the_page(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    experimental::set_fast_buttons_mode(false);
+    app.update_in(vcx, |app, _, _| app.settings.open = true);
+    type_into(&app, vcx, "numberbuttons");
+    app.read_with(vcx, |app, _| {
+        assert!(experimental::fast_buttons_mode());
+        assert_eq!(
+            app.connection.status_note,
+            experimental::FAST_BUTTONS_ENABLED_TOAST
+        );
+        assert!(app.experimental_values().fast_buttons_mode);
+    });
+    // The per-bot switch only works while the option is on.
+    quill::fast_buttons::set_enabled(4242, true);
+    assert!(quill::fast_buttons::is_enabled(4242));
+    type_into(&app, vcx, "numberbuttons");
+    app.read_with(vcx, |app, _| {
+        assert!(!experimental::fast_buttons_mode());
+        assert_eq!(
+            app.connection.status_note,
+            experimental::FAST_BUTTONS_DISABLED_TOAST
+        );
+    });
+    assert!(!quill::fast_buttons::is_enabled(4242));
+    quill::fast_buttons::set_enabled(4242, false);
+}
+
+#[gpui_kit::test]
+fn the_experimental_page_changes_restores_exports_and_imports(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    experimental::set_fast_buttons_mode(false);
+    app.update_in(vcx, |app, _, cx| {
+        app.settings.open = true;
+        app.settings.page = Some(EXPERIMENTAL_PAGE);
+        assert_eq!(parent_page(EXPERIMENTAL_PAGE), Some(ADVANCED_PAGE));
+        assert_eq!(parent_page(ADVANCED_PAGE), None);
+        assert!(!app.experimental_values().changed());
+        app.set_experimental_option(experimental::SPLIT_MEDIA_ID, true, cx);
+        assert!(app.chat_prefs.profile_media_tabs_expanded);
+        assert!(app.experimental_values().changed());
+    });
+    vcx.run_until_parked();
+    let code = app.update_in(vcx, |app, _, _| {
+        experimental::encode_export(app.experimental_values())
+    });
+    // Restore default values puts everything back.
+    app.update_in(vcx, |app, _, cx| {
+        app.set_experimental_option(experimental::SPLIT_MEDIA_ID, false, cx);
+        assert!(!app.chat_prefs.profile_media_tabs_expanded);
+    });
+    let Imported::Values(values) = experimental::decode_import(&code) else {
+        panic!("the exported code must import");
+    };
+    assert_eq!(
+        values,
+        Values {
+            split_profile_media: true,
+            fast_buttons_mode: false
+        }
+    );
+    app.update_in(vcx, |app, _, cx| {
+        app.set_experimental_option(experimental::SPLIT_MEDIA_ID, false, cx);
+    });
+}
+
+#[gpui_kit::test]
+fn the_install_beta_switch_follows_the_update_switch(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        let _ = window;
+        app.appearance.check_updates_on_launch = true;
+        assert!(app.install_beta_row(cx).is_some());
+        app.appearance.check_updates_on_launch = false;
+        assert!(app.install_beta_row(cx).is_none());
+        app.appearance.check_updates_on_launch = true;
+        let release = quill::updater::ReleaseInfo {
+            version: "1.0.0".into(),
+            notes: String::new(),
+            url: String::new(),
+            asset: None,
+        };
+        app.settings.update_state = quill::updater::UpdateState::Downloading(release);
+        assert!(
+            app.install_beta_row(cx).is_none(),
+            "hidden while an update downloads"
+        );
+    });
+}

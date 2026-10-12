@@ -1,0 +1,248 @@
+//! The hidden options tdesktop runs from typed codes
+//! (`settings/settings_codes.cpp`): `debugmode`, `viewlogs`, `testmode` and
+//! `numberbuttons`. tdesktop reads the keys on the Settings list and on the
+//! settings page of the sign-in screen; Quill reads them on the Settings list
+//! and on the sign-in screen itself.
+
+use super::app::QuillApp;
+use super::shell::{DialogKind, QuillShell};
+use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::Dialog;
+use gpui_kit::*;
+use quill::advanced::codes::Code;
+use quill::advanced::{debug_mode, experimental, test_environment};
+use quill::settings::{active_account, list_accounts, safe_app_root};
+use quill::telegram::envelope::AuthorizationState;
+
+/// Where the typed keys are being read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodeScreen {
+    SignIn,
+    Settings,
+}
+
+impl QuillApp {
+    /// A key was pressed anywhere in the window. Plain typed characters on
+    /// the sign-in screen or the Settings list feed the code buffer.
+    pub(super) fn feed_secret_code(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let modifiers = &keystroke.modifiers;
+        if modifiers.control || modifiers.alt || modifiers.platform {
+            return;
+        }
+        let Some(text) = keystroke.key_char.as_deref() else {
+            return;
+        };
+        let Some(screen) = self.code_screen() else {
+            return;
+        };
+        if let Some(code) = self.settings.advanced.codes.feed(text) {
+            self.run_secret_code(code, screen, window, cx);
+        }
+    }
+
+    fn code_screen(&self) -> Option<CodeScreen> {
+        let signed_in = matches!(self.current_auth(), AuthorizationState::Ready);
+        if self.live.is_some() && !signed_in {
+            return Some(CodeScreen::SignIn);
+        }
+        (signed_in && self.settings.open && self.settings.page.is_none())
+            .then_some(CodeScreen::Settings)
+    }
+
+    fn run_secret_code(
+        &mut self,
+        code: Code,
+        screen: CodeScreen,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match code {
+            Code::DebugMode => {
+                self.settings.advanced.debug_confirm = Some(debug_mode::enabled());
+                cx.notify();
+            }
+            Code::ViewLogs => self.show_log_folder(cx),
+            Code::TestMode => {
+                if screen == CodeScreen::SignIn {
+                    self.switch_test_environment(window, cx);
+                }
+            }
+            Code::NumberButtons => {
+                let now = !experimental::fast_buttons_mode();
+                self.set_experimental_option(experimental::FAST_BUTTONS_ID, now, cx);
+                self.connection.status_note = if now {
+                    experimental::FAST_BUTTONS_ENABLED_TOAST
+                } else {
+                    experimental::FAST_BUTTONS_DISABLED_TOAST
+                }
+                .into();
+                cx.notify();
+            }
+        }
+    }
+
+    /// `viewlogs`: show the debug log in the file manager (tdesktop
+    /// `File::ShowInFolder(log.txt)`). The file is created empty if the
+    /// mode never wrote it, so there is always something to select.
+    fn show_log_folder(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = safe_app_root() else {
+            return;
+        };
+        let path = debug_mode::quill_log_path(&root);
+        let _ = std::fs::create_dir_all(debug_mode::log_dir(&root));
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path);
+        if !quill::platform::reveal_in_file_manager(&path) {
+            self.connection.status_note = "Could not open the logs folder.".into();
+        }
+        cx.notify();
+    }
+
+    /// `testmode`: with one signed-out account, add one in the other
+    /// environment and switch to it (tdesktop `Domain::addActivated`).
+    fn switch_test_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(root) = safe_app_root() else {
+            return;
+        };
+        let signed_out = !matches!(self.current_auth(), AuthorizationState::Ready);
+        let active_is_test = test_environment::account_is_test(&root, &active_account(&root));
+        let Some(action) = test_environment::plan_test_mode(
+            list_accounts(&root).len(),
+            signed_out,
+            active_is_test,
+        ) else {
+            return;
+        };
+        if self.credentials.is_none() {
+            return;
+        }
+        match test_environment::add_environment_account(&root, action) {
+            Ok((key, toast)) => {
+                let name = list_accounts(&root)
+                    .into_iter()
+                    .find(|record| record.key == key)
+                    .map(|record| record.display_name)
+                    .unwrap_or_default();
+                self.switch_account(&key, &name, window, cx);
+                self.refresh_test_environment();
+                self.connection.status_note = toast.into();
+            }
+            Err(error) => {
+                self.connection.status_note = format!("Could not switch the environment: {error}");
+            }
+        }
+        cx.notify();
+    }
+
+    /// Read whether the active account is a test account. Called when the
+    /// active account changes.
+    pub(super) fn refresh_test_environment(&mut self) {
+        let test = safe_app_root()
+            .is_some_and(|root| test_environment::account_is_test(&root, &active_account(&root)));
+        self.settings.advanced.test_environment = test;
+        test_environment::set_active_test(test);
+    }
+
+    /// The confirmed `debugmode` question (tdesktop
+    /// `Application::switchDebugMode`). Turning the logs on closes the
+    /// Settings layer; turning them off stops the files at once, where
+    /// tdesktop restarts.
+    pub(super) fn switch_debug_mode(&mut self, cx: &mut Context<Self>) {
+        let root = safe_app_root();
+        let api = quill::telegram::hub::TdHub::shared_api();
+        if debug_mode::enabled() {
+            debug_mode::debug_log("Debug logs stopped.");
+            debug_mode::set_enabled(false);
+            if let Some(api) = api {
+                let _ = debug_mode::stop_tdlib_log(&api);
+            }
+        } else {
+            debug_mode::set_enabled(true);
+            if let (Some(api), Some(root)) = (api, root.as_deref())
+                && let Err(error) = debug_mode::start_tdlib_log(&api, root)
+            {
+                self.connection.status_note = format!("TDLib debug log did not start: {error}");
+            }
+            debug_mode::debug_log("Debug logs started.");
+            self.settings.open = false;
+        }
+        if let Some(root) = root.as_deref()
+            && let Err(error) = debug_mode::persist(root, debug_mode::enabled())
+        {
+            self.connection.status_note = format!("Could not remember the debug mode: {error}");
+        }
+        cx.notify();
+    }
+
+    pub(super) fn build_debug_mode_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::DebugModeConfirm, |this, _, cx| {
+                this.settings.advanced.debug_confirm = None;
+                cx.notify();
+            });
+        app.update(cx, |this, cx| {
+            let text = debug_mode::confirm_text(this.settings.advanced.debug_confirm == Some(true));
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("debug-mode-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.settings.advanced.debug_confirm = None;
+                            this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("debug-mode-confirm")
+                        .label("OK")
+                        .primary()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.settings.advanced.debug_confirm = None;
+                            this.switch_debug_mode(cx);
+                            this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Debug logs"))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    move |content, _, _| {
+                        content.child(
+                            div()
+                                .id("debug-mode-text")
+                                .text_sm()
+                                .whitespace_normal()
+                                .child(text),
+                        )
+                    },
+                ))
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+}
+
+crate::ui::shell::register_dialogs! {
+    /// The `debugmode` code's question: turn the debug logs on or off.
+    DebugModeConfirm => DialogSpec::new(
+        1050,
+        |app| app.settings.advanced.debug_confirm.is_some(),
+        QuillApp::build_debug_mode_dialog,
+    ),
+}

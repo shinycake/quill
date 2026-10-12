@@ -62,6 +62,7 @@ pub(super) enum NavigationAction {
     ChatSettings,
     ContactsSettings,
     CallSettings,
+    AdvancedSettings,
     MarkRead,
     Settings,
     Archive,
@@ -263,6 +264,9 @@ impl QuillApp {
             NavigationAction::ChatSettings => self.settings.page = Some("Chat settings"),
             NavigationAction::ContactsSettings => self.settings.page = Some("Contacts"),
             NavigationAction::CallSettings => self.settings.page = Some("Calls"),
+            NavigationAction::AdvancedSettings => {
+                self.settings.page = Some(super::advanced_ui::ADVANCED_PAGE)
+            }
             NavigationAction::MarkRead => self.mark_all_chats_as_read(false, cx),
             NavigationAction::Archive => self.open_archive_folder(cx),
             NavigationAction::ArchiveToList => self.toggle_archive_in_main_menu(cx),
@@ -432,7 +436,10 @@ impl QuillApp {
                                     Button::new("settings-back")
                                         .label("Back to Settings")
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            this.settings.page = None;
+                                            this.settings.page = this
+                                                .settings
+                                                .page
+                                                .and_then(super::advanced_ui::parent_page);
                                             cx.notify();
                                         })),
                                 )
@@ -450,6 +457,12 @@ impl QuillApp {
                                         ))
                                         .into_any_element(),
                                     "Contacts" => this.contacts_settings_section(cx),
+                                    super::advanced_ui::ADVANCED_PAGE => {
+                                        this.advanced_settings_page(cx)
+                                    }
+                                    super::advanced_ui::EXPERIMENTAL_PAGE => {
+                                        this.experimental_settings_page(cx)
+                                    }
                                     "Privacy and security" => this.privacy_settings_navigation(cx),
                                     super::settings_account_ui::ASK_QUESTION_PAGE => {
                                         this.ask_question_page(cx)
@@ -481,6 +494,7 @@ impl QuillApp {
                         ("Star subscriptions", NavigationAction::Subscriptions),
                         ("Contacts", NavigationAction::ContactsSettings),
                         ("Calls", NavigationAction::CallSettings),
+                        ("Advanced", NavigationAction::AdvancedSettings),
                     ] {
                         let app = app_c.clone();
                         list = list.child(
@@ -494,6 +508,7 @@ impl QuillApp {
                                             NavigationAction::ChatSettings
                                                 | NavigationAction::ContactsSettings
                                                 | NavigationAction::CallSettings
+                                                | NavigationAction::AdvancedSettings
                                                 | NavigationAction::Privacy
                                         ) {
                                             this.settings.open = false;

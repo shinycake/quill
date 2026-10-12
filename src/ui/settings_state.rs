@@ -79,6 +79,9 @@ pub(crate) struct SettingsUi {
     pub(super) update_banner_dismissed: bool,
     /// The "No" answer of the phone-number prompt was chosen: show the note.
     pub(super) phone_change_note: bool,
+    /// Advanced and experimental settings, the secret codes, the test
+    /// environment (`ui/advanced_state.rs`).
+    pub(super) advanced: super::advanced_state::AdvancedUi,
 }
 
 impl SettingsUi {
@@ -124,6 +127,7 @@ impl SettingsUi {
             },
             update_banner_dismissed: false,
             phone_change_note: false,
+            advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
         }
     }
 }
