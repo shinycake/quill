@@ -157,15 +157,17 @@ pub(super) fn poll_body(
 pub(super) fn session_poll_body(
     message: &quill::state::HistoryMessage,
     content: &PollContent,
-    files: &std::collections::HashMap<i32, quill::telegram::envelope::ParsedFile>,
-    media_roots: &[std::path::PathBuf],
-    session: Option<&quill::state::Session>,
-    plain: bool,
+    (files, media_roots, session): (
+        &std::collections::HashMap<i32, quill::telegram::envelope::ParsedFile>,
+        &[std::path::PathBuf],
+        Option<&quill::state::Session>,
+    ),
+    look: super::synthetic::BubbleLook,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let media =
         super::polls::option_thumb::poll_media_view(&content.poll, files, media_roots, session);
-    poll_body(message.chat_id, message.id, content, &media, plain, cx)
+    poll_body(message.chat_id, message.id, content, &media, look.plain, cx)
 }
 
 /// One poll option: text + percentage, a bar split by `flex_grow`

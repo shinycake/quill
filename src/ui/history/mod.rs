@@ -17,7 +17,7 @@ use super::message_media::{
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,
 };
-use super::message_poll::session_poll_body;
+use super::message_poll::session_poll_body as poll_row;
 use super::message_text::{
     FooterMeta, caption_above_media, message_chrome, message_footer_meta, message_rich_block,
     message_text_block, rich_text_reserving,
