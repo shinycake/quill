@@ -9,7 +9,6 @@ use super::premium_ui::sticker_tile;
 use super::pressable::{PressableDiv, action_row};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -25,40 +24,6 @@ use quill::telegram::envelope::{ChatKind, MessageSender};
 const TILE: f32 = 96.;
 
 impl QuillApp {
-    /// Settings row for tdesktop's `profile-media-tabs-expanded` option
-    /// ("Split profile media tab into photos and videos", default off).
-    pub(super) fn appearance_profile_media_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .child(div().text_sm().child("Split profile media tab"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Show photos and videos as two tabs in shared media."),
-                    ),
-            )
-            .child(
-                Switch::new("appearance-profile-media-tabs")
-                    .checked(self.chat_prefs.profile_media_tabs_expanded)
-                    .accessibility_label("Split profile media tab")
-                    .on_click(cx.listener(|this, &on, _, cx| {
-                        this.set_chat_prefs(cx, |c| c.profile_media_tabs_expanded = on);
-                        this.apply_profile_media_tabs_option(cx);
-                    })),
-            )
-            .into_any_element()
-    }
-
     /// Bring the open gallery (or the next one) in line with the option.
     pub(super) fn apply_profile_media_tabs_option(&mut self, cx: &mut Context<Self>) {
         let split = self.chat_prefs.profile_media_tabs_expanded;
