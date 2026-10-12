@@ -16,9 +16,9 @@ use crate::telegram::requests::{
     edit_message_scheduling_state, edit_message_text, fix_rich_message_with_ai, fix_text_with_ai,
     forward_messages_with_options, get_chat_history, get_chat_scheduled_messages,
     get_full_rich_message, input_message_photo, input_message_video, open_message_content,
-    recognize_speech, resend_messages, send_animation, send_document, send_message_album,
-    send_photo, send_rich_message, send_sticker, send_text, send_video, send_video_note,
-    send_voice_note,
+    recognize_speech, resend_messages, send_animation, send_document, send_local_animation,
+    send_message_album, send_photo, send_rich_message, send_sticker, send_text, send_video,
+    send_video_note, send_voice_note,
 };
 use crate::voice::VoiceDraft;
 
@@ -26,6 +26,7 @@ mod ai;
 mod delete_forward;
 mod edit;
 mod export;
+mod media_options;
 mod media_send;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -247,6 +248,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if snapshot.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // The send box's price: photos and videos behind Stars.
+        if snapshot.media.paid_stars > 0 {
+            return self.send_paid_media_snapshot(snapshot);
+        }
         if snapshot.is_media_album() {
             return self.send_album_snapshot(snapshot);
         }
@@ -282,13 +287,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Validate the picked path before allocating `@extra`.
         let media_path = match snapshot.attachment.as_ref() {
             Some(att) => Some(
-                att.send_path_str()
+                media_options::media_send_path(att, snapshot.media)
                     .ok_or(ConnectSendError::InvalidRequest)?,
             ),
             None => None,
         };
         let video_probe = match snapshot.attachment.as_ref() {
-            Some(att) if att.kind == AttachmentKind::Video => Some(
+            Some(att) if att.kind == AttachmentKind::Video && !att.extras.gif => Some(
                 crate::video::probe_local_video(&att.path)
                     .map_err(|_| ConnectSendError::InvalidRequest)?,
             ),
@@ -359,12 +364,24 @@ impl<S: JsonSender> ConnectDriver<S> {
                 AttachmentKind::Document => {
                     send_document(extra, chat_id, topic_id, path, caption, reply_to, is_secret)
                 }
+                // A GIF keeps its caption as an animation.
+                AttachmentKind::Video if att.extras.gif => send_local_animation(
+                    extra,
+                    chat_id,
+                    topic_id,
+                    path,
+                    &media_options::local_animation(&att.path),
+                    caption,
+                    snapshot.caption_above_media,
+                    reply_to,
+                    is_secret,
+                ),
                 AttachmentKind::Video => {
                     let probe = video_probe.ok_or_else(|| {
                         self.session.requests.take(extra);
                         ConnectSendError::InvalidRequest
                     })?;
-                    send_video(
+                    let json = send_video(
                         extra,
                         chat_id,
                         topic_id,
@@ -380,7 +397,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                         snapshot.caption_above_media,
                         reply_to,
                         is_secret,
-                    )
+                    );
+                    self.with_video_options_json(chat_id, att, json)
                 }
                 AttachmentKind::VideoNote => {
                     let note = video_note.ok_or_else(|| {

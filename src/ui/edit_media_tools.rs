@@ -84,8 +84,10 @@ impl QuillApp {
                 }
                 for (label, action) in actions {
                     let owner = owner.clone();
-                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
-                        let _ = owner.update(cx, |this, cx| this.run_edit_media_action(action, cx));
+                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.run_edit_media_action(action, window, cx)
+                        });
                     }));
                 }
                 menu
@@ -101,9 +103,15 @@ impl QuillApp {
         )
     }
 
-    fn run_edit_media_action(&mut self, action: MenuAction, cx: &mut Context<Self>) {
+    fn run_edit_media_action(
+        &mut self,
+        action: MenuAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match action {
             MenuAction::Tool(EditMediaTool::EditImage) => self.begin_edit_image(cx),
+            MenuAction::Tool(EditMediaTool::EditVideo) => self.open_edit_video_editor(window, cx),
             MenuAction::Tool(EditMediaTool::EditCover) => self.pick_edit_cover(cx),
             MenuAction::ClearCover => {
                 if let Some(edit) = self.composer_ui.pending_edit.as_mut() {

@@ -256,6 +256,7 @@ fn driver_sends_photo_and_document_from_picked_paths() {
             kind: AttachmentKind::Document,
             file_name: "missing-forged.bin".into(),
             spoiler: false,
+            extras: Default::default(),
         }),
     );
     assert_eq!(

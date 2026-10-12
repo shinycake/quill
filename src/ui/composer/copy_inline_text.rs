@@ -54,6 +54,15 @@ impl QuillApp {
             Ok(replacement) => {
                 self.connection.status_note =
                     format!("Replacing attachment with {}", replacement.file_name);
+                // A different file starts without the video editor's edits.
+                if edit
+                    .media_edit
+                    .replacement
+                    .as_ref()
+                    .is_none_or(|old| old.path != replacement.path)
+                {
+                    edit.media_edit.video_extras = Default::default();
+                }
                 edit.media_edit.replacement = Some(replacement);
             }
             Err(note) => self.connection.status_note = note.into(),

@@ -62,6 +62,7 @@ mod reply_keyboard;
 mod search;
 mod search_tabs;
 mod search_upgrades;
+mod send_box_options;
 mod settings;
 mod settings_account;
 mod share;

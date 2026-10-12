@@ -149,6 +149,8 @@ pub(crate) struct ComposerUi {
     pub(super) poll_dialog: Option<PollDialog>,
     /// B15: the checklist composer / "Add Tasks" box.
     pub(super) checklist_dialog: Option<ChecklistDialog>,
+    /// The attachment tray's High quality, paid media and video editor.
+    pub(super) send_box: super::send_box_state::SendBoxUi,
 }
 
 impl ComposerUi {
@@ -202,6 +204,7 @@ impl ComposerUi {
             slow_mode_tick_chat: None,
             poll_dialog: None,
             checklist_dialog: None,
+            send_box: super::send_box_state::SendBoxUi::new(),
         }
     }
 }

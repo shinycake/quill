@@ -370,6 +370,8 @@ pub struct SupergroupFullAdmin {
     pub is_all_history_available: bool,
     /// `can_enable_paid_reaction` — channels only.
     pub can_enable_paid_reaction: bool,
+    /// `has_paid_media_allowed` — the channel accepts paid media posts.
+    pub has_paid_media_allowed: bool,
     /// `can_have_sponsored_messages` — only reported to the channel owner;
     /// false means ads are switched off.
     pub can_have_sponsored_messages: bool,

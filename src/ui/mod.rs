@@ -295,6 +295,10 @@ mod search_ui;
 mod secret_chats;
 mod security;
 mod security_recovery;
+mod send_box_options;
+mod send_box_state;
+#[cfg(all(test, feature = "demo-capture"))]
+mod send_box_tests;
 mod send_button_ui;
 mod send_limits;
 mod service_row;
@@ -341,6 +345,7 @@ mod system_unlock;
 mod threads;
 mod translate_ui;
 mod tray_settings;
+mod video_editor;
 mod video_pip;
 mod wallpaper;
 mod wallpaper_cache;

@@ -204,6 +204,11 @@ impl QuillApp {
                             ),
                         );
                     }
+                    // The tray's High quality and price choices.
+                    let media_options = self.composer_media_options();
+                    for snap in &mut snaps {
+                        snap.media = media_options;
+                    }
                     if snaps.first().is_none_or(ComposerSnapshot::is_empty) {
                         self.connection.status_note = "type a message or attach a file".into();
                         cx.notify();
@@ -261,6 +266,7 @@ impl QuillApp {
                     match result {
                         Ok(_) => {
                             self.composer_ui.pending_attachments.clear();
+                            self.composer_ui.send_box.reset();
                             // MED1: the grouping override was consumed —
                             // the next composer follows the pref again.
                             self.composer_ui.group_media = None;
@@ -707,6 +713,7 @@ impl QuillApp {
 
     pub(super) fn clear_attachment(&mut self, cx: &mut Context<Self>) {
         self.composer_ui.pending_attachments.clear();
+        self.composer_ui.send_box.reset();
         self.composer_ui.self_destruct = None;
         // MED1: the grouping override belongs to this composer batch.
         self.composer_ui.group_media = None;

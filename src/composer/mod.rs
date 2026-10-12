@@ -14,6 +14,7 @@ mod draft_topic;
 mod edit;
 mod edit_media_tools;
 mod markup;
+mod media_options;
 mod reply;
 mod send;
 mod shortcuts;
@@ -40,6 +41,12 @@ pub use edit_media_tools::{
 pub use markup::{
     ComposerEntity, FormatAction, FormatKind, apply_format_markup, clear_format_markup,
     custom_emoji_markup, entities_to_markup, find_urls, mention_user_id, parse_format_markup,
+};
+pub use media_options::{
+    AttachmentExtras, MediaSendOptions, PAID_MEDIA_MAX_STARS, PHOTO_SIDE_LARGE,
+    PHOTO_SIDE_STANDARD, PriceInput, can_use_high_quality, fitted_photo_size, is_gif_path,
+    paid_media_fits, parse_paid_price, photo_for_send, photo_scale_args, photo_side_limit,
+    photo_size_of, session_allows_paid_media,
 };
 pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
 pub use send::{
@@ -130,6 +137,9 @@ pub struct ComposerSnapshot {
     /// the driver also enforces it on album items (schema: all album
     /// contents must share the same value).
     pub caption_above_media: bool,
+    /// Send-box choices for the whole message: "High Quality" photos and
+    /// the price of paid media.
+    pub media: MediaSendOptions,
 }
 
 impl ComposerSnapshot {
@@ -158,6 +168,7 @@ impl ComposerSnapshot {
             self_destruct: None,
             send_options: SendOptions::default(),
             caption_above_media: false,
+            media: MediaSendOptions::default(),
         }
     }
 
@@ -178,6 +189,7 @@ impl ComposerSnapshot {
             self_destruct: None,
             send_options: SendOptions::default(),
             caption_above_media: false,
+            media: MediaSendOptions::default(),
         }
     }
 
@@ -197,6 +209,12 @@ impl ComposerSnapshot {
     /// when-online / link-preview toggle).
     pub fn with_send_options(mut self, options: SendOptions) -> Self {
         self.send_options = options;
+        self
+    }
+
+    /// The send box's high quality and paid media choices.
+    pub fn with_media_options(mut self, media: MediaSendOptions) -> Self {
+        self.media = media;
         self
     }
 

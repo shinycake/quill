@@ -656,6 +656,10 @@ impl QuillApp {
             };
             let spoiler = attachment.spoiler;
             let is_photo = attachment.kind == AttachmentKind::Photo;
+            // "Edit video" and "Cover" on a video, no spoiler on paid media
+            // (`send_box_options.rs`).
+            let video_actions = self.video_card_actions(index, attachment, cx);
+            let paid_price = self.tray_paid_price_set();
             let card = Attachment::new()
                 .id(("composer-attach-item", index as u64))
                 .tooltip(attachment.file_name.clone());
@@ -691,21 +695,24 @@ impl QuillApp {
                                             })),
                                     )
                                 })
-                                .child(
-                                    Button::new(("composer-attach-spoiler", index as u64))
-                                        .icon(IconName::EyeOff)
-                                        .xsmall()
-                                        .ghost()
-                                        .selected(spoiler)
-                                        .tooltip(if spoiler {
-                                            "Remove spoiler"
-                                        } else {
-                                            "Hide with spoiler"
-                                        })
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.toggle_attachment_spoiler(index, cx);
-                                        })),
-                                ),
+                                .children(video_actions)
+                                .when(!paid_price, |actions| {
+                                    actions.child(
+                                        Button::new(("composer-attach-spoiler", index as u64))
+                                            .icon(IconName::EyeOff)
+                                            .xsmall()
+                                            .ghost()
+                                            .selected(spoiler)
+                                            .tooltip(if spoiler {
+                                                "Remove spoiler"
+                                            } else {
+                                                "Hide with spoiler"
+                                            })
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.toggle_attachment_spoiler(index, cx);
+                                            })),
+                                    )
+                                }),
                         )
                     }),
             );
@@ -805,6 +812,7 @@ impl QuillApp {
                                 })),
                         )
                     })
+                    .children(self.send_box_option_controls(cx))
                     .children(timer)
                     .child(div().flex_1())
                     .child(
