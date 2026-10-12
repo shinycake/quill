@@ -1,2 +1,0 @@
-# Built-in themes, accents, custom themes and the editor; cloud themes blocked (no TDLib API), see docs/decisions/codex-app-themes.md
-parity:appearance-themes
