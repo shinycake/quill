@@ -1053,7 +1053,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 ### Settings: appearance & chat
 
 - [x] Wallpapers: gallery, patterns, from file, blur, motion, tile, remove <!-- parity:appearance-wallpapers -->
-- [x] Built-in themes (Day, Classic, Tinted, Night), custom and cloud themes, theme editor <!-- parity:appearance-themes -->
+- [x] Built-in themes (Day, Classic, Tinted, Night), custom and cloud themes, theme editor (cloud themes blocked: TDLib has no cloud theme API) <!-- parity:appearance-themes -->
 - [x] System accent color option <!-- parity:appearance-system-accent -->
 - [x] Interface scale <!-- parity:appearance-scale -->
 - [x] Font family choice <!-- parity:appearance-font -->
