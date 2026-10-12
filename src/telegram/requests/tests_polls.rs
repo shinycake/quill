@@ -305,3 +305,21 @@ fn option_media_goes_into_input_poll_option() {
     assert_eq!(link["url"], "https://example.com");
     assert!(options[4]["media"].is_null(), "no media past the list");
 }
+
+#[test]
+fn option_text_keeps_only_custom_emoji_trimmed() {
+    let value = option_text_json("  hi ![\u{2B50}](tg://emoji?id=42) **bold**  ");
+    assert_eq!(value["@type"], "formattedText");
+    // Markers of other formatting are dropped with their entities.
+    assert_eq!(value["text"], "hi \u{2B50} bold");
+    let entities = value["entities"].as_array().unwrap();
+    assert_eq!(entities.len(), 1);
+    assert_eq!(entities[0]["type"]["@type"], "textEntityTypeCustomEmoji");
+    assert_eq!(entities[0]["type"]["custom_emoji_id"], "42");
+    // Moved left by the trimmed space: "hi " is 3 units.
+    assert_eq!(entities[0]["offset"], 3);
+    assert_eq!(entities[0]["length"], 1);
+    let plain = option_text_json("Sushi");
+    assert_eq!(plain["text"], "Sushi");
+    assert!(plain["entities"].as_array().unwrap().is_empty());
+}

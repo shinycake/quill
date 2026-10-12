@@ -77,6 +77,7 @@ fn a_photo_opens_in_the_viewer_without_the_message_actions(cx: &mut TestAppConte
         app.open_poll_option_media(chat, message, 1, cx);
         let confirm = app.message_ui.open_link_confirm.clone().expect("asks");
         assert_eq!(confirm.url, "https://example.com/tacos");
+        assert!(confirm.from_poll_option, "tdesktop's Open Link box");
         assert!(!app.viewer.state.is_open());
 
         // An option without media, or past the end, does nothing.

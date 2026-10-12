@@ -88,6 +88,11 @@ pub(in crate::ui) struct PollMediaView {
 }
 
 impl PollMediaView {
+    /// Some option of the poll has a picture.
+    pub(in crate::ui) fn any_thumb(&self) -> bool {
+        self.thumbs.iter().any(Option::is_some)
+    }
+
     pub(in crate::ui) fn thumb(&self, index: usize) -> Option<&OptionThumb> {
         self.thumbs.get(index).and_then(Option::as_ref)
     }

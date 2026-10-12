@@ -400,6 +400,7 @@ impl QuillApp {
                         url,
                         shown,
                         suspicious,
+                        from_poll_option: false,
                     });
                 cx.activate(true);
                 cx.notify();

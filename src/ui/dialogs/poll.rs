@@ -36,6 +36,10 @@ pub(crate) struct OptionAttach {
     pub(crate) link_input: Option<Entity<TextareaState>>,
     /// Waiting for a sticker chosen in the sticker panel.
     pub(crate) sticker_wait: bool,
+    /// The emoji panel is open for this option's field.
+    pub(crate) emoji_wait: bool,
+    /// A frame of a picked video, drawn while it is attached.
+    pub(crate) preview: Option<std::path::PathBuf>,
 }
 
 /// Phase 4.2: poll creation dialog above the composer. Textarea entities are
@@ -127,7 +131,12 @@ impl PollDialog {
     /// Freeze the dialog inputs into a `PollDraft` (validated by the caller).
     pub(crate) fn draft(&self, cx: &App) -> PollDraft {
         let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
-        let options: Vec<String> = self.option_inputs.iter().map(&value).collect();
+        // Options carry their custom emoji as composer markup.
+        let options: Vec<String> = self
+            .option_inputs
+            .iter()
+            .map(|input| crate::ui::composer_field::field_doc(input.read(cx)).to_markup())
+            .collect();
         // Map the marked row to its index among the usable (non-empty) options.
         let quiz_correct = self.quiz_correct_row.and_then(|row| {
             options

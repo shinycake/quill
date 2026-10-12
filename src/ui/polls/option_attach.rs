@@ -7,7 +7,10 @@
 //! too when the picker is unavailable).
 
 use super::super::app::QuillApp;
+use super::super::composer_field::emoji_token;
 use super::super::dialogs::{OptionAttach, OptionMediaSlot};
+use super::super::media_panel::PanelTab;
+use gpui_base::input::InputContent;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -15,7 +18,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::{AttachmentKind, media_kind_for};
 use quill::poll::PollOptionInput;
-use quill::state::StickerTab;
 use std::path::PathBuf;
 
 /// TDLib: an `inputPhoto` photo is at most 10 MB.
@@ -73,6 +75,39 @@ impl QuillApp {
             slots.push(&mut panel.attach);
         }
         slots
+    }
+
+    /// The field of an option being written.
+    fn option_input(&self, target: AttachTarget) -> Option<Entity<TextareaState>> {
+        match target {
+            AttachTarget::Row(index) => self
+                .composer_ui
+                .poll_dialog
+                .as_ref()?
+                .option_inputs
+                .get(index)
+                .cloned(),
+            AttachTarget::Added => self
+                .message_ui
+                .poll_add_option
+                .as_ref()
+                .map(|panel| panel.input.clone()),
+        }
+    }
+
+    /// The smiley at the end of an option's field: the emoji panel opens for
+    /// it (custom emoji need Premium, as in tdesktop).
+    pub(in crate::ui) fn poll_option_emoji_button(
+        &self,
+        target: AttachTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        Button::new(format!("poll-emoji-option-{}", target.key()))
+            .icon(IconName::FaceSlightlySmiling)
+            .ghost()
+            .tooltip("Emoji")
+            .on_click(cx.listener(move |this, _, _, cx| this.choose_poll_option_emoji(target, cx)))
+            .into_any_element()
     }
 
     /// The paperclip at the end of an option's field.
@@ -139,6 +174,26 @@ impl QuillApp {
                             cx.notify();
                         })),
                 );
+        } else if attach.emoji_wait {
+            shown = true;
+            area = area
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("Choose emoji in the emoji panel"),
+                )
+                .child(
+                    Button::new(format!("poll-option-emoji-done-{key}"))
+                        .label("Done")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(attach) = this.attach_mut(target) {
+                                attach.emoji_wait = false;
+                            }
+                            this.close_media_panel(cx);
+                        })),
+                );
         } else if attach.sticker_wait {
             shown = true;
             area = area
@@ -195,7 +250,7 @@ impl QuillApp {
                         file_name(path),
                         quill::voice::format_voice_duration(*duration)
                     ),
-                    None,
+                    attach.preview.clone(),
                 ),
                 OptionMediaSlot::Ready(PollOptionInput::Sticker { emoji, .. }) => {
                     (format!("Sticker {emoji}"), None)
@@ -237,6 +292,7 @@ impl QuillApp {
         if let Some(attach) = self.attach_mut(target) {
             attach.media = slot;
             attach.menu_open = false;
+            attach.preview = None;
         }
     }
 
@@ -287,21 +343,30 @@ impl QuillApp {
             let path = path.clone();
             async move {
                 match kind {
-                    AttachmentKind::Video => {
-                        quill::video::probe_local_video(&path).map(|probe| PollOptionInput::Video {
-                            path: path.to_string_lossy().into_owned(),
-                            duration: probe.duration,
-                            width: probe.width,
-                            height: probe.height,
-                        })
-                    }
+                    AttachmentKind::Video => quill::video::probe_local_video(&path).map(|probe| {
+                        // A frame to show while the clip is attached; the
+                        // clip still goes without one if ffmpeg cannot.
+                        let frame = quill::video_edit::render_frame(&path, 0, 0, false).ok();
+                        (
+                            PollOptionInput::Video {
+                                path: path.to_string_lossy().into_owned(),
+                                duration: probe.duration,
+                                width: probe.width,
+                                height: probe.height,
+                            },
+                            frame,
+                        )
+                    }),
                     _ => match std::fs::metadata(&path) {
                         Ok(meta) if meta.len() > PHOTO_MAX_BYTES => {
                             Err("the photo is over 10 MB".to_string())
                         }
-                        Ok(_) => Ok(PollOptionInput::Photo {
-                            path: path.to_string_lossy().into_owned(),
-                        }),
+                        Ok(_) => Ok((
+                            PollOptionInput::Photo {
+                                path: path.to_string_lossy().into_owned(),
+                            },
+                            None,
+                        )),
                         Err(_) => Err("could not read the file".to_string()),
                     },
                 }
@@ -320,7 +385,7 @@ impl QuillApp {
     fn finish_poll_option_file(
         &mut self,
         shown: &str,
-        result: Result<PollOptionInput, String>,
+        result: Result<(PollOptionInput, Option<PathBuf>), String>,
         cx: &mut Context<Self>,
     ) {
         let waiting = OptionMediaSlot::Preparing(shown.to_string());
@@ -330,7 +395,10 @@ impl QuillApp {
                 continue;
             }
             match &result {
-                Ok(media) => attach.media = OptionMediaSlot::Ready(media.clone()),
+                Ok((media, frame)) => {
+                    attach.media = OptionMediaSlot::Ready(media.clone());
+                    attach.preview = frame.clone();
+                }
                 Err(why) => {
                     attach.media = OptionMediaSlot::None;
                     note = Some(why.clone());
@@ -360,14 +428,97 @@ impl QuillApp {
             attach.link_input = None;
             attach.sticker_wait = true;
         }
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.open_sticker_panel();
-            let _ = live.driver.select_sticker_tab(StickerTab::Installed);
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.stickers.open = true;
-            session.stickers.stickers.tab = StickerTab::Installed;
+        self.open_media_panel(PanelTab::Stickers, cx);
+    }
+
+    /// The smiley: the emoji panel opens, and the emoji picked in it go into
+    /// this option's field instead of the composer.
+    pub(super) fn choose_poll_option_emoji(
+        &mut self,
+        target: AttachTarget,
+        cx: &mut Context<Self>,
+    ) {
+        for attach in self.attach_slots() {
+            attach.emoji_wait = false;
         }
+        if let Some(attach) = self.attach_mut(target) {
+            attach.menu_open = false;
+            attach.link_input = None;
+            attach.sticker_wait = false;
+            attach.emoji_wait = true;
+        }
+        self.open_media_panel(PanelTab::Emoji, cx);
+    }
+
+    /// The field an emoji pick goes to, while the panel is open for one.
+    fn poll_emoji_field(&self) -> Option<Entity<TextareaState>> {
+        if !self.pickers.media_panel.open {
+            return None;
+        }
+        let rows = self
+            .composer_ui
+            .poll_dialog
+            .as_ref()
+            .map_or(0, |dialog| dialog.attach.len());
+        (0..rows)
+            .map(AttachTarget::Row)
+            .chain([AttachTarget::Added])
+            .find(|target| self.attach_ref(*target).is_some_and(|a| a.emoji_wait))
+            .and_then(|target| self.option_input(target))
+    }
+
+    /// An emoji picked in the panel. `true` when it went to an option.
+    pub(in crate::ui) fn route_poll_option_emoji(
+        &mut self,
+        emoji: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(field) = self.poll_emoji_field() else {
+            return false;
+        };
+        field.update(cx, |input, cx| {
+            input.replace(emoji, window, cx);
+            input.focus(window, cx);
+        });
         cx.notify();
+        true
+    }
+
+    /// A custom emoji picked in the panel: an inline token in the field, as
+    /// in the composer. `true` when it went to an option.
+    pub(in crate::ui) fn route_poll_option_custom_emoji(
+        &mut self,
+        fallback: &str,
+        custom_emoji_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(field) = self.poll_emoji_field() else {
+            return false;
+        };
+        let text = if fallback.is_empty() {
+            "\u{2B50}"
+        } else {
+            fallback
+        }
+        .to_string();
+        let len = text.len();
+        let content = InputContent::new(text.clone())
+            .with_token(0..len, emoji_token(custom_emoji_id, &text))
+            .unwrap_or_else(|_| InputContent::new(text));
+        field.update(cx, |input, cx| {
+            let range = input.selected_range();
+            if input
+                .replace_range_with_content(range, content.clone(), window, cx)
+                .is_err()
+            {
+                input.replace(content.text().to_string(), window, cx);
+            }
+            input.focus(window, cx);
+        });
+        cx.notify();
+        true
     }
 
     /// A sticker clicked in the panel while it chooses a poll option's
@@ -379,7 +530,7 @@ impl QuillApp {
         size: (i32, i32),
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.sticker_panel_open() {
+        if !self.pickers.media_panel.open {
             return false;
         }
         let rows = self
@@ -406,7 +557,7 @@ impl QuillApp {
         if let Some(attach) = self.attach_mut(target) {
             attach.sticker_wait = false;
         }
-        self.close_sticker_panel(cx);
+        cx.notify();
         true
     }
 

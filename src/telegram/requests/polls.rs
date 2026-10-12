@@ -149,6 +149,33 @@ pub struct PollSend<'a> {
     pub topic_id: Option<i32>,
 }
 
+/// The text of a new option as `formattedText`: composer markup in, only
+/// custom emoji out (TDLib allows nothing else in an option, and only for
+/// Premium users), trimmed with the entities moved along.
+pub(crate) fn option_text_json(markup: &str) -> Value {
+    use crate::composer::{FormatKind, parse_format_markup};
+    let (clean, entities) = parse_format_markup(markup);
+    let trimmed = clean.trim();
+    let lead = clean.len() - clean.trim_start().len();
+    let shift = clean[..lead].encode_utf16().count() as i32;
+    let length = trimmed.encode_utf16().count() as i32;
+    let entities: Vec<Value> = entities
+        .iter()
+        .filter(|entity| entity.kind == FormatKind::CustomEmoji)
+        .filter(|entity| entity.offset >= shift && entity.offset + entity.length <= shift + length)
+        .map(|entity| {
+            let mut entity = entity.clone();
+            entity.offset -= shift;
+            super::format_entity_json(&entity)
+        })
+        .collect();
+    json!({
+        "@type": "formattedText",
+        "text": trimmed,
+        "entities": entities
+    })
+}
+
 /// `InputPollMedia` of an option (TDLib 1.8.68, `schema/td_api.tl:6279`):
 /// `inputPollMediaPhoto`, `inputPollMediaVideo`, `inputPollMediaSticker` or
 /// `inputPollMediaLink`. Files go as `inputFileLocal`; the path must be one
@@ -237,11 +264,7 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
                 .map_or(Value::Null, input_poll_media);
             json!({
                 "@type": "inputPollOption",
-                "text": {
-                    "@type": "formattedText",
-                    "text": text,
-                    "entities": []
-                },
+                "text": option_text_json(text),
                 "media": media
             })
         })

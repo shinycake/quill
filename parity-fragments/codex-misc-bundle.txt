@@ -1,3 +1,2 @@
 parity:data-native-frame
 parity:polls-option-media
-parity:settings-bots-websites

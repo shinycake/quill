@@ -253,33 +253,36 @@ pub(super) fn poll_option_row(
         .border_1()
         .border_color(if chosen { accent() } else { border() })
         .bg(bg_canvas())
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(if quiz_correct { success() } else { text_menu() })
-                        .flex_1()
-                        .min_w_0()
-                        .child(label_text),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .flex_none()
-                        .child(div().text_sm().text_color(text_muted()).child(stats))
-                        .children(
-                            media
-                                .thumb(index)
-                                .map(|thumb| option_thumb(chat_id, message_id, index, thumb, cx)),
-                        ),
-                ),
-        )
+        .child({
+            let label = div()
+                .text_sm()
+                .text_color(if quiz_correct { success() } else { text_menu() })
+                .flex_1()
+                .min_w_0()
+                .child(label_text);
+            let stats = div().text_sm().text_color(text_muted()).child(stats);
+            let thumb = media
+                .thumb(index)
+                .map(|thumb| option_thumb(chat_id, message_id, index, thumb, cx));
+            if media.any_thumb() {
+                // tdesktop's layout once an option has a picture: the
+                // percentage first, the picture at the end.
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(stats.flex_none().min_w(px(56.)))
+                    .child(label)
+                    .children(thumb)
+            } else {
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(label)
+                    .child(stats)
+            }
+        })
         .child(
             div()
                 .flex()

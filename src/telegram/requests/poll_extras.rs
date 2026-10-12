@@ -21,7 +21,7 @@ pub fn add_poll_option(
         "message_id": message_id.0,
         "option": {
             "@type": "inputPollOption",
-            "text": { "@type": "formattedText", "text": text, "entities": [] },
+            "text": super::option_text_json(text),
             "media": media.map_or(Value::Null, super::input_poll_media)
         }
     })

@@ -82,8 +82,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             MessageContent::Poll(content)
                 if can_offer_add_option(content.can_add_option, &content.poll) =>
             {
-                validate_new_option(&content.poll, text)
-                    .map_err(|_| ConnectSendError::InvalidRequest)?
+                // The text may carry custom emoji as composer markup: the
+                // rules apply to what it reads as.
+                validate_new_option(&content.poll, &crate::composer::parse_format_markup(text).0)
+                    .map_err(|_| ConnectSendError::InvalidRequest)?;
+                text.trim().to_string()
             }
             _ => return Err(ConnectSendError::InvalidRequest),
         };

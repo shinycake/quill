@@ -23,7 +23,7 @@ The audit entry named three things. tdesktop has:
 - "Clear Payment and Shipping Info": already in Quill.
 - "Logged in with Telegram" websites list: already in Quill.
 - Mini-app permissions: a "Permissions" section on a bot's profile with an "Emoji Status" switch, shown when the bot has `canManageEmojiStatus` (`DetailsFiller::makeBotPermissions`, `bots.toggleUserEmojiStatusPermission`). Missing from Quill, and so was the mini-app side (`web_app_request_emoji_status_access`, `web_app_set_emoji_status`), which Quill answered with "cancelled" or "unsupported".
-- Delete cloud drafts: tdesktop has no such action. `messages.clearAllDrafts` appears only in its API scheme. Nothing was added, to stay with tdesktop. TDLib has `clearAllDraftMessages` if the owner wants it as a Quill-only extra.
+- Delete cloud drafts: tdesktop has no such action (this item is not declared done in the fragment). `messages.clearAllDrafts` appears only in its API scheme. Nothing was added, to stay with tdesktop. TDLib has `clearAllDraftMessages` if the owner wants it as a Quill-only extra.
 
 Now:
 - `BotInfo.can_manage_emoji_status` is parsed; the bot profile shows "Permissions > Emoji Status" for a bot that has it. The switch calls `toggleBotCanManageEmojiStatus`, moves at once like tdesktop's local flag and goes back if the call fails. Like tdesktop, the section stays on screen after the access is turned off, so it can be given again.
@@ -43,15 +43,21 @@ Now:
 - Clicking: photos, clips and GIFs open in the media viewer as a new `ViewerSource::Poll` (one item, no message actions, no delete). A link always asks first, with the address shown and look-alike letters marked. A place opens the map, as Quill's location rows do. A sticker opens its pack.
 - Creating: per-row attach button with Photo or video (file picker, read off the UI thread; photos over 10 MB are refused as TDLib says; videos are probed with ffprobe), Sticker (the normal sticker panel; the next sticker clicked goes to the option, not the chat), Link and Remove, on new polls and on the "Add an Option" field. The request builds `inputPollMediaPhoto`, `inputPollMediaVideo`, `inputPollMediaSticker` or `inputPollMediaLink`.
 
+Follow-up in the same PR:
+- Option fields take custom emoji: a smiley button per field opens the emoji panel for it, picks become inline tokens (the story reply's token renderer), and the text goes out as composer markup reduced to custom-emoji entities (`option_text_json`).
+- With a picture on any option the row reads like tdesktop: percentage first, picture at the end.
+- The option link box is titled "Open Link" and has no "Copy Link" button.
+- A picked video shows a frame (ffmpeg, off the UI thread, `video_edit::render_frame`).
+- The sticker choice now goes through the media panel.
+
 Differences that remain:
-- Option text is typed in a plain field, so custom emoji cannot be inserted while creating an option (tdesktop allows it for Premium). Showing them works.
-- No Location entry in the attach menu (Quill has no map picker, and tdesktop hides the entry when its picker is unavailable). Places received from others show.
-- A place opens the browser's map, as Quill's location messages do, where tdesktop opens a preview box. The link box has no webpage preview card and adds a "Copy Link" button (Quill's shared open-link box).
-- A sticker click opens the sticker pack dialog; tdesktop shows a large preview with a menu.
-- The picture sits after the percentage at the row's end; tdesktop puts the percentage on the left and the picture on the right. The square is the same size.
-- A picked video shows its file name and length in the dialog, not a frame. A photo shows the picture.
-- No drag and drop of media onto an option field.
-- Poll question, description and quiz-explanation media are separate features and not part of this item.
+- No Location entry in the attach menu (no map picker; tdesktop hides it too without one). Received places show.
+- A place opens the browser's map: Quill has no location preview. A sticker click opens the pack dialog: Quill has no large sticker preview.
+- The link box has no webpage preview card.
+- No drag and drop onto option fields.
+- Emoji panel picks go to an option field only while its "Choose emoji" row is shown; use Done to end it.
+- Not done: the custom emoji path was tested with fake picks, not the real panel with a Premium account.
+- Poll question, description and quiz-explanation media are separate features.
 
 ## How it was checked
 

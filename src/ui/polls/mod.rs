@@ -773,10 +773,14 @@ impl QuillApp {
                 );
             }
             row = row.child(
-                div()
-                    .flex_1()
-                    .child(Textarea::new(input).aria_label("Poll answer").h(px(40.))),
+                div().flex_1().child(
+                    Textarea::new(input)
+                        .aria_label("Poll answer")
+                        .token(self.field_token_renderer(input, cx))
+                        .h(px(40.)),
+                ),
             );
+            row = row.child(self.poll_option_emoji_button(AttachTarget::Row(index), cx));
             row = row.child(self.poll_option_attach_button(AttachTarget::Row(index), cx));
             if dialog.option_inputs.len() > POLL_OPTIONS_MIN {
                 row = row.child(

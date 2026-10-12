@@ -471,7 +471,7 @@ impl QuillApp {
             return;
         };
         let (chat_id, message_id) = (panel.chat_id, panel.message_id);
-        let text = panel.input.read(cx).value().to_string();
+        let text = super::composer_field::field_doc(panel.input.read(cx)).to_markup();
         let poll = self
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
@@ -485,8 +485,9 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        let text = match validate_new_option(&poll, &text) {
-            Ok(text) => text,
+        let plain = quill::composer::parse_format_markup(&text).0;
+        let text = match validate_new_option(&poll, &plain) {
+            Ok(_) => text.trim().to_string(),
             Err(reason) => {
                 if let Some(panel) = self.message_ui.poll_add_option.as_mut() {
                     panel.error = Some(reason);
@@ -567,9 +568,11 @@ impl QuillApp {
                         div().flex_1().child(
                             Textarea::new(&panel.input)
                                 .aria_label("New poll option")
+                                .token(self.field_token_renderer(&panel.input, cx))
                                 .h(px(40.)),
                         ),
                     )
+                    .child(self.poll_option_emoji_button(AttachTarget::Added, cx))
                     .child(self.poll_option_attach_button(AttachTarget::Added, cx)),
             )
             .children(self.poll_option_attach_area(AttachTarget::Added, cx));

@@ -230,6 +230,9 @@ impl QuillApp {
         if self.route_story_reply_emoji(emoji.as_ref(), window, cx) {
             return;
         }
+        if self.route_poll_option_emoji(emoji.as_ref(), window, cx) {
+            return;
+        }
         self.composer.update(cx, |input, cx| {
             input.replace(emoji.as_ref(), window, cx);
             input.focus(window, cx);
@@ -269,6 +272,9 @@ impl QuillApp {
         // Drawn inline in the field, one caret stop (codex:composer-input).
         let fallback = item.emoji.clone();
         if self.route_story_reply_custom_emoji(&fallback, id, window, cx) {
+            return;
+        }
+        if self.route_poll_option_custom_emoji(&fallback, id, window, cx) {
             return;
         }
         self.insert_composer_custom_emoji(&fallback, id, window, cx);
