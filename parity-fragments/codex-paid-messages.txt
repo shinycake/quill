@@ -1,3 +1,0 @@
-parity:premium-paid-messages
-parity:composer-paid-gates
-parity:admin-direct-messages

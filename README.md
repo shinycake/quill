@@ -288,7 +288,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
 - [x] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
 - [x] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->
-- [ ] Premium-only and paid-message gates ("charges N per message", "only accepts messages from contacts") <!-- parity:composer-paid-gates -->
+- [x] Premium-only and paid-message gates ("charges N per message", "only accepts messages from contacts") <!-- parity:composer-paid-gates -->
 - [x] Show and hide button for bot reply keyboards <!-- parity:composer-bot-keyboard-toggle -->
 - [x] Reply keyboards update from the server outside the loaded history <!-- parity:composer-reply-markup-update -->
 - [x] Keyboard buttons that request users, a chat or a phone number <!-- parity:composer-keyboard-request-buttons -->
@@ -556,7 +556,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Boosts list, boost link, boost features table and unrestrict-by-boosts setting <!-- parity:admin-boosts-list -->
 - [x] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
 - [ ] Monetization, revenue and earnings sections (deferred: low impact) <!-- parity:admin-monetization -->
-- [ ] Channel direct messages settings and paid-message price <!-- parity:admin-direct-messages -->
+- [x] Channel direct messages settings and paid-message price <!-- parity:admin-direct-messages -->
 - [x] Auto-translate channel and sponsored-messages toggles <!-- parity:admin-auto-translate -->
 - [x] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
 - [x] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
@@ -886,7 +886,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Create and view giveaways (partial: info box, form and prepaid launch shipped; paying for a new giveaway, specific-user gift codes and country picker left) <!-- parity:premium-giveaways -->
 - [ ] Check and apply Premium gift codes <!-- parity:premium-gift-codes -->
 - [x] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
-- [ ] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
+- [x] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
 - [ ] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
 - [x] Hide ads (Premium) <!-- parity:premium-disable-sponsored -->
 - [ ] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
