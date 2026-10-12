@@ -1,3 +1,0 @@
-parity:stickers-send-animation
-parity:stickers-premium-section
-parity:emoji-status-animated

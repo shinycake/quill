@@ -797,11 +797,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Send paid (star) reactions with toast and undo <!-- parity:reactions-paid-send -->
 - [x] Who reacted: hover tooltip and full list per emoji <!-- parity:reactions-who-reacted -->
 - [x] Reaction strip updates when available and default reactions change <!-- parity:reactions-live-updates -->
-- [ ] Sticker or emoji flies from the panel into the chat when sent <!-- parity:stickers-send-animation -->
+- [x] Sticker or emoji flies from the panel into the chat when sent <!-- parity:stickers-send-animation -->
 - [x] Recent, favorite and trending stickers update when changed on another device <!-- parity:stickers-live-updates -->
 - [ ] Sticker and custom emoji set creator (deferred: low impact) <!-- parity:stickers-creator -->
-- [ ] Premium stickers section with locked previews <!-- parity:stickers-premium-section -->
-- [ ] Animated emoji status next to names and in headers <!-- parity:emoji-status-animated -->
+- [x] Premium stickers section with locked previews <!-- parity:stickers-premium-section -->
+- [x] Animated emoji status next to names and in headers <!-- parity:emoji-status-animated -->
 
 ### Bots, polls & payments
 
