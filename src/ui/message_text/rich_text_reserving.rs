@@ -526,7 +526,19 @@ pub(in crate::ui) fn link_preview_card(
     if site_empty && title_empty && description_empty && !display.is_empty() {
         copy = copy.child(div().text_size(small).text_color(accent()).child(display));
     }
-    let body = if preview.show_large_media {
+    // A wallpaper or theme link shows its picture under the copy
+    // (`link_preview_tile`).
+    let special = super::link_preview_tile::picture(row_id, preview, files, media_roots);
+    let body = if let Some(picture) = special {
+        div()
+            .id(("link-preview-special", row_id))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(copy)
+            .child(picture)
+            .into_any_element()
+    } else if preview.show_large_media {
         let mut column = div()
             .id(("link-preview-large", row_id))
             .flex()

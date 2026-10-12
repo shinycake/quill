@@ -86,3 +86,60 @@ fn parsed_preview_keeps_the_button() {
     let (preview, _) = parse_link_preview(Some(&value));
     assert_eq!(preview.unwrap().view_button, Some("View channel"));
 }
+
+fn preview_of(preview_type: Value) -> super::message_link_preview::LinkPreview {
+    let value = json!({
+        "@type": "linkPreview",
+        "url": "https://t.me/bg/sky",
+        "display_url": "t.me/bg/sky",
+        "site_name": "Telegram",
+        "title": "Wallpaper",
+        "type": preview_type,
+    });
+    parse_link_preview(Some(&value)).0.unwrap()
+}
+
+fn doc(name: &str, mime: &str) -> Value {
+    json!({
+        "@type": "document", "file_name": name, "mime_type": mime,
+        "thumbnail": {"@type": "thumbnail", "width": 90, "height": 160,
+            "file": {"@type": "file", "id": 12, "size": 3}},
+        "document": {"@type": "file", "id": 11, "size": 2048}
+    })
+}
+
+#[test]
+fn wallpaper_card_has_its_button_only_with_a_document() {
+    let with_document = preview_of(json!({
+        "@type": "linkPreviewTypeBackground",
+        "document": doc("sky.jpg", "image/jpeg"),
+        "background_type": {"@type": "backgroundTypeWallpaper", "is_blurred": false, "is_moving": false}
+    }));
+    assert_eq!(with_document.view_button, Some("View wallpaper"));
+    assert_eq!(with_document.kind.picture_files().len(), 1);
+    let colors_only = preview_of(json!({
+        "@type": "linkPreviewTypeBackground",
+        "document": null,
+        "background_type": {"@type": "backgroundTypeFill",
+            "fill": {"@type": "backgroundFillSolid", "color": 255}}
+    }));
+    assert_eq!(colors_only.view_button, None);
+    assert!(matches!(
+        colors_only.kind,
+        super::message_link_preview::LinkPreviewKind::Background(_)
+    ));
+}
+
+#[test]
+fn theme_card_has_its_button_only_with_a_desktop_theme_file() {
+    let desktop = preview_of(json!({
+        "@type": "linkPreviewTypeTheme",
+        "documents": [doc("night.tdesktop-theme", "application/x-tgtheme-tdesktop")]
+    }));
+    assert_eq!(desktop.view_button, Some("View theme"));
+    let other = preview_of(json!({
+        "@type": "linkPreviewTypeTheme",
+        "documents": [doc("night.attheme", "application/x-tgtheme-android")]
+    }));
+    assert_eq!(other.view_button, None);
+}

@@ -111,6 +111,10 @@ pub struct SendOptions {
     /// `required_paid_message_star_count` when it does not match the
     /// chat's price.
     pub paid_message_star_count: i64,
+    /// `messageSendOptions.effect_id`: the animated effect added from the
+    /// send menu (tdesktop `SendOptions::effectId`); 0 for none. TDLib
+    /// applies it in private chats only.
+    pub effect_id: i64,
 }
 
 /// MED4b: media-size half of `linkPreviewOptions` (TDLib 1.8.67,

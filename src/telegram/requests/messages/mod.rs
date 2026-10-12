@@ -189,7 +189,8 @@ pub fn message_send_options(options: &SendOptions) -> Value {
         "paid_message_star_count": options.paid_message_star_count,
         "update_order_of_installed_sticker_sets": options.update_order_of_installed_sticker_sets,
         "scheduling_state": scheduling_state,
-        "effect_id": 0,
+        // int64 travels as a string.
+        "effect_id": options.effect_id.max(0).to_string(),
         "sending_id": 0,
         "only_preview": false,
     })

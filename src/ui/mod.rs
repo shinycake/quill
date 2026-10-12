@@ -255,6 +255,8 @@ mod media_viewer;
 mod member_moderation;
 mod message_actions;
 mod message_checklist;
+mod message_effect_badge;
+mod message_effect_play;
 mod message_games;
 mod message_media;
 mod message_menu_ui;

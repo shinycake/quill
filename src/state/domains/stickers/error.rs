@@ -12,6 +12,9 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {
+                self.stickers.effects.fail(effect_id)
+            }
             Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
                 self.fail_sticker_set_view(set_id)
             }

@@ -10,7 +10,9 @@ use serde_json::Value;
 /// TDLib accepts a repeat period only on `sendMessage` (and a one-message
 /// forward), so an album is sent without one.
 pub fn with_message_send_options(json: String, options: &SendOptions, single: bool) -> String {
-    let wanted = options.disable_notification || options.scheduling != ComposerScheduling::None;
+    let wanted = options.disable_notification
+        || options.scheduling != ComposerScheduling::None
+        || options.effect_id != 0;
     if !wanted {
         return json;
     }

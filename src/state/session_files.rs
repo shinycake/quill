@@ -147,6 +147,17 @@ impl Session {
             .flat_map(|history| history.messages.values())
             .chain(saved_rows)
         {
+            // The effect badge on a message sent with an effect.
+            if message.extras.effect_id != 0
+                && let Some(file) = self
+                    .stickers
+                    .effects
+                    .get(message.extras.effect_id)
+                    .and_then(|effect| effect.icon_file())
+                && self.should_download(file)
+            {
+                ids.push(file);
+            }
             match &message.content {
                 MessageContent::Photo(photo) => {
                     if photo.is_secret || photo.has_spoiler {
@@ -190,6 +201,16 @@ impl Session {
                         && self.should_download(size.file_id)
                     {
                         ids.push(size.file_id);
+                    }
+                    // Wallpaper and theme cards paint from their document.
+                    if let Some(preview) = &text.link_preview {
+                        ids.extend(
+                            preview
+                                .kind
+                                .picture_files()
+                                .into_iter()
+                                .filter(|id| self.should_download(*id)),
+                        );
                     }
                     // Custom emoji stickers referenced by the text need
                     // their display file (thumbnail first, else static

@@ -39,6 +39,7 @@ mod marketplace;
 mod masks;
 mod media;
 mod media_library;
+mod message_effects;
 pub use media_library::REACTION_STRIP_SIZE;
 mod attach_bot_icons;
 mod checklists;

@@ -70,7 +70,31 @@ struct Active {
     /// A Premium sticker's effect (`premium_sticker_effect`): placed around
     /// the sticker, not an emoji.
     premium: bool,
+    /// A message effect (`message_effect_play`): centred on the message's
+    /// effect badge.
+    message: Option<MessageEffectPlay>,
+    /// How long a sticker that has not arrived is waited for.
+    wait: Duration,
 }
+
+/// What a message effect needs besides the sticker it plays.
+#[derive(Clone, Copy)]
+struct MessageEffectPlay {
+    effect_id: i64,
+    /// Where the badge was last seen, to find the message again when it
+    /// gets its final id while the effect plays.
+    last: Option<Point<Pixels>>,
+    /// Since when the badge has not been on screen.
+    missing: Option<Instant>,
+}
+
+/// A message effect whose badge is off screen this long has ended
+/// (tdesktop removes it once its view is gone).
+const BADGE_GRACE: Duration = Duration::from_millis(400);
+/// How far a moved badge is looked for.
+const REBIND_RADIUS: f32 = 160.0;
+/// `Sticker::MessageEffectSize`: twice the big emoji's 112 px.
+const MESSAGE_EFFECT_SIDE: f32 = 224.0;
 
 /// Whether the Premium sticker effect of message `key` is playing or waiting.
 pub(super) fn premium_playing(key: Key) -> bool {
@@ -96,13 +120,92 @@ pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool) {
             queued: Instant::now(),
             clip: None,
             premium: true,
+            message: None,
+            wait: START_WAIT,
         });
     });
+}
+
+/// Queue the effect of a message sent with an effect, centred on its badge.
+/// `wait` is how long its animation may take to arrive.
+pub(super) fn push_message(effect: EmojiEffect, outgoing: bool, effect_id: i64, wait: Duration) {
+    ACTIVE.with(|active| {
+        let mut active = active.borrow_mut();
+        if active.len() >= MAX_QUEUED {
+            return;
+        }
+        active.push(Active {
+            seed: 0,
+            outgoing,
+            effect,
+            queued: Instant::now(),
+            clip: None,
+            premium: false,
+            message: Some(MessageEffectPlay {
+                effect_id,
+                last: None,
+                missing: None,
+            }),
+            wait,
+        });
+    });
+}
+
+/// Follow each message effect to its badge. A message gets its final id
+/// while its effect plays (`updateMessageSendSucceeded`): the badge is then
+/// found again by where it was. An effect whose badge is gone for good ends.
+fn follow_badges() {
+    ACTIVE.with(|active| {
+        for a in active.borrow_mut().iter_mut() {
+            let Some(play) = a.message.as_mut() else {
+                continue;
+            };
+            let key = (a.effect.chat_id.0, a.effect.message_id.0);
+            if let Some(seen) = super::message_effect_badge::seen(key) {
+                play.last = Some(seen.bounds.origin);
+                play.missing = None;
+                continue;
+            }
+            let moved = play.last.and_then(|last| {
+                super::message_effect_badge::nearest(
+                    key.0,
+                    play.effect_id,
+                    a.outgoing,
+                    last,
+                    px(REBIND_RADIUS),
+                )
+            });
+            match moved {
+                Some((new_key, seen)) => {
+                    a.effect.message_id = MessageId(new_key.1);
+                    play.last = Some(seen.bounds.origin);
+                    play.missing = None;
+                }
+                None => {
+                    play.missing.get_or_insert_with(Instant::now);
+                }
+            }
+        }
+    });
+}
+
+/// tdesktop `computeRect` for a message effect: centred on the badge's
+/// picture, then moved a third of the effect's width toward the middle of
+/// the chat (to the left for a message on the right). `badge` is the
+/// picture's (left, top, right, bottom).
+fn message_effect_origin(badge: (f32, f32, f32, f32), side: f32, outgoing: bool) -> (f32, f32) {
+    let (left, top, right, bottom) = badge;
+    let shift = if outgoing { -side / 3.0 } else { side / 3.0 };
+    (
+        shift + left + ((right - left) - side) / 2.0,
+        top + ((bottom - top) - side) / 2.0,
+    )
 }
 
 /// The history list is being rebuilt: forget where the emoji were.
 pub(super) fn begin_pass() {
     ANCHORS.with(|anchors| anchors.borrow_mut().clear());
+    super::message_effect_badge::begin_pass();
 }
 
 fn anchor(key: Key) -> Option<Bounds<Pixels>> {
@@ -310,6 +413,7 @@ impl QuillApp {
     pub(super) fn emoji_effect_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.viewed_chat();
         self.premium_autoplay(cx);
+        self.message_effects_pass(cx);
         let queued = self
             .live
             .as_mut()
@@ -343,12 +447,15 @@ impl QuillApp {
                         queued: started,
                         clip: None,
                         premium: false,
+                        message: None,
+                        wait: START_WAIT,
                     });
                 }
             });
         }
+        follow_badges();
         self.advance_effects(open, cx);
-        let drawn: Vec<(Key, bool, u64, bool, LayeredClip)> = ACTIVE.with(|active| {
+        let drawn: Vec<(Key, bool, u64, bool, bool, LayeredClip)> = ACTIVE.with(|active| {
             active
                 .borrow()
                 .iter()
@@ -358,6 +465,7 @@ impl QuillApp {
                         a.outgoing,
                         a.seed,
                         a.premium,
+                        a.message.is_some(),
                         a.clip.clone()?,
                     ))
                 })
@@ -371,8 +479,26 @@ impl QuillApp {
             canvas(
                 |_, _, _| {},
                 move |_, _, window, _| {
-                    for (key, outgoing, seed, premium, clip) in &drawn {
-                        let (side, (x, y)) = if *premium {
+                    for (key, outgoing, seed, premium, message, clip) in &drawn {
+                        let (side, (x, y)) = if *message {
+                            let Some(badge) = super::message_effect_badge::seen(*key) else {
+                                continue;
+                            };
+                            let bounds = badge.bounds;
+                            (
+                                MESSAGE_EFFECT_SIDE,
+                                message_effect_origin(
+                                    (
+                                        f32::from(bounds.left()),
+                                        f32::from(bounds.top()),
+                                        f32::from(bounds.right()),
+                                        f32::from(bounds.bottom()),
+                                    ),
+                                    MESSAGE_EFFECT_SIDE,
+                                    *outgoing,
+                                ),
+                            )
+                        } else if *premium {
                             let Some(sticker) = premium_sticker_effect::anchor(*key) else {
                                 continue;
                             };
@@ -468,9 +594,11 @@ impl QuillApp {
             }
             active.retain(|a| {
                 a.effect.chat_id == open.unwrap_or(ChatId(0))
+                    && a.message
+                        .is_none_or(|play| play.missing.is_none_or(|at| at.elapsed() < BADGE_GRACE))
                     && match &a.clip {
                         Some(clip) => clip.started.elapsed() < clip.duration,
-                        None => a.queued.elapsed() < START_WAIT,
+                        None => a.queued.elapsed() < a.wait,
                     }
             });
         });

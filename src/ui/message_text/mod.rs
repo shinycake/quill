@@ -322,6 +322,8 @@ pub(super) struct FooterMeta {
     pub(super) imported: bool,
     /// Hover text with the full sent / edited / original dates.
     pub(super) tooltip: Option<String>,
+    /// The badge of a message sent with an effect, at the left end.
+    pub(super) effect: Option<super::message_effect_badge::FooterEffect>,
 }
 
 impl FooterMeta {}
@@ -353,6 +355,7 @@ pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
                     gpui_kit::component::tooltip::Tooltip::new(text.clone()).build(window, cx)
                 })
             })
+            .children(meta.effect.as_ref().map(super::message_effect_badge::badge))
             .when_some(meta.signature.clone(), |this, signature| {
                 this.child(
                     div()
@@ -898,6 +901,7 @@ enum InlineAction {
     RevealSpoiler((i64, u64, u64, bool)),
 }
 
+mod link_preview_tile;
 mod of;
 mod rich_text_reserving;
 #[allow(unused_imports)]

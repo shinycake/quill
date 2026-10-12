@@ -1,6 +1,9 @@
 use super::*;
 use serde_json::Value;
 
+mod docs;
+pub use docs::{PreviewTheme, PreviewWallpaper, format_size_text, is_desktop_theme_document};
+
 /// `linkPreview` card. Photo comes from `type` when that constructor carries a `photo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkPreview {
@@ -45,6 +48,12 @@ pub enum LinkPreviewKind {
     },
     /// `linkPreviewTypeAlbum` — up to 4 thumbnails for the strip.
     Album { thumbnails: Vec<PhotoContent> },
+    /// `linkPreviewTypeBackground`: a `bg/` link, drawn as the wallpaper
+    /// (tdesktop `WebPageType::WallPaper`).
+    Background(Box<PreviewWallpaper>),
+    /// `linkPreviewTypeTheme` with a Desktop theme file: an `addtheme/`
+    /// link (tdesktop `WebPageType::Theme`).
+    Theme(Box<PreviewTheme>),
 }
 
 impl LinkPreview {
@@ -73,6 +82,10 @@ pub(crate) fn parse_link_preview(value: Option<&Value>) -> (Option<LinkPreview>,
     let (kind, kind_files) = parse_link_preview_kind(value.get("type"));
     let mut files = files;
     files.extend(kind_files);
+    let view_button = value
+        .get("type")
+        .and_then(view_button_label)
+        .filter(|_| view_button_allowed(value.get("type"), &kind));
     (
         Some(LinkPreview {
             url: json_field_str(value, "url"),
@@ -92,7 +105,7 @@ pub(crate) fn parse_link_preview(value: Option<&Value>) -> (Option<LinkPreview>,
             instant_view_version: int53_or_zero(value.get("instant_view_version")).sat_i32(),
             photo,
             kind,
-            view_button: value.get("type").and_then(view_button_label),
+            view_button,
         }),
         files,
     )
@@ -149,6 +162,22 @@ pub(crate) fn view_button_label(preview_type: &Value) -> Option<&'static str> {
         "linkPreviewTypeGiftCollection" => "View Collection",
         _ => return None,
     })
+}
+
+/// tdesktop `HasButton`: a wallpaper link gets its button when the page has
+/// a wallpaper document, a theme link when it has a Desktop theme file. The
+/// other kinds always have theirs.
+fn view_button_allowed(preview_type: Option<&Value>, kind: &LinkPreviewKind) -> bool {
+    match preview_type
+        .and_then(|value| value.get("@type"))
+        .and_then(Value::as_str)
+    {
+        Some("linkPreviewTypeBackground") => {
+            matches!(kind, LinkPreviewKind::Background(wallpaper) if wallpaper.has_document)
+        }
+        Some("linkPreviewTypeTheme") => matches!(kind, LinkPreviewKind::Theme(_)),
+        _ => true,
+    }
 }
 
 /// MED4: classify the `linkPreview.type` object (schema:4392 album,
@@ -238,6 +267,11 @@ pub(crate) fn parse_link_preview_kind(
                 }
             }
             (LinkPreviewKind::Album { thumbnails }, files)
+        }
+        "linkPreviewTypeBackground" => docs::parse_background_preview(preview_type)
+            .unwrap_or((LinkPreviewKind::Plain, Vec::new())),
+        "linkPreviewTypeTheme" => {
+            docs::parse_theme_preview(preview_type).unwrap_or((LinkPreviewKind::Plain, Vec::new()))
         }
         _ => (LinkPreviewKind::Plain, Vec::new()),
     }
