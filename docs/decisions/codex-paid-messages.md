@@ -40,21 +40,46 @@ Items: `parity:premium-paid-messages`, `parity:composer-paid-gates`,
   `submit_composer`, `composer_send_options`, the composer column and the
   channel settings dialog.
 
+## Every paid send is confirmed
+
+`PaidGuard` (`src/paid_messages_guard.rs`) sits in the sender, the last stop
+before TDLib, and screens `sendMessage`, `sendMessageAlbum`,
+`forwardMessages` and `sendInlineQueryResultMessage`. So stickers, GIFs,
+voice and video notes, media, polls, contacts, forwards and bot results are
+covered, not only text. A request to a chat with a price goes out only when
+the price is trusted; otherwise it is held and the Confirm payment box
+opens. Pay releases it, Cancel drops it. A composer text send still opens
+the box first so the text stays in the field on Cancel.
+
+`messageSendOptions.paid_message_star_count` is the total for the request
+(the schema: "the number of Stars the user agreed to pay to send the
+messages"; albums and forwards are several messages under one options
+object). The guard writes price x messages, and the box shows that total,
+like tdesktop.
+
+"Don't ask me again" follows tdesktop's `markPeerTrustedPayForMessage`: per
+chat, per account, stored on disk (`accounts/<key>/paid_trust.json`), and a
+stored price covers prices up to it. The entry is dropped when the user
+stops charging.
+
+## Paid supergroups and direct messages
+
+`supergroupFullInfo.outgoing_paid_message_star_count` gates a channel's
+direct-messages group (and any paid supergroup) for non-admin senders: the
+composer shows the price and sends are screened like private chats. The
+channel's own direct-messages price is read from `updateSupergroup` and
+`getSupergroup`; opening the Direct Messages box asks for it
+(`getChat` first when the group's chat is not loaded).
+
 ## Safety
 
-A send carries a price only after the confirmation or a trusted price.
-Otherwise it carries 0 and TDLib refuses it, so no Stars move by accident
-(stickers, GIFs and voice notes in a paid chat fail until a text send was
-confirmed with "Don't ask me again"). The charge choice starts only with
-Save. "Don't ask me again" lasts for the session.
+Nothing carries a price the user has not agreed to. The charge choice starts
+only with Save.
 
 ## Verification
 
-Unit tests (gating, trust, slider steps, request JSON, driver round trips,
-rollback), demo UI tests, and temporary captures of the Messages editor,
-the Premium bar, the charge line with the confirmation, and the Direct
-Messages box (not committed). Not verified against a live account: no paid
-message was sent and no real setting changed. Album and multi-part sends
-pass the per-message price; whether TDLib expects a total is unconfirmed.
-The channel direct-messages chat composer for non-admin senders is not
-gated.
+Unit tests (gating, trust file round trip, guard totals), driver tests for
+held, cancelled and released sends, persistence, paid supergroups and the
+price fetch, demo UI tests, and temporary captures (not committed). Not
+verified against a live account: no paid message was sent and no real
+setting changed.
