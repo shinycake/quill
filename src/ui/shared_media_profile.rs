@@ -4,6 +4,7 @@
 
 use super::accent;
 use super::app::QuillApp;
+use super::playlist_manage::PlaylistDrag;
 use super::premium_ui::sticker_tile;
 use super::pressable::{PressableDiv, action_row};
 use gpui_kit::assets::IconName;
@@ -369,6 +370,7 @@ impl QuillApp {
                 let active = playing == Some(message_id);
                 let (file_id, duration) = (track.file_id, f64::from(track.duration));
                 let mut name = track_name(track);
+                let drag_title = name.clone();
                 if track.duration > 0 {
                     name = format!(
                         "{name} · {}:{:02}",
@@ -408,6 +410,28 @@ impl QuillApp {
                                 })
                                 .child(name),
                         )
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                this.open_playlist_menu(file_id, event.position, cx);
+                            }),
+                        )
+                        // Only your own playlist can be reordered
+                        // (`setReorderDescriptor` is set for `isSelf`).
+                        .when(me, |row| {
+                            row.on_drag(
+                                PlaylistDrag {
+                                    index,
+                                    title: drag_title.clone(),
+                                },
+                                |drag: &PlaylistDrag, _, _, cx| cx.new(|_| drag.clone()),
+                            )
+                            .on_drop(cx.listener(
+                                move |this, drag: &PlaylistDrag, _, cx| {
+                                    this.reorder_playlist_track(drag.index, index, cx);
+                                },
+                            ))
+                        })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_audio_playback(chat, message_id, file_id, duration, cx);
                         })),
@@ -476,7 +500,11 @@ impl QuillApp {
                         .py_6()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No saved music."),
+                        .child(if playlist.is_some() {
+                            "No music files here yet"
+                        } else {
+                            "Loading…"
+                        }),
                 )
             })
             .into_any_element()

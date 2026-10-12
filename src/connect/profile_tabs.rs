@@ -6,7 +6,10 @@ use crate::state::{
     MediaPurpose, RequestPurpose, SharedMediaTab, SharedMediaTabStatus, UsersPurpose,
 };
 use crate::telegram::envelope::{ChatKind, MessageSender};
-use crate::telegram::requests::{EXTRA_COUNT_FILTERS, get_user_profile_audios};
+use crate::telegram::requests::{
+    EXTRA_COUNT_FILTERS, get_user_profile_audios, is_profile_audio, remove_profile_audio,
+    send_saved_audio, set_profile_audio_position,
+};
 use crate::telegram::requests_premium::get_received_gifts;
 
 /// Rows per page of the Stories and Gifts tabs and the playlist.
@@ -164,6 +167,106 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail_profile_audios(user_id, "Could not send the request.".to_string());
         }
         sent
+    }
+
+    /// Ask whether a song is in the saved music (`isProfileAudio`), once, so
+    /// the "Save to..." menu knows whether to offer the profile. A song's
+    /// answer is kept; 404 means it is not saved.
+    pub fn check_profile_audio(
+        &mut self,
+        file_id: crate::ids::FileId,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() || !self.session.needs_profile_audio_check(file_id) {
+            return Ok(());
+        }
+        let extra = self.session.request(
+            RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id: file_id.0 }),
+            None,
+        );
+        let json = is_profile_audio(extra, file_id.0);
+        self.send_profile_request(extra, &json)
+    }
+
+    /// Remove a track from your own playlist (`removeProfileAudio`).
+    pub fn remove_profile_audio_track(
+        &mut self,
+        file_id: crate::ids::FileId,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() || file_id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.local_remove_profile_audio(file_id);
+        let extra = self.session.request(
+            RequestPurpose::Media(MediaPurpose::RemoveProfileAudio { file_id: file_id.0 }),
+            None,
+        );
+        let json = remove_profile_audio(extra, file_id.0);
+        self.send_profile_request(extra, &json)
+    }
+
+    /// Move the track at `from` to `to` in your own playlist
+    /// (`setProfileAudioPosition`). Nothing is sent for equal or missing
+    /// positions.
+    pub fn move_profile_audio_track(
+        &mut self,
+        from: usize,
+        to: usize,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some((file_id, after)) = self.session.local_move_profile_audio(from, to) else {
+            return Ok(());
+        };
+        let extra = self.session.request(
+            RequestPurpose::Media(MediaPurpose::SetProfileAudioPosition { file_id }),
+            None,
+        );
+        let json = set_profile_audio_position(extra, file_id, after);
+        self.send_profile_request(extra, &json)
+    }
+
+    /// "Save to... Saved Messages" for a track on someone's Playlist page:
+    /// the track goes to your Saved Messages as a new audio message.
+    pub fn send_track_to_saved_messages(
+        &mut self,
+        file_id: crate::ids::FileId,
+    ) -> Result<crate::ids::RequestId, ConnectSendError> {
+        let Some(me) = self.session.my_user_id else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let track = self
+            .session
+            .media
+            .playlists
+            .values()
+            .flat_map(|playlist| &playlist.tracks)
+            .find(|track| track.file_id == file_id)
+            .cloned();
+        let Some(track) = track.filter(|_| self.chats_path_active()) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let chat_id = ChatId(me);
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let json = send_saved_audio(
+            extra,
+            chat_id,
+            file_id.0,
+            track.duration,
+            &track.title,
+            &track.performer,
+        );
+        self.send_json_request(extra, &json)
+    }
+
+    /// Load the playlists again after a failed change.
+    pub fn refresh_stale_playlists(&mut self) -> Result<(), ConnectSendError> {
+        for user_id in self.session.take_stale_playlists() {
+            self.fetch_playlist(user_id, false)?;
+        }
+        Ok(())
     }
 
     /// Download the thumbnails the Stories and Gifts grids asked for.

@@ -16,6 +16,7 @@ impl Session {
         {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
+        self.apply_profile_music_ok(pending);
         self.apply_proxy_ok(pending);
         self.apply_gift_code_ok(pending);
         self.apply_giveaway_ok(pending);
@@ -41,9 +42,6 @@ impl Session {
                 self.calls.recent_calls_offset.clear();
                 self.calls.recent_calls_error = false;
                 self.calls.recent_calls_clearing = false;
-            }
-            Some(RequestPurpose::AddProfileAudio) => {
-                self.messages.message_action_note = Some("saved to your profile".into());
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
                 self.messages.message_action_note = Some("messages deleted".into());

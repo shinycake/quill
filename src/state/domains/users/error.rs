@@ -12,12 +12,6 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::AddProfileAudio) => {
-                self.messages.message_action_note = Some(format!(
-                    "could not save to your profile: {}",
-                    error_reason(err)
-                ));
-            }
             // A5: profile-edit failures surface in the
             // edit-profile dialog. The message is classified by
             // `error_reason`, never the raw TDLib text.

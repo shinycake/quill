@@ -107,12 +107,17 @@ impl QuillApp {
             } else {
                 None
             };
-        let protected = self
-            .viewer
-            .state
-            .current()
-            .zip(self.session())
-            .is_some_and(|(item, session)| session.chat_has_protected_content(item.chat_id));
+        // Timed media can't be saved, copied or forwarded (tdesktop hides
+        // Save and Share for `ttlSeconds`); its countdown shows in the
+        // header and as a ring.
+        let ttl = self.viewer_ttl();
+        self.tick_viewer_ttl(ttl, cx);
+        let ttl_badge = ttl.and_then(|ttl| self.viewer_ttl_badge(ttl));
+        let protected =
+            ttl.is_some()
+                || self.viewer.state.current().zip(self.session()).is_some_and(
+                    |(item, session)| session.chat_has_protected_content(item.chat_id),
+                );
         let can_delete = self.viewer_delete_confirm().is_some();
         let has_local_clip = self.viewer_clip_path(&item).is_some();
         let hidden = self.viewer.controls_hidden;
@@ -130,6 +135,8 @@ impl QuillApp {
             } else {
                 "Profile photo"
             }
+        } else if ttl.is_some() {
+            quill::media_viewer::disappearing_label(item.kind)
         } else {
             item.kind.label()
         };
@@ -596,17 +603,20 @@ impl QuillApp {
                             .truncate()
                             .child(crate::ui::bidi_line::one_line_plain(name)),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .opacity(0.7)
-                            .truncate()
-                            .child(if when.is_empty() {
-                                header_label
-                            } else {
-                                format!("{when} \u{b7} {header_label}")
-                            }),
-                    )
+                    .child(div().text_xs().opacity(0.7).truncate().child({
+                        // `lng_mediaview_ttl_in` follows the date
+                        // once the timer runs.
+                        let when = match ttl.and_then(|ttl| ttl.date_suffix()) {
+                            Some(left) if when.is_empty() => left,
+                            Some(left) => format!("{when} \u{b7} {left}"),
+                            None => when,
+                        };
+                        if when.is_empty() {
+                            header_label
+                        } else {
+                            format!("{when} \u{b7} {header_label}")
+                        }
+                    }))
                     .into_any_element(),
                 None => div()
                     .font_semibold()
@@ -891,6 +901,7 @@ impl QuillApp {
                 fade_gen,
                 hidden,
             ))
+            .children(ttl_badge)
             .children(saved_toast)
             // Fade the whole overlay in over 200 ms when it opens
             // (tdesktop `mediaviewShowDuration`). Closing is instant: a

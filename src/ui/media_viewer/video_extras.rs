@@ -131,7 +131,7 @@ impl QuillApp {
         };
         let (chat_id, message_id) = (item.chat_id, item.message_id);
         let secs = self.viewer_share_position();
-        if self.refuse_protected_copy(chat_id, cx) {
+        if self.viewer_is_timed() || self.refuse_protected_copy(chat_id, cx) {
             return;
         }
         if self

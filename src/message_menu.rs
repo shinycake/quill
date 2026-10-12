@@ -176,6 +176,9 @@ pub struct MediaFacts {
     pub in_saved_messages: bool,
     /// The song or voice message fits the notification-tone limits.
     pub tone_ok: bool,
+    /// The song is among the current user's saved music (`None` until
+    /// `isProfileAudio` answers; tdesktop treats that as not saved).
+    pub in_profile: Option<bool>,
 }
 
 /// How long, how big and how many notification tones Telegram accepts
@@ -312,7 +315,7 @@ pub fn media_actions(target: &MediaTarget, facts: &MediaFacts) -> Vec<MediaActio
         actions.push(MediaAction::SaveForNotifications);
     }
     if facts.can_save {
-        if target.kind == MediaKind::Audio && target.duration > 0 {
+        if song_can_be_saved_to(target, facts) {
             actions.push(MediaAction::SaveTo);
         } else {
             actions.push(MediaAction::SaveAs);
@@ -322,6 +325,15 @@ pub fn media_actions(target: &MediaTarget, facts: &MediaFacts) -> Vec<MediaActio
         }
     }
     actions
+}
+
+/// `AddSaveDocumentAction`: a song gets the "Save to..." submenu, unless it
+/// is already in the profile and sits in Saved Messages, where only the file
+/// is left to save.
+pub fn song_can_be_saved_to(target: &MediaTarget, facts: &MediaFacts) -> bool {
+    target.kind == MediaKind::Audio
+        && target.duration > 0
+        && !(facts.in_saved_messages && facts.in_profile == Some(true))
 }
 
 /// What the "who saw it" row means for a message (Telegram Desktop
@@ -731,6 +743,44 @@ mod tests {
                 MediaAction::CopyFilename
             ]
         );
+    }
+
+    #[test]
+    fn a_saved_song_in_saved_messages_only_offers_save_as() {
+        let mut song = target(MediaKind::Audio);
+        song.duration = 200;
+        let in_saved = MediaFacts {
+            in_saved_messages: true,
+            in_profile: Some(true),
+            ..local()
+        };
+        assert_eq!(
+            media_actions(&song, &in_saved),
+            vec![
+                MediaAction::ShowInFolder,
+                MediaAction::SaveAs,
+                MediaAction::CopyFilename
+            ]
+        );
+        // In the profile but elsewhere, or in Saved Messages but not in the
+        // profile (or not known yet), the song still has destinations.
+        for facts in [
+            MediaFacts {
+                in_profile: Some(true),
+                ..local()
+            },
+            MediaFacts {
+                in_saved_messages: true,
+                in_profile: Some(false),
+                ..local()
+            },
+            MediaFacts {
+                in_saved_messages: true,
+                ..local()
+            },
+        ] {
+            assert!(media_actions(&song, &facts).contains(&MediaAction::SaveTo));
+        }
     }
 
     #[test]

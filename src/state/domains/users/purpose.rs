@@ -8,8 +8,6 @@ pub enum UsersPurpose {
     /// The info panel's media counts: `getChatMessageCount` with the
     /// filter at index `filter` of `MEDIA_COUNT_FILTERS`.
     GetChatMessageCount { filter: u8 },
-    /// "Save to... Profile" on a song: `addProfileAudio`.
-    AddProfileAudio,
     /// `openChatSimilarChat` (TDLib 1.8.68, schema line 12016): a channel
     /// was opened from the similar-channels strip. Response is `ok`.
     OpenChatSimilarChat,
@@ -118,7 +116,6 @@ pub enum UsersPurpose {
 }
 
 flat_purposes!(Users(UsersPurpose) {
-    AddProfileAudio,
     OpenChatSimilarChat,
     GetMe,
     GetUserFullInfo,

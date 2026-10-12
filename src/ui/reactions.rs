@@ -95,6 +95,11 @@ impl QuillApp {
                 {
                     let _ = live.driver.show_saved_gifs();
                 }
+                // "Save to..." offers the profile only for songs that are
+                // not in it yet.
+                Some(quill::telegram::envelope::MessageContent::Audio(audio)) => {
+                    let _ = live.driver.check_profile_audio(audio.file_id);
+                }
                 _ => {}
             }
         }

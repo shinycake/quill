@@ -11,6 +11,7 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        self.apply_profile_music_error(err, pending);
         // A place without a tile keeps the coordinate card.
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetMapThumbnailFile

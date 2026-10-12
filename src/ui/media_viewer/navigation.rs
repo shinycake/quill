@@ -27,6 +27,27 @@ impl QuillApp {
         offset: usize,
         cx: &mut Context<Self>,
     ) {
+        // A photo or video with a self-destruct timer opens alone and
+        // starts its timer (tdesktop `markTimedMediaRead`).
+        let timed = self
+            .session()
+            .and_then(|session| {
+                session
+                    .histories
+                    .get(&chat_id.0)?
+                    .messages
+                    .get(&message_id.0)
+            })
+            .and_then(quill::media_viewer::timed_viewer_item);
+        if let Some(item) = timed {
+            self.viewer.state = MediaViewer::open(vec![item], 0);
+            self.viewer.open_gen += 1;
+            self.mark_timed_media_read(chat_id, message_id);
+            self.viewer_note_activity(false, cx);
+            self.reset_viewer_item_state(cx);
+            cx.notify();
+            return;
+        }
         let items = self
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))

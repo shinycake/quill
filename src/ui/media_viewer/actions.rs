@@ -91,7 +91,7 @@ impl QuillApp {
             return;
         };
         let (chat_id, message_id) = (item.chat_id, item.message_id);
-        if self.refuse_protected_copy(chat_id, cx) {
+        if self.viewer_is_timed() || self.refuse_protected_copy(chat_id, cx) {
             return;
         }
         // Close the overlay first so the forward picker is visible.
@@ -106,7 +106,7 @@ impl QuillApp {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
-        if self.refuse_protected_copy(item.chat_id, cx) {
+        if self.viewer_is_timed() || self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
         let files: HashMap<i32, ParsedFile> = self
@@ -292,7 +292,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if self.refuse_protected_copy(item.chat_id, cx) {
+        if self.viewer_is_timed() || self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
         let files: HashMap<i32, ParsedFile> = self
@@ -338,7 +338,7 @@ impl QuillApp {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
-        if self.refuse_protected_copy(item.chat_id, cx) {
+        if self.viewer_is_timed() || self.refuse_protected_copy(item.chat_id, cx) {
             return;
         }
         let png = self

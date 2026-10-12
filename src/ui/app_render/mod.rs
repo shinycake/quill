@@ -874,6 +874,9 @@ impl Render for QuillApp {
                     this.child(self.story_menu_overlay(chat_id, position, cx))
                 },
             )
+            .when_some(self.playback.playlist_menu, |this, menu| {
+                this.child(self.playlist_menu_overlay(menu, cx))
+            })
             .when_some(self.chat_list.archive_menu, |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })

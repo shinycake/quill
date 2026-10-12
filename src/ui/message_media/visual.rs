@@ -83,7 +83,11 @@ pub(in crate::ui) fn photo_attachment(
     // Secret and spoiler photos keep a text label; the rest show a disc.
     let status = photo.placeholder_label(downloading_now, ready);
     let viewable = !photo.is_secret && !photo.has_spoiler;
-    let viewer_open = viewable.then_some(viewer).flatten();
+    // A secret photo opens the viewer on click when it has a self-destruct
+    // timer (the viewer decides; view-once media stays closed).
+    let viewer_open = (viewable || (photo.is_secret && !photo.has_spoiler))
+        .then_some(viewer)
+        .flatten();
     let has_viewer_open = viewer_open.is_some();
     // The inline minithumbnail, scaled to the frame, previews the picture
     // (soft, like a blur) while the real size downloads. Secret and
@@ -473,7 +477,9 @@ pub(in crate::ui) fn video_attachment(
             // Phase 4.5: clicking the visual opens the viewer (the viewer
             // triggers the download when nothing is local yet). The
             // Play/Pause button below keeps its own handler.
-            let viewer_open = (!blocked).then_some(viewer).flatten();
+            let viewer_open = (!blocked || (video.is_secret && !video.has_spoiler))
+                .then_some(viewer)
+                .flatten();
             div()
                 .id(("video-visual", row_id))
                 .relative()

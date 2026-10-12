@@ -22,6 +22,10 @@ pub(crate) struct PlaybackUi {
     pub(super) playing_audio: Option<MessageId>,
     /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
     pub(super) pending_audio_play: Option<(ChatId, MessageId, FileId, f64)>,
+    /// The right-click menu of a Playlist page track.
+    pub(super) playlist_menu: Option<super::playlist_manage::PlaylistMenu>,
+    /// A track of your own playlist waiting for the "remove" confirmation.
+    pub(super) playlist_remove: Option<FileId>,
     pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
     /// In-process player for the active voice note / audio file.
     pub(super) audio: super::audio::AudioEngine,
@@ -94,6 +98,8 @@ impl PlaybackUi {
             playing_voice: None,
             playing_audio: None,
             pending_audio_play: None,
+            playlist_menu: None,
+            playlist_remove: None,
             pending_voice_play: None,
             audio: super::audio::AudioEngine::new(audio_output.clone()),
             clock: None,

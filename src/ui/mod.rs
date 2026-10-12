@@ -269,6 +269,7 @@ mod paid_reaction_state;
 mod paid_reaction_ui;
 mod passcode;
 mod payments;
+mod playlist_manage;
 mod polls;
 mod premium_preview_state;
 mod premium_sticker_effect;

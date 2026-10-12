@@ -27,35 +27,41 @@ impl QuillApp {
             return Vec::new();
         };
         let saved = session.is_saved_messages(chat_id);
-        let mut rows = vec![menu_row(
-            1,
-            IconName::User,
-            "menu-save-to-profile",
-            "... Profile",
-            false,
-            cx,
-            {
-                let target = target.clone();
-                move |this, _, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        this.connection.status_note = match live.driver.save_audio_to_profile(
-                            target.file_id,
-                            target.duration,
-                            &target.title,
-                            &target.performer,
-                        ) {
-                            Ok(_) => "saving to your profile…".into(),
-                            Err(_) => "could not save to your profile".into(),
-                        };
-                    } else {
-                        this.connection.status_note =
-                            "demo — saving to the profile needs live TDLib".into();
+        // tdesktop hides "Profile" for a song that is already saved.
+        let in_profile = session.profile_audio_known(target.file_id) == Some(true);
+        let mut rows = Vec::new();
+        if !in_profile {
+            rows.push(menu_row(
+                1,
+                IconName::User,
+                "menu-save-to-profile",
+                "... Profile",
+                false,
+                cx,
+                {
+                    let target = target.clone();
+                    move |this, _, cx| {
+                        if let Some(live) = this.live.as_mut() {
+                            this.connection.status_note = match live.driver.save_audio_to_profile(
+                                target.file_id,
+                                target.duration,
+                                &target.title,
+                                &target.performer,
+                                &target.file_name,
+                            ) {
+                                Ok(_) => "Audio added to your Profile.".into(),
+                                Err(_) => "could not save to your profile".into(),
+                            };
+                        } else {
+                            this.connection.status_note =
+                                "demo — saving to the profile needs live TDLib".into();
+                        }
+                        this.message_ui.menu = None;
+                        cx.notify();
                     }
-                    this.message_ui.menu = None;
-                    cx.notify();
-                }
-            },
-        )];
+                },
+            ));
+        }
         if !saved {
             rows.push(menu_row(
                 2,
@@ -95,6 +101,14 @@ impl QuillApp {
                 this.message_ui.menu = None;
                 cx.notify();
             },
+        ));
+        // `lng_context_save_music_about`, under a separator.
+        rows.push(menu_separator(4));
+        rows.push(info_row(
+            5,
+            "menu-save-to-about",
+            None,
+            "Choose where you want this audio to be saved.",
         ));
         rows
     }

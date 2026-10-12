@@ -279,6 +279,42 @@ fn self_destructing_photo_disappears_via_delete_update() {
 }
 
 #[test]
+fn opening_a_timed_photo_starts_its_countdown() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(43));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":902,"chat_id":43,"is_outgoing":false,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[]},"caption":{"@type":"formattedText","text":"","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":true},"self_destruct_type":{"@type":"messageSelfDestructTypeTimer","self_destruct_time":10},"self_destruct_in":0}}"#,
+    );
+    let sd = session.histories[&43].messages[&902].self_destruct.unwrap();
+    assert_eq!(sd.expires_in_ms, 0);
+    let before = unix_ms_now();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageContentOpened","chat_id":43,"message_id":902}"#,
+    );
+    let sd = session.histories[&43].messages[&902].self_destruct.unwrap();
+    assert_eq!(sd.expires_in_ms, 10_000);
+    assert!(sd.fetched_at_ms >= before);
+    let ttl = crate::media_viewer::viewer_ttl(&sd, sd.fetched_at_ms + 2_500).unwrap();
+    assert_eq!(ttl.seconds_left(), Some(8));
+    // A second open does not restart a running timer.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageContentOpened","chat_id":43,"message_id":902}"#,
+    );
+    let again = session.histories[&43].messages[&902].self_destruct.unwrap();
+    assert_eq!(again.fetched_at_ms, sd.fetched_at_ms);
+}
+
+#[test]
 fn open_chat_live_location_refresh_follows_running_shares_only() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

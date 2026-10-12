@@ -45,6 +45,7 @@ mod navigation;
 mod overlay;
 mod overlay_controls;
 mod playback;
+mod ttl_ui;
 mod video;
 mod video_extras;
 
