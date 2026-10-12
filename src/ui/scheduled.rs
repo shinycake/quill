@@ -24,7 +24,7 @@ use quill::ids::MessageId;
 use quill::local_time::{civil_local, now_unix};
 use quill::schedule::{
     MAX_SCHEDULE_SECS, ScheduleError, ScheduleKind, civil_to_unix, default_schedule_time,
-    parse_picker_stamp, validate_send_date,
+    parse_picker_stamp, repeat_period_text, validate_send_date,
 };
 use quill::telegram::envelope::{
     ChatKind, MessageSchedulingState, ParsedMessage, effective_content,
@@ -40,8 +40,17 @@ pub(super) fn scheduled_message_label(message: &ParsedMessage, kind: ScheduleKin
         ScheduleKind::Schedule => "scheduled",
     };
     match message.scheduling_state {
-        Some(MessageSchedulingState::SendAtDate { send_date }) => {
-            format!("{noun} for {}", format_unix_date_time(send_date as i64))
+        Some(MessageSchedulingState::SendAtDate {
+            send_date,
+            repeat_period,
+        }) => {
+            let when = format_unix_date_time(send_date as i64);
+            if repeat_period > 0 {
+                // tdesktop puts the period before the time ("daily 12:30").
+                format!("{noun} for {when}, {}", repeat_period_text(repeat_period))
+            } else {
+                format!("{noun} for {when}")
+            }
         }
         Some(MessageSchedulingState::SendWhenOnline) => "send when online".to_string(),
         None => noun.to_string(),
@@ -66,6 +75,19 @@ pub(super) struct SchedulePicker {
     pub target: ScheduleTarget,
     pub date: Entity<DatePickerState>,
     pub error: Option<&'static str>,
+    /// The "Repeat" choice in seconds (zero: never), Premium only.
+    pub repeat: i32,
+    /// Send the composer's message as soon as the time is confirmed (the
+    /// "Schedule" shortcut; tdesktop's schedule box sends on Schedule).
+    pub send_after: bool,
+}
+
+/// The test environment of Telegram adds two short repeat periods
+/// (`session->isTestMode()` in tdesktop).
+pub(super) fn using_test_dc() -> bool {
+    std::env::var("QUILL_USE_TEST_DC")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 /// `YYYY-MM-DDTHH:MM:00` of a unix time in the local zone, the shape
@@ -201,12 +223,19 @@ impl QuillApp {
                     .iter()
                     .find(|m| m.id == id)
                     .and_then(|m| match m.scheduling_state {
-                        Some(MessageSchedulingState::SendAtDate { send_date }) => {
+                        Some(MessageSchedulingState::SendAtDate { send_date, .. }) => {
                             Some(i64::from(send_date))
                         }
                         _ => None,
                     })
             }),
+        };
+        // The change dialog starts from the repeat chosen before.
+        let repeat = match (target, self.composer_ui.scheduling) {
+            (ScheduleTarget::Composer, ComposerScheduling::SendAtDate(_)) => {
+                self.composer_ui.schedule_repeat
+            }
+            _ => 0,
         };
         let initial = existing
             .filter(|date| validate_send_date(*date, now).is_ok())
@@ -216,6 +245,8 @@ impl QuillApp {
             target,
             date,
             error: None,
+            repeat,
+            send_after: false,
         });
         self.composer_ui.schedule_popup_open = true;
         cx.notify();
@@ -237,7 +268,7 @@ impl QuillApp {
 
     /// Reads the picker, validates it like `ChooseDateTimeBox::collect`
     /// and applies it.
-    pub(super) fn confirm_schedule_picker(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn confirm_schedule_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(picker) = self.composer_ui.schedule_picker.as_ref() else {
             return;
         };
@@ -246,9 +277,12 @@ impl QuillApp {
             .ok_or(ScheduleError::Invalid)
             .and_then(|unix| validate_send_date(unix, now_unix()));
         match picked {
-            Ok(send_date) => {
-                self.apply_schedule(target, ComposerScheduling::SendAtDate(send_date), cx)
-            }
+            Ok(send_date) => self.apply_schedule(
+                target,
+                ComposerScheduling::SendAtDate(send_date),
+                window,
+                cx,
+            ),
             Err(err) => {
                 if let Some(picker) = self.composer_ui.schedule_picker.as_mut() {
                     picker.error = Some(err.message());
@@ -263,14 +297,31 @@ impl QuillApp {
         &mut self,
         target: ScheduleTarget,
         scheduling: ComposerScheduling,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let kind = self.schedule_kind();
+        // The Repeat choice counts for Premium only (the locked button never
+        // sets it, and a lapsed subscription drops it).
+        let (repeat, send_after) = self
+            .composer_ui
+            .schedule_picker
+            .as_ref()
+            .map(|picker| (picker.repeat, picker.send_after))
+            .unwrap_or((0, false));
+        let repeat = if self.repeat_allowed(target)
+            && matches!(scheduling, ComposerScheduling::SendAtDate(_))
+        {
+            repeat
+        } else {
+            0
+        };
         self.composer_ui.schedule_popup_open = false;
         self.composer_ui.schedule_picker = None;
         match target {
             ScheduleTarget::Composer => {
                 self.composer_ui.scheduling = scheduling;
+                self.composer_ui.schedule_repeat = repeat;
                 self.connection.status_note = match (scheduling, kind) {
                     (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => {
                         format!("reminder set for {}", format_unix_date_time(date))
@@ -281,6 +332,9 @@ impl QuillApp {
                     _ => "will send when the contact is online".into(),
                 };
                 cx.notify();
+                if send_after {
+                    self.send_composer_after_schedule(window, cx);
+                }
             }
             ScheduleTarget::Reschedule(message_id) => {
                 self.edit_scheduled_state(message_id, scheduling, cx);
@@ -293,7 +347,10 @@ impl QuillApp {
                 self.open_scheduled_dialog(cx);
             }
             ScheduleTarget::Share => {
-                self.submit_share(quill::share_box::ShareSend::Scheduled(scheduling), cx);
+                self.submit_share(
+                    quill::share_box::ShareSend::Scheduled(scheduling, repeat),
+                    cx,
+                );
             }
         }
     }
@@ -361,8 +418,8 @@ impl QuillApp {
                 Button::new("schedule-when-online")
                     .label("Send when online")
                     .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.apply_schedule(target, ComposerScheduling::SendWhenOnline, cx);
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.apply_schedule(target, ComposerScheduling::SendWhenOnline, window, cx);
                     })),
             );
         }
@@ -378,7 +435,9 @@ impl QuillApp {
                 Button::new("schedule-confirm")
                     .label(kind.submit_label())
                     .primary()
-                    .on_click(cx.listener(|this, _, _, cx| this.confirm_schedule_picker(cx))),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.confirm_schedule_picker(window, cx)),
+                    ),
             );
         div()
             .id("schedule-popup")
@@ -397,6 +456,7 @@ impl QuillApp {
                     .presets(presets)
                     .placeholder("Pick a date and time"),
             )
+            .children(self.schedule_repeat_row(picker.repeat, cx))
             .when_some(picker.error, |this, error| {
                 this.child(
                     div()

@@ -13,6 +13,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
+mod deferred_caption;
 mod downloads;
 mod sends;
 

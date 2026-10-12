@@ -2,7 +2,7 @@
 //! `QuillApp` (gpui-kit's test support needs the `demo-capture` feature).
 #![cfg(feature = "demo-capture")]
 
-use crate::ui::actions::CloseWindow;
+use crate::ui::actions::{CloseWindow, ReopenClosedWindow};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -531,4 +531,42 @@ fn switching_accounts_closes_the_chat_windows(cx: &mut TestAppContext) {
     assert!(h.app.read_with(cx, |app, _| !app.windows.has(OTHER)));
     // The main window keeps its chat.
     assert_eq!(h.open_chat(cx), Some(OPEN));
+}
+
+#[gpui_kit::test]
+fn reopen_closed_window_brings_back_the_window_closed_last(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    // Nothing was closed yet: the command does not apply.
+    let reopened = cx
+        .update_window(h.main, |_, window, cx| {
+            h.app
+                .update(cx, |app, cx| app.reopen_closed_window_by_key(window, cx))
+        })
+        .unwrap();
+    assert!(!reopened);
+
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+
+    // The chord's action opens it again, once.
+    cx.update_window(h.main, |_, window, cx| {
+        window.dispatch_action(Box::new(ReopenClosedWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(h.other_windows(cx).len(), 1);
+    assert_eq!(h.window_chats(cx), vec![OTHER]);
+    let again = cx
+        .update_window(h.main, |_, window, cx| {
+            h.app
+                .update(cx, |app, cx| app.reopen_closed_window_by_key(window, cx))
+        })
+        .unwrap();
+    assert!(!again, "the list of closed windows is used up");
 }

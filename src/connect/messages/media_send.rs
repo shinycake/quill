@@ -167,6 +167,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::SendMessageAlbum, Some(chat_id));
         let topic_id = self.send_topic(chat_id);
         let json = send_message_album(extra, chat_id, topic_id, reply_to, contents);
+        let json = crate::telegram::requests::with_message_send_options(
+            json,
+            &snapshot.send_options,
+            false,
+        );
         let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {

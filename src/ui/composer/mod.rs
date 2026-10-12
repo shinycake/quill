@@ -149,7 +149,13 @@ impl QuillApp {
                         });
                     let grouped = self.composer_group_media_effective();
                     let mut snaps = Vec::new();
-                    if albumable && grouped {
+                    // A repeating message is sent alone (tdesktop limits the
+                    // batch to one item with a repeat period).
+                    let repeating = matches!(
+                        self.composer_ui.scheduling,
+                        ComposerScheduling::SendAtDate(_)
+                    ) && self.composer_ui.schedule_repeat != 0;
+                    if albumable && grouped && !repeating {
                         // A video turned into a GIF leaves the album and
                         // goes alone (tdesktop `GroupRanges`); paid media
                         // is one message.
@@ -311,6 +317,8 @@ impl QuillApp {
                             // M1: a scheduling choice is one-shot (the next
                             // send goes immediately unless re-scheduled).
                             self.composer_ui.scheduling = ComposerScheduling::None;
+                            self.composer_ui.schedule_repeat = 0;
+                            self.composer_ui.send_silent_once = false;
                             self.composer_ui.schedule_popup_open = false;
                             self.composer_ui.pending_reply = None;
                             self.composer_ui.clear_draft_on_success = Some(chat_id);
@@ -533,6 +541,8 @@ impl QuillApp {
                 self.composer_ui.pending_attachments.clear();
                 // M1: a scheduling choice is one-shot.
                 self.composer_ui.scheduling = ComposerScheduling::None;
+                self.composer_ui.schedule_repeat = 0;
+                self.composer_ui.send_silent_once = false;
                 self.composer_ui.schedule_popup_open = false;
                 self.composer_ui.pending_reply = None;
                 self.composer_ui.rich_editor_open = false;

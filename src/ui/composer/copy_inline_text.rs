@@ -133,16 +133,20 @@ impl QuillApp {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window)
             || !self.composer.read(cx).value().is_empty()
             || self.composer_ui.pending_edit.is_some()
+            // tdesktop: `_replyTo` keeps Up for scrolling.
+            || self.composer_ui.pending_reply.is_some()
             || !self.composer_ui.pending_attachments.is_empty()
             || self.composer_ui.command_menu_open
             || !self.mention_menu_items(cx).is_empty()
         {
             return false;
         }
-        let Some(edit) = self
-            .session()
-            .and_then(|s| s.open_chat.and_then(|chat| s.last_editable_message(chat)))
-        else {
+        // tdesktop `canWriteMessage()`.
+        let Some(edit) = self.session().and_then(|s| {
+            let chat = s.open_chat?;
+            s.chats.get(&chat.0)?.can_post().then_some(())?;
+            s.last_editable_message(chat)
+        }) else {
             return false;
         };
         self.begin_edit(edit, window, cx);
@@ -213,12 +217,20 @@ impl QuillApp {
             return;
         };
         if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .edit_snapshot(&edit, &text);
+            // A media message still being sent keeps the new caption until
+            // it has its real id (tdesktop edits the local item).
+            let pending = self.session().is_some_and(|s| {
+                s.histories
+                    .get(&edit.chat_id.0)
+                    .and_then(|history| history.messages.get(&edit.message_id.0))
+                    .is_some_and(|m| m.pending)
+            });
+            let driver = &mut self.live.as_mut().expect("live").driver;
+            let result = if pending {
+                driver.edit_pending_caption(&edit, &text)
+            } else {
+                driver.edit_snapshot(&edit, &text).map(|_| ())
+            };
             match result {
                 Ok(_) => {
                     self.finish_edit_restore_draft(window, cx);

@@ -37,6 +37,7 @@ mod search_tabs;
 mod secret_chats;
 mod send_as;
 mod send_media_options;
+mod send_options_json;
 mod share_content;
 mod stickers;
 mod stories;
@@ -59,6 +60,8 @@ mod tests_groups;
 mod tests_media;
 #[cfg(test)]
 mod tests_message_menu;
+#[cfg(test)]
+mod tests_message_repeat;
 #[cfg(test)]
 mod tests_messages;
 #[cfg(test)]
@@ -118,6 +121,7 @@ pub use search_tabs::*;
 pub use secret_chats::*;
 pub use send_as::*;
 pub use send_media_options::*;
+pub use send_options_json::*;
 pub use share_content::*;
 pub use stickers::*;
 pub use stories::*;

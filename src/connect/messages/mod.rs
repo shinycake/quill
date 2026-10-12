@@ -23,6 +23,7 @@ use crate::telegram::requests::{
 use crate::voice::VoiceDraft;
 
 mod ai;
+mod deferred_caption;
 mod delete_forward;
 mod edit;
 mod export;
@@ -448,6 +449,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         let json = if spoiler { with_spoiler(json) } else { json };
+        // Silent and scheduled sends reach media too (text builds its own).
+        let json = if snapshot.attachment.is_some() {
+            crate::telegram::requests::with_message_send_options(json, &snapshot.send_options, true)
+        } else {
+            json
+        };
         let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {

@@ -9,6 +9,7 @@ use super::app::QuillApp;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::composer_doc::ComposerTag;
 use quill::suggest::{
     EMOJI_LIMIT, RecentHashtags, SuggestKind, SuggestQuery, detect, search_emoji,
 };
@@ -144,7 +145,7 @@ impl QuillApp {
     ) -> Option<String> {
         let prev = std::mem::replace(&mut self.composer_ui.prev_text, text.to_string());
         let range = self.composer.read(cx).selected_range();
-        if !range.is_empty() || self.composer_ui.pending_edit.is_some() {
+        if !range.is_empty() {
             return None;
         }
         let replace = quill::emoji_replace::instant_replacement(
@@ -153,10 +154,35 @@ impl QuillApp {
             range.start,
             self.chat_prefs.replace_emoji,
         )?;
+        // Never inside code or a code block (`processInstantReplaces`
+        // returns early over `kTagCode` and `IsTagPre`).
+        let caret = range.start;
+        let in_code = super::composer_field::field_doc(self.composer.read(cx))
+            .spans
+            .iter()
+            .any(|span| {
+                matches!(span.tag, ComposerTag::Code | ComposerTag::Pre(_))
+                    && span.range.start < caret
+                    && caret <= span.range.end
+            });
+        if in_code {
+            return None;
+        }
+        let original = text.get(replace.range.clone())?.to_string();
         // A range edit keeps the formatting around it (codex:composer-input).
         self.replace_composer_text(replace.range.clone(), &replace.with, window, cx);
         let new_text = self.composer.read(cx).value().to_string();
         self.composer_ui.prev_text = new_text.clone();
+        // Backspace right after puts the typed text back
+        // (`revertFormatReplace`).
+        self.composer_ui.markdown_revert = Some(super::composer_field::MarkdownRevert {
+            text: new_text.clone(),
+            caret: self.composer.read(cx).selected_range().start,
+            restore: Some((
+                replace.range.start..replace.range.start + replace.with.len(),
+                original,
+            )),
+        });
         Some(new_text)
     }
 

@@ -124,7 +124,11 @@ impl MessageReplyTo {
 /// (schema line 3124).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageSchedulingState {
-    SendAtDate { send_date: i32 },
+    /// `repeat_period` is in seconds, zero when the message is not repeated.
+    SendAtDate {
+        send_date: i32,
+        repeat_period: i32,
+    },
     SendWhenOnline,
 }
 
@@ -139,6 +143,11 @@ pub(crate) fn parse_message_scheduling_state(
         Some("messageSchedulingStateSendAtDate") => Some(MessageSchedulingState::SendAtDate {
             send_date: value
                 .get("send_date")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
+            repeat_period: value
+                .get("repeat_period")
                 .and_then(Value::as_i64)
                 .unwrap_or(0)
                 .sat_i32(),
@@ -711,5 +720,36 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
             })
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod scheduling_tests {
+    use super::{MessageSchedulingState, parse_message_scheduling_state};
+    use serde_json::json;
+
+    #[test]
+    fn a_scheduled_state_keeps_its_repeat_period() {
+        let state = json!({
+            "@type": "messageSchedulingStateSendAtDate",
+            "send_date": 1_800_000_000,
+            "repeat_period": 86_400,
+        });
+        assert_eq!(
+            parse_message_scheduling_state(Some(&state)),
+            Some(MessageSchedulingState::SendAtDate {
+                send_date: 1_800_000_000,
+                repeat_period: 86_400
+            })
+        );
+        // Older answers have none: never repeated.
+        let plain = json!({"@type": "messageSchedulingStateSendAtDate", "send_date": 5});
+        assert_eq!(
+            parse_message_scheduling_state(Some(&plain)),
+            Some(MessageSchedulingState::SendAtDate {
+                send_date: 5,
+                repeat_period: 0
+            })
+        );
     }
 }

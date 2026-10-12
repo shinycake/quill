@@ -77,6 +77,9 @@ pub struct SendOptions {
     /// `disable_notification` — silent send.
     pub disable_notification: bool,
     pub scheduling: ComposerScheduling,
+    /// `messageSchedulingStateSendAtDate.repeat_period` (seconds, Premium).
+    /// Zero for never; ignored unless `scheduling` is a send date.
+    pub schedule_repeat_period: i32,
     /// `linkPreviewOptions.is_disabled` — the composer preview toggle.
     /// Secret chats force this on the driver side regardless.
     pub link_preview_disabled: bool,
@@ -151,7 +154,7 @@ impl PreviewMediaSize {
 /// M1: `MessageSchedulingState` for a send (TDLib 1.8.67,
 /// `schema/td_api.tl:5902` `messageSchedulingStateSendAtDate
 /// send_date repeat_period` / `:5905` `messageSchedulingStateSendWhenOnline`).
-/// `repeat_period` is always 0 (premium-only, never surfaced).
+/// `repeat_period` rides [`SendOptions::schedule_repeat_period`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ComposerScheduling {
     #[default]

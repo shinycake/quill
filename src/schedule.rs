@@ -15,6 +15,69 @@ pub const MAX_SCHEDULE_SECS: i64 = 366 * 86_400;
 /// `DefaultScheduleTime` in `history_view_schedule_box.cpp`.
 pub const DEFAULT_SCHEDULE_SECS: i64 = 600;
 
+const DAY: i32 = 24 * 60 * 60;
+
+/// One choice of the schedule box's "Repeat" menu (`ChooseRepeatPeriod`
+/// in `ui/boxes/choose_date_time.cpp`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepeatChoice {
+    /// `repeat_period` in seconds; zero is "Never".
+    pub period: i32,
+    pub label: &'static str,
+}
+
+/// The menu's entries in tdesktop's order. `test_dc` adds the two short
+/// periods tdesktop offers in the test environment.
+pub fn repeat_choices(test_dc: bool) -> Vec<RepeatChoice> {
+    let choice = |period, label| RepeatChoice { period, label };
+    let mut choices = vec![
+        choice(0, "Never"),
+        choice(DAY, "Daily"),
+        choice(7 * DAY, "Weekly"),
+        choice(14 * DAY, "Biweekly"),
+        choice(30 * DAY, "Monthly"),
+        choice(91 * DAY, "Every 3 month"),
+        choice(182 * DAY, "Every 6 month"),
+        choice(365 * DAY, "Yearly"),
+    ];
+    if test_dc {
+        choices.insert(1, choice(300, "Every 5 minutes"));
+        choices.insert(1, choice(60, "Every minute"));
+    }
+    choices
+}
+
+/// The choice the button shows: the first entry at or above `period`, the
+/// last one when the period is longer than all (tdesktop `lower_bound`).
+pub fn repeat_choice_for(period: i32, test_dc: bool) -> RepeatChoice {
+    let choices = repeat_choices(test_dc);
+    let last = choices[choices.len() - 1];
+    choices
+        .into_iter()
+        .find(|choice| choice.period >= period)
+        .unwrap_or(last)
+}
+
+/// The word before a scheduled message's time (`SchedulePeriodText` in
+/// `history_view_bottom_info.cpp`), e.g. "daily" or "3-monthly".
+pub fn repeat_period_text(period: i32) -> &'static str {
+    const ENTRIES: [(i32, &str); 9] = [
+        (60, "minutely"),
+        (300, "5-minutely"),
+        (DAY, "daily"),
+        (7 * DAY, "weekly"),
+        (14 * DAY, "biweekly"),
+        (30 * DAY, "monthly"),
+        (91 * DAY, "3-monthly"),
+        (182 * DAY, "6-monthly"),
+        (365 * DAY, "yearly"),
+    ];
+    ENTRIES
+        .iter()
+        .find(|(entry, _)| *entry >= period)
+        .map_or("yearly", |(_, text)| text)
+}
+
 /// The picker's initial send time.
 pub fn default_schedule_time(now: i64) -> i64 {
     now + DEFAULT_SCHEDULE_SECS
@@ -158,6 +221,46 @@ mod tests {
     use crate::local_time::civil_at;
 
     const NOW: i64 = 1_800_000_000;
+
+    #[test]
+    fn repeat_menu_matches_tdesktop() {
+        let labels: Vec<_> = repeat_choices(false).iter().map(|c| c.label).collect();
+        assert_eq!(
+            labels,
+            [
+                "Never",
+                "Daily",
+                "Weekly",
+                "Biweekly",
+                "Monthly",
+                "Every 3 month",
+                "Every 6 month",
+                "Yearly"
+            ]
+        );
+        let test: Vec<_> = repeat_choices(true).iter().map(|c| c.period).collect();
+        assert_eq!(&test[..4], [0, 60, 300, DAY]);
+        assert_eq!(repeat_choices(false)[5].period, 91 * DAY);
+    }
+
+    #[test]
+    fn repeat_button_rounds_up_to_a_listed_period() {
+        assert_eq!(repeat_choice_for(0, false).label, "Never");
+        assert_eq!(repeat_choice_for(DAY, false).label, "Daily");
+        assert_eq!(repeat_choice_for(2 * DAY, false).label, "Weekly");
+        assert_eq!(repeat_choice_for(i32::MAX, false).label, "Yearly");
+        assert_eq!(repeat_choice_for(60, true).label, "Every minute");
+    }
+
+    #[test]
+    fn repeat_word_follows_the_period() {
+        assert_eq!(repeat_period_text(DAY), "daily");
+        assert_eq!(repeat_period_text(7 * DAY), "weekly");
+        assert_eq!(repeat_period_text(91 * DAY), "3-monthly");
+        assert_eq!(repeat_period_text(365 * DAY), "yearly");
+        assert_eq!(repeat_period_text(i32::MAX), "yearly");
+        assert_eq!(repeat_period_text(60), "minutely");
+    }
 
     #[test]
     fn default_time_is_ten_minutes_out() {

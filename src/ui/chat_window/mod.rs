@@ -60,6 +60,9 @@ pub(crate) struct ChatWindows {
     cascade: u32,
     /// A write of the open windows is scheduled (`saved`).
     save_pending: bool,
+    /// Windows the user closed, newest last, for "Reopen closed window"
+    /// (`SavedWindows::_closed`, at most `kMaxClosedWindows`).
+    closed: Vec<(ChatId, Bounds<Pixels>)>,
     /// The windows from last time (`saved`).
     restore: saved::Restore,
     /// Keys go to the window that received them: the interceptor runs
@@ -93,9 +96,21 @@ impl ChatWindows {
             main: None,
             cascade: 0,
             save_pending: false,
+            closed: Vec::new(),
             restore: saved::Restore::default(),
             _key_scope: key_scope,
         }
+    }
+
+    /// `kMaxClosedWindows` in `window_saved_windows.cpp`.
+    const MAX_CLOSED: usize = 16;
+
+    /// Remember a window the user closed.
+    fn note_closed(&mut self, chat_id: ChatId, bounds: Bounds<Pixels>) {
+        while self.closed.len() >= Self::MAX_CLOSED {
+            self.closed.remove(0);
+        }
+        self.closed.push((chat_id, bounds));
     }
 
     /// Every open chat window, as its chat and window.
@@ -296,7 +311,7 @@ impl QuillApp {
                 Err(_) => {
                     owner.update(cx, |app, cx| {
                         app.connection.status_note = "Couldn't open the chat window".into();
-                        app.chat_window_closed(chat_id, cx);
+                        app.chat_window_closed(chat_id, None, cx);
                     });
                     return;
                 }
@@ -370,9 +385,35 @@ impl QuillApp {
         true
     }
 
+    /// "Reopen closed window" (`SavedWindows::reopenLastClosed`): the chat
+    /// window closed last opens again where it stood. `false` when none was
+    /// closed.
+    pub(in crate::ui) fn reopen_last_closed_chat_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((chat_id, bounds)) = self.windows.closed.pop() else {
+            return false;
+        };
+        self.open_chat_window_at(chat_id, Some(bounds), window, cx);
+        true
+    }
+
     /// The window showing `chat_id` is gone (closed by the user, or by the
     /// app because the chat or the session went away).
-    pub(super) fn chat_window_closed(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+    ///
+    /// `reopen_at` is where a window the user closed stood: it can come
+    /// back with "Reopen closed window".
+    pub(super) fn chat_window_closed(
+        &mut self,
+        chat_id: ChatId,
+        reopen_at: Option<Bounds<Pixels>>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(bounds) = reopen_at {
+            self.windows.note_closed(chat_id, bounds);
+        }
         self.forget_chat_window(chat_id);
         self.schedule_chat_windows_save(cx);
         cx.notify();

@@ -21,7 +21,10 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
-        scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
+        scheduling_state: Some(MessageSchedulingState::SendAtDate {
+            send_date: 999,
+            repeat_period: 0,
+        }),
         can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("scheduled draft".into()),
