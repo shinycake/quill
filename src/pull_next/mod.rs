@@ -64,6 +64,22 @@ const RESET_REACHED_ON: f32 = 0.95;
 const REVERSE_EASE: f32 = 1.5;
 /// `kReadyDwell`: how long the pull must stay past the threshold.
 pub const READY_DWELL_MS: u64 = 120;
+
+thread_local! {
+    static DWELL_OVERRIDE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Hold time before a pull is ready. UI tests on a loaded machine can't
+/// rely on real time staying under 120 ms, so they may stretch it for
+/// their own thread.
+pub fn ready_dwell_ms() -> u64 {
+    DWELL_OVERRIDE.with(|d| d.get()).unwrap_or(READY_DWELL_MS)
+}
+
+/// Test hook: set this thread's dwell (`None` restores the default).
+pub fn set_ready_dwell_for_tests(ms: Option<u64>) {
+    DWELL_OVERRIDE.with(|d| d.set(ms));
+}
 const EXPAND_MS: u64 = 250;
 const RELEASE_SHOW_MS: u64 = 250;
 const RELEASE_HIDE_MS: u64 = 250;
@@ -556,7 +572,7 @@ impl PullMachine {
             // Arm the dwell on finger-down; a flick releases before it
             // fires.
             if self.dwell_due.is_none() && movement == Movement::Progress {
-                self.dwell_due = Some(now + READY_DWELL_MS);
+                self.dwell_due = Some(now + ready_dwell_ms());
             }
         } else if pull < PULL_THRESHOLD * RESET_REACHED_ON {
             self.dwell_due = None;
