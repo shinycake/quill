@@ -2,7 +2,7 @@
 /// indexed by `CALL_PROBLEMS` (schema 1.8.67, `:7253`-`:7277`).
 pub struct RatingDetail {
     pub(crate) stars: i32,
-    pub(crate) problems: [bool; 9],
+    pub(crate) problems: [bool; CALL_PROBLEMS.len()],
 }
 
 /// Phase C2i: the nine `CallProblem` constructors (TDLib 1.8.67,

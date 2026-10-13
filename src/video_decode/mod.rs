@@ -207,7 +207,8 @@ pub trait Demuxer: Send {
 }
 
 /// Turn a BGRA picture (`stride` bytes per row) upright by `rotation`
-/// clockwise degrees, packing rows tightly. Returns the pixels and size.
+/// clockwise degrees, packing rows tightly. Returns the pixels and size; an
+/// empty 0x0 picture when `src` is shorter than `stride` rows say.
 pub fn rotate_bgra(
     src: &[u8],
     width: u32,
@@ -216,9 +217,22 @@ pub fn rotate_bgra(
     rotation: u32,
 ) -> (Vec<u8>, u32, u32) {
     let (w, h) = (width as usize, height as usize);
-    let px = |x: usize, y: usize| {
+    // The last row may stop at its pixels, without the padding.
+    let fits = w.checked_mul(4).is_some_and(|row| {
+        row <= stride
+            && h.checked_sub(1)
+                .and_then(|rows| rows.checked_mul(stride))
+                .and_then(|before| before.checked_add(row))
+                .is_some_and(|need| need <= src.len())
+    });
+    if !fits {
+        return (Vec::new(), 0, 0);
+    }
+    let px = |x: usize, y: usize| -> [u8; 4] {
         let at = y * stride + x * 4;
-        [src[at], src[at + 1], src[at + 2], src[at + 3]]
+        src.get(at..at + 4)
+            .and_then(|p| p.try_into().ok())
+            .unwrap_or_default()
     };
     match rotation {
         90 | 180 | 270 => {
@@ -233,7 +247,9 @@ pub fn rotate_bgra(
                         _ => (w - 1 - oy, ox),
                     };
                     let at = (oy * ow + ox) * 4;
-                    out[at..at + 4].copy_from_slice(&px(sx, sy));
+                    if let Some(dst) = out.get_mut(at..at + 4) {
+                        dst.copy_from_slice(&px(sx, sy));
+                    }
                 }
             }
             (out, ow as u32, oh as u32)
@@ -242,7 +258,7 @@ pub fn rotate_bgra(
             let row = w * 4;
             let mut out = Vec::with_capacity(row * h);
             for y in 0..h {
-                out.extend_from_slice(&src[y * stride..y * stride + row]);
+                out.extend_from_slice(src.get(y * stride..y * stride + row).unwrap_or_default());
             }
             (out, width, height)
         }

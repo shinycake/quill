@@ -32,29 +32,37 @@ pub fn solid_png(rgb: u32) -> Vec<u8> {
 
 /// The colour of a 1x1, 8-bit RGB or RGBA PNG; `None` for anything else.
 pub fn solid_color(png: &[u8]) -> Option<u32> {
-    let mut at = 8;
+    let mut at: usize = 8;
     if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
         return None;
     }
     let mut color_type = None;
     let mut idat = Vec::new();
-    while at + 8 <= png.len() {
-        let len = u32::from_be_bytes(png[at..at + 4].try_into().ok()?) as usize;
-        let kind = &png[at + 4..at + 8];
-        let data = png.get(at + 8..at + 8 + len)?;
+    while let Some(head) = png.get(at..at.checked_add(8)?) {
+        let (len, kind) = head.split_at(4);
+        let len = u32::from_be_bytes(len.try_into().ok()?) as usize;
+        let body = at.checked_add(8)?;
+        let data = png.get(body..body.checked_add(len)?)?;
         match kind {
             b"IHDR" => {
-                let (w, h) = (&data[0..4], &data[4..8]);
-                if w != [0, 0, 0, 1] || h != [0, 0, 0, 1] || data[8] != 8 {
+                // A truncated header (shorter than width, height, bit
+                // depth and colour type) is not a PNG we can read.
+                let [w0, w1, w2, w3, h0, h1, h2, h3, depth, color, ..] = *data else {
+                    return None;
+                };
+                if [w0, w1, w2, w3] != [0, 0, 0, 1]
+                    || [h0, h1, h2, h3] != [0, 0, 0, 1]
+                    || depth != 8
+                {
                     return None;
                 }
-                color_type = Some(data[9]);
+                color_type = Some(color);
             }
             b"IDAT" => idat.extend_from_slice(data),
             b"IEND" => break,
             _ => {}
         }
-        at += 12 + len;
+        at = body.checked_add(len)?.checked_add(4)?;
     }
     let channels = match color_type? {
         2 => 3,
@@ -68,9 +76,10 @@ pub fn solid_color(png: &[u8]) -> Option<u32> {
         .ok()?;
     // One pixel: every filter predicts from zeros (no left or upper
     // neighbour), so the bytes are the colour as written.
-    if row.len() < 1 + channels || row[0] > 4 {
+    let (&filter, px) = row.split_first()?;
+    if filter > 4 || px.len() < channels {
         return None;
     }
-    let px = &row[1..1 + channels];
-    Some((u32::from(px[0]) << 16) | (u32::from(px[1]) << 8) | u32::from(px[2]))
+    let [r, g, b, ..] = *px else { return None };
+    Some((u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b))
 }

@@ -304,3 +304,35 @@ fn a_date_travels_as_a_date_entity_and_comes_back_as_a_date() {
         vec![DocSpan::new(9..13, ComposerTag::Link(url))]
     );
 }
+
+/// A selection edge inside a multi-byte character used to slice the text
+/// off a char boundary and panic.
+#[test]
+fn block_range_snaps_a_selection_inside_a_multibyte_char() {
+    let text = "h\u{e9}llo\nw\u{f6}rld\nend";
+    // Byte 2 is inside the first accented letter, byte 9 inside the second.
+    assert!(!text.is_char_boundary(2) && !text.is_char_boundary(9));
+    assert_eq!(block_range(text, &(2..9)), 0..13);
+    assert_eq!(
+        block_range(text, &std::ops::Range { start: 9, end: 2 }),
+        7..13
+    );
+    assert_eq!(block_range(text, &(100..200)), 14..text.len());
+}
+
+/// A span or emoji left inside a multi-byte character by a buggy edit path
+/// is dropped from the markup instead of panicking the serializer.
+#[test]
+fn markup_survives_ranges_off_a_char_boundary() {
+    let mut doc = ComposerDoc::plain("a\u{e9} b");
+    doc.spans.push(DocSpan::new(2..5, ComposerTag::Italic));
+    doc.spans.push(DocSpan::new(0..9, ComposerTag::Bold));
+    doc.spans
+        .push(DocSpan::new(1..2, ComposerTag::Pre(String::new())));
+    doc.emoji.push(DocEmoji {
+        range: 2..4,
+        custom_emoji_id: 1,
+    });
+    let markup = doc.to_markup();
+    assert!(markup.contains('a') && markup.contains('b'), "{markup}");
+}

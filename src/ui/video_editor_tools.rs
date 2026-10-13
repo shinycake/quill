@@ -158,8 +158,11 @@ impl QuillApp {
         let (shown_w, shown_h) = (px(width as f32 * scale), px(height as f32 * scale));
         let mut picture: Option<AnyElement> = None;
         if editor.playing {
-            let mut slot = editor.player.borrow_mut();
-            if let Some(video) = slot.as_mut().filter(|video| video.error().is_none()) {
+            // The guard lives only for the player calls: it is dropped
+            // before the frame clock is asked for a tick, and a re-entrant
+            // borrow skips this frame (the still shows) instead of aborting.
+            let frame = editor.player.try_borrow_mut().ok().and_then(|mut slot| {
+                let video = slot.as_mut().filter(|video| video.error().is_none())?;
                 let from = editor.edits.from_ms as f64 / 1000.0;
                 let till = editor.edits.till_ms as f64 / 1000.0;
                 if video.position_secs() >= till {
@@ -168,10 +171,10 @@ impl QuillApp {
                 if !video.is_playing() {
                     video.play();
                 }
-                picture = video.frame().map(|frame| {
-                    frame.element(shown_w, shown_h, ObjectFit::Fill, Corners::default())
-                });
-            }
+                video.frame()
+            });
+            picture = frame
+                .map(|frame| frame.element(shown_w, shown_h, ObjectFit::Fill, Corners::default()));
             self.request_animation_tick(30, cx);
         }
         let picture = picture.or_else(|| {

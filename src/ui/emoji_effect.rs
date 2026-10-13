@@ -575,7 +575,14 @@ impl QuillApp {
         });
         let mut clips: Vec<(usize, Option<LayeredClip>)> = Vec::new();
         for (index, _) in &waiting {
-            let sticker = ACTIVE.with(|active| active.borrow()[*index].effect.sticker.clone());
+            let Some(sticker) = ACTIVE.with(|active| {
+                active
+                    .borrow()
+                    .get(*index)
+                    .map(|a| a.effect.sticker.clone())
+            }) else {
+                continue;
+            };
             let clip = self.effect_clip(&sticker, cx);
             clips.push((*index, clip));
         }
@@ -587,7 +594,11 @@ impl QuillApp {
                     .filter_map(|a| a.clip.as_ref())
                     .map(|c| (c.started.elapsed(), c.duration))
                     .collect();
-                let entry = &mut active[index];
+                // `effect_clip` ran between collecting `index` and here; if
+                // the list shrank meanwhile, skip rather than index past it.
+                let Some(entry) = active.get_mut(index) else {
+                    continue;
+                };
                 if let Some(mut clip) = clip
                     && may_start(&playing)
                 {

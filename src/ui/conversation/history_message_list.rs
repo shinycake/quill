@@ -771,10 +771,17 @@ impl QuillApp {
                 canvas(
                     |_, _, _| {},
                     move |bounds, _, window, _| {
-                        let mut rows = probe.borrow_mut();
+                        // Take the rows out so no guard is held across the
+                        // calls below; a re-entrant borrow skips one frame.
+                        let Ok(mut slot) = probe.try_borrow_mut() else {
+                            return;
+                        };
+                        let mut rows = std::mem::take(&mut *slot);
+                        drop(slot);
                         reveal_probe.note(&rows, count, bounds.top());
-                        *hit_rows.borrow_mut() =
-                            rows.iter().map(|(ix, row, _)| (*ix, *row)).collect();
+                        if let Ok(mut hits) = hit_rows.try_borrow_mut() {
+                            *hits = rows.iter().map(|(ix, row, _)| (*ix, *row)).collect();
+                        }
                         viewport.set(Some(bounds));
                         let moved = drag_app.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
@@ -805,6 +812,12 @@ impl QuillApp {
                             .map(|(ix, _, _)| *ix);
                         let range = on_screen.clone().min().zip(on_screen.max());
                         rows.clear();
+                        // Hand the buffer back to reuse its allocation.
+                        if let Ok(mut slot) = probe.try_borrow_mut()
+                            && slot.is_empty()
+                        {
+                            *slot = rows;
+                        }
                         if top.is_some() {
                             top_probe.set(top);
                         }

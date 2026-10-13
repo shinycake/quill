@@ -52,6 +52,21 @@ fn rotate_turns_pictures_clockwise_and_packs_rows() {
     assert_eq!(ccw, [b, a].concat());
 }
 
+/// A picture shorter than `stride * height` used to index past the
+/// buffer; now it comes back empty.
+#[test]
+fn rotate_rejects_a_buffer_shorter_than_its_rows() {
+    let src = [0u8; 12];
+    for rotation in [0, 90, 180, 270] {
+        assert_eq!(rotate_bgra(&src, 2, 2, 8, rotation), (Vec::new(), 0, 0));
+        assert_eq!(rotate_bgra(&src, 4, 1, 8, rotation), (Vec::new(), 0, 0));
+        assert_eq!(rotate_bgra(&src, 2, 0, 8, rotation), (Vec::new(), 0, 0));
+    }
+    // A tight last row is enough.
+    let (out, w, h) = rotate_bgra(&src, 1, 2, 8, 0);
+    assert_eq!((out.len(), w, h), (8, 1, 2));
+}
+
 #[test]
 fn rotate_90_maps_the_left_column_to_the_top_row() {
     // 2x2: [A B / C D] turned clockwise is [C A / D B].

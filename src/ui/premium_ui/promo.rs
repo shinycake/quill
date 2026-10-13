@@ -495,7 +495,8 @@ impl QuillApp {
             *self.premium_preview.video.borrow_mut() = Some(video);
             self.premium_preview.file_id.set(Some(file_id));
         }
-        let mut slot = self.premium_preview.video.borrow_mut();
+        // A re-entrant borrow skips this frame instead of aborting.
+        let mut slot = self.premium_preview.video.try_borrow_mut().ok()?;
         let video = slot.as_mut()?;
         if video.error().is_some() {
             return None;

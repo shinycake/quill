@@ -36,6 +36,9 @@ impl CodeFence {
 pub enum LanguageError {
     TooLong,
     BadCharacter,
+    /// The draft changed since the block was found, so its range no longer
+    /// fits the text.
+    Stale,
 }
 
 impl LanguageError {
@@ -43,6 +46,7 @@ impl LanguageError {
         match self {
             Self::TooLong => "A language name has at most 32 characters.",
             Self::BadCharacter => "Use letters, digits, + or - in a language name.",
+            Self::Stale => "The code block changed. Try again.",
         }
     }
 }
@@ -100,12 +104,21 @@ pub fn with_language(
     typed: &str,
 ) -> Result<(String, Range<usize>), LanguageError> {
     let name = validate_language(typed)?;
+    let (Some(head), Some(tail)) = (
+        text.get(..fence.language.start),
+        text.get(fence.language.end..),
+    ) else {
+        return Err(LanguageError::Stale);
+    };
+    if fence.language.start > fence.language.end || fence.block.end > text.len() {
+        return Err(LanguageError::Stale);
+    }
     let mut out = String::with_capacity(text.len() + name.len());
-    out.push_str(&text[..fence.language.start]);
+    out.push_str(head);
     out.push_str(name);
-    out.push_str(&text[fence.language.end..]);
+    out.push_str(tail);
     let delta = name.len() as isize - fence.language.len() as isize;
-    let end = (fence.block.end as isize + delta) as usize;
+    let end = fence.block.end.saturating_add_signed(delta);
     Ok((out, fence.block.start..end))
 }
 
@@ -191,6 +204,24 @@ mod tests {
         assert_eq!(
             with_language(text, &fence, "no good"),
             Err(LanguageError::BadCharacter)
+        );
+    }
+
+    /// A fence found in an older draft used to slice the new one out of
+    /// range or inside a character.
+    #[test]
+    fn a_stale_fence_is_an_error_not_a_panic() {
+        let text = "intro\n```rust\nfn main() {}\n```";
+        let fence = fence_at(text, 12).unwrap();
+        assert_eq!(
+            with_language("short", &fence, "go"),
+            Err(LanguageError::Stale)
+        );
+        let accented = "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}";
+        assert!(!accented.is_char_boundary(fence.language.start));
+        assert_eq!(
+            with_language(accented, &fence, "go"),
+            Err(LanguageError::Stale)
         );
     }
 

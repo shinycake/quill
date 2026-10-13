@@ -155,19 +155,28 @@ impl QuillApp {
         }
     }
 
+    /// Runs `f` on the story's player, if there is one. The guard lasts for
+    /// `f` only, and a re-entrant borrow skips the call instead of aborting.
+    fn with_story_video<R>(&self, f: impl FnOnce(&mut NativeVideo) -> R) -> Option<R> {
+        self.stories.native.try_borrow_mut().ok()?.as_mut().map(f)
+    }
+
     /// Pause or resume the player to match `paused`.
     pub(super) fn apply_story_native_pause(&mut self, paused: bool) {
-        let mut slot = self.stories.native.borrow_mut();
-        let Some(video) = slot.as_mut() else {
-            return;
-        };
         if paused {
-            if video.is_playing() {
-                video.pause();
+            let pause = |video: &mut NativeVideo| {
+                if video.is_playing() {
+                    video.pause();
+                }
+            };
+            if self.with_story_video(pause).is_none() {
+                return;
             }
             self.stories.native_paused_by_us = true;
         } else if self.stories.native_paused_by_us {
-            video.play();
+            if self.with_story_video(NativeVideo::play).is_none() {
+                return;
+            }
             self.stories.native_play_at = Instant::now();
             self.stories.native_paused_by_us = false;
         }
@@ -789,10 +798,7 @@ impl QuillApp {
     /// `None` when no player has a picture yet (thumbnail shows instead).
     /// Asks the frame clock for the next frame while the clip plays.
     pub(super) fn story_video_element(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let picture = {
-            let mut slot = self.stories.native.borrow_mut();
-            slot.as_mut()?.frame()?
-        };
+        let picture = self.with_story_video(NativeVideo::frame).flatten()?;
         if !self.story_playback_paused() {
             self.request_media_tick(30, cx);
         }

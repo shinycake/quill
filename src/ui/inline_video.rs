@@ -626,13 +626,14 @@ impl QuillApp {
             return None;
         }
         let (chat_id, message_id) = (message.chat_id, message.id);
-        let frame =
-            self.playback
-                .inline_videos
-                .borrow_mut()
-                .frame(chat_id.0, message_id.0, tile, || {
-                    self.playable_clip_path(chat_id, message_id, file_id)
-                });
+        // A re-entrant borrow (the cell is already in use further up the
+        // stack) skips this frame rather than aborting.
+        let frame = self.playback.inline_videos.try_borrow_mut().ok()?.frame(
+            chat_id.0,
+            message_id.0,
+            tile,
+            || self.playable_clip_path(chat_id, message_id, file_id),
+        );
         // A muted loop in the conversation is drawn by its animation layer
         // (which keeps it playing) while the history replays; a clip with
         // sound or a seek ring stays with the history, ticking it.
@@ -642,15 +643,24 @@ impl QuillApp {
             && self.slices.in_conversation()
             && super::anim_layer::current().is_some();
         if !layered {
-            let videos = self.playback.inline_videos.borrow();
-            if videos.active() {
-                // Seek rings spring in and out more smoothly at 60.
-                let fps = if videos.seek_animating() { 60 } else { 30 };
-                if videos.sounding() {
-                    self.request_media_tick(fps, cx);
-                } else {
-                    self.request_animation_tick(fps, cx);
-                }
+            // Read what the tick needs and drop the guard before asking
+            // the frame clock for it.
+            let tick = self
+                .playback
+                .inline_videos
+                .try_borrow()
+                .ok()
+                .and_then(|videos| {
+                    videos.active().then(|| {
+                        // Seek rings spring in and out more smoothly at 60.
+                        let fps = if videos.seek_animating() { 60 } else { 30 };
+                        (fps, videos.sounding())
+                    })
+                });
+            match tick {
+                Some((fps, true)) => self.request_media_tick(fps, cx),
+                Some((fps, false)) => self.request_animation_tick(fps, cx),
+                None => {}
             }
         }
         // Masks over the video blend into the history behind it.

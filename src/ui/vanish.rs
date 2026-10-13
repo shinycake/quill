@@ -188,21 +188,27 @@ fn grains(seed: u64, area: Bounds<Pixels>, palette: &Palette) -> Vec<Grain> {
             if outside_corner(gx + cell / 2., gy + cell / 2.) {
                 continue;
             }
-            let color = match &palette.picture {
-                Some(picture) if gy < picture_height => {
+            // A zero-sized picture has no pixel to sample: fall through to
+            // the fill.
+            let pixel = palette
+                .picture
+                .as_ref()
+                .filter(|_| gy < picture_height)
+                .and_then(|picture| {
                     let px_x = ((gx / width) * picture.width() as f32) as u32;
                     let px_y = ((gy / picture_height) * picture.height() as f32) as u32;
-                    let pixel = picture.get_pixel(
-                        px_x.min(picture.width() - 1),
-                        px_y.min(picture.height() - 1),
-                    );
-                    Hsla::from(rgba(
-                        (u32::from(pixel[0]) << 24)
-                            | (u32::from(pixel[1]) << 16)
-                            | (u32::from(pixel[2]) << 8)
-                            | 0xff,
-                    ))
-                }
+                    picture.get_pixel_checked(
+                        px_x.min(picture.width().saturating_sub(1)),
+                        px_y.min(picture.height().saturating_sub(1)),
+                    )
+                });
+            let color = match pixel {
+                Some(pixel) => Hsla::from(rgba(
+                    (u32::from(pixel[0]) << 24)
+                        | (u32::from(pixel[1]) << 16)
+                        | (u32::from(pixel[2]) << 8)
+                        | 0xff,
+                )),
                 // Text sits inside the padding; about one grain in six there
                 // takes its color, so words leave lighter specks.
                 _ if gx > 8.
@@ -562,6 +568,20 @@ mod tests {
         let last = grains.iter().find(|g| g.x > 297.).unwrap();
         assert!(first.release < 0.07 && last.release > WIPE * 0.9);
         assert!(grains.iter().any(|g| g.color == white()));
+    }
+
+    /// A zero-width or zero-height photo preview used to underflow
+    /// `width() - 1` and panic in `get_pixel`.
+    #[test]
+    fn a_zero_sized_picture_falls_back_to_the_fill() {
+        let area = Bounds::new(point(px(0.), px(0.)), size(px(60.), px(40.)));
+        for (w, h) in [(0, 0), (0, 5), (5, 0)] {
+            let palette = Palette {
+                picture: Some(image::RgbaImage::new(w, h)),
+                ..palette()
+            };
+            assert!(!grains(3, area, &palette).is_empty());
+        }
     }
 
     #[test]
