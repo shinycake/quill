@@ -88,6 +88,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, window, cx| app.close_code_language_dialog(window, cx)
     ),
     layer!(
+        "composer-date-dialog",
+        |app| app.composer_ui.date_dialog.is_some(),
+        |app, window, cx| app.close_composer_date_dialog(window, cx)
+    ),
+    layer!(
         "composer-link-dialog",
         |app| app.composer_ui.link_dialog.is_some(),
         |app, window, cx| app.close_composer_link_dialog(window, cx)

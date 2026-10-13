@@ -106,6 +106,18 @@ pub(super) fn premium_playing(key: Key) -> bool {
     })
 }
 
+/// Whether the effect of message `key`, sent with an effect, is playing
+/// or waiting for its animation.
+#[cfg(all(test, feature = "demo-capture"))]
+pub(super) fn message_effect_playing(key: Key) -> bool {
+    ACTIVE.with(|active| {
+        active
+            .borrow()
+            .iter()
+            .any(|a| a.message.is_some() && (a.effect.chat_id.0, a.effect.message_id.0) == key)
+    })
+}
+
 /// Queue the effect of a Premium sticker. Dropped when too many wait.
 pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool) {
     ACTIVE.with(|active| {

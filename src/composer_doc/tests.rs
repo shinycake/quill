@@ -268,3 +268,39 @@ fn tags_survive_their_string_form() {
     assert_eq!(ComposerTag::from_tag("mention:x"), None);
     assert_eq!(ComposerTag::from_tag("nope"), None);
 }
+
+#[test]
+fn a_date_travels_as_a_date_entity_and_comes_back_as_a_date() {
+    use crate::composer::{date_link, date_link_time};
+    let url = date_link(1_790_632_300);
+    assert_eq!(date_link_time(&url), Some(1_790_632_300));
+    assert_eq!(date_link_time("tg://time?unix=0"), None);
+    assert_eq!(date_link_time("https://example.com"), None);
+
+    let markup = doc("Lunch at noon", &[("noon", ComposerTag::Link(url.clone()))]).to_markup();
+    let (text, entities) = parse_format_markup(&markup);
+    assert_eq!(text, "Lunch at noon");
+    assert_eq!(entities.len(), 1);
+    assert_eq!(entities[0].kind, FormatKind::DateTime);
+    assert_eq!((entities[0].offset, entities[0].length), (9, 4));
+    let json = crate::telegram::requests::format_entity_json(&entities[0]);
+    assert_eq!(json["type"]["@type"], "textEntityTypeDateTime");
+    assert_eq!(json["type"]["unix_time"], 1_790_632_300);
+    assert!(json["type"]["formatting_type"].is_null());
+
+    // A draft with a date opens with the date in place.
+    let back = ComposerDoc::from_entities(
+        "Lunch at noon",
+        &[TextEntity {
+            utf8_start: 9,
+            utf8_end: 13,
+            kind: TextEntityKind::DateTime {
+                unix_time: 1_790_632_300,
+            },
+        }],
+    );
+    assert_eq!(
+        back.spans,
+        vec![DocSpan::new(9..13, ComposerTag::Link(url))]
+    );
+}

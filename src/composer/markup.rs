@@ -29,6 +29,10 @@ pub enum FormatKind {
     /// `[Name](tg://user?id=N)` — a mention of a user without a username,
     /// sent as `textEntityTypeMentionName` (`url` keeps the link).
     MentionName,
+    /// `[text](tg://time?unix=N)` — a date shown in each reader's time
+    /// zone (tdesktop's "Date" formatting, a `custom-date://` tag there),
+    /// sent as `textEntityTypeDateTime` (`url` keeps the link).
+    DateTime,
 }
 
 /// M1: one parsed entity. Offsets are UTF-16 code units — the units TDLib
@@ -413,6 +417,8 @@ impl<'a> MarkupParser<'a> {
         }
         let kind = if mention_user_id(url).is_some() {
             FormatKind::MentionName
+        } else if date_link_time(url).is_some() {
+            FormatKind::DateTime
         } else {
             FormatKind::TextUrl
         };
@@ -458,6 +464,20 @@ pub fn mention_user_id(url: &str) -> Option<i64> {
         .parse::<i64>()
         .ok()
         .filter(|id| *id > 0)
+}
+
+/// The link a date carries in the composer: `tg://time?unix=N`.
+pub fn date_link(unix_time: i32) -> String {
+    format!("tg://time?unix={unix_time}")
+}
+
+/// The time of a date link (see [`date_link`]); TDLib takes a positive
+/// `int32` (tdesktop's date box allows 1 to 2114380800).
+pub fn date_link_time(url: &str) -> Option<i32> {
+    url.strip_prefix("tg://time?unix=")?
+        .parse::<i32>()
+        .ok()
+        .filter(|time| *time > 0)
 }
 
 /// M1: strip markup without producing entities (clear-formatting).

@@ -295,13 +295,14 @@ impl QuillApp {
         }
         // Cut / Copy / Paste / Paste as Plain Text / Select All, then the
         // Formatting submenu with its shortcuts (tdesktop's field menu).
-        let menu = edit_menu_items(menu, has_selection, true);
+        let menu = Self::unicode_control_menu(edit_menu_items(menu, has_selection, true));
         let in_code_block = if app.composer_ui.rich_editor_open {
             quill::code_language::fence_at(&input.value(), caret).is_some()
         } else {
             app.composer_code_block_at_caret(cx).is_some()
         };
-        Self::formatting_menu_items(menu.separator(), has_selection, in_code_block)
+        let date_enabled = app.composer_date_enabled(cx);
+        Self::formatting_menu_items(menu.separator(), has_selection, in_code_block, date_enabled)
     }
 
     pub(super) fn on_spelling_replace(

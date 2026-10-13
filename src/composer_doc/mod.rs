@@ -159,7 +159,8 @@ impl ComposerDoc {
                 FormatKind::Code => ComposerTag::Code,
                 FormatKind::Pre => ComposerTag::Pre(entity.language),
                 FormatKind::BlockQuote => ComposerTag::Quote,
-                FormatKind::TextUrl => ComposerTag::Link(entity.url),
+                // A date is a link to its time in the field, as in tdesktop.
+                FormatKind::TextUrl | FormatKind::DateTime => ComposerTag::Link(entity.url),
                 FormatKind::MentionName => match crate::composer::mention_user_id(&entity.url) {
                     Some(id) => ComposerTag::Mention(id),
                     None => continue,
@@ -212,6 +213,9 @@ impl ComposerDoc {
                 }
                 TextEntityKind::TextUrl { url } => ComposerTag::Link(url.clone()),
                 TextEntityKind::MentionName { user_id } => ComposerTag::Mention(*user_id),
+                TextEntityKind::DateTime { unix_time } if *unix_time > 0 => {
+                    ComposerTag::Link(crate::composer::date_link(*unix_time))
+                }
                 TextEntityKind::CustomEmoji { custom_emoji_id } => {
                     doc.emoji.push(DocEmoji {
                         range,

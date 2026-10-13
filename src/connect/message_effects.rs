@@ -28,4 +28,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         Ok(sent)
     }
+
+    /// The send menu's effect picker opened: describe every effect the
+    /// server offers (tdesktop has them all from `messages.availableEffects`)
+    /// and fetch the static icons of the ones known, which the "Send with
+    /// Effect" card's message footer shows (`preloadEffectImageFor`). The
+    /// pickers' animations download with their cells.
+    pub fn load_effect_picker(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
+        let ids: Vec<i64> = self.session.stickers.effects.available_ids().collect();
+        let mut sent = self.load_message_effects(ids)?;
+        let icons: Vec<crate::ids::FileId> = self
+            .session
+            .stickers
+            .effects
+            .available_ids()
+            .filter_map(|id| self.session.stickers.effects.get(id))
+            .filter_map(|effect| effect.icon_file())
+            .collect();
+        for file in icons {
+            if let Some(extra) = self.download_file(file, EFFECT_ICON_PRIORITY)? {
+                sent.push(extra);
+            }
+        }
+        Ok(sent)
+    }
 }
+
+/// The effect icons are small and wanted on screen now.
+const EFFECT_ICON_PRIORITY: i32 = 1;

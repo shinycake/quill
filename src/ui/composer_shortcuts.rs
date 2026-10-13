@@ -102,6 +102,13 @@ impl QuillApp {
         }
     }
 
+    /// Cmd/Ctrl+Shift+D in the composer: Formatting > Date.
+    pub(super) fn composer_date_chord(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.composer_focused(window, cx) && self.composer_date_enabled(cx) {
+            self.open_composer_date_dialog(window, cx);
+        }
+    }
+
     /// Open the link dialog for the current selection.
     pub(super) fn open_composer_link_dialog(
         &mut self,
@@ -456,6 +463,7 @@ impl QuillApp {
         menu: NativeMenu,
         has_selection: bool,
         in_code_block: bool,
+        date_enabled: bool,
     ) -> NativeMenu {
         let item = |label: &str, shortcut: ComposerShortcut, action: Box<dyn Action>| {
             (labelled(label, shortcut), action)
@@ -499,6 +507,11 @@ impl QuillApp {
                 labelled("Create link", ComposerShortcut::EditLink),
                 !has_selection,
                 Box::new(ComposerEditLink),
+            )
+            .menu_with_disabled(
+                labelled("Date", ComposerShortcut::EditDate),
+                !date_enabled,
+                Box::new(super::actions::ComposerEditDate),
             )
             .menu_with_disabled(
                 "Code Language…",

@@ -1,0 +1,6 @@
+# Message effects: picker, Send with Effect card, tests (playback was done before)
+parity:render-message-effects
+# What tdesktop's composer menu has: Insert Unicode control character
+# (Windows, RTL keyboard) and Date formatting. Subscript, superscript and
+# formula are Instant View editor items; the README wording needs updating.
+parity:composer-unicode-menu

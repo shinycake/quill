@@ -11,10 +11,9 @@
 use super::app::QuillApp;
 use super::recording::RecordMode;
 use gpui_kit::component::button::*;
-use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
+use gpui_kit::{TestSupportExt, *};
 use quill::send_button::{
     SendButtonInputs, SendButtonKind, SendMorph, format_slowmode, morph_layers, send_button_kind,
 };
@@ -142,14 +141,21 @@ impl QuillApp {
             }));
 
         if kind.has_send_menu() {
-            // Right-click: send options (silent, schedule, link preview).
-            let owner = cx.entity().downgrade();
+            // Right-click: send options (silent, schedule, link preview)
+            // and, in a chat with a user, the effect picker
+            // (`send_effects`).
             div()
                 .id("composer-send-wrap")
-                .context_menu(move |menu, _, cx| {
-                    QuillApp::send_options_menu(owner.clone(), menu, cx)
-                })
+                .test_support()
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        this.open_send_menu(event.position, sendable, window, cx);
+                    }),
+                )
                 .child(button)
+                .children(self.send_menu_overlay(cx))
                 .into_any_element()
         } else if !kind.submits() {
             // MED2: right-click flips audio/video mode (TGX tap-to-switch,

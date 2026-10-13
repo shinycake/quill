@@ -43,7 +43,8 @@ pub use edit_media_tools::{
 };
 pub use markup::{
     ComposerEntity, FormatAction, FormatKind, apply_format_markup, clear_format_markup,
-    custom_emoji_markup, entities_to_markup, find_urls, mention_user_id, parse_format_markup,
+    custom_emoji_markup, date_link, date_link_time, entities_to_markup, find_urls, mention_user_id,
+    parse_format_markup,
 };
 pub use media_options::{
     AttachmentExtras, MediaSendOptions, PAID_MEDIA_MAX_STARS, PHOTO_SIDE_LARGE,

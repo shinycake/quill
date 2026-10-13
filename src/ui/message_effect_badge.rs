@@ -13,8 +13,10 @@
 
 use super::app::QuillApp;
 use super::nested_click::SwallowPress;
+use gpui_kit::TestSupportExt;
 use gpui_kit::*;
 use quill::local_path::sandboxed_display_path;
+use quill::message_effects::MessageEffect;
 use quill::state::{HistoryMessage, Session};
 use quill::telegram::envelope::ParsedFile;
 use std::cell::RefCell;
@@ -27,7 +29,7 @@ pub(super) type Key = (i64, i64);
 /// `st::reactionInfoSize`: the badge's cell.
 pub(super) const CELL: f32 = 15.0;
 /// `st::effectInfoImage`: the picture inside the cell.
-const IMAGE: f32 = 12.0;
+pub(super) const IMAGE: f32 = 12.0;
 /// Messages remembered as having played, at most.
 const MAX_WATCHED: usize = 16_384;
 
@@ -67,6 +69,26 @@ fn unwatched(outgoing: bool, pending: bool, id: i64, last_read_inbox: i64) -> bo
     }
 }
 
+/// What the badge cell shows for `effect`: its static icon once
+/// downloaded, its emoji when it has no icon (tdesktop `generateImage`).
+pub(super) fn effect_icon(
+    effect: &MessageEffect,
+    files: &HashMap<i32, ParsedFile>,
+    media_roots: &[PathBuf],
+) -> BadgeIcon {
+    match effect.icon_file() {
+        Some(file) => files
+            .get(&file.0)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| sandboxed_display_path(path, media_roots))
+            .map_or(BadgeIcon::Waiting, BadgeIcon::Image),
+        None if effect.static_icon.is_none() && !effect.emoji.is_empty() => {
+            BadgeIcon::Emoji(effect.emoji.clone())
+        }
+        None => BadgeIcon::Waiting,
+    }
+}
+
 /// The footer badge of `message`, if it was sent with an effect.
 pub(super) fn footer_effect(
     message: &HistoryMessage,
@@ -83,16 +105,8 @@ pub(super) fn footer_effect(
         .map_or(0, |chat| chat.last_read_inbox_message_id.0);
     let icon = session
         .and_then(|session| session.stickers.effects.get(effect_id))
-        .map_or(BadgeIcon::Waiting, |effect| match effect.icon_file() {
-            Some(file) => files
-                .get(&file.0)
-                .and_then(|file| file.usable_path())
-                .and_then(|path| sandboxed_display_path(path, media_roots))
-                .map_or(BadgeIcon::Waiting, BadgeIcon::Image),
-            None if effect.static_icon.is_none() && !effect.emoji.is_empty() => {
-                BadgeIcon::Emoji(effect.emoji.clone())
-            }
-            None => BadgeIcon::Waiting,
+        .map_or(BadgeIcon::Waiting, |effect| {
+            effect_icon(effect, files, media_roots)
         });
     Some(FooterEffect {
         key: (message.chat_id.0, message.id.0),
@@ -221,7 +235,8 @@ fn is_watched(key: Key) -> bool {
     WATCHED.with(|watched| watched.borrow().contains(key))
 }
 
-fn picture(icon: &BadgeIcon) -> Option<AnyElement> {
+/// The badge's picture: the icon or the emoji, nothing while waiting.
+pub(super) fn picture(icon: &BadgeIcon) -> Option<AnyElement> {
     match icon {
         BadgeIcon::Image(path) => Some(
             img(super::image_budget::sized_media(
@@ -287,6 +302,7 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
     .size_full();
     div()
         .id(("message-effect", key.1 as u64))
+        .test_support()
         .relative()
         .flex_none()
         .w(px(CELL))

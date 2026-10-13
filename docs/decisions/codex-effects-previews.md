@@ -23,7 +23,7 @@ existing notice explains that, as before.
 Verified: unit tests for parsing, button rules, size text and card boxes.
 Not visually checked in a demo capture.
 
-## Message effects (partly done)
+## Message effects (done)
 
 tdesktop: a message with `effect_id` shows a small icon at the left of its
 footer; the effect (2x big-emoji size, 224 px) plays centred on that icon,
@@ -41,11 +41,8 @@ replay, first-show playback with the power-saving rule and window-active
 rule, following a message across its temporary-to-final id change, and unit
 tests of the core parsing and request JSON.
 
-Not done (the README item `parity:render-message-effects` stays unchecked):
-- the send-menu effect picker and "Send with Effect" preview card (the send
-  option plumbing is ready: `SendOptions.effect_id`);
-- driver tests with the recording sender for `getMessageEffect` and a send
-  with an effect, and a GPUI UI test for the badge click;
-- a demo-capture visual check of the badge and overlay.
+The send-menu picker, the "Send with Effect" card, the driver and UI
+tests and the visual check followed in
+`docs/decisions/message-effects-picker.md`.
 
 Only `parity:render-theme-wallpaper-docs` is in the parity fragment.

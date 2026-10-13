@@ -93,6 +93,12 @@ pub(crate) struct ComposerUi {
     pub(super) schedule_repeat: i32,
     /// "Silent send" shortcut: the next send alone goes without sound.
     pub(super) send_silent_once: bool,
+    /// "Send with Effect": the next send alone carries this effect
+    /// (`messageSendOptions.effect_id`); zero for none.
+    pub(super) send_effect_once: i64,
+    /// The send button's options menu and its effect picker
+    /// (`send_effects`).
+    pub(super) send_menu: super::send_effects::SendMenuUi,
     /// M1: the schedule picker popup above the composer.
     pub(super) schedule_popup_open: bool,
     /// The date+time picker behind the schedule popup (created when the
@@ -124,6 +130,8 @@ pub(crate) struct ComposerUi {
     pub(super) saved_edit_reply: Option<ComposerReplyTo>,
     /// The composer's link dialog (Cmd/Ctrl+K on a selection).
     pub(super) link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
+    /// The composer's date box (Formatting > Date).
+    pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
     /// The "Code Language" box for the fenced block under the caret.
     pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
     /// MED1: composer "group media" override for 2+ attachments; `None`
@@ -187,6 +195,8 @@ impl ComposerUi {
             scheduling: ComposerScheduling::None,
             schedule_repeat: 0,
             send_silent_once: false,
+            send_effect_once: 0,
+            send_menu: Default::default(),
             schedule_popup_open: false,
             schedule_picker: None,
             scheduled_dialog_open: false,
@@ -199,6 +209,7 @@ impl ComposerUi {
             saved_edit_draft: String::new(),
             saved_edit_reply: None,
             link_dialog: None,
+            date_dialog: None,
             code_language: None,
             group_media: None,
             send_morph: Default::default(),
