@@ -63,13 +63,21 @@ out and return, locks guard plain data, and both now survive a panic.
   running)". `pending_crash` reads only `crash-*` files, so a caught panic
   never brings up "Quill closed unexpectedly". Each kind keeps its own
   newest 10, so a burst of caught panics cannot prune a real crash report.
-- Start in tray (review follow-up b): `ui/crash_notice.rs` shows the notice
-  right away only when the main window is active. Otherwise it watches the
-  window's activation (`observe_window_activation`) and shows the notice,
-  and acknowledges the crash, the first time the window is active. A
-  session that quits without ever showing the window does not move the
-  clean-exit marker past a pending crash (`crash_log::mark_clean_exit`), so
-  the notice shows next launch.
+- Start in tray (review follow-up b): `ui/crash_notice.rs` picks the crash
+  to report once, in `install`: the newest report from before this run
+  (`crash_log::session_start()`, set by `install_panic_hook`, the first
+  line of `main`). It shows the notice right away only when the main window
+  is active. Otherwise it watches the window's activation
+  (`observe_window_activation`) and, the first time the window is active,
+  shows that crash and acknowledges exactly it.
+- Reports written during the run: a panic on a thread no guard covers (ksni
+  or zbus handlers, GPUI workers) still writes `crash-<ts>.txt` while Quill
+  keeps running. Such a report is never picked as the notice
+  (`pending_crash` ignores reports from `session_start` on), and on a clean
+  quit `mark_clean_exit` renames it to `panic-caught-<ts>.txt`, since the
+  run survived it. The clean-exit marker then moves to now, unless a crash
+  from before this run was never shown (the window stayed in the tray), in
+  which case the marker stays and that crash is reported next launch.
 - TDLib receive threads (review follow-up c): already covered, no code
   change. `telegram/client.rs` (injected bridge) and `telegram/hub.rs`
   (shared hub) both run the loop under `spawn_guarded` with a `StopGuard`
@@ -85,9 +93,14 @@ out and return, locks guard plain data, and both now survive a panic.
 
 ## Left out
 
-- `if let Ok(guard) = m.lock()` / `let Ok(..) = .. else` / `match m.lock()`
-  sites never panic: on a poisoned lock they skip their work. They stay as
-  they are (`advanced/{experimental,update_channel}.rs`, `fast_buttons.rs`,
+- Most `if let Ok(guard) = m.lock()` / `let Ok(..) = .. else` /
+  `match m.lock()` sites never panic: on a poisoned lock they skip their
+  work. The ones in files this PR already rewrote were converted to the
+  recovering helpers: `local_path.rs` (the verdict, root and directory
+  caches), `profile_photo_camera.rs` (the frame slot and the child in
+  `Drop`), `system_accent.rs` (the Linux reader thread) and
+  `calls/ptt_global_win.rs` (setting and clearing the hook context). The
+  rest stay as they are (`advanced/{experimental,update_channel}.rs`, `fast_buttons.rs`,
   `file_prefs.rs`, `notify_prefs.rs`, `web_app/trust.rs`, `media_tools.rs`,
   `video/mod.rs`, `voice.rs`, `voice_input.rs`, `paid_messages_guard.rs`,
   `export/*/handle.rs` progress writers, `sticker_playback.rs`,
@@ -97,6 +110,12 @@ out and return, locks guard plain data, and both now survive a panic.
   behavior from "skip" to "recover" and is a follow-up per site.
 - `crates/webview-host` is a separate binary that does not link `quill`;
   its one `if let Ok` lock is unchanged.
+- Follow-up (rule 9): `block2` blocks (AppKit, AVFoundation,
+  MediaPlayer and notification completion handlers) and WinRT event
+  handler closures (`windows` crate `TypedEventHandler`s for SMTC and media
+  playback) are also C-to-Rust entry points. They are not
+  `extern "C" fn`s, so this PR does not wrap them; a later PR should put
+  their bodies in `ffi_boundary` too.
 - No files owned by in-flight parity work (composer send menu, TON wallet
   rendering, channel and bot revenue screens) were touched.
 
@@ -109,7 +128,8 @@ out and return, locks guard plain data, and both now survive a panic.
   while held; a poisoned `RwLock` still reads and writes), `crash_log`
   (`panic-caught-` naming, caught reports never pending and capped on their
   own, the report kind follows the guards, a clean quit keeps an unseen
-  crash pending), `crash_notice` (`NoticeGate` opens once, on the first
+  crash from before the run pending, reports from during the run are never
+  pending and become caught reports at a clean quit), `crash_notice` (`NoticeGate` opens once, on the first
   activation).
 - UI test (`demo-capture`): a deactivated window with a pending crash shows
   no notice and leaves the crash pending; after `activate_window` the

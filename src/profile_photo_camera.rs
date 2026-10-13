@@ -105,7 +105,10 @@ impl CameraStream {
         };
         if let Err(error) = spawned {
             // Nothing would read the camera: stop ffmpeg now.
-            if let Some(mut process) = child.lock_or_recover().take() {
+            // Take the child out first so the lock is not held while
+            // ffmpeg is killed and reaped.
+            let process = child.lock_or_recover().take();
+            if let Some(mut process) = process {
                 let _ = process.kill();
                 let _ = process.wait();
             }

@@ -18,6 +18,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::panic::PanicHookInfo;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// How many crash reports stay on disk; older ones are removed after each
@@ -61,11 +62,22 @@ impl ReportKind {
 /// first thing in `main`; the previous hook (the standard stderr message)
 /// still runs after the report is written.
 pub fn install_panic_hook() {
+    session_start();
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         record_panic(info);
         previous(info);
     }));
+}
+
+static SESSION_START: OnceLock<u64> = OnceLock::new();
+
+/// Unix seconds when this run of Quill started (first asked for by
+/// `install_panic_hook`, the first line of `main`). Crash reports from
+/// before it are a previous run's; later ones were written while this run
+/// kept going (a panic on a thread no guard covers).
+pub fn session_start() -> u64 {
+    *SESSION_START.get_or_init(unix_now)
 }
 
 /// The logs folder inside the app data root (shared with the debug logs).
@@ -232,23 +244,61 @@ pub struct PendingCrash {
     pub path: PathBuf,
 }
 
-/// The newest crash report written after the last clean exit (or after the
-/// last crash already shown), if any.
+/// The newest crash report from before this run that was written after the
+/// last clean exit (or after the last crash already shown), if any.
 pub fn pending_crash(root: &Path) -> Option<PendingCrash> {
+    pending_crash_before(root, session_start())
+}
+
+/// [`pending_crash`] for a run that started at `session_start`: reports
+/// from that second on are ignored.
+pub fn pending_crash_before(root: &Path, session_start: u64) -> Option<PendingCrash> {
     let dir = log_dir(root);
     let since = read_marker(&dir).unwrap_or(0);
-    let ((unix_secs, _), path) = crash_files(&dir).into_iter().next()?;
+    let ((unix_secs, _), path) = crash_files(&dir)
+        .into_iter()
+        .find(|((unix_secs, _), _)| *unix_secs < session_start)?;
     (unix_secs > since).then_some(PendingCrash { unix_secs, path })
 }
 
-/// Record a normal quit, so the next launch shows no crash notice. A crash
-/// the user has not been told about yet (Quill stayed hidden in the tray the
-/// whole session) keeps the old marker, so the next launch still shows it.
+/// Record a normal quit, so the next launch shows no crash notice.
 pub fn mark_clean_exit(root: &Path) {
-    if pending_crash(root).is_some() {
+    mark_clean_exit_for_session(root, session_start(), unix_now());
+}
+
+/// Quitting normally proves every crash report written since
+/// `session_start` was a panic this run survived: those are renamed to
+/// caught reports. A crash from before this run that the user was never
+/// shown (Quill stayed hidden in the tray) keeps the old marker, so the next
+/// launch still shows it; otherwise the marker moves to `now`.
+fn mark_clean_exit_for_session(root: &Path, session_start: u64, now: u64) {
+    let dir = log_dir(root);
+    for ((unix_secs, _), path) in crash_files(&dir) {
+        if unix_secs >= session_start {
+            let _ = reclassify_as_caught(&dir, unix_secs, &path);
+        }
+    }
+    prune_report_files(&dir, ReportKind::Caught, KEEP_CRASH_FILES);
+    if pending_crash_before(root, session_start).is_some() {
         return;
     }
-    let _ = write_marker(&log_dir(root), unix_now());
+    let _ = write_marker(&dir, now);
+}
+
+/// Rename the crash report at `path` to a free `panic-caught-<ts>` name.
+fn reclassify_as_caught(dir: &Path, unix_secs: u64, path: &Path) -> io::Result<()> {
+    for serial in 0..100u32 {
+        let name = if serial == 0 {
+            format!("{CAUGHT_PREFIX}{unix_secs}{CRASH_SUFFIX}")
+        } else {
+            format!("{CAUGHT_PREFIX}{unix_secs}-{serial}{CRASH_SUFFIX}")
+        };
+        let target = dir.join(name);
+        if !target.exists() {
+            return fs::rename(path, target);
+        }
+    }
+    Err(io::ErrorKind::AlreadyExists.into())
 }
 
 /// The user has been told about `crash`: do not show it again.
@@ -273,8 +323,8 @@ fn write_marker(dir: &Path, unix_secs: u64) -> io::Result<()> {
 mod tests {
     use super::{
         CrashDetails, KEEP_CRASH_FILES, ReportKind, acknowledge, crash_files, format_report,
-        log_dir, mark_clean_exit, parse_report_name, pending_crash, report_files, write_crash_file,
-        write_marker, write_report_file,
+        log_dir, mark_clean_exit, mark_clean_exit_for_session, parse_report_name, pending_crash,
+        pending_crash_before, report_files, write_crash_file, write_marker, write_report_file,
     };
     use std::path::PathBuf;
 
@@ -335,6 +385,35 @@ mod tests {
         assert_eq!(pending_crash(&root), None);
         mark_clean_exit(&root);
         assert_eq!(pending_crash(&root), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reports_from_this_run_never_become_the_notice() {
+        let root = temp_root("session");
+        let dir = log_dir(&root);
+        write_marker(&dir, 1_000).unwrap();
+        // A crash before this run (started at 3_000) and a panic on an
+        // unguarded thread during it.
+        write_crash_file(&dir, 2_000, "previous run", KEEP_CRASH_FILES).unwrap();
+        write_crash_file(&dir, 3_500, "this run", KEEP_CRASH_FILES).unwrap();
+        let before = pending_crash_before(&root, 3_000).unwrap();
+        assert_eq!(before.unix_secs, 2_000, "the mid-run report is ignored");
+
+        // Hidden in the tray all run, then a clean quit: the earlier crash
+        // stays pending, the mid-run report becomes a caught one.
+        mark_clean_exit_for_session(&root, 3_000, 4_000);
+        assert_eq!(report_files(&dir, ReportKind::Caught).len(), 1);
+        let next_run = pending_crash_before(&root, 5_000).unwrap();
+        assert_eq!(next_run.unix_secs, 2_000);
+
+        // Shown and acknowledged next run, then another mid-run report and
+        // a clean quit: nothing is pending afterwards.
+        acknowledge(&root, &next_run);
+        write_crash_file(&dir, 5_500, "next run", KEEP_CRASH_FILES).unwrap();
+        mark_clean_exit_for_session(&root, 5_000, 6_000);
+        assert_eq!(pending_crash_before(&root, 7_000), None);
+        assert_eq!(crash_files(&dir).len(), 1, "only the shown crash is left");
         let _ = std::fs::remove_dir_all(&root);
     }
 

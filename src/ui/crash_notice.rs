@@ -13,21 +13,33 @@ use gpui_kit::component::WindowExt;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::{App, AppContext as _, Window};
+use quill::crash_log::PendingCrash;
 use std::path::{Path, PathBuf};
 
 /// Call once while the main window is built: arms the clean-exit marker and
 /// shows the notice after this update, once the kit root is in place.
+///
+/// The crash to report is picked here, once: the newest report from before
+/// this run. A report written later (a panic on a thread no guard covers,
+/// while Quill keeps running) never becomes this notice.
 pub(crate) fn install(window: &Window, cx: &mut App) {
     watch_clean_exit(cx);
-    if let Some(root) = quill::settings::safe_app_root() {
-        window.defer(cx, move |window, cx| show_once_visible(root, window, cx));
-    }
+    let Some(root) = quill::settings::safe_app_root() else {
+        return;
+    };
+    let Some(crash) = quill::crash_log::pending_crash(&root) else {
+        return;
+    };
+    window.defer(cx, move |window, cx| {
+        show_once_visible(root, crash, window, cx)
+    });
 }
 
 /// Write the clean-exit marker when the app quits normally. A panic ends the
 /// process without running quit observers, so the marker stays older than
-/// the crash report. A crash the user was never shown (the window stayed in
-/// the tray) keeps its notice for the next launch.
+/// the crash report. Reports written during this run are filed as caught
+/// panics; a crash the user was never shown (the window stayed in the tray)
+/// keeps its notice for the next launch (`crash_log::mark_clean_exit`).
 fn watch_clean_exit(cx: &mut App) {
     cx.on_app_quit(|_| {
         if let Some(root) = quill::settings::safe_app_root() {
@@ -38,15 +50,11 @@ fn watch_clean_exit(cx: &mut App) {
     .detach();
 }
 
-/// Show the notice now if the window is active, else the first time it
-/// becomes active (Quill started hidden in the tray). Nothing is watched
-/// when no crash is pending.
-fn show_once_visible(root: PathBuf, window: &mut Window, cx: &mut App) {
-    if quill::crash_log::pending_crash(&root).is_none() {
-        return;
-    }
+/// Show the notice for `crash` now if the window is active, else the first
+/// time it becomes active (Quill started hidden in the tray).
+fn show_once_visible(root: PathBuf, crash: PendingCrash, window: &mut Window, cx: &mut App) {
     if window.is_window_active() {
-        show_for_root(&root, window, cx);
+        show_crash(&root, &crash, window, cx);
         return;
     }
     let gate = cx.new(|_| NoticeGate::default());
@@ -57,9 +65,9 @@ fn show_once_visible(root: PathBuf, window: &mut Window, cx: &mut App) {
         cx.observe_window_activation(window, move |gate, window, cx| {
             if gate.open(window.is_window_active()) {
                 drop(keep.take());
-                let root = root.clone();
+                let (root, crash) = (root.clone(), crash.clone());
                 // Outside this activation callback and the root's update.
-                window.defer(cx, move |window, cx| show_for_root(&root, window, cx));
+                window.defer(cx, move |window, cx| show_crash(&root, &crash, window, cx));
             }
         })
         .detach();
@@ -84,16 +92,12 @@ impl NoticeGate {
     }
 }
 
-/// Show the notice when a crash report is newer than the last clean exit.
-/// Shown once: the crash is acknowledged as soon as the notice is pushed.
-/// Runs outside any update of the window's root view (the kit's
+/// Show the notice for `crash` and acknowledge exactly that crash, so it is
+/// shown once. Runs outside any update of the window's root view (the kit's
 /// notification layer is read by the root).
-fn show_for_root(root: &Path, window: &mut Window, cx: &mut App) {
-    let Some(crash) = quill::crash_log::pending_crash(root) else {
-        return;
-    };
-    quill::crash_log::acknowledge(root, &crash);
-    window.push_notification(notice(crash.path), cx);
+fn show_crash(root: &Path, crash: &PendingCrash, window: &mut Window, cx: &mut App) {
+    quill::crash_log::acknowledge(root, crash);
+    window.push_notification(notice(crash.path.clone()), cx);
 }
 
 fn notice(report: std::path::PathBuf) -> Notification {
@@ -131,7 +135,7 @@ mod gate_tests {
 
 #[cfg(all(test, feature = "demo-capture"))]
 mod tests {
-    use super::{show_for_root, show_once_visible};
+    use super::{show_crash, show_once_visible};
     use gpui_kit::component::Root;
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
@@ -159,7 +163,8 @@ mod tests {
             Root::new(cx.new(|_| Blank), window, cx)
         });
         let mut vcx = VisualTestContext::from_window(handle.into(), cx);
-        vcx.update(|window, cx| show_for_root(&root, window, cx));
+        let crash = quill::crash_log::pending_crash(&root).unwrap();
+        vcx.update(|window, cx| show_crash(&root, &crash, window, cx));
         vcx.run_until_parked();
         vcx.update(|window, cx| {
             window.render_frame(cx);
@@ -184,7 +189,8 @@ mod tests {
         let mut vcx = VisualTestContext::from_window(handle.into(), cx);
         vcx.deactivate_window();
         let armed = root.clone();
-        vcx.update(move |window, cx| show_once_visible(armed, window, cx));
+        let crash = quill::crash_log::pending_crash(&root).unwrap();
+        vcx.update(move |window, cx| show_once_visible(armed, crash, window, cx));
         vcx.run_until_parked();
         vcx.update(|window, cx| {
             window.render_frame(cx);
