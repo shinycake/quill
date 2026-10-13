@@ -6,6 +6,7 @@ use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
+use quill::locks::LockExt;
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -231,7 +232,7 @@ impl QuillApp {
             cancel.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         if let Some(slot) = self.playback.animation_extract_child.take() {
-            let child = slot.lock().ok().and_then(|mut guard| guard.take());
+            let child = slot.lock_or_recover().take();
             if let Some(mut child) = child {
                 let _ = child.kill();
                 let _ = child.wait();

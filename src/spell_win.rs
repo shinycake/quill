@@ -14,6 +14,7 @@
 //! shared Windows dictionary would leave "Remove from Dictionary"
 //! unable to know what to undo.
 
+use crate::locks::LockExt;
 use std::sync::{Mutex, mpsc};
 
 use windows::Win32::Globalization::{
@@ -186,7 +187,7 @@ impl WindowsSpellBackend {
         let job: Job = Box::new(move |c| {
             let _ = tx.send(f(c));
         });
-        self.tx.lock().ok()?.send(job).ok()?;
+        self.tx.lock_or_recover().send(job).ok()?;
         rx.recv().ok()
     }
 

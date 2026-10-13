@@ -9,6 +9,7 @@
 //! in a process-wide table (`set_palette`) the renderer reads by id,
 //! instead of threading the session through every name-color call site.
 
+use crate::locks::RwLockExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{LazyLock, RwLock};
@@ -88,7 +89,7 @@ pub fn set_palette(colors: &[NameAccentColor]) {
 /// lists the id, else the built-in (the entry's `built_in_id`, or `id`
 /// folded onto the seven built-ins).
 pub fn name_color_rgb(id: i32, dark: bool) -> u32 {
-    let entry = PALETTE.read().ok().and_then(|p| p.get(&id).cloned());
+    let entry = PALETTE.read_or_recover().get(&id).cloned();
     resolve(id, entry.as_ref(), dark)
 }
 

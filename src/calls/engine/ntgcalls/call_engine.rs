@@ -1,5 +1,6 @@
 //! The `CallEngine` trait implementation for the ntgcalls adapter.
 use super::*;
+use crate::locks::LockExt;
 
 impl CallEngine for NtgcallsEngine {
     fn start_call(
@@ -23,8 +24,7 @@ impl CallEngine for NtgcallsEngine {
         self.call_to_user.insert(call_id, user_id);
         self.callback
             .user_to_call
-            .lock()
-            .expect("ntgcalls callback map")
+            .lock_or_recover()
             .insert(user_id, call_id);
         Ok(())
     }
@@ -60,19 +60,14 @@ impl CallEngine for NtgcallsEngine {
     }
 
     fn receive_signaling_data(&self, call_id: i32, data: &[u8]) {
-        let hook = self
-            .callback
-            .hook
-            .lock()
-            .expect("ntgcalls callback hook")
-            .clone();
+        let hook = self.callback.hook.lock_or_recover().clone();
         if let Some(hook) = hook {
             hook(call_id, data.to_vec());
         }
     }
 
     fn set_signaling_emitted_callback(&mut self, callback: SignalingEmittedCallback) {
-        *self.callback.hook.lock().expect("ntgcalls callback hook") = Some(callback);
+        *self.callback.hook.lock_or_recover() = Some(callback);
     }
 
     fn set_transport_state_callback(&mut self, callback: TransportStateCallback) {
@@ -187,8 +182,7 @@ impl CallEngine for NtgcallsEngine {
         self.call_media.remove(&call_id);
         self.callback
             .user_to_call
-            .lock()
-            .expect("ntgcalls callback map")
+            .lock_or_recover()
             .remove(&user_id);
         if let Some(instance) = self.instance {
             // SAFETY: best-effort teardown on a live instance. The return
@@ -320,8 +314,7 @@ impl CallEngine for NtgcallsEngine {
         );
         self.callback
             .group_chat_to_call
-            .lock()
-            .expect("ntgcalls group call map")
+            .lock_or_recover()
             .insert(chat_id, group_call_id);
         Ok(offer)
     }
@@ -476,8 +469,7 @@ impl CallEngine for NtgcallsEngine {
             }
             self.callback
                 .group_video_ssrc_to_user
-                .lock()
-                .expect("ntgcalls group ssrc map")
+                .lock_or_recover()
                 .extend(
                     source
                         .ssrc_groups
@@ -500,8 +492,7 @@ impl CallEngine for NtgcallsEngine {
             let live = media.ssrc_to_user.clone();
             self.callback
                 .group_video_ssrc_to_user
-                .lock()
-                .expect("ntgcalls group ssrc map")
+                .lock_or_recover()
                 .retain(|key, user| key.0 != chat_id || live.get(key) == Some(user));
         }
         Ok(())

@@ -82,6 +82,7 @@ pub mod link_handler;
 pub mod link_policy;
 pub mod local_path;
 pub mod local_time;
+pub mod locks;
 pub mod main_menu;
 pub mod marketplace;
 pub mod media_session;

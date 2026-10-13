@@ -8,6 +8,7 @@
 //! microphone ([`crate::voice_input`]) and a pure-Rust Opus encoder writes
 //! the OGG ([`crate::voice_opus`]). No ffmpeg, no libopus.
 
+use crate::locks::LockExt;
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "ui")]
@@ -412,7 +413,7 @@ impl VoiceCapture {
     pub fn failure(&mut self) -> Option<String> {
         use std::sync::atomic::Ordering;
         let live = self.live.as_ref()?;
-        let error = live.mic.error.lock().ok().and_then(|mut e| e.take());
+        let error = live.mic.error.lock_or_recover().take();
         let reason = error.or_else(|| {
             let idle = self.clock.elapsed_at(Instant::now()).as_secs() >= NO_AUDIO_SECS
                 && live.samples.load(Ordering::Relaxed) == 0;
@@ -462,7 +463,7 @@ impl VoiceCapture {
             _ => wall.as_secs_f64().round() as i32,
         }
         .max(1);
-        let levels = self.levels.lock().map(|l| l.clone()).unwrap_or_default();
+        let levels = self.levels.lock_or_recover().clone();
         let mut bars = collect_waveform(&levels, WAVEFORM_SAMPLES);
         if bars.is_empty() {
             bars = std::mem::take(&mut self.bars);

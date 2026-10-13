@@ -5,6 +5,7 @@
 //! notification's account first).
 
 use super::*;
+use quill::locks::LockExt;
 use quill::notify_accounts::{ClickPlan, plan_click};
 use quill::notify_focus::{AlertInput, dnd_active, plan_alert};
 use quill::telegram::envelope::AuthorizationState;
@@ -85,12 +86,8 @@ impl QuillApp {
     /// ([`Self::flush_background_accounts`]). Called from the OS callback
     /// and from both polls (Linux clicks arrive on worker threads).
     pub(in crate::ui) fn drain_account_clicks(&mut self, cx: &mut Context<Self>) {
-        let clicks: Vec<(AccountKey, ChatId, NotificationAction)> = self
-            .background
-            .clicks
-            .lock()
-            .map(|mut guard| std::mem::take(&mut *guard))
-            .unwrap_or_default();
+        let clicks: Vec<(AccountKey, ChatId, NotificationAction)> =
+            self.background.clicks.lock_or_recover().drain(..).collect();
         if clicks.is_empty() {
             return;
         }
@@ -153,12 +150,8 @@ impl QuillApp {
         {
             window.request_attention();
         }
-        let clicks: Vec<(AccountKey, ChatId, NotificationAction)> = self
-            .background
-            .clicks
-            .lock()
-            .map(|mut guard| std::mem::take(&mut *guard))
-            .unwrap_or_default();
+        let clicks: Vec<(AccountKey, ChatId, NotificationAction)> =
+            self.background.clicks.lock_or_recover().drain(..).collect();
         let mut later = Vec::new();
         for (account, chat_id, action) in clicks {
             if action == NotificationAction::MarkRead {

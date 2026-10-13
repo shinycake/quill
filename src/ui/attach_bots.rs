@@ -4,6 +4,7 @@
 //! Each bot ships an SVG icon (`default_icon`); the driver downloads it
 //! and the entry draws it from the file, falling back to the bot glyph.
 
+use quill::locks::LockExt;
 use quill::telegram::envelope::{AttachChatKind, AttachmentMenuBot};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -55,7 +56,7 @@ fn cache() -> &'static IconCache {
 
 /// The SVG at `path`, read once (the menu rebuilds with every render).
 pub(super) fn icon_svg(path: &str) -> Option<Arc<[u8]>> {
-    let mut cache = cache().lock().ok()?;
+    let mut cache = cache().lock_or_recover();
     cache
         .entry(path.to_string())
         .or_insert_with(|| {

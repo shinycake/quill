@@ -18,6 +18,7 @@
 //!   then 5/10/15/20/25/30 s) and the counter survives a restart.
 
 use crate::ids::AccountKey;
+use crate::locks::LockExt;
 use crate::platform::{DatabaseKey, SecretStore, SecretStoreError};
 use crate::settings::AccountPaths;
 use base64::Engine;
@@ -117,20 +118,20 @@ impl UnlockState {
     }
 
     pub fn set(&self, key: MasterKey) {
-        *self.key.lock().expect("unlock state") = Some(key);
+        *self.key.lock_or_recover() = Some(key);
     }
 
     /// Forget the master key (locking). Dropping it zeroizes the bytes.
     pub fn clear(&self) {
-        *self.key.lock().expect("unlock state") = None;
+        *self.key.lock_or_recover() = None;
     }
 
     pub fn is_unlocked(&self) -> bool {
-        self.key.lock().expect("unlock state").is_some()
+        self.key.lock_or_recover().is_some()
     }
 
     pub fn key(&self) -> Option<MasterKey> {
-        self.key.lock().expect("unlock state").clone()
+        self.key.lock_or_recover().clone()
     }
 }
 
@@ -786,7 +787,7 @@ static IDLE: std::sync::Mutex<IdleCache> = std::sync::Mutex::new(IdleCache::Unkn
 
 #[cfg(target_os = "linux")]
 fn linux_idle_cache() -> IdleCache {
-    *IDLE.lock().unwrap_or_else(|e| e.into_inner())
+    *IDLE.lock_or_recover()
 }
 
 #[cfg(target_os = "linux")]
@@ -855,7 +856,7 @@ fn linux_idle_start() {
     linux_now_ms(); // pin the clock origin before the first sample
     // A sample from before a pause would extrapolate to a bogus huge idle
     // time (and lock spuriously); drop it until the fresh one lands.
-    *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = IdleCache::Unknown;
+    *IDLE.lock_or_recover() = IdleCache::Unknown;
     let spawned = crate::thread_guard::spawn_guarded("quill-idle", || {
         #[cfg(feature = "ui")]
         let conn = zbus::blocking::Connection::session().ok();
@@ -881,7 +882,7 @@ fn linux_idle_start() {
                 },
                 None => IdleCache::Failed,
             };
-            *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = state;
+            *IDLE.lock_or_recover() = state;
             if state == IdleCache::Failed {
                 IDLE_RUNNING.store(false, Ordering::Release);
                 return;
@@ -890,7 +891,7 @@ fn linux_idle_start() {
         }
     });
     if spawned.is_err() {
-        *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = IdleCache::Failed;
+        *IDLE.lock_or_recover() = IdleCache::Failed;
         IDLE_RUNNING.store(false, Ordering::Release);
     }
 }

@@ -2,6 +2,7 @@
 //! playback, the audio track and the system media session.
 
 use super::*;
+use quill::locks::LockExt;
 
 impl QuillApp {
     /// Start viewer playback when the current item is a video whose clip is
@@ -207,7 +208,7 @@ impl QuillApp {
         if let Some(slot) = self.viewer.extract_child.take() {
             // Take the child out of the lock before kill/wait: the worker
             // only holds the lock briefly around `try_wait`.
-            let child = slot.lock().ok().and_then(|mut guard| guard.take());
+            let child = slot.lock_or_recover().take();
             drop(slot);
             if let Some(mut child) = child {
                 let _ = child.kill();

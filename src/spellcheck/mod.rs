@@ -395,13 +395,13 @@ impl Default for SpellChecker {
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    crate::locks::lock_or_recover(m)
 }
 fn read<T>(m: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
-    m.read().unwrap_or_else(|e| e.into_inner())
+    crate::locks::read_or_recover(m)
 }
 fn write<T>(m: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
-    m.write().unwrap_or_else(|e| e.into_inner())
+    crate::locks::write_or_recover(m)
 }
 
 /// Lowercase for ignore / app-word comparison.

@@ -46,20 +46,29 @@ impl Drop for Handle {
 unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     // HC_ACTION == 0; negative codes must be passed on untouched.
     if code == 0 && lparam != 0 {
-        let info = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
-        let pressed = match wparam as u32 {
-            WM_KEYDOWN | WM_SYSKEYDOWN => Some(true),
-            WM_KEYUP | WM_SYSKEYUP => Some(false),
-            _ => None,
-        };
-        if let (Some(pressed), Ok(mut guard)) = (pressed, CONTEXT.try_lock())
-            && let Some(ctx) = guard.as_mut()
-            && ctx.active.load(Ordering::SeqCst)
-            && let Some(edge) = ctx.filter.feed(info.vkCode, pressed)
-        {
-            (ctx.sink)(edge);
-        }
+        // A panic in the filter or the sink must not unwind into Windows;
+        // the next hook is called either way.
+        crate::thread_guard::ffi_boundary((), || {
+            // SAFETY: for HC_ACTION, `lparam` points to the KBDLLHOOKSTRUCT
+            // Windows passes for this call (checked non-null above).
+            let info = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
+            let pressed = match wparam as u32 {
+                WM_KEYDOWN | WM_SYSKEYDOWN => Some(true),
+                WM_KEYUP | WM_SYSKEYUP => Some(false),
+                _ => None,
+            };
+            if let (Some(pressed), Some(mut guard)) =
+                (pressed, crate::locks::try_lock_or_recover(&CONTEXT))
+                && let Some(ctx) = guard.as_mut()
+                && ctx.active.load(Ordering::SeqCst)
+                && let Some(edge) = ctx.filter.feed(info.vkCode, pressed)
+            {
+                (ctx.sink)(edge);
+            }
+        });
     }
+    // SAFETY: forwarding this hook call's own arguments, as the
+    // WH_KEYBOARD_LL contract requires.
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
 }
 
@@ -74,13 +83,11 @@ fn run_hook(
         let mut msg: MSG = std::mem::zeroed();
         // Creates this thread's message queue so WM_QUIT can be posted.
         PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
-        if let Ok(mut guard) = CONTEXT.lock() {
-            *guard = Some(Context {
-                filter: KeyFilter::new(target),
-                sink,
-                active: active.clone(),
-            });
-        }
+        *crate::locks::lock_or_recover(&CONTEXT) = Some(Context {
+            filter: KeyFilter::new(target),
+            sink,
+            active: active.clone(),
+        });
         let module = GetModuleHandleW(std::ptr::null());
         let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(on_key), module, 0);
         if hook.is_null() {
@@ -102,10 +109,10 @@ fn run_hook(
 
 /// Drop the global context, unless a newer hook already replaced it.
 fn clear_context(active: &Arc<AtomicBool>) {
-    if let Ok(mut guard) = CONTEXT.lock()
-        && guard
-            .as_ref()
-            .is_some_and(|ctx| Arc::ptr_eq(&ctx.active, active))
+    let mut guard = crate::locks::lock_or_recover(&CONTEXT);
+    if guard
+        .as_ref()
+        .is_some_and(|ctx| Arc::ptr_eq(&ctx.active, active))
     {
         *guard = None;
     }

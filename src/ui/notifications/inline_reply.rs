@@ -6,6 +6,7 @@
 
 use super::*;
 use quill::composer::{ComposerReplyTo, ComposerSnapshot};
+use quill::locks::LockExt;
 use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
@@ -78,9 +79,9 @@ impl QuillApp {
         let clicks: Vec<(ChatId, NotificationAction)> = self
             .notify
             .notify_clicks
-            .lock()
-            .map(|mut guard| std::mem::take(&mut *guard))
-            .unwrap_or_default();
+            .lock_or_recover()
+            .drain(..)
+            .collect();
         if clicks.is_empty() {
             return;
         }

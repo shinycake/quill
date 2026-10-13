@@ -5,6 +5,7 @@ use crate::calls::engine::{
     RtcServer, TransportState, VideoFrame, video_wanted,
 };
 use crate::ids::RequestId;
+use crate::locks::LockExt;
 use crate::state::CallsPurpose;
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{CallState, ReadyParams};
@@ -51,16 +52,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn set_call_engine(&mut self, mut engine: Box<dyn CallEngine>) {
         let outbox = self.signaling_outbox.clone();
         engine.set_signaling_emitted_callback(Arc::new(move |call_id, data| {
-            outbox
-                .lock()
-                .expect("call signaling outbox")
-                .push_back((call_id, data));
+            outbox.lock_or_recover().push_back((call_id, data));
         }));
         let transport_outbox = self.transport_outbox.clone();
         engine.set_transport_state_callback(Arc::new(move |call_id, state| {
             transport_outbox
-                .lock()
-                .expect("call transport outbox")
+                .lock_or_recover()
                 .push_back((call_id, state));
         }));
         self.install_remote_state_hooks(engine.as_mut());
@@ -72,15 +69,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             // (call id, is_local) keys stay untouched.
             if let Some(user_id) = frame.participant_user_id {
                 group_video_frame_slots
-                    .lock()
-                    .expect("group video frame slots")
+                    .lock_or_recover()
                     .insert((call_id, user_id, frame.is_screen), frame);
             } else {
                 // Phase C2j: the screen share gets its own slot keyed on
                 // `is_screen` so it never clobbers the peer camera frame.
                 video_frame_slots
-                    .lock()
-                    .expect("call video frame slots")
+                    .lock_or_recover()
                     .insert((call_id, frame.is_local, frame.is_screen), frame);
             }
         }));
@@ -225,8 +220,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// own slot — see `latest_screen_frame`.
     pub fn latest_video_frame(&self, call_id: i32, is_local: bool) -> Option<VideoFrame> {
         self.video_frame_slots
-            .lock()
-            .expect("call video frame slots")
+            .lock_or_recover()
             .get(&(call_id, is_local, false))
             .cloned()
     }
@@ -238,8 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the slot warm and drops it when the peer's share goes inactive.
     pub fn latest_screen_frame(&self, call_id: i32) -> Option<VideoFrame> {
         self.video_frame_slots
-            .lock()
-            .expect("call video frame slots")
+            .lock_or_recover()
             .get(&(call_id, false, true))
             .cloned()
     }
@@ -254,8 +247,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         screen: bool,
     ) -> Option<VideoFrame> {
         self.group_video_frame_slots
-            .lock()
-            .expect("group video frame slots")
+            .lock_or_recover()
             .get(&(group_call_id, user_id, screen))
             .cloned()
     }
@@ -407,8 +399,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Phase C2e: drop any retained frames for the ended call so
             // the UI cannot render a stale picture.
             self.video_frame_slots
-                .lock()
-                .expect("call video frame slots")
+                .lock_or_recover()
                 .retain(|(slot_call_id, _, _), _| *slot_call_id != call_id);
             self.call_connect_params = None;
             self.reconnect_attempts = 0;
@@ -485,11 +476,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
 
         loop {
-            let update = self
-                .transport_outbox
-                .lock()
-                .expect("call transport outbox")
-                .pop_front();
+            let update = self.transport_outbox.lock_or_recover().pop_front();
             let Some((call_id, state)) = update else {
                 break;
             };
@@ -548,11 +535,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // transport — only the reducer-tracked active call is updated;
         // emissions for an unknown or ended call are dropped.
         loop {
-            let update = self
-                .video_state_outbox
-                .lock()
-                .expect("call video state outbox")
-                .pop_front();
+            let update = self.video_state_outbox.lock_or_recover().pop_front();
             let Some((call_id, state)) = update else {
                 break;
             };
@@ -577,11 +560,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `Inactive`, closing the race where a late frame arriving
         // after the drain would otherwise repopulate the slot.
         loop {
-            let update = self
-                .screen_state_outbox
-                .lock()
-                .expect("call screen state outbox")
-                .pop_front();
+            let update = self.screen_state_outbox.lock_or_recover().pop_front();
             let Some((call_id, state)) = update else {
                 break;
             };
@@ -597,20 +576,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             if state != RemoteVideoState::Inactive {
                 continue;
             }
-            self.video_frame_slots
-                .lock()
-                .expect("call video frame slots")
-                .retain(|(slot_call_id, _, slot_is_screen), _| {
-                    *slot_call_id != call_id || !slot_is_screen
-                });
+            self.video_frame_slots.lock_or_recover().retain(
+                |(slot_call_id, _, slot_is_screen), _| *slot_call_id != call_id || !slot_is_screen,
+            );
         }
 
         loop {
-            let emitted = self
-                .signaling_outbox
-                .lock()
-                .expect("call signaling outbox")
-                .pop_front();
+            let emitted = self.signaling_outbox.lock_or_recover().pop_front();
             let Some((call_id, data)) = emitted else {
                 break;
             };
@@ -624,8 +596,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // them in order instead of dropping them.
                 self.session.requests.take(extra);
                 self.signaling_outbox
-                    .lock()
-                    .expect("call signaling outbox")
+                    .lock_or_recover()
                     .push_front((call_id, data));
                 return Err(err);
             }
@@ -654,8 +625,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Never keep an unmuted replacement transport behind a muted UI.
             let _ = engine.hangup(call_id);
             self.transport_outbox
-                .lock()
-                .expect("call transport outbox")
+                .lock_or_recover()
                 .retain(|(id, _)| *id != call_id);
             return Err(error);
         }

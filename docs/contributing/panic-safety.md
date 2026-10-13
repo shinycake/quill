@@ -52,9 +52,11 @@ These rules apply to every PR, human or agent. Tests are exempt: `unwrap`,
     aborts the process.
 13. **Recursive walks over received data carry a depth limit.**
 
-The three helpers in rules 9 to 11 land in the first fix PRs of the audit
-plan. Until then, write the `catch_unwind` / `unwrap_or_else(PoisonError::into_inner)`
-by hand.
+The helpers for rules 9 to 11 live in `crate::thread_guard`
+(`ffi_boundary`, `spawn_guarded`) and `crate::locks` (`lock_or_recover`,
+`read_or_recover`, `write_or_recover`, `try_lock_or_recover`, and the
+`LockExt` / `RwLockExt` method forms). A panic caught by either guard is
+logged as `panic-caught-<ts>.txt` and does not count as a crash.
 
 When something truly cannot fail and the alternative would be worse code,
 write `#[expect(clippy::<lint>, reason = "<the invariant>")]` on the smallest
