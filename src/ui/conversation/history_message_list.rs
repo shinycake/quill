@@ -552,6 +552,7 @@ impl QuillApp {
             };
             self.history.rows = rows;
             self.history.had_newer = has_newer;
+            self.history_a11y_rows_changed(cx);
             // A new or replaced window: start at the jump target, else at the
             // "Unread messages" divider, else at the bottom.
             if self.history.anchor_pending && !self.history.rows.is_empty() {
@@ -745,7 +746,15 @@ impl QuillApp {
                 .with_jump_button_renderer({
                     let jump = cx.weak_entity();
                     move |button| {
+                        // tdesktop `lng_jump_to_bottom`; the badge's count
+                        // follows the name, as on the other jump buttons.
+                        let name = if unread_count > 0 {
+                            format!("Jump to bottom, {unread_count}")
+                        } else {
+                            "Jump to bottom".to_string()
+                        };
                         button
+                            .accessibility_label(name)
                             .when(unread_count > 0, |button| {
                                 button.label(unread_count.to_string())
                             })
@@ -894,6 +903,27 @@ impl QuillApp {
         .absolute()
         .inset_0()
         .size_full();
+        // Screen-reader focus (`history_a11y`): the focused message, or the
+        // unread bar, is the focused history's active descendant.
+        let (row_focused, bar_focused) = self.history_a11y_row_focus(ix);
+        let a11y_focus = row_focused.then(|| row.first_id()).flatten().map(|id| {
+            (
+                super::super::history_a11y::row_element_id(id),
+                self.history_row_a11y_name(row),
+            )
+        });
+        let element = match a11y_focus {
+            Some((id, name)) => div()
+                .id(id)
+                .role(Role::ListItem)
+                .aria_label(name)
+                .aria_active_descendant()
+                .flex()
+                .flex_col()
+                .child(element)
+                .into_any_element(),
+            None => element,
+        };
         div()
             .relative()
             .flex()
@@ -911,7 +941,7 @@ impl QuillApp {
                     .and_then(|s| viewed.and_then(|chat| s.histories.get(&chat.0)))
                     .map_or(0, |h| h.unread_at_open);
                 this.child(super::chat_palette::with_palette(palette, false, || {
-                    unread_divider(unread_at_open, wide, cx)
+                    unread_divider(unread_at_open, wide, bar_focused, cx)
                 }))
             })
             .child(element)

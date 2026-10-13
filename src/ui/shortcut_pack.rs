@@ -11,6 +11,7 @@
 
 use super::app::{ChatListFilter, PaneMode, QuillApp};
 use super::chat_row::ChatListItem;
+use super::history_a11y::A11yKey;
 use super::menu_states::ChatMenuState;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -256,6 +257,21 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) || self.session().and_then(|s| s.open_chat).is_none() {
             return false;
         }
+        // A screen reader on the focused history: the keys move its focus.
+        let page = self
+            .history
+            .scroll_view_probe
+            .get()
+            .map_or(1, |(first, last)| last.saturating_sub(first));
+        let a11y_key = match key {
+            HistoryKey::PageUp => A11yKey::PageUp(page),
+            HistoryKey::PageDown => A11yKey::PageDown(page),
+            HistoryKey::Top => A11yKey::Home,
+            HistoryKey::Bottom => A11yKey::End,
+        };
+        if let Some(handled) = self.history_a11y_key(a11y_key, false, window, cx) {
+            return handled;
+        }
         if self.composer_has_focus(window, cx)
             && matches!(key, HistoryKey::PageUp | HistoryKey::PageDown)
             && self.composer.read(cx).value().contains('\n')
@@ -375,7 +391,14 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.open_chat)
                 .is_some_and(|chat| self.selecting_in(chat));
-            if selecting && self.toggle_focused_selection_by_key(window, cx) {
+            // Space toggles the selection when there is one, else plays the
+            // focused media for a screen reader (`playPauseFocusedMedia`).
+            let handled = if selecting {
+                self.toggle_focused_selection_by_key(window, cx)
+            } else {
+                self.history_a11y_play_pause(window, cx)
+            };
+            if handled {
                 cx.stop_propagation();
             }
             return;
@@ -423,6 +446,22 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
+        let key = if older { A11yKey::Up } else { A11yKey::Down };
+        if let Some(handled) = self.history_a11y_key(key, extend, window, cx) {
+            return handled;
+        }
+        self.step_selection_focus(older, extend, window, cx)
+    }
+
+    /// The selection-mode move behind Up / Down (and the screen reader's
+    /// Shift+Up / Down, `history_a11y`).
+    pub(super) fn step_selection_focus(
+        &mut self,
+        older: bool,
+        extend: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
             return false;
         };

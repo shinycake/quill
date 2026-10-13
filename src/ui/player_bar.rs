@@ -193,7 +193,7 @@ impl QuillApp {
     }
 
     /// Whether the bar offers previous / next for the active track.
-    fn playlist_can_move(&self) -> (bool, bool) {
+    pub(super) fn playlist_can_move(&self) -> (bool, bool) {
         if self.active_playback_kind() != PlaybackKind::Audio {
             return (false, false);
         }

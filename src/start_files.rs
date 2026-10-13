@@ -27,6 +27,30 @@ const MAX_QUEUED: usize = 256;
 /// Prefix of a file path forwarded to the running instance, so the owner
 /// can tell it from a link or a flag.
 const FORWARD_PREFIX: &str = "--send-file=";
+/// Asks a running Quill to quit (tdesktop `-quit`, which its Windows jump
+/// list and Linux desktop action pass). `-quit` is accepted too.
+pub const QUIT_FLAG: &str = "--quit";
+/// GPUI's Windows jump list launches `quill --dock-action <index>`; Quill's
+/// only task there, "Quit Quill", is index 0.
+const DOCK_ACTION_FLAG: &str = "--dock-action";
+const DOCK_ACTION_QUIT: &str = "0";
+
+/// Whether the launch arguments ask the running Quill to quit: `--quit`,
+/// tdesktop's `-quit`, or the jump list's "Quit Quill" task.
+pub fn quit_requested(args: &[String]) -> bool {
+    let mut flags = args.iter().take_while(|arg| arg.as_str() != "--");
+    let mut wanted = false;
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            QUIT_FLAG | "-quit" => wanted = true,
+            DOCK_ACTION_FLAG => {
+                wanted |= flags.next().map(String::as_str) == Some(DOCK_ACTION_QUIT)
+            }
+            _ => {}
+        }
+    }
+    wanted
+}
 
 /// What the launch arguments ask for.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -46,12 +70,18 @@ pub struct StartArgs {
 pub fn parse_start_args(args: &[String], cwd: &Path) -> StartArgs {
     let mut parsed = StartArgs::default();
     let mut positional = false;
+    let mut skip_value = false;
     for arg in args {
+        if std::mem::take(&mut skip_value) {
+            continue;
+        }
         if !positional && arg == "--" {
             positional = true;
             continue;
         }
         if !positional && arg.starts_with('-') {
+            // The jump list's index is the flag's value, not a file name.
+            skip_value = arg == DOCK_ACTION_FLAG;
             continue;
         }
         if arg.len() > MAX_ARG_BYTES {
@@ -120,10 +150,13 @@ fn percent_decode(input: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// What a second launch sends the running instance: its links and flag
-/// (`--start-minimized`) as the instance already understands them, plus one
-/// `--send-file=<absolute path>` per file.
+/// What a second launch sends the running instance: its links and flags
+/// (`--start-minimized`, `--quit`) as the instance already understands them,
+/// plus one `--send-file=<absolute path>` per file.
 pub fn forwarded_args(args: &[String], cwd: &Path) -> Vec<String> {
+    if quit_requested(args) {
+        return vec![QUIT_FLAG.to_string()];
+    }
     let parsed = parse_start_args(args, cwd);
     let start_minimized = args.iter().any(|arg| arg == "--start-minimized");
     parsed
@@ -225,7 +258,8 @@ pub fn take_files() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        FORWARD_PREFIX, MAX_ARG_BYTES, StartArgs, forwarded_args, parse_start_args, split_forwarded,
+        FORWARD_PREFIX, MAX_ARG_BYTES, QUIT_FLAG, StartArgs, forwarded_args, parse_start_args,
+        quit_requested, split_forwarded,
     };
     use std::path::PathBuf;
 
@@ -327,5 +361,29 @@ mod tests {
         ]));
         assert!(files.is_empty());
         assert_eq!(rest, vec!["--other"]);
+    }
+
+    #[test]
+    fn quit_flags_and_the_jump_list_task_ask_the_running_quill_to_quit() {
+        assert!(quit_requested(&args(&["--quit"])));
+        assert!(quit_requested(&args(&["-quit"])));
+        assert!(quit_requested(&args(&["--dock-action", "0"])));
+        assert!(!quit_requested(&args(&["--dock-action", "1"])));
+        assert!(!quit_requested(&args(&["--dock-action"])));
+        assert!(!quit_requested(&args(&["--", "--quit"])));
+        assert!(!quit_requested(&args(&["tg://resolve?domain=a"])));
+        let dir = scratch("quit");
+        assert_eq!(
+            forwarded_args(&args(&["--dock-action", "0"]), &dir),
+            vec![QUIT_FLAG.to_string()]
+        );
+    }
+
+    #[test]
+    fn the_jump_list_index_is_never_read_as_a_file() {
+        let dir = scratch("dock-index");
+        std::fs::write(dir.join("0"), b"x").unwrap();
+        let parsed = parse_start_args(&args(&["--dock-action", "0"]), &dir);
+        assert!(parsed.files.is_empty());
     }
 }

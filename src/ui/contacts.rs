@@ -88,6 +88,15 @@ impl QuillApp {
         dialog: Dialog,
         cx: &mut App,
     ) -> Dialog {
+        let new_contact = app
+            .read(cx)
+            .dialogs
+            .add_contact_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.user_id == 0);
+        if new_contact {
+            return Self::build_new_contact_dialog(app, shell, dialog, cx);
+        }
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::AddContact, |this, _, cx| {
                 this.close_add_contact_dialog(cx);

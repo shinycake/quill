@@ -85,7 +85,7 @@ impl Session {
                 ) {
                     self.apply_created_bot(user_id, pending);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {
-                    self.users_state.support_user_ready = Some(user_id);
+                    self.users_state.user_chat_to_open = Some(user_id);
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -157,8 +157,20 @@ impl Session {
             // the `ok` of the other contact mutations; the user ids are
             // not merged into the cache (the tab refetches the
             // authoritative list).
-            UsersPayload::ImportedContacts { .. } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
+            UsersPayload::ImportedContacts { user_ids } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContactByPhone) {
+                    // tdesktop `AddContactBox::save`: a user id means the
+                    // phone is on Telegram (open the chat), 0 means not.
+                    self.users_state.contacts = None;
+                    self.users_state.contacts_error = false;
+                    let user_id = user_ids.first().copied().unwrap_or_default();
+                    self.users_state.new_contact_outcome = Some(if user_id != 0 {
+                        self.users_state.user_chat_to_open = Some(user_id);
+                        NewContactOutcome::Joined(user_id)
+                    } else {
+                        NewContactOutcome::NotJoined
+                    });
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
                     self.users_state.contacts = None;
                     self.users_state.contacts_error = false;
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());

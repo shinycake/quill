@@ -151,9 +151,10 @@ pub fn linux_desktop_entry(exe: &std::path::Path) -> String {
     format!(
         "[Desktop Entry]\nType=Application\nName=Quill\n\
          Comment=Unofficial Telegram desktop client\n\
-         Exec={} %u\nIcon=quill\nTerminal=false\n\
-         Categories=Network;Chat;\nMimeType={LINUX_SCHEME_MIME};\n",
-        crate::autostart::desktop_exec(exe)
+         Exec={exec} %u\nIcon=quill\nTerminal=false\n\
+         Categories=Network;Chat;\nMimeType={LINUX_SCHEME_MIME};\nActions=quit;\n\n\
+         [Desktop Action quit]\nName=Quit Quill\nExec={exec} --quit\nIcon=application-exit\n",
+        exec = crate::autostart::desktop_exec(exe)
     )
 }
 
@@ -593,6 +594,12 @@ mod tests {
         let plain = linux_desktop_entry(Path::new("/opt/quill/quill"));
         assert!(plain.contains("Exec=/opt/quill/quill %u\n"));
         assert!(plain.contains("MimeType=x-scheme-handler/tg;\n"));
+        // tdesktop's desktop entry offers "Quit Telegram" (`-quit`).
+        assert!(plain.contains("Actions=quit;\n"));
+        assert!(
+            plain
+                .contains("[Desktop Action quit]\nName=Quit Quill\nExec=/opt/quill/quill --quit\n")
+        );
         assert!(plain.starts_with("[Desktop Entry]\nType=Application\n"));
         let spaced = linux_desktop_entry(Path::new("/home/a b/Quill/quill"));
         assert!(spaced.contains("Exec=\"/home/a b/Quill/quill\" %u\n"));

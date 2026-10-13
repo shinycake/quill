@@ -227,6 +227,41 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// The New Contact box (tdesktop `AddContactBox::save` with no user):
+    /// `importContacts` with the one phone contact. The answer lands in
+    /// `UsersState::new_contact_outcome`, and a phone on Telegram opens the
+    /// chat. `Ok(None)` while one is in flight.
+    pub fn add_contact_by_phone(
+        &mut self,
+        phone_number: &str,
+        first_name: &str,
+        last_name: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::AddContactByPhone;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        self.session.users_state.new_contact_outcome = None;
+        let contact = ImportedContact {
+            phone_number: phone_number.to_string(),
+            first_name: first_name.to_string(),
+            last_name: last_name.to_string(),
+            note: String::new(),
+        };
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&import_contacts(extra, std::slice::from_ref(&contact)))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
     /// Slice A6: "Delete synced contacts" (TGX
     /// `TdlibContactManager.deleteContacts`, `SyncContactsDeleteInfo`) —
     /// `clearImportedContacts` (schema 1.8.67, line 14539) wipes the

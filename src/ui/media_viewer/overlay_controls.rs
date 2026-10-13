@@ -235,6 +235,7 @@ impl QuillApp {
             .child(
                 Button::new(("media-viewer-zoom-out", row_id))
                     .label("−")
+                    .accessibility_label("Zoom Out")
                     .ghost()
                     .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -250,6 +251,7 @@ impl QuillApp {
             .child(
                 Button::new(("media-viewer-zoom-in", row_id))
                     .label("+")
+                    .accessibility_label("Zoom In")
                     .ghost()
                     .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {

@@ -81,6 +81,9 @@ pub(super) struct Slices {
     pub(super) conversation_rendered: Cell<bool>,
     /// The conversation slot was part of the last `QuillApp` render.
     pub(super) conversation_shown: Cell<bool>,
+    /// A screen reader (or another accessibility client) reads the window:
+    /// slices are embedded uncached (see [`embed_slice`]).
+    pub(super) a11y_active: Cell<bool>,
 }
 
 impl Slices {
@@ -266,7 +269,11 @@ impl QuillApp {
             Some(parts) => {
                 super::image_budget::slice_shown(parts.slice.entity_id());
                 column
-                    .child(parts.slice.clone().cached(full()))
+                    .child(embed_slice(
+                        &parts.slice,
+                        full(),
+                        self.slices.a11y_active.get(),
+                    ))
                     .child(parts.painter.clone())
                     .into_any_element()
             }
@@ -335,14 +342,18 @@ impl QuillApp {
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
-                    .child(parts.slice.clone().cached(full()))
+                    .child(embed_slice(
+                        &parts.slice,
+                        full(),
+                        self.slices.a11y_active.get(),
+                    ))
                     .child(parts.painter.clone()),
             )
-            .child(
-                composer
-                    .clone()
-                    .cached(StyleRefinement::default().w_full().h(height).flex_none()),
-            )
+            .child(embed_slice(
+                composer,
+                StyleRefinement::default().w_full().h(height).flex_none(),
+                self.slices.a11y_active.get(),
+            ))
             .children(hint)
             .children(drop_overlay)
             .children(emoji_effects)
@@ -406,6 +417,21 @@ impl QuillApp {
 
 fn full() -> StyleRefinement {
     StyleRefinement::default().size_full()
+}
+
+/// A slice in its box. GPUI rebuilds the accessibility tree every frame
+/// but a cached view that replays its last frame adds no nodes, so while
+/// an accessibility client is reading the window a cached slice would drop
+/// out of the tree (the chat list vanishing whenever the caret blinks).
+/// Then every slice renders each frame, in a box with the cached style.
+fn embed_slice(slice: &Entity<AppSlice>, style: StyleRefinement, a11y_active: bool) -> AnyElement {
+    if a11y_active {
+        let mut slot = div();
+        slot.style().refine(&style);
+        slot.child(slice.clone()).into_any_element()
+    } else {
+        slice.clone().cached(style).into_any_element()
+    }
 }
 
 impl Render for AppSlice {

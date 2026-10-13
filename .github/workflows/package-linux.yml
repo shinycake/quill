@@ -148,6 +148,7 @@ jobs:
           bash "$RUNNER_TEMP/extract/quill-linux-x86_64/install.sh" "$RUNNER_TEMP/prefix"
           "$RUNNER_TEMP/prefix/bin/quill" --version
           grep -q "^Exec=$RUNNER_TEMP/prefix/opt/quill/quill" "$RUNNER_TEMP/prefix/share/applications/quill.desktop"
+          grep -qx "Exec=$RUNNER_TEMP/prefix/opt/quill/quill --quit" "$RUNNER_TEMP/prefix/share/applications/quill.desktop"
       # The in-app updater (src/updater.rs) downloads the bare executable named
       # quill-linux-x86_64 and swaps it in place inside the package directory,
       # so ship the packaged binary (RUNPATH $ORIGIN/lib) under that name.

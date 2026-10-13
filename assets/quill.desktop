@@ -7,3 +7,9 @@ Icon=quill
 Terminal=false
 Categories=Network;Chat;
 MimeType=x-scheme-handler/tg;
+Actions=quit;
+
+[Desktop Action quit]
+Name=Quit Quill
+Exec=quill --quit
+Icon=application-exit

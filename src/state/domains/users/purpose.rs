@@ -73,6 +73,10 @@ pub enum UsersPurpose {
     /// Slice A6: `clearImportedContacts`. Response is `ok`; the contacts
     /// list is invalidated for refetch.
     ClearImportedContacts,
+    /// The New Contact box (tdesktop `AddContactBox` with no user):
+    /// `importContacts` with one contact. Response is `importedContacts`;
+    /// the outcome lands in `UsersState::new_contact_outcome`.
+    AddContactByPhone,
     /// Batch 8: `sharePhoneNumber` (the bar's "Share my phone number").
     /// Response is `ok`; TDLib then clears the bar.
     SharePhoneNumber,
@@ -137,6 +141,7 @@ flat_purposes!(Users(UsersPurpose) {
     RemoveContact,
     ImportContacts,
     ClearImportedContacts,
+    AddContactByPhone,
     SharePhoneNumber,
     SetBirthdate,
     SetMainProfileTab,
