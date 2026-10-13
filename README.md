@@ -296,7 +296,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Recent inline bots suggested when typing @ <!-- parity:composer-recent-inline-bots -->
 - [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
 - [x] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
-- [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
+- [ ] Date formatting (Formatting > Date) and the Insert Unicode control character menu in the composer <!-- parity:composer-unicode-menu -->
 - [x] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
 - [x] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
 - [x] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
