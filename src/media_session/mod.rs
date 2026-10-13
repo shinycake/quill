@@ -12,6 +12,7 @@
 //! foreign threads), so the app state is only ever touched from the UI
 //! thread.
 
+use crate::locks::LockExt;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -62,19 +63,12 @@ static LAST: Mutex<Option<(NowPlaying, Instant)>> = Mutex::new(None);
 /// Queue a command (called by backends from any thread).
 #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
 pub(crate) fn push_command(command: Command) {
-    COMMANDS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push(command);
+    COMMANDS.lock_or_recover().push(command);
 }
 
 /// Drain the commands received since the last call.
 pub fn take_commands() -> Vec<Command> {
-    std::mem::take(
-        &mut *COMMANDS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()),
-    )
+    std::mem::take(&mut *COMMANDS.lock_or_recover())
 }
 
 /// Position error beyond which the OS widget is told about a seek.
@@ -109,7 +103,7 @@ pub fn position_jumped(old: &NowPlaying, age: Duration, new: &NowPlaying) -> boo
 /// Show what is playing (`None` clears the widget). Cheap to call every
 /// tick: the backend is only touched when something changed.
 pub fn publish(info: Option<&NowPlaying>) {
-    let mut last = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut last = LAST.lock_or_recover();
     match (info, last.as_ref()) {
         (None, None) => return,
         (Some(new), Some((old, at))) if !needs_update(old, at.elapsed(), new) => return,

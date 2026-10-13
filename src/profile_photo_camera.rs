@@ -4,6 +4,7 @@
 //! frame; the panel takes it on its redraw clock, and "Take photo" saves
 //! the frame on screen.
 
+use crate::locks::LockExt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
@@ -95,17 +96,19 @@ impl CameraStream {
                 let mut buf = Vec::new();
                 while !stop.load(Ordering::Relaxed) && read_frame(&mut stdout, &mut buf, LIVE_SIDE)
                 {
-                    if let Ok(mut slot) = latest.lock() {
-                        slot.serial += 1;
-                        std::mem::swap(&mut slot.rgb, &mut buf);
-                    }
+                    let mut slot = latest.lock_or_recover();
+                    slot.serial += 1;
+                    std::mem::swap(&mut slot.rgb, &mut buf);
                 }
                 done.store(true, Ordering::Relaxed);
             })
         };
         if let Err(error) = spawned {
             // Nothing would read the camera: stop ffmpeg now.
-            if let Some(mut process) = child.lock().ok().and_then(|mut slot| slot.take()) {
+            // Take the child out first so the lock is not held while
+            // ffmpeg is killed and reaped.
+            let process = child.lock_or_recover().take();
+            if let Some(mut process) = process {
                 let _ = process.kill();
                 let _ = process.wait();
             }
@@ -123,7 +126,7 @@ impl CameraStream {
     /// The newest frame if it is newer than `after` (the serial the caller
     /// last drew): its serial and `LIVE_SIDE` x `LIVE_SIDE` RGB24 bytes.
     pub fn frame_after(&self, after: u64) -> Option<(u64, Vec<u8>)> {
-        let slot = self.latest.lock().ok()?;
+        let slot = self.latest.lock_or_recover();
         (slot.serial > after && !slot.rgb.is_empty()).then(|| (slot.serial, slot.rgb.clone()))
     }
 
@@ -141,9 +144,8 @@ impl CameraStream {
 impl Drop for CameraStream {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Ok(mut child) = self.child.lock()
-            && let Some(mut child) = child.take()
-        {
+        let child = self.child.lock_or_recover().take();
+        if let Some(mut child) = child {
             let _ = child.kill();
             let _ = child.wait();
         }

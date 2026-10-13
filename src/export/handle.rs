@@ -5,6 +5,7 @@
 use super::settings::ExportSettings;
 use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
 use crate::ids::RequestId;
+use crate::locks::LockExt;
 use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
@@ -165,10 +166,7 @@ impl ChatExport {
     }
 
     pub fn progress(&self) -> Progress {
-        self.progress
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|_| Progress::starting())
+        self.progress.lock_or_recover().clone()
     }
 
     /// Ask the worker to stop. It does so at its next step.

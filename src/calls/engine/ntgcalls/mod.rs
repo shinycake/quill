@@ -1,5 +1,6 @@
 //! `NtgcallsEngine`: runtime-loaded ntgcalls adapter implementing `CallEngine`.
 use super::*;
+use crate::locks::LockExt;
 use ntgcalls_sys::{
     Loader, NTG_ERR_INVALID_PARAMS, NTG_MEDIA_SOURCE_DESKTOP, NTG_MEDIA_SOURCE_DEVICE,
     NTG_MEDIA_SOURCE_EXTERNAL, NTG_OK, NTG_STREAM_MODE_CAPTURE, NTG_STREAM_MODE_PLAYBACK,
@@ -556,11 +557,7 @@ impl Drop for NtgcallsEngine {
             );
         }
         self.call_to_user.clear();
-        self.callback
-            .user_to_call
-            .lock()
-            .expect("ntgcalls callback map")
-            .clear();
+        self.callback.user_to_call.lock_or_recover().clear();
         // SAFETY: callback registration is gone and this is the matching
         // destroy for the constructor used by `ensure_instance`.
         unsafe { (self.api.ntg_instance_destroy)(instance.as_ptr()) };

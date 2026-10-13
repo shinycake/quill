@@ -9,6 +9,7 @@
 //! queued in a process-wide inbox; the UI poll loop drains it and feeds the
 //! same `getDeepLinkInfo` pipeline as an in-app click (`ui::deep_links`).
 
+use crate::locks::LockExt;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
@@ -76,9 +77,7 @@ static INBOX: Mutex<Inbox> = Mutex::new(Inbox {
 
 fn inbox() -> std::sync::MutexGuard<'static, Inbox> {
     // A panicked pusher leaves plain data behind; keep using it.
-    INBOX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    INBOX.lock_or_recover()
 }
 
 /// Validates and queues an external link, and asks for the window to be

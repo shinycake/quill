@@ -15,6 +15,7 @@
 //! path), so nothing is sent from here: the user still picks the chat and
 //! confirms in the composer.
 
+use crate::locks::LockExt;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -161,9 +162,7 @@ fn split_forwarded(args: &[String]) -> (Vec<PathBuf>, Vec<String>) {
 static INBOX: Mutex<VecDeque<PathBuf>> = Mutex::new(VecDeque::new());
 
 fn inbox() -> std::sync::MutexGuard<'static, VecDeque<PathBuf>> {
-    INBOX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    INBOX.lock_or_recover()
 }
 
 /// Queues files for the UI and asks for the window to be raised.

@@ -1,5 +1,6 @@
 //! Path sandbox: display only under allowed roots; send only via explicit user pick.
 
+use crate::locks::LockExt;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, OnceLock};
@@ -18,17 +19,16 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
     }
     let key = (candidate.to_owned(), roots_key(allowed_roots));
     let now = std::time::Instant::now();
-    if let Ok(cache) = VERDICTS.lock()
-        && let Some((at, verdict)) = cache.get(&key)
+    if let Some((at, verdict)) = VERDICTS.lock_or_recover().get(&key)
         && now.duration_since(*at) < VERDICT_TTL
     {
         return verdict.clone();
     }
     let verdict = sandboxed_display_path_uncached(candidate, allowed_roots);
-    if let Ok(mut cache) = VERDICTS.lock() {
-        make_room(&mut cache, now);
-        cache.insert(key, (now, verdict.clone()));
-    }
+    let mut cache = VERDICTS.lock_or_recover();
+    make_room(&mut cache, now);
+    cache.insert(key, (now, verdict.clone()));
+    drop(cache);
     verdict
 }
 
@@ -66,15 +66,13 @@ fn roots_key(roots: &[PathBuf]) -> u64 {
 }
 
 fn canonical_root(root: &Path) -> Option<PathBuf> {
-    if let Ok(cache) = CANONICAL_ROOTS.lock()
-        && let Some(canon) = cache.get(root)
-    {
+    if let Some(canon) = CANONICAL_ROOTS.lock_or_recover().get(root) {
         return Some(canon.clone());
     }
     let canon = std::fs::canonicalize(root).ok()?;
-    if let Ok(mut cache) = CANONICAL_ROOTS.lock() {
-        cache.insert(root.to_path_buf(), canon.clone());
-    }
+    CANONICAL_ROOTS
+        .lock_or_recover()
+        .insert(root.to_path_buf(), canon.clone());
     Some(canon)
 }
 
@@ -98,13 +96,11 @@ static ENSURED_DIRS: LazyLock<Mutex<HashSet<PathBuf>>> =
 /// [`sweep_media_caches`] removes the caches). Render paths call this for
 /// the frame-cache roots every frame.
 pub fn ensure_private_dir(path: &Path) {
-    if ENSURED_DIRS.lock().is_ok_and(|set| set.contains(path)) {
+    if ENSURED_DIRS.lock_or_recover().contains(path) {
         return;
     }
-    if secure_create_dir(path).is_ok()
-        && let Ok(mut set) = ENSURED_DIRS.lock()
-    {
-        set.insert(path.to_path_buf());
+    if secure_create_dir(path).is_ok() {
+        ENSURED_DIRS.lock_or_recover().insert(path.to_path_buf());
     }
 }
 
@@ -183,7 +179,7 @@ pub(crate) fn cache_temp_dir() -> PathBuf {
 #[cfg(test)]
 pub(crate) fn lock_shared_media_cache() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    LOCK.lock_or_recover()
 }
 
 /// Remove every account's media cache plus the legacy pre-fix layouts
@@ -192,15 +188,9 @@ pub(crate) fn lock_shared_media_cache() -> std::sync::MutexGuard<'static, ()> {
 /// reading the account scope, so a startup sweep can never poison it.
 pub fn sweep_media_caches() {
     // Cached directory and canonicalization facts no longer hold.
-    if let Ok(mut set) = ENSURED_DIRS.lock() {
-        set.clear();
-    }
-    if let Ok(mut cache) = CANONICAL_ROOTS.lock() {
-        cache.clear();
-    }
-    if let Ok(mut cache) = VERDICTS.lock() {
-        cache.clear();
-    }
+    ENSURED_DIRS.lock_or_recover().clear();
+    CANONICAL_ROOTS.lock_or_recover().clear();
+    VERDICTS.lock_or_recover().clear();
     let _ = std::fs::remove_dir_all(cache_temp_dir().join("quill-media-cache"));
     for legacy in [
         "quill-gif-frames",

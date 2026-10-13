@@ -69,9 +69,7 @@ pub(super) struct Notifier {
 static NOTIFIER: OnceLock<Option<Notifier>> = OnceLock::new();
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    quill::locks::lock_or_recover(mutex)
 }
 
 /// The process-wide notifier, connected on first use. `None`, for good,

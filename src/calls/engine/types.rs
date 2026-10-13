@@ -1,5 +1,6 @@
 //! Call-engine shared types: callbacks, media descriptions, errors.
 use super::*;
+use crate::locks::LockExt;
 use ntgcalls_sys::ntg_rtc_server;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -227,13 +228,9 @@ impl CallbackShared {
     /// every video ssrc attributed in that chat. Runs when the call ends,
     /// whatever the native stop returned.
     pub(crate) fn forget_group(&self, chat_id: i64) {
-        self.group_chat_to_call
-            .lock()
-            .expect("ntgcalls group call map")
-            .remove(&chat_id);
+        self.group_chat_to_call.lock_or_recover().remove(&chat_id);
         self.group_video_ssrc_to_user
-            .lock()
-            .expect("ntgcalls group ssrc map")
+            .lock_or_recover()
             .retain(|(chat, _), _| *chat != chat_id);
     }
 }
@@ -341,7 +338,7 @@ impl NativeRtcServers {
 /// Stores `hook` in a callback slot of the ntgcalls state shared with its
 /// native callbacks.
 pub(crate) fn set_hook<T>(slot: &std::sync::Mutex<Option<T>>, hook: T) {
-    *slot.lock().expect("ntgcalls callback hook") = Some(hook);
+    *slot.lock_or_recover() = Some(hook);
 }
 
 #[cfg(test)]

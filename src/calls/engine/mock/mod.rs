@@ -1,5 +1,6 @@
 //! `MockEngine`: in-memory `CallEngine` for tests and UI demos.
 use super::*;
+use crate::locks::LockExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -76,171 +77,97 @@ impl MockEngine {
     }
 
     pub fn started_calls(&self) -> Vec<(i32, i64, bool)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .started_calls
-            .clone()
+        self.inner.lock_or_recover().started_calls.clone()
     }
 
     pub fn accepted_calls(&self) -> Vec<i32> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .accepted_calls
-            .clone()
+        self.inner.lock_or_recover().accepted_calls.clone()
     }
 
     pub fn signaling_received(&self) -> Vec<(i32, Vec<u8>)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .signaling_received
-            .clone()
+        self.inner.lock_or_recover().signaling_received.clone()
     }
 
     pub fn hung_up_calls(&self) -> Vec<i32> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .hung_up_calls
-            .clone()
+        self.inner.lock_or_recover().hung_up_calls.clone()
     }
 
     pub fn mute_changes(&self) -> Vec<(i32, bool)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .mute_changes
-            .clone()
+        self.inner.lock_or_recover().mute_changes.clone()
     }
 
     pub fn set_devices(&self, devices: Vec<MediaDevice>) {
-        self.inner.lock().expect("mock call engine").devices = devices;
+        self.inner.lock_or_recover().devices = devices;
     }
 
     /// Test-only: make the next `set_muted` calls fail.
     pub fn fail_mute(&self) {
-        self.inner.lock().expect("mock call engine").fail_mute = true;
+        self.inner.lock_or_recover().fail_mute = true;
     }
 
     pub fn fail_next_connect(&self) {
-        self.inner.lock().expect("mock call engine").fail_connect = true;
+        self.inner.lock_or_recover().fail_connect = true;
     }
 
     pub fn connects(&self) -> Vec<(i32, ConnectParams)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .connects
-            .clone()
+        self.inner.lock_or_recover().connects.clone()
     }
 
     pub fn device_selections(&self) -> Vec<(i32, Option<String>, Option<String>)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .device_selections
-            .clone()
+        self.inner.lock_or_recover().device_selections.clone()
     }
 
     pub fn camera_changes(&self) -> Vec<(i32, bool, Option<String>)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .camera_changes
-            .clone()
+        self.inner.lock_or_recover().camera_changes.clone()
     }
 
     /// Phase C2g: recorded group transport calls for driver tests.
     pub fn group_offers(&self) -> Vec<(i32, i64)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .group_offers
-            .clone()
+        self.inner.lock_or_recover().group_offers.clone()
     }
 
     pub fn group_connects(&self) -> Vec<(i32, String, bool)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .group_connects
-            .clone()
+        self.inner.lock_or_recover().group_connects.clone()
     }
 
     pub fn group_video_syncs(&self) -> Vec<(i32, Vec<GroupVideoSource>)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .group_video_syncs
-            .clone()
+        self.inner.lock_or_recover().group_video_syncs.clone()
     }
 
     pub fn group_camera_changes(&self) -> Vec<(i32, bool, Option<String>)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .group_camera_changes
-            .clone()
+        self.inner.lock_or_recover().group_camera_changes.clone()
     }
 
     pub fn screen_share_offers(&self) -> Vec<i32> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .screen_share_offers
-            .clone()
+        self.inner.lock_or_recover().screen_share_offers.clone()
     }
 
     pub fn screen_share_connects(&self) -> Vec<(i32, String)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .screen_share_connects
-            .clone()
+        self.inner.lock_or_recover().screen_share_connects.clone()
     }
 
     pub fn screen_share_stops(&self) -> Vec<i32> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .screen_share_stops
-            .clone()
+        self.inner.lock_or_recover().screen_share_stops.clone()
     }
 
     /// Phase C2i: recorded 1:1 screen-share toggles.
     pub fn p2p_screen_share_changes(&self) -> Vec<(i32, bool)> {
         self.inner
-            .lock()
-            .expect("mock call engine")
+            .lock_or_recover()
             .p2p_screen_share_changes
             .clone()
     }
 
     pub fn group_mutes(&self) -> Vec<(i32, bool)> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .group_mutes
-            .clone()
+        self.inner.lock_or_recover().group_mutes.clone()
     }
 
     pub fn group_leaves(&self) -> Vec<i32> {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .group_leaves
-            .clone()
+        self.inner.lock_or_recover().group_leaves.clone()
     }
 
     pub fn emit_transport_state(&self, call_id: i32, state: TransportState) {
-        let hook = self
-            .inner
-            .lock()
-            .expect("mock call engine")
-            .transport_hook
-            .clone();
+        let hook = self.inner.lock_or_recover().transport_hook.clone();
         if let Some(hook) = hook {
             hook(call_id, state);
         }
@@ -249,7 +176,7 @@ impl MockEngine {
     /// Phase C2e: deliver a synthetic video frame to the registered hook,
     /// assigning the next sequence number from the internal counter.
     pub fn emit_video_frame(&self, call_id: i32, mut frame: VideoFrame) {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         frame.seq = inner.frame_seq;
         inner.frame_seq += 1;
         let hook = inner.video_hook.clone();
@@ -261,12 +188,7 @@ impl MockEngine {
 
     /// Phase C2e: deliver a synthetic peer camera state to the hook.
     pub fn emit_remote_video_state(&self, call_id: i32, state: RemoteVideoState) {
-        let hook = self
-            .inner
-            .lock()
-            .expect("mock call engine")
-            .remote_video_hook
-            .clone();
+        let hook = self.inner.lock_or_recover().remote_video_hook.clone();
         if let Some(hook) = hook {
             hook(call_id, state);
         }
@@ -274,12 +196,7 @@ impl MockEngine {
 
     /// Deliver a synthetic peer microphone state to the hook.
     pub fn emit_remote_audio_muted(&self, call_id: i32, muted: bool) {
-        let hook = self
-            .inner
-            .lock()
-            .expect("mock call engine")
-            .remote_audio_hook
-            .clone();
+        let hook = self.inner.lock_or_recover().remote_audio_hook.clone();
         if let Some(hook) = hook {
             hook(call_id, muted);
         }
@@ -287,12 +204,7 @@ impl MockEngine {
 
     /// Phase C2j: deliver a synthetic peer screen-share state to the hook.
     pub fn emit_remote_screen_state(&self, call_id: i32, state: RemoteVideoState) {
-        let hook = self
-            .inner
-            .lock()
-            .expect("mock call engine")
-            .remote_screen_hook
-            .clone();
+        let hook = self.inner.lock_or_recover().remote_screen_hook.clone();
         if let Some(hook) = hook {
             hook(call_id, state);
         }
@@ -321,7 +233,7 @@ impl CallEngine for MockEngine {
         user_id: i64,
         is_outgoing: bool,
     ) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -334,7 +246,7 @@ impl CallEngine for MockEngine {
     }
 
     fn accept_call(&mut self, call_id: i32) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -346,7 +258,7 @@ impl CallEngine for MockEngine {
     }
 
     fn send_signaling_data(&mut self, call_id: i32, data: &[u8]) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -358,47 +270,38 @@ impl CallEngine for MockEngine {
     }
 
     fn receive_signaling_data(&self, call_id: i32, data: &[u8]) {
-        let hook = self.inner.lock().expect("mock call engine").hook.clone();
+        let hook = self.inner.lock_or_recover().hook.clone();
         if let Some(hook) = hook {
             hook(call_id, data.to_vec());
         }
     }
 
     fn set_signaling_emitted_callback(&mut self, callback: SignalingEmittedCallback) {
-        self.inner.lock().expect("mock call engine").hook = Some(callback);
+        self.inner.lock_or_recover().hook = Some(callback);
     }
 
     fn set_transport_state_callback(&mut self, callback: TransportStateCallback) {
-        self.inner.lock().expect("mock call engine").transport_hook = Some(callback);
+        self.inner.lock_or_recover().transport_hook = Some(callback);
     }
 
     fn set_video_frame_callback(&mut self, callback: VideoFrameCallback) {
-        self.inner.lock().expect("mock call engine").video_hook = Some(callback);
+        self.inner.lock_or_recover().video_hook = Some(callback);
     }
 
     fn set_remote_video_state_callback(&mut self, callback: RemoteVideoStateCallback) {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .remote_video_hook = Some(callback);
+        self.inner.lock_or_recover().remote_video_hook = Some(callback);
     }
 
     fn set_remote_screen_state_callback(&mut self, callback: RemoteVideoStateCallback) {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .remote_screen_hook = Some(callback);
+        self.inner.lock_or_recover().remote_screen_hook = Some(callback);
     }
 
     fn set_remote_audio_state_callback(&mut self, callback: RemoteAudioStateCallback) {
-        self.inner
-            .lock()
-            .expect("mock call engine")
-            .remote_audio_hook = Some(callback);
+        self.inner.lock_or_recover().remote_audio_hook = Some(callback);
     }
 
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -422,7 +325,7 @@ impl CallEngine for MockEngine {
         microphone: Option<&str>,
         speaker: Option<&str>,
     ) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -438,7 +341,7 @@ impl CallEngine for MockEngine {
     }
 
     fn hangup(&mut self, call_id: i32) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -449,7 +352,7 @@ impl CallEngine for MockEngine {
     }
 
     fn set_muted(&mut self, call_id: i32, muted: bool) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -472,7 +375,7 @@ impl CallEngine for MockEngine {
         enabled: bool,
         camera: Option<&str>,
     ) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -486,7 +389,7 @@ impl CallEngine for MockEngine {
     }
 
     fn set_screen_share_enabled(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -502,7 +405,7 @@ impl CallEngine for MockEngine {
         group_call_id: i32,
         chat_id: i64,
     ) -> Result<String, EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -516,7 +419,7 @@ impl CallEngine for MockEngine {
         answer_payload: &str,
         video_enabled: bool,
     ) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -531,7 +434,7 @@ impl CallEngine for MockEngine {
         group_call_id: i32,
         sources: &[GroupVideoSource],
     ) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -547,7 +450,7 @@ impl CallEngine for MockEngine {
         enabled: bool,
         camera: Option<&str>,
     ) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -558,7 +461,7 @@ impl CallEngine for MockEngine {
     }
 
     fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -574,7 +477,7 @@ impl CallEngine for MockEngine {
         group_call_id: i32,
         answer_payload: &str,
     ) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -585,7 +488,7 @@ impl CallEngine for MockEngine {
     }
 
     fn stop_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -596,23 +499,21 @@ impl CallEngine for MockEngine {
 
     fn presentation_active(&self, group_call_id: i32) -> bool {
         self.inner
-            .lock()
-            .expect("mock call engine")
+            .lock_or_recover()
             .presentations
             .contains(&group_call_id)
     }
 
     fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
         self.inner
-            .lock()
-            .expect("mock call engine")
+            .lock_or_recover()
             .group_mutes
             .push((group_call_id, muted));
         Ok(())
     }
 
     fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError> {
-        let mut inner = self.inner.lock().expect("mock call engine");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -627,7 +528,7 @@ impl CallEngine for MockEngine {
     }
 
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError> {
-        let inner = self.inner.lock().expect("mock call engine");
+        let inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
@@ -643,7 +544,7 @@ impl CallEngine for MockEngine {
     }
 
     fn is_available(&self) -> bool {
-        self.inner.lock().expect("mock call engine").available
+        self.inner.lock_or_recover().available
     }
 }
 

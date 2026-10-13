@@ -5,6 +5,7 @@ use super::settings::AccountSettings;
 use super::worker::{AccountJob, AccountProgress, AccountStage, create_folder, run};
 use crate::export::handle::WorkerLink;
 use crate::export::worker::ExportError;
+use crate::locks::LockExt;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -62,10 +63,7 @@ impl AccountExport {
     }
 
     pub fn progress(&self) -> AccountProgress {
-        self.progress
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|_| AccountProgress::starting())
+        self.progress.lock_or_recover().clone()
     }
 
     /// Ask the worker to stop. It does so at its next step; what was

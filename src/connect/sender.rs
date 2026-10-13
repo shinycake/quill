@@ -2,6 +2,7 @@
 use super::*;
 use crate::calls::engine::{RemoteVideoState, TransportState};
 use crate::ids::RequestId;
+use crate::locks::LockExt;
 use crate::telegram::client::LiveTdJson;
 use crate::telegram::ffi::TdJsonError;
 use std::collections::VecDeque;
@@ -86,7 +87,7 @@ impl RetryStash {
         if !retryable {
             return;
         }
-        let mut map = self.map.lock().expect("retry stash");
+        let mut map = self.map.lock_or_recover();
         if map.len() >= RETRY_STASH_LIMIT {
             map.clear();
         }
@@ -94,11 +95,11 @@ impl RetryStash {
     }
 
     pub fn take(&self, extra: RequestId) -> Option<String> {
-        self.map.lock().expect("retry stash").remove(&extra.0)
+        self.map.lock_or_recover().remove(&extra.0)
     }
 
     pub fn len(&self) -> usize {
-        self.map.lock().expect("retry stash").len()
+        self.map.lock_or_recover().len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -120,7 +121,7 @@ impl RecordingSender {
     }
 
     pub fn snapshot(&self) -> Vec<String> {
-        self.sent.lock().expect("recording sender").clone()
+        self.sent.lock_or_recover().clone()
     }
 }
 
@@ -130,10 +131,7 @@ impl JsonSender for RecordingSender {
         let Some(request) = self.guard.screen(request) else {
             return Ok(());
         };
-        self.sent
-            .lock()
-            .expect("recording sender")
-            .push(request.clone());
+        self.sent.lock_or_recover().push(request.clone());
         self.stash.note(&request);
         Ok(())
     }

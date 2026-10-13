@@ -91,7 +91,7 @@ pub fn read() -> Option<u32> {
 pub fn pending() -> bool {
     #[cfg(target_os = "linux")]
     {
-        LINUX.lock().is_ok_and(|state| state.running)
+        crate::locks::lock_or_recover(&LINUX).running
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -117,17 +117,16 @@ static LINUX: std::sync::Mutex<LinuxState> = std::sync::Mutex::new(LinuxState {
 
 #[cfg(target_os = "linux")]
 fn linux_cached() -> Option<u32> {
-    let mut state = LINUX.lock().ok()?;
+    let mut state = crate::locks::lock_or_recover(&LINUX);
     if !state.running && !state.failed {
         state.running = true;
         let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
             let value = read_native().map(|rgb| rgb.max(1));
-            if let Ok(mut state) = LINUX.lock() {
-                state.running = false;
-                state.failed = value.is_none();
-                if value.is_some() {
-                    state.value = value;
-                }
+            let mut state = crate::locks::lock_or_recover(&LINUX);
+            state.running = false;
+            state.failed = value.is_none();
+            if value.is_some() {
+                state.value = value;
             }
         });
         if spawned.is_err() {

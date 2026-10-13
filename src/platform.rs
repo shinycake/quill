@@ -6,6 +6,7 @@
 //! A missing or locked item must never be replaced silently against an existing DB.
 
 use crate::ids::AccountKey;
+use crate::locks::LockExt;
 use crate::settings::AccountPaths;
 use rand::RngCore;
 use std::collections::HashMap;
@@ -109,20 +110,20 @@ impl MemorySecretStore {
     }
 
     pub fn lock(&self) {
-        *self.locked.lock().expect("lock flag") = true;
+        *self.locked.lock_or_recover() = true;
     }
 
     pub fn unlock(&self) {
-        *self.locked.lock().expect("lock flag") = false;
+        *self.locked.lock_or_recover() = false;
     }
 }
 
 impl SecretStore for MemorySecretStore {
     fn get(&self, account: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
-        if *self.locked.lock().expect("lock flag") {
+        if *self.locked.lock_or_recover() {
             return Err(SecretStoreError::Locked);
         }
-        let map = self.inner.lock().expect("store");
+        let map = self.inner.lock_or_recover();
         match map.get(&account.0) {
             None => Ok(None),
             Some(bytes) => Ok(Some(DatabaseKey::from_bytes(bytes.clone())?)),
@@ -130,21 +131,20 @@ impl SecretStore for MemorySecretStore {
     }
 
     fn put(&self, account: &AccountKey, key: &DatabaseKey) -> Result<(), SecretStoreError> {
-        if *self.locked.lock().expect("lock flag") {
+        if *self.locked.lock_or_recover() {
             return Err(SecretStoreError::Locked);
         }
         self.inner
-            .lock()
-            .expect("store")
+            .lock_or_recover()
             .insert(account.0.clone(), key.as_bytes().to_vec());
         Ok(())
     }
 
     fn delete(&self, account: &AccountKey) -> Result<(), SecretStoreError> {
-        if *self.locked.lock().expect("lock flag") {
+        if *self.locked.lock_or_recover() {
             return Err(SecretStoreError::Locked);
         }
-        self.inner.lock().expect("store").remove(&account.0);
+        self.inner.lock_or_recover().remove(&account.0);
         Ok(())
     }
 }

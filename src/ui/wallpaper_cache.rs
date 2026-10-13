@@ -19,6 +19,7 @@ use super::image_budget;
 use super::wallpaper::Wallpaper;
 use super::wallpaper_source::{Rendered, Sources};
 use gpui_kit::*;
+use quill::locks::LockExt;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -163,7 +164,7 @@ fn worker() {
     let mut sources = Sources::default();
     loop {
         let job = {
-            let mut board = shared.board.lock().unwrap_or_else(|e| e.into_inner());
+            let mut board = shared.board.lock_or_recover();
             loop {
                 match board.next(Instant::now()) {
                     Ok(job) => break job,
@@ -181,11 +182,7 @@ fn worker() {
             }
         };
         let result = sources.render(&job.wallpaper, job.width, job.height);
-        shared
-            .board
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .finish(job.key, result);
+        shared.board.lock_or_recover().finish(job.key, result);
     }
 }
 
@@ -404,7 +401,7 @@ fn lookup(wallpaper: &Wallpaper, slot: u64, thumb: bool, width: u32, height: u32
             cache.insert(key, composite.clone());
             return ready(&mut cache, composite);
         }
-        let mut board = shared.board.lock().unwrap_or_else(|e| e.into_inner());
+        let mut board = shared.board.lock_or_recover();
         if let Some(result) = board.done.remove(&key) {
             drop(board);
             let composite = result.and_then(|r| to_composite(r, width, height));

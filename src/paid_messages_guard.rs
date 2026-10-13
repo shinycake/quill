@@ -14,6 +14,7 @@
 //! messages", and `sendMessageAlbum` and `forwardMessages` send several
 //! messages with one set of options. So the guard writes price x messages.
 
+use crate::locks::LockExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -150,12 +151,12 @@ impl PaidGuard {
 
     /// The oldest held request.
     pub fn held(&self) -> Option<HeldSend> {
-        self.state.lock().ok()?.held.first().cloned()
+        self.state.lock_or_recover().held.first().cloned()
     }
 
     /// Takes the oldest held request out.
     pub fn take_held(&self) -> Option<HeldSend> {
-        let mut state = self.state.lock().ok()?;
+        let mut state = self.state.lock_or_recover();
         (!state.held.is_empty()).then(|| state.held.remove(0))
     }
 }

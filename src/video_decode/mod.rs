@@ -437,9 +437,7 @@ impl AudioShared {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::locks::lock_or_recover(mutex)
 }
 
 /// The clip's sound as a stream of samples for an audio output (the UI

@@ -6,6 +6,7 @@ use super::connect_ui::live_status_for;
 use super::notification_settings::MAX_OS_NOTIFICATION_THREADS;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::locks::LockExt;
 use quill::notify::{NotificationAction, NotificationSoundKind, QueuedNotification};
 use quill::state::RedrawNeed;
 use quill::telegram::envelope::{AuthorizationState, ChatNotificationSettings};
@@ -702,9 +703,9 @@ impl QuillApp {
         let clicks: Vec<(ChatId, NotificationAction)> = self
             .notify
             .notify_clicks
-            .lock()
-            .map(|mut guard| std::mem::take(&mut *guard))
-            .unwrap_or_default();
+            .lock_or_recover()
+            .drain(..)
+            .collect();
         for (chat_id, action) in clicks {
             self.run_notification_action(chat_id, action, window, cx);
         }
@@ -789,9 +790,9 @@ impl QuillApp {
         let picks: Vec<(i32, quill::notify_call::CallNotificationAction)> = self
             .calls
             .notify_clicks
-            .lock()
-            .map(|mut guard| std::mem::take(&mut *guard))
-            .unwrap_or_default();
+            .lock_or_recover()
+            .drain(..)
+            .collect();
         let ringing = self.session().and_then(|s| {
             let call = s.calls.active_call.as_ref()?;
             (matches!(

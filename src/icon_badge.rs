@@ -297,13 +297,13 @@ impl<T> LatestSlot<T> {
 
     /// Replace any pending value; never blocks on the consumer.
     fn put(&self, value: T) {
-        *self.value.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
+        *crate::locks::lock_or_recover(&self.value) = Some(value);
         self.ready.notify_one();
     }
 
     /// Block until a value is pending, then take it.
     fn take(&self) -> T {
-        let mut guard = self.value.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = crate::locks::lock_or_recover(&self.value);
         loop {
             if let Some(value) = guard.take() {
                 return value;

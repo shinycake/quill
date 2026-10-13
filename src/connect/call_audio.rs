@@ -12,6 +12,7 @@
 use super::*;
 use crate::calls::audio_level::SpeakingTracker;
 use crate::calls::engine::CallEngine;
+use crate::locks::LockExt;
 use crate::state::{ActiveGroupCall, CallsPurpose, RequestPurpose};
 use crate::telegram::requests::set_group_call_participant_is_speaking;
 use std::sync::Arc;
@@ -149,35 +150,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn install_remote_state_hooks(&self, engine: &mut dyn CallEngine) {
         let outbox = self.video_state_outbox.clone();
         engine.set_remote_video_state_callback(Arc::new(move |call_id, state| {
-            outbox
-                .lock()
-                .expect("call video state outbox")
-                .push_back((call_id, state));
+            outbox.lock_or_recover().push_back((call_id, state));
         }));
         let outbox = self.screen_state_outbox.clone();
         engine.set_remote_screen_state_callback(Arc::new(move |call_id, state| {
-            outbox
-                .lock()
-                .expect("call screen state outbox")
-                .push_back((call_id, state));
+            outbox.lock_or_recover().push_back((call_id, state));
         }));
         let outbox = self.audio_state_outbox.clone();
         engine.set_remote_audio_state_callback(Arc::new(move |call_id, muted| {
-            outbox
-                .lock()
-                .expect("call audio state outbox")
-                .push_back((call_id, muted));
+            outbox.lock_or_recover().push_back((call_id, muted));
         }));
     }
 
     /// Apply the peer's microphone state to the active 1:1 call.
     fn drain_remote_audio_state(&mut self) {
         loop {
-            let update = self
-                .audio_state_outbox
-                .lock()
-                .expect("call audio state outbox")
-                .pop_front();
+            let update = self.audio_state_outbox.lock_or_recover().pop_front();
             let Some((call_id, muted)) = update else {
                 break;
             };

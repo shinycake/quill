@@ -39,9 +39,7 @@ impl Shared {
 }
 
 fn lock(shared: &Mutex<Shared>) -> std::sync::MutexGuard<'_, Shared> {
-    shared
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::locks::lock_or_recover(shared)
 }
 
 struct Root;

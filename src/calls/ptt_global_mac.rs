@@ -91,25 +91,30 @@ extern "C" fn on_event(
     event: *mut c_void,
     info: *mut c_void,
 ) -> *mut c_void {
-    // SAFETY: `info` is the `TapContext` boxed by `run_tap`, alive until the
-    // run loop returns; the callback only runs on that thread.
-    let ctx = unsafe { &mut *(info as *mut TapContext) };
-    match event_type {
-        TAP_DISABLED_BY_TIMEOUT | TAP_DISABLED_BY_USER_INPUT => unsafe {
-            CGEventTapEnable(ctx.tap.get(), true);
-        },
-        KEY_DOWN | KEY_UP if ctx.active.load(Ordering::SeqCst) => {
-            let code = unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) };
-            if let Some(edge) = u32::try_from(code)
-                .ok()
-                .and_then(|code| ctx.filter.feed(code, event_type == KEY_DOWN))
-            {
-                (ctx.sink)(edge);
+    crate::thread_guard::ffi_boundary(event, || {
+        // SAFETY: `info` is the `TapContext` boxed by `run_tap`, alive until the
+        // run loop returns; the callback only runs on that thread.
+        let ctx = unsafe { &mut *(info as *mut TapContext) };
+        match event_type {
+            // SAFETY: `ctx.tap` is the tap `run_tap` created; it outlives the
+            // run loop this callback runs on.
+            TAP_DISABLED_BY_TIMEOUT | TAP_DISABLED_BY_USER_INPUT => unsafe {
+                CGEventTapEnable(ctx.tap.get(), true);
+            },
+            KEY_DOWN | KEY_UP if ctx.active.load(Ordering::SeqCst) => {
+                // SAFETY: `event` is the key event the tap is delivering now.
+                let code = unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) };
+                if let Some(edge) = u32::try_from(code)
+                    .ok()
+                    .and_then(|code| ctx.filter.feed(code, event_type == KEY_DOWN))
+                {
+                    (ctx.sink)(edge);
+                }
             }
+            _ => {}
         }
-        _ => {}
-    }
-    event
+        event
+    })
 }
 
 fn run_tap(

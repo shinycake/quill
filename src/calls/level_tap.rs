@@ -10,6 +10,7 @@
 //! in which case the tap reports an error and the call carries on
 //! without a level.
 
+use crate::locks::LockExt;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -104,7 +105,7 @@ impl LevelSource for LevelTap {
     fn error(&self) -> Option<String> {
         self.mic
             .as_ref()
-            .and_then(|mic| mic.error.lock().ok().and_then(|slot| slot.clone()))
+            .and_then(|mic| mic.error.lock_or_recover().clone())
     }
 }
 
@@ -125,7 +126,7 @@ pub struct FixedLevel(pub Mutex<f32>);
 
 impl LevelSource for FixedLevel {
     fn take_level(&self) -> Option<f32> {
-        self.0.lock().ok().map(|level| *level)
+        Some(*self.0.lock_or_recover())
     }
 
     fn error(&self) -> Option<String> {

@@ -1,5 +1,6 @@
 //! Allowlisted diagnostics. Never record raw TDLib JSON, credentials, or message text.
 
+use crate::locks::LockExt;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +46,7 @@ impl MemorySink {
     }
 
     pub fn snapshot(&self) -> Vec<Diagnostic> {
-        self.inner.lock().expect("diagnostic sink").clone()
+        self.inner.lock_or_recover().clone()
     }
 
     pub fn rendered(&self) -> String {
@@ -59,7 +60,7 @@ impl MemorySink {
 
 impl DiagnosticSink for MemorySink {
     fn record(&self, event: Diagnostic) {
-        self.inner.lock().expect("diagnostic sink").push(event);
+        self.inner.lock_or_recover().push(event);
     }
 }
 

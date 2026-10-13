@@ -16,6 +16,7 @@
 //! close/minimize-to-tray switches stay hidden. Registration is retried
 //! every [`RETRY_EVERY`], so a desktop that finishes starting later wins.
 
+use crate::locks::LockExt;
 use crate::tray::{
     TrayAction, notifications_label, render_tray_icon, rgba_to_argb32, sounds_label, tray_tooltip,
 };
@@ -32,19 +33,12 @@ pub const RETRY_EVERY: Duration = Duration::from_secs(10);
 static ACTIONS: Mutex<Vec<TrayAction>> = Mutex::new(Vec::new());
 
 fn push_action(action: TrayAction) {
-    ACTIONS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push(action);
+    ACTIONS.lock_or_recover().push(action);
 }
 
 /// Drain pending tray menu / click actions.
 pub fn take_actions() -> Vec<TrayAction> {
-    std::mem::take(
-        &mut *ACTIONS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()),
-    )
+    std::mem::take(&mut *ACTIONS.lock_or_recover())
 }
 
 /// The StatusNotifierItem model ksni publishes over D-Bus.

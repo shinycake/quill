@@ -24,6 +24,7 @@
 //! Everything that decides something (parsing, the entry table, the
 //! ownership rule) is pure so every platform tests it.
 
+use crate::locks::LockExt;
 #[cfg(any(test, target_os = "macos"))]
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -393,7 +394,7 @@ static CACHE: Mutex<Option<(Instant, LinkHandlerState)>> = Mutex::new(None);
 /// The current handler, cached briefly so rendering never spawns a process
 /// per frame. Reflects external changes within a couple of seconds.
 pub fn state() -> LinkHandlerState {
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = CACHE.lock_or_recover();
     if let Some((at, state)) = cache.as_ref()
         && at.elapsed() < CACHE_TTL
     {
@@ -406,7 +407,7 @@ pub fn state() -> LinkHandlerState {
 
 /// Drops the cache so the next [`state`] asks the OS again.
 pub fn invalidate() {
-    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *CACHE.lock_or_recover() = None;
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
