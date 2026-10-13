@@ -402,3 +402,40 @@ fn battery_saver_stops_the_send_fly_unless_ignored(cx: &mut TestAppContext) {
     assert_eq!(while_saving, None, "the saver forces the effect off");
     assert_eq!(while_ignored, Some(false), "ignored: the flight is armed");
 }
+
+/// Recently used custom emoji, which the Emoji tab lists in its first rows.
+fn seed_recent_custom_emoji(app: &mut QuillApp) {
+    let session = app.demo_session.as_mut().expect("demo session");
+    session.stickers.emoji.custom_emoji_stickers = (0..8)
+        .map(|ix| StickerItem {
+            custom_emoji_id: Some(5000 + i64::from(ix)),
+            ..sticker(1000 + ix, false)
+        })
+        .collect();
+    session.settings.media_prefs.recent_custom_emoji_ids = (0..8).map(|ix| 5000 + ix).collect();
+}
+
+/// Custom emoji rows used to ask the list where they were while the list
+/// was laying them out, which aborted the app as the panel opened.
+#[gpui_kit::test]
+fn the_emoji_panel_opens_with_custom_emoji_rows(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| seed_recent_custom_emoji(app));
+    app.update(vcx, |app, cx| app.open_media_panel(PanelTab::Emoji, cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        let panel = &app.pickers.media_panel;
+        let custom_row = panel.rows.iter().position(|row| {
+            matches!(row, PanelRow::Cells { cells, .. }
+                if cells.iter().any(|cell| matches!(cell, PanelCell::Custom { .. })))
+        });
+        let custom_row = custom_row.expect("recent custom emoji are listed");
+        assert!(panel.on_screen.contains(custom_row), "and drawn on screen");
+        let last = panel.rows.len() - 1;
+        assert!(
+            !panel.on_screen.contains(last),
+            "the catalog's end is below the fold"
+        );
+    });
+}

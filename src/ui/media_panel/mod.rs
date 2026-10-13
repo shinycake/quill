@@ -116,6 +116,9 @@ pub(super) struct MediaPanel {
     pub reaction: Option<ReactionTarget>,
     pub tab: PanelTab,
     pub list: ListState,
+    /// Rows that touched the viewport at the list's last layout, read
+    /// before it lays out again (see [`on_screen_rows`]).
+    pub on_screen: OnScreenRows,
     pub rows: Vec<PanelRow>,
     pub sections: Vec<PanelSection>,
     pub key: Option<PanelKey>,
@@ -137,6 +140,7 @@ impl Default for MediaPanel {
             reaction: None,
             tab: PanelTab::default(),
             list: ListState::new(0, ListAlignment::Top, px(400.)),
+            on_screen: OnScreenRows::default(),
             rows: Vec::new(),
             sections: Vec::new(),
             key: None,
@@ -788,10 +792,7 @@ impl QuillApp {
                                 if let Some(file) = item.display_file_id() {
                                     need_files.push(file);
                                 }
-                                let on_screen = row_on_screen(
-                                    self.pickers.media_panel.list.item_is_above_viewport(ix),
-                                    self.pickers.media_panel.list.item_is_below_viewport(ix),
-                                );
+                                let on_screen = self.pickers.media_panel.on_screen.contains(ix);
                                 self.custom_emoji_cell(id, item, on_screen, cx)
                             }
                             None => placeholder_cell(EMOJI_CELL, cx),
@@ -896,10 +897,52 @@ impl QuillApp {
     }
 }
 
-/// Whether a list row touches the viewport; unknown (not laid out yet)
-/// counts as visible so the first frame still animates.
-fn row_on_screen(above: Option<bool>, below: Option<bool>) -> bool {
-    above != Some(true) && below != Some(true)
+/// Which panel rows touched the viewport at the list's last layout. Rows
+/// render inside the list's layout, while it holds its state mutably
+/// borrowed, so a row must never query the `ListState` itself (that
+/// aborted the app as soon as a custom emoji row was drawn); the panel
+/// reads this snapshot before the list lays out instead.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) enum OnScreenRows {
+    /// Not laid out yet: every row counts as visible so the first frame
+    /// still animates.
+    #[default]
+    Unknown,
+    /// Rows from `first` up to (not including) `end`; `None` when the
+    /// list stopped laying out before reaching the viewport's bottom.
+    Range { first: usize, end: Option<usize> },
+}
+
+impl OnScreenRows {
+    /// Overdraw rows the list built beyond the viewport do not count.
+    pub(super) fn contains(&self, ix: usize) -> bool {
+        match *self {
+            OnScreenRows::Unknown => true,
+            OnScreenRows::Range { first, end } => ix >= first && end.is_none_or(|end| ix < end),
+        }
+    }
+}
+
+/// Reads the visible rows from the list's last layout. Call it only
+/// outside the list's own layout (it borrows the `ListState`).
+pub(super) fn on_screen_rows(list: &ListState, rows: usize) -> OnScreenRows {
+    let first = list.logical_scroll_top().item_ix;
+    let mut ix = first;
+    while ix < rows {
+        match list.item_is_below_viewport(ix) {
+            Some(true) => {
+                return OnScreenRows::Range {
+                    first,
+                    end: Some(ix),
+                };
+            }
+            Some(false) => ix += 1,
+            // Not laid out: unknown from here on, so visible.
+            None if ix == first => return OnScreenRows::Unknown,
+            None => break,
+        }
+    }
+    OnScreenRows::Range { first, end: None }
 }
 
 fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
@@ -922,14 +965,27 @@ mod panel_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::row_on_screen;
+    use super::OnScreenRows;
 
     #[test]
     fn overdraw_rows_do_not_count_as_on_screen() {
-        assert!(!row_on_screen(Some(true), Some(false)));
-        assert!(!row_on_screen(Some(false), Some(true)));
-        assert!(row_on_screen(Some(false), Some(false)));
+        let rows = OnScreenRows::Range {
+            first: 2,
+            end: Some(5),
+        };
+        assert!(!rows.contains(1));
+        assert!(rows.contains(2));
+        assert!(rows.contains(4));
+        assert!(!rows.contains(5));
+        // The list stopped short of the viewport's bottom: later rows
+        // are not known to be off screen.
+        let open = OnScreenRows::Range {
+            first: 2,
+            end: None,
+        };
+        assert!(!open.contains(1));
+        assert!(open.contains(40));
         // Not laid out yet: animate rather than flash a still.
-        assert!(row_on_screen(None, None));
+        assert!(OnScreenRows::Unknown.contains(0));
     }
 }

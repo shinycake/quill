@@ -416,6 +416,12 @@ impl QuillApp {
             .then(|| self.sticker_category_strip(cx))
             .flatten();
             let empty = self.pickers.media_panel.rows.is_empty();
+            // Rows cannot ask the list where they are while it lays them
+            // out, so take that from its last layout now.
+            self.pickers.media_panel.on_screen = super::on_screen_rows(
+                &self.pickers.media_panel.list,
+                self.pickers.media_panel.rows.len(),
+            );
             let list = list(
                 self.pickers.media_panel.list.clone(),
                 move |ix, _window, cx| {
