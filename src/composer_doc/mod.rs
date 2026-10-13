@@ -334,12 +334,17 @@ pub fn has_tag(text: &str, spans: &[DocSpan], range: &Range<usize>, tag: &Compos
 /// The range a block format (quote, code block) applies to: the whole lines
 /// the selection touches, without the final line break.
 pub fn block_range(text: &str, range: &Range<usize>) -> Range<usize> {
-    let start = text[..range.start.min(text.len())]
-        .rfind('\n')
+    // Snap both edges to char boundaries: a selection that ends inside a
+    // multi-byte character must not split it.
+    let start_from = text.floor_char_boundary(range.start);
+    let start = text
+        .get(..start_from)
+        .and_then(|head| head.rfind('\n'))
         .map_or(0, |i| i + 1);
-    let end_from = range.end.max(range.start).min(text.len());
-    let end = text[end_from..]
-        .find('\n')
+    let end_from = text.ceil_char_boundary(range.end.max(range.start));
+    let end = text
+        .get(end_from..)
+        .and_then(|tail| tail.find('\n'))
         .map_or(text.len(), |i| end_from + i);
     start..end
 }
@@ -534,7 +539,9 @@ impl<'a> Markup<'a> {
             .iter()
             .filter_map(|span| {
                 let range = snap_out_of_emoji(&doc.emoji, span.range.clone());
-                (range.start < range.end && range.end <= text.len()).then(|| DocSpan {
+                // Off a char boundary means an edit left the span stale:
+                // drop it rather than split a character.
+                (range.start < range.end && text.get(range.clone()).is_some()).then(|| DocSpan {
                     range,
                     tag: span.tag.clone(),
                 })
@@ -576,7 +583,8 @@ impl<'a> Markup<'a> {
         let mut lines: Vec<DocSpan> = Vec::new();
         for span in inline {
             let mut start = span.range.start;
-            for (ix, _) in text[span.range.clone()].match_indices('\n') {
+            let body = text.get(span.range.clone()).unwrap_or_default();
+            for (ix, _) in body.match_indices('\n') {
                 let at = span.range.start + ix;
                 if start < at {
                     lines.push(DocSpan::new(start..at, span.tag.clone()));
@@ -630,7 +638,10 @@ impl<'a> Markup<'a> {
             cuts.push(ix);
             cuts.push(ix + 1);
         }
-        cuts.retain(|&c| c <= text.len());
+        // Spans and emoji should stay on char boundaries after every edit;
+        // drop any cut that does not, so a stale range cannot split a
+        // character here.
+        cuts.retain(|&c| text.is_char_boundary(c));
         cuts.sort_unstable();
         cuts.dedup();
 
@@ -638,8 +649,7 @@ impl<'a> Markup<'a> {
         // Indices into `self.inline` of the open spans, outermost first.
         let mut stack: Vec<usize> = Vec::new();
         let mut i = 0;
-        while i + 1 < cuts.len() {
-            let (a, b) = (cuts[i], cuts[i + 1]);
+        while let (Some(&a), Some(&b)) = (cuts.get(i), cuts.get(i + 1)) {
             i += 1;
             if let Some(block) = self.pre.iter().find(|p| p.range.start == a) {
                 self.close_all(&mut stack, &mut out);
@@ -651,24 +661,24 @@ impl<'a> Markup<'a> {
                 out.push_str("```");
                 out.push_str(language);
                 out.push('\n');
-                out.push_str(&text[block.range.clone()]);
+                out.push_str(text.get(block.range.clone()).unwrap_or_default());
                 out.push_str("\n```");
                 // Continue from the end of the block.
-                while i + 1 < cuts.len() && cuts[i] < block.range.end {
+                while i + 1 < cuts.len() && cuts.get(i).is_some_and(|&c| c < block.range.end) {
                     i += 1;
                 }
                 continue;
             }
-            let active: Vec<usize> = (0..self.inline.len())
-                .filter(|&ix| {
-                    let r = &self.inline[ix].range;
-                    r.start <= a && a < r.end
-                })
+            let active: Vec<usize> = self
+                .inline
+                .iter()
+                .enumerate()
+                .filter(|(_, span)| span.range.start <= a && a < span.range.end)
+                .map(|(ix, _)| ix)
                 .collect();
             // Close from the first open span that is no longer active.
             if let Some(k) = stack.iter().position(|ix| !active.contains(ix)) {
-                while stack.len() > k {
-                    let ix = stack.pop().expect("stack holds k+1 spans");
+                for ix in stack.drain(k..).rev() {
                     out.push_str(&self.closer(ix));
                 }
             }
@@ -678,21 +688,23 @@ impl<'a> Markup<'a> {
                 .filter(|ix| !stack.contains(ix))
                 .collect();
             opening.sort_by_key(|&ix| {
-                let span = &self.inline[ix];
-                (std::cmp::Reverse(span.range.end), span.tag.nesting())
+                self.inline
+                    .get(ix)
+                    .map(|span| (std::cmp::Reverse(span.range.end), span.tag.nesting()))
             });
             for ix in opening {
                 out.push_str(&self.opener(ix));
                 stack.push(ix);
             }
+            let piece = text.get(a..b).unwrap_or_default();
             match self.doc.emoji.iter().find(|e| e.range.start == a) {
                 Some(emoji) if emoji.range.end == b => {
                     out.push_str(&crate::composer::custom_emoji_markup(
-                        &text[a..b],
+                        piece,
                         emoji.custom_emoji_id,
                     ));
                 }
-                _ => out.push_str(&text[a..b]),
+                _ => out.push_str(piece),
             }
         }
         self.close_all(&mut stack, &mut out);
@@ -702,7 +714,7 @@ impl<'a> Markup<'a> {
     /// `> ` when `at` starts a line inside a quote.
     fn quote_prefix(&self, at: usize, out: &mut String) {
         let text = &self.doc.text;
-        let line_start = at == 0 || text.as_bytes()[at - 1] == b'\n';
+        let line_start = at == 0 || text.as_bytes().get(at - 1) == Some(&b'\n');
         if line_start && self.quote.iter().any(|q| q.start <= at && at < q.end) {
             out.push_str("> ");
         }
@@ -715,7 +727,10 @@ impl<'a> Markup<'a> {
     }
 
     fn opener(&self, ix: usize) -> String {
-        match &self.inline[ix].tag {
+        let Some(span) = self.inline.get(ix) else {
+            return String::new();
+        };
+        match &span.tag {
             ComposerTag::Bold => "**".into(),
             ComposerTag::Italic => self.italic_marker(ix).into(),
             ComposerTag::Underline => "__".into(),
@@ -728,7 +743,10 @@ impl<'a> Markup<'a> {
     }
 
     fn closer(&self, ix: usize) -> String {
-        match &self.inline[ix].tag {
+        let Some(span) = self.inline.get(ix) else {
+            return String::new();
+        };
+        match &span.tag {
             ComposerTag::Bold => "**".into(),
             ComposerTag::Italic => self.italic_marker(ix).into(),
             ComposerTag::Underline => "__".into(),
@@ -745,10 +763,12 @@ impl<'a> Markup<'a> {
     /// with bold (whose `**` an italic `*` would be read into); then `_`.
     fn italic_marker(&self, ix: usize) -> &'static str {
         let text = &self.doc.text;
-        let range = &self.inline[ix].range;
-        let touches_star = text[range.clone()].contains('*')
-            || text[..range.start].ends_with('*')
-            || text[range.end..].starts_with('*');
+        let Some(range) = self.inline.get(ix).map(|span| &span.range) else {
+            return "*";
+        };
+        let touches_star = text.get(range.clone()).is_some_and(|t| t.contains('*'))
+            || text.get(..range.start).is_some_and(|t| t.ends_with('*'))
+            || text.get(range.end..).is_some_and(|t| t.starts_with('*'));
         let with_bold = self.inline.iter().any(|span| {
             span.tag == ComposerTag::Bold
                 && span.range.start < range.end

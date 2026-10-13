@@ -355,7 +355,7 @@ impl QuillApp {
     ) {
         self.dialogs.rating_detail = Some(RatingDetail {
             stars: rating,
-            problems: [false; 9],
+            problems: [false; CALL_PROBLEMS.len()],
         });
         self.dialogs.rating_comment_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -364,8 +364,10 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_rating_problem(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(detail) = self.dialogs.rating_detail.as_mut() {
-            detail.problems[index] = !detail.problems[index];
+        if let Some(detail) = self.dialogs.rating_detail.as_mut()
+            && let Some(problem) = detail.problems.get_mut(index)
+        {
+            *problem = !*problem;
         }
         cx.notify();
     }
@@ -390,7 +392,7 @@ impl QuillApp {
         let problems: Vec<&str> = CALL_PROBLEMS
             .iter()
             .enumerate()
-            .filter(|(index, _)| detail.problems[*index])
+            .filter(|(index, _)| detail.problems.get(*index).copied().unwrap_or(false))
             .map(|(_, (constructor, _))| *constructor)
             .collect();
         let stars = detail.stars;

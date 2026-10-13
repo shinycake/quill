@@ -869,7 +869,7 @@ impl QuillApp {
         }
         let mut chips = div().flex().flex_wrap().gap_1();
         for (index, (_, description)) in CALL_PROBLEMS.iter().enumerate() {
-            let selected = detail.problems[index];
+            let selected = detail.problems.get(index).copied().unwrap_or(false);
             chips = chips.child(
                 // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                 Checkbox::new(format!("call-problem-{index}"))

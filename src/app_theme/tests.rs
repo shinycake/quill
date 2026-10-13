@@ -208,6 +208,26 @@ fn solid_pngs_round_trip() {
     assert_eq!(png::solid_color(b"not a png"), None);
 }
 
+/// A theme or wallpaper file with an `IHDR` chunk shorter than ten bytes
+/// used to index past the chunk body and panic.
+#[test]
+fn truncated_png_header_is_rejected() {
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&4u32.to_be_bytes());
+    png.extend_from_slice(b"IHDR");
+    png.extend_from_slice(&[0, 0, 0, 1]);
+    png.extend_from_slice(&[0, 0, 0, 0]);
+    assert_eq!(png::solid_color(&png), None);
+    let mut empty = b"\x89PNG\r\n\x1a\n".to_vec();
+    empty.extend_from_slice(&0u32.to_be_bytes());
+    empty.extend_from_slice(b"IHDR");
+    assert_eq!(png::solid_color(&empty), None);
+    let mut huge = b"\x89PNG\r\n\x1a\n".to_vec();
+    huge.extend_from_slice(&u32::MAX.to_be_bytes());
+    huge.extend_from_slice(b"IHDR");
+    assert_eq!(png::solid_color(&huge), None);
+}
+
 #[test]
 fn theme_ids_serialize_leniently() {
     let ids = [

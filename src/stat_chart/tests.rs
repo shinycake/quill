@@ -195,6 +195,28 @@ fn height_limits_track_enabled_lines_and_kind() {
     assert_eq!(limits.ranged, Limits::new(10.0, 40.0));
 }
 
+/// A start index past the end used to slice `y[start..=end]` backwards and
+/// panic.
+#[test]
+fn height_limits_survive_a_start_past_the_end() {
+    let chart = parse_chart(&chart_json(
+        &days(4),
+        &[("y0", "A", "#000000", vec![10, 40, 20, 30])],
+        json!({}),
+    ))
+    .unwrap();
+    for kind in [
+        ChartKind::Linear,
+        ChartKind::StackBar,
+        ChartKind::DoubleLinear,
+    ] {
+        let limits = height_limits(&chart, kind, &[true], (9, 2));
+        assert!(limits.ranged.span() >= 0.0, "{kind:?}");
+        let limits = height_limits(&chart, kind, &[true], (9, 99));
+        assert!(limits.ranged.span() >= 0.0, "{kind:?}");
+    }
+}
+
 #[test]
 fn nearest_point_and_bar_under_the_pointer() {
     let chart = linear();

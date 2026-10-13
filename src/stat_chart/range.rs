@@ -103,7 +103,10 @@ pub fn height_limits(
     indices: (usize, usize),
 ) -> HeightLimits {
     let on = |i: usize| enabled.get(i).copied().unwrap_or(true);
-    let (start, end) = (indices.0, indices.1.min(chart.x.len().saturating_sub(1)));
+    // A start past the end (or past the data) gives an empty range rather
+    // than an inverted slice.
+    let end = indices.1.min(chart.x.len().saturating_sub(1));
+    let start = indices.0.min(end);
     match kind {
         ChartKind::StackLinear => HeightLimits {
             full: Limits::new(0.0, 100.0),
@@ -113,7 +116,7 @@ pub fn height_limits(
             let sum = |i: usize| -> i64 {
                 (0..chart.lines.len())
                     .filter(|&k| on(k))
-                    .map(|k| chart.lines[k].y[i])
+                    .filter_map(|k| chart.lines.get(k)?.y.get(i).copied())
                     .sum()
             };
             let full = (0..chart.x.len()).map(sum).max().unwrap_or(0);
@@ -131,8 +134,8 @@ pub fn height_limits(
                 if !on(k) {
                     continue;
                 }
-                let r = ratios[k];
-                for &v in &line.y[start..=end] {
+                let r = ratios.get(k).copied().unwrap_or(1.0);
+                for &v in line.y.get(start..=end).unwrap_or_default() {
                     max = max.max((v as f64 * r).trunc());
                     min = min.min((v as f64 * r).trunc());
                 }

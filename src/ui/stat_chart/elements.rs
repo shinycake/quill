@@ -167,9 +167,8 @@ pub(super) fn plot(
         && let Some(line) = chart.lines.get(k)
     {
         let (first, last) = local.indices;
-        let total: i64 = line.y[first..=last.min(line.y.len().saturating_sub(1))]
-            .iter()
-            .sum();
+        let last = last.min(line.y.len().saturating_sub(1));
+        let total: i64 = line.y.get(first..=last).unwrap_or_default().iter().sum();
         let value =
             (total as f64 * f64::from(snapshot.alpha.get(k).copied().unwrap_or(1.0))) as i64;
         if value > 0 {
