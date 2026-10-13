@@ -17,6 +17,8 @@ pub enum ComposerShortcut {
     Spoiler,
     ClearFormatting,
     EditLink,
+    /// "Date": the selection shows a chosen date and time.
+    EditDate,
 }
 
 /// One row of the shortcut table: the chord is the platform's primary
@@ -36,8 +38,9 @@ pub struct ComposerShortcutSpec {
 /// tdesktop's table: Bold/Italic/Underline are `QKeySequence::Bold` etc.
 /// (Ctrl+B/I/U); the rest are `kStrikeOutSequence` ctrl+shift+x,
 /// `kMonospaceSequence` ctrl+shift+m, `kBlockquoteSequence` ctrl+shift+.,
-/// `kSpoilerSequence` ctrl+shift+p, `kClearFormatSequence` ctrl+shift+n and
-/// `kEditLinkSequence` ctrl+k (input_field.h:40).
+/// `kSpoilerSequence` ctrl+shift+p, `kClearFormatSequence` ctrl+shift+n,
+/// `kEditLinkSequence` ctrl+k and `kEditDateSequence` ctrl+shift+d
+/// (input_field.h:40).
 pub const COMPOSER_SHORTCUTS: &[ComposerShortcutSpec] = &[
     spec(ComposerShortcut::Bold, "Bold", false, "b"),
     spec(ComposerShortcut::Italic, "Italic", false, "i"),
@@ -53,6 +56,7 @@ pub const COMPOSER_SHORTCUTS: &[ComposerShortcutSpec] = &[
         "n",
     ),
     spec(ComposerShortcut::EditLink, "Link", false, "k"),
+    spec(ComposerShortcut::EditDate, "Date", true, "d"),
 ];
 
 const fn spec(
@@ -91,7 +95,9 @@ impl ComposerShortcut {
             ComposerShortcut::Spoiler => FormatAction::Spoiler,
             ComposerShortcut::Monospace if selected.contains('\n') => FormatAction::Pre,
             ComposerShortcut::Monospace => FormatAction::Code,
-            ComposerShortcut::ClearFormatting | ComposerShortcut::EditLink => return None,
+            ComposerShortcut::ClearFormatting
+            | ComposerShortcut::EditLink
+            | ComposerShortcut::EditDate => return None,
         })
     }
 }
@@ -153,6 +159,7 @@ mod tests {
             (true, "p", ComposerShortcut::Spoiler),
             (true, "n", ComposerShortcut::ClearFormatting),
             (false, "k", ComposerShortcut::EditLink),
+            (true, "d", ComposerShortcut::EditDate),
         ];
         for (shift, key, expected) in cases {
             assert_eq!(composer_shortcut_for(shift, key), Some(expected), "{key}");

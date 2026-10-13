@@ -81,7 +81,12 @@ fn effect_json(id: i64, emoji: &str, premium: bool, sticker: bool) -> String {
     let kind = if sticker {
         format!(
             r#"{{"@type":"messageEffectTypePremiumSticker","sticker":{}}}"#,
-            sticker_json(ANIMATION_FILE, emoji, "stickerFormatTgs", Some(ANIMATION_FILE + 1))
+            sticker_json(
+                ANIMATION_FILE,
+                emoji,
+                "stickerFormatTgs",
+                Some(ANIMATION_FILE + 1)
+            )
         )
     } else {
         let animation = sticker_json(ANIMATION_FILE, emoji, "stickerFormatTgs", None);

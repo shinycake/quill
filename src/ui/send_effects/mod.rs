@@ -368,10 +368,7 @@ impl QuillApp {
         }
         let areas = open.areas.clone();
         // The strip stays under the expanded list, which covers it.
-        let strip = open
-            .effects
-            .then(|| self.effects_strip(open, cx))
-            .flatten();
+        let strip = open.effects.then(|| self.effects_strip(open, cx)).flatten();
         let width = strip.as_ref().map(|(_, width)| px(*width));
         let menu_areas = areas.clone();
         let column = div()
@@ -418,16 +415,15 @@ impl QuillApp {
         }
         if let Some((position, menu, _)) = open.card_menu.as_ref() {
             let menu_areas = areas.clone();
-            layer = layer.child(
-                anchored()
-                    .position(*position)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        div().relative().child(menu.clone()).child(tracker(move |bounds| {
-                            menu_areas.card_menu.set(Some(bounds))
-                        })),
-                    ),
-            );
+            layer =
+                layer.child(
+                    anchored()
+                        .position(*position)
+                        .snap_to_window_with_margin(px(8.))
+                        .child(div().relative().child(menu.clone()).child(tracker(
+                            move |bounds| menu_areas.card_menu.set(Some(bounds)),
+                        ))),
+                );
         }
         Some(
             deferred(anchored().position(point(px(0.), px(0.))).child(layer))

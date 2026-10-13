@@ -179,12 +179,14 @@ mod command_shortcuts;
 mod composer;
 #[cfg(all(test, feature = "demo-capture"))]
 mod composer_bundle_tests;
+mod composer_date;
 mod composer_field;
 #[cfg(all(test, feature = "demo-capture"))]
 mod composer_field_tests;
 mod composer_shortcuts;
 mod composer_suggest;
 mod composer_ui;
+mod composer_unicode;
 mod connect_ui;
 mod contacts;
 mod conversation;

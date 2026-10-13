@@ -126,7 +126,11 @@ impl QuillApp {
     }
 
     /// The list over the strip and the menu.
-    pub(super) fn effects_panel(&self, open: &SendMenu, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn effects_panel(
+        &self,
+        open: &SendMenu,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let session = self.session()?;
         let Some(column) = open.areas.column.get() else {
             // Placed over the menu once it has been painted.
@@ -167,7 +171,8 @@ impl QuillApp {
         for chunk in lists.reactions.chunks(columns) {
             let mut row = div().flex().h(px(STRIP_SIZE));
             for effect in chunk {
-                row = row.child(self.effect_list_cell(open, effect, STRIP_SIZE, false, premium, cx));
+                row =
+                    row.child(self.effect_list_cell(open, effect, STRIP_SIZE, false, premium, cx));
             }
             list = list.child(row);
         }

@@ -109,7 +109,11 @@ pub fn panel_min_height(width: f32, emoji: usize, stickers: usize) -> f32 {
 /// as x, y, width, height), grown to `min_height` downwards when the window
 /// (`window_height`) has room below, else upwards (tdesktop grows the menu
 /// on the side away from where it opened).
-pub fn panel_rect(column: (f32, f32, f32, f32), min_height: f32, window_height: f32) -> (f32, f32, f32, f32) {
+pub fn panel_rect(
+    column: (f32, f32, f32, f32),
+    min_height: f32,
+    window_height: f32,
+) -> (f32, f32, f32, f32) {
     let (x, y, w, h) = column;
     if h >= min_height {
         return column;
@@ -126,7 +130,11 @@ pub fn panel_rect(column: (f32, f32, f32, f32), min_height: f32, window_height: 
 /// The card's top-left corner (`EffectPreview::setupGeometry`): centred on
 /// the chosen effect, kept inside the menu (`parent`, as x, y, width,
 /// height); a menu shorter than the card centres it on the menu instead.
-pub fn preview_origin(center: (f32, f32), card: (f32, f32), parent: (f32, f32, f32, f32)) -> (f32, f32) {
+pub fn preview_origin(
+    center: (f32, f32),
+    card: (f32, f32),
+    parent: (f32, f32, f32, f32),
+) -> (f32, f32) {
     let (px, py, pw, ph) = parent;
     let (cw, ch) = card;
     let left = (center.0 - px - cw / 2.).min(pw - cw).max(0.);
@@ -174,7 +182,10 @@ pub fn emoji_key(emoji: &str) -> String {
 /// Of `effects`, those whose emoji is among `found` (tdesktop
 /// `appendPremiumSearchResults` for the reaction effects,
 /// `filterEffectsByEmoji` for the sticker ones), in their order.
-pub fn search<'a>(effects: &[&'a MessageEffect], found: &HashSet<String>) -> Vec<&'a MessageEffect> {
+pub fn search<'a>(
+    effects: &[&'a MessageEffect],
+    found: &HashSet<String>,
+) -> Vec<&'a MessageEffect> {
     effects
         .iter()
         .copied()
@@ -254,10 +265,7 @@ mod tests {
     fn the_expanded_list_asks_for_at_most_the_panels_minimum() {
         let small = panel_min_height(270., 3, 0);
         assert_eq!(small, 4. + 32. + SEARCH_ROW + 14.);
-        assert_eq!(
-            panel_min_height(270., 60, 30),
-            4. + PANEL_MIN_HEIGHT + 14.
-        );
+        assert_eq!(panel_min_height(270., 60, 30), 4. + PANEL_MIN_HEIGHT + 14.);
         assert_eq!(emoji_columns(270.), 8);
         let (columns, cell) = sticker_grid(270.);
         assert_eq!(columns, 5);
@@ -266,9 +274,18 @@ mod tests {
 
     #[test]
     fn the_panel_grows_down_when_there_is_room_else_up() {
-        assert_eq!(panel_rect((10., 100., 250., 150.), 300., 900.), (10., 100., 250., 300.));
-        assert_eq!(panel_rect((10., 500., 250., 150.), 300., 700.), (10., 350., 250., 300.));
-        assert_eq!(panel_rect((10., 500., 250., 400.), 300., 700.), (10., 500., 250., 400.));
+        assert_eq!(
+            panel_rect((10., 100., 250., 150.), 300., 900.),
+            (10., 100., 250., 300.)
+        );
+        assert_eq!(
+            panel_rect((10., 500., 250., 150.), 300., 700.),
+            (10., 350., 250., 300.)
+        );
+        assert_eq!(
+            panel_rect((10., 500., 250., 400.), 300., 700.),
+            (10., 500., 250., 400.)
+        );
     }
 
     #[test]
@@ -324,7 +341,8 @@ mod tests {
         use serde_json::json;
         let mut effects = MessageEffects::default();
         effects.set_available(vec![1, 2], vec![3]);
-        for (id, emoji, sticker) in [("1", "🔥", false), ("2", "👍", false), ("3", "🔥", true)] {
+        for (id, emoji, sticker) in [("1", "🔥", false), ("2", "👍", false), ("3", "🔥", true)]
+        {
             let kind = if sticker {
                 json!({"@type": "messageEffectTypePremiumSticker", "sticker": null})
             } else {
@@ -339,7 +357,13 @@ mod tests {
         assert_eq!((all.reactions.len(), all.stickers.len()), (2, 1));
         let found: HashSet<String> = ["🔥".to_string()].into_iter().collect();
         let fire = picker_lists(&effects, true, Some(&found));
-        assert_eq!(fire.reactions.iter().map(|e| e.id).collect::<Vec<_>>(), vec![1]);
-        assert_eq!(fire.stickers.iter().map(|e| e.id).collect::<Vec<_>>(), vec![3]);
+        assert_eq!(
+            fire.reactions.iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            fire.stickers.iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![3]
+        );
     }
 }

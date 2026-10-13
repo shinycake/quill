@@ -1,6 +1,7 @@
 //! Methods moved out of `keybindings.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::actions::ComposerEditDate;
 
 /// Cmd/Ctrl+1..8: the Nth pinned chat of the list on screen
 /// (`Command::ChatPinned1..8`).
@@ -137,6 +138,20 @@ pub(super) fn composer_scoped_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("pagedown", HistoryPageDown, ctx),
         KeyBinding::new(primary!("]"), ShowChatPreview, ctx),
     ]
+}
+
+/// Composer rows of the shortcut list kept out of `shortcut_rows`; their
+/// bindings are installed with `composer_bindings`.
+pub(super) fn composer_extra_rows() -> Vec<ShortcutRow> {
+    vec![ShortcutRow {
+        label: "Date (selected text)",
+        section: "Composer",
+        binding: KeyBinding::new(
+            primary!("shift-d"),
+            ComposerEditDate,
+            Some(COMPOSER_INPUT_CONTEXT),
+        ),
+    }]
 }
 
 /// kit Phase 7: the application menus — File / Edit / View / Window / Help,

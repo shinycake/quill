@@ -310,6 +310,9 @@ impl QuillApp {
                         .when_some(self.composer_link_dialog_panel(cx), |this, panel| {
                             this.child(panel)
                         })
+                        .when_some(self.composer_date_dialog_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         .when_some(self.code_language_panel(cx), |this, panel| {
                             this.child(panel)
                         })

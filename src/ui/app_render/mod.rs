@@ -549,6 +549,16 @@ impl Render for QuillApp {
                 this.composer_link_chord(window, cx);
             }))
             .on_action(
+                cx.listener(|this, _: &super::actions::ComposerEditDate, window, cx| {
+                    this.composer_date_chord(window, cx);
+                }),
+            )
+            .on_action(cx.listener(
+                |this, action: &super::actions::ComposerInsertControlChar, window, cx| {
+                    this.insert_composer_control_char(action.character, window, cx);
+                },
+            ))
+            .on_action(
                 cx.listener(|this, _: &ComposerEditCodeLanguage, window, cx| {
                     this.open_code_language_dialog(window, cx);
                 }),

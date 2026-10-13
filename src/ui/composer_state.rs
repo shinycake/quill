@@ -130,6 +130,8 @@ pub(crate) struct ComposerUi {
     pub(super) saved_edit_reply: Option<ComposerReplyTo>,
     /// The composer's link dialog (Cmd/Ctrl+K on a selection).
     pub(super) link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
+    /// The composer's date box (Formatting > Date).
+    pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
     /// The "Code Language" box for the fenced block under the caret.
     pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
     /// MED1: composer "group media" override for 2+ attachments; `None`
@@ -207,6 +209,7 @@ impl ComposerUi {
             saved_edit_draft: String::new(),
             saved_edit_reply: None,
             link_dialog: None,
+            date_dialog: None,
             code_language: None,
             group_media: None,
             send_morph: Default::default(),

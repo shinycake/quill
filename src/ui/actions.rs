@@ -55,6 +55,8 @@ actions!(
         /// Cmd/Ctrl+K inside the composer (key context `QuillComposer`):
         /// edit the link of the selection, or quick switch without one.
         ComposerEditLink,
+        /// Cmd/Ctrl+Shift+D inside the composer: Formatting > Date.
+        ComposerEditDate,
         /// Cmd/Ctrl+Shift+V: paste the clipboard text as plain text.
         ComposerPastePlain,
         /// "Code Language…" in the composer's Formatting menu: set the
@@ -151,6 +153,14 @@ pub struct SpellingReplace {
     pub end: usize,
     pub word: String,
     pub replacement: String,
+}
+
+/// "Insert Unicode control character": one of Qt's control characters
+/// (`composer_unicode`), built per menu; never bound to keys.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct ComposerInsertControlChar {
+    pub character: char,
 }
 
 /// "Add to Dictionary".

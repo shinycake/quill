@@ -111,9 +111,10 @@ pub(super) fn premium_playing(key: Key) -> bool {
 #[cfg(all(test, feature = "demo-capture"))]
 pub(super) fn message_effect_playing(key: Key) -> bool {
     ACTIVE.with(|active| {
-        active.borrow().iter().any(|a| {
-            a.message.is_some() && (a.effect.chat_id.0, a.effect.message_id.0) == key
-        })
+        active
+            .borrow()
+            .iter()
+            .any(|a| a.message.is_some() && (a.effect.chat_id.0, a.effect.message_id.0) == key)
     })
 }
 

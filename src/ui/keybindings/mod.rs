@@ -369,6 +369,7 @@ fn composer_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(paste_plain_chord(), ComposerPastePlain, None),
     ];
     bindings.extend(composer_scoped_bindings());
+    bindings.extend(composer_extra_rows().into_iter().map(|row| row.binding));
     bindings
 }
 
@@ -887,7 +888,8 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
     rows.extend(
         QUOTE_CHORDS
             .iter()
-            .map(|chord| row(chord, "Quote", "Composer", FormatBlockQuote)),
+            .map(|chord| row(chord, "Quote", "Composer", FormatBlockQuote))
+            .chain(composer_extra_rows()),
     );
     // The reference dialog prints a heading whenever the section changes,
     // so each group goes in next to its own section.
@@ -963,7 +965,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 92);
+        assert_eq!(defaults.len(), 93);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
@@ -1308,6 +1310,7 @@ mod tests {
             ("p", true, "quill_ui::FormatSpoiler"),
             ("n", true, "quill_ui::FormatClear"),
             ("k", false, "quill_ui::ComposerEditLink"),
+            ("d", true, "quill_ui::ComposerEditDate"),
         ];
         assert_eq!(expected.len() + 1, COMPOSER_SHORTCUTS.len());
         for (key, shift, action) in expected {

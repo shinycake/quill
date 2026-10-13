@@ -58,7 +58,9 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|shown| std::ptr::eq(shown, preview));
         let toggle = Duration::from_millis(PREVIEW_TOGGLE_MS);
-        let gone = preview.hiding.is_some_and(|since| since.elapsed() >= toggle);
+        let gone = preview
+            .hiding
+            .is_some_and(|since| since.elapsed() >= toggle);
         if gone {
             if current {
                 open.areas.card.set(None);
@@ -93,18 +95,24 @@ impl QuillApp {
             f32::from(open.viewport.width),
             f32::from(open.viewport.height),
         );
-        let x = x.min(viewport.0 - card.0 - WINDOW_MARGIN).max(WINDOW_MARGIN);
-        let y = y.min(viewport.1 - card.1 - WINDOW_MARGIN).max(WINDOW_MARGIN);
+        let x = x
+            .min(viewport.0 - card.0 - WINDOW_MARGIN)
+            .max(WINDOW_MARGIN);
+        let y = y
+            .min(viewport.1 - card.1 - WINDOW_MARGIN)
+            .max(WINDOW_MARGIN);
         let progress = progress(preview);
         let hiding = preview.hiding.is_some();
 
-        let icon = badge::effect_icon(
-            effect,
-            &session.media.files,
-            &self.media_display_roots(),
-        );
+        let icon = badge::effect_icon(effect, &session.media.files, &self.media_display_roots());
         let clip = effect.animation().and_then(|animation| {
-            self.layered_clip(animation.file, animation.format, PlaybackSize::Sticker, true, cx)
+            self.layered_clip(
+                animation.file,
+                animation.format,
+                PlaybackSize::Sticker,
+                true,
+                cx,
+            )
         });
         // Nothing to play (an unknown kind): the icon alone is the card.
         let animated = effect.animation().is_some();
@@ -158,18 +166,20 @@ impl QuillApp {
             .bg(cx.theme().popover)
             .flex()
             .flex_col()
-            .child(paint_wallpaper(
-                div()
-                    .relative()
-                    .flex_none()
-                    .w(px(PREVIEW_SIDE))
-                    .h(px(PREVIEW_SIDE))
-                    .overflow_hidden(),
-                self.current_wallpaper(cx).as_ref(),
-                0,
-                Slot::Thumb,
+            .child(
+                paint_wallpaper(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .w(px(PREVIEW_SIDE))
+                        .h(px(PREVIEW_SIDE))
+                        .overflow_hidden(),
+                    self.current_wallpaper(cx).as_ref(),
+                    0,
+                    Slot::Thumb,
+                )
+                .child(sample_bubble(badge_cell)),
             )
-            .child(sample_bubble(badge_cell)))
             .child(bottom);
 
         let mut layer = div()
@@ -370,17 +380,19 @@ fn premium_offer(effect_id: i64, cx: &mut Context<QuillApp>) -> AnyElement {
         .line_height(px(14.))
         .text_color(text_muted())
         .swallow_press()
-        .child(div().w_full().child(
-            InteractiveText::new(
-                ("send-effect-premium", effect_id as u64),
-                StyledText::new(text).with_highlights(vec![(link.clone(), highlight)]),
-            )
-            .on_click(vec![link], move |_, _, cx| {
-                let _ = owner.update(cx, |this, cx| {
-                    this.close_send_menu(cx);
-                    this.show_premium_effects_preview(cx);
-                });
-            }),
-        ))
+        .child(
+            div().w_full().child(
+                InteractiveText::new(
+                    ("send-effect-premium", effect_id as u64),
+                    StyledText::new(text).with_highlights(vec![(link.clone(), highlight)]),
+                )
+                .on_click(vec![link], move |_, _, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.close_send_menu(cx);
+                        this.show_premium_effects_preview(cx);
+                    });
+                }),
+            ),
+        )
         .into_any_element()
 }

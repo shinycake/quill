@@ -59,6 +59,8 @@ pub fn formatted_to_rich_text(text: &str, entities: &[ComposerEntity]) -> Value 
             }
             // Rich text has no custom-emoji node: the fallback emoji stays.
             crate::composer::FormatKind::CustomEmoji => plain(run),
+            // Nor a date node: the text the date was written as stays.
+            crate::composer::FormatKind::DateTime => plain(run),
             crate::composer::FormatKind::TextUrl | crate::composer::FormatKind::MentionName => {
                 if entity.url == run {
                     plain(run)

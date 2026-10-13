@@ -250,6 +250,9 @@ fn markup_preview_text(text: &str) -> (String, Vec<TextEntity>) {
                         .strip_prefix("tg://emoji?id=")
                         .and_then(|id| id.parse().ok())?,
                 },
+                crate::composer::FormatKind::DateTime => TextEntityKind::DateTime {
+                    unix_time: crate::composer::date_link_time(&entity.url)?,
+                },
                 crate::composer::FormatKind::BlockQuote => return None,
             };
             Some(TextEntity {

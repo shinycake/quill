@@ -103,7 +103,13 @@ fn a_message_with_an_effect_asks_for_it_once() {
     assert_eq!(f.sent("getMessageEffect").len(), 1);
 
     f.answer_effect(&asked[0], 600);
-    let effect = f.driver.session.stickers.effects.get(EFFECT).expect("known");
+    let effect = f
+        .driver
+        .session
+        .stickers
+        .effects
+        .get(EFFECT)
+        .expect("known");
     assert_eq!(effect.icon_file(), Some(FileId(600)));
     // The badge's icon downloads with the chat's thumbnails.
     f.driver.maybe_download_open_thumbs().unwrap();

@@ -147,6 +147,13 @@ pub fn format_entity_json(entity: &ComposerEntity) -> Value {
             "@type": "textEntityTypeMentionName",
             "user_id": crate::composer::mention_user_id(&entity.url).unwrap_or_default(),
         }),
+        // No `formatting_type`: shown as the reader's full date and time
+        // (tdesktop sends empty `FormattedDateFlags`).
+        FormatKind::DateTime => json!({
+            "@type": "textEntityTypeDateTime",
+            "unix_time": crate::composer::date_link_time(&entity.url).unwrap_or_default(),
+            "formatting_type": null,
+        }),
         FormatKind::CustomEmoji => json!({
             "@type": "textEntityTypeCustomEmoji",
             // int64 ids travel as strings.

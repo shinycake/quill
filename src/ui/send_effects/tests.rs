@@ -10,9 +10,7 @@ use crate::ui::send_effects::demo::{CHAT, REACTION_EFFECTS, STICKER_EFFECTS};
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{
-    AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size,
-};
+use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -142,7 +140,13 @@ fn the_full_list_shows_every_effect_and_searches_them(cx: &mut TestAppContext) {
 
     // A sticker effect opens its card from the list too.
     app.update_in(vcx, |app, window, cx| {
-        app.composer_ui.send_menu.open.as_mut().expect("open").query.clear();
+        app.composer_ui
+            .send_menu
+            .open
+            .as_mut()
+            .expect("open")
+            .query
+            .clear();
         let _ = window;
         cx.notify();
     });
