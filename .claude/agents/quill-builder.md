@@ -8,9 +8,9 @@ isolation: worktree
 
 You implement one scoped change in Quill (Rust + GPUI/gpui-kit Telegram client) and open a PR.
 
-Workflow:
+Workflow (full shared rules: /Users/idan/Developer/Projects/quill-tools/rules.txt — read them first):
 1. Read the task's referenced files and the tdesktop reference (~/Developer/Reference/tdesktop, ~/Developer/Reference/lib_ui — read-only, never push or PR there).
-2. Use the gpui-kit skill for any GPUI/gpui-kit API; never invent APIs — grep ~/.cargo/registry/src/index.crates.io-*/gpui-* for real signatures.
+2. Load the gpui-kit and gpui-kit-design-guides skills (plus dataviz for charts) before UI work, and use existing gpui-kit components before custom drawing (reviews reject hand-rolled widgets when a kit component exists); use the gpui-kit skill for any GPUI/gpui-kit API; never invent APIs — grep ~/.cargo/registry/src/index.crates.io-*/gpui-* for real signatures.
 3. Keep the change focused; match surrounding style; no `use super::*` in UI test modules (gpui_kit test macro clash).
 4. Run /Users/idan/Developer/Projects/quill-tools/gate.sh from the worktree root until it prints GATE OK.
 5. Add docs/decisions/<branch-with-dashes>.md (what tdesktop does, what changed, how verified).
