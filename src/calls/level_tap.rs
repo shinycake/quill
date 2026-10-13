@@ -40,7 +40,7 @@ const NO_LEVEL: u32 = u32::MAX;
 pub struct LevelTap {
     mic: Option<crate::voice_input::MicStream>,
     shared: Arc<Shared>,
-    worker: Option<JoinHandle<()>>,
+    worker: Option<JoinHandle<Option<()>>>,
 }
 
 impl LevelTap {
@@ -54,40 +54,38 @@ impl LevelTap {
         });
         let worker = {
             let shared = shared.clone();
-            std::thread::Builder::new()
-                .name("quill-level-tap".into())
-                .spawn(move || {
-                    let mut window = PeakWindow::default();
-                    while !shared.stop.load(Ordering::Acquire) {
-                        let chunk = match receiver.recv_timeout(Duration::from_millis(50)) {
-                            Ok(chunk) => chunk,
-                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                        };
-                        window.push(&chunk, |level| {
-                            // Keep the highest level since the last read.
-                            let mut seen = shared.peak_since_read.load(Ordering::Acquire);
-                            loop {
-                                let current = if seen == NO_LEVEL {
-                                    0.0
-                                } else {
-                                    f32::from_bits(seen)
-                                };
-                                let next = level.max(current).to_bits();
-                                match shared.peak_since_read.compare_exchange(
-                                    seen,
-                                    next,
-                                    Ordering::AcqRel,
-                                    Ordering::Acquire,
-                                ) {
-                                    Ok(_) => break,
-                                    Err(actual) => seen = actual,
-                                }
+            crate::thread_guard::spawn_guarded("quill-level-tap", move || {
+                let mut window = PeakWindow::default();
+                while !shared.stop.load(Ordering::Acquire) {
+                    let chunk = match receiver.recv_timeout(Duration::from_millis(50)) {
+                        Ok(chunk) => chunk,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
+                    window.push(&chunk, |level| {
+                        // Keep the highest level since the last read.
+                        let mut seen = shared.peak_since_read.load(Ordering::Acquire);
+                        loop {
+                            let current = if seen == NO_LEVEL {
+                                0.0
+                            } else {
+                                f32::from_bits(seen)
+                            };
+                            let next = level.max(current).to_bits();
+                            match shared.peak_since_read.compare_exchange(
+                                seen,
+                                next,
+                                Ordering::AcqRel,
+                                Ordering::Acquire,
+                            ) {
+                                Ok(_) => break,
+                                Err(actual) => seen = actual,
                             }
-                        });
-                    }
-                })
-                .map_err(|err| format!("Couldn't start the level thread: {err}"))?
+                        }
+                    });
+                }
+            })
+            .map_err(|err| format!("Couldn't start the level thread: {err}"))?
         };
         Ok(Self {
             mic: Some(mic),

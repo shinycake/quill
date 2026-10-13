@@ -134,7 +134,7 @@ impl ChatExport {
         let title = settings.title.clone();
         let worker_progress = progress.clone();
         let worker_folder = folder.clone();
-        std::thread::spawn(move || {
+        crate::thread_guard::spawn_guarded("quill-export", move || {
             let report = |progress: Progress| {
                 if let Ok(mut slot) = worker_progress.lock() {
                     *slot = progress;
@@ -155,7 +155,7 @@ impl ChatExport {
             if let Ok(mut slot) = worker_progress.lock() {
                 slot.stage = last;
             }
-        });
+        })?;
         Ok(Self {
             link,
             progress,

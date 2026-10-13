@@ -122,10 +122,10 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
     let (ready_tx, ready_rx) = mpsc::channel();
     {
         let (active, thread_id) = (active.clone(), thread_id.clone());
-        std::thread::Builder::new()
-            .name("quill-ptt-hook".into())
-            .spawn(move || run_hook(target, sink, active, thread_id, ready_tx))
-            .map_err(|_| StartError::Failed("Couldn't start the key listener.".into()))?;
+        crate::thread_guard::spawn_guarded("quill-ptt-hook", move || {
+            run_hook(target, sink, active, thread_id, ready_tx)
+        })
+        .map_err(|_| StartError::Failed("Couldn't start the key listener.".into()))?;
     }
     match ready_rx.recv_timeout(Duration::from_secs(2)) {
         Ok(Ok(())) => Ok(Handle { active, thread_id }),

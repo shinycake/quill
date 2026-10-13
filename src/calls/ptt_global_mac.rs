@@ -176,10 +176,10 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
     let (ready_tx, ready_rx) = mpsc::channel();
     {
         let (active, run_loop) = (active.clone(), run_loop.clone());
-        std::thread::Builder::new()
-            .name("quill-ptt-tap".into())
-            .spawn(move || run_tap(target, sink, active, run_loop, ready_tx))
-            .map_err(|_| StartError::Failed("Couldn't start the key listener.".into()))?;
+        crate::thread_guard::spawn_guarded("quill-ptt-tap", move || {
+            run_tap(target, sink, active, run_loop, ready_tx)
+        })
+        .map_err(|_| StartError::Failed("Couldn't start the key listener.".into()))?;
     }
     match ready_rx.recv_timeout(Duration::from_secs(2)) {
         Ok(Ok(())) => Ok(Handle { active, run_loop }),

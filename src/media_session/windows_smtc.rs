@@ -28,9 +28,7 @@ static WORKER: OnceLock<Sender<Option<NowPlaying>>> = OnceLock::new();
 pub(super) fn set(info: Option<&NowPlaying>) {
     let sender = WORKER.get_or_init(|| {
         let (tx, rx) = channel::<Option<NowPlaying>>();
-        let _ = std::thread::Builder::new()
-            .name("smtc".into())
-            .spawn(move || run(rx));
+        let _ = crate::thread_guard::spawn_guarded("smtc", move || run(rx));
         tx
     });
     let _ = sender.send(info.cloned());

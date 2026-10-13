@@ -367,9 +367,7 @@ pub fn select_backend(
 /// thread (which only paints cached underlines) never blocks on the parse.
 fn warm_in_background(backend: &Arc<dyn SpellBackend>) {
     let backend = Arc::clone(backend);
-    let _ = std::thread::Builder::new()
-        .name("quill-spell-warm".into())
-        .spawn(move || backend.warm());
+    let _ = crate::thread_guard::spawn_guarded("quill-spell-warm", move || backend.warm());
 }
 
 /// A checker plus what the settings page shows about it.

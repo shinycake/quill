@@ -31,7 +31,7 @@ impl AccountExport {
         let worker_progress = progress.clone();
         let worker_finished = finished.clone();
         let worker_folder = folder.clone();
-        std::thread::spawn(move || {
+        crate::thread_guard::spawn_guarded("quill-export-account", move || {
             let report = |progress: AccountProgress| {
                 if let Ok(mut slot) = worker_progress.lock() {
                     *slot = progress;
@@ -52,7 +52,7 @@ impl AccountExport {
                 slot.stage = last;
             }
             worker_finished.store(true, Ordering::Release);
-        });
+        })?;
         Ok(Self {
             link,
             progress,

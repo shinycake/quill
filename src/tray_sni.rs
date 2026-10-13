@@ -229,14 +229,12 @@ fn start_registration(unread: u32, toggles: (bool, bool)) -> Receiver<Option<Han
     let (sender, receiver) = channel();
     // If the thread cannot spawn, `sender` is dropped with the closure and
     // the receiver reports `Disconnected`, which schedules a retry.
-    let _ = std::thread::Builder::new()
-        .name("quill-tray-sni".to_string())
-        .spawn(move || {
-            let handle = SniTray { unread, toggles }
-                .disable_dbus_name(sandboxed())
-                .spawn()
-                .ok();
-            let _ = sender.send(handle);
-        });
+    let _ = crate::thread_guard::spawn_guarded("quill-tray-sni", move || {
+        let handle = SniTray { unread, toggles }
+            .disable_dbus_name(sandboxed())
+            .spawn()
+            .ok();
+        let _ = sender.send(handle);
+    });
     receiver
 }

@@ -1,4 +1,4 @@
 # Files over the 1,000-line limit when scripts/check-file-size.sh started.
 # They may shrink but not grow; remove a line once its file is under the
 # limit. See docs/contributing/structure.md.
-1254 src/main.rs
+1245 src/main.rs

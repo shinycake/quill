@@ -52,17 +52,15 @@ impl QuillApp {
         let clicks = self.calls.notify_clicks.clone();
         let inflight = self.notify.notify_inflight.clone();
         let call_id = notification.call_id;
-        let spawn = std::thread::Builder::new()
-            .name("quill-call-notify".to_string())
-            .spawn(move || {
-                let action = quill::notify_call::run_call_command(&command);
-                inflight.fetch_sub(1, Ordering::SeqCst);
-                if let Some(action) = action
-                    && let Ok(mut guard) = clicks.lock()
-                {
-                    guard.push((call_id, action));
-                }
-            });
+        let spawn = quill::thread_guard::spawn_guarded("quill-call-notify", move || {
+            let action = quill::notify_call::run_call_command(&command);
+            inflight.fetch_sub(1, Ordering::SeqCst);
+            if let Some(action) = action
+                && let Ok(mut guard) = clicks.lock()
+            {
+                guard.push((call_id, action));
+            }
+        });
         if spawn.is_err() {
             self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
         }
@@ -140,13 +138,11 @@ impl QuillApp {
         if let Some(notifier) =
             super::linux_dbus::notifier(&self.notify.notify_clicks, &self.background.clicks)
         {
-            let _ = std::thread::Builder::new()
-                .name("quill-notify-close".to_string())
-                .spawn(move || {
-                    if let Err(error) = notifier.close(&(account, chat_id)) {
-                        eprintln!("failed to close the desktop notification: {error}");
-                    }
-                });
+            let _ = quill::thread_guard::spawn_guarded("quill-notify-close", move || {
+                if let Err(error) = notifier.close(&(account, chat_id)) {
+                    eprintln!("failed to close the desktop notification: {error}");
+                }
+            });
         }
     }
 
@@ -279,45 +275,43 @@ impl QuillApp {
         let account_clicks = self.background.clicks.clone();
         let account = account.cloned();
         let inflight = self.notify.notify_inflight.clone();
-        let spawn = std::thread::Builder::new()
-            .name("quill-notify".to_string())
-            .spawn(move || {
-                // D-Bus first: `Notify` returns at once and the listener
-                // thread reports the click. Without a session bus,
-                // `notify-send --wait` holds the thread until the click.
-                #[cfg(target_os = "linux")]
-                if let Some(notifier) = super::linux_dbus::notifier(&clicks, &account_clicks) {
-                    if let Err(error) = notifier.show(
-                        (account, chat_id),
-                        &notification.title,
-                        &notification.body,
-                        icon.as_deref(),
-                        locked,
-                        reply_field,
-                    ) {
-                        eprintln!("failed to show the desktop notification: {error}");
-                    }
-                    inflight.fetch_sub(1, Ordering::SeqCst);
-                    return;
+        let spawn = quill::thread_guard::spawn_guarded("quill-notify", move || {
+            // D-Bus first: `Notify` returns at once and the listener
+            // thread reports the click. Without a session bus,
+            // `notify-send --wait` holds the thread until the click.
+            #[cfg(target_os = "linux")]
+            if let Some(notifier) = super::linux_dbus::notifier(&clicks, &account_clicks) {
+                if let Err(error) = notifier.show(
+                    (account, chat_id),
+                    &notification.title,
+                    &notification.body,
+                    icon.as_deref(),
+                    locked,
+                    reply_field,
+                ) {
+                    eprintln!("failed to show the desktop notification: {error}");
                 }
-                let outcome = quill::notify::run_notification_command(&command);
                 inflight.fetch_sub(1, Ordering::SeqCst);
-                let Some(action) = outcome.action else {
-                    return;
-                };
-                match account {
-                    Some(account) => {
-                        if let Ok(mut guard) = account_clicks.lock() {
-                            guard.push((account, chat_id, action));
-                        }
-                    }
-                    None => {
-                        if let Ok(mut guard) = clicks.lock() {
-                            guard.push((chat_id, action));
-                        }
+                return;
+            }
+            let outcome = quill::notify::run_notification_command(&command);
+            inflight.fetch_sub(1, Ordering::SeqCst);
+            let Some(action) = outcome.action else {
+                return;
+            };
+            match account {
+                Some(account) => {
+                    if let Ok(mut guard) = account_clicks.lock() {
+                        guard.push((account, chat_id, action));
                     }
                 }
-            });
+                None => {
+                    if let Ok(mut guard) = clicks.lock() {
+                        guard.push((chat_id, action));
+                    }
+                }
+            }
+        });
         if spawn.is_err() {
             self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
         }

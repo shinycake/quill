@@ -120,9 +120,7 @@ impl Notifier {
             account_clicks,
             reply_texts: Mutex::new(HashMap::new()),
         };
-        std::thread::Builder::new()
-            .name("quill-notify-signals".to_string())
-            .spawn(move || listen(signals))
+        quill::thread_guard::spawn_guarded("quill-notify-signals", move || listen(signals))
             .map_err(|error| zbus::Error::Failure(error.to_string()))?;
         Ok(notifier)
     }

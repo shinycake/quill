@@ -327,32 +327,30 @@ fn emit_launcher_entry(unread: u32) {
         use std::sync::Once;
         static WORKER: Once = Once::new();
         WORKER.call_once(|| {
-            let _ = std::thread::Builder::new()
-                .name("quill-launcher-badge".into())
-                .spawn(|| {
-                    let mut connection: Option<zbus::blocking::Connection> = None;
-                    loop {
-                        let count = LAUNCHER_SLOT.take();
-                        if connection.is_none() {
-                            connection = zbus::blocking::Connection::session().ok();
-                        }
-                        let Some(conn) = &connection else { continue };
-                        let mut props: std::collections::HashMap<&str, zbus::zvariant::Value> =
-                            std::collections::HashMap::new();
-                        props.insert("count", zbus::zvariant::Value::from(i64::from(count)));
-                        props.insert("count-visible", zbus::zvariant::Value::from(count > 0));
-                        let sent = conn.emit_signal(
-                            None::<&str>,
-                            "/",
-                            "com.canonical.Unity.LauncherEntry",
-                            "Update",
-                            &(APP_URI, props),
-                        );
-                        if sent.is_err() {
-                            connection = None;
-                        }
+            let _ = crate::thread_guard::spawn_guarded("quill-launcher-badge", || {
+                let mut connection: Option<zbus::blocking::Connection> = None;
+                loop {
+                    let count = LAUNCHER_SLOT.take();
+                    if connection.is_none() {
+                        connection = zbus::blocking::Connection::session().ok();
                     }
-                });
+                    let Some(conn) = &connection else { continue };
+                    let mut props: std::collections::HashMap<&str, zbus::zvariant::Value> =
+                        std::collections::HashMap::new();
+                    props.insert("count", zbus::zvariant::Value::from(i64::from(count)));
+                    props.insert("count-visible", zbus::zvariant::Value::from(count > 0));
+                    let sent = conn.emit_signal(
+                        None::<&str>,
+                        "/",
+                        "com.canonical.Unity.LauncherEntry",
+                        "Update",
+                        &(APP_URI, props),
+                    );
+                    if sent.is_err() {
+                        connection = None;
+                    }
+                }
+            });
         });
         LAUNCHER_SLOT.put(unread);
     }

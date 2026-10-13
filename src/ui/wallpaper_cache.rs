@@ -144,10 +144,7 @@ struct Shared {
 fn shared() -> &'static Shared {
     static SHARED: OnceLock<Shared> = OnceLock::new();
     SHARED.get_or_init(|| {
-        let threaded = std::thread::Builder::new()
-            .name("quill-wallpaper".into())
-            .spawn(worker)
-            .is_ok();
+        let threaded = quill::thread_guard::spawn_guarded("quill-wallpaper", worker).is_ok();
         Shared {
             board: Mutex::new(Board::default()),
             wake: Condvar::new(),

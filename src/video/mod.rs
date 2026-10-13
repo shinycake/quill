@@ -707,7 +707,8 @@ impl VideoNoteCapture {
         let frames: PreviewFrame = Arc::default();
         if let Some(mut stdout) = child.stdout.take() {
             let frames = frames.clone();
-            std::thread::spawn(move || {
+            // No thread: the recording still works, without a preview.
+            let _ = crate::thread_guard::spawn_guarded("quill-round-preview", move || {
                 use std::io::Read;
                 let mut frame = vec![0u8; (preview * preview * 4) as usize];
                 while stdout.read_exact(&mut frame).is_ok() {
