@@ -11,15 +11,21 @@ const MESSAGE_DECIMALS: usize = 3;
 /// decimals with trailing zeros cut. An amount under 0.001 that is not
 /// zero keeps all nine decimals instead of reading "0".
 pub fn format_gram_amount(nanos: i64) -> String {
+    format_gram_amount_with(nanos, MESSAGE_DECIMALS)
+}
+
+/// [`format_gram_amount`] with up to `decimals` places (iOS
+/// `maxDecimalPositions`: 2 for a balance, 3 in lists, 5 for a key change).
+pub fn format_gram_amount_with(nanos: i64, decimals: usize) -> String {
     let magnitude = nanos.unsigned_abs();
     let integer = magnitude / NANOS_PER_GRAM;
     let fraction = magnitude % NANOS_PER_GRAM;
     let full = format!("{fraction:09}");
-    let mut decimals: String = full.chars().take(MESSAGE_DECIMALS).collect();
-    if integer == 0 && magnitude != 0 && decimals.chars().all(|ch| ch == '0') {
-        decimals = full;
+    let mut shown: String = full.chars().take(decimals.min(9)).collect();
+    if integer == 0 && magnitude != 0 && shown.chars().all(|ch| ch == '0') {
+        shown = full;
     }
-    let decimals = decimals.trim_end_matches('0');
+    let decimals = shown.trim_end_matches('0');
     let mut text = group_thousands(integer);
     if !decimals.is_empty() {
         text.push('.');

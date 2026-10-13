@@ -282,11 +282,12 @@ pub enum GroupsPayload {
     /// `chatBoostFeatures` — the `getChatBoostFeatures` answer.
     ChatBoostFeatures(ParsedBoostFeatures),
     /// `jsonValueObject`, the `getApplicationConfig` answer: only
-    /// `boosts_per_sent_gift` (0 when the key is missing) and
-    /// `ton_blockchain_explorer_url` are kept.
+    /// `boosts_per_sent_gift` (0 when the key is missing),
+    /// `ton_blockchain_explorer_url` and `ton_usd_rate` are kept.
     ApplicationConfig {
         boosts_per_gift: i32,
         ton_explorer_url: Option<String>,
+        ton_usd_rate: Option<f64>,
     },
     /// Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
     /// `getAvailableChatBoostSlots` / `boostChat` response.

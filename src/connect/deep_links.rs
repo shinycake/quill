@@ -113,7 +113,7 @@ pub fn parse_tg_url(url: &str) -> Option<DeepLinkAction> {
 /// First path segments of `t.me` links that are not usernames (stickers,
 /// proxies, languages, share sheets, ...). They fall through to TDLib's
 /// own `getDeepLinkInfo` text instead of a bogus `searchPublicChat`.
-const WEB_RESERVED_PATHS: [&str; 26] = [
+const WEB_RESERVED_PATHS: [&str; 27] = [
     "premium_offer",
     "premium_multigift",
     "addstickers",
@@ -140,6 +140,8 @@ const WEB_RESERVED_PATHS: [&str; 26] = [
     "+",
     "web",
     "k",
+    // TON wallet transfers (`internalLinkTypeTonWalletTransfer`).
+    "sendgrams",
 ];
 
 fn is_username(segment: &str) -> bool {

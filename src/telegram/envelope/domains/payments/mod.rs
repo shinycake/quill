@@ -50,4 +50,6 @@ pub enum PaymentsPayload {
     UpdateOwnedStarCount(crate::premium_hub::StarAmount),
     /// Answers of gift management and sending (`crate::gift_manage`).
     GiftManage(crate::gift_manage::GiftManagePayload),
+    /// The read-only TON wallet's answers and updates (`crate::ton_wallet`).
+    TonWallet(crate::ton_wallet::TonWalletPayload),
 }

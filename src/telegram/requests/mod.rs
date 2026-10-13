@@ -78,6 +78,7 @@ mod tests_stickers;
 mod tests_stories;
 #[cfg(test)]
 mod tests_threads;
+mod ton_wallet;
 mod translate;
 mod users;
 mod web_apps;
@@ -126,6 +127,7 @@ pub use share_content::*;
 pub use stickers::*;
 pub use stories::*;
 pub use story_reply_media::*;
+pub use ton_wallet::*;
 pub use translate::*;
 pub use users::*;
 pub use web_apps::*;

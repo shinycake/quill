@@ -147,6 +147,7 @@ fn explorer_url_uses_the_app_config_prefix() {
     let state = TonWalletState {
         explorer_url: explorer_url_from_config(&config),
         explorer_url_requested: true,
+        ..TonWalletState::default()
     };
     assert_eq!(
         state.explorer_url_for(&address),
@@ -384,7 +385,17 @@ fn push_contents_word_like_the_ios_pushes() {
 #[test]
 fn no_forbidden_wallet_method_is_ever_built() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut stack = vec![root.join("telegram"), root.join("connect")];
+    let mut stack = vec![
+        root.join("telegram"),
+        root.join("connect"),
+        root.join("ton_wallet"),
+        root.join("state/domains/payments"),
+    ];
+    // The list itself and its tests name the methods on purpose.
+    let lists = [
+        root.join("ton_wallet/mod.rs"),
+        root.join("ton_wallet/tests.rs"),
+    ];
     let mut scanned = 0;
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -394,7 +405,7 @@ fn no_forbidden_wallet_method_is_ever_built() {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
+            } else if path.extension().is_some_and(|ext| ext == "rs") && !lists.contains(&path) {
                 let Ok(source) = std::fs::read_to_string(&path) else {
                     continue;
                 };

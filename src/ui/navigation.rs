@@ -496,6 +496,22 @@ impl QuillApp {
                         ("Calls", NavigationAction::CallSettings),
                         ("Advanced", NavigationAction::AdvancedSettings),
                     ] {
+                        if matches!(action, NavigationAction::Stars) {
+                            let app = app_c.clone();
+                            let money = app_c.update(cx, |this, cx| {
+                                this.money_settings_row(
+                                    move |window, cx| {
+                                        app.update(cx, |this, cx| {
+                                            this.settings.open = false;
+                                            window.close_dialog(cx);
+                                            this.open_money(cx);
+                                        })
+                                    },
+                                    cx,
+                                )
+                            });
+                            list = list.children(money);
+                        }
                         let app = app_c.clone();
                         list = list.child(
                             Button::new(SharedString::from(format!("settings-{label}")))

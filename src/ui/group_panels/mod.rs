@@ -202,6 +202,7 @@ impl QuillApp {
                 InfoPanelTarget::User(user_id) => {
                     // The saved music behind the profile's music button.
                     let _ = live.driver.fetch_playlist(user_id, false);
+                    let _ = live.driver.fetch_user_ton_wallet_address(user_id);
                     // B10: the groups you share with the user, listed under
                     // the media counts (yourself has none).
                     if live.driver.session.my_user_id != Some(user_id) {

@@ -230,6 +230,7 @@ impl Session {
                 }
             }
             PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),
+            PaymentsPayload::TonWallet(payload) => self.apply_ton_wallet(payload, pending),
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 // The subscriptions list carries its own copy of the balance.
                 if let Some(subs) = self.payments.star_subscriptions.as_mut() {

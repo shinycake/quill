@@ -482,16 +482,21 @@ impl Session {
                 {
                     use crate::deep_link_types::{LinkRoute, route};
                     let original = std::mem::take(&mut self.chats_state.deep_link_original);
-                    self.chats_state.deep_link = Some(match route(&link, &original) {
-                        LinkRoute::Resolve(action) => DeepLinkState::Info {
-                            text: String::new(),
-                            need_update: false,
-                            action: Some(action),
-                            generation,
+                    let wallet_notice =
+                        crate::ton_wallet::links::link_notice(&link, self.ton_wallet.can_use);
+                    self.chats_state.deep_link = Some(match wallet_notice {
+                        Some(text) => DeepLinkState::ShowText(text.into()),
+                        None => match route(&link, &original) {
+                            LinkRoute::Resolve(action) => DeepLinkState::Info {
+                                text: String::new(),
+                                need_update: false,
+                                action: Some(action),
+                                generation,
+                            },
+                            LinkRoute::Ui(ui) => DeepLinkState::Ui(ui),
+                            LinkRoute::Unknown(link) => DeepLinkState::Unknown { link },
+                            LinkRoute::Message(text) => DeepLinkState::ShowText(text),
                         },
-                        LinkRoute::Ui(ui) => DeepLinkState::Ui(ui),
-                        LinkRoute::Unknown(link) => DeepLinkState::Unknown { link },
-                        LinkRoute::Message(text) => DeepLinkState::ShowText(text),
                     });
                 }
             }

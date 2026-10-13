@@ -165,6 +165,7 @@ impl Session {
             GroupsPayload::ApplicationConfig {
                 boosts_per_gift,
                 ton_explorer_url,
+                ton_usd_rate,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
                     self.groups.boosts_per_gift = Some(boosts_per_gift);
@@ -172,6 +173,9 @@ impl Session {
                 // Any app-config answer carries the current explorer.
                 if ton_explorer_url.is_some() {
                     self.ton_wallet.explorer_url = ton_explorer_url;
+                }
+                if ton_usd_rate.is_some() {
+                    self.ton_wallet.ton_usd_rate = ton_usd_rate;
                 }
             }
             // `getChatBoostFeatures` answer, kept for the chat it was

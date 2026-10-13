@@ -74,6 +74,8 @@ pub enum PaymentsPurpose {
     /// `getApplicationConfig` for `ton_blockchain_explorer_url`, asked
     /// when a TON address menu opens. Response is `jsonValueObject`.
     GetTonExplorerUrl,
+    /// A read-only TON wallet request (`crate::ton_wallet`).
+    TonWallet(crate::ton_wallet::TonWalletPurpose),
     /// `checkPremiumGiftCode` for a gift code link. Response is
     /// `premiumGiftCodeInfo`.
     CheckPremiumGiftCode,

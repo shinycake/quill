@@ -87,6 +87,7 @@ mod subsection_tabs;
 mod support;
 mod threads;
 mod ton_wallet;
+mod ton_wallet_own;
 mod translate;
 mod web_apps;
 
