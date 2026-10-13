@@ -93,6 +93,12 @@ pub(crate) struct ComposerUi {
     pub(super) schedule_repeat: i32,
     /// "Silent send" shortcut: the next send alone goes without sound.
     pub(super) send_silent_once: bool,
+    /// "Send with Effect": the next send alone carries this effect
+    /// (`messageSendOptions.effect_id`); zero for none.
+    pub(super) send_effect_once: i64,
+    /// The send button's options menu and its effect picker
+    /// (`send_effects`).
+    pub(super) send_menu: super::send_effects::SendMenuUi,
     /// M1: the schedule picker popup above the composer.
     pub(super) schedule_popup_open: bool,
     /// The date+time picker behind the schedule popup (created when the
@@ -187,6 +193,8 @@ impl ComposerUi {
             scheduling: ComposerScheduling::None,
             schedule_repeat: 0,
             send_silent_once: false,
+            send_effect_once: 0,
+            send_menu: Default::default(),
             schedule_popup_open: false,
             schedule_picker: None,
             scheduled_dialog_open: false,

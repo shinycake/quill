@@ -2,6 +2,15 @@
 
 use super::*;
 
+/// See [`QuillApp::send_options_state`].
+#[derive(Clone, Copy)]
+pub(in crate::ui) struct SendOptionsState {
+    silent: bool,
+    preview_off: bool,
+    scheduled: bool,
+    kind: quill::schedule::ScheduleKind,
+}
+
 impl QuillApp {
     /// Flip silent send for the next message, keeping a chat default
     /// from switching it back on.
@@ -36,6 +45,7 @@ impl QuillApp {
             link_preview_link: self.composer_ui.preview_link,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
+            effect_id: self.composer_ui.send_effect_once,
             ..SendOptions::default()
         }
     }
@@ -226,25 +236,31 @@ impl QuillApp {
             })
     }
 
+    /// What the send options menu shows: silent, previews off, scheduled
+    /// and the schedule kind. Read before the menu is built, since it is
+    /// built while the app is being updated.
+    pub(in crate::ui) fn send_options_state(&self) -> SendOptionsState {
+        SendOptionsState {
+            silent: self.composer_effective_silent(),
+            preview_off: self.composer_ui.preview_disabled,
+            scheduled: !matches!(self.composer_ui.scheduling, ComposerScheduling::None),
+            kind: self.schedule_kind(),
+        }
+    }
+
     /// Send options for the next message (right-click on Send, like the
     /// official desktop client): silent send, scheduling, link previews.
     pub(in crate::ui) fn send_options_menu(
         owner: WeakEntity<Self>,
+        state: SendOptionsState,
         menu: gpui_kit::component::menu::PopupMenu,
-        cx: &App,
     ) -> gpui_kit::component::menu::PopupMenu {
-        let Some(app) = owner.upgrade() else {
-            return menu;
-        };
-        let (silent, preview_off, scheduled, kind) = {
-            let app = app.read(cx);
-            (
-                app.composer_effective_silent(),
-                app.composer_ui.preview_disabled,
-                !matches!(app.composer_ui.scheduling, ComposerScheduling::None),
-                app.schedule_kind(),
-            )
-        };
+        let SendOptionsState {
+            silent,
+            preview_off,
+            scheduled,
+            kind,
+        } = state;
         let toggle_silent = owner.clone();
         let schedule = owner.clone();
         let toggle_preview = owner;

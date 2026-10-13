@@ -45,6 +45,7 @@ mod live_location;
 mod masks;
 mod media_library;
 mod member_moderation;
+mod message_effects;
 mod message_menu;
 mod message_ops;
 mod messaging;

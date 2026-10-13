@@ -80,6 +80,9 @@ pub(super) struct SchedulePicker {
     /// Send the composer's message as soon as the time is confirmed (the
     /// "Schedule" shortcut; tdesktop's schedule box sends on Schedule).
     pub send_after: bool,
+    /// With `send_after`: the effect that send carries (the "Send with
+    /// Effect" card's Schedule item); zero for none.
+    pub send_effect: i64,
 }
 
 /// The test environment of Telegram adds two short repeat periods
@@ -248,6 +251,7 @@ impl QuillApp {
             error: None,
             repeat,
             send_after: false,
+            send_effect: 0,
         });
         self.composer_ui.schedule_popup_open = true;
         cx.notify();
@@ -304,12 +308,12 @@ impl QuillApp {
         let kind = self.schedule_kind();
         // The Repeat choice counts for Premium only (the locked button never
         // sets it, and a lapsed subscription drops it).
-        let (repeat, send_after) = self
+        let (repeat, send_after, send_effect) = self
             .composer_ui
             .schedule_picker
             .as_ref()
-            .map(|picker| (picker.repeat, picker.send_after))
-            .unwrap_or((0, false));
+            .map(|picker| (picker.repeat, picker.send_after, picker.send_effect))
+            .unwrap_or((0, false, 0));
         let repeat = if self.repeat_allowed(target)
             && matches!(scheduling, ComposerScheduling::SendAtDate(_))
         {
@@ -334,7 +338,9 @@ impl QuillApp {
                 };
                 cx.notify();
                 if send_after {
+                    self.composer_ui.send_effect_once = send_effect;
                     self.send_composer_after_schedule(window, cx);
+                    self.composer_ui.send_effect_once = 0;
                 }
             }
             ScheduleTarget::Reschedule(message_id) => {

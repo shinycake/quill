@@ -17,6 +17,8 @@ use quill::premium_hub::promo::{
 /// The feature whose preview shows example stickers (tdesktop shows a
 /// sticker carousel there instead of a video).
 const STICKERS_FEATURE: &str = "Premium stickers";
+/// `premiumFeatureMessageEffects`' title (`premium_hub`).
+const EFFECTS_FEATURE: &str = "Message effects";
 /// Stickers shown in that preview.
 const STICKER_TILES: usize = 6;
 
@@ -127,13 +129,21 @@ impl QuillApp {
             hub.premium_requested = sticker;
         }
         self.open_premium(cx);
-        self.go_to_stickers_preview(cx);
+        self.go_to_feature_preview(STICKERS_FEATURE, cx);
     }
 
-    /// Page the open Premium dialog to its stickers feature: at once when
-    /// the feature list is known, else as soon as it arrives.
-    fn go_to_stickers_preview(&mut self, cx: &mut Context<Self>) {
-        let stickers_page = |this: &Self| {
+    /// "Subscribe to Telegram Premium" under a Premium message effect: the
+    /// Premium dialog on its effects feature (tdesktop
+    /// `ShowPremiumPreviewBox(PremiumFeature::Effects)`).
+    pub(in crate::ui) fn show_premium_effects_preview(&mut self, cx: &mut Context<Self>) {
+        self.open_premium(cx);
+        self.go_to_feature_preview(EFFECTS_FEATURE, cx);
+    }
+
+    /// Page the open Premium dialog to the feature titled `title`: at once
+    /// when the feature list is known, else as soon as it arrives.
+    fn go_to_feature_preview(&mut self, title: &'static str, cx: &mut Context<Self>) {
+        let feature_page = move |this: &Self| {
             this.session()?
                 .payments
                 .hub
@@ -141,9 +151,9 @@ impl QuillApp {
                 .as_ref()?
                 .features
                 .iter()
-                .position(|feature| feature.title == STICKERS_FEATURE)
+                .position(|feature| feature.title == title)
         };
-        if let Some(index) = stickers_page(self) {
+        if let Some(index) = feature_page(self) {
             self.set_promo_page(PromoPage::Preview(index), cx);
             return;
         }
@@ -158,7 +168,7 @@ impl QuillApp {
                         if !open {
                             return true;
                         }
-                        match stickers_page(this) {
+                        match feature_page(this) {
                             Some(index) => {
                                 this.set_promo_page(PromoPage::Preview(index), cx);
                                 true
