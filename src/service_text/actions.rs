@@ -403,6 +403,8 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
             price,
         } => render_upgraded_gift(ctx, name, *sender, *receiver, *origin, price.as_ref()),
         A::WithCard { action, .. } => render_action(action, ctx),
+        A::TonWalletTransfer(transfer) => super::wallet::transfer_line(transfer, ctx),
+        A::TonConnectRequest(request) => text(&request.service_line()),
         A::RefundedUpgradedGift => text(
             "This gift was downgraded because a request to refund the payment related to this gift was made, and the money was returned.",
         ),

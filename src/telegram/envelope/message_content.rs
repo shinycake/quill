@@ -779,6 +779,7 @@ pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<
             Some("textEntityTypeEmailAddress") => TextEntityKind::EmailAddress,
             Some("textEntityTypePhoneNumber") => TextEntityKind::PhoneNumber,
             Some("textEntityTypeBankCardNumber") => TextEntityKind::BankCardNumber,
+            Some("textEntityTypeTonAddress") => TextEntityKind::TonAddress,
             Some("textEntityTypeMediaTimestamp") => {
                 match int64(type_value.and_then(|t| t.get("media_timestamp"))) {
                     Some(seconds) if (0..=i64::from(i32::MAX)).contains(&seconds) => {

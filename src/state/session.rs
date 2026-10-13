@@ -106,6 +106,8 @@ pub struct Session {
     /// Payments, receipts, Stars subscriptions, Premium and gifts.
     /// Declared in `src/state/domains/payments/state.rs`.
     pub payments: PaymentsState,
+    /// Read-only TON wallet state (`crate::ton_wallet`).
+    pub ton_wallet: crate::ton_wallet::TonWalletState,
     /// Global search, search in chat and date jumps.
     /// Declared in `src/state/domains/search/state.rs`.
     pub search: SearchDomainState,

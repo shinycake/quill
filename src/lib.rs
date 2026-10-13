@@ -184,6 +184,7 @@ pub mod telegram;
 pub mod text;
 pub mod text_split;
 pub mod theme_colorize;
+pub mod ton_wallet;
 pub mod topic_info;
 pub mod translate;
 pub mod tray;

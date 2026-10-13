@@ -50,7 +50,7 @@ pub(super) use layout::{
 pub(super) use location::{location_row, venue_row};
 pub(super) use sticker::{sticker_attachment, sticker_box};
 pub(super) use story_card::{expired_mention_text, story_mention_extras};
-pub(super) use surfaces::spoiler_cover;
+pub(super) use surfaces::{spoiler_cover, spoiler_surface};
 pub(super) use video_note::{VIDEO_NOTE_DIAMETER, video_note_attachment};
 pub(super) use visual::{animation_attachment, photo_attachment, video_attachment};
 

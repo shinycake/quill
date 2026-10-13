@@ -47,6 +47,7 @@ impl Session {
             last_seq: 0,
             bots: BotsState::new(),
             payments: PaymentsState::new(),
+            ton_wallet: Default::default(),
             search: SearchDomainState::new(),
             my_user_id: None,
             users: HashMap::new(),

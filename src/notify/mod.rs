@@ -232,7 +232,8 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
     let body = if input.hide_previews || !input.chat_preview_allowed {
         GENERIC_BODY.to_string()
     } else {
-        let preview = effective_content(&message.content, message.ephemeral.as_ref()).preview();
+        let content = effective_content(&message.content, message.ephemeral.as_ref());
+        let preview = wallet_transfer_body(content, chat_id).unwrap_or_else(|| content.preview());
         if preview.trim().is_empty() {
             GENERIC_BODY.to_string()
         } else {
@@ -245,6 +246,24 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
         title: title.to_string(),
         body,
     })
+}
+
+/// A received TON transfer notifies as the official iOS app does, under
+/// the sender's chat title: "sent you \u{1F48E}5 Grams" (or "Someone sent
+/// you …" from the service chat).
+fn wallet_transfer_body(
+    content: &crate::telegram::envelope::MessageContent,
+    chat_id: ChatId,
+) -> Option<String> {
+    match content {
+        crate::telegram::envelope::MessageContent::Action(action) => match action.as_ref() {
+            crate::telegram::envelope::ServiceAction::TonWalletTransfer(transfer) => {
+                transfer.received_preview(chat_id.0, true)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Which sound to play for a notification (parity slice: notification sounds).

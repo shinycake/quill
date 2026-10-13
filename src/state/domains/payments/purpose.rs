@@ -71,6 +71,9 @@ pub enum PaymentsPurpose {
     /// `getBankCardInfo` for a tapped card number. Response is
     /// `bankCardInfo`.
     GetBankCardInfo,
+    /// `getApplicationConfig` for `ton_blockchain_explorer_url`, asked
+    /// when a TON address menu opens. Response is `jsonValueObject`.
+    GetTonExplorerUrl,
     /// `checkPremiumGiftCode` for a gift code link. Response is
     /// `premiumGiftCodeInfo`.
     CheckPremiumGiftCode,
@@ -179,6 +182,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     DeleteSavedOrderInfo,
     DeleteSavedCredentials,
     GetBankCardInfo,
+    GetTonExplorerUrl,
     CheckPremiumGiftCode,
     ApplyPremiumGiftCode,
     GetGiveawayInfo,
