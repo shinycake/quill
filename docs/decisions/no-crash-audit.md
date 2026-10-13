@@ -18,7 +18,7 @@ under a native callback that cannot unwind:
 
 | Platform | What runs our code | What a panic does |
 | --- | --- | --- |
-| macOS | AppKit calls GPUI's `extern "C"` methods (`step`, `display_layer`, `handle_view_event`, key handlers; `gpui-pre-macos/src/window.rs`). Main-thread and background tasks run through GCD's `extern "C" fn trampoline` (`gpui-pre-apple/src/dispatcher.rs:192`). | Unwinding out of an `extern "C"` function aborts the process. This is exactly what #747 hit. |
+| macOS | AppKit calls GPUI's `extern "C"` methods (`step`, `display_layer`, `handle_view_event`, key handlers; `gpui-pre-macos/src/window.rs`). Main-thread and background tasks run through GCD's `extern "C" fn trampoline` (`gpui-pre-apple` 0.3.8 from crates.io, not vendored: `src/dispatcher.rs:192`). | Unwinding out of an `extern "C"` function aborts the process. This is exactly what #747 hit. |
 | Windows | `WndProc` is `extern "system"` (`gpui-pre-windows/src/platform.rs:1818`). Debug builds wrap it in `catch_unwind` and then call `process::abort()` on purpose. | Abort in both debug and release. |
 | Linux | GPUI's calloop event loop is plain Rust. | The panic unwinds out of `Application::run`, `main` returns, the process exits with status 101. Same result for the user. |
 
@@ -63,7 +63,7 @@ library (`--no-default-features --lib`) and the UI binary (`--features ui
 | `extern "C"` callbacks we implement | 6 | 4 | ntgcalls trampolines and the macOS push-to-talk event tap. |
 | `process::exit` / `abort` | 6 | 0 | All in `main.rs` CLI paths (`--apply-update`, `--video-probe`, `--connect-smoke`, `--check-updates`, unknown demo kind). Fine. |
 | `Mutex` poisoning | 62 lock sites | ~35 | Half already recover with `unwrap_or_else(PoisonError::into_inner)`; the rest `expect` and would turn one panic into a second one. |
-| Threads we spawn | 34 | see §3.6 | No panic isolation or reporting. |
+| Threads we spawn | 34-35 | see §3.6 | No panic isolation or reporting. |
 | Native code in process | TDLib, ntgcalls/WebRTC, rlottie, quillvideo (FFmpeg / AVFoundation), Objective-C calls | see §3.7 | Can crash without any Rust panic. |
 
 Vendored code (`third_party/`: gpui-base and the three GPUI platform crates)
@@ -285,7 +285,7 @@ The ones a user can hit:
 | --- | --- | --- | --- |
 | `gpui-pre-windows/src/platform.rs:488`, `src/events.rs:1321` `panic!("Device lost: ..")` | GPU driver reset or update while Quill runs, if the renderer cannot be recreated | P0 (Windows) | Retry recreation with backoff; if it still fails, log and close the window cleanly instead of panicking. Patch in our fork and record it in `QUILL-CHANGES.md`. |
 | `gpui-pre-windows/src/platform.rs:410` `panic!("failed to initialize DirectX")` | No usable GPU / remote desktop session | P1 (Windows) | Return the error up to `main.rs` so §3.6's startup alert shows it. |
-| `gpui-pre-windows/src/platform.rs:749,754` `unimplemented!()` in `hide_other_apps` / `unhide_other_apps` | Only if something calls them; Quill does not today (`interface_zoom.rs:390` just forwards) | P2 | Make them no-ops in the fork. |
+| `gpui-pre-windows/src/platform.rs:749,754` `unimplemented!()` in `hide_other_apps` / `unhide_other_apps` | Only if something calls them; Quill does not today (`src/ui/interface_zoom.rs:390` just forwards) | P2 | Make them no-ops in the fork. |
 | `gpui-pre-macos/src/display.rs:63` `panic!` when `CGGetActiveDisplayList` fails | Display reconfiguration races (sleep/wake, monitor unplug) | P1 (macOS) | Return an empty list. |
 | `gpui-pre-macos/src/text_system.rs:580-605` four `unwrap`s on CoreText run attributes | Malformed font or unusual glyph run | P1 (macOS) | Skip the run. |
 | `gpui-pre-macos/src/keyboard.rs:63,70` `to_str().unwrap()` on input source ids | Non-UTF-8 input source name | P2 | `to_string_lossy()`. |

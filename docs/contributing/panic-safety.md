@@ -64,7 +64,7 @@ item that needs it. The reason is reviewed like code.
 
 The lints go into `Cargo.toml` `[lints.clippy]` one phase at a time. A phase
 starts only when its sites are at zero, so main never carries a warning.
-`clippy.toml` sets `allow-unwrap-in-tests`, `allow-expect-in-tests`,
+Phase A also adds a `clippy.toml` that sets `allow-unwrap-in-tests`, `allow-expect-in-tests`,
 `allow-panic-in-tests` and `allow-indexing-slicing-in-tests`.
 
 | Phase | Lints (`deny`) | Sites left at audit time |
