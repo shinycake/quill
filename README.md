@@ -896,11 +896,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display comes first: Quill never holds keys and never sends funds. Everything else waits for a security and legal review. See docs/decisions/research-ton-wallet.md.
 
-- [ ] TON addresses in messages are highlighted, with Copy Address and Open in Explorer (planned: phase 1, read-only) <!-- parity:wallet-address-entity -->
-- [ ] TON addresses in Instant View pages are highlighted and copyable (planned: phase 1, read-only) <!-- parity:wallet-address-richtext -->
-- [ ] Wallet transfer messages show as a card with amount, direction, peer and public comment (planned: phase 1, read-only) <!-- parity:wallet-transfer-card -->
-- [ ] TON Connect request messages show the app name and request state, with no approve or reject (planned: phase 1, read-only) <!-- parity:wallet-tonconnect-card -->
-- [ ] Chat-list, reply and notification previews for wallet transfers and TON Connect requests (planned: phase 1, read-only) <!-- parity:wallet-previews -->
+- [x] TON addresses in messages are highlighted, with Copy Address and Open in Explorer (planned: phase 1, read-only) <!-- parity:wallet-address-entity -->
+- [x] TON addresses in Instant View pages are highlighted and copyable (planned: phase 1, read-only) <!-- parity:wallet-address-richtext -->
+- [x] Wallet transfer messages show as a card with amount, direction, peer and public comment (planned: phase 1, read-only) <!-- parity:wallet-transfer-card -->
+- [x] TON Connect request messages show the app name and request state, with no approve or reject (planned: phase 1, read-only) <!-- parity:wallet-tonconnect-card -->
+- [x] Chat-list, reply and notification previews for wallet transfers and TON Connect requests (planned: phase 1, read-only) <!-- parity:wallet-previews -->
 - [ ] A user's public wallet address on their profile, with copy (planned: phase 1, read-only) <!-- parity:wallet-profile-address -->
 - [ ] Own wallet address and balance, with fiat value and backup status (planned: phase 1, read-only) <!-- parity:wallet-own-overview -->
 - [ ] Own wallet transaction history and NFTs, view only (planned: phase 1, read-only) <!-- parity:wallet-own-history -->
