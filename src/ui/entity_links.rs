@@ -149,6 +149,7 @@ impl QuillApp {
             LinkTarget::MediaTimestamp { seconds } => {
                 self.seek_media_timestamp(chat_id, message_id, seconds, cx);
             }
+            LinkTarget::TonAddress(_) => self.open_ton_address_menu(link, window),
         }
         cx.notify();
     }
@@ -406,12 +407,13 @@ impl QuillApp {
         )
     }
 
-    /// The menu of a phone number, card number or date.
+    /// The menu of a phone number, card number, date or TON address.
     pub(super) fn link_popup_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let popup = self.message_ui.link_popup.clone()?;
         let (label, text) = match &popup.link {
             LinkTarget::Phone(number) => ("Copy Phone Number", number.clone()),
             LinkTarget::BankCard(number) => ("Copy Card Number", number.clone()),
+            LinkTarget::TonAddress(address) => ("Copy Address", address.clone()),
             LinkTarget::DateTime { unix_time, label } => (
                 "Copy Date",
                 if label.trim().is_empty() {
@@ -435,6 +437,20 @@ impl QuillApp {
                 .unwrap_or_default(),
             _ => Default::default(),
         };
+        // A TON address also opens on the blockchain explorer (iOS "View
+        // in Explorer"); "Send Money" is never offered.
+        let ton_address = match &popup.link {
+            LinkTarget::TonAddress(address) => Some(address.clone()),
+            _ => None,
+        };
+        let explorer_row = ton_address.clone().map(|address| {
+            super::ton_wallet_ui::explorer_menu_row(
+                "link-popup-explorer",
+                address,
+                |this| this.message_ui.link_popup = None,
+                cx,
+            )
+        });
         Some(
             div()
                 .id("link-popup-overlay")
@@ -500,9 +516,14 @@ impl QuillApp {
                                         .child(label)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.message_ui.link_popup = None;
-                                            this.copy_entity_text(text.clone(), cx);
+                                            if ton_address.is_some() {
+                                                this.copy_ton_address(text.clone(), cx);
+                                            } else {
+                                                this.copy_entity_text(text.clone(), cx);
+                                            }
                                         })),
                                 )
+                                .when_some(explorer_row, |panel, row| panel.child(row))
                                 .children(card_actions.into_iter().enumerate().map(
                                     |(index, action)| {
                                         let url = action.url;

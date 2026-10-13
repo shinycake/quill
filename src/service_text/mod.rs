@@ -14,6 +14,7 @@ use crate::telegram::envelope::{
 use std::ops::Range;
 
 mod actions;
+mod wallet;
 pub use actions::*;
 
 /// What a clickable segment opens.

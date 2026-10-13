@@ -330,6 +330,12 @@ pub enum ServiceAction {
         unlocked: Vec<MessageContent>,
         caption: String,
     },
+    /// `messageTonWalletTransfer`: a service line with a transfer card
+    /// under it (`crate::ton_wallet`, read-only).
+    TonWalletTransfer(Box<crate::ton_wallet::TonWalletTransfer>),
+    /// `messageTonConnectRequest`: a service line naming the dApp and the
+    /// request state; Quill never answers it.
+    TonConnectRequest(crate::ton_wallet::TonConnectRequest),
 }
 
 /// One locked item of a `messagePaidMedia` (`paidMediaPreview`, schema
@@ -880,6 +886,12 @@ impl ServiceAction {
                     .unwrap_or("")
                     .to_string(),
             },
+            "messageTonWalletTransfer" => A::TonWalletTransfer(Box::new(
+                crate::ton_wallet::TonWalletTransfer::from_td(value),
+            )),
+            "messageTonConnectRequest" => {
+                A::TonConnectRequest(crate::ton_wallet::TonConnectRequest::from_td(value))
+            }
             _ => return None,
         })
     }

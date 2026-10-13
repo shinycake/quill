@@ -306,6 +306,20 @@ impl QuillApp {
                     }
                 );
             }
+            // A TON address: "Copy Address" below and, as the iOS address
+            // menu, "View in Explorer".
+            if let quill::text::LinkTarget::TonAddress(address) = &link {
+                let address = address.clone();
+                rows.push((
+                    42,
+                    super::super::ton_wallet_ui::explorer_menu_row(
+                        "menu-ton-explorer",
+                        address,
+                        |this| this.message_ui.menu = None,
+                        cx,
+                    ),
+                ));
+            }
             if let (Some(label), Some(text)) = (link.copy_label(), link.copy_text())
                 && !protected
             {

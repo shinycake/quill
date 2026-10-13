@@ -100,6 +100,9 @@ fn walk_rich_text(value: &Value, w: &mut RichWalk) {
         | "richTextMentionName" => {
             walk_rich_text(value.get("text").unwrap_or(&Value::Null), w);
         }
+        // A TON address in an Instant View page: highlighted and copyable
+        // like the message entity (`crate::ton_wallet`).
+        "richTextTonAddress" => w.styled(value, "text", TextEntityKind::TonAddress),
         "richTextCustomEmoji" => w.push(&field_str(value, "alternative_text")),
         "richTextIcon" => {}
         "richTextMathematicalExpression" => w.push(&field_str(value, "expression")),

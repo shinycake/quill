@@ -79,6 +79,7 @@ mod stories;
 mod story_insights;
 mod subsection_tabs;
 mod threads;
+mod ton_wallet;
 mod translate;
 mod types;
 mod typing;

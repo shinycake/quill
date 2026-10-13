@@ -371,6 +371,9 @@ mod subsection_tabs;
 mod suggestions_block;
 mod system_unlock;
 mod threads;
+mod ton_wallet_ui;
+#[cfg(all(test, feature = "demo-capture"))]
+mod ton_wallet_ui_tests;
 mod translate_ui;
 mod tray_settings;
 mod video_editor;

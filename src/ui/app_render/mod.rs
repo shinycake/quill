@@ -833,14 +833,6 @@ impl Render for QuillApp {
             .when_some(self.message_ui.menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
-            // The copy menu of a phone number, card number or date, and
-            // the tooltip of a text link.
-            .when_some(self.link_popup_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            .when_some(self.link_tooltip_overlay(), |this, overlay| {
-                this.child(overlay)
-            })
             // The expanded reaction selector, where the menu was.
             .when_some(self.pickers.media_panel.reaction, |this, target| {
                 let panel = self.media_panel(cx);
@@ -895,6 +887,15 @@ impl Render for QuillApp {
             })
             // MED4: Instant View reader overlay (above the menu).
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // The copy menu of a phone number, card number, date or TON
+            // address, and the tooltip of a text link; above the Instant
+            // View reader, whose links open them too.
+            .when_some(self.link_popup_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            .when_some(self.link_tooltip_overlay(), |this, overlay| {
                 this.child(overlay)
             })
             // Middle-click autoscroll: the anchor mark, and any other press

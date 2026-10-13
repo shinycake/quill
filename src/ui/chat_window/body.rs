@@ -109,12 +109,6 @@ impl QuillApp {
             .when_some(self.message_ui.menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
-            .when_some(self.link_popup_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            .when_some(self.link_tooltip_overlay(), |this, overlay| {
-                this.child(overlay)
-            })
             // The expanded reaction selector, where the menu was.
             .when_some(self.pickers.media_panel.reaction, |this, target| {
                 let panel = self.media_panel(cx);
@@ -143,6 +137,13 @@ impl QuillApp {
             })
             // MED4: Instant View reader overlay (above the menu).
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Link menu and tooltip above the reader, whose links open them.
+            .when_some(self.link_popup_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            .when_some(self.link_tooltip_overlay(), |this, overlay| {
                 this.child(overlay)
             })
             .into_any_element()

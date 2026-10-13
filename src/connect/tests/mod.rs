@@ -85,6 +85,7 @@ mod story_reply_media;
 mod subsection_tabs;
 mod support;
 mod threads;
+mod ton_wallet;
 mod translate;
 mod web_apps;
 

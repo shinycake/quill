@@ -89,9 +89,35 @@ impl ServiceNames for SessionNames<'_> {
 }
 
 impl Session {
+    /// The chat-list wording of a service message (`None` for ordinary
+    /// content). Same as the history line except a received TON transfer,
+    /// which the official iOS app words without the name the row already
+    /// shows ("sent you 5 Grams").
+    pub fn service_text_for(
+        &self,
+        chat_id: ChatId,
+        content: &MessageContent,
+        sender: Option<MessageSender>,
+        is_outgoing: bool,
+    ) -> Option<ServiceText> {
+        if let MessageContent::Action(action) = content
+            && let crate::telegram::envelope::ServiceAction::TonWalletTransfer(transfer) =
+                action.as_ref()
+            && let Some(line) = transfer.received_preview(chat_id.0, false)
+        {
+            return Some(ServiceText {
+                segs: vec![crate::service_text::Seg {
+                    text: line,
+                    link: None,
+                }],
+            });
+        }
+        self.history_service_text(chat_id, content, sender, is_outgoing)
+    }
+
     /// The wording of a service message (`None` for ordinary content),
     /// with names resolved from the caches.
-    pub fn service_text_for(
+    fn history_service_text(
         &self,
         chat_id: ChatId,
         content: &MessageContent,
@@ -124,7 +150,7 @@ impl Session {
 
     /// Service wording of a history row.
     pub fn service_text(&self, message: &HistoryMessage) -> Option<ServiceText> {
-        self.service_text_for(
+        self.history_service_text(
             message.chat_id,
             &message.content,
             message.sender,

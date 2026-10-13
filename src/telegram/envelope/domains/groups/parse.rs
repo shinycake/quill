@@ -448,9 +448,10 @@ pub(crate) fn parse_groups_payload(
         "chatBoostFeatures" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostFeatures(
             parse_boost_features(value),
         ))),
-        "jsonValueObject" => Ok(EnvelopePayload::Groups(GroupsPayload::BoostsPerGift(
-            boosts_per_gift(value),
-        ))),
+        "jsonValueObject" => Ok(EnvelopePayload::Groups(GroupsPayload::ApplicationConfig {
+            boosts_per_gift: boosts_per_gift(value),
+            ton_explorer_url: crate::ton_wallet::address::explorer_url_from_config(value),
+        })),
         "chatBoostSlots" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots {
             slots: parse_boost_slots(value),
         })),

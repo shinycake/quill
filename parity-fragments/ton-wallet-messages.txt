@@ -1,0 +1,5 @@
+parity:wallet-address-entity
+parity:wallet-address-richtext
+parity:wallet-transfer-card
+parity:wallet-tonconnect-card
+parity:wallet-previews

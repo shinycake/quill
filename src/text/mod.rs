@@ -119,6 +119,9 @@ pub enum TextEntityKind {
     PhoneNumber,
     /// `textEntityTypeBankCardNumber` — offers copy.
     BankCardNumber,
+    /// `textEntityTypeTonAddress` — a TON wallet address; offers copy and
+    /// the blockchain explorer (`crate::ton_wallet`).
+    TonAddress,
     /// `textEntityTypeMediaTimestamp media_timestamp:int32` — seeks the
     /// message's (or the replied message's) audio or video.
     MediaTimestamp { seconds: i32 },
@@ -149,6 +152,15 @@ impl TextEntity {
             TextEntityKind::EmailAddress => LinkTarget::Email(covered()?),
             TextEntityKind::PhoneNumber => LinkTarget::Phone(covered()?),
             TextEntityKind::BankCardNumber => LinkTarget::BankCard(covered()?),
+            // The official iOS app acts only on a checksummed 48-character
+            // address; anything else stays plain text.
+            TextEntityKind::TonAddress => {
+                let address = covered()?;
+                if !crate::ton_wallet::is_valid_ton_address(&address) {
+                    return None;
+                }
+                LinkTarget::TonAddress(address)
+            }
             TextEntityKind::MediaTimestamp { seconds } => {
                 LinkTarget::MediaTimestamp { seconds: *seconds }
             }
@@ -198,6 +210,9 @@ pub enum LinkTarget {
     Email(String),
     Phone(String),
     BankCard(String),
+    /// A TON wallet address (`textEntityTypeTonAddress` /
+    /// `richTextTonAddress`).
+    TonAddress(String),
     MediaTimestamp {
         seconds: i32,
     },
@@ -218,6 +233,7 @@ impl LinkTarget {
             | Self::Email(text)
             | Self::Phone(text)
             | Self::BankCard(text)
+            | Self::TonAddress(text)
             | Self::BotCommand(text) => Some(text),
             Self::MentionName { .. } | Self::MediaTimestamp { .. } | Self::DateTime { .. } => None,
         }
@@ -233,6 +249,8 @@ impl LinkTarget {
             Self::Email(_) => Some("Copy Email Address"),
             Self::Phone(_) => Some("Copy Phone Number"),
             Self::BankCard(_) => Some("Copy Card Number"),
+            // iOS `Wallet.CopyAddress`.
+            Self::TonAddress(_) => Some("Copy Address"),
             Self::BotCommand(_) => Some("Copy Command"),
             Self::MentionName { .. } | Self::MediaTimestamp { .. } | Self::DateTime { .. } => None,
         }
@@ -373,6 +391,7 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
                 | TextEntityKind::EmailAddress
                 | TextEntityKind::PhoneNumber
                 | TextEntityKind::BankCardNumber
+                | TextEntityKind::TonAddress
                 | TextEntityKind::MediaTimestamp { .. }
                 | TextEntityKind::DateTime { .. } => {
                     if link.is_none() {
