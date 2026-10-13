@@ -35,13 +35,11 @@ fn now_ms() -> u64 {
 pub fn dnd_active() -> bool {
     let checked = CHECKED_AT_MS.load(Ordering::Relaxed);
     if now_ms().saturating_sub(checked) > FRESH_MS && !REFRESHING.swap(true, Ordering::AcqRel) {
-        let spawned = std::thread::Builder::new()
-            .name("quill-dnd".to_string())
-            .spawn(|| {
-                DND.store(query_os_dnd(), Ordering::Relaxed);
-                CHECKED_AT_MS.store(now_ms(), Ordering::Relaxed);
-                REFRESHING.store(false, Ordering::Release);
-            });
+        let spawned = crate::thread_guard::spawn_guarded("quill-dnd", || {
+            DND.store(query_os_dnd(), Ordering::Relaxed);
+            CHECKED_AT_MS.store(now_ms(), Ordering::Relaxed);
+            REFRESHING.store(false, Ordering::Release);
+        });
         if spawned.is_err() {
             REFRESHING.store(false, Ordering::Release);
         }

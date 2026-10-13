@@ -202,7 +202,8 @@ struct Control {
 #[cfg(feature = "ui")]
 struct Live {
     mic: crate::voice_input::MicStream,
-    worker: std::thread::JoinHandle<Result<u64, String>>,
+    /// `None` from `join` means the encoder panicked.
+    worker: std::thread::JoinHandle<Option<Result<u64, String>>>,
     samples: Arc<std::sync::atomic::AtomicU64>,
     control: Arc<Control>,
 }
@@ -253,7 +254,7 @@ impl VoiceCapture {
         let control = Arc::new(Control::default());
         let worker = {
             let (levels, samples, control) = (levels.clone(), samples.clone(), control.clone());
-            std::thread::spawn(move || {
+            crate::thread_guard::spawn_guarded("quill-voice-encoder", move || {
                 let mut sent = 0;
                 let mut paused = false;
                 // Ends when the stream (the only sender) is dropped.
@@ -290,6 +291,14 @@ impl VoiceCapture {
                 encoder.finish()?;
                 Ok(total)
             })
+        };
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(err) => {
+                drop(mic);
+                let _ = fs::remove_file(&path);
+                return Err(err.to_string());
+            }
         };
         Ok(Self {
             path,
@@ -477,7 +486,9 @@ impl VoiceCapture {
         let result = live
             .worker
             .join()
-            .unwrap_or_else(|_| Err("The voice encoder crashed.".into()));
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| Err("The voice encoder crashed.".into()));
         graceful.then_some(result)
     }
 

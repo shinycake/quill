@@ -599,17 +599,15 @@ impl Player {
         });
         let thread_shared = shared.clone();
         let want_audio = options.want_audio;
-        std::thread::Builder::new()
-            .name("quill-video".into())
-            .spawn(move || match opener() {
-                Ok(demuxer) => decode_loop(demuxer, thread_shared, want_audio),
-                Err(err) => {
-                    let mut state = lock(&thread_shared.state);
-                    state.error = Some(err);
-                    state.eof = true;
-                }
-            })
-            .map_err(|err| err.to_string())?;
+        crate::thread_guard::spawn_guarded("quill-video", move || match opener() {
+            Ok(demuxer) => decode_loop(demuxer, thread_shared, want_audio),
+            Err(err) => {
+                let mut state = lock(&thread_shared.state);
+                state.error = Some(err);
+                state.eof = true;
+            }
+        })
+        .map_err(|err| err.to_string())?;
         Ok(Self {
             shared,
             clock: Clock::new(),

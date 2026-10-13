@@ -120,18 +120,16 @@ fn linux_cached() -> Option<u32> {
     let mut state = LINUX.lock().ok()?;
     if !state.running && !state.failed {
         state.running = true;
-        let spawned = std::thread::Builder::new()
-            .name("system-accent".into())
-            .spawn(|| {
-                let value = read_native().map(|rgb| rgb.max(1));
-                if let Ok(mut state) = LINUX.lock() {
-                    state.running = false;
-                    state.failed = value.is_none();
-                    if value.is_some() {
-                        state.value = value;
-                    }
+        let spawned = crate::thread_guard::spawn_guarded("system-accent", || {
+            let value = read_native().map(|rgb| rgb.max(1));
+            if let Ok(mut state) = LINUX.lock() {
+                state.running = false;
+                state.failed = value.is_none();
+                if value.is_some() {
+                    state.value = value;
                 }
-            });
+            }
+        });
         if spawned.is_err() {
             state.running = false;
             state.failed = true;

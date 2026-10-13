@@ -138,6 +138,16 @@ pub fn set_theme_mode(mode: ThemeMode, window: Option<&mut Window>, cx: &mut App
     Theme::change(mode, window, cx);
 }
 
+/// kit Phase 8: the app boots dark; screenshot demos can opt into the light
+/// theme with `QUILL_DEMO_THEME=light` so both themes get captured.
+pub fn startup_theme_mode() -> ThemeMode {
+    if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("light") {
+        ThemeMode::Light
+    } else {
+        ThemeMode::Dark
+    }
+}
+
 /// Pick the dark/light hex value for the current mode. `hc_hex`
 /// (`Some`) overrides both while high contrast is active; `None` keeps
 /// the dark value in high-contrast mode (semantic hues are designed for

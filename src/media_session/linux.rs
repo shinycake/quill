@@ -226,9 +226,7 @@ static WORKER: OnceLock<Sender<Option<NowPlaying>>> = OnceLock::new();
 pub(super) fn set(info: Option<&NowPlaying>) {
     let sender = WORKER.get_or_init(|| {
         let (tx, rx) = channel::<Option<NowPlaying>>();
-        let spawned = std::thread::Builder::new()
-            .name("mpris".into())
-            .spawn(move || run(rx));
+        let spawned = crate::thread_guard::spawn_guarded("mpris", move || run(rx));
         if spawned.is_err() {
             // No thread: the receiver is gone, sends below just fail.
         }

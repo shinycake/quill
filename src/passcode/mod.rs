@@ -856,41 +856,39 @@ fn linux_idle_start() {
     // A sample from before a pause would extrapolate to a bogus huge idle
     // time (and lock spuriously); drop it until the fresh one lands.
     *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = IdleCache::Unknown;
-    let spawned = std::thread::Builder::new()
-        .name("quill-idle".into())
-        .spawn(|| {
-            #[cfg(feature = "ui")]
-            let conn = zbus::blocking::Connection::session().ok();
-            loop {
-                if !idle_sampling_wanted(idle_last_read(), linux_now_ms()) {
-                    IDLE_RUNNING.store(false, Ordering::Release);
-                    // A read may have raced the exit; pick it back up.
-                    if idle_sampling_wanted(idle_last_read(), linux_now_ms())
-                        && !IDLE_RUNNING.swap(true, Ordering::AcqRel)
-                    {
-                        continue;
-                    }
-                    return;
+    let spawned = crate::thread_guard::spawn_guarded("quill-idle", || {
+        #[cfg(feature = "ui")]
+        let conn = zbus::blocking::Connection::session().ok();
+        loop {
+            if !idle_sampling_wanted(idle_last_read(), linux_now_ms()) {
+                IDLE_RUNNING.store(false, Ordering::Release);
+                // A read may have raced the exit; pick it back up.
+                if idle_sampling_wanted(idle_last_read(), linux_now_ms())
+                    && !IDLE_RUNNING.swap(true, Ordering::AcqRel)
+                {
+                    continue;
                 }
-                #[cfg(feature = "ui")]
-                let ms = conn.as_ref().and_then(linux_idle_sample);
-                #[cfg(not(feature = "ui"))]
-                let ms: Option<u64> = None;
-                let state = match ms {
-                    Some(ms) => IdleCache::Sample {
-                        ms,
-                        taken_ms: linux_now_ms(),
-                    },
-                    None => IdleCache::Failed,
-                };
-                *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = state;
-                if state == IdleCache::Failed {
-                    IDLE_RUNNING.store(false, Ordering::Release);
-                    return;
-                }
-                std::thread::sleep(Duration::from_secs(2));
+                return;
             }
-        });
+            #[cfg(feature = "ui")]
+            let ms = conn.as_ref().and_then(linux_idle_sample);
+            #[cfg(not(feature = "ui"))]
+            let ms: Option<u64> = None;
+            let state = match ms {
+                Some(ms) => IdleCache::Sample {
+                    ms,
+                    taken_ms: linux_now_ms(),
+                },
+                None => IdleCache::Failed,
+            };
+            *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = state;
+            if state == IdleCache::Failed {
+                IDLE_RUNNING.store(false, Ordering::Release);
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
     if spawned.is_err() {
         *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = IdleCache::Failed;
         IDLE_RUNNING.store(false, Ordering::Release);

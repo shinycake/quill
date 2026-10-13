@@ -123,42 +123,40 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
         context,
         active: active.clone(),
     };
-    std::thread::Builder::new()
-        .name("quill-ptt-record".into())
-        .spawn(move || {
-            let mut filters: Vec<(u8, KeyFilter)> = codes
-                .into_iter()
-                .map(|code| (code, KeyFilter::new(u32::from(code))))
-                .collect();
-            let Ok(stream) = data.record_enable_context(context) else {
-                return;
-            };
-            for reply in stream {
-                let Ok(reply) = reply else { break };
-                if !active.load(Ordering::SeqCst) {
-                    break;
-                }
-                if reply.category != FROM_SERVER {
-                    continue;
-                }
-                for event in reply.data.as_chunks::<32>().0 {
-                    let pressed = match event[0] & 0x7f {
-                        KEY_PRESS => true,
-                        KEY_RELEASE => false,
-                        _ => continue,
-                    };
-                    let code = event[1];
-                    if let Some((_, filter)) = filters.iter_mut().find(|(c, _)| *c == code)
-                        && let Some(edge) = filter.feed(u32::from(code), pressed)
-                    {
-                        sink(edge);
-                    }
+    crate::thread_guard::spawn_guarded("quill-ptt-record", move || {
+        let mut filters: Vec<(u8, KeyFilter)> = codes
+            .into_iter()
+            .map(|code| (code, KeyFilter::new(u32::from(code))))
+            .collect();
+        let Ok(stream) = data.record_enable_context(context) else {
+            return;
+        };
+        for reply in stream {
+            let Ok(reply) = reply else { break };
+            if !active.load(Ordering::SeqCst) {
+                break;
+            }
+            if reply.category != FROM_SERVER {
+                continue;
+            }
+            for event in reply.data.as_chunks::<32>().0 {
+                let pressed = match event[0] & 0x7f {
+                    KEY_PRESS => true,
+                    KEY_RELEASE => false,
+                    _ => continue,
+                };
+                let code = event[1];
+                if let Some((_, filter)) = filters.iter_mut().find(|(c, _)| *c == code)
+                    && let Some(edge) = filter.feed(u32::from(code), pressed)
+                {
+                    sink(edge);
                 }
             }
-            let _ = control.record_free_context(context);
-            let _ = control.flush();
-        })
-        .map_err(|_| failed("thread"))?;
+        }
+        let _ = control.record_free_context(context);
+        let _ = control.flush();
+    })
+    .map_err(|_| failed("thread"))?;
     Ok(handle)
 }
 

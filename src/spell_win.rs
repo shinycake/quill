@@ -129,32 +129,30 @@ impl WindowsSpellBackend {
         let (ready_tx, ready_rx) = mpsc::channel::<Option<(Vec<String>, Vec<String>)>>();
         let locales = locales.to_vec();
         let chosen = chosen.to_vec();
-        std::thread::Builder::new()
-            .name("quill-spell-com".into())
-            .spawn(move || {
-                // SAFETY: balanced with `CoUninitialize` below.
-                let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-                let initialized = hr.is_ok();
-                match init(&locales, &chosen) {
-                    Some((_factory, list, available)) if !list.is_empty() => {
-                        let tags: Vec<String> = list.iter().map(|(t, _)| t.clone()).collect();
-                        let _ = ready_tx.send(Some((tags, available)));
-                        let mut checkers = Checkers { list };
-                        while let Ok(job) = job_rx.recv() {
-                            job(&mut checkers);
-                        }
-                    }
-                    _ => {
-                        let _ = ready_tx.send(None);
+        crate::thread_guard::spawn_guarded("quill-spell-com", move || {
+            // SAFETY: balanced with `CoUninitialize` below.
+            let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+            let initialized = hr.is_ok();
+            match init(&locales, &chosen) {
+                Some((_factory, list, available)) if !list.is_empty() => {
+                    let tags: Vec<String> = list.iter().map(|(t, _)| t.clone()).collect();
+                    let _ = ready_tx.send(Some((tags, available)));
+                    let mut checkers = Checkers { list };
+                    while let Ok(job) = job_rx.recv() {
+                        job(&mut checkers);
                     }
                 }
-                if initialized {
-                    // SAFETY: matches the successful init above; COM
-                    // objects were dropped with `checkers`/`_factory`.
-                    unsafe { CoUninitialize() };
+                _ => {
+                    let _ = ready_tx.send(None);
                 }
-            })
-            .ok()?;
+            }
+            if initialized {
+                // SAFETY: matches the successful init above; COM
+                // objects were dropped with `checkers`/`_factory`.
+                unsafe { CoUninitialize() };
+            }
+        })
+        .ok()?;
         let (tags, available) = ready_rx.recv().ok()??;
         let languages = tags
             .into_iter()

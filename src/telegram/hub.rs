@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 /// Seconds one `td_receive` call may block. Shutdown is noticed after it.
@@ -110,7 +110,7 @@ pub struct TdHub {
     /// Set when the receive loop ends without a shutdown request (a panic):
     /// every bridge then reports itself stopped.
     stopped: Arc<AtomicBool>,
-    thread: Mutex<Option<JoinHandle<()>>>,
+    thread: Mutex<Option<JoinHandle<Option<()>>>>,
 }
 
 /// Marks the hub stopped when the loop ends for any reason other than a
@@ -181,12 +181,10 @@ impl TdHub {
             let routes = routes.clone();
             let seq = seq.clone();
             let shutdown = shutdown.clone();
-            thread::Builder::new()
-                .name("quill-td-receive".into())
-                .spawn(move || {
-                    let _guard = guard;
-                    receive_loop(source, &routes, &seq, &shutdown, &sink);
-                })?
+            crate::thread_guard::spawn_guarded("quill-td-receive", move || {
+                let _guard = guard;
+                receive_loop(source, &routes, &seq, &shutdown, &sink);
+            })?
         };
         Ok(Self {
             api: None,

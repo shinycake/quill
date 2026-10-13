@@ -5,7 +5,7 @@ use crate::telegram::hub::TdHub;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 /// Owned JSON copied off the TDLib receive pointer, with a monotonic sequence.
@@ -32,7 +32,7 @@ pub struct ReceiveBridge {
     /// Set by the receive loop's exit guard when it ends without a
     /// shutdown request (channel closed, thread panicked).
     stopped: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<JoinHandle<Option<()>>>,
     /// A hub-fed bridge: the route to remove on shutdown.
     route: Option<(Arc<TdHub>, i32)>,
 }
@@ -65,12 +65,10 @@ impl ReceiveBridge {
             stopped: stopped.clone(),
         };
         let shutdown_thread = shutdown.clone();
-        let thread = thread::Builder::new()
-            .name("quill-td-receive".into())
-            .spawn(move || {
-                let _guard = guard;
-                injected_loop(rx_cmd, tx_out, seq_thread, shutdown_thread, sink)
-            })?;
+        let thread = crate::thread_guard::spawn_guarded("quill-td-receive", move || {
+            let _guard = guard;
+            injected_loop(rx_cmd, tx_out, seq_thread, shutdown_thread, sink)
+        })?;
         Ok(Self {
             rx: rx_out,
             tx_cmd,
@@ -378,7 +376,7 @@ mod tests {
         bridge.tx_cmd = dead_tx;
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while !bridge.stopped_unexpectedly() && std::time::Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_millis(10));
         }
         assert!(bridge.stopped_unexpectedly());
         let sink = Arc::new(MemorySink::new());

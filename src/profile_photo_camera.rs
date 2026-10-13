@@ -89,9 +89,9 @@ impl CameraStream {
         let done = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(Some(child)));
-        {
+        let spawned = {
             let (latest, done, stop) = (latest.clone(), done.clone(), stop.clone());
-            std::thread::spawn(move || {
+            crate::thread_guard::spawn_guarded("quill-camera", move || {
                 let mut buf = Vec::new();
                 while !stop.load(Ordering::Relaxed) && read_frame(&mut stdout, &mut buf, LIVE_SIDE)
                 {
@@ -101,7 +101,15 @@ impl CameraStream {
                     }
                 }
                 done.store(true, Ordering::Relaxed);
-            });
+            })
+        };
+        if let Err(error) = spawned {
+            // Nothing would read the camera: stop ffmpeg now.
+            if let Some(mut process) = child.lock().ok().and_then(|mut slot| slot.take()) {
+                let _ = process.kill();
+                let _ = process.wait();
+            }
+            return Err(error.to_string());
         }
         Ok(Self {
             latest,

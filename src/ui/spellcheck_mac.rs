@@ -37,15 +37,13 @@ fn worker() -> &'static Sender<Job> {
     static WORKER: OnceLock<Sender<Job>> = OnceLock::new();
     WORKER.get_or_init(|| {
         let (tx, rx) = mpsc::channel::<Job>();
-        let spawned = std::thread::Builder::new()
-            .name("quill-spell".into())
-            .spawn(move || {
-                // The tag is created on this thread, like every other call.
-                let tag = autoreleasepool(|_| NSSpellChecker::uniqueSpellDocumentTag());
-                while let Ok(job) = rx.recv() {
-                    autoreleasepool(|_| job(&NSSpellChecker::sharedSpellChecker(), tag));
-                }
-            });
+        let spawned = quill::thread_guard::spawn_guarded("quill-spell", move || {
+            // The tag is created on this thread, like every other call.
+            let tag = autoreleasepool(|_| NSSpellChecker::uniqueSpellDocumentTag());
+            while let Ok(job) = rx.recv() {
+                autoreleasepool(|_| job(&NSSpellChecker::sharedSpellChecker(), tag));
+            }
+        });
         if let Err(err) = spawned {
             eprintln!("quill: couldn't start the spellcheck thread: {err}");
         }

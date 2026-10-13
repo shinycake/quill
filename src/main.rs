@@ -206,6 +206,7 @@ fn attach_parent_console() {
 }
 
 fn main() {
+    quill::crash_log::install_panic_hook();
     #[cfg(windows)]
     attach_parent_console();
     let args: Vec<String> = std::env::args().collect();
@@ -350,7 +351,7 @@ fn ui_main(args: &[String]) {
         gpui_kit::init(cx);
         // kit Phase 8: the kit defaults to its light theme on init;
         // Quill boots dark (kit dialogs match the app from here on).
-        ui::set_theme_mode(startup_theme_mode(), None, cx);
+        ui::set_theme_mode(ui::startup_theme_mode(), None, cx);
         // stories-high-contrast: screenshot demos can opt into the
         // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
         ui::set_high_contrast(std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"));
@@ -372,6 +373,7 @@ fn ui_main(args: &[String]) {
                     ..ui::window_frame::window_options("Quill")
                 },
                 move |window, cx| {
+                    ui::crash_notice::install(window, cx);
                     let view = cx.new(|cx| {
                         let mut app = ui::QuillApp::new(window, cx, credentials.clone());
                         app.pending_deep_link = pending_deep_link.clone();
@@ -681,17 +683,6 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
     None
 }
 
-/// kit Phase 8: the app boots dark; screenshot demos can opt into the light
-/// theme with `QUILL_DEMO_THEME=light` so both themes get captured.
-#[cfg(feature = "ui")]
-fn startup_theme_mode() -> gpui_kit::component::ThemeMode {
-    if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("light") {
-        gpui_kit::component::ThemeMode::Light
-    } else {
-        gpui_kit::component::ThemeMode::Dark
-    }
-}
-
 /// kit Phase 9: respect the OS "reduce motion" accessibility preference.
 /// GPUI's animation/spring machinery settles instantly when
 /// `App::set_reduce_motion(true)` is called, so kit `Skeleton` shimmer,
@@ -803,7 +794,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             gpui_kit::init(cx);
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
-            ui::set_theme_mode(startup_theme_mode(), None, cx);
+            ui::set_theme_mode(ui::startup_theme_mode(), None, cx);
             // stories-high-contrast: screenshot demos can opt into the
             // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
             ui::set_high_contrast(

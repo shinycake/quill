@@ -29,7 +29,7 @@ fn wait_until(mut done: impl FnMut() -> bool) -> bool {
         if done() {
             return true;
         }
-        thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(5));
     }
     done()
 }
@@ -136,11 +136,11 @@ fn the_receive_thread_sleeps_while_no_client_is_registered() {
     let counted = calls.clone();
     let source: ReceiveSource = Box::new(move |_| {
         counted.fetch_add(1, Ordering::SeqCst);
-        thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(5));
         None
     });
     let hub = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
-    thread::sleep(Duration::from_millis(150));
+    std::thread::sleep(Duration::from_millis(150));
     assert_eq!(calls.load(Ordering::SeqCst), 0, "no client, no td_receive");
     let mut bridge = hub.bridge(1);
     assert!(wait_until(|| calls.load(Ordering::SeqCst) > 0));

@@ -147,7 +147,8 @@ fn forward(endpoint: &Endpoint, args: &[String]) -> Forward {
     };
     let message = encode_message(args);
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    // No thread: `tx` is dropped with the closure and the wait below ends.
+    let _ = crate::thread_guard::spawn_guarded("quill-single-instance-send", move || {
         let result = (|| -> io::Result<bool> {
             let mut stream = stream;
             stream.write_all(message.as_bytes())?;
@@ -262,16 +263,16 @@ pub fn acquire(
         let _ = std::fs::set_permissions(&endpoint.path, std::fs::Permissions::from_mode(0o600));
     }
     let on_launch: Arc<dyn Fn(Vec<String>) + Send + Sync> = Arc::new(on_launch);
-    std::thread::Builder::new()
-        .name("quill-single-instance".into())
-        .spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { continue };
-                let on_launch = Arc::clone(&on_launch);
-                // A client that connects and stalls must not block others.
-                std::thread::spawn(move || serve(stream, &*on_launch));
-            }
-        })?;
+    crate::thread_guard::spawn_guarded("quill-single-instance", move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let on_launch = Arc::clone(&on_launch);
+            // A client that connects and stalls must not block others.
+            let _ = crate::thread_guard::spawn_guarded("quill-single-instance-client", move || {
+                serve(stream, &*on_launch)
+            });
+        }
+    })?;
     Ok(Acquired::Primary)
 }
 

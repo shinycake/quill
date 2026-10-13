@@ -45,24 +45,22 @@ impl QuillApp {
             return;
         };
         let (sender, events) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("quill-webview-reader".into())
-            .spawn(move || {
-                let reader = std::io::BufReader::new(stdout);
-                for line in reader.lines() {
-                    let Ok(line) = line else { break };
-                    if line.len() > quill_webview_protocol::MAX_IPC_MESSAGE_BYTES * 2 {
-                        continue;
-                    }
-                    if let Ok(event) = decode::<HelperEvent>(&line)
-                        && sender.send(event).is_err()
-                    {
-                        break;
-                    }
+        quill::thread_guard::spawn_guarded("quill-webview-reader", move || {
+            let reader = std::io::BufReader::new(stdout);
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                if line.len() > quill_webview_protocol::MAX_IPC_MESSAGE_BYTES * 2 {
+                    continue;
                 }
-                let _ = sender.send(HelperEvent::Closed);
-            })
-            .ok();
+                if let Ok(event) = decode::<HelperEvent>(&line)
+                    && sender.send(event).is_err()
+                {
+                    break;
+                }
+            }
+            let _ = sender.send(HelperEvent::Closed);
+        })
+        .ok();
         let in_attachment_menu = self.session().is_some_and(|session| {
             session
                 .bots
