@@ -222,7 +222,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
 - [x] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
 - [x] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
-- [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
+- [x] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
 - [x] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
 - [x] Similar channels carousel after joining a channel <!-- parity:render-similar-channels -->
 - [x] Link-preview "View channel / bot / message" buttons <!-- parity:render-preview-view-button -->
@@ -296,7 +296,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Recent inline bots suggested when typing @ <!-- parity:composer-recent-inline-bots -->
 - [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
 - [x] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
-- [ ] Date formatting (Formatting > Date) and the Insert Unicode control character menu in the composer <!-- parity:composer-unicode-menu -->
+- [x] Date formatting (Formatting > Date) and the Insert Unicode control character menu in the composer <!-- parity:composer-unicode-menu -->
 - [x] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
 - [x] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
 - [x] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
