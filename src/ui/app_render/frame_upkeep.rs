@@ -28,6 +28,9 @@ impl QuillApp {
         // Revenue and affiliate pages: the amount field, the setup
         // sliders, program photos and pages, profile balances.
         self.earn_frame_upkeep(window, cx);
+        // Gift market: an auction whose state arrived, the followed
+        // auction, toasts and sticker downloads.
+        self.gift_market_frame_upkeep(window, cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in

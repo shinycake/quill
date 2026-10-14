@@ -70,6 +70,9 @@ impl QuillApp {
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
             DeepLinkUi::Background { name } => self.open_background_link(name, cx),
             DeepLinkUi::GiftCode { code } => self.open_gift_code_link(code, cx),
+            DeepLinkUi::GiftAuction { auction_id } => {
+                self.open_gift_auction(0, &auction_id, cx);
+            }
             DeepLinkUi::LanguagePack { id } => self.open_language_pack_link(id, cx),
             DeepLinkUi::Invoice { name } => self.open_invoice_link(&name, window, cx),
             DeepLinkUi::Settings(SettingsTarget::ChangePhone) => self.open_change_phone_dialog(cx),

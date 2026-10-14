@@ -320,6 +320,7 @@ impl QuillApp {
             giveaway: super::giveaway_state::GiveawayUi::new(),
             paid_messages: super::paid_messages_state::PaidMessagesUi::new(),
             suggested_posts: super::suggested_posts_state::SuggestedPostsUi::new(),
+            gift_market: super::gift_market_state::GiftMarketUi::new(),
             paid_reaction: super::paid_reaction_state::PaidReactionUi::new(),
             pending_deep_link: None,
             viewer: super::viewer_state::ViewerUi::new(&audio_output),
