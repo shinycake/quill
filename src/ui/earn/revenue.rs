@@ -77,6 +77,17 @@ pub(super) fn star_amount(amount: StarAmount, size: f32) -> Div {
         )
 }
 
+/// tdesktop `addAboutWithLearn`: the about text with its inline
+/// "Learn more ›" link on the divider band.
+pub(super) fn learn_more_band(
+    id: &'static str,
+    text: &'static str,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Div {
+    divider_label(about_with_link(id, text, on_click, cx), cx)
+}
+
 /// The about line with tdesktop's inline "Learn more ›" link.
 pub(super) fn about_with_link(
     id: &'static str,
@@ -158,7 +169,7 @@ impl QuillApp {
         let stars = page.stars.ready().filter(|_| !is_bot);
         let mut body = div().flex().flex_col().gap_3();
         if ton.is_some() {
-            body = body.child(about_with_link(
+            body = body.child(learn_more_band(
                 "earn-learn",
                 if is_bot {
                     "Telegram shares 50% of the revenue from ads displayed in your bot."
@@ -352,7 +363,7 @@ impl QuillApp {
                         this.earn_withdraw(WithdrawTarget::Ton { chat_id }, cx);
                     })),
             )
-            .child(about_with_link(
+            .child(learn_more_band(
                 "earn-learn-collect",
                 if enabled {
                     "Collect your reward using Fragment, a third-party platform used by advertisers to pay for ads."
@@ -620,8 +631,11 @@ impl QuillApp {
             );
         }
         body = body
-            .child(about(
-                "Stars from your total balance can be used for ads or withdrawn as rewards 21 days after they are earned.",
+            .child(divider_label(
+                about(
+                    "Stars from your total balance can be used for ads or withdrawn as rewards 21 days after they are earned.",
+                ),
+                cx,
             ))
             .child(header("Available balance", cx))
             .child(self.stars_withdrawal(session, page, stats, cx));
@@ -748,8 +762,14 @@ impl QuillApp {
                 }
                 cx.notify();
             }));
-        div().flex().flex_col().gap_1().child(row).child(about(
-            "You will not be eligible for any rewards if you switch off ads.",
-        ))
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(row)
+            .child(divider_label(
+                about("You will not be eligible for any rewards if you switch off ads."),
+                cx,
+            ))
     }
 }

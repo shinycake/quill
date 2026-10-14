@@ -19,8 +19,14 @@ pub(crate) struct EarnUi {
     /// The withdrawal amount last put in `amount`, per page peer, so a
     /// new balance refills it once.
     pub(super) prefilled: Option<(EarnPeer, i64)>,
-    /// The pages an earn page was opened from (tdesktop's back arrow).
+    /// The earn pages the open one was opened from, inside the layer
+    /// (tdesktop's back arrow).
     pub(super) back: Vec<InfoPanelTarget>,
+    /// The info panel the layer covered; it comes back when the layer
+    /// closes.
+    pub(super) restore: Option<InfoPanelTarget>,
+    /// The layer's fade in and out.
+    pub(super) fade: Option<super::earn::LayerFade>,
     /// The "Learn more" box of the Monetization page.
     pub(super) learn: bool,
     /// The learn box's TON easter egg (tdesktop counts diamonds).
@@ -41,6 +47,9 @@ pub(crate) struct EarnUi {
     pub(super) scroll: ScrollHandle,
     /// The programs box's list.
     pub(super) box_scroll: ScrollHandle,
+    /// When the referral link box appeared: its link icon plays once
+    /// (tdesktop's `starref_link` animation).
+    pub(super) link_shown: Option<std::time::Instant>,
 }
 
 impl EarnUi {
@@ -53,12 +62,14 @@ impl EarnUi {
             }),
             password: cx.new(|cx| {
                 InputState::new(window, cx)
-                    .placeholder("Password")
+                    .placeholder("Enter current password")
                     .masked(true)
                     .submit_on_enter(true)
             }),
             prefilled: None,
             back: Vec::new(),
+            restore: None,
+            fade: None,
             learn: false,
             diamonds: 0,
             ton_tx: None,
@@ -69,6 +80,7 @@ impl EarnUi {
             photos_asked: HashSet::new(),
             scroll: ScrollHandle::new(),
             box_scroll: ScrollHandle::new(),
+            link_shown: None,
         }
     }
 }

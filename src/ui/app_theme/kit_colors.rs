@@ -35,7 +35,17 @@ pub(crate) fn apply(colors: &mut ThemeColor, palette: &Palette) {
     let fg = c(K::WindowFg);
     let over = c(K::WindowBgOver);
     let ripple = c(K::WindowBgRipple);
-    let sub = c(K::WindowSubTextFg);
+    // Secondary text keeps WCAG AA on the window background even where a
+    // palette's own gray is lighter (Day's #999999 on white).
+    let sub = {
+        let raw = palette.rgba(K::WindowSubTextFg);
+        let fg = quill::theme_colorize::readable(
+            raw >> 8,
+            palette.rgba(K::WindowBg) >> 8,
+            quill::theme_colorize::WCAG_AA,
+        );
+        hsla((fg << 8) | (raw & 0xff))
+    };
     let active = c(K::WindowBgActive);
     let on_active = c(K::WindowFgActive);
     let link = c(K::WindowActiveTextFg);
@@ -171,9 +181,17 @@ mod tests {
             hsla(palette.rgba(PaletteKey::WindowBgActive))
         );
         assert_eq!(colors.sidebar, hsla(palette.rgba(PaletteKey::DialogsBg)));
+        // Secondary text keeps WCAG AA on the window background: this
+        // palette's own gray is lighter than that, so it is darkened.
+        let sub = palette.rgba(PaletteKey::WindowSubTextFg);
+        let readable = quill::theme_colorize::readable(
+            sub >> 8,
+            palette.rgba(PaletteKey::WindowBg) >> 8,
+            quill::theme_colorize::WCAG_AA,
+        );
         assert_eq!(
             colors.muted_foreground,
-            hsla(palette.rgba(PaletteKey::WindowSubTextFg))
+            hsla((readable << 8) | (sub & 0xff))
         );
         // Alpha survives: the scroll bar thumb is translucent.
         assert!(colors.scrollbar_thumb.a < 0.5);

@@ -37,6 +37,8 @@ pub(super) struct PlotInput {
     /// A click on a point zooms in.
     pub zoomable: bool,
     pub height: f32,
+    /// US cents per currency unit of a revenue chart; 0 for none.
+    pub currency_rate: f64,
 }
 
 impl PlotInput {
@@ -61,11 +63,11 @@ impl PlotInput {
         let chart = self.chart.clone();
         let enabled = self.enabled.clone();
         let hovered = self.hovered.clone();
-        let (shares, zoomable) = (self.shares(), self.zoomable);
+        let (shares, zoomable, rate) = (self.shares(), self.zoomable, self.currency_rate);
         move |point: &Point, _: &mut Window, _: &mut App| {
             hovered.set(Some(point.index));
             let zoom = zoomable && zoomable_point(point);
-            tooltip::body(&chart, point, &enabled, shares, zoom).into_any_element()
+            tooltip::body(&chart, point, &enabled, shares, zoom, rate).into_any_element()
         }
     }
 }

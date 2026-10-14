@@ -9,15 +9,24 @@ use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use quill::earn::*;
 
-/// How close to the end of a list the next page loads (tdesktop loads
-/// when the list's bottom comes into view).
-const LOAD_MORE_DISTANCE: f32 = 200.0;
+/// How many screens ahead of the end the next page loads (tdesktop
+/// `PeerListContent`'s `PreloadHeightsCount`).
+const PRELOAD_SCREENS: f32 = 3.0;
+
+/// Whether the end of a list is within `PRELOAD_SCREENS` of what is
+/// visible: `max` is the farthest scroll, `offset` the current one and
+/// `visible` the height in view.
+pub(super) fn preload_due(max: Pixels, offset: Pixels, visible: Pixels) -> bool {
+    max <= px(0.) || max - offset <= visible * PRELOAD_SCREENS
+}
 
 /// Whether a scroll handle sits near the end of its content.
 pub(super) fn near_end(handle: &ScrollHandle) -> bool {
-    let max = handle.max_offset().y;
-    let offset = -handle.offset().y;
-    max <= px(0.) || max - offset <= px(LOAD_MORE_DISTANCE)
+    preload_due(
+        handle.max_offset().y,
+        -handle.offset().y,
+        handle.bounds().size.height,
+    )
 }
 
 /// One program in a list: what the row shows and what it opens.
@@ -408,5 +417,18 @@ impl QuillApp {
         if box_more && near_end(&self.earn.box_scroll) {
             let _ = live.driver.more_starref_programs(false, true);
         }
+    }
+}
+
+#[cfg(test)]
+mod unit {
+    use super::preload_due;
+    use gpui_kit::px;
+
+    #[test]
+    fn the_next_page_loads_three_screens_ahead() {
+        assert!(preload_due(px(0.), px(0.), px(500.)));
+        assert!(preload_due(px(3000.), px(1500.), px(500.)));
+        assert!(!preload_due(px(3000.), px(1400.), px(500.)));
     }
 }

@@ -83,6 +83,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, _, cx| app.close_profile_modal(cx)
     ),
     layer!(
+        "earn-layer",
+        |app| app.earn_layer_open(),
+        |app, window, cx| app.earn_layer_escape(window, cx)
+    ),
+    layer!(
         "composer-code-language",
         |app| app.composer_ui.code_language.is_some(),
         |app, window, cx| app.close_code_language_dialog(window, cx)

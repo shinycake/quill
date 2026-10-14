@@ -69,7 +69,9 @@ pub(super) fn points(
                 .iter()
                 .enumerate()
                 .map(|(k, line)| match line.y.get(index) {
-                    Some(v) if on(k) => *v as f64,
+                    // A revenue chart scales in its currency (TON, not
+                    // nanotons); other charts are unchanged.
+                    Some(v) if on(k) => chart.currency_units(*v as f64),
                     _ => 0.0,
                 })
                 .collect();
