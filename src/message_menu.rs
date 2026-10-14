@@ -42,6 +42,8 @@ pub mod order {
     pub const COPY_POST_LINK: u8 = 45;
     pub const FORWARD: u8 = 50;
     /// "Poll Stats" (`getPollVoteStatistics`).
+    /// "Add Offer" follows Forward (tdesktop `AddOfferAction`).
+    pub const ADD_OFFER: u8 = 51;
     pub const POLL_STATS: u8 = 53;
     /// "Retract vote" sits above "Stop Poll" (`AddPollActions`).
     pub const RETRACT_VOTE: u8 = 54;

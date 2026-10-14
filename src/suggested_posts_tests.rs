@@ -376,3 +376,42 @@ fn parses_updates() {
     );
     assert_eq!(parse_payload("updateOther", &grams), None);
 }
+
+#[test]
+fn date_labels() {
+    use crate::local_time::CivilTime;
+    use crate::suggested_posts::{block_time_label, date_time_label, time_value};
+    let at = |year, month, day| CivilTime {
+        year,
+        month,
+        day,
+        hour: 9,
+        minute: 5,
+        weekday: 0,
+    };
+    let now = at(2026, 10, 14);
+    assert_eq!(date_time_label(&at(2026, 3, 5), &now), "Mar 5 at 09:05");
+    assert_eq!(
+        date_time_label(&at(2027, 1, 2), &now),
+        "Jan 2, 2027 at 09:05"
+    );
+    assert_eq!(block_time_label(&now, &now), "today at 09:05");
+    assert_eq!(
+        block_time_label(&at(2026, 10, 13), &now),
+        "yesterday at 09:05"
+    );
+    assert_eq!(block_time_label(&at(2026, 10, 20), &now), "Oct 20 at 09:05");
+    assert_eq!(time_value(0, 0), "Anytime");
+}
+
+#[test]
+fn balance_shortfall() {
+    use crate::suggested_posts::shortfall;
+    let stars = SuggestedPrice::Stars(10);
+    assert_eq!(shortfall(stars, Some(9), None), Some(stars));
+    assert_eq!(shortfall(stars, Some(10), None), None);
+    assert_eq!(shortfall(stars, None, None), None);
+    let grams = SuggestedPrice::TonCents(150);
+    assert_eq!(shortfall(grams, None, Some(1_400_000_000)), Some(grams));
+    assert_eq!(shortfall(grams, None, Some(1_500_000_000)), None);
+}

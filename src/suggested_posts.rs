@@ -13,6 +13,7 @@
 //! `connect::suggested_posts`, the screens in `ui::suggested_posts_ui`.
 
 use crate::ids::{ChatId, MessageId};
+use crate::local_time::{CivilTime, civil_local, hhmm, month_name};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
@@ -235,6 +236,36 @@ pub fn bar_both_tail(date: &str) -> String {
     format!("   \u{1F4C6} {date}")
 }
 
+/// "Mar 5 at 10:00", or "Mar 5, 2027 at 10:00" in another year
+/// (tdesktop `langDateTime` as the bar and the boxes show a time).
+pub fn date_time_label(date: &CivilTime, now: &CivilTime) -> String {
+    let month = month_name(date.month).get(..3).unwrap_or_default();
+    let time = hhmm(date);
+    if date.year == now.year {
+        format!("{month} {} at {time}", date.day)
+    } else {
+        format!("{month} {}, {} at {time}", date.day, date.year)
+    }
+}
+
+/// The block's time: "today at 10:00", "yesterday at 10:00", else
+/// [`date_time_label`] (tdesktop `FormatDateTime`).
+pub fn block_time_label(date: &CivilTime, now: &CivilTime) -> String {
+    match now.day_number().checked_sub(date.day_number()) {
+        Some(0) => format!("today at {}", hhmm(date)),
+        Some(1) => format!("yesterday at {}", hhmm(date)),
+        _ => date_time_label(date, now),
+    }
+}
+
+/// The time row's value: "Anytime" for 0, else the local date and time.
+pub fn time_value(send_date: i32, now_unix: i64) -> String {
+    if send_date <= 0 {
+        return "Anytime".into();
+    }
+    date_time_label(&civil_local(i64::from(send_date)), &civil_local(now_unix))
+}
+
 /// Which box a price or time choice belongs to (tdesktop `SuggestMode`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuggestMode {
@@ -280,50 +311,6 @@ impl SuggestMode {
         }
     }
 }
-
-/// The price box's main button: "Update Terms" when changing, "Offer for
-/// Free" with no amount, else "Offer" before the amount (the icon and
-/// number are drawn after it).
-pub fn price_submit_label(mode: SuggestMode, price: Option<SuggestedPrice>) -> &'static str {
-    match (mode, price) {
-        (SuggestMode::Change, _) => "Update Terms",
-        (_, None) => "Offer for Free",
-        (_, Some(_)) => "Offer",
-    }
-}
-
-/// The price box's tab labels: (Stars, Grams).
-pub fn currency_tabs(admin: bool) -> (&'static str, &'static str) {
-    if admin {
-        ("Request Stars", "Request Grams")
-    } else {
-        ("Offer Stars", "Offer Grams")
-    }
-}
-
-/// The section title above the price field.
-pub fn price_section_title(ton: bool) -> &'static str {
-    if ton {
-        "Enter Price in Grams"
-    } else {
-        "Enter Price in Stars"
-    }
-}
-
-/// The member's note under the field.
-pub fn price_about_member(ton: bool) -> &'static str {
-    if ton {
-        "Choose how many Grams to pay to publish this message."
-    } else {
-        "Choose how many Stars to pay to publish this message."
-    }
-}
-
-/// `lng_suggest_options_stars_warning` (bold parts are plain here).
-pub const STARS_WARNING: &str = "Transactions in Stars may be reversed by the payment provider within 21 days. Only accept Stars from people you trust.";
-
-/// `lng_suggest_options_date_about`.
-pub const DATE_ABOUT: &str = "Select the date and time you want the message to be published. The post will remain available for at least 24 hours from this date.";
 
 /// The decision buttons under a suggestion
 /// (`HistoryItem::computeSuggestionActions` + `updateSuggestControls`).
@@ -642,99 +629,6 @@ pub fn field_text(price: Option<SuggestedPrice>) -> String {
     }
 }
 
-/// The accept box (`ConfirmApproval`): the question and, with a price,
-/// what is paid or received. `channel` and `from` are display names;
-/// `date` the formatted time, `None` for "right now".
-pub fn accept_text(
-    admin: bool,
-    from: &str,
-    channel: &str,
-    price: Option<SuggestedPrice>,
-    date: Option<&str>,
-    limits: &SuggestedPostLimits,
-) -> String {
-    let mut text = if admin {
-        format!("Do you want to publish this post from {from}?")
-    } else {
-        format!("Do you want to publish this post to {channel}?")
-    };
-    let Some(price) = price else {
-        return text;
-    };
-    let count = if admin {
-        limits.after_commission_text(price)
-    } else {
-        price.number_text()
-    };
-    let unit = match (price.is_ton(), count == "1") {
-        (false, true) => "Star",
-        (false, false) => "Stars",
-        (true, true) => "Gram",
-        (true, false) => "Grams",
-    };
-    let when = date.map_or_else(|| "right now".to_string(), str::to_string);
-    text.push_str("\n\n");
-    if admin {
-        text.push_str(&format!(
-            "{channel} will receive {count} {unit} ({}) for publishing {when}. It must remain visible for at least 24 hours after publication.",
-            limits.percent_label(price)
-        ));
-        if !price.is_ton() {
-            text.push_str("\n\n");
-            text.push_str(STARS_WARNING);
-        }
-    } else {
-        text.push_str(&format!(
-            "You will pay {count} {unit} for publishing {when}."
-        ));
-    }
-    text
-}
-
-/// The decline box's question (`lng_suggest_decline_text` / `_to`).
-pub fn decline_text(admin: bool, from: &str, channel: &str) -> String {
-    if admin {
-        format!("Do you want to decline publishing this post from {from}?")
-    } else {
-        format!("Do you want to decline publishing this post to {channel}?")
-    }
-}
-
-/// `declineSuggestedPost.comment` allows 0-128 characters.
-pub const DECLINE_REASON_MAX: usize = 128;
-
-/// "{amount} Grams Needed" (`lng_suggest_low_ton_title`).
-pub fn low_ton_title(price: SuggestedPrice) -> String {
-    format!("{} Grams Needed", price.number_text())
-}
-
-/// `lng_suggest_low_ton_text`.
-pub const LOW_TON_TEXT: &str =
-    "You can add funds to your balance via the third-party platform Fragment.";
-/// `lng_suggest_low_ton_fragment`.
-pub const LOW_TON_BUTTON: &str = "Add Funds via Fragment";
-/// `lng_suggest_low_ton_fragment_url`.
-pub const LOW_TON_URL: &str = "https://fragment.com/ads/topup";
-
-/// The delete box over a paid post younger than the lifetime minimum
-/// (`lng_suggest_warn_*`): (title, text).
-pub fn delete_warning(ton: bool) -> (&'static str, &'static str) {
-    if ton {
-        (
-            "Grams will be lost",
-            "You won't receive Grams for the post if you delete it now. The post must remain visible for at least 24 hours after it was published.",
-        )
-    } else {
-        (
-            "Stars will be lost",
-            "You won't receive Stars for the post if you delete it now. The post must remain visible for at least 24 hours after it was published.",
-        )
-    }
-}
-
-/// `lng_suggest_warn_delete_anyway`.
-pub const DELETE_ANYWAY: &str = "Delete Anyway";
-
 /// The viewer's side in a channel's direct messages chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectMessagesRole {
@@ -916,21 +810,45 @@ pub fn error_note(purpose: SuggestedPostPurpose, reason: &str) -> String {
     format!("Couldn't {what}: {reason}.")
 }
 
-/// Whether "Edit Message" is offered for the suggestion's content
-/// (`CanEditSuggestedMessage`: no rich page, and media that takes a
-/// caption or none).
-pub fn can_edit_message(content: &crate::telegram::envelope::MessageContent) -> bool {
+/// What "Edit Message" puts in the composer, and whether the suggestion
+/// is media (its caption is edited and the media copied). `None` when
+/// the content can't be edited that way (tdesktop
+/// `CanEditSuggestedMessage`: no rich pages, media must take a caption).
+pub fn edit_source(content: &crate::telegram::envelope::MessageContent) -> Option<(String, bool)> {
     use crate::telegram::envelope::MessageContent as C;
-    matches!(
-        content,
-        C::Text(_)
-            | C::Photo(_)
-            | C::Video(_)
-            | C::Document(_)
-            | C::Audio(_)
-            | C::Animation(_)
-            | C::VoiceNote(_)
-    )
+    match content {
+        C::Text(text) => Some((
+            crate::composer::entities_to_markup(&text.text, &text.entities),
+            false,
+        )),
+        C::Photo(photo) => Some((photo.caption.clone(), true)),
+        C::Video(video) => Some((video.caption.clone(), true)),
+        C::Document(document) => Some((document.caption.clone(), true)),
+        C::Audio(audio) => Some((audio.caption.clone(), true)),
+        C::Animation(animation) => Some((animation.caption.clone(), true)),
+        C::VoiceNote(note) => Some((note.caption.clone(), true)),
+        _ => None,
+    }
+}
+
+/// What a member's balance lacks for paying `price`; `None` when the
+/// balance covers it or isn't known yet (no check without a balance,
+/// never a fake zero). Stars come as whole Stars, Grams as nano-Grams.
+pub fn shortfall(
+    price: SuggestedPrice,
+    stars: Option<i64>,
+    gram_nanos: Option<i64>,
+) -> Option<SuggestedPrice> {
+    match price {
+        SuggestedPrice::Stars(count) => {
+            let have = stars?;
+            (have < count).then_some(price)
+        }
+        SuggestedPrice::TonCents(_) => {
+            let have = gram_nanos?;
+            (have < price.nanos()).then_some(price)
+        }
+    }
 }
 
 fn int(value: Option<&Value>) -> i64 {
@@ -942,6 +860,10 @@ fn int(value: Option<&Value>) -> i64 {
 fn date(value: Option<&Value>) -> i32 {
     i32::try_from(int(value).max(0)).unwrap_or(i32::MAX)
 }
+
+#[path = "suggested_posts_text.rs"]
+mod text;
+pub use text::*;
 
 #[cfg(test)]
 #[path = "suggested_posts_tests.rs"]

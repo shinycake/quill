@@ -21,6 +21,10 @@ pub(super) fn inline_keyboard(
     fast_buttons: bool,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
+    // A suggested post's Accept / Decline / Suggest Changes.
+    if let Some(buttons) = super::history::suggested_post_block::suggestion_buttons(message, cx) {
+        return Some(buttons);
+    }
     // M2: an ephemeral payload carries its own `reply_markup`, shown
     // instead of the message's own (bot-built flows, anniversary post).
     let markup = message

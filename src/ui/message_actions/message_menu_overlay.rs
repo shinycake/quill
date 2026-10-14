@@ -457,6 +457,21 @@ impl QuillApp {
                 }
             );
         }
+        if self.can_add_offer(chat_id, message_id) {
+            item!(
+                order::ADD_OFFER,
+                gpui_kit::assets::IconName::CircleDollarSign,
+                "menu-add-offer",
+                "Add Offer",
+                this,
+                window,
+                cx,
+                {
+                    this.message_ui.menu = None;
+                    this.begin_add_offer(chat_id, message_id, window, cx);
+                }
+            );
+        }
         if allows(message.can_pin() && !is_channel_post, |a| a.can_be_pinned) {
             let label = if pinned { "Unpin" } else { "Pin" };
             item!(

@@ -109,6 +109,8 @@ pub struct QuillApp {
     pub(super) giveaway: super::giveaway_state::GiveawayUi,
     /// Paid messages: price, confirmation, Remove Fee (`ui/paid_messages_state.rs`).
     pub(super) paid_messages: super::paid_messages_state::PaidMessagesUi,
+    /// Suggested posts: price, time and decision boxes (`ui/suggested_posts_state.rs`).
+    pub(super) suggested_posts: super::suggested_posts_state::SuggestedPostsUi,
     /// The Star reaction box (`ui/paid_reaction_state.rs`).
     pub(super) paid_reaction: super::paid_reaction_state::PaidReactionUi,
     /// `parity:platform-deep-links`: launch link from the CLI (`t.me` /

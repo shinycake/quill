@@ -73,6 +73,9 @@ impl QuillApp {
                     self.submit_edit(text, window, cx);
                     return;
                 }
+                if self.submit_suggested_change(&text, window, cx) {
+                    return;
+                }
                 // B4: the forward bar sends the comment, then the forward.
                 if self.forward_bar_here() {
                     self.submit_forward_bar(text, window, cx);
@@ -190,7 +193,7 @@ impl QuillApp {
                                 // M1: silent / scheduled / when-online /
                                 // link-preview options ride the snapshot to
                                 // `sendMessage.options`.
-                                .with_send_options(self.composer_send_options())
+                                .with_send_options(self.composer_post_options())
                                 // MED4: caption-above-media toggle.
                                 .with_caption_above_media(
                                     self.composer_ui.caption_above && !self.open_chat_is_secret(),
@@ -214,7 +217,7 @@ impl QuillApp {
                                     None
                                 })
                                 .with_self_destruct(self_destruct)
-                                .with_send_options(self.composer_send_options())
+                                .with_send_options(self.composer_post_options())
                                 // MED4: caption-above-media toggle.
                                 .with_caption_above_media(
                                     self.composer_ui.caption_above && !self.open_chat_is_secret(),
@@ -234,7 +237,7 @@ impl QuillApp {
                             // M1: silent / scheduled / when-online /
                             // link-preview options ride the snapshot to
                             // `sendMessage.options`.
-                            .with_send_options(self.composer_send_options())
+                            .with_send_options(self.composer_post_options())
                             // MED4: caption-above-media toggle.
                             .with_caption_above_media(
                                 self.composer_ui.caption_above && !self.open_chat_is_secret(),
@@ -322,6 +325,7 @@ impl QuillApp {
                             self.composer_ui.send_silent_once = false;
                             self.composer_ui.schedule_popup_open = false;
                             self.composer_ui.pending_reply = None;
+                            self.clear_suggest_bar_after_send(chat_id);
                             self.composer_ui.clear_draft_on_success = Some(chat_id);
                             self.composer
                                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -526,7 +530,7 @@ impl QuillApp {
             .pending_reply
             .as_ref()
             .and_then(|reply| reply.send_reply(chat_id));
-        let options = self.composer_send_options();
+        let options = self.composer_post_options();
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -543,6 +547,7 @@ impl QuillApp {
                 self.composer_ui.schedule_popup_open = false;
                 self.composer_ui.pending_reply = None;
                 self.composer_ui.rich_editor_open = false;
+                self.clear_suggest_bar_after_send(chat_id);
                 self.composer_ui.clear_draft_on_success = Some(chat_id);
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));

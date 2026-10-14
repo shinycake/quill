@@ -307,7 +307,10 @@ impl QuillApp {
                                 .message_ui
                                 .fact_check_expanded
                                 .contains(&(message.chat_id.0, message.id.0)),
-                            reply_header: session.and_then(|s| s.reply_header(&message)),
+                            // A counter-offer's reply header stays hidden.
+                            reply_header: session
+                                .and_then(|s| s.reply_header(&message))
+                                .filter(|_| message.extras.suggested_post.is_none()),
                             forward_header: session.and_then(|s| s.forward_header(&message)),
                             via_bot: session.and_then(|s| s.via_bot_label(&message)),
                             seek_bar,

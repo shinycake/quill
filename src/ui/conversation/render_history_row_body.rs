@@ -139,6 +139,7 @@ impl QuillApp {
                     },
                     cx,
                 );
+                let row = self.with_suggested_post_block(message, row, cx);
                 // M1: `cx.listener` closures must be `'static`, so the
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);

@@ -84,6 +84,19 @@ impl Session {
         self.payments.suggested_posts.bar(chat_id).copied()
     }
 
+    /// Changes one message's offer in every loaded copy (the demo, which
+    /// has no TDLib to answer a decision).
+    pub fn edit_suggested_post(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        mut edit: impl FnMut(&mut Option<crate::suggested_posts::SuggestedPostInfo>),
+    ) {
+        self.edit_loaded_message(chat_id, message_id, |message| {
+            edit(&mut message.extras.suggested_post);
+        });
+    }
+
     /// Takes the one-shot error notes for the UI's toasts.
     pub fn take_suggested_post_notes(&mut self) -> Vec<String> {
         std::mem::take(&mut self.payments.suggested_posts.notes)
