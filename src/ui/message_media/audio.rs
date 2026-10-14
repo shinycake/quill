@@ -37,11 +37,6 @@ pub(in crate::ui) fn transcription_row(
                         this.request_transcription(chat_id, message_id, cx);
                     })),
             )
-            .children(
-                cx.try_global::<crate::ui::updates_sync_ui::SpeechTrialHint>()
-                    .and_then(|hint| hint.0.clone())
-                    .map(|hint| div().text_xs().opacity(0.7).child(hint)),
-            )
             .into_any_element(),
         Some(SpeechRecognition::Pending { partial_text }) => div()
             .text_xs()
@@ -56,14 +51,19 @@ pub(in crate::ui) fn transcription_row(
             .text_sm()
             .child(format!("“{text}”"))
             .into_any_element(),
+        // A column, so a long error wraps inside the bubble instead of
+        // running past its edge.
         Some(SpeechRecognition::Error { message }) => div()
+            .w_full()
+            .min_w_0()
             .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_2()
+            .flex_col()
+            .items_start()
+            .gap_1()
             .text_xs()
             .child(
                 div()
+                    .w_full()
                     .opacity(0.7)
                     .child(format!("Transcription failed: {message}")),
             )

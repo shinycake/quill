@@ -54,6 +54,15 @@ pub struct SpeechTrialUpdate {
     pub next_reset_date: i32,
 }
 
+impl SpeechTrialUpdate {
+    /// Whether the account has a free weekly quota at all (tdesktop
+    /// `Transcribes::trialsSupport`: a count or a reset date). A Premium
+    /// account gets all zeros.
+    pub fn supported(&self) -> bool {
+        self.weekly_count > 0 || self.next_reset_date > 0
+    }
+}
+
 pub(crate) fn parse_file_download(value: &Value) -> Option<ParsedFileDownload> {
     let download = value.get("file_download")?;
     let file_id = json_i32(download.get("file_id"), 0);

@@ -11,15 +11,15 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::state::{
     age_verification_about, age_verification_bot_url, freeze_deadline_label, live_left_label,
-    live_strip_label, speech_trial_hint,
+    live_strip_label, speech_trial_toast,
 };
+use quill::telegram::envelope::SpeechTrialUpdate;
 
-/// The free-transcription line the voice rows show next to "Transcribe".
-/// Set before each frame from the session, read by the row builders.
+/// The free-transcription quota last seen, so a change can toast once.
 #[derive(Default)]
-pub(super) struct SpeechTrialHint(pub Option<SharedString>);
+struct SpeechTrialSeen(Option<SpeechTrialUpdate>);
 
-impl Global for SpeechTrialHint {}
+impl Global for SpeechTrialSeen {}
 
 /// How many running shares the strip lists before it summarizes.
 const LIVE_STRIP_ROWS: usize = 3;
@@ -37,16 +37,24 @@ const FROZEN_ROWS: [(&str, &str); 2] = [
 ];
 
 impl QuillApp {
-    /// Publish the free transcription counter for the voice rows.
-    pub(super) fn sync_speech_trial_hint(&self, cx: &mut Context<Self>) {
-        let hint = self
+    /// Toast the free transcription quota when a transcription changed it,
+    /// as tdesktop does; nothing is shown under the voice rows.
+    pub(super) fn sync_speech_trial_hint(&mut self, cx: &mut Context<Self>) {
+        let Some((trial, premium)) = self
             .session()
-            .and_then(|s| s.sync.speech_trial)
-            .map(|trial| {
-                SharedString::from(speech_trial_hint(&trial, quill::local_time::now_unix()))
-            });
-        if cx.try_global::<SpeechTrialHint>().map(|h| &h.0) != Some(&hint) {
-            cx.set_global(SpeechTrialHint(hint));
+            .and_then(|s| Some((s.sync.speech_trial?, s.my_is_premium())))
+        else {
+            return;
+        };
+        let previous = cx.try_global::<SpeechTrialSeen>().and_then(|seen| seen.0);
+        if previous == Some(trial) {
+            return;
+        }
+        cx.set_global(SpeechTrialSeen(Some(trial)));
+        if let Some(toast) =
+            speech_trial_toast(previous, trial, premium, quill::local_time::now_unix())
+        {
+            self.connection.status_note = toast;
         }
     }
 
