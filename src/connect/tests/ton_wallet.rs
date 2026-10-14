@@ -10,16 +10,16 @@ use crate::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-struct Rig {
-    driver: ConnectDriver<Arc<RecordingSender>>,
-    recorder: Arc<RecordingSender>,
+pub(super) struct Rig {
+    pub(super) driver: ConnectDriver<Arc<RecordingSender>>,
+    pub(super) recorder: Arc<RecordingSender>,
     seq: AtomicU64,
     sink: Arc<dyn DiagnosticSink>,
     _dir: std::path::PathBuf,
 }
 
 impl Rig {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
         let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
         let recorder = Arc::new(RecordingSender::new());
@@ -42,13 +42,13 @@ impl Rig {
         rig
     }
 
-    fn ingest(&mut self, json: &str) {
+    pub(super) fn ingest(&mut self, json: &str) {
         self.driver
             .ingest(copy_and_parse(json, &self.seq, &self.sink).unwrap())
             .unwrap();
     }
 
-    fn sent(&self, ty: &str) -> usize {
+    pub(super) fn sent(&self, ty: &str) -> usize {
         self.recorder
             .snapshot()
             .into_iter()

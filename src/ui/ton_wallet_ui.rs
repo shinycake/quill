@@ -3,13 +3,16 @@
 //! `quill::ton_wallet`; Telegram Desktop has no wallet, so this follows the
 //! official iOS app (`ChatControllerOpenTonAddressContextMenu`,
 //! `ChatMessageTransferBubbleContentNode`) minus everything that acts on
-//! the wallet: no Send Money, no transaction screen, no decrypting.
+//! the wallet: no Send Money, no decrypting. A card click opens the
+//! transaction on the read-only Money page (`ton_wallet_money.rs`); the
+//! profile's wallet-address row lives here too.
 
 use super::app::QuillApp;
 use super::entity_links::LinkPopup;
 use super::message_media::{MediaCorners, spoiler_surface};
 use super::message_text::MONO_FONT;
 use super::*;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -56,6 +59,100 @@ impl QuillApp {
     pub(super) fn copy_ton_address(&mut self, address: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(address));
         self.connection.status_note = "address copied to clipboard".into();
+        cx.notify();
+    }
+}
+
+impl QuillApp {
+    /// The wallet address on a user's profile, from
+    /// `getUserTonWalletAddresses`: tap copies it, right-click offers Copy
+    /// Address and View in Explorer. Nothing shows while the wallet option
+    /// is off or the user has no wallet.
+    pub(super) fn ton_wallet_profile_row(
+        &self,
+        user_id: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let address = self
+            .session()?
+            .ton_wallet
+            .profile_address(user_id)?
+            .to_string();
+        let muted = cx.theme().muted_foreground;
+        let hover = cx.theme().secondary;
+        let copy = address.clone();
+        let owner = cx.entity().downgrade();
+        let menu_address = address.clone();
+        Some(
+            div()
+                .id("info-ton-wallet")
+                .flex()
+                .flex_col()
+                .px_3()
+                .py_2()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .cursor_pointer()
+                .role(gpui_kit::Role::Button)
+                .aria_label(format!("Wallet address: {address}"))
+                .tab_index(0)
+                .hover(move |style| style.bg(hover))
+                .debug_selector(|| "info-ton-wallet".to_string())
+                .child(
+                    div()
+                        .text_sm()
+                        .font_family(MONO_FONT)
+                        .child(group_address(&address)),
+                )
+                .child(div().text_xs().text_color(muted).child("Wallet address"))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.copy_ton_address(copy.clone(), cx);
+                }))
+                .context_menu(move |menu, _, _| {
+                    let copy_owner = owner.clone();
+                    let open_owner = owner.clone();
+                    let copy = menu_address.clone();
+                    let open = menu_address.clone();
+                    menu.item(
+                        PopupMenuItem::new("Copy Address").on_click(move |_, _, cx| {
+                            let _ = copy_owner.update(cx, |this, cx| {
+                                this.copy_ton_address(copy.clone(), cx);
+                            });
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("View in Explorer").on_click(move |_, _, cx| {
+                            let _ = open_owner.update(cx, |this, cx| {
+                                this.open_ton_explorer(&open, cx);
+                            });
+                        }),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// A click on a transfer card opens that transaction on the Money page
+    /// (the iOS card opens the wallet's transaction screen).
+    fn open_transfer_details(&mut self, transaction_id: &str, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.open_wallet_transaction(transaction_id);
+        } else if let Some(session) = self.demo_session.as_mut()
+            && session.ton_wallet.can_use
+        {
+            session.ton_wallet.money.open = true;
+            let known = session
+                .ton_wallet
+                .money
+                .history
+                .items
+                .iter()
+                .find(|tx| tx.id == transaction_id)
+                .cloned();
+            if let Some(tx) = known {
+                session.show_wallet_transaction(tx);
+            }
+        }
         cx.notify();
     }
 }
@@ -131,6 +228,8 @@ pub(super) fn transfer_card(
         ("sent", SENT_RIBBON)
     };
     let muted = cx.theme().muted_foreground;
+    let wallet_on = session.is_some_and(|session| session.ton_wallet.can_use);
+    let transaction_id = transfer.transaction_id.clone();
     let label = format!(
         "{} {}{}",
         if received { "Received" } else { "Sent" },
@@ -158,6 +257,14 @@ pub(super) fn transfer_card(
         .role(gpui_kit::Role::Group)
         .aria_label(label)
         .debug_selector(move || format!("ton-transfer-card-{row_id}"))
+        .when(wallet_on && !transaction_id.is_empty(), |card| {
+            card.cursor_pointer()
+                .role(gpui_kit::Role::Button)
+                .tab_index(0)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_transfer_details(&transaction_id, cx);
+                }))
+        })
         .child(
             div()
                 .absolute()

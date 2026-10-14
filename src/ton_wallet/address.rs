@@ -76,6 +76,30 @@ pub fn group_address(address: &str) -> String {
         .join(" ")
 }
 
+/// Where "View in Explorer" opens a transaction (the iOS
+/// `walletTransactionExplorerUrl`): the explorer prefix, `transaction/`, and
+/// the base64 hash as hex. `None` when the hash is not base64.
+pub fn transaction_explorer_url(base: Option<&str>, tx_hash: &str) -> Option<String> {
+    let trimmed = tx_hash.trim().trim_end_matches('=');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized: Vec<u8> = trimmed
+        .bytes()
+        .map(|b| match b {
+            b'+' => b'-',
+            b'/' => b'_',
+            other => other,
+        })
+        .collect();
+    let bytes = decode_base64url(&normalized)?;
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let mut url = explorer_url(base, "");
+    url.push_str("transaction/");
+    url.push_str(&hex);
+    Some(url)
+}
+
 fn decode_base64url(input: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(input.len() * 3 / 4);
     let mut buffer: u32 = 0;

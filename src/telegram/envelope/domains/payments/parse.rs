@@ -13,6 +13,11 @@ pub(crate) fn parse_payments_payload(
             PaymentsPayload::GiftManage(payload),
         )));
     }
+    if let Some(payload) = crate::ton_wallet::parse_payload(type_name, value) {
+        return Ok(Some(EnvelopePayload::Payments(PaymentsPayload::TonWallet(
+            payload,
+        ))));
+    }
     let payload = match type_name {
         // Slice P1: payment answers (TDLib 1.8.67, `schema/td_api.tl:4734` /
         // `:4737` / `:4740` / `:4765`).

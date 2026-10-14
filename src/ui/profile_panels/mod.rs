@@ -275,7 +275,8 @@ impl QuillApp {
                 extra_copy: None,
             });
         }
-        let business_rows = self.business_rows(user_id, cx);
+        let mut business_rows = self.business_rows(user_id, cx);
+        business_rows.extend(self.ton_wallet_profile_row(user_id, cx));
         if rows.is_empty() && business_rows.is_empty() {
             return None;
         }

@@ -8,6 +8,7 @@ mod limit;
 mod paid;
 mod purpose;
 mod state;
+mod ton_wallet;
 
 pub use gift_code::*;
 pub use giveaway::*;

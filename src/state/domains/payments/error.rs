@@ -152,6 +152,9 @@ impl Session {
             Some(RequestPurpose::Payments(purpose)) if purpose.is_gift_manage() => {
                 self.apply_gift_manage_error(err, purpose)
             }
+            Some(RequestPurpose::Payments(PaymentsPurpose::TonWallet(purpose))) => {
+                self.apply_ton_wallet_error(err, purpose, pending.and_then(|p| p.user_id))
+            }
             _ => {}
         }
     }

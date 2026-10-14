@@ -72,6 +72,10 @@ impl Session {
                 {
                     self.payments.premium_available = Some(*on);
                 }
+                if name == crate::ton_wallet::CAN_USE_OPTION {
+                    self.ton_wallet
+                        .set_can_use(matches!(value, OptionValue::Boolean(true)));
+                }
                 if name == "paid_reaction_star_count_max"
                     && let OptionValue::Integer(limit) = &value
                     && *limit > 0
