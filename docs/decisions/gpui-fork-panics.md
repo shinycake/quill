@@ -60,12 +60,45 @@ changed file has the "Modified by the Quill project" header, and each crate's
   `unimplemented!()`. Windows has no "hide others"; Quill doesn't call them
   today.
 
-What a user sees after an unrecoverable device loss: every Quill window
-closes. If Quill keeps running (tray), reopening a window fails with an
-error from the renderer rather than a crash, because the vsync thread has
-stopped and the platform still holds the dead device. Restarting Quill
-recovers. A full "re-attach the GPU later" path would need a GPUI windowing
-change and is out of scope.
+- After the windows are told to close, the vsync thread also posts
+  `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 11`) to the platform window. That
+  drops the dead devices, so `is_windowed()` reports false, and keeps a
+  reason that `open_window` returns ("the GPU device was lost and could not
+  be recreated"), the same way the launch failure does.
+  `request_windowing(Windowed)` can attach fresh devices later.
+- `close_one_window` logs a window that isn't in the list instead of
+  `unwrap`ing its position, and `handle_gpui_events` returns `None` for an
+  unexpected message instead of `unreachable!()`.
+- `directx_renderer.rs`: upstream's device-loss recovery decided whether to
+  use DirectComposition from `self.direct_composition.is_none()`, but each
+  attempt clears that field first. So every retry after a failed attempt
+  came back without DirectComposition, for the rest of the window's life.
+  The renderer now keeps the creation-time choice in
+  `disable_direct_composition`. The two `dxgi_device.unwrap()`s on that path
+  became errors.
+
+What a user sees after an unrecoverable device loss: Quill uses GPUI's
+default `QuitMode`, which on Windows (and Linux) is `LastWindowClosed`. So
+once the main window is destroyed and no other window is open, GPUI quits
+and Quill exits. It does not stay in the tray, and no message is shown;
+the reason is only in the log. If a picture-in-picture window is still open
+and only the main window's renderer failed, the process keeps running with
+just that window until it is closed. If the vsync thread's recovery failed,
+it closes every window, PiP included, and Quill exits.
+
+That is acceptable for this step. The alternative was a crash with the same
+end state (process gone) plus a crash report. Follow-ups worth doing:
+
+- Show the reason on the way out. Something like an `on_window_closed` check
+  in Quill that notices the GPU error, or a MessageBoxW from the fork, would
+  tell the user why Quill closed (as `startup_failure` does at launch).
+- Better, keep Quill alive. Quill could switch to `QuitMode::Explicit` on
+  Windows, ask for `request_windowing(Windowed)` after a pause, and reopen
+  the main window. The platform side now supports that, because the dead
+  devices are dropped and a re-attach creates new ones.
+- If only the main window failed while a PiP window lives, the PiP window
+  should be closed as well, or the main window reopened. Today Quill keeps
+  running with only the PiP window.
 
 ### macOS (`gpui-pre-macos`)
 
@@ -93,9 +126,14 @@ change and is out of scope.
 - `src/calls/ptt_global_mac.rs`: if `start` times out after the tap thread
   stored its `CFRetain`ed run loop, nobody released it. Now the tap thread
   swaps the pointer out and releases it when `ready.send` fails, and the
-  timeout path in `start` drops a `Handle` (which does the same swap, stops
-  the loop and releases). Both sides use `swap(0)`, so exactly one of them
-  releases the retain, whichever order the race goes.
+  timeout path in `start` first drops the receiver and then a `Handle`
+  (which does the same swap, stops the loop and releases). The order
+  matters. Once the receiver is gone, every later send fails, so a retain
+  stored from then on is released by the thread. A retain stored earlier,
+  whose send succeeded, is still in the slot when the handle swaps. Both
+  sides use `swap(0)`, so exactly one of them releases it. Dropping the
+  handle first would leak a retain stored just after its swap, because the
+  send would still succeed.
 
 ## How verified
 

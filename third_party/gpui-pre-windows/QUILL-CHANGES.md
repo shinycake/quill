@@ -113,9 +113,20 @@ DirectX start no longer crashes the app (step 7 of
 - `src/directx_renderer.rs`: `pre_draw` and `present` return an error
   instead of `expect`/`unwrap` when the renderer has no resources or devices
   (what a failed recovery leaves), so a draw queued before the window is
-  destroyed can't panic.
+  destroyed can't panic. The renderer keeps its creation-time
+  `disable_direct_composition`; upstream re-derived it from
+  `direct_composition`, which each recovery attempt clears, so every retry
+  after a failed attempt lost DirectComposition. The `dxgi_device` unwraps
+  on that path return errors.
 - `src/directx_devices.rs`: `try_to_recover_from_device_lost` is a loop
   instead of `find_or_last(..).unwrap()`.
+- `src/platform.rs`, `src/events.rs`: after an unrecoverable device loss
+  the vsync thread posts `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 11`) to the
+  platform window, which drops the dead devices (so `is_windowed()` is false
+  and `open_window` returns the reason; `request_windowing(Windowed)` can
+  attach new ones). `close_one_window` logs an untracked window instead of
+  unwrapping, and `handle_gpui_events` returns `None` instead of
+  `unreachable!()`.
 
 Type-checked with `cargo check --target x86_64-pc-windows-msvc` on macOS;
 not built or run on Windows. See `docs/decisions/gpui-fork-panics.md`.

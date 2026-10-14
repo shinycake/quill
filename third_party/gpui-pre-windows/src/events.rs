@@ -42,6 +42,9 @@ pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
 pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
 /// Quill: destroy this window because its GPU device is gone and could not be recreated.
 pub(crate) const WM_GPUI_DESTROY_AFTER_DEVICE_LOST: u32 = WM_USER + 10;
+/// Quill: tells the platform window that the GPU device is gone for good (see
+/// `WindowsPlatformInner::handle_device_gone`).
+pub(crate) const WM_GPUI_GPU_DEVICE_GONE: u32 = WM_USER + 11;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 

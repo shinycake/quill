@@ -214,9 +214,14 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
         Ok(Ok(())) => Ok(Handle { active, run_loop }),
         Ok(Err(err)) => Err(err),
         Err(_) => {
-            // Dropping a handle stops the thread and releases the run loop
-            // retain if the thread stored it just after the timeout but
-            // before its `ready.send` could fail.
+            // Order matters. Dropping the receiver first makes every later
+            // `ready.send` fail, so a thread that stores its retain from now
+            // on releases it itself. Then the handle's drop stops the thread
+            // and releases a retain stored before that (whose send
+            // succeeded). Both sides `swap(0)`, so exactly one releases it.
+            // With the handle dropped first, a store after its swap could
+            // still send successfully and the retain would leak.
+            drop(ready_rx);
             drop(Handle { active, run_loop });
             Err(StartError::Failed("The key listener did not start.".into()))
         }

@@ -60,9 +60,6 @@ pub struct WindowsPlatform {
     raw_window_handles: Arc<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     /// The windowing mode to start in, applied when `run` starts. Windowed when unset.
     initial_windowing: RefCell<Option<WindowingRequest>>,
-    /// Quill: why DirectX could not start at launch, reported by `open_window`
-    /// so the app's startup failure path can show it.
-    gpu_init_error: RefCell<Option<String>>,
     /// Set to stop the current `VSyncProvider` thread, which runs while windowed.
     vsync_stop: RefCell<Option<Arc<AtomicBool>>>,
     // The below members will never change throughout the entire lifecycle of the app.
@@ -106,6 +103,9 @@ pub(crate) struct WindowsPlatformState {
     /// thread; see [`DrawCoordinator`].
     pub(crate) draw_coordinator: Rc<DrawCoordinator>,
     directx_devices: RefCell<Option<DirectXDevices>>,
+    /// Quill: why the platform has no GPU (DirectX failed at launch, or a lost device could not
+    /// be recreated), reported by `open_window` so the app can show it.
+    gpu_error: RefCell<Option<String>>,
 }
 
 #[derive(Default)]
@@ -133,6 +133,7 @@ impl WindowsPlatformState {
             current_cursor: Cell::new(current_cursor),
             cursor_visible: Arc::new(AtomicBool::new(true)),
             draw_coordinator: Rc::new(DrawCoordinator::new()),
+            gpu_error: RefCell::new(None),
             directx_devices: RefCell::new(directx_devices),
             menus: RefCell::new(Vec::new()),
         }
@@ -274,7 +275,6 @@ impl WindowsPlatform {
             handle,
             raw_window_handles,
             initial_windowing: RefCell::new(None),
-            gpu_init_error: RefCell::new(None),
             vsync_stop: RefCell::new(None),
             headless,
             icon,
@@ -413,7 +413,8 @@ impl WindowsPlatform {
         }
         if let Err(error) = self.attach_gpu() {
             log::error!("failed to initialize DirectX: {error:#}");
-            *self.gpu_init_error.borrow_mut() = Some(format!("{error:#}"));
+            *self.inner.state.gpu_error.borrow_mut() =
+                Some(format!("failed to initialize DirectX: {error:#}"));
         }
     }
 
@@ -424,6 +425,7 @@ impl WindowsPlatform {
             text_system.handle_gpu_lost(&devices)?;
         }
         *self.inner.state.directx_devices.borrow_mut() = Some(devices);
+        self.inner.state.gpu_error.borrow_mut().take();
         self.begin_vsync_thread();
         Ok(())
     }
@@ -499,6 +501,18 @@ impl WindowsPlatform {
                                  windows: {err:#}"
                             );
                             destroy_all_windows_after_device_lost(&all_windows);
+                            // Quill: the platform drops the dead devices, so it reports
+                            // itself headless until it is windowed again.
+                            // SAFETY: PostMessageW only queues the message.
+                            unsafe {
+                                PostMessageW(
+                                    Some(platform_window.as_raw()),
+                                    WM_GPUI_GPU_DEVICE_GONE,
+                                    WPARAM(validation_number),
+                                    LPARAM::default(),
+                                )
+                                .log_err();
+                            }
                             break;
                         }
                     }
@@ -796,9 +810,9 @@ impl Platform for WindowsPlatform {
         options: WindowParams,
     ) -> Result<Box<dyn PlatformWindow>> {
         if !self.is_windowed() {
-            // Quill: say why when DirectX failed to start at launch.
-            if let Some(error) = self.gpu_init_error.borrow().as_ref() {
-                return Err(anyhow!("failed to initialize DirectX: {error}"));
+            // Quill: say why when the platform has no GPU.
+            if let Some(error) = self.inner.state.gpu_error.borrow().as_ref() {
+                return Err(anyhow!("{error}"));
             }
             return Err(anyhow!("cannot open windows while headless"));
         }
@@ -1228,6 +1242,7 @@ impl WindowsPlatformInner {
             | WM_GPUI_DOCK_MENU_ACTION
             | WM_GPUI_KEYBOARD_LAYOUT_CHANGED
             | WM_GPUI_GPU_DEVICE_LOST
+            | WM_GPUI_GPU_DEVICE_GONE
             | WM_GPUI_END_SESSION => self.handle_gpui_events(msg, wparam, lparam),
             WM_POWERBROADCAST => self.handle_power_broadcast(wparam),
             _ => None,
@@ -1253,8 +1268,10 @@ impl WindowsPlatformInner {
             WM_GPUI_DOCK_MENU_ACTION => self.handle_dock_action_event(lparam.0 as _),
             WM_GPUI_KEYBOARD_LAYOUT_CHANGED => self.handle_keyboard_layout_change(),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
+            WM_GPUI_GPU_DEVICE_GONE => self.handle_device_gone(),
             WM_GPUI_END_SESSION => self.handle_end_session(),
-            _ => unreachable!(),
+            // Quill: `handle_msg` only routes the messages above here.
+            _ => None,
         }
     }
 
@@ -1282,11 +1299,16 @@ impl WindowsPlatformInner {
             return false;
         };
         let mut lock = all_windows.write();
-        let index = lock
+        // Quill: a window that isn't tracked is logged instead of upstream's `unwrap`.
+        match lock
             .iter()
             .position(|handle| handle.as_raw() == target_window)
-            .unwrap();
-        lock.remove(index);
+        {
+            Some(index) => {
+                lock.remove(index);
+            }
+            None => log::error!("closing a window that isn't in the window list"),
+        }
 
         let is_empty = lock.is_empty();
         // Quill: never take the frame gate while holding the window list.
@@ -1400,6 +1422,16 @@ impl WindowsPlatformInner {
             _ => {}
         }
         Some(1)
+    }
+
+    /// Quill: the vsync thread could not recreate the GPU device and has stopped. Drop the dead
+    /// devices so `is_windowed` reports false and `open_window` says why; a later
+    /// `request_windowing(Windowed)` attaches fresh devices.
+    fn handle_device_gone(&self) -> Option<isize> {
+        self.state.directx_devices.borrow_mut().take();
+        *self.state.gpu_error.borrow_mut() =
+            Some("the GPU device was lost and could not be recreated".to_owned());
+        Some(0)
     }
 
     fn handle_device_lost(&self, lparam: LPARAM) -> Option<isize> {

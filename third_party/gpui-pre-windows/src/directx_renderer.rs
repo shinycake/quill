@@ -1,6 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
 // drawing returns an error instead of panicking when device-loss recovery
-// failed. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// failed, and every recovery attempt keeps DirectComposition. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
     sync::{Arc, OnceLock},
@@ -47,6 +47,9 @@ pub(crate) struct DirectXRenderer {
     globals: DirectXGlobalElements,
     pipelines: DirectXRenderPipelines,
     direct_composition: Option<DirectComposition>,
+    /// Quill: fixed at creation. Upstream re-derived it from `direct_composition` on each
+    /// device-loss attempt, so every retry after a failed one lost DirectComposition.
+    disable_direct_composition: bool,
     font_info: &'static FontInfo,
 
     width: u32,
@@ -177,8 +180,12 @@ impl DirectXRenderer {
         let direct_composition = if disable_direct_composition {
             None
         } else {
-            let composition = DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), hwnd)
-                .context("Creating DirectComposition")?;
+            let dxgi_device = devices
+                .dxgi_device
+                .as_ref()
+                .context("missing DXGI device for DirectComposition")?;
+            let composition =
+                DirectComposition::new(dxgi_device, hwnd).context("Creating DirectComposition")?;
             composition
                 .set_swap_chain(&resources.swap_chain)
                 .context("Setting swap chain for DirectComposition")?;
@@ -193,6 +200,7 @@ impl DirectXRenderer {
             globals,
             pipelines,
             direct_composition,
+            disable_direct_composition,
             font_info: Self::get_font_info(),
             width: 1,
             height: 1,
@@ -266,7 +274,7 @@ impl DirectXRenderer {
     }
 
     fn handle_device_lost_impl(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
-        let disable_direct_composition = self.direct_composition.is_none();
+        let disable_direct_composition = self.disable_direct_composition;
 
         unsafe {
             #[cfg(debug_assertions)]
@@ -309,8 +317,11 @@ impl DirectXRenderer {
         let direct_composition = if disable_direct_composition {
             None
         } else {
-            let composition =
-                DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), self.hwnd)?;
+            let dxgi_device = devices
+                .dxgi_device
+                .as_ref()
+                .context("missing DXGI device for DirectComposition")?;
+            let composition = DirectComposition::new(dxgi_device, self.hwnd)?;
             composition.set_swap_chain(&resources.swap_chain)?;
             Some(composition)
         };
