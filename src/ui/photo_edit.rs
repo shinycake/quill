@@ -163,13 +163,7 @@ pub fn render(
         }
     }
     for item in placed {
-        let w = (item.width * width as f32).round().max(1.0) as u32;
-        let h = (w as f32 * item.aspect()).round().max(1.0) as u32;
-        let picture =
-            image::imageops::resize(&item.image, w, h, image::imageops::FilterType::Triangle);
-        let x = (item.center.0 * width as f32 - w as f32 / 2.0).round() as i64;
-        let y = (item.center.1 * height as f32 - h as f32 / 2.0).round() as i64;
-        image::imageops::overlay(&mut canvas, &picture, x, y);
+        overlay_item(&mut canvas, item);
     }
     let crop = crop.clamped();
     let x = (crop.x * width as f32).round() as u32;
@@ -177,6 +171,17 @@ pub fn render(
     let w = ((crop.w * width as f32).round() as u32).clamp(1, width - x.min(width - 1));
     let h = ((crop.h * height as f32).round() as u32).clamp(1, height - y.min(height - 1));
     image::imageops::crop_imm(&canvas, x, y, w, h).to_image()
+}
+
+/// Draw a placed item onto the canvas at its size and place.
+pub fn overlay_item(canvas: &mut RgbaImage, item: &Placed) {
+    let (width, height) = canvas.dimensions();
+    let w = (item.width * width as f32).round().max(1.0) as u32;
+    let h = (w as f32 * item.aspect()).round().max(1.0) as u32;
+    let picture = image::imageops::resize(&item.image, w, h, image::imageops::FilterType::Triangle);
+    let x = (item.center.0 * width as f32 - w as f32 / 2.0).round() as i64;
+    let y = (item.center.1 * height as f32 - h as f32 / 2.0).round() as i64;
+    image::imageops::overlay(canvas, &picture, x, y);
 }
 
 /// A filled, anti-aliased disc blended over the image.

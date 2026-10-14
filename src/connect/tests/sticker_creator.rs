@@ -118,11 +118,13 @@ fn adding_a_new_sticker_uploads_it_and_refreshes_the_set() {
     open_owned_set(&mut driver, &seq, &sink, true);
 
     assert!(
-        driver.add_new_sticker_to_set(77, "/tmp/s.png", "").is_err(),
+        driver
+            .add_new_sticker_to_set(77, "/tmp/s.png", "", StickerFormat::Webp)
+            .is_err(),
         "an emoji is required"
     );
     let extra = driver
-        .add_new_sticker_to_set(77, "/tmp/s.png", "😀")
+        .add_new_sticker_to_set(77, "/tmp/s.png", "😀", StickerFormat::Webp)
         .unwrap();
     let request = sent_request(&recorder, "addStickerToSet");
     assert_eq!(request["name"], "mine_by_me");
@@ -180,8 +182,11 @@ fn a_failed_upload_shows_tdesktops_wording() {
     open_owned_set(&mut driver, &seq, &sink, true);
 
     let extra = driver
-        .add_new_sticker_to_set(77, "/tmp/s.png", "😀")
+        .add_new_sticker_to_set(77, "/tmp/s.webm", "😀", StickerFormat::Webm)
         .unwrap();
+    let request = sent_request(&recorder, "addStickerToSet");
+    assert_eq!(request["sticker"]["format"]["@type"], "stickerFormatWebm");
+    assert_eq!(request["sticker"]["sticker"]["path"], "/tmp/s.webm");
     feed(&mut driver, &seq, &sink, error(extra));
     assert!(!edits(&driver).busy());
     assert!(!edits(&driver).refresh_needed);

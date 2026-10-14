@@ -2,17 +2,23 @@
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use quill::sticker_set_box::SetKind;
-use quill::telegram::envelope::StickerItem;
+use quill::telegram::envelope::{StickerFormat, StickerItem};
 use std::path::PathBuf;
 
-/// A new image on its way into an owned set: the editor's output and the
-/// emoji chosen for it (tdesktop `StickerCreatorBox`, image step).
+/// A new sticker on its way into an owned set: the editor's output and the
+/// emoji chosen for it (tdesktop `CreateMediaBox`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateSticker {
     pub set_id: i64,
     pub kind: SetKind,
-    /// The PNG the photo editor wrote, fitted to the set's side.
+    /// The file to upload: the PNG the photo editor wrote, fitted to the
+    /// set's side, or the WEBM the video editor encoded.
     pub path: PathBuf,
+    /// `stickerFormatWebp` for the PNG, `stickerFormatWebm` for the video.
+    pub format: StickerFormat,
+    /// The still the box shows: the PNG itself, or a frame of the video
+    /// (`None` when the frame could not be read).
+    pub preview: Option<PathBuf>,
     pub emojis: Vec<String>,
 }
 

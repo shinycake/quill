@@ -15,6 +15,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::slider::{Slider, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::sticker_video::{square_crop, squared_crop};
 use quill::video_edit::{Crop, quality_levels, turned_size};
 
 /// The stage the picture is fitted into.
@@ -40,6 +41,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let for_set = self.video_editor_for_set();
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
@@ -58,7 +60,12 @@ impl QuillApp {
             }
             _ => return,
         }
-        let crop = crop.clamped();
+        let mut crop = crop.clamped();
+        // A sticker's crop stays a square: the other side follows.
+        if for_set && let Some(info) = editor.info {
+            let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
+            crop = squared_crop(crop, width, height, knob == Knob::CropX);
+        }
         editor.edits.crop = (crop != Crop::FULL).then_some(crop);
         if release {
             let ((x0, x1), (y0, y1)) = crop_ranges(editor.edits.crop);
@@ -89,12 +96,21 @@ impl QuillApp {
             return;
         };
         editor.edits.turns = (editor.edits.turns + 1) % 4;
-        editor.edits.crop = None;
-        for slider in [editor.crop_x.clone(), editor.crop_y.clone()]
-            .into_iter()
-            .flatten()
-        {
-            slider.update(cx, |state, cx| state.set_value((0.0, 1.0), window, cx));
+        // A sticker's crop starts over as the centered square of the
+        // turned frame.
+        editor.edits.crop = match (editor.target, editor.info) {
+            (super::video_editor::EditorTarget::Set { .. }, Some(info)) => {
+                let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
+                square_crop(width, height)
+            }
+            _ => None,
+        };
+        let ((x0, x1), (y0, y1)) = crop_ranges(editor.edits.crop);
+        if let Some(slider) = editor.crop_x.clone() {
+            slider.update(cx, |state, cx| state.set_value((x0, x1), window, cx));
+        }
+        if let Some(slider) = editor.crop_y.clone() {
+            slider.update(cx, |state, cx| state.set_value((y0, y1), window, cx));
         }
         Self::fit_editor_quality(editor);
         if let Some(video) = editor.player.borrow_mut().as_mut() {

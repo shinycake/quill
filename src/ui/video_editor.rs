@@ -22,6 +22,7 @@ use quill::video_edit::{
     VideoEdits, VideoSource, format_clock, probe_source, quality_label, quality_levels,
     render_edited, render_frame,
 };
+use quill::sticker_set_box::SetKind;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -33,6 +34,9 @@ pub(super) enum EditorTarget {
     Tray(usize),
     /// The replacement video of the message being edited.
     MessageEdit,
+    /// A video sticker for an owned set (`video_editor_set.rs`): three
+    /// seconds at most, a square crop, encoded as WEBM.
+    Set { set_id: i64, kind: SetKind },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -64,6 +68,9 @@ pub(super) struct VideoEditorDialog {
     /// The preview player while the trimmed range plays.
     pub(super) player: RefCell<Option<NativeVideo>>,
     pub(super) playing: bool,
+    /// Set target: the emoji the sticker already had, for the "New
+    /// Sticker" box.
+    pub(super) set_emoji: Option<String>,
 }
 
 /// Where the editor writes its pictures and copies is
@@ -133,7 +140,7 @@ impl QuillApp {
         self.open_video_editor(EditorTarget::MessageEdit, source, initial, window, cx);
     }
 
-    fn open_video_editor(
+    pub(super) fn open_video_editor(
         &mut self,
         target: EditorTarget,
         source: PathBuf,
@@ -163,6 +170,7 @@ impl QuillApp {
             crop_y: None,
             player: RefCell::new(None),
             playing: false,
+            set_emoji: None,
         });
         let worker = cx.background_spawn(async move { probe_source(&source) });
         cx.spawn_in(window, async move |this, cx| {
@@ -199,17 +207,29 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        let for_set = self.video_editor_for_set();
+        if for_set && !quill::sticker_video::accepts_source(&info) {
+            if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
+                editor.note = Some(quill::sticker_video::BAD_VIDEO_NOTE.into());
+            }
+            cx.notify();
+            return;
+        }
         // An edit that only asked for a GIF has no range yet.
-        let edits = initial
-            .map(|edits| {
-                let till_ms = if edits.till_ms <= 0 {
-                    info.duration_ms
-                } else {
-                    edits.till_ms
-                };
-                VideoEdits { till_ms, ..edits }.clamped(info.duration_ms, true)
-            })
-            .unwrap_or_else(|| VideoEdits::full(info.duration_ms));
+        let edits = if for_set {
+            quill::sticker_video::initial_edits(&info)
+        } else {
+            initial
+                .map(|edits| {
+                    let till_ms = if edits.till_ms <= 0 {
+                        info.duration_ms
+                    } else {
+                        edits.till_ms
+                    };
+                    VideoEdits { till_ms, ..edits }.clamped(info.duration_ms, true)
+                })
+                .unwrap_or_else(|| VideoEdits::full(info.duration_ms))
+        };
         let crop_unit =
             |start: u16, len: u16| (f32::from(start) / 1000.0, f32::from(start + len) / 1000.0);
         let crop = edits.crop.unwrap_or(quill::video_edit::Crop::FULL);
@@ -304,6 +324,7 @@ impl QuillApp {
             self.video_editor_crop_knob(knob, start, end, release, window, cx);
             return;
         }
+        let for_set = self.video_editor_for_set();
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
@@ -315,12 +336,16 @@ impl QuillApp {
                 let from = (f64::from(start) * 1000.0).round() as i64;
                 let till = (f64::from(end) * 1000.0).round() as i64;
                 let moved_start = (from - editor.edits.from_ms).abs() > 1;
-                editor.edits = VideoEdits {
+                let edits = VideoEdits {
                     from_ms: from,
                     till_ms: till,
                     ..editor.edits
-                }
-                .clamped(duration, moved_start);
+                };
+                editor.edits = if for_set {
+                    quill::sticker_video::clamp_range(edits, duration, moved_start)
+                } else {
+                    edits.clamped(duration, moved_start)
+                };
                 let show_at = if moved_start {
                     editor.edits.from_ms
                 } else {
@@ -428,12 +453,24 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The open editor is making a sticker for a set.
+    pub(super) fn video_editor_for_set(&self) -> bool {
+        self.composer_ui
+            .send_box
+            .video_editor
+            .as_ref()
+            .is_some_and(|editor| matches!(editor.target, EditorTarget::Set { .. }))
+    }
+
     /// "Done": encode the edited copy when the file has to change, then
     /// swap it in.
     fn finish_video_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return true;
         };
+        if let EditorTarget::Set { set_id, kind } = editor.target {
+            return self.finish_set_video_editor(set_id, kind, window, cx);
+        }
         let (Some(info), false) = (editor.info, editor.busy) else {
             return false;
         };
@@ -561,7 +598,7 @@ impl QuillApp {
                 edit.media_edit.video_extras = extras;
                 "Video edits saved"
             }
-            None => return,
+            Some(EditorTarget::Set { .. }) | None => return,
         };
         self.connection.status_note = note.into();
         cx.notify();
@@ -602,7 +639,8 @@ impl QuillApp {
     fn video_editor_body(&self, editor: &VideoEditorDialog, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let this_stage = self.video_editor_stage(editor, cx);
-        let gif_allowed = editor.target != EditorTarget::MessageEdit;
+        let for_set = matches!(editor.target, EditorTarget::Set { .. });
+        let gif_allowed = editor.target != EditorTarget::MessageEdit && !for_set;
         let picture = this_stage;
         let mut body = div()
             .flex()
@@ -650,7 +688,8 @@ impl QuillApp {
                 ));
             let (edited_w, edited_h) = edits.edited_size(&info);
             let levels = quality_levels(edited_w, edited_h);
-            if levels.len() > 1 {
+            // A sticker is always encoded at the set's side.
+            if levels.len() > 1 && !for_set {
                 let mut choices = div().flex().flex_wrap().gap_1();
                 for level in levels {
                     choices = choices.child(

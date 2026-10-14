@@ -33,6 +33,7 @@ mod menu;
 pub(crate) mod state;
 #[cfg(all(test, feature = "demo-capture"))]
 mod tests;
+mod video_pick;
 
 /// A sticker being dragged to a new place in reorder mode.
 #[derive(Clone)]
