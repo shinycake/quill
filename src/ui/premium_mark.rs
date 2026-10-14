@@ -12,6 +12,15 @@ const SIZE: f32 = 18.;
 /// tdesktop `roundRadiusSmall`: the gap to the cell's corner.
 const INSET: f32 = 4.;
 
+/// The Premium badge gradient (tdesktop `Premium::ButtonGradientStops`).
+pub(crate) fn premium_gradient() -> Background {
+    linear_gradient(
+        135.,
+        linear_color_stop(rgb(0x6b93ff), 0.),
+        linear_color_stop(rgb(0xc66cd8), 1.),
+    )
+}
+
 /// The disc, placed absolutely in the cell's bottom-right corner (the cell
 /// must be `relative`). `unlocked` is whether the account has Premium.
 pub(super) fn premium_mark(unlocked: bool) -> AnyElement {
@@ -24,11 +33,7 @@ pub(super) fn premium_mark(unlocked: bool) -> AnyElement {
         .items_center()
         .justify_center()
         .rounded_full()
-        .bg(linear_gradient(
-            135.,
-            linear_color_stop(rgb(0x6b93ff), 0.),
-            linear_color_stop(rgb(0xc66cd8), 1.),
-        ))
+        .bg(premium_gradient())
         .child(
             Icon::new(if unlocked {
                 IconName::StarFill

@@ -34,10 +34,12 @@ pub(super) fn layer_width(width: f32) -> f32 {
     LAYER_WIDTH.min((width - 2. * LAYER_MARGIN).max(0.))
 }
 
-/// The layer's fade, and whether it is on its way out.
+/// The layer's fade, whether it is on its way out, and which close it
+/// is (a timer only drops the layer for the close that started it).
 pub(crate) struct LayerFade {
     glide: Glide,
     closing: bool,
+    close_id: u64,
 }
 
 impl QuillApp {
@@ -69,6 +71,7 @@ impl QuillApp {
                 self.earn.fade = Some(LayerFade {
                     glide,
                     closing: false,
+                    close_id: 0,
                 });
             }
         }
@@ -101,6 +104,8 @@ impl QuillApp {
             return;
         }
         fade.closing = true;
+        fade.close_id = fade.close_id.wrapping_add(1);
+        let close_id = fade.close_id;
         fade.glide.go(0., CLOSE_FADE, animate, now);
         if !fade.glide.animating(now) {
             self.drop_earn_layer(cx);
@@ -109,7 +114,12 @@ impl QuillApp {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(CLOSE_FADE).await;
             this.update(cx, |this, cx| {
-                if this.earn.fade.as_ref().is_some_and(|fade| fade.closing) {
+                if this
+                    .earn
+                    .fade
+                    .as_ref()
+                    .is_some_and(|fade| fade.closing && fade.close_id == close_id)
+                {
                     this.drop_earn_layer(cx);
                 }
             })

@@ -337,6 +337,7 @@ impl StatChartView {
                 shown,
                 visible,
                 &range,
+                chart.whole_values(),
                 cx,
             ));
         }

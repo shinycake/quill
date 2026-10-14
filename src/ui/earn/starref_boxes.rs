@@ -371,12 +371,7 @@ impl QuillApp {
             .rounded_full()
             .border_2()
             .border_color(crate::ui::chat_theme::bg_canvas())
-            // tdesktop `Premium::ButtonGradientStops`.
-            .bg(linear_gradient(
-                135.,
-                linear_color_stop(rgb(0x6b93ff), 0.),
-                linear_color_stop(rgb(0xc66cd8), 1.),
-            ))
+            .bg(crate::ui::premium_mark::premium_gradient())
             .child(
                 Icon::new(IconName::StarFill)
                     .with_size(px(10.))

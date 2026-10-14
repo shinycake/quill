@@ -4,7 +4,7 @@
 //! ruler reads as a round number).
 
 use gpui_kit::SharedString;
-use quill::stat_chart::{ChartKind, StatChart, nice_domain};
+use quill::stat_chart::{ChartKind, StatChart, nice_domain_in};
 use std::collections::HashSet;
 
 /// Even steps on a chart's value axis (tdesktop draws six rulers).
@@ -111,22 +111,23 @@ pub(super) fn points(
 
 /// The value axis's domain for `points`: 0–100 on a percentage chart,
 /// from zero to the tallest stack on stacked bars, around the shown
-/// values of `lines` otherwise.
+/// values of `lines` otherwise. Steps are whole numbers when `whole`.
 pub(super) fn value_domain(
     points: &[Point],
     kind: ChartKind,
     enabled: &[bool],
     lines: impl Iterator<Item = usize> + Clone,
+    whole: bool,
 ) -> (f64, f64) {
     match kind {
         ChartKind::StackLinear => (0.0, 100.0),
         ChartKind::StackBar => {
             let top = points.iter().map(Point::total).fold(0.0, f64::max);
-            nice_domain(0.0, top, VALUE_INTERVALS)
+            nice_domain_in(0.0, top, VALUE_INTERVALS, whole)
         }
         ChartKind::Linear | ChartKind::Bar | ChartKind::DoubleLinear => {
             match value_extent(points, enabled, lines) {
-                Some((min, max)) => nice_domain(min, max, VALUE_INTERVALS),
+                Some((min, max)) => nice_domain_in(min, max, VALUE_INTERVALS, whole),
                 None => (0.0, 1.0),
             }
         }
@@ -188,12 +189,12 @@ mod tests {
         let chart = chart();
         let all = points(&chart, ChartKind::Linear, &[true, true], 0, 2);
         assert_eq!(
-            value_domain(&all, ChartKind::StackLinear, &[true, true], 0..2),
+            value_domain(&all, ChartKind::StackLinear, &[true, true], 0..2, true),
             (0.0, 100.0)
         );
-        let (low, high) = value_domain(&all, ChartKind::StackBar, &[true, true], 0..2);
+        let (low, high) = value_domain(&all, ChartKind::StackBar, &[true, true], 0..2, true);
         assert!(low == 0.0 && high >= 40.0);
-        let (low, high) = value_domain(&all, ChartKind::Linear, &[true, false], 0..2);
+        let (low, high) = value_domain(&all, ChartKind::Linear, &[true, false], 0..2, true);
         assert!(low <= 10.0 && high >= 30.0);
         assert_eq!(value_extent(&all, &[false, false], 0..2), None);
     }

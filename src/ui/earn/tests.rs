@@ -55,8 +55,21 @@ fn bounds(vcx: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixels>
         .unwrap_or_else(|| panic!("{selector} is drawn"))
 }
 
+/// Click the middle of `selector` once it stops moving: a kit dialog
+/// scales in on the real clock, and a click taken mid-animation can
+/// land beside the button on a busy machine.
 fn click(vcx: &mut VisualTestContext, selector: &'static str) {
-    let at = bounds(vcx, selector).center();
+    let mut at = bounds(vcx, selector);
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        frames(vcx);
+        let now = bounds(vcx, selector);
+        if now == at {
+            break;
+        }
+        at = now;
+    }
+    let at = at.center();
     vcx.simulate_click(at, Modifiers::default());
     frames(vcx);
 }
