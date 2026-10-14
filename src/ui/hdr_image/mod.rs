@@ -19,7 +19,8 @@ mod viewer;
 mod viewer_tests;
 
 pub(crate) use probe_cache::has_hdr;
-#[cfg(all(test, target_os = "macos", feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(all(target_os = "macos", feature = "demo-capture"))]
 use viewer::HdrBadge;
 pub(crate) use viewer::{HdrViewer, badge_element};
 
@@ -122,7 +123,8 @@ thread_local! {
     static TEST_HEADROOM: std::cell::Cell<Option<Headroom>> = const { std::cell::Cell::new(None) };
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(crate) fn set_test_headroom(headroom: Option<Headroom>) {
     TEST_HEADROOM.with(|cell| cell.set(headroom));
 }

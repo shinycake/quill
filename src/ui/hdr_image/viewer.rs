@@ -100,7 +100,8 @@ impl HdrViewer {
     }
 
     /// Recorded for tests: whether the window was last switched to EDR.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(crate) fn edr_on(&self) -> bool {
         self.edr_on
     }
