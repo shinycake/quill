@@ -1026,7 +1026,8 @@ mod tests {
         note_activity();
         let due = idle_trim_due().expect("activity schedules a trim");
         assert!(
-            due >= std::time::Instant::now() + IDLE_AFTER - std::time::Duration::from_millis(50)
+            due >= std::time::Instant::now()
+                + IDLE_AFTER.saturating_sub(std::time::Duration::from_millis(50))
         );
         super::IDLE_TRIMMED.with(|trimmed| trimmed.set(super::ACTIVITY.with(|a| a.get())));
         assert_eq!(idle_trim_due(), None, "already trimmed");

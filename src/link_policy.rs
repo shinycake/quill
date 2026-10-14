@@ -166,15 +166,18 @@ pub fn suspicious_ranges(url: &str) -> Vec<Range<usize>> {
     for prefix in ["https://", "http://", "sftp://", "ftp://"] {
         if url.len() >= prefix.len()
             && url.is_char_boundary(prefix.len())
-            && url[..prefix.len()].eq_ignore_ascii_case(prefix)
+            && url
+                .get(..prefix.len())
+                .unwrap_or_default()
+                .eq_ignore_ascii_case(prefix)
         {
             start = prefix.len();
             break;
         }
     }
-    let rest = &url[start..];
+    let rest = url.get(start..).unwrap_or_default();
     let end = rest.find(['/', '#', ':', '?']).unwrap_or(rest.len());
-    let domain = &rest[..end];
+    let domain = rest.get(..end).unwrap_or_default();
     if domain.is_empty() {
         return Vec::new();
     }
@@ -273,6 +276,7 @@ fn script_of(ch: char) -> Script {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::{OpenDecision, host_of, open_decision, suspicious_ranges};
     use crate::text::LinkTarget;
 

@@ -154,8 +154,8 @@ pub fn parse_gdbus_bool(text: &str) -> Option<bool> {
 /// `(<'power-saver'>,)` from `gdbus call`.
 pub fn parse_active_profile(text: &str) -> Option<bool> {
     let start = text.find('\'')? + 1;
-    let end = start + text[start..].find('\'')?;
-    Some(&text[start..end] == "power-saver")
+    let end = start + text.get(start..).unwrap_or_default().find('\'')?;
+    Some(text.get(start..end).unwrap_or_default() == "power-saver")
 }
 
 #[cfg(test)]

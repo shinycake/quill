@@ -34,7 +34,9 @@ pub(crate) struct FrameUi {
     /// A debounced `window_state.json` save is scheduled.
     pub(super) window_state_save_pending: bool,
     /// Cmd+Q hold detection (`macWarnBeforeQuit`) and its clock origin.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(super) quit_guard: quill::quit_guard::QuitGuard,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(super) quit_clock: Instant,
     /// Whether the main window is currently excluded from screen capture.
     pub(super) capture_blocked: bool,

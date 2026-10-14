@@ -304,7 +304,9 @@ pub fn parse_username_query(text: &str) -> Option<String> {
         let rest = text.strip_prefix("https://").unwrap_or(text);
         let is_host = |c: char| c.is_ascii_alphanumeric() || c == '.';
         let rest = match rest.find('/') {
-            Some(at) if rest[..at].chars().all(is_host) => &rest[at + 1..],
+            Some(at) if rest.get(..at).unwrap_or_default().chars().all(is_host) => {
+                rest.get(at + 1..).unwrap_or_default()
+            }
             _ => rest,
         };
         rest.chars()

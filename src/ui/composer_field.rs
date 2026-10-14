@@ -509,7 +509,7 @@ pub(super) fn apply_markdown(
     // The inner text keeps its own formatting and emoji, and gets the new
     // format on top.
     let inner = found.inner.clone();
-    let mut inner_doc = ComposerDoc::plain(&doc.text[inner.clone()]);
+    let mut inner_doc = ComposerDoc::plain(doc.text.get(inner.clone()).unwrap_or_default());
     let shift = |r: &Range<usize>| {
         r.start.max(inner.start) - inner.start..r.end.min(inner.end) - inner.start
     };

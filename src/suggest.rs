@@ -58,11 +58,11 @@ pub fn hashtag_query(text: &str, caret: usize) -> Option<SuggestQuery> {
     if !text.is_char_boundary(caret) {
         return None;
     }
-    let head = &text[..caret];
+    let head = text.get(..caret).unwrap_or_default();
     let mut count = 0;
     for (at, c) in head.char_indices().rev() {
         if c == '#' {
-            let before = &head[..at];
+            let before = head.get(..at).unwrap_or_default();
             if before.chars().next_back().is_some_and(is_tag_char) {
                 return None;
             }
@@ -73,13 +73,13 @@ pub fn hashtag_query(text: &str, caret: usize) -> Option<SuggestQuery> {
                 .rev()
                 .find(|(_, c)| c.is_whitespace())
                 .map_or(0, |(i, c)| i + c.len_utf8());
-            if before[word_start..].contains('/') {
+            if before.get(word_start..).unwrap_or_default().contains('/') {
                 return None;
             }
             return Some(SuggestQuery {
                 kind: SuggestKind::Hashtag,
                 range: at..caret,
-                query: head[at + 1..].to_string(),
+                query: head.get(at + 1..).unwrap_or_default().to_string(),
             });
         }
         count += 1;
@@ -98,13 +98,15 @@ pub fn emoji_query(text: &str, caret: usize) -> Option<SuggestQuery> {
     if !text.is_char_boundary(caret) {
         return None;
     }
-    let head = &text[..caret];
+    let head = text.get(..caret).unwrap_or_default();
     let mut count = 0;
     let mut previous_space = false;
     for (at, c) in head.char_indices().rev() {
         if c == ':' {
-            let query = &head[at + 1..];
-            if head[..at]
+            let query = head.get(at + 1..).unwrap_or_default();
+            if head
+                .get(..at)
+                .unwrap_or_default()
                 .chars()
                 .next_back()
                 .is_some_and(|p| p.is_alphanumeric())
@@ -219,11 +221,13 @@ pub fn extract_hashtags(text: &str) -> Vec<String> {
         if c != '#' {
             continue;
         }
-        let Some(tag) = hashtag_query(&text[..at + 1], at + 1) else {
+        let Some(tag) = hashtag_query(text.get(..at + 1).unwrap_or_default(), at + 1) else {
             continue;
         };
         debug_assert!(tag.query.is_empty());
-        let rest: String = text[at + 1..]
+        let rest: String = text
+            .get(at + 1..)
+            .unwrap_or_default()
             .chars()
             .take_while(|c| is_tag_char(*c))
             .take(HASHTAG_MAX)

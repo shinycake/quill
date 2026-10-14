@@ -106,7 +106,7 @@ fn resolve_file(arg: &str, cwd: &Path) -> Option<PathBuf> {
         return None;
     }
     let path = match arg.get(..7).filter(|p| p.eq_ignore_ascii_case("file://")) {
-        Some(_) => file_url_path(&arg[7..])?,
+        Some(_) => file_url_path(arg.get(7..).unwrap_or_default())?,
         None => PathBuf::from(arg),
     };
     let path = if path.is_absolute() {
@@ -124,7 +124,7 @@ fn file_url_path(rest: &str) -> Option<PathBuf> {
     // `/C:/Users/a` names `C:\Users\a` on Windows.
     let bytes = decoded.as_bytes();
     let decoded = if cfg!(windows) && bytes.len() > 2 && bytes[0] == b'/' && bytes[2] == b':' {
-        decoded[1..].to_string()
+        decoded.get(1..).unwrap_or_default().to_string()
     } else {
         decoded
     };

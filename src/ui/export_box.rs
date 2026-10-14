@@ -450,7 +450,12 @@ impl QuillApp {
                     .justify_center()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(quill::local_time::weekday_name(weekday)[..2].to_string()),
+                    .child(
+                        quill::local_time::weekday_name(weekday)
+                            .get(..2)
+                            .unwrap_or_default()
+                            .to_string(),
+                    ),
             );
         }
         let mut grid = div().flex().flex_col().gap_0p5();

@@ -1,5 +1,6 @@
 //! `parse_text_entities`: every interactive TDLib entity type survives the
 //! JSON → `TextEntity` conversion, with UTF-16 offsets mapped to bytes.
+#![allow(clippy::string_slice, reason = "test code slices known-good literals")]
 
 use super::message_content::parse_text_entities;
 use crate::text::{LinkTarget, TextEntityKind as K, styled_runs};

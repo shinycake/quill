@@ -70,7 +70,7 @@ fn parse_data_id(text: &str) -> Option<[u8; 16]> {
     }
     let mut id = [0u8; 16];
     for (i, byte) in id.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok()?;
+        *byte = u8::from_str_radix(text.get(i * 2..i * 2 + 2)?, 16).ok()?;
     }
     Some(id)
 }

@@ -451,7 +451,7 @@ fn spelling_menu_items(
     if !selection.is_empty() && selection != range {
         return menu;
     }
-    let word = text[range.clone()].to_string();
+    let word = text.get(range.clone()).unwrap_or_default().to_string();
     if checker.is_correct(&word) {
         if checker.is_learned(&word) {
             menu = menu

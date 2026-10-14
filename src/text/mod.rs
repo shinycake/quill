@@ -371,14 +371,24 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
                             // A bare `example.com` entity has no scheme;
                             // Telegram Desktop opens it as `http://…`.
                             matches!(entity.kind, TextEntityKind::Url)
-                                .then(|| schemeless_url(&text[entity.utf8_start..entity.utf8_end]))
+                                .then(|| {
+                                    schemeless_url(
+                                        text.get(entity.utf8_start..entity.utf8_end)
+                                            .unwrap_or_default(),
+                                    )
+                                })
                                 .flatten()
                         });
                         if link.is_none() {
                             link = href.as_ref().map(|url| LinkTarget::Url {
                                 url: url.clone(),
-                                label: matches!(entity.kind, TextEntityKind::TextUrl { .. })
-                                    .then(|| text[entity.utf8_start..entity.utf8_end].to_string()),
+                                label: matches!(entity.kind, TextEntityKind::TextUrl { .. }).then(
+                                    || {
+                                        text.get(entity.utf8_start..entity.utf8_end)
+                                            .unwrap_or_default()
+                                            .to_string()
+                                    },
+                                ),
                             });
                         }
                     }
@@ -423,7 +433,7 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
                 }
             }
         }
-        let slice = text[start..end].to_string();
+        let slice = text.get(start..end).unwrap_or_default().to_string();
         if let Some(last) = runs.last_mut()
             && last.style == style
             && last.href == href

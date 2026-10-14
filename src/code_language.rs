@@ -75,10 +75,16 @@ pub fn fence_at(text: &str, caret: usize) -> Option<CodeFence> {
     while let Some(found) = text.get(from..)?.find("```") {
         let open = from + found;
         let after = open + 3;
-        let newline = text[after..].find('\n')?;
+        let newline = text.get(after..).unwrap_or_default().find('\n')?;
         let body = after + newline + 1;
-        match text[body..].find("```") {
-            Some(close) if !text[body..body + close].trim().is_empty() => {
+        match text.get(body..).unwrap_or_default().find("```") {
+            Some(close)
+                if !text
+                    .get(body..body + close)
+                    .unwrap_or_default()
+                    .trim()
+                    .is_empty() =>
+            {
                 let end = body + close + 3;
                 if (open..=end).contains(&caret) {
                     return Some(CodeFence {
@@ -124,6 +130,7 @@ pub fn with_language(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
 
     #[test]
