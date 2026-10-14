@@ -44,15 +44,6 @@ pub fn format_decimal(number: i64) -> String {
     out
 }
 
-/// A ruler caption: short from 10,000 up, grouped below.
-pub fn ruler_caption(value: i64) -> String {
-    if value >= 10_000 {
-        format_short(value)
-    } else {
-        format_decimal(value)
-    }
-}
-
 /// The colored change next to an overview value: `+1,234 (5.6%)` or
 /// `−87 (2%)`; `None` with no change or no previous value. The bool is
 /// true for a decrease.

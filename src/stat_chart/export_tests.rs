@@ -1,4 +1,4 @@
-//! Pie zoom math and the "Export to File" workbook.
+//! Pie shares and the "Export to File" workbook.
 use super::*;
 use crate::telegram::envelope::{
     ChannelStatistics, ChatStatistics, StatisticalGraph, StatisticalValue,
@@ -25,56 +25,13 @@ fn chart(points: usize, step: f64, lines: &[(&str, Vec<i64>)]) -> StatChart {
 }
 
 #[test]
-fn pie_parts_round_to_one_hundred_and_pick_slices_by_angle() {
+fn pie_parts_round_to_one_hundred() {
     let parts = pie_parts(&[1.0, 1.0, 1.0], true);
     let texts: Vec<&str> = parts.iter().map(|p| p.text.as_str()).collect();
     assert_eq!(texts.iter().filter(|t| **t == "33%").count(), 2);
     assert_eq!(texts.iter().filter(|t| **t == "34%").count(), 1);
     let total: f64 = parts.iter().map(|p| p.share).sum();
     assert!((total - 1.0).abs() < 1e-9);
-    // A quarter and three quarters: the first slice runs from the top to
-    // three o'clock.
-    let parts = pie_parts(&[1.0, 3.0], true);
-    assert_eq!(pie_angles(&parts), vec![(0.0, 90.0), (90.0, 360.0)]);
-    assert_eq!(pie_part_at(&parts, 1.0, -1.0), Some(0));
-    assert_eq!(pie_part_at(&parts, -1.0, 1.0), Some(1));
-    assert_eq!(pie_part_at(&parts, 0.0, 1.0), Some(1));
-    assert_eq!(pie_part_at(&parts, 0.0, 0.0), None);
-}
-
-#[test]
-fn pie_sums_follow_the_range_and_switched_off_lines() {
-    let c = chart(
-        4,
-        ONE_DAY_MS,
-        &[("A", vec![1, 2, 3, 4]), ("B", vec![10, 0, 0, 10])],
-    );
-    assert_eq!(pie_sums(&c, &[1.0, 1.0], (1, 2)), vec![5.0, 0.0]);
-    assert_eq!(pie_sums(&c, &[1.0, 0.0], (0, 3)), vec![10.0, 0.0]);
-}
-
-#[test]
-fn local_zoom_covers_eight_days_around_the_point() {
-    let c = chart(30, ONE_DAY_MS, &[("A", vec![1; 30])]);
-    let zoom = local_zoom(&c, 15);
-    assert_eq!(zoom.limit, (11, 20));
-    // The selected day sits a quarter to three quarters into its step.
-    let indices = local_zoom_indices(&c, zoom.range, zoom.limit);
-    assert_eq!(indices, (15, 15));
-    // Near the start and the end the window stays inside the chart.
-    assert_eq!(local_zoom(&c, 1).limit, (0, 9));
-    let end = local_zoom(&c, 29);
-    assert_eq!(end.limit, (21, 29));
-    assert_eq!(local_zoom_indices(&c, end.range, end.limit), (29, 29));
-    // Selecting the whole window names all its points but the last
-    // (unless it is the chart's last).
-    assert_eq!(
-        local_zoom_indices(&c, Limits::new(0.0, 1.0), (11, 20)),
-        (11, 19)
-    );
-    // A tiny chart.
-    let small = chart(3, ONE_DAY_MS, &[("A", vec![1, 2, 3])]);
-    assert_eq!(local_zoom(&small, 1).limit, (0, 2));
 }
 
 fn unzip(bytes: &[u8]) -> Vec<(String, String)> {

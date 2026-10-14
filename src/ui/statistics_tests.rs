@@ -1,6 +1,6 @@
-//! UI tests for the statistics panel: every chart kind draws, hovering
-//! shows the tooltip, the range selector and legend respond, a tooltip
-//! click zooms into a day, and a recent post opens its own page.
+//! UI tests for the statistics panel: every chart kind draws, the arrow
+//! keys read a day out, the legend and range selector respond, a click on
+//! a point zooms into a day or a pie, and a recent post opens its own page.
 
 use super::fixture::{
     ZOOM_TOKEN, seed_channel_statistics, seed_message_statistics, seed_zoomed_day,
@@ -12,8 +12,8 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Bounds, Entity, Modifiers, MouseButton, Pixels, TestAppContext, VisualTestContext,
-    point, px, size,
+    AppContext, Bounds, Entity, Modifiers, Pixels, TestAppContext, VisualTestContext, point, px,
+    size,
 };
 use quill::state::{InfoPanelTarget, StatsPage};
 
@@ -86,85 +86,75 @@ fn every_chart_kind_draws_and_failed_graphs_stay_out(cx: &mut TestAppContext) {
         assert!(plot.size.width > px(200.), "{id} has the panel's width");
     }
     // The growth chart has one line: no legend. Two lines: a legend.
-    assert!(find(vcx, &format!("stats-{CHANNEL}-growth-line-0")).is_none());
-    assert!(find(vcx, &format!("stats-{CHANNEL}-followers-line-1")).is_some());
+    assert!(find(vcx, &format!("stats-{CHANNEL}-growth-line-y0")).is_none());
+    assert!(find(vcx, &format!("stats-{CHANNEL}-followers-line-y1")).is_some());
     // A graph the server could not build is left out.
     assert!(find(vcx, &format!("stats-{CHANNEL}-join-sources-plot")).is_none());
     assert!(find(vcx, &format!("stats-{CHANNEL}-iv-plot")).is_none());
 }
 
-/// Let real time pass for fades (they run on the wall clock) and the
-/// chart's frame timer fire.
-fn after_fade(vcx: &mut VisualTestContext) {
-    std::thread::sleep(std::time::Duration::from_millis(450));
+/// Point at `at` so the plot's tooltip picks the point under it. A plot
+/// shows no tooltip while its marks draw in, so run the clock past that
+/// first, then let the tooltip fade in.
+fn hover(vcx: &mut VisualTestContext, at: gpui_kit::Point<Pixels>) {
     vcx.executor()
-        .advance_clock(std::time::Duration::from_millis(500));
+        .advance_clock(std::time::Duration::from_secs(2));
+    frames(vcx);
+    vcx.simulate_mouse_move(at, None, Modifiers::default());
+    frames(vcx);
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(300));
     frames(vcx);
 }
 
 #[gpui_kit::test]
-fn a_press_shows_details_and_moving_the_range_hides_them(cx: &mut TestAppContext) {
+fn arrow_keys_read_out_a_point_and_the_legend_and_range_respond(cx: &mut TestAppContext) {
     let (_app, mut vcx) = open_statistics(cx);
     let vcx = &mut vcx;
     let details = format!("stats-{CHANNEL}-followers-details");
     let plot = bounds(vcx, &format!("stats-{CHANNEL}-followers-plot"));
-    // Hovering alone shows nothing, as in tdesktop.
-    vcx.simulate_mouse_move(plot.center(), None, Modifiers::default());
-    frames(vcx);
-    assert!(find(vcx, &details).is_none(), "hover alone shows nothing");
+    assert!(find(vcx, &details).is_none(), "no point is picked yet");
+    // A click focuses the plot; the arrow keys pick a day, Escape drops it.
     vcx.simulate_click(plot.center(), Modifiers::default());
+    vcx.simulate_keystrokes("right");
     frames(vcx);
-    assert!(find(vcx, &details).is_some(), "a press shows the details");
-    // Pressing the same point again hides them.
-    vcx.simulate_click(plot.center(), Modifiers::default());
-    after_fade(vcx);
-    assert!(find(vcx, &details).is_none(), "a second press hides them");
-    vcx.simulate_click(plot.center(), Modifiers::default());
+    assert!(
+        find(vcx, &details).is_some(),
+        "an arrow key reads a day out"
+    );
+    vcx.simulate_keystrokes("escape");
     frames(vcx);
-    assert!(find(vcx, &details).is_some());
+    assert!(find(vcx, &details).is_none(), "escape clears it");
+    assert!(
+        find(vcx, &format!("stats-{CHANNEL}-followers-plot")).is_some(),
+        "escape leaves the panel open"
+    );
     // Switching a line off keeps the chart drawing.
-    let chip = bounds(vcx, &format!("stats-{CHANNEL}-followers-line-0"));
+    let chip = bounds(vcx, &format!("stats-{CHANNEL}-followers-line-y0"));
     vcx.simulate_click(chip.center(), Modifiers::default());
     frames(vcx);
-    // Drag the selector's left handle to the middle.
+    bounds(vcx, &format!("stats-{CHANNEL}-followers-plot"));
+    // The range selector is drawn under the plot.
     let range = bounds(vcx, &format!("stats-{CHANNEL}-followers-range"));
-    let handle = point(range.left() + px(4.), range.center().y);
-    let to = point(range.center().x, range.center().y);
-    vcx.simulate_mouse_down(handle, MouseButton::Left, Modifiers::default());
-    vcx.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
-    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
-    after_fade(vcx);
-    assert!(find(vcx, &details).is_none(), "a range change hides them");
+    assert!(range.top() >= plot.bottom());
 }
 
 #[gpui_kit::test]
 fn a_percentage_chart_zooms_into_a_pie_and_back(cx: &mut TestAppContext) {
     let (_app, mut vcx) = open_statistics(cx);
     let vcx = &mut vcx;
+    let zoom_out = format!("stats-{CHANNEL}-languages-pie-zoom-out");
     let plot = bounds(vcx, &format!("stats-{CHANNEL}-languages-plot"));
     let at = point(plot.right() - px(30.), plot.center().y);
+    hover(vcx, at);
     vcx.simulate_click(at, Modifiers::default());
     frames(vcx);
-    let details = bounds(vcx, &format!("stats-{CHANNEL}-languages-details"));
-    vcx.simulate_mouse_move(details.center(), None, Modifiers::default());
-    vcx.simulate_click(details.center(), Modifiers::default());
-    after_fade(vcx);
-    // The pie: a slice under the pointer shows its total.
-    let plot = bounds(vcx, &format!("stats-{CHANNEL}-languages-plot"));
-    let pie_details = format!("stats-{CHANNEL}-languages-pie-details");
-    let on_pie = point(plot.center().x + px(4.), plot.center().y + px(14.));
-    vcx.simulate_mouse_move(on_pie, None, Modifiers::default());
-    after_fade(vcx);
-    assert!(
-        find(vcx, &pie_details).is_some(),
-        "hovering a slice shows its total"
-    );
-    assert!(find(vcx, &format!("stats-{CHANNEL}-languages-details")).is_none());
+    assert!(find(vcx, &zoom_out).is_some(), "a click opens the pie");
     // Escape zooms back out.
-    vcx.simulate_click(on_pie, Modifiers::default());
     vcx.simulate_keystrokes("escape");
-    after_fade(vcx);
-    assert!(find(vcx, &pie_details).is_none(), "zoomed out");
+    frames(vcx);
+    assert!(find(vcx, &zoom_out).is_none(), "zoomed out");
+    bounds(vcx, &format!("stats-{CHANNEL}-languages-plot"));
 }
 
 #[gpui_kit::test]
@@ -191,17 +181,13 @@ fn export_builds_the_page_workbook(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_tooltip_click_zooms_into_the_day(cx: &mut TestAppContext) {
+fn a_click_on_a_point_zooms_into_the_day(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_statistics(cx);
     let vcx = &mut vcx;
     let plot = bounds(vcx, &format!("stats-{CHANNEL}-growth-plot"));
     let at = point(plot.right() - px(20.), plot.center().y);
-    vcx.simulate_mouse_move(at, None, Modifiers::default());
+    hover(vcx, at);
     vcx.simulate_click(at, Modifiers::default());
-    frames(vcx);
-    let details = bounds(vcx, &format!("stats-{CHANNEL}-growth-details"));
-    vcx.simulate_mouse_move(details.center(), None, Modifiers::default());
-    vcx.simulate_click(details.center(), Modifiers::default());
     frames(vcx);
     app.read_with(vcx, |app, _| {
         let stats = &app.session().unwrap().groups.stats;

@@ -1,22 +1,22 @@
 //! Statistics charts: the graph JSON TDLib hands over in
-//! `statisticalGraphData.json_data`, and the range, axis and label math a
+//! `statisticalGraphData.json_data`, and the axis, label and share math a
 //! chart view needs. Ported from Telegram Desktop's `statistics/`
-//! (`statistics_data_deserialize.cpp`, `data_statistics_chart.cpp`,
-//! `chart_rulers_data.cpp`, `view/*`); the drawing itself lives in the UI.
+//! (`statistics_data_deserialize.cpp`, `statistics_format_values.cpp`);
+//! the UI draws them with gpui-kit's charts.
 
 mod axis;
 mod currency;
 mod format;
+mod lines;
 mod pie;
-mod range;
 mod slots;
 pub(crate) mod xlsx;
 
 pub use axis::*;
 pub use currency::*;
 pub use format::*;
+pub use lines::*;
 pub use pie::*;
-pub use range::*;
 pub use slots::*;
 pub use xlsx::*;
 
@@ -105,8 +105,6 @@ pub struct ChartLine {
     /// The JSON's own color, `0xRRGGBB`.
     pub rgb: Option<u32>,
     pub y: Vec<i64>,
-    pub min: i64,
-    pub max: i64,
     /// Listed in the JSON's `hidden`: starts switched off in the legend.
     pub hidden_on_start: bool,
 }
@@ -127,8 +125,6 @@ impl ChartLine {
 pub struct StatChart {
     /// X values in milliseconds.
     pub x: Vec<f64>,
-    /// Each x as a fraction of the full span (0..=1).
-    pub x_frac: Vec<f64>,
     pub lines: Vec<ChartLine>,
     /// Milliseconds between the first two points (a day when there is
     /// only one).
@@ -142,8 +138,6 @@ pub struct StatChart {
     /// The tooltip names a week, not a day (`xTooltipFormatter` with
     /// `'week'`).
     pub week_format: bool,
-    pub min: i64,
-    pub max: i64,
     /// The currency the `yTickFormatter` names (revenue graphs).
     pub currency: ChartCurrency,
 }
@@ -194,8 +188,6 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
                 name: String::new(),
                 color_key: None,
                 rgb: None,
-                min: y.iter().copied().min().unwrap_or(i64::MAX),
-                max: y.iter().copied().max().unwrap_or(0).max(0),
                 y,
                 hidden_on_start: hidden.contains(&id),
             });
@@ -219,15 +211,6 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
             line.name = name.replace('-', "\u{2014}");
         }
     }
-    let mut min = lines.iter().map(|l| l.min).min().unwrap_or(i64::MAX);
-    let mut max = lines.iter().map(|l| l.max).max().unwrap_or(0);
-    if min == max {
-        if min != 0 {
-            min = 0;
-        } else {
-            max = 1;
-        }
-    }
     let subchart = root.get("subchart").and_then(Value::as_object);
     let footer_hidden = subchart
         .and_then(|s| s.get("show"))
@@ -240,7 +223,6 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
         ONE_DAY_MS
     };
     Ok(StatChart {
-        x_frac: x_fractions(&x),
         x,
         lines,
         time_step,
@@ -254,23 +236,8 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
             .get("xTooltipFormatter")
             .and_then(Value::as_str)
             .is_some_and(|f| f.contains("'week'")),
-        min,
-        max,
         currency: currency_of(root),
     })
-}
-
-fn x_fractions(x: &[f64]) -> Vec<f64> {
-    match x {
-        [] => Vec::new(),
-        [_] => vec![1.0],
-        [first, .., last] => {
-            let span = last - first;
-            x.iter()
-                .map(|v| if span > 0.0 { (v - first) / span } else { 0.0 })
-                .collect()
-        }
-    }
 }
 
 /// `subchart.defaultZoom` (two x values) as indices; the whole chart when
@@ -291,33 +258,4 @@ fn default_zoom(x: &[f64], zoom: Option<&Value>) -> (usize, usize) {
         }
     }
     (min.min(max), min.max(max))
-}
-
-impl StatChart {
-    /// Milliseconds between the first and last point.
-    pub fn span(&self) -> f64 {
-        match self.x.as_slice() {
-            [first, .., last] => last - first,
-            _ => 0.0,
-        }
-    }
-
-    /// One time step as a fraction of the full span.
-    pub fn step_fraction(&self) -> f64 {
-        let span = self.span();
-        if span > 0.0 {
-            self.time_step / span
-        } else {
-            1.0
-        }
-    }
-
-    /// The default range as fractions of the span.
-    pub fn default_range(&self) -> Limits {
-        let (min, max) = self.default_zoom;
-        if self.x_frac.len() < 2 {
-            return Limits::new(0.0, 1.0);
-        }
-        Limits::new(self.x_frac[min], self.x_frac[max])
-    }
 }
