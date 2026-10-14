@@ -1,5 +1,9 @@
 # Profile photo sources: camera, emoji avatar, video avatar
 
+> The video avatar part is superseded by
+> [avatar-video-editor.md](avatar-video-editor.md): the clip is now edited in
+> the full video editor, and the slider panel described here is gone.
+
 ## What tdesktop does
 
 `UserpicButton::choosePhotoLocally` (`ui/controls/userpic_button.cpp`) offers,

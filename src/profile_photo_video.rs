@@ -18,7 +18,7 @@ pub const AVATAR_MAX_MS: i64 = 9600;
 /// Why a clip can't be a video avatar.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VideoAvatarError {
-    /// Shorter than `AVATAR_MIN_SECS` or without a known length.
+    /// Shorter than [`AVATAR_MIN_MS`].
     TooShort,
     /// More than ten times wider than tall, or the other way round
     /// (Telegram Desktop `AcceptableDimensions`).
@@ -62,9 +62,10 @@ pub fn initial_edits(source: &VideoSource) -> VideoEdits {
 }
 
 /// The main frame (`video_start_ts`): the cover's place in the encoded
-/// clip, in seconds to a millisecond.
+/// clip, in seconds to a millisecond, at least one frame before its end.
 pub fn main_frame_secs(edits: &VideoEdits) -> f64 {
-    let into = (edits.cover_ms - edits.from_ms).clamp(0, edits.length_ms().max(0));
+    let last = (edits.length_ms() - 1000 / i64::from(AVATAR_VIDEO_FPS)).max(0);
+    let into = (edits.cover_ms - edits.from_ms).clamp(0, last);
     into as f64 / 1000.0
 }
 
@@ -96,7 +97,9 @@ pub fn encode_args(
     if let Some(crop) = edits.crop {
         let (width, height) = turned_size(source.width, source.height, edits.turns);
         let (x, y, w, h) = crop.pixels(width, height);
-        filters.push(format!("crop={w}:{h}:{x}:{y}"));
+        // Exactly square: the thousandths round each side on its own.
+        let side = w.min(h);
+        filters.push(format!("crop={side}:{side}:{x}:{y}"));
     }
     let side = AVATAR_VIDEO_SIDE;
     filters.push(format!("scale={side}:{side}:flags=lanczos"));
@@ -217,6 +220,12 @@ mod tests {
             ..edits
         };
         assert_eq!(main_frame_secs(&before), 0.0);
+        // A cover on the last moment stays a frame inside the clip.
+        let at_end = VideoEdits {
+            cover_ms: 8000,
+            ..edits
+        };
+        assert_eq!(main_frame_secs(&at_end), 5.967);
         // Six seconds at 1200 kbit/s, plus the container.
         assert_eq!(estimated_size(&edits), 900_000 + 2_000 + 2_160);
     }
@@ -240,7 +249,7 @@ mod tests {
         let joined = args.join(" ");
         assert!(joined.starts_with("-y -ss 1.500 -t 2.500 -i in.mov -an -vf "));
         assert!(joined.contains(
-            "transpose=1,hflip,crop=720:640:0:0,scale=800:800:flags=lanczos,fps=30,format=yuv420p"
+            "transpose=1,hflip,crop=640:640:0:0,scale=800:800:flags=lanczos,fps=30,format=yuv420p"
         ));
         assert!(joined.ends_with("+faststart out.mp4"));
     }

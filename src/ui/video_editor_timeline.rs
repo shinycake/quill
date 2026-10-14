@@ -503,6 +503,7 @@ impl QuillApp {
         timeline.width = f32::from(strip.size.width);
         let crop = editor.motion.crop_bounds.get();
         let crop_area = quill::video_timeline::CropArea::of(editor.edits.crop);
+        let round = editor.target.round();
         Some(
             canvas(
                 |_, _, _| (),
@@ -512,9 +513,9 @@ impl QuillApp {
                     let dot = point(strip.origin.x + px(dot_x), strip.origin.y + px(dot_y));
                     match (capture, crop) {
                         (Some(value), Some(from)) => {
-                            paint_capture(&still, crop_area, from, target, value, window)
+                            paint_capture(&still, crop_area, (from, target), value, round, window)
                         }
-                        _ => paint_bubble(&still, crop_area, target, dot, shown, window),
+                        _ => paint_bubble(&still, crop_area, target, dot, shown, round, window),
                     }
                 },
             )
@@ -576,6 +577,7 @@ fn paint_bubble(
     target: Bounds<Pixels>,
     dot: Point<Pixels>,
     shown: f32,
+    round: bool,
     window: &mut Window,
 ) {
     let center = point(
@@ -584,7 +586,7 @@ fn paint_bubble(
     );
     let grown = size(target.size.width * shown, target.size.height * shown);
     let rect = Bounds::centered_at(center, grown);
-    let radius = rect.size.width.min(rect.size.height) * 0.1;
+    let radius = shape_radius(rect, round);
     paint_cropped(still, crop, rect, radius, window);
     window.paint_quad(quad(
         rect,
@@ -596,14 +598,21 @@ fn paint_bubble(
     ));
 }
 
+/// `ShapeRadius`: an avatar's bubble is a circle, any other a rounded
+/// rectangle.
+fn shape_radius(rect: Bounds<Pixels>, round: bool) -> Pixels {
+    let shorter = rect.size.width.min(rect.size.height);
+    if round { shorter / 2. } else { shorter * 0.1 }
+}
+
 /// The picture flying from the crop into the bubble, with a short flash
 /// where it left (`_capture` paint).
 fn paint_capture(
     still: &Arc<RenderImage>,
     crop: quill::video_timeline::CropArea,
-    from: Bounds<Pixels>,
-    to: Bounds<Pixels>,
+    (from, to): (Bounds<Pixels>, Bounds<Pixels>),
     value: f32,
+    round: bool,
     window: &mut Window,
 ) {
     let lerp = |a: Pixels, b: Pixels| a + (b - a) * value;
@@ -617,7 +626,7 @@ fn paint_capture(
             lerp(from.size.height, to.size.height),
         ),
     );
-    let radius = rect.size.width.min(rect.size.height) * 0.1 * value;
+    let radius = shape_radius(rect, round) * value;
     paint_cropped(still, crop, rect, radius, window);
     window.paint_quad(quad(
         rect,

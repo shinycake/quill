@@ -52,6 +52,11 @@ impl EditorTarget {
         matches!(self, Self::Set { .. } | Self::Avatar)
     }
 
+    /// The crop is shown as a circle (`CropType::Ellipse`, an avatar).
+    pub(super) fn round(self) -> bool {
+        self == Self::Avatar
+    }
+
     /// The longest and the shortest range in ms; 0 is no limit.
     fn range_limits(self) -> (i64, i64) {
         match self {

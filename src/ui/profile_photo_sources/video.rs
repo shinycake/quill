@@ -89,9 +89,13 @@ impl QuillApp {
                         this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
                     }
                     Err(note) => {
+                        let _ = std::fs::remove_file(&output);
                         if let Some(editor) = this.composer_ui.send_box.video_editor.as_mut() {
                             editor.busy = false;
                             editor.note = Some(note);
+                            // A still cut dropped by the serial bump frees
+                            // the cutter again.
+                            editor.still_busy = false;
                         }
                     }
                 }
