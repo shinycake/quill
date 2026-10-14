@@ -128,6 +128,12 @@ impl QuillApp {
     }
 
     pub(super) fn suggestion_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        // Running gift auctions with a bid of the user take the slot
+        // first (tdesktop ranks them above every suggestion but the
+        // unreviewed-login one, `Priority::GiftAuctions`).
+        if let Some(bar) = self.gift_auction_bar(cx) {
+            return Some(bar);
+        }
         let suggestion = self.current_suggestion()?;
         let session = self.session()?;
         let names: Vec<String> = match &suggestion {

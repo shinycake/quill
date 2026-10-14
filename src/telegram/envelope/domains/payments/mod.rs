@@ -56,4 +56,6 @@ pub enum PaymentsPayload {
     Earn(crate::earn::EarnPayload),
     /// Suggested posts in channel direct messages (`crate::suggested_posts`).
     SuggestedPost(crate::suggested_posts::SuggestedPostPayload),
+    /// Resale listings, gift auctions and crafting (`crate::gift_market`).
+    GiftMarket(crate::gift_market::GiftMarketPayload),
 }

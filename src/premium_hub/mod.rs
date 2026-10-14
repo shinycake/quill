@@ -463,6 +463,8 @@ pub struct GiftInfo {
     pub files: Vec<crate::telegram::envelope::ParsedFile>,
     /// `upgradedGift.colors`: the scheme the gift lends to its wearer.
     pub colors: Option<crate::gift_colors::UpgradedGiftColors>,
+    /// Model, symbol, backdrop, craft chance and listing of a collectible.
+    pub collectible: Option<Box<upgraded::Collectible>>,
 }
 
 fn sticker_content(
@@ -529,6 +531,7 @@ pub fn parse_gift_info(gift: &Value) -> GiftInfo {
             colors: gift
                 .get("colors")
                 .and_then(crate::gift_colors::parse_upgraded_gift_colors),
+            collectible: upgraded::parse_collectible(gift).map(Box::new),
         };
     }
     let (sticker, files) = sticker_content(gift.get("sticker"));
@@ -541,6 +544,7 @@ pub fn parse_gift_info(gift: &Value) -> GiftInfo {
         sticker,
         files,
         colors: None,
+        collectible: None,
     }
 }
 
@@ -776,6 +780,7 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
 }
 
 pub mod promo;
+pub mod upgraded;
 
 /// `premiumFeatures`: the feature rows and limits Telegram reports, plus the
 /// Premium Bot link the "Get Premium" button opens.

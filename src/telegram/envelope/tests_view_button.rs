@@ -143,3 +143,15 @@ fn theme_card_has_its_button_only_with_a_desktop_theme_file() {
     }));
     assert_eq!(other.view_button, None);
 }
+
+#[test]
+fn auction_card_button_follows_the_dates() {
+    let preview = preview_of(json!({
+        "@type": "linkPreviewTypeGiftAuction",
+        "gift": {"@type": "gift", "id": "5", "auction_info": {"@type": "giftAuction", "id": "pepe", "gifts_per_round": 10, "start_date": 1000}},
+        "auction_end_date": 2000
+    }));
+    assert_eq!(preview.button_label(500), Some("View"));
+    assert_eq!(preview.button_label(1500), Some("Join"));
+    assert_eq!(preview.button_label(2500), Some("View Results"));
+}

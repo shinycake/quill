@@ -161,6 +161,9 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(purpose))) => {
                 self.apply_suggested_post_error(err, purpose)
             }
+            Some(RequestPurpose::Payments(PaymentsPurpose::GiftMarket(purpose))) => {
+                self.apply_gift_market_error(err, purpose)
+            }
             _ => {}
         }
     }

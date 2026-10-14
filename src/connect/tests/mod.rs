@@ -31,6 +31,7 @@ mod flood_retry;
 mod folder_followups;
 mod forum_saved;
 mod gift_manage;
+mod gift_market;
 mod giveaway_members;
 mod giveaways;
 mod group_admin;

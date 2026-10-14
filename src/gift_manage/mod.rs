@@ -55,6 +55,8 @@ pub struct GiftManageInfo {
     /// Listed for TON only (`resale_parameters.gram_only`).
     pub resale_gram_only: bool,
     pub listed: bool,
+    /// Not usable for crafting before this Unix time (`craft_date`).
+    pub craft_date: i32,
 }
 
 impl GiftManageInfo {
@@ -77,6 +79,7 @@ impl GiftManageInfo {
             resale_star_count: int(resale.and_then(|r| r.get("star_count"))),
             resale_gram_only: resale.is_some_and(|r| flag(r, "gram_only")),
             listed: resale.is_some_and(|r| !r.is_null()),
+            craft_date: int(received.get("craft_date")) as i32,
         }
     }
 }
