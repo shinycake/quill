@@ -266,7 +266,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StickerCreate, |this, _, cx| {
-                this.sticker_box.create = None;
+                this.sticker_box.discard_create();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -276,6 +276,7 @@ impl QuillApp {
                     .on_close(on_close);
             };
             let kind = create.kind;
+            let encoding = this.sticker_box.encoding.is_some();
             let preview = this.create_preview_path();
             let search = this.sticker_box.emoji_search.clone();
             let query = search.read(cx).value().trim().to_string();
@@ -365,7 +366,7 @@ impl QuillApp {
                                 .label("Cancel")
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.sticker_box.create = None;
+                                    this.sticker_box.discard_create();
                                     this.close_kit_dialog_if_done(
                                         DialogKind::StickerCreate,
                                         window,
@@ -375,11 +376,15 @@ impl QuillApp {
                                 })),
                         )
                         .child(
+                            // A video encodes here (tdesktop's box does
+                            // too); the button waits until it is done.
                             Button::new("sticker-create-done")
                                 .label("Done")
                                 .primary()
+                                .loading(encoding)
+                                .disabled(encoding)
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    if this.confirm_create_sticker(cx) {
+                                    if this.confirm_create_sticker(window, cx) {
                                         this.close_kit_dialog_if_done(
                                             DialogKind::StickerCreate,
                                             window,
@@ -445,20 +450,55 @@ impl QuillApp {
                                 .into_any_element(),
                         })
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.pick_existing_sticker(&item, cx);
+                            this.pick_existing_sticker(&item, window, cx);
                             this.close_kit_dialog_if_done(DialogKind::StickerPick, window, cx);
                         }))
                         .into_any_element()
                 })
                 .collect();
-            let empty = cells.is_empty();
-            let body = Rc::new(RefCell::new(Some(cells)));
+            // Saved GIFs go through the video editor (tdesktop's panel has
+            // a GIFs tab in this flow).
+            let gifs: Vec<AnyElement> = this
+                .pick_gif_candidates(pick)
+                .iter()
+                .enumerate()
+                .map(|(index, animation)| {
+                    let still = this.gif_still(animation);
+                    let animation = animation.clone();
+                    div()
+                        .id(("sticker-pick-gif", index as u64))
+                        .test_support()
+                        .size(px(64.))
+                        .p_1()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .hover(|style| style.bg(cx.theme().accent))
+                        .child(match still {
+                            Some(path) => img(path)
+                                .size_full()
+                                .object_fit(ObjectFit::Cover)
+                                .into_any_element(),
+                            None => div()
+                                .size_full()
+                                .rounded_md()
+                                .bg(cx.theme().muted.opacity(0.5))
+                                .into_any_element(),
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.pick_gif_for_set(&animation, window, cx);
+                            this.close_kit_dialog_if_done(DialogKind::StickerPick, window, cx);
+                        }))
+                        .into_any_element()
+                })
+                .collect();
+            let empty = cells.is_empty() && gifs.is_empty();
+            let body = Rc::new(RefCell::new(Some((cells, gifs))));
             dialog
                 .overlay(true)
                 .w(px(400.))
                 .title(shell::dialog_title(title))
                 .content(shell::scrollable_dialog_content(move |content, _, _| {
-                    let cells = body.borrow_mut().take().unwrap_or_default();
+                    let (cells, gifs) = body.borrow_mut().take().unwrap_or_default();
                     content.child(if empty {
                         div()
                             .text_sm()
@@ -468,9 +508,18 @@ impl QuillApp {
                     } else {
                         div()
                             .flex()
-                            .flex_wrap()
-                            .gap_1()
-                            .children(cells)
+                            .flex_col()
+                            .gap_2()
+                            .child(div().flex().flex_wrap().gap_1().children(cells))
+                            .when(!gifs.is_empty(), |body| {
+                                body.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(text_muted())
+                                        .child(quill::sticker_video::GIFS_CAPTION),
+                                )
+                                .child(div().flex().flex_wrap().gap_1().children(gifs))
+                            })
                             .into_any_element()
                     })
                 }))

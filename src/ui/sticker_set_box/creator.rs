@@ -4,9 +4,10 @@
 //! driver; the demo applies what it can to its own session.
 use super::state::{CreateSticker, PickExisting};
 use super::*;
+use quill::sticker_image::{Corners, prepared_sticker_image};
 use quill::sticker_set_box::{
-    EMOJI_REQUIRED_NOTE, MAX_EMOJIS, OPEN_FAILED_NOTE, emoji_or_default, fitted_size,
-    joined_emojis, valid_set_name,
+    EMOJI_REQUIRED_NOTE, MAX_EMOJIS, OPEN_FAILED_NOTE, emoji_or_default, joined_emojis,
+    valid_set_name,
 };
 use quill::telegram::envelope::StickerFormat;
 use std::path::PathBuf;
@@ -152,7 +153,7 @@ impl QuillApp {
     }
 
     /// "Create a New Sticker" / "Create a New Emoji": pick an image, then
-    /// the photo editor with a square crop.
+    /// the photo editor on the sticker canvas.
     pub(super) fn begin_create_sticker(
         &mut self,
         set_id: i64,
@@ -177,8 +178,8 @@ impl QuillApp {
         .detach();
     }
 
-    /// Open `path` in the photo editor for the set (tdesktop's fixed square
-    /// crop at the set's side).
+    /// Open `path` in the photo editor for the set: the image on a
+    /// transparent square canvas (tdesktop `PrepareEditorState`).
     pub(super) fn edit_image_for_set(
         &mut self,
         set_id: i64,
@@ -186,47 +187,65 @@ impl QuillApp {
         path: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
-        match image::open(path) {
-            Ok(image) => {
-                self.viewer.photo_editor = Some(super::super::photo_editor::PhotoEditor::for_set(
-                    image.to_rgba8(),
-                    set_id,
-                    kind,
-                ));
-            }
-            Err(_) => self.connection.status_note = OPEN_FAILED_NOTE.into(),
+        let pixels = image::open(path).ok().map(|image| image.to_rgba8());
+        self.edit_pixels_for_set(set_id, kind, pixels, cx);
+    }
+
+    /// The editor on `pixels` for the set, or the "Could not load image."
+    /// toast when there are none or the editor refuses them.
+    pub(super) fn edit_pixels_for_set(
+        &mut self,
+        set_id: i64,
+        kind: SetKind,
+        pixels: Option<image::RgbaImage>,
+        cx: &mut Context<Self>,
+    ) {
+        let editor = pixels.and_then(|pixels| {
+            super::super::photo_editor::PhotoEditor::for_set(pixels, set_id, kind)
+        });
+        match editor {
+            Some(editor) => self.viewer.photo_editor = Some(editor),
+            None => self.connection.status_note = OPEN_FAILED_NOTE.into(),
         }
         cx.notify();
     }
 
-    /// The editor's "Done" for a set image: fit it to the set's side, write
-    /// it, and ask for its emoji.
+    /// The editor's "Done" for a set image: fit it to the set's side, cut
+    /// the corners and write it off the UI thread, then ask for its emoji.
     pub(in crate::ui) fn finish_set_image(
         &mut self,
         set_id: i64,
         kind: SetKind,
-        edited: &image::RgbaImage,
+        job: super::super::photo_editor_set::SetRenderJob,
+        corners: Corners,
         cx: &mut Context<Self>,
     ) {
-        let (width, height) = edited.dimensions();
-        let (fit_w, fit_h) = fitted_size(width, height, kind.image_side());
-        let fitted = if (fit_w, fit_h) == (width, height) {
-            edited.clone()
-        } else {
-            image::imageops::resize(edited, fit_w, fit_h, image::imageops::FilterType::Lanczos3)
-        };
-        match super::super::edit_media_tools::write_edited_png(&fitted) {
-            Some(path) => {
-                self.sticker_box.create = Some(CreateSticker {
-                    set_id,
-                    kind,
-                    path,
-                    emojis: Vec::new(),
-                });
-            }
-            None => self.connection.status_note = "Couldn't save the image.".into(),
-        }
-        cx.notify();
+        let worker = cx.background_spawn(async move {
+            let prepared = prepared_sticker_image(&job.render(), kind.image_side(), corners);
+            super::super::edit_media_tools::write_edited_png(&prepared)
+        });
+        cx.spawn(async move |this, cx| {
+            let written = worker.await;
+            let _ = this.update(cx, |this, cx| {
+                match written {
+                    Some(path) => {
+                        this.sticker_box.discard_create();
+                        this.sticker_box.create = Some(CreateSticker {
+                            set_id,
+                            kind,
+                            preview: Some(path.clone()),
+                            path,
+                            format: StickerFormat::Webp,
+                            emojis: Vec::new(),
+                            video: None,
+                        });
+                    }
+                    None => this.connection.status_note = "Couldn't save the image.".into(),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// An emoji in the "New Sticker" box toggles on or off (at most seven).
@@ -241,8 +260,13 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Done" in the "New Sticker" box: upload and add.
-    pub(super) fn confirm_create_sticker(&mut self, cx: &mut Context<Self>) -> bool {
+    /// "Done" in the "New Sticker" box: upload and add; a video is encoded
+    /// first (`video_create.rs`).
+    pub(super) fn confirm_create_sticker(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(create) = self.sticker_box.create.clone() else {
             return false;
         };
@@ -251,12 +275,21 @@ impl QuillApp {
             cx.notify();
             return false;
         }
+        if let Some(job) = create.video.clone() {
+            return self.encode_created_video(create, job, window, cx);
+        }
+        self.upload_created_sticker(create, cx);
+        true
+    }
+
+    /// Hand the finished file to TDLib and leave the box.
+    pub(super) fn upload_created_sticker(&mut self, create: CreateSticker, cx: &mut Context<Self>) {
         let emojis = joined_emojis(&create.emojis);
         if let Some(live) = self.live.as_mut() {
             let path = create.path.to_string_lossy().into_owned();
             if live
                 .driver
-                .add_new_sticker_to_set(create.set_id, &path, &emojis)
+                .add_new_sticker_to_set(create.set_id, &path, &emojis, create.format)
                 .is_err()
             {
                 self.connection.status_note = quill::sticker_set_box::UPLOAD_FAILED_NOTE.into();
@@ -265,8 +298,9 @@ impl QuillApp {
             self.connection.status_note = "demo — stickers upload with live TDLib".into();
         }
         self.sticker_box.create = None;
+        self.sticker_box.encoding = None;
+        create.uploaded();
         cx.notify();
-        true
     }
 
     /// "Add an Existing Sticker" / "Adapt from a Sticker": the chooser.
@@ -320,55 +354,45 @@ impl QuillApp {
         out
     }
 
-    /// A sticker was chosen: add it (or adapt it) to the set.
-    pub(super) fn pick_existing_sticker(&mut self, item: &StickerItem, cx: &mut Context<Self>) {
-        let Some(pick) = self.sticker_box.pick.take() else {
+    /// A sticker was chosen: add it (or adapt it) to the set
+    /// (`AdaptStickerToEmoji`).
+    pub(super) fn pick_existing_sticker(
+        &mut self,
+        item: &StickerItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pick) = self.sticker_box.pick else {
             return;
         };
-        if pick.adapt {
-            match item.format {
-                // Animated stickers become emoji as they are.
-                StickerFormat::Tgs => {
-                    self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx)
-                }
-                StickerFormat::Webp | StickerFormat::Unknown => {
-                    let roots = self.media_display_roots();
-                    let path = self
-                        .session()
-                        .and_then(|s| {
-                            s.media
-                                .files
-                                .get(&item.file_id.0)?
-                                .usable_path()
-                                .map(str::to_string)
-                        })
-                        .and_then(|p| quill::local_path::sandboxed_display_path(&p, &roots));
-                    match path.and_then(|p| {
-                        super::super::editor_art::sticker_pixels(
-                            std::path::Path::new(&p),
-                            item.format,
-                        )
-                    }) {
-                        Some(pixels) => {
-                            self.viewer.photo_editor =
-                                Some(super::super::photo_editor::PhotoEditor::for_set(
-                                    pixels,
-                                    pick.set_id,
-                                    pick.kind,
-                                ));
-                        }
-                        None => self.connection.status_note = OPEN_FAILED_NOTE.into(),
-                    }
-                }
-                StickerFormat::Webm => {
-                    self.connection.status_note =
-                        "Video stickers can't be adapted into emoji yet.".into();
-                }
-            }
-            cx.notify();
+        if !pick.adapt {
+            self.sticker_box.pick = None;
+            self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
             return;
         }
-        self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
+        match item.format {
+            // Animated stickers become emoji as they are.
+            StickerFormat::Tgs => {
+                self.sticker_box.pick = None;
+                self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
+            }
+            // A video sticker goes through the video editor; the chooser
+            // stays while the file is still downloading.
+            StickerFormat::Webm => {
+                let emoji = emoji_or_default(&item.emoji).to_string();
+                self.pick_video_for_set(pick, item.file_id, Some(emoji), window, cx);
+            }
+            StickerFormat::Webp | StickerFormat::Unknown => {
+                self.sticker_box.pick = None;
+                let pixels = self.local_media_path(item.file_id).and_then(|path| {
+                    super::super::editor_art::sticker_pixels(
+                        std::path::Path::new(&path),
+                        item.format,
+                    )
+                });
+                self.edit_pixels_for_set(pick.set_id, pick.kind, pixels, cx);
+            }
+        }
     }
 
     /// Add a sticker that already exists to an owned set, refusing a full
@@ -453,8 +477,8 @@ impl QuillApp {
         changed
     }
 
-    /// The still picture of the image a "New Sticker" box shows.
+    /// The still picture a "New Sticker" box shows.
     pub(super) fn create_preview_path(&self) -> Option<PathBuf> {
-        self.sticker_box.create.as_ref().map(|c| c.path.clone())
+        self.sticker_box.create.as_ref()?.preview.clone()
     }
 }

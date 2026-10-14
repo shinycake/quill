@@ -225,7 +225,7 @@ pub fn scaled_size(width: u32, height: u32, side: u32) -> (u32, u32) {
 }
 
 /// A probed clip.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VideoSource {
     pub duration_ms: i64,
     pub width: u32,
@@ -377,7 +377,7 @@ fn stamp() -> u128 {
 }
 
 fn run_ffmpeg(args: &[String]) -> Result<(), String> {
-    let output = crate::media_tools::command("ffmpeg")
+    let output = crate::media_tools::quiet_command("ffmpeg")
         .args(args)
         .output()
         .map_err(|_| "ffmpeg isn't available".to_string())?;

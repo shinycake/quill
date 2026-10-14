@@ -47,9 +47,11 @@ impl PhotoEditor {
         self.mode = EditorMode::Stickers;
     }
 
+    /// Remove the selected item; the Set mode's picked image stays.
     fn delete_selected(&mut self) {
         if let Some(index) = self.selected.take()
             && index < self.placed.len()
+            && !self.is_base(index)
         {
             self.placed.remove(index);
         }
@@ -120,7 +122,12 @@ impl PhotoEditor {
             } => {
                 let (scale_x, scale_y) = (bounds.size.width / px(1.), bounds.size.height / px(1.));
                 let distance = ((x - item.center.0) * scale_x).hypot((y - item.center.1) * scale_y);
-                item.width = (start_width * distance / start_distance).clamp(0.03, 2.0);
+                let largest = if self.base_item && index == 0 {
+                    super::photo_editor_set::BASE_MAX_WIDTH
+                } else {
+                    2.0
+                };
+                item.width = (start_width * distance / start_distance).clamp(0.03, largest);
             }
         }
     }
@@ -134,7 +141,7 @@ impl QuillApp {
             .viewer
             .photo_editor
             .as_ref()
-            .is_some_and(|editor| editor.selected.is_some());
+            .is_some_and(|editor| editor.selected.is_some_and(|index| !editor.is_base(index)));
         let roots = self.media_display_roots();
         let mut seen = std::collections::HashSet::new();
         // Thumbnails not on disk yet: fetch them; the strip fills in.

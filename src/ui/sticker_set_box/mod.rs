@@ -34,6 +34,8 @@ pub(crate) mod state;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests;
+mod video_create;
+mod video_pick;
 
 /// A sticker being dragged to a new place in reorder mode.
 #[derive(Clone)]

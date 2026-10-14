@@ -350,6 +350,14 @@ pub fn consent_denies(reg_output: &str) -> bool {
     })
 }
 
+/// `command(name)` that won't flash a console window on Windows; for
+/// children run with `.output()` from the GUI (ffmpeg encodes, probes).
+pub fn quiet_command(name: &str) -> Command {
+    let mut command = command(name);
+    command.no_console();
+    command
+}
+
 /// Hide the console window a child would flash on Windows GUI apps.
 trait NoConsole {
     fn no_console(&mut self) -> &mut Self;

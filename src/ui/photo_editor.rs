@@ -12,6 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use image::RgbaImage;
+use quill::sticker_image::Corners as StickerCorners;
 use quill::sticker_set_box::SetKind;
 use smallvec::SmallVec;
 use std::cell::Cell;
@@ -50,9 +51,10 @@ pub(super) enum EditorPurpose {
     Attachment(usize),
     /// The media of a message being edited (`edit_media_tools.rs`).
     MessageEdit,
-    /// A new sticker or emoji for a set the user owns: the crop stays
-    /// square and the result is fitted to the set's side (tdesktop's
-    /// `fixedCrop` editor from `StickerCreatorBox`).
+    /// A new sticker or emoji for a set the user owns: the image sits on a
+    /// transparent square canvas, the crop is fixed, and the result is
+    /// fitted to the set's side (tdesktop's `fixedCrop` editor from
+    /// `StickerCreatorBox`; `photo_editor_set.rs`).
     Set { set_id: i64, kind: SetKind },
 }
 
@@ -71,7 +73,7 @@ pub(super) struct PhotoEditor {
     pub(super) working: RgbaImage,
     preview: Arc<RenderImage>,
     pub(super) crop: CropRect,
-    strokes: Vec<Stroke>,
+    pub(super) strokes: Vec<Stroke>,
     current: Option<Stroke>,
     pub(super) mode: EditorMode,
     color: usize,
@@ -83,6 +85,15 @@ pub(super) struct PhotoEditor {
     pub(super) item_drag: Option<ItemDrag>,
     /// Where the image was painted last frame, for mapping the pointer.
     pub(super) image_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Set mode: `placed[0]` is the picked image on the transparent
+    /// canvas, movable and zoomable, never deleted.
+    pub(super) base_item: bool,
+    /// Set mode: how round the sticker's corners come out.
+    pub(super) corners: StickerCorners,
+    /// Set mode: "Keep original aspect ratio" is on.
+    pub(super) keep_ratio: bool,
+    /// Set mode: the picked image's ratio when it may be kept, else 0.
+    pub(super) original_ratio: f64,
 }
 
 /// A display copy of `image` (at most 1600 px), in GPUI's BGRA order.
@@ -123,6 +134,10 @@ impl PhotoEditor {
             selected: None,
             item_drag: None,
             image_bounds: Rc::new(Cell::new(None)),
+            base_item: false,
+            corners: StickerCorners::default(),
+            keep_ratio: false,
+            original_ratio: 0.0,
         }
     }
 
@@ -131,35 +146,13 @@ impl PhotoEditor {
         Self::new(EditorPurpose::MessageEdit, working)
     }
 
-    /// An editor on an image for an owned set: the crop starts as the
-    /// largest centered square and stays square.
-    pub(super) fn for_set(working: RgbaImage, set_id: i64, kind: SetKind) -> Self {
-        let mut editor = Self::new(EditorPurpose::Set { set_id, kind }, working);
-        editor.crop = editor.square_crop(editor.crop);
-        editor
+    /// An editor on a transparent canvas with `working` as its base item
+    /// (`photo_editor_set.rs` fills the rest in).
+    pub(super) fn on_canvas(purpose: EditorPurpose, canvas: RgbaImage) -> Self {
+        Self::new(purpose, canvas)
     }
 
-    /// The crop is locked to a square (in pixels, not normalized units).
-    fn square_locked(&self) -> bool {
-        matches!(self.purpose, EditorPurpose::Set { .. })
-    }
-
-    /// `crop` shrunk to a pixel square about its center.
-    fn square_crop(&self, crop: CropRect) -> CropRect {
-        let (width, height) = self.working.dimensions();
-        let (width, height) = (width.max(1) as f32, height.max(1) as f32);
-        let side = (crop.w * width).min(crop.h * height);
-        let (w, h) = (side / width, side / height);
-        CropRect {
-            x: crop.x + (crop.w - w) / 2.0,
-            y: crop.y + (crop.h - h) / 2.0,
-            w,
-            h,
-        }
-        .clamped()
-    }
-
-    fn rotate(&mut self) {
+    pub(super) fn rotate(&mut self) {
         let (width, height) = self.working.dimensions();
         self.placed = self
             .placed
@@ -176,7 +169,7 @@ impl PhotoEditor {
         self.strokes = self.strokes.iter().map(Stroke::rotated_ccw).collect();
     }
 
-    fn flip(&mut self) {
+    pub(super) fn flip(&mut self) {
         self.placed = self
             .placed
             .iter()
@@ -214,6 +207,7 @@ impl PhotoEditor {
                     points: vec![(x, y)],
                 });
             }
+            EditorMode::Crop if self.fixed_crop() => self.press_base((x, y)),
             EditorMode::Crop => {
                 let Some(bounds) = self.image_bounds.get() else {
                     return;
@@ -279,20 +273,6 @@ impl PhotoEditor {
                     2 => (right, bottom) = (x.max(left + min), y.max(top + min)),
                     _ => (left, bottom) = (x.min(right - min), y.max(top + min)),
                 }
-                if self.square_locked() {
-                    // The dragged corner follows the pointer along the
-                    // shorter side; the opposite corner stays put.
-                    let (width, height) = self.working.dimensions();
-                    let (width, height) = (width.max(1) as f32, height.max(1) as f32);
-                    let side = ((right - left) * width).min((bottom - top) * height);
-                    let (w, h) = (side / width, side / height);
-                    match corner {
-                        0 => (left, top) = (right - w, bottom - h),
-                        1 => (right, top) = (left + w, bottom - h),
-                        2 => (right, bottom) = (left + w, top + h),
-                        _ => (left, bottom) = (right - w, top + h),
-                    }
-                }
                 self.crop = CropRect {
                     x: left,
                     y: top,
@@ -343,20 +323,25 @@ impl QuillApp {
         let Some(editor) = self.viewer.photo_editor.take() else {
             return;
         };
-        let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
-        let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
         let index = match editor.purpose {
             EditorPurpose::Attachment(index) => index,
             EditorPurpose::MessageEdit => {
+                let placed: Vec<Placed> =
+                    editor.placed.iter().map(|(item, _)| item.clone()).collect();
+                let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
                 let saved = super::edit_media_tools::write_edited_png(&edited);
                 self.finish_edit_image(saved, cx);
                 return;
             }
             EditorPurpose::Set { set_id, kind } => {
-                self.finish_set_image(set_id, kind, &edited, cx);
+                // The canvas render and the fit run off the UI thread.
+                let job = editor.set_render_job();
+                self.finish_set_image(set_id, kind, job, editor.corners, cx);
                 return;
             }
         };
+        let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
+        let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
         let saved = super::edit_media_tools::write_edited_png(&edited);
         match (saved, self.composer_ui.pending_attachments.get_mut(index)) {
             (Some(path), Some(attachment)) => {
@@ -407,7 +392,12 @@ impl QuillApp {
             .iter()
             .map(|(item, preview)| (editor.item_rect(item), preview.clone()))
             .collect();
-        let selected_item = editor.selected.filter(|_| mode == EditorMode::Stickers);
+        // Set mode: the picked image shows its handle while cropping too.
+        let selected_item = editor.selected.filter(|_| {
+            mode == EditorMode::Stickers || (mode == EditorMode::Crop && editor.base_item)
+        });
+        let base_item = editor.base_item;
+        let corner_multiplier = editor.corners.multiplier();
         let surface = canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
             move |bounds, hitbox, window, _| {
@@ -433,51 +423,56 @@ impl QuillApp {
                     )
                 };
                 let side = fit_size.width.min(fit_size.height) / px(1.);
-                for stroke in &strokes {
-                    let color = Rgba {
-                        r: f32::from(stroke.color[0]) / 255.,
-                        g: f32::from(stroke.color[1]) / 255.,
-                        b: f32::from(stroke.color[2]) / 255.,
-                        a: 1.,
-                    };
-                    let mut path = PathBuilder::stroke(px((stroke.width * side).max(1.)));
-                    let mut points = stroke.points.iter().copied().map(at);
-                    if let Some(first) = points.next() {
-                        path.move_to(first);
-                        path.line_to(point(first.x + px(0.1), first.y));
-                        for point in points {
-                            path.line_to(point);
+                // Items and strokes may reach past the picture; they are
+                // cut at its edge, as the render cuts them.
+                window.with_content_mask(Some(ContentMask { bounds: fit }), |window| {
+                    // Set mode: the picked image is the ground the drawing and
+                    // the other items go on.
+                    if base_item && let Some(((left, top, w, h), picture)) = items.first() {
+                        let item_bounds =
+                            Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
+                        paint_editor_item(
+                            window,
+                            item_bounds,
+                            picture.clone(),
+                            selected_item == Some(0),
+                        );
+                    }
+                    for stroke in &strokes {
+                        let color = Rgba {
+                            r: f32::from(stroke.color[0]) / 255.,
+                            g: f32::from(stroke.color[1]) / 255.,
+                            b: f32::from(stroke.color[2]) / 255.,
+                            a: 1.,
+                        };
+                        let mut path = PathBuilder::stroke(px((stroke.width * side).max(1.)));
+                        let mut points = stroke.points.iter().copied().map(at);
+                        if let Some(first) = points.next() {
+                            path.move_to(first);
+                            path.line_to(point(first.x + px(0.1), first.y));
+                            for point in points {
+                                path.line_to(point);
+                            }
+                        }
+                        if let Ok(path) = path.build() {
+                            window.paint_path(path, color);
                         }
                     }
-                    if let Ok(path) = path.build() {
-                        window.paint_path(path, color);
-                    }
-                }
-                // Stickers and emoji over the drawing; the selected one gets
-                // a frame and a resize handle.
-                for (index, ((left, top, w, h), picture)) in items.iter().enumerate() {
-                    let item_bounds =
-                        Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
-                    let _ = window.paint_image(
-                        item_bounds,
-                        item_bounds,
-                        Corners::default(),
-                        picture.clone(),
-                        0,
-                        false,
-                    );
-                    if selected_item == Some(index) {
-                        window.paint_quad(outline(
+                    // Stickers and emoji over the drawing; the selected one gets
+                    // a frame and a resize handle.
+                    for (index, ((left, top, w, h), picture)) in
+                        items.iter().enumerate().skip(usize::from(base_item))
+                    {
+                        let item_bounds =
+                            Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
+                        paint_editor_item(
+                            window,
                             item_bounds,
-                            gpui_kit::white(),
-                            BorderStyle::Dashed,
-                        ));
-                        window.paint_quad(fill(
-                            Bounds::centered_at(item_bounds.bottom_right(), size(px(12.), px(12.))),
-                            gpui_kit::white(),
-                        ));
+                            picture.clone(),
+                            selected_item == Some(index),
+                        );
                     }
-                }
+                });
                 // Outside the crop is shaded in all modes, so editing
                 // shows what will be sent; handles only while cropping.
                 {
@@ -507,7 +502,20 @@ impl QuillApp {
                     ] {
                         window.paint_quad(fill(band, shade));
                     }
-                    if mode == EditorMode::Crop {
+                    if base_item {
+                        // The fixed sticker frame, rounded like the corners
+                        // choice; no handles, as it can't be dragged.
+                        let radius =
+                            crop_bounds.size.width.min(crop_bounds.size.height) * corner_multiplier;
+                        window.paint_quad(quad(
+                            crop_bounds,
+                            Corners::all(radius),
+                            gpui_kit::transparent_black(),
+                            px(1.),
+                            gpui_kit::white().opacity(0.8),
+                            BorderStyle::Solid,
+                        ));
+                    } else if mode == EditorMode::Crop {
                         window.paint_quad(outline(
                             crop_bounds,
                             gpui_kit::white(),
@@ -556,19 +564,35 @@ impl QuillApp {
                         });
                     }
                 });
+                let up_app = app.clone();
                 window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
                     if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
-                        let _ = app.update(cx, |this, cx| {
+                        let _ = up_app.update(cx, |this, cx| {
                             this.photo_editor_mut(PhotoEditor::release, cx)
                         });
                     }
                 });
+                if base_item {
+                    // The wheel zooms the picked image (tdesktop's scene
+                    // zoom in the sticker editor).
+                    let wheel_hitbox = hitbox.clone();
+                    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Bubble && wheel_hitbox.is_hovered(window) {
+                            let delta = event.delta.pixel_delta(px(20.)).y / px(1.);
+                            let _ = app.update(cx, |this, cx| {
+                                this.photo_editor_mut(|editor| editor.zoom_base(delta), cx)
+                            });
+                        }
+                    });
+                }
             },
         )
         .size_full();
 
         let stickers_tools =
             (mode == EditorMode::Stickers).then(|| self.photo_editor_sticker_tools(cx));
+        let set_tools = (mode == EditorMode::Crop && base_item)
+            .then(|| self.photo_editor_set_tools(editor, cx));
         let mode_button = |id: &'static str,
                            label: &'static str,
                            icon: gpui_kit::assets::IconName,
@@ -598,6 +622,7 @@ impl QuillApp {
                 .items_center()
                 .gap_2()
                 .children(stickers_tools),
+            EditorMode::Crop if base_item => div().flex().items_center().children(set_tools),
             EditorMode::Crop => div()
                 .flex()
                 .items_center()
@@ -766,5 +791,29 @@ impl QuillApp {
                 )
                 .into_any_element(),
         )
+    }
+}
+
+/// A placed picture, with a dashed frame and a resize handle when selected.
+fn paint_editor_item(
+    window: &mut Window,
+    item_bounds: Bounds<Pixels>,
+    picture: Arc<RenderImage>,
+    selected: bool,
+) {
+    let _ = window.paint_image(
+        item_bounds,
+        item_bounds,
+        Corners::default(),
+        picture,
+        0,
+        false,
+    );
+    if selected {
+        window.paint_quad(outline(item_bounds, gpui_kit::white(), BorderStyle::Dashed));
+        window.paint_quad(fill(
+            Bounds::centered_at(item_bounds.bottom_right(), size(px(12.), px(12.))),
+            gpui_kit::white(),
+        ));
     }
 }

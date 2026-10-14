@@ -39,14 +39,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Add a freshly rendered image at `path` (a PNG or WEBP fitted to the
-    /// set's side) tagged with `emojis` (`addStickerToSet` with
-    /// `inputFileLocal`; TDLib uploads it).
+    /// Add a freshly rendered file at `path` (a PNG fitted to the set's
+    /// side, or a WEBM video sticker) tagged with `emojis`
+    /// (`addStickerToSet` with `inputFileLocal`; TDLib uploads it).
     pub fn add_new_sticker_to_set(
         &mut self,
         set_id: i64,
         path: &str,
         emojis: &str,
+        format: StickerFormat,
     ) -> Result<RequestId, ConnectSendError> {
         let name = self
             .owned_set_name(set_id)
@@ -61,7 +62,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|(_, emoji)| emoji);
         self.creator_request(
             StickerCreatorPurpose::AddNewSticker { set_id, emoji },
-            |extra| add_sticker_to_set(extra, &name, &file, StickerFormat::Webp, emojis),
+            |extra| add_sticker_to_set(extra, &name, &file, format, emojis),
         )
     }
 

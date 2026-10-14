@@ -85,7 +85,7 @@ impl QuillApp {
         }
         self.message_ui.menu_ui.sticker_set_open = true;
         // `QUILL_DEMO_STICKER_BOX=<state>` opens one of the editing states
-        // for its screenshot: reorder, rename, delete, create, panel.
+        // for its screenshot: reorder, rename, delete, create, editor, video, panel.
         match std::env::var("QUILL_DEMO_STICKER_BOX").as_deref() {
             Ok("reorder") => self.sticker_box.reordering = true,
             Ok("rename") => {
@@ -109,8 +109,49 @@ impl QuillApp {
                     set_id: 78,
                     kind: SetKind::Stickers,
                     path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),
+                    format: quill::telegram::envelope::StickerFormat::Webp,
+                    preview: Some(std::path::PathBuf::from(
+                        crate::ui::demo::demo_thumb_png_path(),
+                    )),
                     emojis: vec!["😀".into(), "🎨".into()],
+                    video: None,
                 });
+            }
+            // The sticker editor on a wide image: the transparent canvas,
+            // the rounded frame and the corners menu.
+            Ok("editor") => {
+                let wide = image::open(crate::ui::demo::demo_thumb_png_path())
+                    .ok()
+                    .map(|image| {
+                        let image = image.to_rgba8();
+                        let (w, h) = image.dimensions();
+                        image::imageops::crop_imm(&image, 0, h / 4, w, (h / 2).max(1)).to_image()
+                    });
+                self.edit_pixels_for_set(78, SetKind::Stickers, wide, _cx);
+            }
+            // The video editor on a generated clip for the set (needs
+            // ffmpeg; without it the editor shows its wait note).
+            Ok("video") => {
+                let clip = std::env::temp_dir().join("quill-demo-sticker-clip.mp4");
+                let _ = quill::media_tools::command("ffmpeg")
+                    .args([
+                        "-y",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "testsrc=duration=5:size=640x360:rate=30",
+                    ])
+                    .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+                    .arg(&clip)
+                    .output();
+                self.open_set_video_editor(
+                    78,
+                    SetKind::Stickers,
+                    clip,
+                    Some("😀".into()),
+                    _window,
+                    _cx,
+                );
             }
             Ok("panel") => {
                 self.message_ui.menu_ui.sticker_set_open = false;
