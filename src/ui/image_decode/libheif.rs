@@ -22,10 +22,12 @@ struct HeifError {
 
 impl HeifError {
     fn check(self) -> Result<(), DecodeError> {
-        if self.code == 0 {
-            Ok(())
-        } else {
-            Err(DecodeError::Failed(format!("libheif error {}", self.code)))
+        match self.code {
+            0 => Ok(()),
+            // `heif_error_Unsupported_filetype` / `_Unsupported_feature`: no
+            // codec plugin for this file (libheif without libde265, say).
+            3 | 4 => Err(DecodeError::Unsupported),
+            code => Err(DecodeError::Failed(format!("libheif error {code}"))),
         }
     }
 }
