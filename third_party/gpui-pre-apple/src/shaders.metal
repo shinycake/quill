@@ -910,7 +910,7 @@ struct HdrSurfaceParams {
 
 // Identity up to 80% of the headroom, then a smooth roll-off that reaches
 // the headroom only at infinity (slope 1 at the knee). Twin of
-// `hdr_tone_map` in Quill's `src/hdr_image/tone_map.rs`.
+// `hdr_tone_map` in Quill's `src/ui/hdr_image/tone_map.rs`.
 float hdr_tone_map(float x, float headroom) {
   float knee = 0.8 * headroom;
   if (x <= knee) {
@@ -939,9 +939,11 @@ fragment float4 hdr_surface_fragment(
   float alpha = color.a;
   float3 rgb = alpha > 0.0 ? color.rgb / alpha : float3(0.0);
   bool extended = params->extended_output != 0;
-  float headroom = extended ? max(params->headroom, 1.0) : 1.0;
+  float headroom = max(params->headroom, 1.0);
   float peak = max(max(rgb.r, rgb.g), rgb.b);
-  if (peak > 0.0) {
+  // An 8-bit drawable is a passing frame (EDR switching on or off): clip
+  // rather than dim SDR white with the knee.
+  if (extended && peak > 0.0) {
     rgb *= hdr_tone_map(peak, headroom) / peak;
   }
   if (!extended) {

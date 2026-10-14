@@ -24,3 +24,6 @@ The Quill project changed it in 2026 to show HDR photos in the media viewer
     (`match_drawable_format`), so a layer switched to `RGBA16Float` for EDR
     draws correctly. The `BGRA8Unorm` set is kept for the way back. Path
     rasterization keeps its 8-bit intermediate.
+  - Test-support readback (`read_texture_to_image`) reads an `RGBA16Float`
+    drawable as clamped 8-bit sRGB, so screenshot captures of an HDR still
+    work.

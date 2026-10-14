@@ -493,6 +493,7 @@ impl QuillApp {
         self.account.passcode.logout_confirm = false;
         // tdesktop closes the media viewer and call panels when it locks.
         self.viewer.state.close();
+        self.viewer.hdr.reset();
         self.stories.viewer.close();
         self.close_context_menus(cx);
         // Notification windows on screen show senders and text (tdesktop

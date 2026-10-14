@@ -1,6 +1,8 @@
 //! Screenshot demos for pictures sent as files: the thumbed file rows in a
-//! chat (`ready-image-files`) and the viewer open on a HEIC file
-//! (`ready-image-file-viewer`). Injected updates, no live Telegram.
+//! chat (`ready-image-files`), the viewer open on a HEIC file
+//! (`ready-image-file-viewer`), and the same with an HDR gain-map HEIC
+//! (`ready-hdr-files`, `ready-hdr-file-viewer`). Injected updates, no live
+//! Telegram.
 
 use crate::ui::app::QuillApp;
 use crate::ui::demo::demo_media_allowlist;
@@ -24,10 +26,21 @@ register_demos![
         "screenshot demo — a HEIC file in the viewer"
     )
     .setup(QuillApp::demo_image_file_viewer),
+    DemoSpec::chats(
+        "ready-hdr-files",
+        "screenshot demo — an HDR picture sent as a file"
+    )
+    .setup(QuillApp::demo_hdr_files),
+    DemoSpec::chats(
+        "ready-hdr-file-viewer",
+        "screenshot demo — an HDR file in the viewer"
+    )
+    .setup(QuillApp::demo_hdr_file_viewer),
 ];
 
 const CHAT: i64 = 11;
 const HEIC_MESSAGE: i64 = 901;
+pub(super) const HDR_MESSAGE: i64 = 904;
 
 fn fixture(name: &str) -> String {
     demo_media_allowlist()
@@ -158,6 +171,33 @@ impl QuillApp {
             }
         }
         self.connection.status_note = "screenshot demo — pictures sent as files".into();
+    }
+
+    /// An HDR sunset (an ISO gain-map HEIC) sent as a file.
+    fn demo_hdr_files(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+        let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+        let json = document_message(
+            HDR_MESSAGE,
+            true,
+            "IMG_2077.HEIC",
+            "image/heic",
+            file(921, Some(&fixture("sunset-hdr.heic")), 6_978),
+            Some(file(922, Some(&fixture("sunset-hdr-thumb.jpg")), 6_473)),
+            "Sunset from the ridge, in HDR",
+        );
+        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
+            session.apply(owned);
+        }
+        self.connection.status_note = "screenshot demo — an HDR picture sent as a file".into();
+    }
+
+    fn demo_hdr_file_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_hdr_files(window, cx);
+        self.open_file_viewer(ChatId(CHAT), MessageId(HDR_MESSAGE), cx);
     }
 
     fn demo_image_file_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {

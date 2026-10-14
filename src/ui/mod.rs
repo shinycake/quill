@@ -56,6 +56,7 @@ mod frame_clock;
 mod frame_profile;
 mod frame_state;
 mod group_call_state;
+mod hdr_image;
 mod history_a11y;
 mod history_state;
 mod image_budget;

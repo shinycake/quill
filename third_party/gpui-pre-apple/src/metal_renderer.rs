@@ -1464,6 +1464,11 @@ fn new_command_encoder_for_texture<'a>(
 fn read_texture_to_image(texture: &metal::TextureRef) -> Result<RgbaImage> {
     let width = texture.width() as u32;
     let height = texture.height() as u32;
+    // QUILL: a window showing an HDR still draws to a float drawable;
+    // capture it as its standard-range (clamped) picture.
+    if texture.pixel_format() == MTLPixelFormat::RGBA16Float {
+        return read_float_texture_to_image(texture, width, height);
+    }
     let bytes_per_row = width as usize * 4;
     let mut pixels = vec![0u8; height as usize * bytes_per_row];
 
@@ -1488,6 +1493,49 @@ fn read_texture_to_image(texture: &metal::TextureRef) -> Result<RgbaImage> {
     }
 
     RgbaImage::from_raw(width, height, pixels).context("failed to create RgbaImage from pixel data")
+}
+
+/// QUILL: reads an RGBA16Float texture in extended sRGB (gamma-encoded)
+/// and clamps it to 8-bit sRGB.
+#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+fn read_float_texture_to_image(
+    texture: &metal::TextureRef,
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage> {
+    let bytes_per_row = width as usize * 8;
+    let mut halves = vec![0u16; height as usize * width as usize * 4];
+    let region = metal::MTLRegion {
+        origin: metal::MTLOrigin { x: 0, y: 0, z: 0 },
+        size: metal::MTLSize {
+            width: width as u64,
+            height: height as u64,
+            depth: 1,
+        },
+    };
+    texture.get_bytes(
+        halves.as_mut_ptr() as *mut std::ffi::c_void,
+        bytes_per_row as u64,
+        region,
+        0,
+    );
+    let pixels = halves
+        .iter()
+        .map(|&bits| (half_to_f32(bits).clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+    RgbaImage::from_raw(width, height, pixels).context("failed to create RgbaImage from pixel data")
+}
+
+#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+fn half_to_f32(bits: u16) -> f32 {
+    let exponent = (bits >> 10) & 0x1f;
+    let mantissa = f32::from(bits & 0x3ff);
+    let magnitude = match exponent {
+        0 => mantissa * 2.0_f32.powi(-24),
+        0x1f => f32::INFINITY,
+        _ => (1.0 + mantissa / 1024.0) * 2.0_f32.powi(i32::from(exponent) - 15),
+    };
+    if bits & 0x8000 != 0 { -magnitude } else { magnitude }
 }
 
 fn build_pipeline_state(

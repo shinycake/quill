@@ -1,10 +1,11 @@
 //! A picture sent as a file, shown in the chat as the photo it is: framed
 //! like a compressed photo, with a pill in the top-left corner marking it
-//! as a file (a file glyph and the format: `HEIC`, `PNG`) and its name and
-//! size along the bottom. The thumbnail stands in until the file has
-//! loaded; a click opens the viewer. A file Quill can't decode keeps
-//! showing its thumbnail. Files without a thumbnail, or too big to open in
-//! the viewer, keep the file row (`quill::media_viewer::shows_as_photo`).
+//! as a file (a file glyph and the format: `HEIC`, `PNG`, plus `HDR` when
+//! the file carries HDR data) and its name and size along the bottom. The
+//! thumbnail stands in until the file has loaded; a click opens the
+//! viewer. A file Quill can't decode keeps showing its thumbnail. Files
+//! without a thumbnail, or too big to open in the viewer, keep the file
+//! row (`quill::media_viewer::shows_as_photo`).
 
 use super::layout::{MediaDisc, download_fraction, media_disc};
 use super::*;
@@ -74,6 +75,9 @@ pub(in crate::ui) fn picture_file_attachment(
         ),
         _ => None,
     };
+    let hdr = full_path
+        .as_deref()
+        .is_some_and(|path| crate::ui::hdr_image::has_hdr(path, cx));
     let picture = full_path.as_ref().map(|path| {
         fill(img(sized_media(path, (frame_w, frame_h), dims, Fit::Cover)))
             .with_fallback(|| div().into_any_element())
@@ -107,7 +111,10 @@ pub(in crate::ui) fn picture_file_attachment(
         .children(preview)
         .children(picture)
         .children(disc)
-        .child(file_pill(quill::media_viewer::picture_format_label(doc)))
+        .child(file_pill(
+            quill::media_viewer::picture_format_label(doc),
+            hdr,
+        ))
         .child(name_badge(name, status, frame_w))
         .on_click(cx.listener(move |this, _, _, cx| {
             if !this.open_file_viewer(chat_id, message_id, cx) {
@@ -117,9 +124,10 @@ pub(in crate::ui) fn picture_file_attachment(
         .into_any_element()
 }
 
-/// The top-left pill that tells a picture file from a photo: a file glyph
-/// and the format. Fixed colours: it sits on the picture, not the theme.
-fn file_pill(format: String) -> Div {
+/// The top-left pill that tells a picture file from a photo: a file glyph,
+/// the format and, when the file carries HDR data, an "HDR" tag. Fixed
+/// colours: it sits on the picture, not the theme.
+fn file_pill(format: String, hdr: bool) -> Div {
     div()
         .absolute()
         .top_1()
@@ -140,6 +148,15 @@ fn file_pill(format: String) -> Div {
                 .text_color(gpui_kit::white()),
         )
         .child(format)
+        .when(hdr, |this| {
+            this.child(
+                div()
+                    .px_1()
+                    .rounded_sm()
+                    .bg(gpui_kit::white().opacity(0.22))
+                    .child("HDR"),
+            )
+        })
 }
 
 /// The file's name and size (or download progress) along the bottom left,
