@@ -54,9 +54,26 @@ pub enum LinkPreviewKind {
     /// `linkPreviewTypeTheme` with a Desktop theme file: an `addtheme/`
     /// link (tdesktop `WebPageType::Theme`).
     Theme(Box<PreviewTheme>),
+    /// `linkPreviewTypeGiftAuction`: its button reads "Join", "View" before
+    /// the start or "View Results" after the end, so the dates are kept.
+    GiftAuction { start_date: i32, end_date: i32 },
 }
 
 impl LinkPreview {
+    /// The call-to-action at `now` (tdesktop `PageToPhrase`): fixed for
+    /// most kinds, by the dates for a gift auction.
+    pub fn button_label(&self, now: i64) -> Option<&'static str> {
+        match self.kind {
+            LinkPreviewKind::GiftAuction {
+                start_date,
+                end_date,
+            } => Some(crate::gift_market::preview_button(
+                start_date, end_date, now,
+            )),
+            _ => self.view_button,
+        }
+    }
+
     pub fn has_card(&self) -> bool {
         !self.url.is_empty()
             || !self.site_name.is_empty()
@@ -160,6 +177,8 @@ pub(crate) fn view_button_label(preview_type: &Value) -> Option<&'static str> {
         "linkPreviewTypeStickerSet" => "View stickers",
         "linkPreviewTypeUpgradedGift" => "View collectible",
         "linkPreviewTypeGiftCollection" => "View Collection",
+        // The label follows the clock; see `LinkPreview::button_label`.
+        "linkPreviewTypeGiftAuction" => "Join",
         _ => return None,
     })
 }
@@ -268,6 +287,19 @@ pub(crate) fn parse_link_preview_kind(
             }
             (LinkPreviewKind::Album { thumbnails }, files)
         }
+        "linkPreviewTypeGiftAuction" => (
+            LinkPreviewKind::GiftAuction {
+                start_date: int53_or_zero(
+                    preview_type
+                        .get("gift")
+                        .and_then(|gift| gift.get("auction_info"))
+                        .and_then(|info| info.get("start_date")),
+                )
+                .sat_i32(),
+                end_date: int53_or_zero(preview_type.get("auction_end_date")).sat_i32(),
+            },
+            Vec::new(),
+        ),
         "linkPreviewTypeBackground" => docs::parse_background_preview(preview_type)
             .unwrap_or((LinkPreviewKind::Plain, Vec::new())),
         "linkPreviewTypeTheme" => {

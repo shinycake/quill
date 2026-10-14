@@ -96,6 +96,10 @@ pub enum InternalLink {
     PremiumGiftCode {
         code: String,
     },
+    /// `internalLinkTypeGiftAuction`: `t.me/auction/<id>`.
+    GiftAuction {
+        auction_id: String,
+    },
     /// `internalLinkTypeLanguagePack`: `t.me/setlanguage/<id>`.
     LanguagePack {
         id: String,
@@ -187,6 +191,10 @@ pub enum DeepLinkUi {
     /// `giftcode`: the box with the code's details and an Apply button.
     GiftCode {
         code: String,
+    },
+    /// `auction`: the gift auction's box (`getGiftAuctionState` first).
+    GiftAuction {
+        auction_id: String,
     },
     /// `setlanguage`: the language pack's details; nothing is switched.
     LanguagePack {
@@ -372,6 +380,9 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
         "PremiumFeaturesPage" => InternalLink::Settings(SettingsTarget::Premium),
         "PremiumGiftCode" => InternalLink::PremiumGiftCode {
             code: text(value, "code"),
+        },
+        "GiftAuction" => InternalLink::GiftAuction {
+            auction_id: text(value, "auction_id"),
         },
         "LanguagePack" => InternalLink::LanguagePack {
             id: text(value, "language_pack_id"),
@@ -624,6 +635,15 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
                 LinkRoute::Message("This gift code link is broken.".into())
             } else {
                 LinkRoute::Ui(DeepLinkUi::GiftCode { code: code.clone() })
+            }
+        }
+        InternalLink::GiftAuction { auction_id } => {
+            if auction_id.is_empty() {
+                LinkRoute::Message("This auction link is broken.".into())
+            } else {
+                LinkRoute::Ui(DeepLinkUi::GiftAuction {
+                    auction_id: auction_id.clone(),
+                })
             }
         }
         InternalLink::LanguagePack { id } => {
