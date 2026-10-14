@@ -1,3 +1,0 @@
-# Dock menu, jump list, Linux quit action; screen-reader focus and first-message announce per tdesktop
-parity:platform-dock-menu
-parity:platform-screen-reader-announce

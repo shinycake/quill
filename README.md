@@ -1126,12 +1126,12 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Ctrl+R mark chat read, Ctrl+\ chat menu <!-- parity:platform-shortcut-chat-actions -->
 - [x] Shortcuts for scheduled messages, silent send, schedule, link preview toggle, round video, archive chat, admin log and reopen closed window <!-- parity:platform-shortcut-commands -->
 - [x] Open a chat in a new window <!-- parity:platform-new-window -->
-- [ ] Dock menu on macOS (deferred: low impact) <!-- parity:platform-dock-menu -->
+- [x] Dock menu on macOS (deferred: low impact) <!-- parity:platform-dock-menu -->
 - [ ] Touch Bar: pinned chats, emoji and sticker scrubber, formatting, player and media viewer controls (window menu items done) <!-- parity:platform-touch-bar -->
 - [x] Online status follows window focus and idle time <!-- parity:platform-idle-presence -->
 - [x] Online status is set so contacts see you as online while you are active <!-- parity:platform-online-option -->
 - [x] Windows "Send to" menu and share extension <!-- parity:platform-sendto-menu -->
-- [ ] Screen reader announcements for new messages (deferred: low impact) <!-- parity:platform-screen-reader-announce -->
+- [x] Screen reader announcements for new messages (deferred: low impact) <!-- parity:platform-screen-reader-announce -->
 
 ## License
 
