@@ -11,12 +11,12 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 632
+- MIT License: 647
 - Apache License 2.0: 41
 - ISC License: 22
 - Unicode License v3: 19
 - Mozilla Public License 2.0: 16
-- BSD 3-Clause "New" or "Revised" License: 13
+- BSD 3-Clause "New" or "Revised" License: 15
 - BSD Zero Clause License: 4
 - Creative Commons Zero v1.0 Universal: 3
 - zlib License: 3
@@ -2169,6 +2169,27 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### BSD 3-Clause "New" or "Revised" License
 
 Used by:
+- [alloc-no-stdlib 2.0.4](https://github.com/dropbox/rust-alloc-no-stdlib)
+
+````text
+Copyright (c) 2016 Dropbox, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+````
+
+### BSD 3-Clause "New" or "Revised" License
+
+Used by:
 - [subtle 2.6.1](https://github.com/dalek-cryptography/subtle)
 
 ````text
@@ -2278,6 +2299,7 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### BSD 3-Clause "New" or "Revised" License
 
 Used by:
+- [alloc-stdlib 0.2.4](https://github.com/dropbox/rust-alloc-no-stdlib)
 - [exr 1.74.2](https://github.com/johannesvollmer/exrs)
 - [sha1_smol 1.0.1](https://github.com/mitsuhiko/sha1-smol)
 
@@ -10260,6 +10282,7 @@ Used by:
 - [accesskit_windows 0.34.0](https://github.com/AccessKit/accesskit)
 - [block2 0.6.2](https://github.com/madsmtm/objc2)
 - [block 0.1.6](http://github.com/SSheldon/rust-block)
+- [brotli-decompressor 5.0.3](https://github.com/dropbox/rust-brotli-decompressor)
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
 - [dasp_sample 0.11.0](https://github.com/rustaudio/sample.git)
 - [dispatch2 0.3.1](https://github.com/madsmtm/objc2)
@@ -10298,6 +10321,7 @@ Used by:
 - [objc2-encode 4.1.0](https://github.com/madsmtm/objc2)
 - [objc2-foundation 0.2.2](https://github.com/madsmtm/objc2)
 - [objc2-foundation 0.3.2](https://github.com/madsmtm/objc2)
+- [objc2-image-io 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-media-player 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-metal 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-quartz-core 0.3.2](https://github.com/madsmtm/objc2)
@@ -10845,6 +10869,19 @@ Used by:
 - [futures-lite 2.6.1](https://github.com/smol-rs/futures-lite)
 - [inventory 0.3.25](https://github.com/dtolnay/inventory)
 - [itoa 1.0.18](https://github.com/dtolnay/itoa)
+- [jxl-bitstream 1.1.0](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-coding 1.0.1](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-color 0.11.0](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-frame 0.13.3](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-grid 0.6.2](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-image 0.13.0](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-jbr 0.2.1](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-modular 0.11.3](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-oxide-common 1.0.0](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-oxide 0.12.6](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-render 0.12.4](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-threadpool 1.0.0](https://github.com/tirr-c/jxl-oxide.git)
+- [jxl-vardct 0.11.1](https://github.com/tirr-c/jxl-oxide.git)
 - [khronos-egl 6.0.0](https://github.com/timothee-haudebourg/khronos-egl)
 - [lazy_static 1.5.1](https://github.com/rust-lang-nursery/lazy-static.rs)
 - [linux-raw-sys 0.12.1](https://github.com/sunfishcode/linux-raw-sys)

@@ -258,3 +258,8 @@ impl FileCard {
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "files_tests.rs"]
+mod tests;
