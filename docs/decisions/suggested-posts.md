@@ -327,12 +327,62 @@ calls, all TDLib numbers via checked parsing.
 ## Deviations from tdesktop
 
 - Quill has no TON balance display outside the wallet; the price box shows
-  the Stars balance on the Stars tab and the TON balance only when the
-  wallet has loaded it (otherwise nothing, never a fake 0).
-- The approximate USD line under the price field needs the Stars/TON USD
-  rates (`getStarPaymentOptions` / app config). Show it only when Quill
-  already has a rate; otherwise omit the line.
+  the Stars balance on the Stars tab and the Grams balance only when TDLib
+  (`updateOwnedGramCount`) or the wallet has reported it (otherwise
+  nothing, never a fake 0).
+- The approximate USD line under the price field shows only for Grams,
+  from the wallet's TON/USD rate when Quill already has it. Stars have no
+  USD line.
+- Corrections to the plan above, taken from the tdesktop source while
+  building: the decision buttons are `[Decline | Accept]` plus a full-width
+  `[Suggest Changes]` (only `[Decline]` when the viewer can decline but not
+  approve); the toggle sits after the bot keyboard toggle; "Add Offer" is
+  not limited to the viewer's own messages (`CanAddOfferToMessage`); an
+  admin with an empty price sees "You will receive 0 Stars (85%)"; the
+  toggle clears the reply and puts the bar up without opening the box.
+- Error toasts read "Couldn't {publish the post|decline the post|send the
+  offer}: {reason}." Quill's `TdError` keeps only the error class, not
+  TDLib's message, so the reason is the class text rather than tdesktop's
+  server-specific strings.
+- Not enough Stars for an offer: tdesktop opens its Stars purchase box for
+  the missing amount. Quill shows a note and opens its Stars screen, where
+  the viewer buys Stars; the offer is not resent afterwards.
+- "Suggest Changes" > "Edit Message" from the channel side sends the
+  changed post with `topic_id` null. Telegram routes it by the reply to the
+  original suggestion; a direct messages topic id is not set yet.
+- "Maximum price is ...", "Enter a number." and the time box's "Pick a
+  date and time." are Quill copy; tdesktop shakes the field instead of
+  showing text.
+- The time box uses gpui-kit's `DatePicker` with time, not tdesktop's
+  wheel picker.
 
 ## How verified
 
-(Filled in by the build.)
+- `quill-tools/gate.sh`: GATE OK (fmt, clippy for lib and UI, core and UI
+  test suites).
+- Core tests (`src/suggested_posts_tests.rs`, 20): parsing of
+  `suggestedPostInfo`, prices and updates, limits from options and price
+  checks, button rules, the "Changes" resolution between an offer and its
+  reply, block titles, bar lines and labels, Accept/Decline and submit
+  wording, commission and time range, date labels, balance shortfall, and
+  the input terms and draft sync.
+- Driver tests (`src/connect/tests/suggested_posts.rs`, 8): the role from
+  the supergroup flags, approve with the date and no second request on a
+  double tap, decline with a reason and an error turning into a note, Add
+  Offer carrying complete terms, a changed post sent as a new reply with
+  media copied, a send with the bar up, the bar riding the draft both
+  ways, and info updates changing the loaded message.
+- UI tests (`src/ui/suggested_posts_tests.rs`, 7, `#[gpui_kit::test]` on
+  the `ready-suggested-posts` demo): toggle and bar per role, price box
+  minimum error and filling the bar, time box "Anytime" answering the price
+  box, buttons only on the counter-offer, Accept Terms text and Approved
+  state, Decline with a reason and Declined state, Add Offer gating.
+- Screenshots of the new `ready-suggested-posts` demo at 1200x1000, light
+  and dark (`after-{block,price,admin,time,accept,decline}-{light,dark}.png`
+  in the scratch dir, not committed): history blocks for the offer and the
+  counter-offer, decision buttons, the suggest bar, the Suggest a Message
+  box, the admin's Suggest Changes box, the time box, Accept Terms and
+  Decline. There is no "before" image: main has no such screen.
+- Not verified against a live account: approving, declining and offering
+  on a real channel's direct messages, paying in Grams, and the paid post
+  delete warning timing.
