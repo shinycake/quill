@@ -11,6 +11,7 @@
 //! - Linux: X11 and Wayland give apps no way to hide a window from screen
 //!   capture, so nothing is blocked; a secret chat says so plainly
 //!   (`capture_notice`) instead of implying a protection it can't give.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

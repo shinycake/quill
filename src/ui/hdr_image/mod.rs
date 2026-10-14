@@ -5,6 +5,7 @@
 //! the window's layer to an extended-range drawable while one shows
 //! (`macos.rs`). Windows and Linux show the SDR picture for now; every
 //! entry point here answers "SDR" there.
+#![deny(clippy::indexing_slicing)]
 
 #[cfg(target_os = "macos")]
 mod macos;

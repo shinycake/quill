@@ -1,4 +1,5 @@
 //! Screenshot demos: bots profile.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::bots::{apply_ready_bot_chat, apply_ready_bot_keyboard};

@@ -1,4 +1,5 @@
 //! Screenshot demos: messages.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::chat_list::{apply_ready_mute_archive, apply_ready_pin};

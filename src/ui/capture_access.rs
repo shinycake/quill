@@ -2,6 +2,7 @@
 //! `Platform::GetPermissionStatus` / `RequestPermission`): Quill asks
 //! macOS itself, so the system prompt names Quill and a refusal is
 //! explained before any capture starts.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

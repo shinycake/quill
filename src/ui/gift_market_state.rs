@@ -2,6 +2,7 @@
 //! and "Back" return to the box below, like tdesktop's layered boxes. The
 //! data itself (listings, auction states, bids) lives in the session
 //! (`quill::gift_market::GiftMarketState`).
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::slider::SliderState;
@@ -89,6 +90,12 @@ pub(crate) struct GiftMarketUi {
     /// A tile or link asked for this auction; its box opens when the
     /// state arrives.
     pub(super) pending_auction: bool,
+    /// The sticker files last asked for; downloads go out only when the
+    /// set changes, not every frame.
+    pub(super) requested_files: Vec<quill::ids::FileId>,
+    /// How often the chat-list bar opened its box (one tap, one open).
+    #[cfg(test)]
+    pub(super) bar_opens: usize,
     /// The gift the craft info box was opened for.
     pub(super) craft_primary: Option<CraftGift>,
     /// When the forge started; it runs at least `FORGE_SECONDS`.
@@ -104,6 +111,9 @@ impl GiftMarketUi {
             slider: None,
             custom: None,
             pending_auction: false,
+            requested_files: Vec::new(),
+            #[cfg(test)]
+            bar_opens: 0,
             craft_primary: None,
             forge_started: None,
         }

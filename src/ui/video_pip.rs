@@ -1,4 +1,5 @@
 //! Picture-in-Picture shares the viewer's decoded frames and playback clock.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use gpui_kit::component::Root;
 use gpui_kit::component::button::*;

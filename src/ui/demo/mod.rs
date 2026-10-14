@@ -1,4 +1,5 @@
 //! screenshot demo seeds + apply_demo_* mutations.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_text::interaction_info_update_json;

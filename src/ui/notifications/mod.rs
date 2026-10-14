@@ -1,4 +1,5 @@
 //! Poll loop and OS notification threads.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::audio::{NotificationSound, notification_sound};

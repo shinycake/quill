@@ -2,6 +2,7 @@
 //! `ShowBuyResaleGiftBox`): the collectible and its attributes, "Send a
 //! Gift" when it goes to someone else, then the price question with
 //! "Pay in Stars" / "Pay in Grams". Only the last button spends anything.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::gift_manage_ui::hint;

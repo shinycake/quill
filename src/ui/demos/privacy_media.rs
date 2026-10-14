@@ -1,4 +1,5 @@
 //! Screenshot demos: privacy media.
+#![deny(clippy::indexing_slicing)]
 
 use super::attachments;
 use crate::ui::app::QuillApp;

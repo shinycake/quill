@@ -1,4 +1,5 @@
 //! Screenshot demos: security.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::demo::{demo_sessions, demo_storage_stats};

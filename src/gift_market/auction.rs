@@ -474,26 +474,77 @@ impl BidSlider {
         if self.mine > 0 { self.mine } else { self.min }
     }
 
-    /// The amount at slider position `step` of [`BID_SLIDER_STEPS`]: a
-    /// cubic curve, so the low end (where most bids are) gets most of the
-    /// track, like tdesktop's paid-reaction slider.
+    /// The amount at slider position `step` of [`BID_SLIDER_STEPS`]:
+    /// tdesktop's `StarSelectDiscreterForMax` scale over `1..=max`, then
+    /// `PaidReactionSlider`'s rule: below the minimum the slider stops at
+    /// the user's current bid if there is one under the minimum, else at
+    /// the minimum.
     pub fn amount_at(self, step: f32) -> i64 {
-        let t = f64::from(step.clamp(0., BID_SLIDER_STEPS)) / f64::from(BID_SLIDER_STEPS);
-        let span = self.max.saturating_sub(self.min).max(0) as f64;
-        let amount = self.min as f64 + span * t * t * t;
-        (amount.round() as i64).clamp(self.min, self.max.max(self.min))
+        let ratio = f64::from(step.clamp(0., BID_SLIDER_STEPS)) / f64::from(BID_SLIDER_STEPS);
+        let value = ratio_to_value(self.max, ratio);
+        let amount = if value <= self.mine && self.mine < self.min {
+            self.mine
+        } else {
+            value.max(self.min)
+        };
+        amount.min(self.max.max(self.min))
     }
 
-    /// The slider position closest to `amount` (the inverse of
-    /// [`Self::amount_at`]).
+    /// The slider position of `amount` (tdesktop `valueToRatio`).
     pub fn step_of(self, amount: i64) -> f32 {
-        let span = self.max.saturating_sub(self.min);
-        if span <= 0 {
-            return 0.;
-        }
-        let t = (amount.saturating_sub(self.min).clamp(0, span) as f64 / span as f64).cbrt();
-        (t * f64::from(BID_SLIDER_STEPS)).round() as f32
+        (value_to_ratio(self.max, amount) * f64::from(BID_SLIDER_STEPS)) as f32
     }
+}
+
+/// tdesktop `StarSelectDiscreterForMax`: (track ratio, value) points the
+/// scale runs through linearly, so small amounts get a wide share of the
+/// track (1/8 of it is 1..10, 1/3 is 1..100 for most ranges).
+fn discreter_points(max: i64) -> Vec<(f64, i64)> {
+    let max = max.max(2);
+    let mut points = vec![(0., 1)];
+    match max {
+        ..=40 => {}
+        41..=300 => points.push((1. / 4., 10)),
+        301..=600 => points.extend([(1. / 8., 10), (1. / 2., 100)]),
+        601..=1_900 => points.extend([(1. / 8., 10), (1. / 3., 100)]),
+        1_901..=10_000 => points.extend([(1. / 8., 10), (1. / 3., 100), (2. / 3., 1_000)]),
+        _ => points.extend([(1. / 10., 10), (1. / 6., 100), (1. / 3., 1_000)]),
+    }
+    points.push((1., max));
+    points
+}
+
+/// tdesktop `ratioToValue`: the amount at a track ratio.
+pub fn ratio_to_value(max: i64, ratio: f64) -> i64 {
+    let ratio = ratio.clamp(0., 1.);
+    let points = discreter_points(max);
+    points
+        .windows(2)
+        .find_map(|pair| match pair {
+            [(r0, v0), (r1, v1)] if *r1 >= ratio && ratio > *r0 => {
+                let progress = (ratio - r0) / (r1 - r0);
+                Some((*v0 as f64 + (*v1 - *v0) as f64 * progress).round() as i64)
+            }
+            _ => None,
+        })
+        .unwrap_or(1)
+}
+
+/// tdesktop `valueToRatio`: the track ratio of an amount.
+pub fn value_to_ratio(max: i64, value: i64) -> f64 {
+    let points = discreter_points(max);
+    let value = value.clamp(1, max.max(2));
+    points
+        .windows(2)
+        .find_map(|pair| match pair {
+            [(r0, v0), (r1, v1)] if *v1 >= value => {
+                let span = v1.saturating_sub(*v0).max(1) as f64;
+                let progress = value.saturating_sub(*v0) as f64 / span;
+                Some(r0 + (r1 - r0) * progress)
+            }
+            _ => None,
+        })
+        .unwrap_or(1.)
 }
 
 /// Positions on the bid slider's track.

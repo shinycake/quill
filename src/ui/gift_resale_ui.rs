@@ -1,6 +1,7 @@
 //! The resale box: the listings of one collection with the sort and
 //! attribute filter pills (tdesktop `boxes/star_gift_resale_box.cpp`,
 //! `GiftResaleBox`). A listing opens the buy box (`gift_resale_buy.rs`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::gift_market_state::MarketBox;

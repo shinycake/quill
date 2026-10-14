@@ -8,6 +8,7 @@
 //! `telegram::requests::gift_market`, the driver in `connect::gift_market`,
 //! the reducer in `state::domains::payments::gift_market`, the screens in
 //! `ui::gift_resale_ui`, `ui::gift_auction_ui` and `ui::gift_craft_ui`.
+#![deny(clippy::indexing_slicing)]
 
 mod auction;
 mod auction_text;

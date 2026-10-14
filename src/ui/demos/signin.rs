@@ -1,5 +1,6 @@
 //! Screenshot demos: sign-in and connection screens (injected auth states,
 //! no live Telegram).
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::connect_ui::ConnectUiStatus;
