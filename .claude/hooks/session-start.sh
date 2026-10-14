@@ -16,6 +16,9 @@ APT_PACKAGES=(
   zlib1g-dev libssl-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev
   libwayland-dev libxcb1-dev libx11-xcb-dev libxcb-xkb-dev libfontconfig-dev
   libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev libclang-dev
+  # Not in CI: run the app headless (virtual X display, software Vulkan,
+  # screen capture). See .claude/skills/quill-run/SKILL.md.
+  xvfb xauth mesa-vulkan-drivers imagemagick
 )
 
 missing=()
@@ -35,6 +38,12 @@ fi
 
 # The toolchain (with rustfmt and clippy) pinned in rust-toolchain.toml.
 rustup toolchain install >&2 2>/dev/null || rustup show active-toolchain >&2
+
+# GPUI renders through Vulkan; the container has no GPU, so use Mesa's
+# software driver (lavapipe).
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && ! grep -qs VK_ICD_FILENAMES "$CLAUDE_ENV_FILE"; then
+  echo 'export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$CLAUDE_ENV_FILE"
+fi
 
 # Download every crate in Cargo.lock so builds do not stall on the network.
 cargo fetch --locked >&2
