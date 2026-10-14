@@ -1,5 +1,5 @@
-//! Long captions in the media viewer: collapsed to whole lines within a
-//! quarter of the window, with "Show more" to expand them in place.
+//! Long captions in the media viewer: collapsed to two lines, with
+//! "Show more" to expand them in place.
 //!
 //! References (tdesktop, read-only):
 //! - `media/view/media_view_overlay_widget.cpp` `refreshCaptionGeometry`:
@@ -13,17 +13,24 @@
 //!   `st::fadeWrapDuration` (200 ms) with `anim::sineInOut`; Escape
 //!   collapses it again.
 //!
-//! The viewer keeps the media caption's quarter-window cap and adds the
-//! stories expansion on top. Heights come from the caption's own layout
+//! The viewer follows the stories caption: more than four lines collapse
+//! to two (`kMaxShownCaptionLines`, `kCollapsedCaptionLines`), and the
+//! expanded caption scrolls with a scrollbar when it outgrows the window. Heights come from the caption's own layout
 //! (its scroll handle), measured one frame late and re-rendered until
 //! stable, so wrapping, quotes and custom emoji are all accounted for.
 
 use super::*;
 use crate::ui::motion::Glide;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use std::time::Instant;
 
 /// `st::fadeWrapDuration`.
 const EXPAND_DURATION: Duration = Duration::from_millis(200);
+/// `Stories::kCollapsedCaptionLines`.
+const COLLAPSED_LINES: f32 = 2.;
+/// `Stories::kMaxShownCaptionLines`: a caption up to this many lines shows
+/// in full.
+const MAX_SHOWN_LINES: f32 = 4.;
 /// Room kept under an expanded caption for the player panel or zoom
 /// controls, plus the "Show less" row.
 const EXPANDED_BOTTOM_ROOM: f32 = 120.0;
@@ -34,14 +41,12 @@ fn sine_in_out(t: f32) -> f32 {
     -((std::f32::consts::PI * t).cos() - 1.) / 2.
 }
 
-/// Height of a collapsed caption: whole lines within a quarter of the
-/// window, at least one line.
-pub(super) fn collapsed_height(viewport_h: f32, line_h: f32) -> f32 {
+/// Height of a collapsed caption: two lines.
+pub(super) fn collapsed_height(line_h: f32) -> f32 {
     if line_h <= 0. || !line_h.is_finite() {
         return 0.;
     }
-    let lines = ((viewport_h.max(0.) / 4.) / line_h).floor().max(1.);
-    lines * line_h
+    COLLAPSED_LINES * line_h
 }
 
 /// Height of an expanded caption: all of it when it fits in `room`,
@@ -50,10 +55,10 @@ pub(super) fn expanded_height(content_h: f32, collapsed_h: f32, room: f32) -> f3
     content_h.min(room).max(collapsed_h)
 }
 
-/// Whether the caption is taller than its collapsed height (half a pixel
-/// of slack for layout rounding).
-pub(super) fn overflows(content_h: f32, collapsed_h: f32) -> bool {
-    content_h > collapsed_h + 0.5
+/// Whether the caption collapses: it runs past four lines (half a pixel
+/// of slack for layout rounding). Shorter captions show in full.
+pub(super) fn overflows(content_h: f32, line_h: f32) -> bool {
+    line_h > 0. && content_h > MAX_SHOWN_LINES * line_h + 0.5
 }
 
 /// The caption's expand state, reset whenever the viewer shows another
@@ -155,7 +160,7 @@ impl QuillApp {
                 .round(),
         );
         let viewport_h = f32::from(window.viewport_size().height);
-        let collapsed_h = collapsed_height(viewport_h, line_h);
+        let collapsed_h = collapsed_height(line_h);
         let room = (viewport_h - VIEWER_TOP_BAR - EXPANDED_BOTTOM_ROOM).max(collapsed_h);
 
         let now = Instant::now();
@@ -168,7 +173,7 @@ impl QuillApp {
         // draw again so the toggle and heights follow the new layout.
         let remeasure = fresh || (content_h - caption.measured).abs() > 0.5;
         caption.measured = content_h;
-        let cut = overflows(content_h, collapsed_h);
+        let cut = overflows(content_h, line_h);
         let shown = caption.glide.value(now).clamp(0., 1.);
         let animating = caption.glide.animating(now);
         let expanded = caption.expanded();
@@ -176,7 +181,8 @@ impl QuillApp {
         let max_h = if cut {
             collapsed_h + (full_h - collapsed_h) * shown
         } else {
-            collapsed_h
+            // Up to four lines show in full.
+            MAX_SHOWN_LINES * line_h
         };
         let scroll = caption.scroll.clone();
         if remeasure || animating {
@@ -189,7 +195,9 @@ impl QuillApp {
             .track_scroll(&scroll)
             .max_h(px(max_h))
             .line_height(px(line_h))
-            .when(expanded && !animating, |this| this.overflow_y_scroll())
+            .when(expanded && !animating, |this| {
+                this.overflow_y_scroll().vertical_scrollbar(&scroll)
+            })
             .when(!expanded || animating, |this| this.overflow_hidden())
             .child(text);
         let toggle = cut.then(|| {
@@ -224,29 +232,27 @@ mod tests {
     use super::{collapsed_height, expanded_height, overflows, sine_in_out};
 
     #[test]
-    fn collapsed_caption_is_whole_lines_in_a_quarter_of_the_window() {
-        // 1000 px window, 20 px lines: 250 px → 12 whole lines.
-        assert_eq!(collapsed_height(1000., 20.), 240.);
-        // A tiny window still shows one line.
-        assert_eq!(collapsed_height(40., 20.), 20.);
+    fn collapsed_caption_is_two_lines() {
+        assert_eq!(collapsed_height(20.), 40.);
         // No line height (not laid out): nothing to clip to.
-        assert_eq!(collapsed_height(1000., 0.), 0.);
-        assert_eq!(collapsed_height(1000., f32::NAN), 0.);
+        assert_eq!(collapsed_height(0.), 0.);
+        assert_eq!(collapsed_height(f32::NAN), 0.);
     }
 
     #[test]
     fn expanded_caption_fits_its_content_or_the_room() {
-        assert_eq!(expanded_height(300., 100., 500.), 300.);
-        assert_eq!(expanded_height(900., 100., 500.), 500.);
+        assert_eq!(expanded_height(300., 40., 500.), 300.);
+        assert_eq!(expanded_height(900., 40., 500.), 500.);
         // A cramped window never shrinks below the collapsed height.
-        assert_eq!(expanded_height(900., 100., 50.), 100.);
+        assert_eq!(expanded_height(900., 40., 20.), 40.);
     }
 
     #[test]
-    fn only_a_taller_caption_gets_the_toggle() {
-        assert!(!overflows(240., 240.));
-        assert!(!overflows(240.4, 240.));
-        assert!(overflows(260., 240.));
+    fn only_a_caption_past_four_lines_collapses() {
+        assert!(!overflows(80., 20.));
+        assert!(!overflows(80.4, 20.));
+        assert!(overflows(100., 20.));
+        assert!(!overflows(100., 0.));
     }
 
     #[test]
