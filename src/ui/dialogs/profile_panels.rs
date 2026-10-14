@@ -46,6 +46,8 @@ pub enum ProfileDialog {
     PersonalChannel,
     /// Pick the tab your profile opens on.
     MainTab,
+    /// The note that the number is changed in the phone apps.
+    ChangePhone,
     /// Pick the chat to share `user_id`'s contact into; `target` is the
     /// chosen chat awaiting the confirm step.
     ShareContact {

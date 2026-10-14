@@ -38,6 +38,8 @@ enum RowAction {
     None,
     /// Open the birthday form (your own profile).
     EditBirthday,
+    /// Explain that the number is changed in the phone apps (your own phone).
+    ChangePhone,
     /// Open the personal channel picker (your own profile).
     PickPersonalChannel,
     /// Open the main tab chooser (your own profile).
@@ -143,7 +145,11 @@ impl QuillApp {
                     menu: "Copy Phone Number",
                     toast: "Phone number copied to clipboard",
                 }),
-                action: RowAction::None,
+                action: if is_self {
+                    RowAction::ChangePhone
+                } else {
+                    RowAction::None
+                },
                 hint: false,
                 extra_copy: None,
             });
@@ -324,6 +330,7 @@ impl QuillApp {
                     }
                 }
                 RowAction::EditBirthday => this.open_birthday_dialog(window, cx),
+                RowAction::ChangePhone => this.open_change_phone_dialog(cx),
                 RowAction::PickPersonalChannel => this.open_personal_channel_dialog(cx),
                 RowAction::PickMainTab => this.open_main_tab_dialog(cx),
                 RowAction::OpenChat(chat_id) => {
@@ -908,5 +915,6 @@ crate::ui::shell::register_dialogs! {
 }
 
 pub(super) mod action_row;
+mod change_phone_dialog;
 mod main_profile_tab_dialog;
 mod submit_personal_photo;
