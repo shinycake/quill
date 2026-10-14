@@ -106,7 +106,9 @@ impl QuillApp {
         let animate = !cx.reduce_motion();
         let caption = &mut self.viewer.extra.caption;
         let to = if caption.expanded() { 0. } else { 1. };
-        caption.glide.go(to, EXPAND_DURATION, animate, Instant::now());
+        caption
+            .glide
+            .go(to, EXPAND_DURATION, animate, Instant::now());
         // Either way the text starts from its first line.
         caption.scroll.set_offset(point(px(0.), px(0.)));
         self.viewer_note_activity(false, cx);
@@ -114,7 +116,10 @@ impl QuillApp {
     }
 
     /// Escape collapses an expanded caption before it closes the viewer.
-    pub(in crate::ui) fn collapse_viewer_caption_on_escape(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::ui) fn collapse_viewer_caption_on_escape(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.viewer.extra.caption.expanded() {
             return false;
         }
@@ -244,3 +249,8 @@ mod tests {
         assert_eq!(sine_in_out(2.), sine_in_out(1.));
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "caption_ui_tests.rs"]
+mod ui_tests;
