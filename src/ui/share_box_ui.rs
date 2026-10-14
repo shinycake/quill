@@ -302,11 +302,8 @@ impl QuillApp {
                 return;
             }
         }
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
+        if let Some(live) = self.live.as_mut() {
+            let result = live
                 .driver
                 .forward_messages_with_options(dest, &draft, &options);
             match result {

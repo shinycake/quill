@@ -280,7 +280,7 @@ fn ui_main(args: &[String]) {
                     cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
                 },
             )
-            .expect("failed to open window");
+            .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
         })
         .detach();
     });
@@ -448,7 +448,7 @@ fn install_main_window_tray(
                         if let Ok(handle) = HasWindowHandle::window_handle(window)
                             && let RawWindowHandle::AppKit(handle) = handle.as_raw()
                         {
-                            // GPUI owns this live NSView for the lifetime of the window.
+                            // SAFETY: GPUI owns this live NSView for the lifetime of the window.
                             let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
                             if let Some(native) = view.window()
                                 && native.isMiniaturized()
@@ -686,7 +686,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
                         },
                     )
-                    .expect("failed to open screenshot demo window");
+                    .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
 
                 // `QUILL_DEMO_BACKGROUND=1`: leave the window behind the
                 // frontmost app (inactive), to measure the inactive path.

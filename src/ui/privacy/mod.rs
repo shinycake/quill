@@ -532,11 +532,8 @@ impl QuillApp {
     /// `blockListMain`). Optimistic; the `ok`/error confirms or fails it.
     fn block_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
         self.privacy.block_picker_open = false;
-        if self.live.is_some() {
-            let result = {
-                let live = self.live.as_mut().expect("live checked above");
-                live.driver.block_sender(user_id)
-            };
+        if let Some(live) = self.live.as_mut() {
+            let result = { live.driver.block_sender(user_id) };
             if let Err(err) = result {
                 self.connection.status_note = format!("block failed: {err:?}");
             }
@@ -554,11 +551,8 @@ impl QuillApp {
     /// block list — TGX `Tdlib.unblockSender`). Optimistic.
     fn unblock_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
         self.privacy.unblock_confirm = None;
-        if self.live.is_some() {
-            let result = {
-                let live = self.live.as_mut().expect("live checked above");
-                live.driver.unblock_sender(user_id)
-            };
+        if let Some(live) = self.live.as_mut() {
+            let result = { live.driver.unblock_sender(user_id) };
             if let Err(err) = result {
                 self.connection.status_note = format!("unblock failed: {err:?}");
             }

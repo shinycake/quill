@@ -133,7 +133,9 @@ pub fn run_connect_smoke(timeout: Duration) -> SmokeOutcome {
     if let Err(blocker) = smoke_preflight(credentials.as_ref(), tdjson_path.as_deref()) {
         return SmokeOutcome::Blocked(blocker);
     }
-    let credentials = credentials.expect("preflight required credentials");
+    let Some(credentials) = credentials else {
+        return SmokeOutcome::Blocked(ConnectBlocker::MissingCredentials);
+    };
     let store = live_secret_store();
     let sink = std::sync::Arc::new(crate::diagnostics::MemorySink::new());
     let mut live: LiveConnect = match start_live_connect(credentials, store.as_ref(), sink) {

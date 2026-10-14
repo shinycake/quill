@@ -119,6 +119,8 @@ impl CallEngine for NtgcallsEngine {
         // Their presence also identifies a subsequent transport retry.
         let config = previous.unwrap_or_else(|| retained_call_media(params, None));
         self.call_media.insert(call_id, config);
+        // SAFETY: `instance` is live; the key is exactly the 256 bytes
+        // ntgcalls copies (checked above) and outlives this synchronous call.
         let rc = unsafe {
             (self.api.ntg_skip_exchange)(
                 instance.as_ptr(),
@@ -137,6 +139,8 @@ impl CallEngine for NtgcallsEngine {
         // P2P connect enables incoming audio from the already configured
         // playback sources. Configuring them afterwards leaves it disabled.
         self.set_media_sources(call_id)?;
+        // SAFETY: `instance` is live; the server, version and custom-parameter
+        // buffers are owned locals (pointer + matching length) alive for the call.
         let rc = unsafe {
             (self.api.ntg_connect_p2p)(
                 instance.as_ptr(),
@@ -304,6 +308,7 @@ impl CallEngine for NtgcallsEngine {
         let offer = unsafe { CStr::from_ptr(out) }
             .to_string_lossy()
             .into_owned();
+        // SAFETY: `out` came from ntgcalls and is freed once, after the copy.
         unsafe { (self.api.ntg_string_free)(out) };
         self.group_calls.insert(
             group_call_id,
@@ -444,6 +449,8 @@ impl CallEngine for NtgcallsEngine {
             // The semantics C strings were `into_raw` above; reclaim them.
             for group in &groups {
                 if !group.semantics.is_null() {
+                    // SAFETY: each non-null pointer came from `CString::into_raw`
+                    // above and ntgcalls does not keep it past the call.
                     let _ = unsafe { CString::from_raw(group.semantics) };
                 }
             }
@@ -540,6 +547,7 @@ impl CallEngine for NtgcallsEngine {
         let offer = unsafe { CStr::from_ptr(out) }
             .to_string_lossy()
             .into_owned();
+        // SAFETY: `out` came from ntgcalls and is freed once, after the copy.
         unsafe { (self.api.ntg_string_free)(out) };
         if let Some(media) = self.group_calls.get_mut(&group_call_id) {
             media.presentation_initialized = true;
@@ -646,6 +654,8 @@ impl CallEngine for NtgcallsEngine {
     }
 
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError> {
+        // SAFETY: `ntg_media_devices` is a pointer + length pair; all-zero is
+        // the valid empty value.
         let mut raw: ntg_media_devices = unsafe { std::mem::zeroed() };
         // SAFETY: device enumeration needs no instance and writes to `raw`.
         let rc = unsafe { (self.api.ntg_get_media_devices)(&mut raw) };

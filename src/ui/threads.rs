@@ -214,7 +214,9 @@ impl QuillApp {
             .map(|thread| thread.origin_message_id);
         // Save the thread's draft while the thread is still the open slot.
         self.flush_leaving_draft(cx);
-        let live = self.live.as_mut().expect("checked above");
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
         let back = live.driver.close_thread();
         self.history.thread_root_jump = false;
         match back {
@@ -236,7 +238,9 @@ impl QuillApp {
             return;
         }
         self.flush_leaving_draft(cx);
-        let live = self.live.as_mut().expect("checked above");
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
         let root = live
             .driver
             .session

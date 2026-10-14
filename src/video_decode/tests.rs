@@ -238,7 +238,10 @@ fn scripted_player(frames: Option<usize>, audio: bool, queue: usize) -> (Player,
         want_audio: audio,
         video_frames: queue,
     };
-    (Player::with_demuxer(Box::new(demuxer), options), calls)
+    (
+        Player::with_demuxer(Box::new(demuxer), options).expect("spawn the decode thread"),
+        calls,
+    )
 }
 
 #[test]

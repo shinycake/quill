@@ -524,9 +524,11 @@ impl Tray {
         use tray_icon::menu::ContextMenu;
         use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
         let menu = Menu::new();
+        // Tray commands stay enabled even while the app has no active window.
         #[cfg(target_os = "macos")]
+        // SAFETY: `ns_menu` returns the live NSMenu owned by `menu`, which
+        // outlives this block; we only flip a flag on it on the main thread.
         unsafe {
-            // Tray commands stay enabled even while the app has no active window.
             let native = &*menu.ns_menu().cast::<objc2_app_kit::NSMenu>();
             native.setAutoenablesItems(false);
         }

@@ -415,17 +415,21 @@ impl Element for SelectableRichText {
         // survives re-renders of the row. A selection change redraws the
         // whole window: the text may sit in a cached view (`app_slice`)
         // that would otherwise replay its old highlight.
-        let handle = window.with_element_state(
-            global_id.expect("SelectableRichText has an element id"),
-            |retained: Option<(TextSelectionHandle, Subscription)>, window| {
-                let (handle, refresh) = retained.unwrap_or_else(|| {
-                    let handle = TextSelectionHandle::new(self.text.clone(), cx);
-                    let refresh = handle.refresh_window_on_change(window, cx);
-                    (handle, refresh)
-                });
-                (handle.clone(), (handle, refresh))
-            },
-        );
+        // `id()` is always `Some`, so GPUI always passes a global id.
+        let handle = match global_id {
+            Some(global_id) => window.with_element_state(
+                global_id,
+                |retained: Option<(TextSelectionHandle, Subscription)>, window| {
+                    let (handle, refresh) = retained.unwrap_or_else(|| {
+                        let handle = TextSelectionHandle::new(self.text.clone(), cx);
+                        let refresh = handle.refresh_window_on_change(window, cx);
+                        (handle, refresh)
+                    });
+                    (handle.clone(), (handle, refresh))
+                },
+            ),
+            None => TextSelectionHandle::new(self.text.clone(), cx),
+        };
         if let Some(source) = self.bidi_source.clone() {
             let style = window.text_style();
             let font_size = style.font_size.to_pixels(window.rem_size());
@@ -678,13 +682,7 @@ impl Element for SelectableRichText {
             let ranges = self.click_ranges.clone();
             let move_hitbox = hitbox.clone();
             let layout = layout.clone();
-            let over: Rc<Cell<Option<usize>>> = window.with_element_state(
-                global_id.expect("SelectableRichText has an element id"),
-                |retained: Option<Rc<Cell<Option<usize>>>>, _| {
-                    let cell = retained.unwrap_or_default();
-                    (cell.clone(), cell)
-                },
-            );
+            let over: Rc<Cell<Option<usize>>> = retained_cell(global_id, window);
             if let Some(ix) = over.get()
                 && self.underline_on_hover.get(ix).copied().unwrap_or(false)
                 && let Some(range) = self.click_ranges.get(ix)
@@ -729,13 +727,7 @@ impl Element for SelectableRichText {
             {
                 window.set_cursor_style(CursorStyle::PointingHand, hitbox);
             }
-            let pressed_at: Rc<std::cell::Cell<Option<Point<Pixels>>>> = window.with_element_state(
-                global_id.expect("SelectableRichText has an element id"),
-                |retained: Option<Rc<std::cell::Cell<Option<Point<Pixels>>>>>, _| {
-                    let cell = retained.unwrap_or_default();
-                    (cell.clone(), cell)
-                },
-            );
+            let pressed_at: Rc<Cell<Option<Point<Pixels>>>> = retained_cell(global_id, window);
             let down_hitbox = hitbox.clone();
             let down_cell = pressed_at.clone();
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _| {
@@ -773,6 +765,21 @@ impl Element for SelectableRichText {
 
 /// The fallback text of the custom emoji whose placeholder lies within one
 /// of the selected `ranges`, with the placeholder's byte offset.
+/// A per-element cell kept across frames. `SelectableRichText::id` is always
+/// `Some`, so GPUI passes a global id; without one the cell lives one frame.
+fn retained_cell<T: Default + 'static>(
+    global_id: Option<&GlobalElementId>,
+    window: &mut Window,
+) -> Rc<T> {
+    let Some(global_id) = global_id else {
+        return Rc::default();
+    };
+    window.with_element_state(global_id, |retained: Option<Rc<T>>, _| {
+        let cell = retained.unwrap_or_default();
+        (cell.clone(), cell)
+    })
+}
+
 fn selected_fallbacks(
     emoji: &[InlineEmoji],
     ranges: &[Option<Range<usize>>],

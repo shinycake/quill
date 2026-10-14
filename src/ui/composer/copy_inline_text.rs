@@ -216,16 +216,16 @@ impl QuillApp {
         let Some(edit) = self.composer_ui.pending_edit.clone() else {
             return;
         };
-        if self.live.is_some() {
-            // A media message still being sent keeps the new caption until
-            // it has its real id (tdesktop edits the local item).
-            let pending = self.session().is_some_and(|s| {
-                s.histories
-                    .get(&edit.chat_id.0)
-                    .and_then(|history| history.messages.get(&edit.message_id.0))
-                    .is_some_and(|m| m.pending)
-            });
-            let driver = &mut self.live.as_mut().expect("live").driver;
+        // A media message still being sent keeps the new caption until
+        // it has its real id (tdesktop edits the local item).
+        let pending = self.session().is_some_and(|s| {
+            s.histories
+                .get(&edit.chat_id.0)
+                .and_then(|history| history.messages.get(&edit.message_id.0))
+                .is_some_and(|m| m.pending)
+        });
+        if let Some(live) = self.live.as_mut() {
+            let driver = &mut live.driver;
             let result = if pending {
                 driver.edit_pending_caption(&edit, &text)
             } else {
@@ -279,13 +279,8 @@ impl QuillApp {
             return;
         };
         self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .delete_confirmed(&confirm);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.delete_confirmed(&confirm);
             self.connection.status_note = match result {
                 Ok(_) => "deleting…".into(),
                 Err(_) => "could not delete message".into(),

@@ -425,29 +425,34 @@ pub(in crate::ui) fn session_history_row(
                 cx,
             ),
         )),
-        MessageContent::VoiceNote(note) => Some(voice_note_row(
-            message.chat_id,
-            message.id,
-            message.is_outgoing,
-            note,
-            files,
-            downloading,
-            seek_bar.as_ref().expect("voice row always has a seek view"),
-            look.plain,
-            f32::from(info_width).ceil() as i32,
-            cx,
-        )),
-        MessageContent::Audio(audio) => Some(audio_row(
-            message.id,
-            message.is_outgoing,
-            audio,
-            files,
-            downloading,
-            media_roots,
-            seek_bar.as_ref().expect("audio row always has a seek view"),
-            look.plain,
-            cx,
-        )),
+        // Voice and audio rows always get a seek view above.
+        MessageContent::VoiceNote(note) => seek_bar.as_ref().map(|seek_bar| {
+            voice_note_row(
+                message.chat_id,
+                message.id,
+                message.is_outgoing,
+                note,
+                files,
+                downloading,
+                seek_bar,
+                look.plain,
+                f32::from(info_width).ceil() as i32,
+                cx,
+            )
+        }),
+        MessageContent::Audio(audio) => seek_bar.as_ref().map(|seek_bar| {
+            audio_row(
+                message.id,
+                message.is_outgoing,
+                audio,
+                files,
+                downloading,
+                media_roots,
+                seek_bar,
+                look.plain,
+                cx,
+            )
+        }),
         MessageContent::Animation(animation) => Some(animation_attachment(
             message.id,
             animation,

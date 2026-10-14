@@ -403,14 +403,11 @@ impl QuillApp {
             }
         };
         let reply = self.composer_ui.pending_reply.clone();
-        if self.live.is_some() {
-            let reply_to = self.recording_send_reply();
-            let result = self.live.as_mut().expect("live").driver.send_voice_note(
-                &draft,
-                caption.trim(),
-                reply_to,
-                play_once,
-            );
+        let reply_to = self.recording_send_reply();
+        if let Some(live) = self.live.as_mut() {
+            let result = live
+                .driver
+                .send_voice_note(&draft, caption.trim(), reply_to, play_once);
             self.connection.status_note = match result {
                 Ok(_) => "sending voice note".into(),
                 Err(_) => "could not send voice note".into(),
@@ -515,14 +512,9 @@ impl QuillApp {
             }
         };
         let reply = self.composer_ui.pending_reply.clone();
-        if self.live.is_some() {
-            let reply_to = self.recording_send_reply();
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .send_recorded_video_note(&draft, reply_to);
+        let reply_to = self.recording_send_reply();
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.send_recorded_video_note(&draft, reply_to);
             self.connection.status_note = match result {
                 Ok(_) => "sending video note".into(),
                 Err(_) => "could not send video note".into(),

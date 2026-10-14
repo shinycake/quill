@@ -189,10 +189,10 @@ pub fn decode_tgs_sized(
     if cancelled.load(Ordering::SeqCst) {
         return Err("Sticker playback cancelled".into());
     }
-    if slot.is_none() {
-        *slot = Some(Rlottie::load()?);
-    }
-    let renderer = slot.as_ref().expect("loaded");
+    let renderer: &Rlottie = match &mut *slot {
+        Some(renderer) => renderer,
+        empty => empty.insert(Rlottie::load()?),
+    };
     // SAFETY: the validated, NUL-terminated JSON and empty resource strings stay alive;
     // this animation is used only while the library's global lock is held.
     let animation = unsafe { (renderer.from_data)(data.as_ptr(), c"".as_ptr(), c"".as_ptr()) };

@@ -59,13 +59,8 @@ impl QuillApp {
                 return;
             }
         }
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .toggle_chat_pin(chat_id, !pinned);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.toggle_chat_pin(chat_id, !pinned);
             self.connection.status_note = match result {
                 Ok(Some(_)) if pinned => "unpinning…".into(),
                 Ok(Some(_)) => "pinning…".into(),
@@ -120,19 +115,11 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if self.live.is_some() {
+        if let Some(live) = self.live.as_mut() {
             let result = if marked {
-                self.live
-                    .as_mut()
-                    .expect("live")
-                    .driver
-                    .mark_chat_as_read(chat_id)
+                live.driver.mark_chat_as_read(chat_id)
             } else {
-                self.live
-                    .as_mut()
-                    .expect("live")
-                    .driver
-                    .toggle_chat_marked_as_unread(chat_id, true)
+                live.driver.toggle_chat_marked_as_unread(chat_id, true)
             };
             self.connection.status_note = match result {
                 Ok(Some(_)) if marked => "marking as read…".into(),

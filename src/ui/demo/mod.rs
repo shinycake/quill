@@ -773,7 +773,7 @@ pub(super) fn demo_media_allowlist() -> PathBuf {
 pub(super) fn demo_file_json(id: i32, path: &str, completed: bool) -> String {
     format!(
         r#"{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":{path},"can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":{completed},"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}}"#,
-        path = serde_json::to_string(path).unwrap(),
+        path = serde_json::to_string(path).unwrap_or_default(),
         completed = completed,
     )
 }

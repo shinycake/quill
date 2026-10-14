@@ -44,12 +44,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             "microphone_device_id": self.selected_devices.0,
             "speaker_device_id": self.selected_devices.1,
         });
-        if engine_available {
-            let protocol = self
-                .call_engine
-                .as_ref()
-                .expect("available engine")
-                .protocol();
+        if let Some(engine) = self.call_engine.as_ref().filter(|_| engine_available) {
+            let protocol = engine.protocol();
             payload["engine_protocol"] = serde_json::json!({
                 "udp_p2p": protocol.udp_p2p,
                 "udp_reflector": protocol.udp_reflector,

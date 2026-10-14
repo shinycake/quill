@@ -175,7 +175,10 @@ pub fn add_account(app_root: &Path, display_name: &str) -> std::io::Result<Accou
     let mut registry = load_registry(app_root);
     let mut n = 1u32;
     loop {
-        let candidate = AccountKey::new(&format!("account-{n}")).expect("generated id is valid");
+        // `account-<n>` is always a valid key; the error is unreachable.
+        let candidate = AccountKey::new(&format!("account-{n}")).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid account key")
+        })?;
         if !registry.accounts.iter().any(|r| r.key == candidate) {
             registry.accounts.push(AccountRecord {
                 key: candidate.clone(),

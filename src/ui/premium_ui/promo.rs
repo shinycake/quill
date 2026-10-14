@@ -480,7 +480,13 @@ impl QuillApp {
         if self.premium_preview.file_id.get() != Some(file_id) {
             self.premium_preview.stop();
         }
-        if self.premium_preview.video.borrow().is_none() {
+        // A re-entrant borrow skips opening this frame (the slot below fails too).
+        if self
+            .premium_preview
+            .video
+            .try_borrow()
+            .is_ok_and(|video| video.is_none())
+        {
             let roots = self.media_display_roots();
             let path = self
                 .session()?
@@ -492,7 +498,11 @@ impl QuillApp {
             let mut video = NativeVideo::open(&path, Purpose::Inline { max_edge: 720 }).ok()?;
             video.set_volume(0.0);
             video.play();
-            *self.premium_preview.video.borrow_mut() = Some(video);
+            let Ok(mut slot) = self.premium_preview.video.try_borrow_mut() else {
+                return None;
+            };
+            *slot = Some(video);
+            drop(slot);
             self.premium_preview.file_id.set(Some(file_id));
         }
         // A re-entrant borrow skips this frame instead of aborting.

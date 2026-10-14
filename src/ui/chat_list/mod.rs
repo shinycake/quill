@@ -215,8 +215,8 @@ impl QuillApp {
             }
         }
         let open_at = self.chat_list.open_at.take();
-        if self.live.is_some() {
-            let driver = &mut self.live.as_mut().expect("live").driver;
+        if let Some(live) = self.live.as_mut() {
+            let driver = &mut live.driver;
             let result = if thread_switch {
                 driver.switch_to_thread_chat()
             } else {
@@ -772,19 +772,11 @@ impl QuillApp {
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
             .is_some_and(|chat| chat.in_archive);
-        if self.live.is_some() {
+        if let Some(live) = self.live.as_mut() {
             let result = if archived {
-                self.live
-                    .as_mut()
-                    .expect("live")
-                    .driver
-                    .unarchive_chat(chat_id)
+                live.driver.unarchive_chat(chat_id)
             } else {
-                self.live
-                    .as_mut()
-                    .expect("live")
-                    .driver
-                    .archive_chat(chat_id)
+                live.driver.archive_chat(chat_id)
             };
             self.connection.status_note = match result {
                 Ok(_) if archived => "unarchiving…".into(),

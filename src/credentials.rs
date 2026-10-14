@@ -85,13 +85,12 @@ fn load_runtime() -> Option<TelegramCredentials> {
 }
 
 fn finish(api_id: Option<i32>, api_hash: Option<String>) -> Option<TelegramCredentials> {
-    let hash_ref = api_hash.as_deref();
-    if !credentials_ready(api_id, hash_ref) {
+    if !credentials_ready(api_id, api_hash.as_deref()) {
         return None;
     }
     Some(TelegramCredentials {
-        api_id: api_id.expect("validated"),
-        api_hash: api_hash.expect("validated"),
+        api_id: api_id?,
+        api_hash: api_hash?,
     })
 }
 

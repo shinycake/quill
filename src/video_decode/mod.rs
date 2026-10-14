@@ -596,8 +596,8 @@ impl Player {
     }
 
     /// Run a player over any demuxer (tests use scripted ones).
-    pub fn with_demuxer(demuxer: Box<dyn Demuxer>, options: OpenOptions) -> Self {
-        Self::spawn(move || Ok(demuxer), options).expect("spawn the decode thread")
+    pub fn with_demuxer(demuxer: Box<dyn Demuxer>, options: OpenOptions) -> Result<Self, String> {
+        Self::spawn(move || Ok(demuxer), options)
     }
 
     fn spawn(

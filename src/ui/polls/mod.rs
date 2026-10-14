@@ -53,13 +53,8 @@ impl QuillApp {
         let Some((chat_id, message_id, _)) = self.message_ui.pending_stop_poll.take() else {
             return;
         };
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .stop_poll(chat_id, message_id);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.stop_poll(chat_id, message_id);
             self.connection.status_note = match result {
                 Ok(_) => "stopping poll…".into(),
                 Err(_) => "could not stop poll".into(),

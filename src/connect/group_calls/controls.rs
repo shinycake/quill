@@ -63,12 +63,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Ok(extra);
         }
-        let offer = match self
-            .call_engine
-            .as_deref_mut()
-            .expect("available engine")
-            .start_screen_share(group_call_id)
-        {
+        let Some(engine) = self.call_engine.as_deref_mut() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let offer = match engine.start_screen_share(group_call_id) {
             Ok(offer) => offer,
             Err(err) => {
                 if let Some(call) = self.session.calls.active_group_call.as_mut() {

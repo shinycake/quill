@@ -173,7 +173,7 @@ fn configure_pip_window(window: &Window) {
     if let Ok(handle) = HasWindowHandle::window_handle(window)
         && let RawWindowHandle::AppKit(handle) = handle.as_raw()
     {
-        // GPUI owns this NSView; its raw handle is valid during the window callback.
+        // SAFETY: GPUI owns this NSView; its raw handle is valid during the window callback.
         let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
         if let Some(panel) = view.window() {
             panel.setHidesOnDeactivate(false);

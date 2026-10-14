@@ -889,7 +889,12 @@ impl QuillApp {
         // Notes where the row is painted, for the floating date pill.
         let tracker = canvas(
             |_, _, _| {},
-            move |bounds, _, _, _| probe.borrow_mut().push((ix, bounds, has_day)),
+            move |bounds, _, _, _| {
+                // A re-entrant borrow drops this row's probe for one frame.
+                if let Ok(mut rows) = probe.try_borrow_mut() {
+                    rows.push((ix, bounds, has_day));
+                }
+            },
         )
         .absolute()
         .inset_0()
