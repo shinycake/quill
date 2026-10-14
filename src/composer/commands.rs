@@ -7,8 +7,10 @@ use super::*;
 /// right after a bare `@`; `None` once a space or other character follows.
 pub fn mention_trigger(text: &str) -> Option<&str> {
     let at = text.rfind('@')?;
-    let query = &text[at + 1..];
-    let starts_word = text[..at]
+    let query = text.get(at + 1..).unwrap_or_default();
+    let starts_word = text
+        .get(..at)
+        .unwrap_or_default()
         .chars()
         .next_back()
         .is_none_or(char::is_whitespace);
@@ -23,7 +25,7 @@ pub fn complete_mention(text: &str, user_id: i64, username: &str, name: &str) ->
     let Some(query) = mention_trigger(text) else {
         return text.to_string();
     };
-    let head = &text[..text.len() - query.len() - 1];
+    let head = text.get(..text.len() - query.len() - 1).unwrap_or_default();
     if username.is_empty() {
         let name = name.replace(['[', ']'], "");
         format!("{head}[{name}](tg://user?id={user_id}) ")
@@ -108,8 +110,8 @@ pub fn inline_query_trigger(text: &str) -> Option<(&str, &str)> {
         .take_while(|(_, c)| c.is_ascii_alphanumeric() || *c == '_')
         .map(|(i, c)| i + c.len_utf8())
         .last()?;
-    let query = rest[username_len..].trim_start();
-    Some((&rest[..username_len], query))
+    let query = rest.get(username_len..).unwrap_or_default().trim_start();
+    Some((rest.get(..username_len).unwrap_or_default(), query))
 }
 
 /// Phase 3.3: merge `botInfo.commands` (bot-specific) with `getCommands`

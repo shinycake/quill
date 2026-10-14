@@ -227,7 +227,7 @@ pub fn format_international(input: &str, countries: &[Country]) -> Formatted {
     let code = match_calling_code(&digits, countries);
     let text = match &code {
         Some(code) => {
-            let national = &digits[code.len()..];
+            let national = digits.get(code.len()..).unwrap_or_default();
             let groups = groups_for(code);
             if national.is_empty() {
                 format!("+{code}")

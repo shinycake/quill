@@ -1,5 +1,6 @@
 //! TON wallet, phase 1: parsing, wording, address checks and the
 //! read-only guard.
+#![allow(clippy::string_slice, reason = "test code slices known-good literals")]
 use super::address::{encode_test_address, explorer_url_from_config};
 use super::push::push_text;
 use super::*;

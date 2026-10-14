@@ -1,5 +1,6 @@
 //! One test per service action: recorded TDLib JSON in, Telegram
 //! Desktop's wording (and the links) out.
+#![allow(clippy::string_slice, reason = "test code slices known-good literals")]
 use crate::service_text::{PinTarget, ServiceCtx, ServiceLink, ServiceNames, ServiceText, render};
 use crate::telegram::envelope::{
     MessageContent, MessageSender, ParsedFile, ServiceAction, parse_content,

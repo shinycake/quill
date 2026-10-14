@@ -293,8 +293,8 @@ pub fn parse_dshow_devices(stderr: &str) -> DshowDevices {
         if close <= open {
             continue;
         }
-        let name = line[open + 1..close].to_string();
-        let tail = &lower[close..];
+        let name = line.get(open + 1..close).unwrap_or_default().to_string();
+        let tail = lower.get(close..).unwrap_or_default();
         let kind = if tail.contains("(video)") {
             "video"
         } else if tail.contains("(audio)") {
@@ -465,7 +465,7 @@ fn failure_from_log(text: &str, camera: bool) -> String {
 fn last_reason(text: &str) -> Option<String> {
     text.lines()
         .map(|line| match line.find("] ") {
-            Some(end) if line.starts_with('[') => &line[end + 2..],
+            Some(end) if line.starts_with('[') => line.get(end + 2..).unwrap_or_default(),
             _ => line,
         })
         .rfind(|line| {

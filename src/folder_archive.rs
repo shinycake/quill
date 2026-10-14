@@ -143,7 +143,7 @@ pub fn already_compressed(name: &str) -> bool {
     let leaf = name.rsplit('/').next().unwrap_or(name);
     match leaf.rfind('.') {
         Some(dot) if dot > 0 => {
-            let ext = leaf[dot + 1..].to_ascii_lowercase();
+            let ext = leaf.get(dot + 1..).unwrap_or_default().to_ascii_lowercase();
             STORED.contains(&ext.as_str())
         }
         _ => false,

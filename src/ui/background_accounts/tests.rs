@@ -185,7 +185,9 @@ fn a_pending_open_for_another_account_or_too_late_is_dropped(cx: &mut TestAppCon
         (other_account(), Instant::now() + Duration::from_secs(30)),
         (
             app.read_with(&vcx, |app, _| app.session().unwrap().account.clone()),
-            Instant::now() - Duration::from_secs(1),
+            Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
         ),
     ] {
         app.update_in(&mut vcx, |app, _, cx| {

@@ -54,7 +54,7 @@ fn reveal_text(text: &TextContent, chars: usize) -> TextContent {
         .nth(chars)
         .map_or(text.text.len(), |(index, _)| index);
     TextContent {
-        text: text.text[..end].to_string(),
+        text: text.text.get(..end).unwrap_or_default().to_string(),
         entities: text
             .entities
             .iter()

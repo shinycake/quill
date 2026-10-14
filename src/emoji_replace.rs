@@ -62,7 +62,10 @@ fn typed_one_char(prev: &str, new: &str, caret: usize) -> bool {
 fn ends_with_ignore_case(head: &str, pattern: &str) -> bool {
     head.len() >= pattern.len()
         && head.is_char_boundary(head.len() - pattern.len())
-        && head[head.len() - pattern.len()..].eq_ignore_ascii_case(pattern)
+        && head
+            .get(head.len() - pattern.len()..)
+            .unwrap_or_default()
+            .eq_ignore_ascii_case(pattern)
 }
 
 /// The triggers `InstantReplaces::Default()` adds by hand are matched
@@ -89,7 +92,7 @@ pub fn instant_replacement(
     if !enabled || !typed_one_char(prev, new, caret) {
         return None;
     }
-    let head = &new[..caret];
+    let head = new.get(..caret).unwrap_or_default();
     // `processInstantReplaces` walks the trie back from the typed character
     // and stops at the first node that holds a replacement: the shortest
     // matching ending wins.
@@ -111,7 +114,7 @@ pub fn instant_replacement(
 fn shortcode(head: &str) -> Option<InstantReplace> {
     let body = head.strip_suffix(':')?;
     let open = body.rfind(':')?;
-    let name = &body[open + 1..];
+    let name = body.get(open + 1..).unwrap_or_default();
     if name.is_empty()
         || !name
             .chars()
@@ -128,6 +131,7 @@ fn shortcode(head: &str) -> Option<InstantReplace> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::instant_replacement;
 
     fn typed(prev: &str, ch: char, replace_emoji: bool) -> Option<String> {

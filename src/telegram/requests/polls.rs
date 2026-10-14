@@ -157,7 +157,7 @@ pub(crate) fn option_text_json(markup: &str) -> Value {
     let (clean, entities) = parse_format_markup(markup);
     let trimmed = clean.trim();
     let lead = clean.len() - clean.trim_start().len();
-    let shift = clean[..lead].encode_utf16().count() as i32;
+    let shift = clean.get(..lead).unwrap_or_default().encode_utf16().count() as i32;
     let length = trimmed.encode_utf16().count() as i32;
     let entities: Vec<Value> = entities
         .iter()

@@ -61,7 +61,7 @@ fn largest_fitting_prefix(rest: &str, max: usize) -> usize {
     let (mut lo, mut hi) = (0usize, bounds.len() - 1);
     while lo < hi {
         let mid = (lo + hi).div_ceil(2);
-        if markup_text_units(&rest[..bounds[mid]]) <= max {
+        if markup_text_units(rest.get(..bounds[mid]).unwrap_or_default()) <= max {
             lo = mid;
         } else {
             hi = mid - 1;
@@ -75,8 +75,8 @@ fn largest_fitting_prefix(rest: &str, max: usize) -> usize {
 /// parsing the whole (no span straddles the cut, no marker was split).
 fn cut_preserves_formatting(rest: &str, at: usize) -> bool {
     let (whole_text, whole_entities) = parse_format_markup(rest);
-    let (head_text, head_entities) = parse_format_markup(&rest[..at]);
-    let (tail_text, tail_entities) = parse_format_markup(&rest[at..]);
+    let (head_text, head_entities) = parse_format_markup(rest.get(..at).unwrap_or_default());
+    let (tail_text, tail_entities) = parse_format_markup(rest.get(at..).unwrap_or_default());
     head_text.len() + tail_text.len() == whole_text.len()
         && head_entities.len() + tail_entities.len() == whole_entities.len()
         && format!("{head_text}{tail_text}") == whole_text
@@ -129,12 +129,16 @@ pub fn split_markup_text(markup: &str, limit: i32) -> Vec<String> {
             .find(|&at| cut_preserves_formatting(&rest, at))
             .or_else(|| candidates.first().map(|&(_, at)| at))
             .unwrap_or(hard);
-        let head = rest[..cut].trim_end();
-        let tail = rest[cut..].trim_start();
+        let head = rest.get(..cut).unwrap_or_default().trim_end();
+        let tail = rest.get(cut..).unwrap_or_default().trim_start();
         if head.is_empty() || tail.len() >= rest.len() {
             // Defensive: guarantee progress.
-            parts.push(rest[..hard].to_string());
-            rest = rest[hard..].trim_start().to_string();
+            parts.push(rest.get(..hard).unwrap_or_default().to_string());
+            rest = rest
+                .get(hard..)
+                .unwrap_or_default()
+                .trim_start()
+                .to_string();
             continue;
         }
         parts.push(head.to_string());

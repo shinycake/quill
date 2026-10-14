@@ -1,3 +1,4 @@
+#![allow(clippy::string_slice, reason = "test code slices known-good literals")]
 use super::*;
 
 fn checker() -> SpellChecker {

@@ -179,7 +179,7 @@ fn strip_quotes(value: &str) -> &str {
         if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
             || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
         {
-            return &value[1..value.len() - 1];
+            return value.get(1..value.len() - 1).unwrap_or_default();
         }
     }
     value

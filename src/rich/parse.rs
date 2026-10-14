@@ -78,7 +78,11 @@ fn walk_rich_text(value: &Value, w: &mut RichWalk) {
             let url = field_str(value, "url");
             let start_text = w.text.clone();
             walk_rich_text(value.get("text").unwrap_or(&Value::Null), w);
-            let label: String = w.text[start_text.len()..].to_string();
+            let label: String = w
+                .text
+                .get(start_text.len()..)
+                .unwrap_or_default()
+                .to_string();
             let kind = if url == label {
                 TextEntityKind::Url
             } else {
@@ -399,6 +403,7 @@ pub fn parse_rich_message(value: &Value) -> (Vec<RichBlock>, bool) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
     use serde_json::json;
 

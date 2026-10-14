@@ -441,7 +441,7 @@ pub fn markdown_replacement(
     if caret == 0 || caret > text.len() || !text.is_char_boundary(caret) {
         return None;
     }
-    let before = &text[..caret];
+    let before = text.get(..caret).unwrap_or_default();
     let last = before.chars().next_back()?;
     if !matches!(last, '*' | '_' | '~' | '`' | '|') {
         return None;
@@ -466,7 +466,7 @@ pub fn markdown_replacement(
         if close > 0 && text.as_bytes()[close - 1] == marker_char {
             continue;
         }
-        let line = &text[line_start..close];
+        let line = text.get(line_start..close).unwrap_or_default();
         // Candidate openers, nearest first.
         for (rel, _) in line.rmatch_indices(marker) {
             let open = line_start + rel;
@@ -474,7 +474,7 @@ pub fn markdown_replacement(
             if inner.is_empty() {
                 continue;
             }
-            let inner_text = &text[inner.clone()];
+            let inner_text = text.get(inner.clone()).unwrap_or_default();
             if inner_text.starts_with(char::is_whitespace)
                 || inner_text.ends_with(char::is_whitespace)
                 || inner_text.as_bytes()[0] == marker_char
@@ -484,22 +484,34 @@ pub fn markdown_replacement(
             }
             // The opener starts a word: nothing or a non-word character
             // before it, and not another marker character.
-            let prev = text[..open].chars().next_back();
+            let prev = text.get(..open).unwrap_or_default().chars().next_back();
             if prev.is_some_and(|c| c.is_alphanumeric() || c as u32 == marker_char as u32) {
                 continue;
             }
             // `scheme://host/__path__` is a link, not formatting.
-            let word_start = text[..open]
+            let word_start = text
+                .get(..open)
+                .unwrap_or_default()
                 .rfind(char::is_whitespace)
                 .map_or(0, |i| i + 1)
                 .max(line_start);
-            if text[word_start..open].contains("://") {
+            if text
+                .get(word_start..open)
+                .unwrap_or_default()
+                .contains("://")
+            {
                 continue;
             }
             // Not inside an unclosed inline code span.
             if marker != "`"
                 && marker != "```"
-                && text[line_start..open].matches('`').count() % 2 == 1
+                && text
+                    .get(line_start..open)
+                    .unwrap_or_default()
+                    .matches('`')
+                    .count()
+                    % 2
+                    == 1
             {
                 continue;
             }

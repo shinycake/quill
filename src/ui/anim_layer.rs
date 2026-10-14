@@ -833,7 +833,9 @@ mod tests {
         LayeredClip {
             frames: frames.into(),
             fps: 10.,
-            started: Instant::now() - Duration::from_millis(elapsed_ms),
+            started: Instant::now()
+                .checked_sub(Duration::from_millis(elapsed_ms))
+                .unwrap_or_else(Instant::now),
             duration: Duration::from_millis(400),
             looping,
             loops: None,
