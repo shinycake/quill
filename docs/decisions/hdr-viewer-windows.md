@@ -119,6 +119,17 @@ JPEG XL header.
   photo is drawn clipped to SDR white with the tag still saying "Shown in
   high dynamic range". Detecting that from Quill needs a renderer query.
 
+- The frame's CPU copy (8 bytes a pixel, 192 MB at the 24 Mpx cap) stays
+  alive next to its GPU texture while the photo shows, so the renderer can
+  re-upload after a lost device. Both go when the viewer closes: a frame
+  without HDR stills frees the textures.
+- Values are clamped to the largest half float before packing, so an
+  extreme gain map can't put infinity (then NaN through the mips) on
+  screen. HDR JPEG XL above 48 Mpx shows in SDR, because jxl-oxide renders
+  at full size in floats.
+- The display reading (DXGI output plus display configuration) runs on the
+  render thread once a second while the viewer shows an HDR photo.
+
 ## Follow-ups
 
 - HEIC gain maps on Windows (iPhone photos): read the gain-map item out

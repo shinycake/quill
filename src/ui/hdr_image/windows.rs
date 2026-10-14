@@ -33,7 +33,7 @@ pub(crate) fn decode(path: &Path, long_edge: u32) -> Result<Option<HdrPixels>, D
     let Some(decoded) = cpu::decode(path, long_edge)? else {
         return Ok(None);
     };
-    let bytes: Arc<[u8]> = Arc::from(decoded.bytes);
+    let bytes = decoded.bytes;
     let frame = SurfaceFrame::new(
         decoded.width,
         decoded.height,

@@ -221,3 +221,16 @@ fn half_floats_round_trip() {
         assert_eq!(f32_to_half(half_to_f32(bits)), bits, "{bits:#06x}");
     }
 }
+
+#[test]
+fn boosts_past_the_half_range_stay_finite() {
+    let image = super::LinearImage {
+        width: 2,
+        height: 1,
+        pixels: vec![[1.0e9, 2.0, f32::INFINITY, 1.0], [0.5, 0.5, 0.5, 1.0]],
+    };
+    let frame = image.into_frame().unwrap();
+    assert_eq!(frame.bytes.len(), 16);
+    assert_eq!(pixel(&frame, 0, 0), [65504.0, 2.0, 0.0, 1.0]);
+    assert_eq!(frame.peak, 65504.0);
+}

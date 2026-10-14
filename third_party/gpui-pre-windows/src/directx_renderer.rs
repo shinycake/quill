@@ -435,6 +435,11 @@ impl DirectXRenderer {
                 )
             })?;
         }
+        // Quill: a frame without HDR stills frees their textures (the viewer
+        // closed), so they never outlive what's on screen.
+        if scene.surfaces.is_empty() {
+            self.pipelines.hdr_surfaces.release();
+        }
         Ok(())
     }
 
@@ -1328,6 +1333,8 @@ struct PathSprite {
 
 impl Drop for DirectXRenderer {
     fn drop(&mut self) {
+        // Quill: a later window reusing the handle starts in SDR.
+        crate::hdr_output::forget(self.hwnd);
         #[cfg(debug_assertions)]
         if let Some(devices) = &self.devices {
             report_live_objects(&devices.device).ok();

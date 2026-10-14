@@ -17,6 +17,7 @@ use crate::ui::image_decode::{
 };
 use std::io::Read;
 use std::path::Path;
+use std::sync::Arc;
 
 /// The brightest channel must clear SDR white by this much before a
 /// decode counts as HDR (as on macOS).
@@ -26,12 +27,16 @@ const HDR_PEAK_MIN: f32 = 1.01;
 /// metadata at the start.
 const PROBE_BYTES: u64 = 256 * 1024;
 
+/// The largest finite half float: brighter values would pack as infinity,
+/// which the shader's tone map and the mip chain turn into NaN.
+const HALF_MAX: f32 = 65_504.0;
+
 /// A decoded HDR still: premultiplied RGBA half floats (little-endian),
 /// row after row.
 pub(crate) struct CpuFrame {
     pub width: u32,
     pub height: u32,
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
     /// The brightest channel, in multiples of SDR white.
     pub peak: f32,
 }
@@ -46,20 +51,40 @@ pub(super) struct LinearImage {
 impl LinearImage {
     /// Pack to half floats; `None` when nothing is above SDR white.
     fn into_frame(self) -> Option<CpuFrame> {
-        let mut peak = 0.0_f32;
-        let mut bytes = Vec::with_capacity(self.pixels.len().saturating_mul(8));
-        for [red, green, blue, alpha] in self.pixels {
-            for channel in [red, green, blue] {
-                if channel.is_finite() && channel > peak {
-                    peak = channel;
+        let finite = |value: f32| {
+            if value.is_finite() {
+                value.clamp(-HALF_MAX, HALF_MAX)
+            } else {
+                0.0
+            }
+        };
+        let peak = self
+            .pixels
+            .iter()
+            .flat_map(|[red, green, blue, _]| [*red, *green, *blue])
+            .map(finite)
+            .fold(0.0_f32, f32::max);
+        if peak < HDR_PEAK_MIN {
+            return None;
+        }
+        // Packed straight into the shared buffer the renderer reads, so
+        // the frame is never held twice.
+        let len = self.pixels.len().checked_mul(8)?;
+        let mut bytes = Arc::<[u8]>::new_zeroed_slice(len);
+        let slots = Arc::get_mut(&mut bytes)?;
+        for (slot, [red, green, blue, alpha]) in slots.as_chunks_mut::<8>().0.iter_mut().zip(self.pixels) {
+            let alpha = finite(alpha).clamp(0.0, 1.0);
+            let values = [red * alpha, green * alpha, blue * alpha, alpha];
+            for (pair, value) in slot.as_chunks_mut::<2>().0.iter_mut().zip(values) {
+                for (byte, value) in pair.iter_mut().zip(f32_to_half(finite(value)).to_le_bytes()) {
+                    byte.write(value);
                 }
             }
-            for value in [red * alpha, green * alpha, blue * alpha, alpha] {
-                let half = f32_to_half(if value.is_finite() { value } else { 0.0 });
-                bytes.extend_from_slice(&half.to_le_bytes());
-            }
         }
-        (peak >= HDR_PEAK_MIN).then_some(CpuFrame {
+        // SAFETY: every byte was written above: `slots` has exactly 8 bytes
+        // per pixel and the loop writes all 8 of each.
+        let bytes = unsafe { bytes.assume_init() };
+        Some(CpuFrame {
             width: self.width,
             height: self.height,
             bytes,

@@ -124,24 +124,25 @@ pub(super) fn probe(head: &[u8], file_len: u64) -> bool {
         (segment.marker == APP2 && segment.data.starts_with(ISO_PREFIX))
             || xmp(segment).is_some_and(|xmp| xmp.contains("hdrgm:Version"))
     });
-    announced && gain_map_range(&segments, file_len).is_some()
+    announced && !gain_map_ranges(&segments, file_len).is_empty()
 }
 
 /// The HDR rendition of the gain-map JPEG `file`, long edge at most
 /// `long_edge`; `Ok(None)` when it has no usable gain map.
 pub(super) fn decode(file: &[u8], long_edge: u32) -> Result<Option<LinearImage>, DecodeError> {
     let segments = segments(file);
-    let Some(map_bytes) =
-        gain_map_range(&segments, file.len() as u64).and_then(|range| file.get(range))
-    else {
-        return Ok(None);
-    };
-    let map_segments = self::segments(map_bytes);
-    let gain_map = metadata(&map_segments).or_else(|| {
-        // Some writers keep the `hdrgm` values in the primary's XMP.
-        segments.iter().filter_map(xmp).find_map(xmp_gain_map)
-    });
-    let Some(gain_map) = gain_map else {
+    // The first secondary picture whose header carries gain map metadata
+    // (a depth map or preview may come before it); some writers keep the
+    // `hdrgm` values in the primary's XMP instead.
+    let primary_xmp = || segments.iter().filter_map(xmp).find_map(xmp_gain_map);
+    let found = gain_map_ranges(&segments, file.len() as u64)
+        .into_iter()
+        .filter_map(|range| file.get(range))
+        .find_map(|bytes| {
+            let gain_map = metadata(&self::segments(bytes)).or_else(primary_xmp)?;
+            Some((bytes, gain_map))
+        });
+    let Some((map_bytes, gain_map)) = found else {
         return Ok(None);
     };
 
@@ -280,29 +281,41 @@ fn metadata(segments: &[Segment<'_>]) -> Option<GainMap> {
         .or_else(|| segments.iter().filter_map(xmp).find_map(xmp_gain_map))
 }
 
-/// Where the gain map JPEG sits in the file: the second MPF image, else
-/// the `GainMap` item of the XMP `GContainer` directory.
-fn gain_map_range(segments: &[Segment<'_>], file_len: u64) -> Option<Range<usize>> {
-    let file_len = usize::try_from(file_len).ok()?;
-    let from_mpf = segments
+/// Where the gain map JPEG may sit in the file: every secondary MPF image
+/// in order, else the `GainMap` item of the XMP `GContainer` directory.
+fn gain_map_ranges(segments: &[Segment<'_>], file_len: u64) -> Vec<Range<usize>> {
+    let Ok(file_len) = usize::try_from(file_len) else {
+        return Vec::new();
+    };
+    let from_mpf: Vec<Range<usize>> = segments
         .iter()
         .filter(|segment| segment.marker == APP2)
         .find_map(|segment| {
             let tiff = segment.data.strip_prefix(MPF_PREFIX)?;
             let base = segment.start + MPF_PREFIX.len();
-            mpf_entries(tiff)
-                .into_iter()
-                .find(|&(_, offset)| offset != 0)
-                .and_then(|(size, offset)| {
-                    let start = base.checked_add(usize::try_from(offset).ok()?)?;
-                    let end = start.checked_add(usize::try_from(size).ok()?)?;
-                    (end <= file_len && start < end).then_some(start..end)
-                })
-        });
-    from_mpf.or_else(|| {
-        let xmp = segments.iter().filter_map(xmp).next()?;
-        gcontainer_gain_map(xmp, file_len)
-    })
+            Some(
+                mpf_entries(tiff)
+                    .into_iter()
+                    .filter(|&(_, offset)| offset != 0)
+                    .filter_map(|(size, offset)| {
+                        let start = base.checked_add(usize::try_from(offset).ok()?)?;
+                        let end = start.checked_add(usize::try_from(size).ok()?)?;
+                        (end <= file_len && start < end).then_some(start..end)
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
+    if !from_mpf.is_empty() {
+        return from_mpf;
+    }
+    segments
+        .iter()
+        .filter_map(xmp)
+        .next()
+        .and_then(|xmp| gcontainer_gain_map(xmp, file_len))
+        .into_iter()
+        .collect()
 }
 
 /// The `(size, offset)` of every image in an MPF index (`tiff` is the
@@ -373,10 +386,13 @@ fn gcontainer_gain_map(xmp: &str, file_len: usize) -> Option<Range<usize>> {
     let position = items
         .iter()
         .position(|(semantic, _)| semantic == "GainMap")?;
-    let tail: usize = items.iter().skip(position).map(|(_, length)| *length).sum();
+    let tail = items
+        .iter()
+        .skip(position)
+        .try_fold(0_usize, |sum, (_, length)| sum.checked_add(*length))?;
     let length = items.get(position).map(|(_, length)| *length)?;
     let start = file_len.checked_sub(tail)?;
-    (length > 0).then_some(start..start + length)
+    (length > 0).then_some(start..start.checked_add(length)?)
 }
 
 /// The XMP packet of an APP1 segment.

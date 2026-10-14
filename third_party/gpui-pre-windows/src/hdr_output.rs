@@ -84,6 +84,17 @@ pub fn set_hdr_output(hwnd: isize, on: bool) {
     }
 }
 
+/// Drop what is recorded for a window that is going away.
+pub(crate) fn forget(hwnd: HWND) {
+    let key = hwnd.0 as isize;
+    if let Ok(mut wanted) = WANTED.lock() {
+        wanted.remove(&key);
+    }
+    if let Ok(mut info) = INFO.lock() {
+        info.remove(&key);
+    }
+}
+
 /// Whether the window asked for HDR output.
 pub(crate) fn wanted(hwnd: HWND) -> bool {
     WANTED

@@ -111,6 +111,11 @@ impl HdrSurfaces {
         Ok(())
     }
 
+    /// Free every uploaded still.
+    pub(super) fn release(&mut self) {
+        self.textures.clear();
+    }
+
     /// The frame's texture, uploading it on first use.
     fn texture(
         &mut self,
@@ -237,6 +242,15 @@ impl DirectXRenderer {
     /// and its display is in HDR mode, and back otherwise. A failed switch
     /// is not retried until the window releases HDR output.
     pub(super) fn sync_output_mode(&mut self) {
+        // A switch that failed after resizing the buffers can leave no
+        // render target; rebuild it at the current format.
+        if self
+            .resources
+            .as_ref()
+            .is_some_and(|resources| resources.render_target_view.is_none())
+        {
+            self.switch_output(self.output).log_err();
+        }
         let wanted = hdr_output::wanted(self.hwnd);
         if !wanted {
             self.hdr_failed = false;

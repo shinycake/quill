@@ -182,7 +182,8 @@ float4 to_output_premultiplied(float4 color) {
     if (hdr_output == 0u || color.a <= 0.0) {
         return color;
     }
-    float3 straight = color.rgb / color.a;
+    // An 8-bit intermediate can round a channel a step above its alpha.
+    float3 straight = saturate(color.rgb / color.a);
     return float4(srgb_decode_exact(straight) * output_scale * color.a, color.a);
 }
 

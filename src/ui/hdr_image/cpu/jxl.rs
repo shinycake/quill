@@ -20,6 +20,10 @@ const SDR_INTENSITY_TARGET: f32 = 255.0;
 /// The most memory jxl-oxide may use for one picture (as for SDR decodes).
 const MEMORY_LIMIT: usize = 1024 * 1024 * 1024;
 
+/// The largest HDR JPEG XL decoded: jxl-oxide renders at full size, and
+/// each full-size float copy is 16 bytes a pixel. Larger ones show in SDR.
+const MAX_PIXELS: u64 = 2 * super::super::HDR_MAX_PIXELS;
+
 fn failed(err: impl std::fmt::Display) -> DecodeError {
     DecodeError::Failed(err.to_string())
 }
@@ -52,6 +56,9 @@ pub(super) fn decode(bytes: &[u8], long_edge: u32) -> Result<Option<LinearImage>
         return Ok(None);
     }
     area_allowed(image.width(), image.height())?;
+    if u64::from(image.width()) * u64::from(image.height()) > MAX_PIXELS {
+        return Ok(None);
+    }
     image.set_cms(jxl_oxide::Moxcms);
     image.request_color_encoding(EnumColourEncoding {
         colour_space: ColourSpace::Rgb,
@@ -71,8 +78,10 @@ pub(super) fn decode(bytes: &[u8], long_edge: u32) -> Result<Option<LinearImage>
         .ok_or(DecodeError::TooLarge)?;
     let mut samples = vec![0.0_f32; len];
     stream.write_to_buffer(&mut samples);
+    drop(stream);
+    drop(render);
     let to_linear = |value: f32| pq_to_nits(value) / SDR_WHITE_NITS;
-    let pixels: Vec<[f32; 4]> = samples
+    let pixels: Vec<[f32; 4]> = std::mem::take(&mut samples)
         .chunks_exact(channels.max(1))
         .map(|pixel| match *pixel {
             [gray] => [to_linear(gray), to_linear(gray), to_linear(gray), 1.0],
@@ -113,9 +122,13 @@ fn scaled(image: LinearImage, long_edge: u32) -> LinearImage {
     if (target_width, target_height) == (width, height) {
         return image;
     }
-    let flat: Vec<f32> = image.pixels.iter().flatten().copied().collect();
-    let Some(buffer) = image::Rgba32FImage::from_raw(width, height, flat) else {
-        return image;
+    let Some(buffer) = image::Rgba32FImage::from_raw(width, height, image.pixels.into_flattened())
+    else {
+        return LinearImage {
+            width,
+            height,
+            pixels: Vec::new(),
+        };
     };
     let resized = image::imageops::resize(
         &buffer,
