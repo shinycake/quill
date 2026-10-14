@@ -1,6 +1,10 @@
 //! scripts/check-app-name.sh on fixture trees: app-meaning "Telegram" copy
 //! fails, service-meaning copy and comments pass, the allowlist works.
 #![cfg(unix)]
+#![allow(
+    clippy::expect_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use std::path::PathBuf;
 use std::process::Command;

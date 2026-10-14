@@ -68,8 +68,10 @@ fn version_string_is_non_empty() {
     let loader =
         ntgcalls_sys::Loader::load(&path).expect("dlopen of the vendored libntgcalls.so failed");
 
+    // SAFETY: `ntg_get_version` takes no arguments and returns a static string.
     let version = unsafe { (loader.ntg_get_version)() };
     assert!(!version.is_null(), "ntg_get_version() returned null");
+    // SAFETY: checked non-null above; ntgcalls returns a NUL-terminated static string.
     let version = unsafe { std::ffi::CStr::from_ptr(version) };
     assert!(
         !version.to_bytes().is_empty(),
@@ -78,8 +80,10 @@ fn version_string_is_non_empty() {
     eprintln!("vendored ntgcalls version: {}", version.to_string_lossy());
 
     // ntg_last_error() must be either null or a valid C string.
+    // SAFETY: `ntg_last_error` takes no arguments and returns null or a C string.
     let last_error = unsafe { (loader.ntg_last_error)() };
     if !last_error.is_null() {
+        // SAFETY: checked non-null; ntgcalls returns a NUL-terminated string.
         let text = unsafe { std::ffi::CStr::from_ptr(last_error) };
         eprintln!("ntg_last_error(): {}", text.to_string_lossy());
     }
@@ -114,7 +118,9 @@ fn missing_library_errors_clearly() {
 fn packaged_sidecar_loads() {
     if std::env::var_os("QUILL_BUNDLED_CALL_PROBE").is_some() {
         let loader = ntgcalls_sys::Loader::load_default().expect("Bundled sidecar must load");
-        assert!(!unsafe { (loader.ntg_get_version)() }.is_null());
+        // SAFETY: `ntg_get_version` takes no arguments and returns a static string.
+        let version = unsafe { (loader.ntg_get_version)() };
+        assert!(!version.is_null());
         return;
     }
     let Some(library) = vendored_lib() else {

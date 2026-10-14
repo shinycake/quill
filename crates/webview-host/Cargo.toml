@@ -8,6 +8,9 @@ description = "Quill's mini-app window: a system web view (WKWebView, WebView2, 
 repository = "https://github.com/shinycake/quill"
 publish = false
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "quill-webview"
 path = "src/main.rs"

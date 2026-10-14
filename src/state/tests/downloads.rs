@@ -514,7 +514,7 @@ fn nested_file_snapshots_cannot_erase_downloaded_media() {
             crate::telegram::envelope::EnvelopePayload::Media(MediaPayload::UpdateFile(file)) => {
                 file
             }
-            _ => unreachable!(),
+            _ => panic!("expected an updateFile payload"),
         };
     session.remember_files(&[stale]);
     assert_eq!(

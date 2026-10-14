@@ -354,13 +354,15 @@ impl QuillApp {
 }
 
 /// Whether a flight is armed, and whether it has started moving.
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(super) fn flight_state() -> Option<bool> {
     FLY.with(|fly| fly.borrow().as_ref().map(|fly| fly.started.is_some()))
 }
 
 /// Forget any flight and what was noted (tests share a thread).
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(super) fn reset() {
     FLY.with(|fly| *fly.borrow_mut() = None);
     SOURCE.with(|source| *source.borrow_mut() = None);

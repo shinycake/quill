@@ -911,7 +911,8 @@ impl Element for SelectionViewport {
     }
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests {
     use super::{EMOJI_PLACEHOLDER, SelectableRichText, emoji_bounds, with_emoji_fallbacks};
     use gpui_kit::component::Root;

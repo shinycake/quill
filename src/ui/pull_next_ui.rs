@@ -61,12 +61,14 @@ impl PullUi {
             .as_millis() as u64
     }
 
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn machine_for_tests(&self) -> &PullMachine {
         &self.machine
     }
 
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn next_chat_for_tests(&self) -> Option<ChatId> {
         self.next_chat
     }
@@ -764,6 +766,7 @@ fn round_stroke(window: &mut Window, points: &[Point<Pixels>], width: f32, color
     }
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "pull_next_ui_tests.rs"]
 mod tests;

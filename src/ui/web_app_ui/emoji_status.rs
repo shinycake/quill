@@ -33,7 +33,8 @@ pub(super) struct EmojiStatusFlow {
 }
 
 impl EmojiStatusFlow {
-    #[cfg(all(test, feature = "demo-capture", unix))]
+    #[cfg(test)]
+    #[cfg(all(feature = "demo-capture", unix))]
     fn set_is_idle(&self) -> bool {
         self.set.is_none()
     }
@@ -343,6 +344,7 @@ impl QuillApp {
     }
 }
 
-#[cfg(all(test, feature = "demo-capture", unix))]
+#[cfg(test)]
+#[cfg(all(feature = "demo-capture", unix))]
 #[path = "emoji_status_tests.rs"]
 mod tests;

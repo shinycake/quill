@@ -1,0 +1,5 @@
+# Test code may unwrap, expect, panic and index (docs/contributing/panic-safety.md).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

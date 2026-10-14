@@ -558,7 +558,8 @@ fn paint_underlines(
 // UI integration test (needs gpui-kit `test-support`, enabled by the
 // `demo-capture` feature): `cargo test --features demo-capture --bin quill
 // spellcheck_ui`.
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests {
     use super::deferred_input_menu;
     use gpui_kit::component::Root;

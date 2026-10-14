@@ -420,6 +420,7 @@ pub(crate) fn row_element_id(message: MessageId) -> ElementId {
     ElementId::from(("history-a11y-row", message.0 as u64))
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "history_a11y_tests.rs"]
 mod tests;

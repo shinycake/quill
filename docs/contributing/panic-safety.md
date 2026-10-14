@@ -64,20 +64,46 @@ item that needs it. The reason is reviewed like code.
 
 ## Lints (phased)
 
-The lints go into `Cargo.toml` `[lints.clippy]` one phase at a time. A phase
-starts only when its sites are at zero, so main never carries a warning.
-Phase A also adds a `clippy.toml` that sets `allow-unwrap-in-tests`, `allow-expect-in-tests`,
-`allow-panic-in-tests` and `allow-indexing-slicing-in-tests`.
+The lints live in the root `Cargo.toml` under `[workspace.lints.clippy]`, and
+every first-party crate (the root package, `crates/ntgcalls-sys`,
+`crates/webview-protocol`, `crates/webview-host`) inherits them with
+`[lints] workspace = true`. The vendored `third_party/` crates are not
+workspace members and do not get them. A phase starts only when its sites are
+at zero, so main never carries a warning.
 
-| Phase | Lints (`deny`) | Sites left at audit time |
+`clippy.toml` sets `allow-unwrap-in-tests`, `allow-expect-in-tests`,
+`allow-panic-in-tests` and `allow-indexing-slicing-in-tests`. Clippy only sees
+a test module as test code when it carries a plain `#[cfg(test)]`; it does not
+look inside `#[cfg(all(test, ..))]`. Write a gated test module as two
+attributes:
+
+```rust
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests;
+```
+
+Helpers in `tests/*.rs` integration tests are outside any `#[test]` function,
+so those files carry a file-level `#![allow(clippy::unwrap_used, ..)]` with a
+reason. `unreachable!` and `undocumented_unsafe_blocks` have no test
+exemption: use `panic!` with a message in tests, and give test `unsafe`
+blocks a `// SAFETY:` comment too.
+
+| Phase | Lints (`deny`) | State |
 | --- | --- | --- |
-| A | `unwrap_used`, `panic`, `todo`, `unimplemented`, `unreachable`, `exit` (with an `expect` on `main`'s CLI paths) | 13 unwrap (11 in demo fixtures), 3 unreachable |
-| B | `expect_used`, `undocumented_unsafe_blocks` | 205 expect, 40 unsafe |
-| C | `string_slice`, `unchecked_time_subtraction` | 152 |
-| D | `indexing_slicing`, per module, starting with `telegram/envelope`, `state`, `composer`, `composer_doc` | 640 |
+| A | `unwrap_used`, `panic`, `todo`, `unimplemented`, `unreachable`, `exit` (with an `expect` on `main`'s CLI paths) | **On** (`panic-lints`) |
+| B | `expect_used`, `undocumented_unsafe_blocks` | **On** (`panic-lints`) |
+| C | `string_slice`, `unchecked_time_subtraction` | 140 sites left (139 `string_slice`, 1 `unchecked_time_subtraction`; 152 at audit time) |
+| D | `indexing_slicing`, per module, starting with `telegram/envelope`, `state`, `composer`, `composer_doc` | 621 sites left (640 at audit time) |
+
+Phase C and D counts are production code on macOS from
+`cargo clippy --features ui --bin quill`, which lints the library with the UI
+features on as well as the binary (the core-only library alone has 128
+`string_slice` and 437 `indexing_slicing`), counted on the `panic-lints`
+branch.
 
 `arithmetic_side_effects` stays off: 1,781 hits, nearly all on local values
 (pixel math, animation curves). Rule 5 covers the ones that matter.
 
-Until a phase is on, reviewers check the rules by hand. New code must follow
+Until a phase is on, reviewers check its rules by hand. New code must follow
 all rules now, whatever the phase.

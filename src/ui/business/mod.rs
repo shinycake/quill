@@ -22,7 +22,8 @@ mod messages;
 mod recipients;
 mod start_page;
 mod state;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests;
 
 pub(crate) use state::{

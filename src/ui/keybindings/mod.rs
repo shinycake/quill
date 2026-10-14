@@ -1547,7 +1547,8 @@ mod tests {
 
 /// Headless key delivery through the real GPUI dispatcher (needs the
 /// `demo-capture` feature for gpui-kit's test support).
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod dispatch_tests {
     use super::{COMPOSER_CONTEXT, default_bindings};
     use crate::ui::actions::{FormatBlockQuote, FormatStrikethrough};

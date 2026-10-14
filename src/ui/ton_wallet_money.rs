@@ -540,6 +540,7 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "ton_wallet_money_tests.rs"]
 mod tests;

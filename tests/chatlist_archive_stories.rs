@@ -1,6 +1,10 @@
 //! Chat-list archive row and story-ring state plumbing through the real
 //! reducer: the archive summary (names, unread badge) and the per-chat
 //! story ring (kept for every story list, unread by `max_read_story_id`).
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::AccountKey;

@@ -162,7 +162,8 @@ impl FrameTitleBar {
         }
     }
 
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(crate) fn system_frame(mut self, native: bool) -> Self {
         self.native = Some(native);
         self
@@ -222,6 +223,7 @@ impl RenderOnce for FrameTitleBar {
     }
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "window_frame_tests.rs"]
 mod tests;

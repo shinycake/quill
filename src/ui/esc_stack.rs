@@ -442,7 +442,8 @@ mod table_tests {
 
 /// End-to-end: real Escape keystrokes through GPUI's dispatcher into a demo
 /// `QuillApp` (needs the `demo-capture` feature for gpui-kit's test support).
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod dispatch_tests {
     use crate::ui::app::QuillApp;
     use crate::ui::keybindings::bind_keys;
@@ -525,7 +526,7 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         for (name, open) in openers() {
-            app.update_in(vcx, |app, window, cx| open(app, window, cx));
+            app.update_in(vcx, open);
             assert_eq!(top(&app, vcx), Some(name), "{name} should be on top");
             vcx.simulate_keystrokes("escape");
             // The privacy picker peels first; a second press closes the rest.

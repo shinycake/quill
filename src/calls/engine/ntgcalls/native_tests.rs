@@ -17,10 +17,9 @@ fn native_default_audio_sources_before_connect() {
         "Desktop capturer requires a source ID"
     );
     let description = NtgcallsEngine::screen_video_description(Some(&screen));
-    assert_eq!(
-        unsafe { CStr::from_ptr(description.input) },
-        screen.as_c_str()
-    );
+    // SAFETY: `input` points into `screen`, a live NUL-terminated CString.
+    let input = unsafe { CStr::from_ptr(description.input) };
+    assert_eq!(input, screen.as_c_str());
     let mut params = ConnectParams {
         encryption_key: Vec::new(),
         custom_parameters: String::new(),
@@ -60,6 +59,7 @@ fn native_default_audio_sources_before_connect() {
     let instance = engine.instance.expect("Live native instance");
     // Exercise the native operation reported in the user's screenshot.
     // No connection follows, so these synthetic bytes never leave the process.
+    // SAFETY: `instance` is the live native instance and `key` outlives the call.
     let result = unsafe {
         (engine.api.ntg_skip_exchange)(instance.as_ptr(), 42, key.as_ptr(), key.len(), true)
     };

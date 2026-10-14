@@ -256,6 +256,7 @@ impl QuillApp {
     }
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "advanced_ui_tests.rs"]
 mod tests;

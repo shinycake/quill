@@ -9,6 +9,10 @@
 //! 2. `send_sticker` (panel-picked) passes
 //!    `update_order_of_installed_sticker_sets: true` in messageSendOptions
 //!    (schema 1.8.67:5934).
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};

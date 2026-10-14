@@ -444,7 +444,8 @@ pub(crate) mod fixture;
 #[path = "statistics_demo.rs"]
 mod demo;
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "statistics_tests.rs"]
 mod ui_tests;
 

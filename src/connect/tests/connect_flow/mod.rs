@@ -36,6 +36,7 @@ fn gate_blocks_without_tdjson_when_credentials_present() {
     unsafe { std::env::remove_var("QUILL_TDJSON_PATH") };
     let gate = evaluate_gate(true);
     if let Some(v) = previous {
+        // SAFETY: still under the exclusive lock taken above.
         unsafe { std::env::set_var("QUILL_TDJSON_PATH", v) };
     }
     assert_eq!(gate, ConnectGate::Blocked(ConnectBlocker::MissingTdjson));

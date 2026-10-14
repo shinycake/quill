@@ -2,6 +2,11 @@
 //! size limit, baseline rules and trailing test modules; hotspot rules,
 //! overrides, and the big `match` / `pub enum` warnings.
 #![cfg(unix)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use std::fs;
 use std::path::{Path, PathBuf};

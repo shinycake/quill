@@ -510,6 +510,7 @@ fn demo_kinds() -> String {
 }
 
 #[cfg(feature = "ui")]
+#[expect(clippy::exit, reason = "CLI usage error for an unknown demo kind")]
 fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::path::PathBuf)> {
     use std::path::PathBuf;
 
@@ -521,15 +522,12 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 .next()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("docs/screenshots"));
-            let demo = match ui::ScreenshotDemo::from_kind(kind) {
-                Some(demo) => demo,
-                None => {
-                    eprintln!(
-                        "unknown screenshot demo '{kind}' (expected {})",
-                        demo_kinds()
-                    );
-                    std::process::exit(2);
-                }
+            let Some(demo) = ui::ScreenshotDemo::from_kind(kind) else {
+                eprintln!(
+                    "unknown screenshot demo '{kind}' (expected {})",
+                    demo_kinds()
+                );
+                std::process::exit(2);
             };
             return Some((demo, out));
         }
@@ -1098,7 +1096,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         });
 }
 
-#[cfg(all(test, feature = "ui"))]
+#[cfg(test)]
+#[cfg(feature = "ui")]
 mod demo_kind_tests {
     use crate::{demo_kinds, parse_screenshot_demo, ui::ScreenshotDemo};
 

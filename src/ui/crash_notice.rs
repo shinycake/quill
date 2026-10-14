@@ -133,7 +133,8 @@ mod gate_tests {
     }
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests {
     use super::{show_crash, show_once_visible};
     use gpui_kit::component::Root;

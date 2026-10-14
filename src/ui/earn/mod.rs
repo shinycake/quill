@@ -13,7 +13,8 @@ mod join;
 mod revenue;
 mod setup;
 mod starref_boxes;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests;
 mod withdraw;
 

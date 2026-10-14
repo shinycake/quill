@@ -491,6 +491,7 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "boost_box_ui_tests.rs"]
 mod tests;

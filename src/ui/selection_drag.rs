@@ -361,7 +361,8 @@ impl QuillApp {
 
 /// UI integration tests: real pointer and key events against the demo
 /// `QuillApp` (gpui-kit's test support needs the `demo-capture` feature).
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests {
     use crate::ui::HistoryRow;
     use crate::ui::app::QuillApp;
@@ -419,7 +420,7 @@ mod tests {
         app.read_with(cx, |app, _| {
             let viewport = app.history.viewport.get().expect("the list painted");
             let mut painted: Vec<(usize, Bounds<Pixels>)> = app.history.hit_rows.borrow().clone();
-            painted.sort_by(|a, b| a.1.top().cmp(&b.1.top()));
+            painted.sort_by_key(|row| row.1.top());
             painted
                 .into_iter()
                 .filter(|(_, bounds)| {

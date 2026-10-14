@@ -540,6 +540,7 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "playlist_manage_tests.rs"]
 mod tests;
