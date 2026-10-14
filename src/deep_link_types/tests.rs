@@ -355,6 +355,20 @@ fn an_invoice_link_opens_the_checkout_and_a_nameless_one_is_broken() {
 }
 
 #[test]
+fn an_auction_link_opens_the_auction_and_an_empty_one_is_broken() {
+    assert_eq!(
+        route_of(json!({"@type": "internalLinkTypeGiftAuction", "auction_id": "pepe"})),
+        LinkRoute::Ui(DeepLinkUi::GiftAuction {
+            auction_id: "pepe".into()
+        })
+    );
+    assert!(matches!(
+        route_of(json!({"@type": "internalLinkTypeGiftAuction"})),
+        LinkRoute::Message(_)
+    ));
+}
+
+#[test]
 fn unsupported_targets_say_so_and_never_open_a_browser() {
     for ty in [
         "internalLinkTypePremiumGiftCode",
