@@ -97,6 +97,12 @@ pub fn usd_label(units: f64, cents_per_unit: f64) -> String {
 }
 
 impl StatChart {
+    /// Whether the value axis steps in whole numbers: everything but TON
+    /// amounts, which are often fractions of one.
+    pub fn whole_values(&self) -> bool {
+        self.currency != ChartCurrency::Ton
+    }
+
     /// A raw y value in the currency's units (TON for nanotons).
     pub fn currency_units(&self, value: f64) -> f64 {
         match self.currency {

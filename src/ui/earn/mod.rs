@@ -10,6 +10,7 @@ mod entries;
 pub(in crate::ui) mod fixture;
 mod icons;
 mod join;
+mod layer;
 mod revenue;
 mod setup;
 mod starref_boxes;
@@ -19,6 +20,7 @@ mod tests;
 mod withdraw;
 
 pub(in crate::ui) use icons::*;
+pub(crate) use layer::LayerFade;
 
 use super::app::QuillApp;
 use super::chat_theme::text_muted;
@@ -80,9 +82,45 @@ pub(super) fn about_link(
     )
 }
 
-/// The thin line between blocks (tdesktop `AddDivider`).
+/// The page's side padding inside the layer; the bands below reach
+/// past it to the layer's edges.
+const PAGE_INSET: f32 = 16.;
+
+/// The band between blocks (tdesktop `AddDivider`), edge to edge.
 pub(super) fn divider(cx: &App) -> Div {
-    div().h(px(1.)).w_full().bg(cx.theme().border)
+    div()
+        .mx(px(-PAGE_INSET))
+        .h(px(8.))
+        .flex_none()
+        .bg(cx.theme().muted)
+        .border_y_1()
+        .border_color(cx.theme().border)
+}
+
+/// Gray text on the divider band (tdesktop `DividerLabel` and
+/// `AddDividerText`), edge to edge; the text keeps WCAG AA on the band.
+pub(super) fn divider_label(content: Div, cx: &App) -> Div {
+    div()
+        .mx(px(-PAGE_INSET))
+        .px(px(PAGE_INSET))
+        .py_2p5()
+        .bg(cx.theme().muted)
+        .border_y_1()
+        .border_color(cx.theme().border)
+        .child(content.text_color(readable_on(text_muted().into(), cx.theme().muted)))
+}
+
+/// `fg` held to WCAG AA on `bg`.
+pub(super) fn readable_on(fg: Hsla, bg: Hsla) -> Hsla {
+    let pack = |color: Hsla| {
+        let rgba = color.to_rgb();
+        let channel = |v: f32| (v.clamp(0., 1.) * 255.).round() as u32;
+        (channel(rgba.r) << 16) | (channel(rgba.g) << 8) | channel(rgba.b)
+    };
+    let out = quill::theme_colorize::readable(pack(fg), pack(bg), quill::theme_colorize::WCAG_AA);
+    let mut color: Hsla = rgb(out).into();
+    color.a = fg.a;
+    color
 }
 
 /// A title and its about line with an icon on the left (tdesktop's
@@ -193,8 +231,9 @@ impl QuillApp {
         self.session().map(|s| &s.payments.earn)
     }
 
-    /// Open an earn page fresh (tdesktop `showSection`): the page the
-    /// panel showed is kept for the back arrow.
+    /// Open an earn page fresh (tdesktop `showSection`) in the layer: a
+    /// page opened from another earn page stacks for the back arrow, and
+    /// the info panel the layer covers comes back when it closes.
     pub(in crate::ui) fn open_earn(
         &mut self,
         panel: EarnPanel,
@@ -203,9 +242,14 @@ impl QuillApp {
     ) {
         let current = self.session().and_then(|s| s.users_state.open_info_panel);
         match current {
-            Some(target) if target != InfoPanelTarget::Earn(panel) => self.earn.back.push(target),
-            Some(_) => {}
-            None => self.earn.back.clear(),
+            Some(InfoPanelTarget::Earn(open)) if open != panel => {
+                self.earn.back.push(InfoPanelTarget::Earn(open));
+            }
+            Some(InfoPanelTarget::Earn(_)) => {}
+            other => {
+                self.earn.back.clear();
+                self.earn.restore = other;
+            }
         }
         if self.live.is_some()
             && let Some(earn) = self.earn_mut()
@@ -221,6 +265,7 @@ impl QuillApp {
             self.earn.commission = None;
             self.earn.duration = None;
         }
+        self.show_earn_layer();
         self.open_info_panel_target(InfoPanelTarget::Earn(panel), window, cx);
     }
 
@@ -228,7 +273,7 @@ impl QuillApp {
     pub(super) fn earn_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.earn.back.pop() {
             Some(target) => self.open_info_panel_target(target, window, cx),
-            None => self.close_info_panel(cx),
+            None => self.close_earn_layer(cx),
         }
     }
 
@@ -299,7 +344,7 @@ impl QuillApp {
                         live.driver.set_info_panel(Some(target));
                     }
                 }
-                None => self.close_info_panel(cx),
+                None => self.drop_earn_layer(cx),
             }
         }
         if progressed {
@@ -319,38 +364,41 @@ impl QuillApp {
         }
         self.join_upkeep();
         self.earn_balances_upkeep();
+        let link_open = self.earn_state().is_some_and(|e| e.link_box.is_some());
+        match (link_open, self.earn.link_shown) {
+            (true, None) => self.earn.link_shown = Some(std::time::Instant::now()),
+            (false, Some(_)) => self.earn.link_shown = None,
+            _ => {}
+        }
     }
 
-    /// The content of an earn page in the info panel.
-    pub(in crate::ui) fn earn_panel(&self, panel: EarnPanel, cx: &mut Context<Self>) -> AnyElement {
+    /// The content of an earn page under the layer's top bar: the page,
+    /// which scrolls itself so the end of a program list can load the
+    /// next page, and the setup page's pinned bottom (tdesktop
+    /// `setupBottom` with `setScrollBottomSkip`).
+    pub(super) fn earn_panel(&self, panel: EarnPanel, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let body = match panel {
             EarnPanel::Revenue { peer, screen } => self.revenue_page(peer, screen, cx),
             EarnPanel::Setup { bot_user_id } => self.setup_page(bot_user_id, cx),
             EarnPanel::Join { peer } => self.join_page(peer, cx),
         };
-        // The page scrolls itself so the end of a program list can load
-        // the next page.
-        let mut column = div()
+        let column = div()
             .id("earn-panel")
             .debug_selector(|| "earn-panel".into())
-            .size_full()
+            .flex_1()
+            .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.earn.scroll)
             .flex()
             .flex_col()
             .gap_3()
-            .p_3();
-        if !self.earn.back.is_empty() {
-            column = column.child(
-                div().flex().child(
-                    Button::new("earn-back")
-                        .label("\u{2039} Back")
-                        .ghost()
-                        .small()
-                        .on_click(cx.listener(|this, _, window, cx| this.earn_back(window, cx))),
-                ),
-            );
+            .px_4()
+            .pb_4()
+            .child(body);
+        let mut parts = vec![column.into_any_element()];
+        if let EarnPanel::Setup { bot_user_id } = panel {
+            parts.extend(self.setup_footer(bot_user_id, cx));
         }
-        column.child(body).into_any_element()
+        parts
     }
 }

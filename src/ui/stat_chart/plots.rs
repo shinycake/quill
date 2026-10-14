@@ -11,7 +11,7 @@ use gpui_kit::component::chart::{AreaChart, LineChart};
 use gpui_kit::component::plot::axis_gutter;
 use gpui_kit::component::plot::label::{TEXT_GAP, TEXT_SIZE};
 use gpui_kit::*;
-use quill::stat_chart::{ChartKind, StatChart, axis_caption, nice_domain};
+use quill::stat_chart::{ChartKind, StatChart, axis_caption, nice_domain_in};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -37,6 +37,8 @@ pub(super) struct PlotInput {
     /// A click on a point zooms in.
     pub zoomable: bool,
     pub height: f32,
+    /// US cents per currency unit of a revenue chart; 0 for none.
+    pub currency_rate: f64,
 }
 
 impl PlotInput {
@@ -61,11 +63,11 @@ impl PlotInput {
         let chart = self.chart.clone();
         let enabled = self.enabled.clone();
         let hovered = self.hovered.clone();
-        let (shares, zoomable) = (self.shares(), self.zoomable);
+        let (shares, zoomable, rate) = (self.shares(), self.zoomable, self.currency_rate);
         move |point: &Point, _: &mut Window, _: &mut App| {
             hovered.set(Some(point.index));
             let zoom = zoomable && zoomable_point(point);
-            tooltip::body(&chart, point, &enabled, shares, zoom).into_any_element()
+            tooltip::body(&chart, point, &enabled, shares, zoom, rate).into_any_element()
         }
     }
 }
@@ -96,6 +98,7 @@ fn areas(input: PlotInput) -> AnyElement {
         input.kind,
         &input.enabled,
         0..input.chart.lines.len(),
+        input.chart.whole_values(),
     );
     let mut chart = AreaChart::new(input.points)
         .id(ElementId::Name(format!("{}-area", input.id).into()))
@@ -145,7 +148,7 @@ fn two_scales(input: PlotInput, cx: &App) -> AnyElement {
     for (row, (k, color)) in shown.into_iter().enumerate() {
         let (min, max) = value_extent(&input.points, &input.enabled, k..k + 1)
             .map_or((0.0, 1.0), |(min, max)| {
-                nice_domain(min, max, DOUBLE_INTERVALS)
+                nice_domain_in(min, max, DOUBLE_INTERVALS, input.chart.whole_values())
             });
         let dates = row == last;
         let chart = LineChart::new(input.points.clone())
@@ -204,6 +207,7 @@ fn stacked_bars(input: PlotInput) -> AnyElement {
         input.kind,
         &input.enabled,
         0..input.chart.lines.len(),
+        input.chart.whole_values(),
     );
     let every = input.points.len().div_ceil(DATE_TICKS).max(1);
     StackedBars::new(

@@ -453,7 +453,8 @@ impl QuillApp {
     pub(super) fn info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // A profile opened from a sender avatar is presented as a modal
         // layer (`profile_modal_overlay`), not in the right column.
-        if self.profile_modal_active() {
+        // Earn pages open in their own layer (`earn_layer`).
+        if self.profile_modal_active() || self.earn_layer_open() {
             return None;
         }
         let (title, content) = self.info_panel_parts(cx)?;
@@ -531,7 +532,12 @@ impl QuillApp {
                 "Community info",
                 self.community_info_panel(community_id, cx),
             ),
-            InfoPanelTarget::Earn(panel) => (panel.title(), self.earn_panel(panel, cx)),
+            InfoPanelTarget::Earn(panel) => (
+                panel.title(),
+                div()
+                    .children(self.earn_panel(panel, cx))
+                    .into_any_element(),
+            ),
         };
         Some((title, content))
     }

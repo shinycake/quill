@@ -55,8 +55,21 @@ fn bounds(vcx: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixels>
         .unwrap_or_else(|| panic!("{selector} is drawn"))
 }
 
+/// Click the middle of `selector` once it stops moving: a kit dialog
+/// scales in on the real clock, and a click taken mid-animation can
+/// land beside the button on a busy machine.
 fn click(vcx: &mut VisualTestContext, selector: &'static str) {
-    let at = bounds(vcx, selector).center();
+    let mut at = bounds(vcx, selector);
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        frames(vcx);
+        let now = bounds(vcx, selector);
+        if now == at {
+            break;
+        }
+        at = now;
+    }
+    let at = at.center();
     vcx.simulate_click(at, Modifiers::default());
     frames(vcx);
 }
@@ -218,7 +231,11 @@ fn the_revenue_charts_draw_with_the_kit_charts(cx: &mut TestAppContext) {
     let (_app, _shell, mut vcx) = open_demo(cx, "ready-earn-monetization");
     let vcx = &mut vcx;
     let panel = bounds(vcx, "earn-panel");
-    for id in ["earn-chart-hours", "earn-chart-ton", "earn-chart-stars"] {
+    for id in [
+        "earn-chart-hours-plot",
+        "earn-chart-ton-plot",
+        "earn-chart-stars-plot",
+    ] {
         let chart = bounds(vcx, id);
         assert_eq!(
             chart.size.height,
@@ -235,24 +252,32 @@ fn the_revenue_charts_draw_with_the_kit_charts(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_bot_stars_page_draws_its_revenue_chart(cx: &mut TestAppContext) {
     let (_app, _shell, mut vcx) = open_demo(cx, "ready-earn-bot-stars");
-    let chart = bounds(&mut vcx, "earn-chart-bot");
-    assert_eq!(chart.size.height, px(200.));
+    // tdesktop `ChartWidget`: the plot, then the range selector under it.
+    let plot = bounds(&mut vcx, "earn-chart-bot-plot");
+    assert_eq!(plot.size.height, px(200.));
+    let range = bounds(&mut vcx, "earn-chart-bot-range");
+    assert!(range.origin.y >= plot.origin.y + plot.size.height);
 }
 
-#[test]
-fn column_dates_stay_clear_of_the_right_edge() {
-    use super::chart::column_tick_margin;
-    for len in [1usize, 2, 7, 24, 30, 31, 90] {
-        let margin = column_tick_margin(len);
-        assert!(margin >= 1);
-        // The kit labels every column `i` with `(i + 1) % margin == 0`.
-        let labeled = (0..len).filter(|i| (i + 1) % margin == 0).count();
-        if len >= 7 {
-            assert!(
-                (2..=4).contains(&labeled),
-                "{len} columns get {labeled} dates"
-            );
-            assert_ne!(len % margin, 0, "{len} columns: the last is not labeled");
-        }
-    }
+#[gpui_kit::test]
+fn the_page_is_a_centered_layer_that_closes(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-earn-monetization");
+    let vcx = &mut vcx;
+    // tdesktop `Info::LayerWidget`: `infoDesiredWidth`, centered.
+    let layer = bounds(vcx, "earn-layer");
+    assert_eq!(layer.size.width, px(392.));
+    assert_eq!(layer.center().x, px(600.));
+    click(vcx, "earn-layer-close");
+    frames(vcx);
+    app.read_with(vcx, |app, _| assert!(!app.earn_layer_open()));
+}
+
+#[gpui_kit::test]
+fn the_setup_button_stays_pinned_under_the_page(cx: &mut TestAppContext) {
+    let (_app, _shell, mut vcx) = open_demo(cx, "ready-earn-affiliate-setup");
+    let vcx = &mut vcx;
+    let page = bounds(vcx, "earn-panel");
+    let save = bounds(vcx, "earn-setup-save");
+    // tdesktop `setupBottom`: below the scrolling part, not inside it.
+    assert!(save.origin.y >= page.bottom());
 }

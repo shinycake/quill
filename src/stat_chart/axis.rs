@@ -15,6 +15,12 @@ const NICE_STEPS: [f64; 12] = [
 /// whole number of at least 1. A non-negative series stays non-negative;
 /// a flat one gets a step of room above it.
 pub fn nice_domain(min: f64, max: f64, intervals: u32) -> (f64, f64) {
+    nice_domain_in(min, max, intervals, true)
+}
+
+/// [`nice_domain`], with fractional steps allowed unless `whole`: a TON
+/// revenue chart of 0.05 a day reads 0..0.05, not 0..5.
+pub fn nice_domain_in(min: f64, max: f64, intervals: u32, whole: bool) -> (f64, f64) {
     if !min.is_finite() || !max.is_finite() || intervals == 0 {
         return (0.0, 1.0);
     }
@@ -22,14 +28,17 @@ pub fn nice_domain(min: f64, max: f64, intervals: u32) -> (f64, f64) {
     let count = f64::from(intervals);
     let span = if max > min {
         max - min
-    } else {
+    } else if whole || max == 0.0 {
         (max.abs() * 0.2).max(count)
+    } else {
+        max.abs() * 0.2
     };
     let raw = span / count;
-    let power = 10f64.powf(raw.log10().floor()).max(1.0);
+    let power = 10f64.powf(raw.log10().floor());
+    let power = if whole { power.max(1.0) } else { power };
     for multiplier in NICE_STEPS {
         let step = multiplier * power;
-        if step < 1.0 || step.fract() != 0.0 {
+        if whole && (step < 1.0 || step.fract() != 0.0) {
             continue;
         }
         let low = (min / step).floor() * step;
@@ -43,7 +52,7 @@ pub fn nice_domain(min: f64, max: f64, intervals: u32) -> (f64, f64) {
 
 #[cfg(test)]
 mod tests {
-    use super::nice_domain;
+    use super::{nice_domain, nice_domain_in};
 
     #[test]
     fn rounds_out_to_round_steps() {
@@ -64,5 +73,15 @@ mod tests {
         assert_eq!(nice_domain(f64::NAN, 3.0, 5), (0.0, 1.0));
         assert_eq!(nice_domain(5.0, 1.0, 4), nice_domain(1.0, 5.0, 4));
         assert_eq!(nice_domain(1.0, 2.0, 0), (0.0, 1.0));
+    }
+
+    #[test]
+    fn amounts_below_one_get_fractional_steps() {
+        let (low, high) = nice_domain_in(0.0, 0.05, 5, false);
+        assert!(low == 0.0 && (0.05..=0.06).contains(&high), "{high}");
+        let (low, high) = nice_domain_in(0.012, 0.012, 5, false);
+        assert!(low <= 0.012 && high > 0.012 && high < 0.1, "{low} {high}");
+        assert_eq!(nice_domain_in(0.0, 97.0, 5, false), (0.0, 100.0));
+        assert_eq!(nice_domain_in(0.0, 0.0, 5, false), (0.0, 5.0));
     }
 }

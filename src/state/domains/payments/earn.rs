@@ -429,6 +429,8 @@ impl Session {
                         page.ton = Load::Idle;
                     } else {
                         page.ton = Load::Failed(format!("Couldn't load the revenue: {reason}"));
+                        // tdesktop toasts the error too.
+                        earn.notes.push(reason.clone());
                     }
                 }
             }
@@ -438,6 +440,8 @@ impl Session {
                 }
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
                     page.stars = Load::Failed(format!("Couldn't load the revenue: {reason}"));
+                    // tdesktop toasts the error too.
+                    earn.notes.push(reason.clone());
                 }
             }
             EarnPurpose::TonTransactions { peer, .. } => {
@@ -465,7 +469,8 @@ impl Session {
                 if let Some(setup) = earn.setup.as_mut() {
                     setup.saving = false;
                 }
-                earn.note(format!("Couldn't save the affiliate program: {reason}"));
+                // tdesktop `UpdateProgram`: "Failed: " and the error.
+                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::SearchPrograms { for_box, .. } => {
                 let list = if for_box {
@@ -502,7 +507,8 @@ impl Session {
                 if let Some(revoke) = earn.revoke.as_mut() {
                     revoke.sending = false;
                 }
-                earn.note(format!("Couldn't revoke the link: {reason}"));
+                // tdesktop `Revoke`: "Failed: " and the error.
+                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::RecipientChats | EarnPurpose::RecipientBots => {
                 // tdesktop treats a failed list as empty.
@@ -551,7 +557,8 @@ impl Session {
                     sending: false,
                     error: None,
                 };
-                earn.note(format!("Couldn't withdraw: {reason}"));
+                // tdesktop toasts the error as it is.
+                earn.note(reason);
             }
         }
     }

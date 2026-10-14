@@ -1,0 +1,3 @@
+# Revenue polish: every deviation listed in docs/decisions/revenue-and-affiliates.md closed
+parity:admin-monetization
+parity:bots-earn-affiliate

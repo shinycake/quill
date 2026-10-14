@@ -14,6 +14,7 @@ use gpui_kit::component::spinner::Spinner;
 use quill::earn::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// The one-shot body the kit dialog content closure takes.
 fn one_shot(
@@ -85,6 +86,17 @@ fn recipient_list(
 }
 
 /// The link box's footer (tdesktop `lng_star_ref_link_copy_users`).
+/// How long the link icon plays.
+const LINK_PLAY: Duration = Duration::from_millis(700);
+
+/// Ease out with a small overshoot past the end.
+fn ease_out_back(t: f32) -> f32 {
+    let t = t.clamp(0., 1.);
+    let c1 = 1.70158;
+    let c3 = c1 + 1.;
+    1. + c3 * (t - 1.).powi(3) + c1 * (t - 1.).powi(2)
+}
+
 fn opened_through(users: i64, app: &str) -> String {
     match users {
         0 => format!("No one have opened {app} through this link."),
@@ -336,21 +348,53 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The bot's photo, an arrow and the recipient's (tdesktop
-    /// `CreateUserpicsTransfer` with `StarRefJoin`).
-    fn transfer_userpics(&self, session: &Session, bot: EarnPeer, recipient: EarnPeer) -> Div {
+    /// The bot's photo, an arrow and the recipient's with the Premium
+    /// star disc on its corner (tdesktop `CreateUserpicsTransfer` with
+    /// `StarRefJoin`: 60 px photos 42 px apart, `starrefJoinIcon` on a
+    /// gradient disc ringed in the window color).
+    fn transfer_userpics(
+        &self,
+        session: &Session,
+        bot: EarnPeer,
+        recipient: EarnPeer,
+        cx: &App,
+    ) -> Div {
+        let disc = div()
+            .debug_selector(|| "earn-join-star".into())
+            .absolute()
+            .right(px(-4.))
+            .bottom(px(-2.))
+            .size(px(22.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .border_2()
+            .border_color(crate::ui::chat_theme::bg_canvas())
+            .bg(crate::ui::premium_mark::premium_gradient())
+            .child(
+                Icon::new(IconName::StarFill)
+                    .with_size(px(10.))
+                    .text_color(cx.theme().primary_foreground),
+            );
         div()
             .flex()
             .justify_center()
             .items_center()
-            .gap_2()
-            .child(self.earn_avatar(session, bot, 64.))
+            .child(self.earn_avatar(session, bot, 60.))
             .child(
-                Icon::new(IconName::ChevronRight)
-                    .size(px(20.))
-                    .text_color(text_muted()),
+                div().w(px(42.)).flex().justify_center().child(
+                    Icon::new(IconName::ChevronRight)
+                        .size(px(20.))
+                        .text_color(text_muted()),
+                ),
             )
-            .child(self.earn_avatar(session, recipient, 64.))
+            .child(
+                div()
+                    .relative()
+                    .child(self.earn_avatar(session, recipient, 60.))
+                    .child(disc),
+            )
     }
 
     /// `JoinStarRefBox`.
@@ -379,7 +423,7 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(this.transfer_userpics(session, bot, join.recipient))
+                .child(this.transfer_userpics(session, bot, join.recipient, cx))
                 .child(box_title("Affiliate Program"))
                 .child(centered(format!(
                     "{app_name} will share {} of the revenue from each user you refer to it {}.",
@@ -506,6 +550,26 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The link icon's one-time play as the box opens: it swings in from
+    /// a quarter turn and settles with a small overshoot (tdesktop plays
+    /// the `starref_link` animation once in `CreateLinkIcon`).
+    fn link_icon_motion(&self, cx: &mut Context<Self>) -> Transformation {
+        let elapsed = self.earn.link_shown.map_or(LINK_PLAY, |since| {
+            crate::ui::motion::elapsed_since(since, Instant::now())
+        });
+        let t = if crate::ui::motion::interface_animations_off() {
+            1.
+        } else {
+            crate::ui::motion::progress(elapsed, LINK_PLAY)
+        };
+        if t < 1. {
+            self.request_animation_tick(60, cx);
+        }
+        let eased = ease_out_back(t);
+        Transformation::rotate(radians(-(1. - eased) * std::f32::consts::FRAC_PI_2))
+            .with_scaling(size(0.6 + 0.4 * eased, 0.6 + 0.4 * eased))
+    }
+
     /// `StarRefLinkBox`.
     pub(super) fn build_earn_link_dialog(
         app: &Entity<QuillApp>,
@@ -543,7 +607,8 @@ impl QuillApp {
                     .child(
                         Icon::new(IconName::Link)
                             .size(px(34.))
-                            .text_color(cx.theme().primary_foreground),
+                            .text_color(cx.theme().primary_foreground)
+                            .transform(this.link_icon_motion(cx)),
                     ),
             );
             if users > 0 {

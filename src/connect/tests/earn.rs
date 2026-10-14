@@ -375,7 +375,7 @@ fn setup_starts_updates_and_ends_a_program() {
     error(&mut p, "setChatAffiliateProgram", "STARREF_HASH_REVOKED");
     let earn = &p.0.session.payments.earn;
     assert!(!earn.setup.as_ref().unwrap().saving);
-    assert!(earn.notes[1].starts_with("Couldn't save the affiliate program"));
+    assert!(earn.notes[1].starts_with("Failed: "));
 }
 
 #[test]
