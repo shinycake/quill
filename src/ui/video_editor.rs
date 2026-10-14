@@ -424,7 +424,8 @@ impl QuillApp {
     }
 
     /// The open editor is making a sticker for a set.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn video_editor_for_set(&self) -> bool {
         self.composer_ui
             .send_box
