@@ -336,7 +336,7 @@ hotspots `ui/mod.rs`, `app`, `app_demo`, `shell`, `screenshot_demo`,
 
 ## Phase D, batch 6: stickers, video editor, composer, send, TON wallet, earn
 
-Branch `panic-lints-d6`. 52 more roots start with
+Branch `panic-lints-d6`. 46 more roots start with
 `#![deny(clippy::indexing_slicing)]`:
 
 - Library: `sticker_image`, `sticker_playback`, `sticker_set_box`,
