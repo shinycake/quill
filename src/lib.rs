@@ -70,6 +70,7 @@ pub mod force_reply;
 pub mod game_share;
 pub mod gift_colors;
 pub mod gift_manage;
+pub mod gift_market;
 pub mod giveaway;
 pub mod go_to_message;
 pub mod icon_badge;

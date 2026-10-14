@@ -99,6 +99,8 @@ pub struct PaymentsState {
     /// Suggested posts: limits, the composer's suggest bars, the Grams
     /// balance.
     pub suggested_posts: crate::suggested_posts::SuggestedPostsState,
+    /// Resale listings, gift auctions and crafting.
+    pub gift_market: crate::gift_market::GiftMarketState,
 }
 
 /// A tapped bank card number and the lookup's progress.
@@ -149,6 +151,7 @@ impl PaymentsState {
             star_packs: Default::default(),
             stars_gift: Default::default(),
             suggested_posts: Default::default(),
+            gift_market: Default::default(),
         }
     }
 }

@@ -149,6 +149,8 @@ pub enum PaymentsPurpose {
     /// Suggested posts in channel direct messages
     /// (`crate::suggested_posts`).
     SuggestedPost(crate::suggested_posts::SuggestedPostPurpose),
+    /// Resale listings, gift auctions and crafting (`crate::gift_market`).
+    GiftMarket(crate::gift_market::GiftMarketPurpose),
 }
 
 impl PaymentsPurpose {

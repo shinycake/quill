@@ -4,6 +4,7 @@ mod earn;
 mod error;
 mod gift_code;
 mod gift_manage;
+mod gift_market;
 mod giveaway;
 mod limit;
 mod paid;

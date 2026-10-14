@@ -17,7 +17,11 @@ pub struct AvailableGift {
     /// Extra Stars to let the receiver upgrade the gift to a collectible.
     pub upgrade_star_count: i64,
     pub is_premium: bool,
-    pub is_auction: bool,
+    /// Sold by auction (`gift.auction_info`).
+    pub auction: Option<crate::gift_market::GiftAuctionInfo>,
+    /// `availableGift.title`: the collection name ("Plush Pepe"), which a
+    /// bare `gift` does not carry.
+    pub title: String,
     /// `(remaining, total)` when the gift has a global supply.
     pub supply: Option<(i32, i32)>,
     /// How many more this account may buy, when limited per user.
@@ -34,7 +38,7 @@ pub enum SendGate {
     SoldOut,
     /// Needs Telegram Premium.
     PremiumOnly,
-    /// Sold by auction; bidding is not available in Quill.
+    /// Sold by auction: the tile opens the auction box instead.
     Auction,
     /// Not before this Unix time.
     Later(i32),
@@ -45,6 +49,10 @@ pub enum SendGate {
 }
 
 impl AvailableGift {
+    pub fn is_auction(&self) -> bool {
+        self.auction.is_some()
+    }
+
     pub fn is_limited(&self) -> bool {
         self.supply.is_some()
     }
@@ -57,10 +65,12 @@ impl AvailableGift {
     /// Whether the gift can be sent to `recipient` now. `premium` is whether
     /// this account has Telegram Premium.
     pub fn gate(&self, recipient: &GiftRecipient, premium: bool, now: i64) -> SendGate {
-        if self.sold_out() {
-            SendGate::SoldOut
-        } else if self.is_auction {
+        // tdesktop opens the auction box for every auction tile, sold out
+        // or not (`star_gift_box.cpp`, `auction` before `soldOut`).
+        if self.auction.is_some() {
             SendGate::Auction
+        } else if self.sold_out() {
+            SendGate::SoldOut
         } else if self.is_premium && !premium {
             SendGate::PremiumOnly
         } else if self.user_remaining.is_some_and(|n| n <= 0) {
@@ -107,7 +117,7 @@ impl SendGate {
             Self::Ready => None,
             Self::SoldOut => Some("Sold out"),
             Self::PremiumOnly => Some("Needs Telegram Premium"),
-            Self::Auction => Some("Auction gift"),
+            Self::Auction => None,
             Self::Later(_) => Some("Not available yet"),
             Self::UserLimit => Some("You bought all you can"),
             Self::NotForChannels => Some("Not for channels"),
@@ -137,7 +147,8 @@ pub fn parse_available_gift(value: &Value) -> Option<AvailableGift> {
         star_count: int(gift.get("star_count")),
         upgrade_star_count: int(gift.get("upgrade_star_count")),
         is_premium: flag(gift, "is_premium"),
-        is_auction: gift.get("auction_info").is_some_and(|a| !a.is_null()),
+        auction: crate::gift_market::GiftAuctionInfo::parse(gift.get("auction_info")),
+        title: text(value, "title"),
         supply: limits("overall_limits"),
         user_remaining: limits("user_limits").map(|(left, _)| left),
         next_send_date: int(gift.get("next_send_date")) as i32,

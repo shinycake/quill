@@ -30,6 +30,7 @@ impl Session {
         self.apply_business_extra_ok(pending);
         self.apply_sticker_creator_ok(pending);
         self.apply_suggested_post_ok(pending);
+        self.apply_gift_market_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme
