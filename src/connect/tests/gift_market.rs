@@ -289,6 +289,14 @@ fn auction_link_follow_and_bids() {
         .to_string(),
     );
     assert!(f.driver.session.payments.gift_market.bidding.is_none());
+    // A bid for someone else is a new bid, not a raise of the friend's.
+    f.driver
+        .bid_gift_auction(800, 900, FRIEND_CHAT.0 + 1, "", false)
+        .unwrap();
+    let other = f.last("placeGiftAuctionBid");
+    assert_eq!(other["user_id"], FRIEND_CHAT.0 + 1);
+    assert_eq!(other["star_count"], 900);
+    f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
     f.driver.follow_gift_auction(None).unwrap();
     assert_eq!(f.last("closeGiftAuction")["gift_id"], "800");
     assert!(f.driver.session.payments.gift_market.followed.is_none());

@@ -237,6 +237,34 @@ fn bid_slider_follows_tdesktop_bounds() {
 }
 
 #[test]
+fn bid_slider_steps_round_trip() {
+    let slider = BidSlider {
+        min: 100,
+        mine: 0,
+        max: 30_000,
+    };
+    assert_eq!(slider.amount_at(0.), 100);
+    assert_eq!(slider.amount_at(BID_SLIDER_STEPS), 30_000);
+    assert_eq!(slider.amount_at(-5.), 100);
+    // The low end gets most of the track.
+    assert!(slider.amount_at(500.) < 4_000);
+    for amount in [100, 250, 1_200, 9_999, 30_000] {
+        let back = slider.amount_at(slider.step_of(amount));
+        assert!(
+            (back - amount).abs() <= amount / 50 + 2,
+            "{amount} -> {back}"
+        );
+    }
+    let flat = BidSlider {
+        min: 5,
+        mine: 0,
+        max: 5,
+    };
+    assert_eq!(flat.step_of(5), 0.);
+    assert_eq!(flat.amount_at(700.), 5);
+}
+
+#[test]
 fn auction_box_choice_matches_tdesktop() {
     let me = MessageSender::User { user_id: 42 };
     let other = MessageSender::User { user_id: 9 };

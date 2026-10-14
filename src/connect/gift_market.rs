@@ -287,7 +287,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let text = text.trim().to_string();
-        let result = if mine > 0 {
+        // A bid for someone else is placed anew (it changes the recipient
+        // and raises it); `increaseGiftAuctionBid` keeps the recipient.
+        let same_owner = state
+            .my()
+            .and_then(|my| my.owner.as_ref())
+            .is_none_or(|owner| *owner == MessageSender::User { user_id });
+        let result = if mine > 0 && same_owner {
             self.send_market(GiftMarketPurpose::IncreaseBid { gift_id }, |extra| {
                 rq::increase_gift_auction_bid(extra, gift_id, stars)
             })
