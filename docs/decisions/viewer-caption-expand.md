@@ -18,16 +18,20 @@
 Before, Quill showed the whole caption however long it was, so a long one
 covered most of the photo and the controls.
 
-Now the viewer keeps tdesktop's quarter-window cap and adds the stories
-expansion on top, as the owner asked:
+Now the viewer follows tdesktop's story caption, as the owner asked
+(the first version kept the quarter-window cap; he found it far too
+tall):
 
-- `src/ui/media_viewer/caption.rs`: the caption box is clipped to whole
-  lines within a quarter of the window. When the text is taller, a ghost
-  `Button` "Show more" sits under it on the right. It expands the box
-  upward to the full text, or to the room between the top bar and the
-  bottom controls, where it scrolls. "Show less" (or Escape) collapses it.
-  Another item, or the viewer opened again, starts collapsed. In video
-  full screen Escape leaves full screen first, as in tdesktop.
+- `src/ui/media_viewer/caption.rs`: a caption of up to four lines shows
+  in full. A longer one collapses to two lines
+  (`kMaxShownCaptionLines`, `kCollapsedCaptionLines`) with a ghost
+  `Button` "Show more" under it on the right. It expands the box upward to
+  the full text, or to the room between the top bar and the bottom
+  controls, where it scrolls with the kit's vertical scrollbar
+  (`ScrollableElement::vertical_scrollbar`, shown per the theme's
+  scrollbar setting). "Show less" (or Escape) collapses it. Another item,
+  or the viewer opened again, starts collapsed. In video full screen
+  Escape leaves full screen first, as in tdesktop.
 - The height glides over 200 ms with sineInOut through `motion::Glide`, so
   an interrupted toggle reverses from where it is. Frames come from the
   frame clock (`request_animation_tick`), not `with_animation`. Reduced
@@ -38,13 +42,16 @@ expansion on top, as the owner asked:
 
 ## Deviations
 
-- tdesktop keeps regular media captions cut with no expand. Quill
-  expands them like stories, because the owner asked for it.
+- tdesktop cuts regular media captions at a quarter of the window with
+  no expand. Quill treats them like story captions (two lines, expand),
+  because the owner asked for it.
 - tdesktop has no "Show less". Quill shows it under the expanded caption
   so collapsing does not depend on knowing Escape. Escape still works.
 - tdesktop draws "Show more" inside the last line's skip block and elides
-  that line. Quill puts it on its own row under the text, because the
-  plate is translucent and an overlay would show text through it.
+  that line with "…". Quill puts it on its own row under the two lines
+  and cuts the second line without an ellipsis: the plate is translucent,
+  so an overlay would show text through it, and a button beside the text
+  would change the wrap width it is measured at.
 
 ## Verified
 
