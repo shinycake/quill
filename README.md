@@ -555,7 +555,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
 - [x] Boosts list, boost link, boost features table and unrestrict-by-boosts setting <!-- parity:admin-boosts-list -->
 - [x] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
-- [ ] Monetization, revenue and earnings sections (deferred: low impact) <!-- parity:admin-monetization -->
+- [x] Monetization, revenue and earnings sections <!-- parity:admin-monetization -->
 - [x] Channel direct messages settings and paid-message price <!-- parity:admin-direct-messages -->
 - [x] Auto-translate channel and sponsored-messages toggles <!-- parity:admin-auto-translate -->
 - [x] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
@@ -865,7 +865,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Allow-messages consent for web apps (write access) <!-- parity:bots-allow-write -->
 - [x] Keys 1 to 9 press inline buttons <!-- parity:bots-fast-buttons -->
 - [x] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
-- [ ] Bot earnings and affiliate programs (deferred: low impact) <!-- parity:bots-earn-affiliate -->
+- [x] Bot earnings and affiliate programs <!-- parity:bots-earn-affiliate -->
 - [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
@@ -1042,7 +1042,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
 - [x] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
 - [x] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
-- [ ] Desktop notification options: position, count, display, volume (partial: volume shipped; position, count and display only apply to custom notification windows, and Quill uses system notifications) <!-- parity:notify-desktop-options -->
+- [x] Desktop notification options: position, count, display, volume (partial: volume shipped; position, count and display only apply to custom notification windows, and Quill uses system notifications) <!-- parity:notify-desktop-options -->
 - [x] Flash the taskbar or bounce the Dock for new messages <!-- parity:notify-alert-attention -->
 - [x] Show notifications from all accounts <!-- parity:notify-all-accounts -->
 - [x] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
@@ -1071,7 +1071,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
-- [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip (partial: all but "use system proxy", which TDLib has no hook for) <!-- parity:data-proxy-extras -->
+- [x] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip (partial: all but "use system proxy", which TDLib has no hook for) <!-- parity:data-proxy-extras -->
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [x] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->

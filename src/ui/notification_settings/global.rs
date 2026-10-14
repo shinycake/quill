@@ -87,6 +87,7 @@ impl QuillApp {
                 this.notify.defaults_sound_picker = None;
                 this.notify.defaults_exceptions_scope = None;
                 this.notify.notifications_confirm = None;
+                this.notify_corner_preview(None, cx);
                 cx.notify();
             },
         );
@@ -124,6 +125,7 @@ impl QuillApp {
             // sounds") — the client-side toggle gating
             // `Session::notification_sound_for`.
             body = body.child(this.desktop_notifications_section(cx));
+            body = body.child(this.notify_options_section(cx));
             body = body.child(this.attention_section(cx));
             body = body.child(this.events_section(cx));
             body = body.child(this.inapp_sounds_section(cx));
@@ -148,6 +150,7 @@ impl QuillApp {
                         this.notify.defaults_sound_picker = None;
                         this.notify.defaults_exceptions_scope = None;
                         this.notify.notifications_confirm = None;
+                        this.notify_corner_preview(None, cx);
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::NotificationDefaults, window, cx);
                     }))

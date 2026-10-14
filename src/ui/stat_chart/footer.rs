@@ -23,16 +23,19 @@ pub(super) fn footer(
     shown: Vec<(usize, Hsla)>,
     visible: (usize, usize),
     slider: &Entity<SliderState>,
+    whole: bool,
     cx: &App,
 ) -> Stateful<Div> {
     let len = points.len();
     let lines = 0..enabled.len();
     let (min, max) = match kind {
         // A preview of stacked columns reads as stacked areas.
-        ChartKind::StackBar | ChartKind::StackLinear => value_domain(&points, kind, enabled, lines),
+        ChartKind::StackBar | ChartKind::StackLinear => {
+            value_domain(&points, kind, enabled, lines, whole)
+        }
         // Each line of a two-scale chart fills the preview on its own scale.
         ChartKind::DoubleLinear => (0., 1.),
-        _ => value_domain(&points, ChartKind::Linear, enabled, lines),
+        _ => value_domain(&points, ChartKind::Linear, enabled, lines, whole),
     };
     // Each line's own extent, for a two-scale preview.
     let extents: Vec<(f64, f64)> = (0..enabled.len())

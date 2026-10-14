@@ -9,16 +9,19 @@ use crate::ui::chat_theme::text_muted;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::stat_chart::{StatChart, format_decimal, percentages};
+use quill::stat_chart::{ChartCurrency, StatChart, format_decimal, percentages, usd_label};
 
 /// The tooltip body for `point`: each line's share too when `shares`,
-/// the chevron when `zoomable`.
+/// the chevron when `zoomable`. A revenue chart with a `currency_rate`
+/// reads each value in its currency and in US dollars (tdesktop
+/// `lng_channel_earn_chart_overriden_detail_*`).
 pub(super) fn body(
     chart: &StatChart,
     point: &Point,
     enabled: &[bool],
     shares: bool,
     zoomable: bool,
+    currency_rate: f64,
 ) -> Div {
     let offset = quill::local_time::utc_offset_at(quill::local_time::now_unix());
     let title = chart.point_title(point.index, offset);
@@ -53,20 +56,7 @@ pub(super) fn body(
             continue;
         }
         let color: Hsla = rgb(line.color()).into();
-        let mut name = div()
-            .flex()
-            .items_center()
-            .gap_1p5()
-            .min_w_0()
-            // A short stroke of the line's color keys the row.
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(10.))
-                    .h(px(2.))
-                    .rounded_full()
-                    .bg(color),
-            );
+        let mut name = stroke(color);
         if let Some(share) = shares.as_ref().and_then(|s| s.get(k)) {
             name = name.child(div().font_semibold().child(share.clone()));
         }
@@ -76,20 +66,50 @@ pub(super) fn body(
                 .text_color(text_muted())
                 .child(line.name.clone()),
         );
-        body = body.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_4()
-                .child(name)
-                .child(
-                    div()
-                        .flex_none()
-                        .font_semibold()
-                        .child(format_decimal(raw.get(k).copied().unwrap_or(0))),
-                ),
-        );
+        let raw_value = raw.get(k).copied().unwrap_or(0);
+        let currency = match chart.currency {
+            ChartCurrency::Ton => Some("Rewards in TON"),
+            ChartCurrency::Stars => Some("Rewards in Stars"),
+            ChartCurrency::None => None,
+        };
+        match currency.filter(|_| currency_rate > 0.0) {
+            Some(label) => {
+                let units = chart.currency_units(raw_value as f64);
+                body = body
+                    .child(value_row(
+                        stroke(color).child(div().text_color(text_muted()).child(label)),
+                        chart.currency_amount(raw_value),
+                    ))
+                    .child(value_row(
+                        stroke(color).child(div().text_color(text_muted()).child("Rewards in USD")),
+                        usd_label(units, currency_rate),
+                    ));
+            }
+            None => body = body.child(value_row(name, format_decimal(raw_value))),
+        }
     }
     body
+}
+
+/// A short stroke of the line's color that keys a row.
+fn stroke(color: Hsla) -> Div {
+    div().flex().items_center().gap_1p5().min_w_0().child(
+        div()
+            .flex_none()
+            .w(px(10.))
+            .h(px(2.))
+            .rounded_full()
+            .bg(color),
+    )
+}
+
+/// A row: its name on the left, the value on the right.
+fn value_row(name: Div, value: String) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .child(name)
+        .child(div().flex_none().font_semibold().child(value))
 }

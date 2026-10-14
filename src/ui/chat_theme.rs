@@ -231,8 +231,36 @@ pub fn text_bright() -> Rgba {
 pub fn text_primary() -> Rgba {
     pick_key(K::WindowFg, 0xc9d1d9, 0x24292f, Some(0xffffff))
 }
+/// [`quill::theme_colorize::readable`] at AA for the last pair asked:
+/// `text_muted` runs for many rows a frame and the palette rarely changes.
+fn readable_cached(fg: u32, bg: u32) -> u32 {
+    thread_local! {
+        static LAST: std::cell::Cell<Option<(u32, u32, u32)>> = const { std::cell::Cell::new(None) };
+    }
+    LAST.with(|last| match last.get() {
+        Some((f, b, out)) if f == fg && b == bg => out,
+        _ => {
+            let out = quill::theme_colorize::readable(fg, bg, quill::theme_colorize::WCAG_AA);
+            last.set(Some((fg, bg, out)));
+            out
+        }
+    })
+}
+
 #[inline]
 pub fn text_muted() -> Rgba {
+    // An applied palette's gray is held to WCAG AA on its window
+    // background (Day's #999999 on white is 2.8:1); Quill's own grays
+    // already pass.
+    if !high_contrast()
+        && let (Some(fg), Some(bg)) = (
+            super::app_theme::installed(K::WindowSubTextFg),
+            super::app_theme::installed(K::WindowBg),
+        )
+    {
+        let rgb = readable_cached(fg >> 8, bg >> 8);
+        return super::chat_palette::recolor(hex_a((rgb << 8) | (fg & 0xff)));
+    }
     pick_key(K::WindowSubTextFg, 0x8b949e, 0x59636e, Some(0xd9d9d9))
 }
 #[inline]

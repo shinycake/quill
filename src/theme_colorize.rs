@@ -176,6 +176,34 @@ pub fn contrast(a: u32, b: u32) -> f64 {
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
+/// WCAG AA for body text.
+pub const WCAG_AA: f64 = 4.5;
+
+/// `fg` (0xRRGGBB) moved in lightness away from `bg` until it reaches
+/// `min` contrast, keeping its hue; unchanged when it already does. Gray
+/// secondary text of palette themes (Day's `windowSubTextFg` #999999 on
+/// white is 2.8:1) stays readable this way.
+pub fn readable(fg: u32, bg: u32, min: f64) -> u32 {
+    if contrast(fg, bg) >= min {
+        return fg;
+    }
+    let mut hsl = Hsl::of(fg);
+    // Toward black on a light background, toward white on a dark one.
+    let darker = Hsl::of(bg).lightness >= 0.5;
+    for _ in 0..50 {
+        hsl.lightness = if darker {
+            (hsl.lightness - 0.02).max(0.0)
+        } else {
+            (hsl.lightness + 0.02).min(1.0)
+        };
+        let out = hsl.to_rgb();
+        if contrast(out, bg) >= min || hsl.lightness <= 0.0 || hsl.lightness >= 1.0 {
+            return out;
+        }
+    }
+    hsl.to_rgb()
+}
+
 /// tdesktop `kMinAcceptableContrast` for text on outgoing bubbles.
 pub const MIN_ACCEPTABLE_CONTRAST: f64 = 1.14;
 
@@ -346,6 +374,20 @@ mod tests {
         let hsl = Hsl::of(out);
         assert!((hsl.lightness - Hsl::of(0x404040).lightness).abs() < 0.01);
         assert!(hsl.hue.abs() < 1.0 && hsl.saturation > 0.9);
+    }
+
+    #[test]
+    fn readable_reaches_aa_and_keeps_good_colors() {
+        // Day's secondary text on white.
+        let out = readable(0x999999, 0xffffff, WCAG_AA);
+        assert!(contrast(out, 0xffffff) >= WCAG_AA);
+        assert!(contrast(out, 0xffffff) < 5.5, "only as dark as needed");
+        // On a dark background it goes lighter.
+        let out = readable(0x555555, 0x17212b, WCAG_AA);
+        assert!(contrast(out, 0x17212b) >= WCAG_AA);
+        assert!(Hsl::of(out).lightness > Hsl::of(0x555555).lightness);
+        // Already readable: untouched.
+        assert_eq!(readable(0x59636e, 0xffffff, WCAG_AA), 0x59636e);
     }
 
     #[test]

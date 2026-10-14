@@ -92,6 +92,34 @@ pub fn get_string(subkey: &str, name: &str) -> io::Result<Option<String>> {
     }
 }
 
+/// Read the `REG_DWORD` value `name` under `HKCU\<subkey>`; `Ok(None)` when
+/// the key or value does not exist.
+pub fn get_dword(subkey: &str, name: &str) -> io::Result<Option<u32>> {
+    use windows_sys::Win32::System::Registry::RRF_RT_REG_DWORD;
+    let subkey = wide(subkey);
+    let name = wide(name);
+    let mut value: u32 = 0;
+    let mut bytes = std::mem::size_of::<u32>() as u32;
+    // SAFETY: `value` provides `bytes` (4) writable bytes; the key and name
+    // are live NUL-terminated buffers.
+    let code = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut value as *mut u32).cast(),
+            &mut bytes,
+        )
+    };
+    match code {
+        ERROR_SUCCESS => Ok(Some(value)),
+        ERROR_FILE_NOT_FOUND => Ok(None),
+        other => Err(io::Error::from_raw_os_error(other as i32)),
+    }
+}
+
 /// Delete the value `name` under `HKCU\<subkey>`; a missing key or value is
 /// success (the postcondition holds).
 pub fn delete_value(subkey: &str, name: &str) -> io::Result<()> {

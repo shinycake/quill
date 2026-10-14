@@ -57,6 +57,11 @@ pub(super) struct StatChartView {
     /// A zoomed day's own chart: its header names the day and offers
     /// "Zoom out".
     day_title: Option<SharedString>,
+    /// US cents per currency unit of a revenue chart (tdesktop
+    /// `StatisticalChart::currencyRate`); 0 for none.
+    currency_rate: f64,
+    /// What the values are in, after the dates in the header.
+    unit: Option<SharedString>,
 }
 
 impl StatChartView {
@@ -75,7 +80,17 @@ impl StatChartView {
             zoomed: None,
             on_unzoom: None,
             day_title: None,
+            currency_rate: 0.,
+            unit: None,
         }
+    }
+
+    /// A revenue chart: the tooltip adds the amount in the currency and
+    /// in US dollars at `cents_per_unit`, and the header names `unit`.
+    pub(super) fn currency(mut self, cents_per_unit: f64, unit: Option<&'static str>) -> Self {
+        self.currency_rate = cents_per_unit;
+        self.unit = unit.map(SharedString::from);
+        self
     }
 
     /// The chart can zoom into a day: a click on a point calls `on_zoom`
@@ -161,6 +176,8 @@ impl RenderOnce for StatChartView {
                     zoomed: None,
                     on_unzoom: self.on_unzoom.clone(),
                     day_title: Some(day_title),
+                    currency_rate: self.currency_rate,
+                    unit: self.unit.clone(),
                 }
                 .into_any_element();
             }
@@ -247,6 +264,11 @@ impl StatChartView {
             (None, Some(day)) => day,
             (None, None) => chart.range_title(visible.0, visible.1).into(),
         };
+        let subtitle = match &self.unit {
+            Some(unit) if subtitle.is_empty() => unit.clone(),
+            Some(unit) => format!("{subtitle} \u{00B7} {unit}").into(),
+            None => subtitle,
+        };
         let trailing = if pie_days.is_some() {
             // The pie's "Zoom out" (tdesktop `processLocalZoom`).
             let state = state.clone();
@@ -281,6 +303,7 @@ impl StatChartView {
                     hovered: hovered.clone(),
                     zoomable,
                     height: PLOT_HEIGHT,
+                    currency_rate: self.currency_rate,
                 },
                 cx,
             ),
@@ -314,6 +337,7 @@ impl StatChartView {
                 shown,
                 visible,
                 &range,
+                chart.whole_values(),
                 cx,
             ));
         }
@@ -445,11 +469,16 @@ impl StatChartView {
             .border_color(theme.border)
             .bg(theme.popover)
             .text_color(theme.popover_foreground)
-            .children(
-                point.first().map(|p| {
-                    tooltip::body(chart, p, enabled, shares, zoomable && zoomable_point(p))
-                }),
-            )
+            .children(point.first().map(|p| {
+                tooltip::body(
+                    chart,
+                    p,
+                    enabled,
+                    shares,
+                    zoomable && zoomable_point(p),
+                    self.currency_rate,
+                )
+            }))
     }
 }
 

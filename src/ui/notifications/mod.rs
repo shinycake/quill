@@ -324,6 +324,15 @@ impl QuillApp {
             progressed = true;
             need = RedrawNeed::Now;
         }
+        // `parity:data-proxy-extras`: "Use system proxy settings".
+        let proxy = &live.driver.session.settings.proxy;
+        let wanted = proxy.prefs.use_system && proxy.enabled().is_none();
+        if live
+            .driver
+            .system_proxy_tick(&quill::system_proxy::latest(wanted))
+        {
+            progressed = true;
+        }
         // Star reactions: commit the ones whose Undo window ended, and keep
         // the toast's countdown redrawing while one is waiting.
         let paid_now = quill::state::unix_ms_now();
@@ -701,6 +710,9 @@ impl QuillApp {
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
+        // Where Quill's own notification windows would go.
+        self.notify.windows.platform = super::notify_windows::platform_of(window);
+        self.notify.windows.main_display = window.display(cx).map(|display| display.id());
         self.post_debug_notification_once(cx);
         // Inline replies and "Mark as read" need no window; what is left
         // opens a chat.
@@ -880,6 +892,8 @@ mod debug_notification;
 mod inline_reply;
 #[cfg(target_os = "linux")]
 mod linux_dbus;
+#[cfg(target_os = "linux")]
+pub(in crate::ui) use linux_dbus::linux_service_capabilities;
 mod native_extras;
 mod spawn_call_notification;
 

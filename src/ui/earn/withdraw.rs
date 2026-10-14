@@ -3,7 +3,7 @@
 //! Buy Ads buttons, and the password and security-check boxes. A
 //! withdrawal only asks TDLib for a Fragment URL and opens it.
 
-use super::revenue::{about_with_link, star_amount};
+use super::revenue::{learn_more_band, star_amount};
 use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
@@ -61,6 +61,9 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        // The password box shows the hint and "Forgot password?" from the
+        // cloud password state (tdesktop `cloudPassword().reload()`).
+        let _ = live.driver.fetch_password_state();
         if live.driver.start_withdrawal(target).is_err() {
             self.connection.status_note = "Couldn't withdraw right now".into();
         }
@@ -182,7 +185,7 @@ impl QuillApp {
                 .child(buttons);
         }
         let is_self = matches!(peer, EarnPeer::User(id) if session.my_user_id == Some(id));
-        block.child(about_with_link(
+        block.child(learn_more_band(
             "earn-learn-stars",
             if is_self {
                 "You can withdraw from 10 Stars using Fragment."
@@ -207,6 +210,27 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(Err(_)) = sent {
             self.connection.status_note = "Couldn't withdraw right now".into();
+        }
+        cx.notify();
+    }
+
+    /// "Forgot password?" (tdesktop `PasscodeBox::recoverByEmail`): with a
+    /// recovery email the code is sent at once; without one the
+    /// two-step verification page offers the reset.
+    fn forgot_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_withdraw(window, cx);
+        self.close_kit_dialog_if_done(DialogKind::EarnWithdraw, window, cx);
+        let has_email = self
+            .session()
+            .and_then(|s| s.auth_state.password_state.as_ref())
+            .is_some_and(|state| state.has_recovery_email_address);
+        self.open_twofa(cx);
+        self.goto_twofa_view(crate::ui::dialogs::callback_password::TwofaView::Recover);
+        if has_email
+            && let Some(live) = self.live.as_mut()
+            && live.driver.request_password_recovery().is_err()
+        {
+            self.connection.status_note = "Couldn't send the recovery code".into();
         }
         cx.notify();
     }
@@ -305,19 +329,50 @@ impl QuillApp {
                             "Please enter your password to collect."
                         }
                     };
+                    let hint = this
+                        .session()
+                        .and_then(|s| s.auth_state.password_state.as_ref())
+                        .map(|state| state.password_hint.clone())
+                        .filter(|hint| !hint.is_empty());
+                    // tdesktop `PasscodeBox` in check mode: the field, the
+                    // error or the hint under it, "Forgot password?", then
+                    // the description.
+                    let under = match (error, hint) {
+                        (Some(error), _) => {
+                            Some(div().text_xs().text_color(cx.theme().danger).child(error))
+                        }
+                        (None, Some(hint)) => Some(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .truncate()
+                                .child(format!("Hint: {hint}")),
+                        ),
+                        (None, None) => None,
+                    };
                     let body = div()
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(div().text_sm().text_color(muted).child(description))
                         .child(
                             Input::new(&this.earn.password)
-                                .aria_label("Password")
+                                .aria_label("Enter current password")
                                 .content_type(InputContentType::Password),
                         )
-                        .when_some(error, |d, error| {
-                            d.child(div().text_xs().text_color(cx.theme().danger).child(error))
-                        });
+                        .children(under)
+                        .child(
+                            div().child(
+                                Button::new("earn-password-forgot")
+                                    .debug_selector(|| "earn-password-forgot".into())
+                                    .label("Forgot password?")
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.forgot_withdraw_password(window, cx);
+                                    })),
+                            ),
+                        )
+                        .child(div().text_sm().text_color(muted).child(description));
                     let footer = div()
                         .flex()
                         .justify_end()

@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::proxy::ProxyKind;
 use quill::proxy::{
-    AUTO_SWITCH_TIMEOUTS, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, kind_label,
+    AUTO_SWITCH_TIMEOUTS, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, ProxyMode, kind_label,
     parse_proxy_link, proxy_link_from_text,
 };
 use quill::state::LINK_PING_ID;
@@ -253,13 +253,23 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn disable_proxy_entry(&mut self, cx: &mut Context<Self>) {
-        let _ = self.proxy_driver(|driver| driver.disable_proxy());
+    /// Radios "Disable proxy" (`use_system` false) and "Use system proxy
+    /// settings" (true).
+    fn set_proxy_mode(&mut self, use_system: bool, cx: &mut Context<Self>) {
+        let _ = self.proxy_driver(|driver| driver.set_proxy_mode(use_system));
         cx.notify();
     }
 
+    /// Deleting the proxy in use falls back to the system proxy settings,
+    /// as tdesktop's `ProxiesBoxController::setDeleted` does.
     fn delete_proxy_entry(&mut self, id: i32, cx: &mut Context<Self>) {
-        let _ = self.proxy_driver(|driver| driver.remove_proxy(id));
+        let _ = self.proxy_driver(|driver| {
+            if driver.session.settings.proxy.enabled().map(|p| p.id) == Some(id) {
+                driver.session.settings.proxy.prefs.use_system = true;
+                let _ = driver.save_proxy_prefs();
+            }
+            driver.remove_proxy(id)
+        });
         cx.notify();
     }
 
@@ -593,14 +603,14 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .cursor_pointer()
+                    // The proxy in use stays on (tdesktop `applyItem`); the
+                    // radios above switch it off.
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if this
+                        let enabled = this
                             .session()
                             .and_then(|s| s.settings.proxy.find(id))
-                            .is_some_and(|p| p.is_enabled)
-                        {
-                            this.disable_proxy_entry(cx);
-                        } else {
+                            .is_some_and(|p| p.is_enabled);
+                        if !enabled {
                             this.enable_proxy_entry(id, cx);
                         }
                     }))
@@ -678,6 +688,11 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.calls.prefs.use_proxy_for_calls);
             let enabled = state.enabled().is_some();
+            let mode = match state.mode() {
+                ProxyMode::Disabled => 0,
+                ProxyMode::System => 1,
+                ProxyMode::Custom => 2,
+            };
             let mut body = div().flex().flex_col().gap_2();
             if let Some(error) = state.error.clone() {
                 body = body.child(
@@ -690,17 +705,16 @@ impl QuillApp {
             body = body
                 .child(
                     RadioGroup::vertical("proxy-mode")
-                        .selected_index(Some(usize::from(enabled)))
+                        .selected_index(Some(mode))
                         .children([
                             Radio::new("proxy-mode-off").label("Disable proxy"),
+                            Radio::new("proxy-mode-system").label("Use system proxy settings"),
                             Radio::new("proxy-mode-custom").label("Use custom proxy"),
                         ])
-                        .on_click(cx.listener(|this, &ix, window, cx| {
-                            if ix == 0 {
-                                this.disable_proxy_entry(cx);
-                            } else {
-                                this.use_custom_proxy(window, cx);
-                            }
+                        .on_click(cx.listener(|this, &ix, window, cx| match ix {
+                            0 => this.set_proxy_mode(false, cx),
+                            1 => this.set_proxy_mode(true, cx),
+                            _ => this.use_custom_proxy(window, cx),
                         })),
                 )
                 .child(Self::switch_row(

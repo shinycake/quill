@@ -296,7 +296,34 @@ impl QuillApp {
                 )
                 .child(divider(cx));
         }
-        page.child(self.setup_bottom(setup, cx)).into_any_element()
+        page.into_any_element()
+    }
+
+    /// The setup page's pinned bottom, under its scrolling part.
+    pub(super) fn setup_footer(
+        &self,
+        bot_user_id: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let setup = self
+            .session()?
+            .payments
+            .earn
+            .setup
+            .as_ref()
+            .filter(|s| s.bot_user_id == bot_user_id)?;
+        Some(
+            div()
+                .id("earn-setup-bottom")
+                .flex_none()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .px_4()
+                .pt_3()
+                .pb_4()
+                .child(self.setup_bottom(setup, cx))
+                .into_any_element(),
+        )
     }
 
     /// tdesktop `MakeSliderWithTopTag`: the lowest and highest commission
