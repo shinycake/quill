@@ -7,8 +7,9 @@
 //! `quill::sticker_image`; this is the editor state and its tools.
 
 use super::app::QuillApp;
-use super::photo_edit::{CropRect, Placed, overlay_item, render};
-use super::photo_editor::{EditorPurpose, PhotoEditor, preview_of};
+use super::photo_edit::{CropRect, Placed, Stroke, overlay_item, render};
+use super::photo_editor::{EditorPurpose, HANDLE_GRAB, PhotoEditor, preview_of};
+use super::photo_editor_items::ItemDrag;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
@@ -103,27 +104,72 @@ impl PhotoEditor {
     }
 
     /// A press on the canvas in Crop mode moves or resizes the picked
-    /// image (its handle is the bottom-right corner).
-    pub(super) fn press_base(&mut self, position: (f32, f32)) {
-        self.selected = Some(0);
-        self.press_item(position);
-        if self.item_drag.is_none() {
-            self.selected = None;
+    /// image only (its handle is the bottom-right corner); stickers over
+    /// it are left to the Stickers mode.
+    pub(super) fn press_base(&mut self, (x, y): (f32, f32)) {
+        let (Some(bounds), Some((base, _))) = (self.image_bounds.get(), self.placed.first()) else {
+            return;
+        };
+        let (scale_x, scale_y) = (bounds.size.width / px(1.), bounds.size.height / px(1.));
+        let (left, top, w, h) = self.item_rect(base);
+        let on_handle = ((left + w - x) * scale_x).abs() <= HANDLE_GRAB
+            && ((top + h - y) * scale_y).abs() <= HANDLE_GRAB;
+        let inside = (left..left + w).contains(&x) && (top..top + h).contains(&y);
+        self.item_drag = if on_handle {
+            let distance = ((x - base.center.0) * scale_x).hypot((y - base.center.1) * scale_y);
+            Some(ItemDrag::Resize {
+                start_width: base.width,
+                start_distance: distance.max(1.0),
+            })
+        } else if inside {
+            Some(ItemDrag::Move {
+                from: (x, y),
+                start: base.center,
+            })
+        } else {
+            None
+        };
+        self.selected = self.item_drag.is_some().then_some(0);
+    }
+
+    /// What "Done" renders, without the editor's UI handles, so it can
+    /// run off the UI thread.
+    pub(super) fn set_render_job(&self) -> SetRenderJob {
+        let mut items = self.placed.iter().map(|(item, _)| item.clone());
+        let base = self.base_item.then(|| items.next()).flatten();
+        SetRenderJob {
+            canvas: self.working.clone(),
+            base,
+            rest: items.collect(),
+            strokes: self.strokes.clone(),
+            crop: self.crop,
         }
     }
 
     /// The result: the picked image drawn on the canvas first, then the
     /// strokes and the other items, cropped.
+    #[cfg(test)]
     pub(super) fn render_set_image(&self) -> RgbaImage {
-        let mut canvas = self.working.clone();
-        let mut items = self.placed.iter().map(|(item, _)| item);
-        if self.base_item
-            && let Some(base) = items.next()
-        {
+        self.set_render_job().render()
+    }
+}
+
+/// The Set mode's canvas, items and strokes, ready to render anywhere.
+pub(super) struct SetRenderJob {
+    canvas: RgbaImage,
+    base: Option<Placed>,
+    rest: Vec<Placed>,
+    strokes: Vec<Stroke>,
+    crop: CropRect,
+}
+
+impl SetRenderJob {
+    pub(super) fn render(&self) -> RgbaImage {
+        let mut canvas = self.canvas.clone();
+        if let Some(base) = &self.base {
             overlay_item(&mut canvas, base);
         }
-        let rest: Vec<Placed> = items.cloned().collect();
-        render(&canvas, self.crop, &self.strokes, &rest)
+        render(&canvas, self.crop, &self.strokes, &self.rest)
     }
 }
 

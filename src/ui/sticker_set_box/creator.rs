@@ -211,30 +211,41 @@ impl QuillApp {
     }
 
     /// The editor's "Done" for a set image: fit it to the set's side, cut
-    /// the corners, write it, and ask for its emoji.
+    /// the corners and write it off the UI thread, then ask for its emoji.
     pub(in crate::ui) fn finish_set_image(
         &mut self,
         set_id: i64,
         kind: SetKind,
-        edited: &image::RgbaImage,
+        job: super::super::photo_editor_set::SetRenderJob,
         corners: Corners,
         cx: &mut Context<Self>,
     ) {
-        let prepared = prepared_sticker_image(edited, kind.image_side(), corners);
-        match super::super::edit_media_tools::write_edited_png(&prepared) {
-            Some(path) => {
-                self.sticker_box.create = Some(CreateSticker {
-                    set_id,
-                    kind,
-                    preview: Some(path.clone()),
-                    path,
-                    format: StickerFormat::Webp,
-                    emojis: Vec::new(),
-                });
-            }
-            None => self.connection.status_note = "Couldn't save the image.".into(),
-        }
-        cx.notify();
+        let worker = cx.background_spawn(async move {
+            let prepared = prepared_sticker_image(&job.render(), kind.image_side(), corners);
+            super::super::edit_media_tools::write_edited_png(&prepared)
+        });
+        cx.spawn(async move |this, cx| {
+            let written = worker.await;
+            let _ = this.update(cx, |this, cx| {
+                match written {
+                    Some(path) => {
+                        this.sticker_box.discard_create();
+                        this.sticker_box.create = Some(CreateSticker {
+                            set_id,
+                            kind,
+                            preview: Some(path.clone()),
+                            path,
+                            format: StickerFormat::Webp,
+                            emojis: Vec::new(),
+                            video: None,
+                        });
+                    }
+                    None => this.connection.status_note = "Couldn't save the image.".into(),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// An emoji in the "New Sticker" box toggles on or off (at most seven).
@@ -249,8 +260,13 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Done" in the "New Sticker" box: upload and add.
-    pub(super) fn confirm_create_sticker(&mut self, cx: &mut Context<Self>) -> bool {
+    /// "Done" in the "New Sticker" box: upload and add; a video is encoded
+    /// first (`video_create.rs`).
+    pub(super) fn confirm_create_sticker(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(create) = self.sticker_box.create.clone() else {
             return false;
         };
@@ -259,6 +275,15 @@ impl QuillApp {
             cx.notify();
             return false;
         }
+        if let Some(job) = create.video.clone() {
+            return self.encode_created_video(create, job, window, cx);
+        }
+        self.upload_created_sticker(create, cx);
+        true
+    }
+
+    /// Hand the finished file to TDLib and leave the box.
+    pub(super) fn upload_created_sticker(&mut self, create: CreateSticker, cx: &mut Context<Self>) {
         let emojis = joined_emojis(&create.emojis);
         if let Some(live) = self.live.as_mut() {
             let path = create.path.to_string_lossy().into_owned();
@@ -273,8 +298,9 @@ impl QuillApp {
             self.connection.status_note = "demo — stickers upload with live TDLib".into();
         }
         self.sticker_box.create = None;
+        self.sticker_box.encoding = None;
+        create.uploaded();
         cx.notify();
-        true
     }
 
     /// "Add an Existing Sticker" / "Adapt from a Sticker": the chooser.

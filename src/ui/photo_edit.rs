@@ -173,15 +173,43 @@ pub fn render(
     image::imageops::crop_imm(&canvas, x, y, w, h).to_image()
 }
 
-/// Draw a placed item onto the canvas at its size and place.
+/// Draw a placed item onto the canvas at its size and place. Only the
+/// part inside the canvas is scaled, so a picture zoomed far past the
+/// edges costs no more than the canvas itself.
 pub fn overlay_item(canvas: &mut RgbaImage, item: &Placed) {
     let (width, height) = canvas.dimensions();
-    let w = (item.width * width as f32).round().max(1.0) as u32;
-    let h = (w as f32 * item.aspect()).round().max(1.0) as u32;
-    let picture = image::imageops::resize(&item.image, w, h, image::imageops::FilterType::Triangle);
+    let (src_w, src_h) = item.image.dimensions();
+    if width == 0 || height == 0 || src_w == 0 || src_h == 0 {
+        return;
+    }
+    let w = (item.width * width as f32).round().max(1.0) as i64;
+    let h = (w as f32 * item.aspect()).round().max(1.0) as i64;
     let x = (item.center.0 * width as f32 - w as f32 / 2.0).round() as i64;
     let y = (item.center.1 * height as f32 - h as f32 / 2.0).round() as i64;
-    image::imageops::overlay(canvas, &picture, x, y);
+    // The visible rectangle, on the canvas and on the picture.
+    let (x0, y0) = (x.max(0), y.max(0));
+    let (x1, y1) = (
+        (x + w).min(i64::from(width)),
+        (y + h).min(i64::from(height)),
+    );
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let part = |from: i64, total: i64, source: u32| -> u32 {
+        ((from as f64 / total as f64) * f64::from(source)).floor() as u32
+    };
+    let sx = part(x0 - x, w, src_w).min(src_w - 1);
+    let sy = part(y0 - y, h, src_h).min(src_h - 1);
+    let sw = (part(x1 - x, w, src_w).max(sx + 1) - sx).min(src_w - sx);
+    let sh = (part(y1 - y, h, src_h).max(sy + 1) - sy).min(src_h - sy);
+    let visible = image::imageops::crop_imm(&item.image, sx, sy, sw, sh);
+    let picture = image::imageops::resize(
+        &*visible,
+        (x1 - x0) as u32,
+        (y1 - y0) as u32,
+        image::imageops::FilterType::Triangle,
+    );
+    image::imageops::overlay(canvas, &picture, x0, y0);
 }
 
 /// A filled, anti-aliased disc blended over the image.

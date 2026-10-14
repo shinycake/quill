@@ -200,6 +200,16 @@ impl QuillApp {
         {
             return;
         }
+        let for_set = self.video_editor_for_set();
+        // A set's source the editor can't take: the editor goes and the
+        // set box toasts, as tdesktop's `lng_bad_video` does.
+        if for_set && !info.is_some_and(|info| quill::sticker_video::accepts_source(&info)) {
+            self.close_video_editor(cx);
+            self.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
+            self.connection.status_note = quill::sticker_video::BAD_VIDEO_NOTE.into();
+            cx.notify();
+            return;
+        }
         let Some(info) = info else {
             if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
                 editor.note = Some("This isn't a video Quill can read.".into());
@@ -207,14 +217,6 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        let for_set = self.video_editor_for_set();
-        if for_set && !quill::sticker_video::accepts_source(&info) {
-            if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-                editor.note = Some(quill::sticker_video::BAD_VIDEO_NOTE.into());
-            }
-            cx.notify();
-            return;
-        }
         // An edit that only asked for a GIF has no range yet.
         let edits = if for_set {
             quill::sticker_video::initial_edits(&info)
@@ -469,7 +471,7 @@ impl QuillApp {
             return true;
         };
         if let EditorTarget::Set { set_id, kind } = editor.target {
-            return self.finish_set_video_editor(set_id, kind, window, cx);
+            return self.finish_set_video_editor(set_id, kind, cx);
         }
         let (Some(info), false) = (editor.info, editor.busy) else {
             return false;

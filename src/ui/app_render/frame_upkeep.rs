@@ -23,6 +23,8 @@ impl QuillApp {
         // The chat windows open at the last run come back once the
         // account is ready (`chat_window::saved`).
         self.restore_chat_windows(window, cx);
+        // A video chosen for an owned set finished downloading: its editor.
+        self.sticker_box_frame_upkeep(window, cx);
         // Revenue and affiliate pages: the amount field, the setup
         // sliders, program photos and pages, profile balances.
         self.earn_frame_upkeep(window, cx);

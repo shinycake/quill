@@ -266,7 +266,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::StickerCreate, |this, _, cx| {
-                this.sticker_box.create = None;
+                this.sticker_box.discard_create();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -276,6 +276,7 @@ impl QuillApp {
                     .on_close(on_close);
             };
             let kind = create.kind;
+            let encoding = this.sticker_box.encoding.is_some();
             let preview = this.create_preview_path();
             let search = this.sticker_box.emoji_search.clone();
             let query = search.read(cx).value().trim().to_string();
@@ -365,7 +366,7 @@ impl QuillApp {
                                 .label("Cancel")
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.sticker_box.create = None;
+                                    this.sticker_box.discard_create();
                                     this.close_kit_dialog_if_done(
                                         DialogKind::StickerCreate,
                                         window,
@@ -375,11 +376,15 @@ impl QuillApp {
                                 })),
                         )
                         .child(
+                            // A video encodes here (tdesktop's box does
+                            // too); the button waits until it is done.
                             Button::new("sticker-create-done")
                                 .label("Done")
                                 .primary()
+                                .loading(encoding)
+                                .disabled(encoding)
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    if this.confirm_create_sticker(cx) {
+                                    if this.confirm_create_sticker(window, cx) {
                                         this.close_kit_dialog_if_done(
                                             DialogKind::StickerCreate,
                                             window,
@@ -507,8 +512,13 @@ impl QuillApp {
                             .gap_2()
                             .child(div().flex().flex_wrap().gap_1().children(cells))
                             .when(!gifs.is_empty(), |body| {
-                                body.child(div().text_xs().text_color(text_muted()).child("GIFs"))
-                                    .child(div().flex().flex_wrap().gap_1().children(gifs))
+                                body.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(text_muted())
+                                        .child(quill::sticker_video::GIFS_CAPTION),
+                                )
+                                .child(div().flex().flex_wrap().gap_1().children(gifs))
                             })
                             .into_any_element()
                     })

@@ -280,12 +280,16 @@ fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext)
     assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open));
     // Done in the editor hands the image to the "New Sticker" box.
     app.update(vcx, |app, cx| {
-        let image = image::RgbaImage::from_pixel(300, 300, image::Rgba([10, 20, 30, 255]));
-        app.viewer.photo_editor = None;
+        let job = app
+            .viewer
+            .photo_editor
+            .take()
+            .expect("editor")
+            .set_render_job();
         app.finish_set_image(
             78,
             quill::sticker_set_box::SetKind::Stickers,
-            &image,
+            job,
             quill::sticker_image::Corners::None,
             cx,
         );
@@ -334,7 +338,14 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
     item.format = StickerFormat::Webm;
     item.emoji = "🔥".into();
     vcx.update(|window, cx| {
-        app.update(cx, |app, cx| app.pick_existing_sticker(&item, window, cx));
+        app.update(cx, |app, cx| {
+            app.pick_existing_sticker(&item, window, cx);
+            // The stub isn't a video: the real probe's answer is stale
+            // (the test answers the probe itself below).
+            if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut() {
+                editor.serial += 1;
+            }
+        });
     });
     frames(vcx);
     // The video editor (tdesktop `RunVideoEditorAndCreate`) replaces the
@@ -376,12 +387,176 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
     assert_eq!(edits.crop.map(|crop| (crop.w, crop.h)), Some((750, 1000)));
     assert_eq!(emoji.as_deref(), Some("🔥"));
     assert!(vcx.update(|window, _| window.try_find("video-editor-gif").is_none()));
-    assert!(vcx.update(|window, _| window.try_find("video-editor-done").is_some()));
-    // Cancel returns to the set box.
-    vcx.update(|window, cx| window.click("video-editor-cancel", cx));
+    // Done: the "New Emoji" box opens with the edits waiting to encode and
+    // the sticker's emoji chosen (tdesktop's `CreateMediaBox`).
+    vcx.update(|window, cx| window.click("video-editor-done", cx));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| {
         app.composer_ui.send_box.video_editor.is_none()
+    }));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerCreate)));
+    let create = app
+        .read_with(vcx, |app, _| app.sticker_box.create.clone())
+        .expect("create");
+    assert_eq!(create.format, StickerFormat::Webm);
+    assert_eq!(create.emojis, vec!["🔥".to_string()]);
+    let job = create.video.expect("the encode waits for Done");
+    assert_eq!((job.edits.from_ms, job.edits.till_ms), (0, 3000));
+    assert_eq!(job.info.width, 640);
+    // Cancel in the box drops it and returns to the set box.
+    vcx.update(|window, cx| window.click("sticker-create-cancel", cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.create.is_none()
+        && app.sticker_box.encoding.is_none()));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerSet)));
+}
+
+#[gpui_kit::test]
+fn a_video_the_editor_cannot_take_closes_it_with_the_bad_video_toast(cx: &mut TestAppContext) {
+    use quill::sticker_set_box::SetKind;
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let clip = std::path::PathBuf::from("not-a-video.webm");
+            app.open_set_video_editor(78, SetKind::Stickers, clip, None, window, cx);
+        });
+    });
+    // The editor opens, then the probe of the missing file fails.
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::VideoEditor)));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| {
+        app.composer_ui.send_box.video_editor.is_none()
+            && app.connection.status_note.as_str() == quill::sticker_video::BAD_VIDEO_NOTE
+    }));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerSet)));
+}
+
+#[gpui_kit::test]
+fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting};
+    use quill::sticker_set_box::SetKind;
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let pick = PickExisting {
+        set_id: 78,
+        kind: SetKind::Stickers,
+        adapt: false,
+    };
+    // A demo sticker whose file is on disk stands in for the download
+    // that just finished.
+    let file_id = app
+        .read_with(vcx, |app, _| {
+            app.demo_session
+                .as_ref()
+                .and_then(|s| s.media.media_library.set_stickers.get(&78))
+                .and_then(|stickers| stickers.first().map(|item| item.file_id))
+        })
+        .expect("a demo sticker");
+    app.update(vcx, |app, cx| {
+        app.sticker_box.pending_video = Some(PendingVideo {
+            pick,
+            file_id,
+            emoji: Some("🎉".into()),
+        });
+        cx.notify();
+    });
+    // The next frame opens the editor; the stub isn't a video, so the
+    // real probe's answer is made stale.
+    vcx.update(|window, cx| window.render_frame(cx));
+    app.update(vcx, |app, _| {
+        if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut() {
+            editor.serial += 1;
+        }
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.pending_video.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.video_editor_for_set()));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::VideoEditor)));
+    assert_eq!(
+        app.read_with(vcx, |app, _| app
+            .composer_ui
+            .send_box
+            .video_editor
+            .as_ref()
+            .and_then(|editor| editor.set_emoji.clone())),
+        Some("🎉".to_string())
+    );
+    vcx.update(|window, cx| window.click("video-editor-cancel", cx));
+    frames(vcx);
+}
+
+#[gpui_kit::test]
+fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::PickExisting;
+    use quill::ids::FileId;
+    use quill::sticker_set_box::SetKind;
+    use quill::telegram::envelope::AnimationItem;
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.gifs.animations.push(AnimationItem {
+                duration: 2,
+                width: 320,
+                height: 240,
+                file_name: "dance.mp4".into(),
+                mime_type: "video/mp4".into(),
+                file_id: FileId(9_001),
+                thumb_file_id: None,
+                thumb_width: 0,
+                thumb_height: 0,
+            });
+        }
+        app.sticker_box.pick = Some(PickExisting {
+            set_id: 78,
+            kind: SetKind::Stickers,
+            adapt: false,
+        });
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerPick)));
+    let offered = app.read_with(vcx, |app, _| {
+        app.sticker_box
+            .pick
+            .map(|pick| app.pick_gif_candidates(pick).len())
+    });
+    assert_eq!(offered, Some(1));
+    // "Adapt from a Sticker" is stickers only.
+    let adapt = PickExisting {
+        set_id: 78,
+        kind: SetKind::Emoji,
+        adapt: true,
+    };
+    assert!(app.read_with(vcx, |app, _| app.pick_gif_candidates(adapt).is_empty()));
+    // Choosing the GIF (its file isn't here) closes the chooser and waits
+    // for the download.
+    let animation = app
+        .read_with(vcx, |app, _| {
+            app.sticker_box
+                .pick
+                .and_then(|pick| app.pick_gif_candidates(pick).into_iter().next())
+        })
+        .expect("the GIF");
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.pick_gif_for_set(&animation, window, cx));
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| {
+        app.sticker_box.pick.is_none()
+            && app
+                .sticker_box
+                .pending_video
+                .as_ref()
+                .is_some_and(|pending| pending.file_id == FileId(9_001))
     }));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerSet)));
@@ -393,6 +568,7 @@ fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppCo
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         app.sticker_box.create = Some(super::state::CreateSticker {
+            video: None,
             set_id: 78,
             kind: quill::sticker_set_box::SetKind::Stickers,
             path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),

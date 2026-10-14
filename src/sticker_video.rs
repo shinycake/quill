@@ -10,6 +10,7 @@
 use crate::sticker_set_box::SetKind;
 use crate::video_edit::{Crop, VideoEdits, VideoSource, turned_size};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Longest video sticker (`kVideoStickerMaxDuration`).
 pub const MAX_DURATION_MS: i64 = 3000;
@@ -28,8 +29,10 @@ pub const CRF_LADDER: [u32; 6] = [28, 34, 40, 47, 55, 63];
 /// The toast when the source can't be read or the result won't fit
 /// (`lng_bad_video`, with the app's own name).
 pub const BAD_VIDEO_NOTE: &str = "Sorry, Quill can't process that type of video.";
-/// The video editor's wait note while the sticker is encoded.
+/// The "New Sticker" box's wait note while the sticker is encoded.
 pub const ENCODING_NOTE: &str = "Preparing the video…";
+/// The caption over the saved GIFs in the existing-sticker chooser.
+pub const GIFS_CAPTION: &str = "GIFs";
 
 /// The largest file the server takes for a set of this kind
 /// (`MaxWebmBytesForType`).
@@ -40,10 +43,11 @@ pub fn max_webm_bytes(kind: SetKind) -> u64 {
     }
 }
 
-/// A probed source the sticker editor can open: it has frames and lasts at
-/// least the shortest sticker.
+/// A probed source the sticker editor can open: it has frames and some
+/// length (`FileInfo::valid`; a clip shorter than [`MIN_DURATION_MS`] is
+/// taken whole, as tdesktop's timeline clamps the floor to the clip).
 pub fn accepts_source(source: &VideoSource) -> bool {
-    source.width > 0 && source.height > 0 && source.duration_ms >= MIN_DURATION_MS
+    source.width > 0 && source.height > 0 && source.duration_ms > 0
 }
 
 /// The largest centered square of a `width`×`height` frame, in thousandths
@@ -196,15 +200,29 @@ pub enum EncodeError {
     FfmpegMissing(String),
     /// ffmpeg refused the file, or no quality step fits the size limit.
     BadVideo,
+    /// The box was closed while encoding; nothing to tell.
+    Cancelled,
 }
 
 impl EncodeError {
-    pub fn note(&self) -> String {
+    /// The toast for the failure; none for a cancel.
+    pub fn note(&self) -> Option<String> {
         match self {
-            Self::FfmpegMissing(message) => message.clone(),
-            Self::BadVideo => BAD_VIDEO_NOTE.to_string(),
+            Self::FfmpegMissing(message) => Some(message.clone()),
+            Self::BadVideo => Some(BAD_VIDEO_NOTE.to_string()),
+            Self::Cancelled => None,
         }
     }
+}
+
+/// The video editor's result, waiting in the "New Sticker" box for its
+/// emoji and "Done" (tdesktop's `CreateMediaBox` encodes on Done too, with
+/// a cancel flag).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoStickerJob {
+    pub source: PathBuf,
+    pub edits: VideoEdits,
+    pub info: VideoSource,
 }
 
 /// The encoded sticker.
@@ -229,12 +247,14 @@ fn stamp() -> u128 {
 
 /// Encode `source_path` with `edits` for a set of `kind`, walking the
 /// quality ladder until the file is small enough (`RunWebmSticker`).
-/// Blocks; call it off the UI thread.
+/// `cancelled` is read between quality steps; a step already running
+/// finishes. Blocks; call it off the UI thread.
 pub fn encode_sticker(
     source_path: &Path,
     edits: &VideoEdits,
     source: &VideoSource,
     kind: SetKind,
+    cancelled: &AtomicBool,
 ) -> Result<EncodedSticker, EncodeError> {
     if !crate::media_tools::is_installed("ffmpeg") {
         return Err(EncodeError::FfmpegMissing(
@@ -249,8 +269,12 @@ pub fn encode_sticker(
     let out = output.to_string_lossy();
     let mut last = Err(EncodeError::BadVideo);
     for crf in CRF_LADDER {
+        if cancelled.load(Ordering::Relaxed) {
+            last = Err(EncodeError::Cancelled);
+            break;
+        }
         let args = webm_args(&input, &out, edits, source, kind.image_side(), crf);
-        let ran = crate::media_tools::command("ffmpeg")
+        let ran = crate::media_tools::quiet_command("ffmpeg")
             .args(&args)
             .output()
             .is_ok_and(|result| result.status.success());
@@ -293,8 +317,17 @@ mod tests {
         assert_eq!(max_webm_bytes(SetKind::Emoji), 65_536);
         assert_eq!(CRF_LADDER[0], 28);
         assert!(accepts_source(&source(640, 480, 200)));
-        assert!(!accepts_source(&source(640, 480, 199)));
+        assert!(
+            accepts_source(&source(640, 480, 120)),
+            "short clips are taken whole"
+        );
+        assert!(!accepts_source(&source(640, 480, 0)));
         assert!(!accepts_source(&source(0, 480, 2000)));
+        assert_eq!(EncodeError::Cancelled.note(), None);
+        assert_eq!(
+            EncodeError::BadVideo.note().as_deref(),
+            Some(BAD_VIDEO_NOTE)
+        );
     }
 
     #[test]
@@ -413,10 +446,36 @@ mod tests {
         assert!(!plain.join(" ").contains("crop="));
     }
 
+    /// This ffmpeg can encode VP9 (`-encoders` lists `libvpx-vp9`).
+    fn has_vp9_encoder() -> bool {
+        crate::media_tools::quiet_command("ffmpeg")
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .is_ok_and(|out| {
+                out.status.success() && String::from_utf8_lossy(&out.stdout).contains("libvpx-vp9")
+            })
+    }
+
+    #[test]
+    fn a_cancelled_encode_does_nothing() {
+        let cancelled = AtomicBool::new(true);
+        let result = encode_sticker(
+            Path::new("missing.webm"),
+            &VideoEdits::full(1000),
+            &source(100, 100, 1000),
+            SetKind::Stickers,
+            &cancelled,
+        );
+        assert!(matches!(
+            result,
+            Err(EncodeError::Cancelled | EncodeError::FfmpegMissing(_))
+        ));
+    }
+
     #[test]
     fn ffmpeg_encodes_a_generated_clip_into_a_small_webm_sticker() {
-        // Skipped where ffmpeg (with libvpx-vp9) isn't installed.
-        if !crate::media_tools::is_installed("ffmpeg") {
+        // Skipped where ffmpeg can't encode VP9 (Linux CI has no ffmpeg).
+        if !crate::media_tools::is_installed("ffmpeg") || !has_vp9_encoder() {
             return;
         }
         let dir = std::env::temp_dir().join(format!("quill-sticker-video-{}", std::process::id()));
@@ -444,12 +503,9 @@ mod tests {
             return;
         };
         let edits = initial_edits(&probed);
-        let encoded = match encode_sticker(&clip, &edits, &probed, SetKind::Emoji) {
-            Ok(encoded) => encoded,
-            // A build of ffmpeg without libvpx: nothing to check here.
-            Err(EncodeError::BadVideo) => return,
-            Err(other) => panic!("{other:?}"),
-        };
+        let cancelled = AtomicBool::new(false);
+        let encoded = encode_sticker(&clip, &edits, &probed, SetKind::Emoji, &cancelled)
+            .expect("a VP9 ffmpeg encodes the clip");
         assert!(encoded.bytes <= MAX_EMOJI_WEBM_BYTES);
         assert_eq!(encoded.duration_ms, 3000);
         let result = crate::video_edit::probe_source(&encoded.path).expect("probe result");

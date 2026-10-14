@@ -323,22 +323,25 @@ impl QuillApp {
         let Some(editor) = self.viewer.photo_editor.take() else {
             return;
         };
-        if let EditorPurpose::Set { set_id, kind } = editor.purpose {
-            let edited = editor.render_set_image();
-            self.finish_set_image(set_id, kind, &edited, editor.corners, cx);
-            return;
-        }
-        let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
-        let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
         let index = match editor.purpose {
             EditorPurpose::Attachment(index) => index,
             EditorPurpose::MessageEdit => {
+                let placed: Vec<Placed> =
+                    editor.placed.iter().map(|(item, _)| item.clone()).collect();
+                let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
                 let saved = super::edit_media_tools::write_edited_png(&edited);
                 self.finish_edit_image(saved, cx);
                 return;
             }
-            EditorPurpose::Set { .. } => return,
+            EditorPurpose::Set { set_id, kind } => {
+                // The canvas render and the fit run off the UI thread.
+                let job = editor.set_render_job();
+                self.finish_set_image(set_id, kind, job, editor.corners, cx);
+                return;
+            }
         };
+        let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
+        let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
         let saved = super::edit_media_tools::write_edited_png(&edited);
         match (saved, self.composer_ui.pending_attachments.get_mut(index)) {
             (Some(path), Some(attachment)) => {
@@ -389,7 +392,10 @@ impl QuillApp {
             .iter()
             .map(|(item, preview)| (editor.item_rect(item), preview.clone()))
             .collect();
-        let selected_item = editor.selected.filter(|_| mode == EditorMode::Stickers);
+        // Set mode: the picked image shows its handle while cropping too.
+        let selected_item = editor.selected.filter(|_| {
+            mode == EditorMode::Stickers || (mode == EditorMode::Crop && editor.base_item)
+        });
         let base_item = editor.base_item;
         let corner_multiplier = editor.corners.multiplier();
         let surface = canvas(
@@ -417,52 +423,56 @@ impl QuillApp {
                     )
                 };
                 let side = fit_size.width.min(fit_size.height) / px(1.);
-                // Set mode: the picked image is the ground the drawing and
-                // the other items go on.
-                if base_item && let Some(((left, top, w, h), picture)) = items.first() {
-                    let item_bounds =
-                        Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
-                    paint_editor_item(
-                        window,
-                        item_bounds,
-                        picture.clone(),
-                        selected_item == Some(0),
-                    );
-                }
-                for stroke in &strokes {
-                    let color = Rgba {
-                        r: f32::from(stroke.color[0]) / 255.,
-                        g: f32::from(stroke.color[1]) / 255.,
-                        b: f32::from(stroke.color[2]) / 255.,
-                        a: 1.,
-                    };
-                    let mut path = PathBuilder::stroke(px((stroke.width * side).max(1.)));
-                    let mut points = stroke.points.iter().copied().map(at);
-                    if let Some(first) = points.next() {
-                        path.move_to(first);
-                        path.line_to(point(first.x + px(0.1), first.y));
-                        for point in points {
-                            path.line_to(point);
+                // Items and strokes may reach past the picture; they are
+                // cut at its edge, as the render cuts them.
+                window.with_content_mask(Some(ContentMask { bounds: fit }), |window| {
+                    // Set mode: the picked image is the ground the drawing and
+                    // the other items go on.
+                    if base_item && let Some(((left, top, w, h), picture)) = items.first() {
+                        let item_bounds =
+                            Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
+                        paint_editor_item(
+                            window,
+                            item_bounds,
+                            picture.clone(),
+                            selected_item == Some(0),
+                        );
+                    }
+                    for stroke in &strokes {
+                        let color = Rgba {
+                            r: f32::from(stroke.color[0]) / 255.,
+                            g: f32::from(stroke.color[1]) / 255.,
+                            b: f32::from(stroke.color[2]) / 255.,
+                            a: 1.,
+                        };
+                        let mut path = PathBuilder::stroke(px((stroke.width * side).max(1.)));
+                        let mut points = stroke.points.iter().copied().map(at);
+                        if let Some(first) = points.next() {
+                            path.move_to(first);
+                            path.line_to(point(first.x + px(0.1), first.y));
+                            for point in points {
+                                path.line_to(point);
+                            }
+                        }
+                        if let Ok(path) = path.build() {
+                            window.paint_path(path, color);
                         }
                     }
-                    if let Ok(path) = path.build() {
-                        window.paint_path(path, color);
+                    // Stickers and emoji over the drawing; the selected one gets
+                    // a frame and a resize handle.
+                    for (index, ((left, top, w, h), picture)) in
+                        items.iter().enumerate().skip(usize::from(base_item))
+                    {
+                        let item_bounds =
+                            Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
+                        paint_editor_item(
+                            window,
+                            item_bounds,
+                            picture.clone(),
+                            selected_item == Some(index),
+                        );
                     }
-                }
-                // Stickers and emoji over the drawing; the selected one gets
-                // a frame and a resize handle.
-                for (index, ((left, top, w, h), picture)) in
-                    items.iter().enumerate().skip(usize::from(base_item))
-                {
-                    let item_bounds =
-                        Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
-                    paint_editor_item(
-                        window,
-                        item_bounds,
-                        picture.clone(),
-                        selected_item == Some(index),
-                    );
-                }
+                });
                 // Outside the crop is shaded in all modes, so editing
                 // shows what will be sent; handles only while cropping.
                 {

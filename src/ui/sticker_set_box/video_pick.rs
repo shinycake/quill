@@ -3,7 +3,7 @@
 //! chosen in the existing-sticker chooser (`handleChosenGifs` →
 //! `AdaptGifToSet`). Both open the video editor on the file, which encodes
 //! the sticker and hands it to the "New Sticker" box.
-use super::state::PickExisting;
+use super::state::{PendingVideo, PickExisting};
 use super::*;
 use quill::ids::FileId;
 use quill::telegram::envelope::AnimationItem;
@@ -60,7 +60,9 @@ impl QuillApp {
 
     /// Open the video editor on the chosen file for the set, with `emoji`
     /// already picked (a sticker's own). A file not downloaded yet is
-    /// fetched, and the chooser stays open for a second pick.
+    /// fetched and the editor opens when it arrives
+    /// (`sticker_box_frame_upkeep`); the chooser closes either way, as
+    /// tdesktop's panel hides on the pick.
     pub(super) fn pick_video_for_set(
         &mut self,
         pick: PickExisting,
@@ -69,16 +71,19 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.sticker_box.pick = None;
         let Some(path) = self.local_media_path(file_id) else {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.download_file(file_id, 16);
             }
-            self.connection.status_note =
-                "Downloading the video… choose it again once it has arrived.".into();
+            self.sticker_box.pending_video = Some(PendingVideo {
+                pick,
+                file_id,
+                emoji,
+            });
             cx.notify();
             return;
         };
-        self.sticker_box.pick = None;
         self.open_set_video_editor(
             pick.set_id,
             pick.kind,

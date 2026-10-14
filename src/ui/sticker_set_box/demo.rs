@@ -114,6 +114,7 @@ impl QuillApp {
                         crate::ui::demo::demo_thumb_png_path(),
                     )),
                     emojis: vec!["😀".into(), "🎨".into()],
+                    video: None,
                 });
             }
             // The sticker editor on a wide image: the transparent canvas,

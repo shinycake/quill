@@ -111,18 +111,29 @@ deleted).
 
 **Video stickers.** "Adapt from a Sticker" on a WEBM sticker, and a saved
 GIF picked in the "Add an Existing Sticker / Emoji" chooser (tdesktop's
-panel has a GIFs tab there, `handleChosenGifs` → `AdaptGifToSet`), open
+panel has a GIFs tab there, `handleChosenGifs` → `AdaptGifToSet`; the
+chooser lists them under a "GIFs" caption, none while adapting), open
 Quill's video editor with a set target (`RunVideoEditorAndCreate` with
 `VideoStickerEditorData`): the range starts at the first three seconds and
-can't leave 200 ms..3 s, the crop starts as the centered square and stays
-square in pixels, there is no quality or GIF choice, rotate resets to the
-turned square. "Done" encodes the sticker off the UI thread and the "New
-Sticker" / "New Emoji" box opens with a frame of the result and the
-sticker's own emoji pre-chosen; "Done" there uploads it with
-`stickerFormatWebm`. A file that isn't downloaded yet is fetched and the
-chooser stays open for a second pick. A source shorter than 200 ms, a file
-ffmpeg can't read, or a result that won't fit any quality step toasts
-"Sorry, Quill can't process that type of video." (`lng_bad_video`).
+can't leave 200 ms..3 s (a shorter clip is taken whole, as tdesktop's
+timeline clamps the floor to the clip), the crop starts as the centered
+square and stays square in pixels, there is no quality or GIF choice,
+rotate resets to the turned square. "Done" in the editor opens the "New
+Sticker" / "New Emoji" box right away with the editor's cover frame and the
+sticker's own emoji pre-chosen (`ShowVideoEditorThenCreate` →
+`CreateMediaBox`); "Done" there encodes the sticker off the UI thread
+(the button shows its spinner and the note "Preparing the video…"), then
+uploads it with `stickerFormatWebm`. Closing the box sets the encoder's
+cancel flag, read between quality steps (a step already running finishes,
+as tdesktop's does). A file that isn't downloaded yet is fetched, the
+chooser closes (tdesktop's panel hides on the pick) and the editor opens
+on the file when it arrives (`LoadDocumentMedia`; checked each frame in
+`sticker_box_frame_upkeep`). A file ffmpeg can't read closes the editor
+and toasts "Sorry, Quill can't process that type of video." (`lng_bad_video`)
+over the set box; a result that won't fit any quality step toasts the same
+in the box. The editor's files (the cover frame, the PNG, the WEBM) are
+removed when the box is dismissed; after an upload only the frame goes,
+since TDLib reads the file itself.
 
 **Encoder choice.** tdesktop links libavcodec and drives libvpx-vp9 in
 process. Quill already runs the external `ffmpeg` for the video editor and
@@ -130,20 +141,25 @@ process. Quill already runs the external `ffmpeg` for the video editor and
 same CLI (`src/sticker_video.rs`): `-c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0
 -crf N -auto-alt-ref 0`, no audio, `fps=min(source_fps,30)`, scaled to the
 set's side, walking tdesktop's ladder (crf 28, then 34 / 40 / 47 / 55 / 63)
-until the file is under 256 KiB (stickers) or 64 KiB (emoji). No FFI, no
-new crate, no new system dependency: where ffmpeg is missing the editor
-says so with the install hint (`media_tools::ffmpeg_missing_message`), and
-the never-crash rule holds because every step is a child process whose
-failure is a `Result`. Linux CI has no ffmpeg; the encoder test returns
-early there (like the video editor's existing ffmpeg test) and the argument
-builder, limits, crop and range math are tested without it.
+until the file is under 256 KiB (stickers) or 64 KiB (emoji). The
+`fps=min(source_fps,30)` expression needs FFmpeg 4.3 or later (Quill's
+install hints point at current builds). No FFI, no new crate, no new system
+dependency: where ffmpeg is missing the box says so with the install hint
+(`media_tools::ffmpeg_missing_message`), children run through
+`media_tools::quiet_command` (no console flash on Windows), and the
+never-crash rule holds because every step is a child process whose failure
+is a `Result`. Linux CI has no ffmpeg; the encoder test returns early
+where `ffmpeg -encoders` lists no `libvpx-vp9` and the argument builder,
+limits, crop and range math are tested without it.
 
 **Verified**: unit tests in `sticker_image.rs`, `sticker_video.rs` (an
 ffmpeg-gated end-to-end encode of a generated clip into a ≤ 64 KiB 100×100
 emoji WEBM), `photo_editor_set.rs`; the driver test sends
 `stickerFormatWebm`; UI tests in `sticker_set_box/tests.rs` cover the padded
-canvas and corner mask through "Done", the refused image, and the WEBM
-adapt flow into the video editor and back.
+canvas and corner mask through "Done", the refused image, the WEBM adapt
+flow through the video editor into the box and its cancel, the unreadable
+video's toast, the chooser's GIFs and a pick that waits for its download,
+and the editor opening when the file arrives.
 
 ## Still different from tdesktop
 
@@ -161,7 +177,10 @@ adapt flow into the video editor and back.
   the box open.
 - The video editor's preview frame is the uncropped frame with the crop
   drawn over it, as in Quill's composer editor; tdesktop paints the cropped
-  frame.
+  frame. The "New Sticker" box shows that same frame, where tdesktop shows
+  the cropped cover.
+- A chosen video whose download fails leaves the box waiting until it is
+  closed; tdesktop's `LoadDocumentMedia` waits the same way.
 - Set creation stays with the @stickers bot, as in tdesktop.
 
 ## Kit components
