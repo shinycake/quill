@@ -7,6 +7,7 @@
 //!
 //! The encoder (`rusty-opus`) and the Ogg muxer (`ogg`) are pure Rust, so
 //! no libopus or ffmpeg is needed on any platform.
+#![deny(clippy::indexing_slicing)]
 
 use std::io::Write;
 
@@ -164,7 +165,13 @@ impl<W: Write> VoiceEncoder<W> {
     pub fn pause(&mut self) -> Result<(), String> {
         let tail = self.pending.len();
         let fade = tail.min(PAUSE_FADE);
-        for (i, sample) in self.pending[tail - fade..].iter_mut().enumerate() {
+        for (i, sample) in self
+            .pending
+            .get_mut(tail - fade..)
+            .unwrap_or_default()
+            .iter_mut()
+            .enumerate()
+        {
             *sample *= 1.0 - (i as f32 / fade as f32);
         }
         while self.pending.len() >= FRAME {
@@ -194,7 +201,13 @@ impl<W: Write> VoiceEncoder<W> {
     pub fn finish(mut self) -> Result<W, String> {
         let tail = self.pending.len();
         let fade = tail.min(FADE);
-        for (i, sample) in self.pending[tail - fade..].iter_mut().enumerate() {
+        for (i, sample) in self
+            .pending
+            .get_mut(tail - fade..)
+            .unwrap_or_default()
+            .iter_mut()
+            .enumerate()
+        {
             *sample *= 1.0 - (i as f32 / fade as f32);
         }
         let mut rest = std::mem::take(&mut self.pending);
@@ -231,7 +244,10 @@ impl<W: Write> VoiceEncoder<W> {
             .encode(frame, FRAME, &mut packet)
             .map_err(|err| format!("Opus encode: {err:?}"))?;
         // The held packet is not the last one: write it with its granule.
-        if let Some(previous) = self.held.replace(packet[..len].to_vec()) {
+        if let Some(previous) = self
+            .held
+            .replace(packet.get(..len).unwrap_or_default().to_vec())
+        {
             self.packets += 1;
             let granule = u64::from(PRE_SKIP) + self.packets * FRAME as u64;
             let end = if self.packets.is_multiple_of(PAGE_EVERY) {

@@ -12,6 +12,7 @@
 //! received the drop into what to attach. No GPUI and no I/O except
 //! [`DragEntry::probe`] and [`folder_files_for_sending`];
 //! `src/ui/drop_zones.rs` draws the zones.
+#![deny(clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
 

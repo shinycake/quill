@@ -3,6 +3,7 @@
 //! chart view needs. Ported from Telegram Desktop's `statistics/`
 //! (`statistics_data_deserialize.cpp`, `statistics_format_values.cpp`);
 //! the UI draws them with gpui-kit's charts.
+#![deny(clippy::indexing_slicing)]
 
 mod axis;
 mod currency;
@@ -175,10 +176,10 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
     for column in columns {
         let column = column
             .as_array()
-            .filter(|c| !c.is_empty())
+            .and_then(|c| c.split_first())
             .ok_or(ChartError::EmptyColumn)?;
-        let id = column[0].as_str().unwrap_or_default();
-        let values = column[1..].iter().map(|v| v.as_f64().unwrap_or(0.0));
+        let id = column.0.as_str().unwrap_or_default();
+        let values = column.1.iter().map(|v| v.as_f64().unwrap_or(0.0));
         if id == "x" {
             x = values.collect();
         } else {
@@ -220,10 +221,9 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
         .and_then(Value::as_bool)
         .is_some_and(|show| !show);
     let default_zoom = default_zoom(&x, subchart.and_then(|s| s.get("defaultZoom")));
-    let time_step = if x.len() > 1 {
-        (x[1] - x[0]).max(1.0)
-    } else {
-        ONE_DAY_MS
+    let time_step = match x.as_slice() {
+        [first, second, ..] => (second - first).max(1.0),
+        _ => ONE_DAY_MS,
     };
     Ok(StatChart {
         x,

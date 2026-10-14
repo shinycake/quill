@@ -8,10 +8,14 @@ use serde_json::{Value, json};
 
 /// Put a local image on a video `inputMessageVideo` as its cover.
 pub fn with_video_cover(mut content: Value, cover_path: &str) -> Value {
-    content["video"]["cover"] = json!({
-        "@type": "inputFileLocal",
-        "path": cover_path
-    });
+    crate::json_access::set_path(
+        &mut content,
+        &["video", "cover"],
+        json!({
+            "@type": "inputFileLocal",
+            "path": cover_path
+        }),
+    );
     content
 }
 
@@ -38,12 +42,20 @@ pub fn existing_video_cover_content(
         caption_above,
         strip_blockquote,
     );
-    content["video"]["video"] = json!({
-        "@type": "inputFileId",
-        "id": video.file_id.0
-    });
-    content["video"]["start_timestamp"] = json!(video.start_timestamp);
-    content["has_spoiler"] = Value::Bool(video.has_spoiler);
+    crate::json_access::set_path(
+        &mut content,
+        &["video", "video"],
+        json!({
+            "@type": "inputFileId",
+            "id": video.file_id.0
+        }),
+    );
+    crate::json_access::set_path(
+        &mut content,
+        &["video", "start_timestamp"],
+        json!(video.start_timestamp),
+    );
+    crate::json_access::set(&mut content, "has_spoiler", Value::Bool(video.has_spoiler));
     with_video_cover(content, cover_path)
 }
 

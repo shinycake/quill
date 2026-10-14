@@ -4,6 +4,7 @@
 //! tdesktop's `platform/win/specific_win.cpp` does) and by the toast
 //! identity registration (`Software\Classes\AppUserModelId\<AUMID>`).
 //! Only `REG_SZ` values under `HKEY_CURRENT_USER`, which needs no elevation.
+#![deny(clippy::indexing_slicing)]
 
 use std::io;
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS};
@@ -82,8 +83,11 @@ pub fn get_string(subkey: &str, name: &str) -> io::Result<Option<String>> {
         match code {
             ERROR_SUCCESS => {
                 let units = (bytes as usize / 2).min(buf.len());
-                let end = buf[..units].iter().position(|&c| c == 0).unwrap_or(units);
-                return Ok(Some(String::from_utf16_lossy(&buf[..end])));
+                let head = buf.get(..units).unwrap_or_default();
+                let end = head.iter().position(|&c| c == 0).unwrap_or(units);
+                return Ok(Some(String::from_utf16_lossy(
+                    head.get(..end).unwrap_or_default(),
+                )));
             }
             ERROR_FILE_NOT_FOUND => return Ok(None),
             ERROR_MORE_DATA => buf.resize((bytes as usize / 2) + 1, 0),

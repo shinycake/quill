@@ -7,6 +7,7 @@
 //! is one `internalLinkType*` object, parsed here into [`InternalLink`], and
 //! [`route`] decides what the app does with it. Everything in this module is
 //! pure so every platform tests it without a network.
+#![deny(clippy::indexing_slicing)]
 
 use crate::bot_invite::{Invite, Scope};
 use crate::state::DeepLinkAction;

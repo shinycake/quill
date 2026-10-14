@@ -38,8 +38,8 @@ pub fn pie_parts(sums: &[f64], round: bool) -> Vec<PiePart> {
     }
     // tdesktop's min and max trackers both keep the largest error, so
     // the correction always lands on that part.
-    if round && let Some(index) = max_index {
-        shares[index] += diff_sum;
+    if round && let Some(share) = max_index.and_then(|index| shares.get_mut(index)) {
+        *share += diff_sum;
     }
     shares
         .into_iter()

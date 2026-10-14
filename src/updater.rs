@@ -1,4 +1,5 @@
 //! Bounded GitHub release checks and explicit installation states.
+#![deny(clippy::indexing_slicing)]
 use semver::Version;
 use serde::{Deserialize, Serialize};
 

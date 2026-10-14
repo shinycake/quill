@@ -3,6 +3,7 @@
 //! `boxes/gift_credits_box.cpp`, `ShowGiftCreditsBox` and `GiftCreditsBox`).
 //! tdesktop offers it as the "Send Stars" button on the Stars page; the
 //! contact list leaves out yourself and bots.
+#![deny(clippy::indexing_slicing)]
 use crate::star_packs::StarPack;
 
 /// The contact the Stars go to.

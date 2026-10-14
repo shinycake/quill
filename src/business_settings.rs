@@ -22,6 +22,7 @@
 //!
 //! Opening hours and location data live in `crate::business_info`; the
 //! day editor's interval math is in `crate::business_hours_edit`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::business_info::{BusinessLocation, OpeningHours};
 use serde_json::{Value, json};

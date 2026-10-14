@@ -5,6 +5,7 @@
 //! value is the channel name with the latest post under it. TDLib gives no
 //! post id for the card, so the channel's own last message stands in. See
 //! `docs/decisions/codex-personal-channel.md`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::premium_hub::group_digits;
 

@@ -6,6 +6,7 @@
 //! TDLib expresses all three on `searchMessages` / `searchChatMessages`
 //! (`chat_type_filter`, `filter`, `min_date`). The calendar behind "Jump to
 //! date" is a Monday-first month grid computed from civil dates.
+#![deny(clippy::indexing_slicing)]
 
 use crate::local_time::{CivilTime, civil_local, utc_offset_at};
 

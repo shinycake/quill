@@ -94,7 +94,10 @@ const MONTHS: [&str; 12] = [
 const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 fn month(date: &CivilTime) -> &'static str {
-    MONTHS[usize::from(date.month.clamp(1, 12) - 1)]
+    MONTHS
+        .get(usize::from(date.month.clamp(1, 12) - 1))
+        .copied()
+        .unwrap_or_default()
 }
 
 /// Days are UTC days in Telegram's statistics; read them in UTC so a
@@ -124,7 +127,10 @@ pub fn detailed_day(seconds: i64, offset_secs: i32) -> String {
         let local = civil_at(seconds, offset_secs);
         format!(
             "{}, {} {} {:02}:{:02}",
-            WEEKDAYS[usize::from(local.weekday.min(6))],
+            WEEKDAYS
+                .get(usize::from(local.weekday.min(6)))
+                .copied()
+                .unwrap_or_default(),
             local.day,
             month(&local),
             local.hour,
@@ -133,7 +139,10 @@ pub fn detailed_day(seconds: i64, offset_secs: i32) -> String {
     } else {
         format!(
             "{}, {} {} {}",
-            WEEKDAYS[usize::from(utc.weekday.min(6))],
+            WEEKDAYS
+                .get(usize::from(utc.weekday.min(6)))
+                .copied()
+                .unwrap_or_default(),
             utc.day,
             month(&utc),
             utc.year
@@ -151,7 +160,7 @@ impl StatChart {
             return String::new();
         };
         if self.time_step == 1.0 {
-            let index = ((x - self.x[0]) / self.time_step) as i64;
+            let index = ((x - self.x.first().copied().unwrap_or(x)) / self.time_step) as i64;
             format!("{index:02}:00")
         } else if self.time_step < ONE_DAY_MS {
             let time = civil_at((x / 1000.0) as i64, offset_secs);

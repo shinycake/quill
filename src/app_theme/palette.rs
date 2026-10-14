@@ -51,6 +51,10 @@ impl Palette {
     }
 
     /// The key's colour as 0xRRGGBBAA.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`colors` has one slot per `PaletteKey` and `index()` is the discriminant"
+    )]
     pub fn rgba(&self, key: PaletteKey) -> u32 {
         self.colors[key.index()]
     }
@@ -60,6 +64,10 @@ impl Palette {
         self.rgba(key) >> 8
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`colors` has one slot per `PaletteKey` and `index()` is the discriminant"
+    )]
     pub fn set(&mut self, key: PaletteKey, rgba: u32) {
         self.colors[key.index()] = rgba;
     }

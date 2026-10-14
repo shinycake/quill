@@ -11,6 +11,7 @@
 //! Backends only push [`Command`]s into a queue (their callbacks arrive on
 //! foreign threads), so the app state is only ever touched from the UI
 //! thread.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use std::sync::Mutex;

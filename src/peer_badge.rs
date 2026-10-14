@@ -2,6 +2,7 @@
 //! emoji status, and the SCAM / FAKE labels. Mirrors Telegram Desktop's
 //! `Ui::PeerBadge::drawGetWidth` (`ui/unread_badge.cpp`), minus the
 //! monoforum label.
+#![deny(clippy::indexing_slicing)]
 
 /// `verificationStatus` (TDLib `schema/td_api.tl:860`), the flags the chat
 /// list needs. `bot_icon` is `bot_verification_icon_custom_emoji_id`: the

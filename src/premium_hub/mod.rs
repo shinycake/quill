@@ -7,6 +7,7 @@
 //! only mutations are `toggleGiftIsSaved` ("show on profile") and
 //! `sellGift` ("convert to Stars"), both for the user's own gifts and both
 //! behind an explicit confirmation in the UI.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{MessageSender, StickerContent, parse_sticker_value};
 use serde_json::Value;

@@ -18,6 +18,7 @@
 //! methods it may send are [`READ_ONLY_METHODS`], the ones it must never
 //! send are [`FORBIDDEN_METHODS`], and every wallet getter waits for the
 //! `can_use_ton_wallet` option.
+#![deny(clippy::indexing_slicing)]
 
 pub mod address;
 pub mod amount;

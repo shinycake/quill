@@ -2,6 +2,7 @@
 //! `HistoryView::DoubleClickQuickAction`, set in Settings > Chat): reply
 //! (the default), react with the quick reaction, or nothing. Kept pure so
 //! the dispatch is unit tested.
+#![deny(clippy::indexing_slicing)]
 
 use serde::{Deserialize, Serialize};
 

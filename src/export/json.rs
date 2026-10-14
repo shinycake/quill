@@ -111,7 +111,7 @@ pub fn message_json(msg: &ExportMessage, outcome: Option<&Outcome>, offset: i32)
                     "length": e.length,
                 });
                 if let EntityKind::Link(url) = &e.kind {
-                    entity["href"] = url.clone().into();
+                    crate::json_access::set(&mut entity, "href", url.clone().into());
                 }
                 entity
             })

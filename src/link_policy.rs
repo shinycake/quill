@@ -13,6 +13,7 @@
 //! The script test is a coarse port: Qt's `QChar::script` becomes the block
 //! table in [`script_of`], which covers the scripts domains realistically
 //! use; every other character counts as its own script.
+#![deny(clippy::indexing_slicing)]
 
 use crate::text::LinkTarget;
 use std::ops::Range;

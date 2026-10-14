@@ -9,6 +9,7 @@
 //! else falls back to groups of three. The server stays the authority:
 //! a number that passes the local check can still be answered with
 //! `PHONE_NUMBER_INVALID`.
+#![deny(clippy::indexing_slicing)]
 
 use std::cmp::Ordering;
 

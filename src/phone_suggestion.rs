@@ -3,6 +3,7 @@
 //! `updateSuggestedActions(suggestedActionCheckPhoneNumber)`; "Yes" sends
 //! `hideSuggestedAction`, "No" explains where to change the number (the
 //! official app on the phone: TDLib offers no way to change it from here).
+#![deny(clippy::indexing_slicing)]
 
 /// tdesktop `lng_settings_suggestion_phone_number_about_link`.
 pub const LEARN_MORE_URL: &str =

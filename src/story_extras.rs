@@ -7,6 +7,7 @@
 //! (`Controller::ignoreWindowMove` / `PauseState::Inactive`), Space toggles
 //! pause, the mute button toggles `Controller::muted` for video sound, and
 //! `Data::Story::url()` builds `https://t.me/<username>/s/<id>`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ParsedStory;
 use std::collections::BTreeSet;

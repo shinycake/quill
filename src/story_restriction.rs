@@ -17,6 +17,7 @@
 //! variants below survive to the reducer. The story composer surfaces
 //! the notice through its existing gating: `canPostStory` error →
 //! `Session::story_post.check_error` → composer status line.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ErrorClass;
 

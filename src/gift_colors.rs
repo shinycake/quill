@@ -1,6 +1,7 @@
 //! `upgradedGiftColors` (TDLib 1.8.68, `schema/td_api.tl:1578`): the color
 //! scheme a collectible gift lends to its wearer's name, replies and
 //! profile (`setUpgradedGiftColors`).
+#![deny(clippy::indexing_slicing)]
 
 use serde_json::Value;
 

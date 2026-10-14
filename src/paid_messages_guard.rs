@@ -13,6 +13,7 @@
 //! "the number of Telegram Stars the user agreed to pay to send the
 //! messages", and `sendMessageAlbum` and `forwardMessages` send several
 //! messages with one set of options. So the guard writes price x messages.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use serde_json::Value;

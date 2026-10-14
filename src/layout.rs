@@ -2,6 +2,7 @@
 //!
 //! GPUI Kit's `MessageScroller` measures rows in the live app. This module is the
 //! CI-testable model of prepend / resize / follow-tail behavior.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::HashMap;
 

@@ -5,6 +5,7 @@
 //! export, report. The profile section adds statistics, auto-delete and gifts.
 //! Quill's own entries (archive, folders, shared media, new window, close
 //! secret chat) follow.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChatKind;
 

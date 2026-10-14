@@ -9,6 +9,7 @@
 //! app); `MakeVerifyPeersBox` (`boxes/peers/verify_peers_box.cpp`) is the
 //! owner's "Verify Accounts" list, reached from the bot's edit screen when
 //! the bot has `verifierSettings`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{int64, parse_formatted_text};
 use serde_json::{Value, json};

@@ -100,7 +100,10 @@ fn resolve(id: i32, entry: Option<&NameAccentColor>, dark: bool) -> u32 {
         } else {
             &BUILT_IN_LIGHT
         };
-        table[n.rem_euclid(BUILT_IN_COUNT) as usize]
+        table
+            .get(n.rem_euclid(BUILT_IN_COUNT) as usize)
+            .copied()
+            .unwrap_or_default()
     };
     if (0..BUILT_IN_COUNT).contains(&id) {
         // Built-ins keep Quill's tuned legibility values.

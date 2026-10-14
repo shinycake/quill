@@ -12,6 +12,7 @@
 //!
 //! This module decides what the link does and holds the hash; the driver
 //! (`connect::group_calls::link`) fetches the call.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChatKind;
 

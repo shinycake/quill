@@ -15,6 +15,7 @@
 //! - Time: with sound, the sound card is the master clock (the samples it
 //!   took, [`AudioTap`]); without, a wall clock that starts when the first
 //!   picture is shown ([`Clock`]). The picture shown is the newest one due.
+#![deny(clippy::indexing_slicing)]
 
 mod ffi;
 
@@ -520,7 +521,9 @@ impl AudioTap {
                 }
             }
         }
-        let sample = self.chunk[self.at];
+        let Some(&sample) = self.chunk.get(self.at) else {
+            return 0.0;
+        };
         self.at += 1;
         let channels = usize::from(self.channels());
         if self.at.is_multiple_of(channels) {

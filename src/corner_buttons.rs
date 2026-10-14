@@ -2,6 +2,7 @@
 //! `ListWidget::replyButtonParameters` / `reactionButtonParameters`, and
 //! the `cornerReply` / `cornerReaction` settings). Kept pure so it is unit
 //! tested.
+#![deny(clippy::indexing_slicing)]
 
 /// One button's width plus the gap after it.
 const SLOT: f32 = 28.;

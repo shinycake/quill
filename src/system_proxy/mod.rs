@@ -25,6 +25,7 @@
 //! TDLib reaches the servers through an HTTP proxy with `CONNECT`.
 //! Proxy auto-config scripts (PAC, WPAD) are not evaluated: with only a
 //! PAC URL configured Quill connects directly.
+#![deny(clippy::indexing_slicing)]
 
 mod platform;
 #[cfg(test)]

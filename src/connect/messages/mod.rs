@@ -535,7 +535,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 fn with_spoiler(json: String) -> String {
     match serde_json::from_str::<serde_json::Value>(&json) {
         Ok(mut value) => {
-            value["input_message_content"]["has_spoiler"] = serde_json::Value::Bool(true);
+            crate::json_access::set_path(
+                &mut value,
+                &["input_message_content", "has_spoiler"],
+                serde_json::Value::Bool(true),
+            );
             value.to_string()
         }
         Err(_) => json,

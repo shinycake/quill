@@ -12,6 +12,7 @@
 //!
 //! The parsing and the choice between the custom and the system colour are
 //! pure and tested here; only the final reads touch the OS.
+#![deny(clippy::indexing_slicing)]
 
 /// Pack three 0..=1 components into 0xRRGGBB. `None` outside the range,
 /// which is how the portal says "no preference" (it sends values below 0).

@@ -7,6 +7,7 @@
 //! accent gradient), then read ones (grey, thinner). The avatar itself is
 //! scaled down so the ring sits outside it. This module is the pure
 //! geometry; the UI paints it.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChatActiveStoriesView;
 

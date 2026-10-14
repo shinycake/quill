@@ -46,13 +46,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         if let Some(engine) = self.call_engine.as_ref().filter(|_| engine_available) {
             let protocol = engine.protocol();
-            payload["engine_protocol"] = serde_json::json!({
-                "udp_p2p": protocol.udp_p2p,
-                "udp_reflector": protocol.udp_reflector,
-                "min_layer": protocol.min_layer,
-                "max_layer": protocol.max_layer,
-                "library_versions": protocol.library_versions,
-            });
+            crate::json_access::set(
+                &mut payload,
+                "engine_protocol",
+                serde_json::json!({
+                    "udp_p2p": protocol.udp_p2p,
+                    "udp_reflector": protocol.udp_reflector,
+                    "min_layer": protocol.min_layer,
+                    "max_layer": protocol.max_layer,
+                    "library_versions": protocol.library_versions,
+                }),
+            );
         }
         payload
     }

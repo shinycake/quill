@@ -8,6 +8,7 @@
 //! that could carry a file path or a command line flag. Accepted links are
 //! queued in a process-wide inbox; the UI poll loop drains it and feeds the
 //! same `getDeepLinkInfo` pipeline as an in-app click (`ui::deep_links`).
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use std::collections::VecDeque;

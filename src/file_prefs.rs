@@ -11,6 +11,7 @@
 //! `LauncherWouldWarn` (`core/mime_type.cpp`,
 //! `data/data_document_resolver.cpp`), with the same per-platform
 //! executable extension lists.
+#![deny(clippy::indexing_slicing)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;

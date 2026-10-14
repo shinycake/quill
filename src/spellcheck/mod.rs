@@ -18,6 +18,7 @@
 //!   (re-checking a long draft only asks the backend about new words),
 //!   session ignores and app-level learned words. It is `Send + Sync`, so
 //!   the UI runs whole-draft checks on a background thread.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -467,7 +468,7 @@ pub fn checkable_words(text: &str) -> Vec<Range<usize>> {
         }
         let start = start + (segment.len() - segment.trim_start_matches(['\'', '\u{2019}']).len());
         let end = start + trimmed.len();
-        while skip_ix < skips.len() && skips[skip_ix].end <= start {
+        while skips.get(skip_ix).is_some_and(|s| s.end <= start) {
             skip_ix += 1;
         }
         if skips
@@ -515,13 +516,13 @@ pub fn skip_ranges(text: &str) -> Vec<Range<usize>> {
     let mut i = 0;
     let bytes = text.as_bytes();
     // Whitespace-separated runs.
-    while i < text.len() {
-        if bytes[i].is_ascii_whitespace() {
+    while let Some(byte) = bytes.get(i) {
+        if byte.is_ascii_whitespace() {
             i += 1;
             continue;
         }
         let run_start = i;
-        while i < text.len() && !bytes[i].is_ascii_whitespace() {
+        while bytes.get(i).is_some_and(|b| !b.is_ascii_whitespace()) {
             i += 1;
         }
         // `i` stops on ASCII whitespace or the end: always a char boundary.
@@ -664,8 +665,11 @@ fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
     if n.len() > h.len() {
         return None;
     }
-    (0..=h.len() - n.len())
-        .find(|&i| haystack.is_char_boundary(i) && h[i..i + n.len()].eq_ignore_ascii_case(n))
+    (0..=h.len() - n.len()).find(|&i| {
+        haystack.is_char_boundary(i)
+            && h.get(i..i + n.len())
+                .is_some_and(|window| window.eq_ignore_ascii_case(n))
+    })
 }
 
 fn is_email(s: &str) -> bool {
@@ -692,7 +696,10 @@ fn is_domain(s: &str) -> bool {
     let ok_labels = labels
         .iter()
         .all(|l| !l.is_empty() && l.chars().all(|c| c.is_alphanumeric() || c == '-'));
-    let tld = labels[labels.len() - 1].to_ascii_lowercase();
+    let Some(last) = labels.last() else {
+        return false;
+    };
+    let tld = last.to_ascii_lowercase();
     ok_labels && TLDS.contains(&tld.as_str())
 }
 
@@ -910,10 +917,12 @@ fn edits1(word: &str) -> Vec<String> {
     let chars: Vec<char> = word.chars().collect();
     let n = chars.len();
     let mut out = Vec::with_capacity(58 * n + 28);
+    let head = |i: usize| chars.get(..i).unwrap_or_default();
+    let tail = |i: usize| chars.get(i..).unwrap_or_default();
     for i in 0..n {
         let mut s = String::with_capacity(n);
-        s.extend(chars[..i].iter());
-        s.extend(chars[i + 1..].iter());
+        s.extend(head(i).iter());
+        s.extend(tail(i + 1).iter());
         out.push(s);
     }
     for i in 0..n.saturating_sub(1) {
@@ -925,15 +934,15 @@ fn edits1(word: &str) -> Vec<String> {
         for c in ('a'..='z').chain(['\'', '-']) {
             if i < n {
                 let mut s = String::with_capacity(n);
-                s.extend(chars[..i].iter());
+                s.extend(head(i).iter());
                 s.push(c);
-                s.extend(chars[i + 1..].iter());
+                s.extend(tail(i + 1).iter());
                 out.push(s);
             }
             let mut s = String::with_capacity(n + 1);
-            s.extend(chars[..i].iter());
+            s.extend(head(i).iter());
             s.push(c);
-            s.extend(chars[i..].iter());
+            s.extend(tail(i).iter());
             out.push(s);
         }
     }

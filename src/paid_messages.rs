@@ -15,6 +15,7 @@
 //!   can refund them ([`refund_label`]).
 //!
 //! The state sits in [`PaidMessages`] (`Session::payments.paid_messages`).
+#![deny(clippy::indexing_slicing)]
 
 use crate::premium_hub::group_digits;
 use crate::privacy::NewChatPrivacy;

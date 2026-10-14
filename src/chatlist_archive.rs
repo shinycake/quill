@@ -15,6 +15,7 @@
 //!   entry appears in the main menu (`window/window_main_menu.cpp:508-526`).
 //!
 //! This module is the pure part: what the row says and which form it takes.
+#![deny(clippy::indexing_slicing)]
 
 /// `kShowChatNamesCount`.
 pub const SHOWN_NAMES: usize = 8;

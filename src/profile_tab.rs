@@ -4,6 +4,7 @@
 //! (`data_user.cpp`, `info_profile_tabs_host.cpp`): a profile opens on that
 //! tab when the peer chose one. Quill's profile shows the shared-media
 //! gallery for every tab: Posts opens the Stories tab, Gifts the Gifts tab.
+#![deny(clippy::indexing_slicing)]
 use crate::state::SharedMediaTab;
 use serde_json::Value;
 

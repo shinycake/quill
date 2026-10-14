@@ -183,7 +183,7 @@ unsafe impl Send for FfiDemuxer {}
 
 fn codec_name(raw: &[u8; 24]) -> String {
     let end = raw.iter().position(|b| *b == 0).unwrap_or(raw.len());
-    String::from_utf8_lossy(&raw[..end]).into_owned()
+    String::from_utf8_lossy(raw.get(..end).unwrap_or_default()).into_owned()
 }
 
 impl FfiDemuxer {
@@ -210,7 +210,7 @@ impl FfiDemuxer {
         };
         if ctx.is_null() {
             let end = err.iter().position(|b| *b == 0).unwrap_or(err.len());
-            let message = String::from_utf8_lossy(&err[..end]).into_owned();
+            let message = String::from_utf8_lossy(err.get(..end).unwrap_or_default()).into_owned();
             return Err(if message.is_empty() {
                 "This video can't be played.".into()
             } else {

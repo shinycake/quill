@@ -7,6 +7,7 @@
 //! `api/api_chat_filters.cpp` (`ShowImportError`),
 //! `ui/chat/more_chats_bar.cpp` and `boxes/filters/edit_filter_box.cpp`
 //! (the tag colour row).
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::OptionValue;
 

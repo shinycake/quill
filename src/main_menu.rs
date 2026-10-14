@@ -4,6 +4,7 @@
 //! Contacts, Calls, Saved Messages, Settings and a Night Mode switch.
 //! The switch flips between the day and night theme in one step, which is
 //! what `night_mode_toggle` decides from the theme in effect.
+#![deny(clippy::indexing_slicing)]
 
 use crate::settings::{AutoNight, ThemeChoice};
 

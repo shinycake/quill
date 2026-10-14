@@ -1,4 +1,5 @@
 //! Offline plain-emoji keyboard data (Unicode 17.0, Unicode data license).
+#![deny(clippy::indexing_slicing)]
 use crate::settings::MediaPrefs;
 
 pub const CATEGORIES: &[&str] = &[

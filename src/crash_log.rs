@@ -12,6 +12,7 @@
 //! instead: Quill kept running, so the next launch does not say it closed.
 //! Those reports are capped separately, so a burst of them never pushes
 //! out the report of a real crash.
+#![deny(clippy::indexing_slicing)]
 
 use std::backtrace::Backtrace;
 use std::fs;

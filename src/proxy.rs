@@ -14,6 +14,7 @@
 //! `ProxyBox`, `ShowApplyConfirmation`, `ProxyDataToQueryPath`),
 //! `mtproto/mtproto_proxy_data.cpp` (secret status),
 //! `core/proxy_rotation_manager.cpp` (auto-switch).
+#![deny(clippy::indexing_slicing)]
 
 use crate::calls::proxy::{EnabledProxy, ProxyKind};
 use base64::Engine as _;
@@ -218,7 +219,10 @@ pub fn mtproto_secret_status(secret: &str) -> SecretStatus {
     if is_hex_secret(secret) {
         let size = secret.len() / 2;
         let lower = secret.to_ascii_lowercase();
-        let (t1, t2) = (lower.as_bytes()[0], lower.as_bytes()[1]);
+        let [t1, t2, ..] = lower.as_bytes() else {
+            return SecretStatus::Invalid;
+        };
+        let (t1, t2) = (*t1, *t2);
         let valid = size == 16
             || (size == 17 && t1 == b'd' && t2 == b'd')
             || (size >= 21 && t1 == b'e' && t2 == b'e');
@@ -232,12 +236,14 @@ pub fn mtproto_secret_status(secret: &str) -> SecretStatus {
     } else if is_base64url_secret(secret) {
         let inner = base64url_inner(secret);
         let size = inner.len() * 3 / 4;
-        let b = secret.as_bytes();
+        let [b0, b1, ..] = secret.as_bytes() else {
+            return SecretStatus::Invalid;
+        };
         let valid = size == 16
-            || (size == 17 && b[0] == b'3' && (matches!(b[1], b'Q'..=b'Z' | b'a'..=b'f')))
-            || (size >= 21 && b[0] == b'7' && matches!(b[1], b'g'..=b'v'));
+            || (size == 17 && *b0 == b'3' && (matches!(*b1, b'Q'..=b'Z' | b'a'..=b'f')))
+            || (size >= 21 && *b0 == b'7' && matches!(*b1, b'g'..=b'v'));
         let incorrect =
-            size >= 21 && b[0].eq_ignore_ascii_case(&b'e') && b[1].eq_ignore_ascii_case(&b'e');
+            size >= 21 && b0.eq_ignore_ascii_case(&b'e') && b1.eq_ignore_ascii_case(&b'e');
         if size < 16 {
             SecretStatus::Invalid
         } else if valid {
@@ -625,7 +631,7 @@ impl ProxyState {
         let current = entries.iter().position(|p| p.is_enabled).unwrap_or(0);
         // Candidates in list order, starting after the current proxy.
         let order: Vec<&ProxyEntry> = (1..entries.len())
-            .map(|step| &entries[(current + step) % entries.len()])
+            .filter_map(|step| entries.get((current + step) % entries.len()))
             .collect();
         if let Some(found) = order
             .iter()

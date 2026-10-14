@@ -12,6 +12,7 @@
 //!
 //! Everything here is pure (paths and environment values are passed in) so
 //! it is unit-tested with temp dirs.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -197,7 +198,7 @@ fn decode_text(bytes: &[u8], charset: Option<&str>) -> Option<String> {
 }
 
 fn aff_charset(aff: &[u8]) -> Option<String> {
-    let head = &aff[..aff.len().min(4096)];
+    let head = aff.get(..aff.len().min(4096)).unwrap_or_default();
     String::from_utf8_lossy(head)
         .lines()
         .find_map(|l| l.trim().strip_prefix("SET ").map(|s| s.trim().to_string()))

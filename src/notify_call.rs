@@ -9,6 +9,7 @@
 //! [`crate::notify`]: native GPUI notifications on macOS and Windows,
 //! `notify-send --wait` with actions on Linux. The tag carries the call id
 //! (not a chat id), so it never collides with a message notification.
+#![deny(clippy::indexing_slicing)]
 
 use crate::notify::{NotificationCommand, NotifyBackend, current_backend};
 

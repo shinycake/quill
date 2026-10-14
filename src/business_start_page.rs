@@ -7,6 +7,7 @@
 //! when the screen closes. `history_view_about_view.cpp` shows a set
 //! start page in empty chats with "{name} added the message below for all
 //! empty chats. How?".
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{StickerItem, parse_sticker_value};
 use serde_json::{Value, json};

@@ -82,9 +82,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> String {
         match serde_json::from_str::<serde_json::Value>(&json) {
             Ok(mut value) => {
-                let content = value["input_message_content"].take();
-                value["input_message_content"] =
-                    self.with_attachment_video_options(chat_id, attachment, content);
+                let content = value
+                    .get_mut("input_message_content")
+                    .map(serde_json::Value::take)
+                    .unwrap_or_default();
+                let content = self.with_attachment_video_options(chat_id, attachment, content);
+                crate::json_access::set(&mut value, "input_message_content", content);
                 value.to_string()
             }
             Err(_) => json,
@@ -137,20 +140,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             .collect();
         let items: Vec<PaidMediaItem<'_>> = attachments
             .iter()
-            .enumerate()
-            .map(|(index, attachment)| match videos[index] {
+            .zip(&videos)
+            .zip(&paths)
+            .zip(&covers)
+            .map(|(((attachment, video), path), cover)| match *video {
                 Some(probe) => PaidMediaItem::Video {
-                    path: &paths[index],
+                    path,
                     duration: probe.duration,
                     width: probe.width,
                     height: probe.height,
                     supports_streaming: probe.supports_streaming,
-                    cover: covers[index].as_deref(),
+                    cover: cover.as_deref(),
                     start_timestamp: attachment.extras.start_timestamp,
                 },
-                None => PaidMediaItem::Photo {
-                    path: &paths[index],
-                },
+                None => PaidMediaItem::Photo { path },
             })
             .collect();
         let is_secret = self

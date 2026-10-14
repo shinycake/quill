@@ -4,6 +4,7 @@
 //! (tdesktop's `FinalizeDialogsInfo`).
 use super::settings::{AccountSettings, Section};
 use crate::export::worker::{ExportError, QUERY_TIMEOUT, Tdlib, query};
+use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
@@ -95,12 +96,13 @@ fn all_chat_ids<T: Tdlib>(tdlib: &mut T) -> Result<Vec<i64>, ExportError> {
                 json!({"@type": "loadChats", "chat_list": {"@type": list}, "limit": 100}),
                 QUERY_TIMEOUT,
             )?;
-            if answer["@type"] == "error" {
-                if answer["code"] == 404 {
+            if answer.at("@type") == "error" {
+                if answer.at("code") == 404 {
                     break;
                 }
                 return Err(ExportError::Tdlib(
-                    answer["message"]
+                    answer
+                        .at("message")
                         .as_str()
                         .unwrap_or("could not load the chat list")
                         .into(),
@@ -111,7 +113,8 @@ fn all_chat_ids<T: Tdlib>(tdlib: &mut T) -> Result<Vec<i64>, ExportError> {
             tdlib,
             json!({"@type": "getChats", "chat_list": {"@type": list}, "limit": CHATS_LIMIT}),
         )?;
-        for id in answer["chat_ids"]
+        for id in answer
+            .at("chat_ids")
             .as_array()
             .cloned()
             .unwrap_or_default()
@@ -133,11 +136,11 @@ fn classify<T: Tdlib>(
     chat: &Value,
     me: i64,
 ) -> Result<Option<(ChatKind, String)>, ExportError> {
-    let kind = &chat["type"];
-    let title = chat["title"].as_str().unwrap_or_default().to_string();
-    Ok(Some(match kind["@type"].as_str() {
+    let kind = &chat.at("type");
+    let title = chat.at("title").as_str().unwrap_or_default().to_string();
+    Ok(Some(match kind.at("@type").as_str() {
         Some("chatTypePrivate") => {
-            let user_id = kind["user_id"].as_i64().unwrap_or(0);
+            let user_id = kind.at("user_id").as_i64().unwrap_or(0);
             if user_id == me {
                 (ChatKind::SavedMessages, "Saved messages".to_string())
             } else {
@@ -145,7 +148,7 @@ fn classify<T: Tdlib>(
                     json!({"@type": "getUser", "user_id": user_id}),
                     QUERY_TIMEOUT,
                 )?;
-                let bot = user["type"]["@type"] == "userTypeBot";
+                let bot = user.at("type").at("@type") == "userTypeBot";
                 (
                     if bot {
                         ChatKind::Bot
@@ -159,13 +162,15 @@ fn classify<T: Tdlib>(
         Some("chatTypeBasicGroup") => (ChatKind::PrivateGroup, title),
         Some("chatTypeSupergroup") => {
             let supergroup = tdlib.call(
-                json!({"@type": "getSupergroup", "supergroup_id": kind["supergroup_id"]}),
+                json!({"@type": "getSupergroup", "supergroup_id": kind.at("supergroup_id")}),
                 QUERY_TIMEOUT,
             )?;
-            let public = supergroup["usernames"]["active_usernames"]
+            let public = supergroup
+                .at("usernames")
+                .at("active_usernames")
                 .as_array()
                 .is_some_and(|names| !names.is_empty());
-            let kind = match (kind["is_channel"] == true, public) {
+            let kind = match (kind.at("is_channel") == true, public) {
                 (true, true) => ChatKind::PublicChannel,
                 (true, false) => ChatKind::PrivateChannel,
                 (false, true) => ChatKind::PublicSupergroup,
@@ -192,7 +197,7 @@ pub fn list<T: Tdlib>(
             json!({"@type": "getChat", "chat_id": chat_id}),
             QUERY_TIMEOUT,
         )?;
-        if chat["@type"] == "error" {
+        if chat.at("@type") == "error" {
             continue;
         }
         let Some((kind, name)) = classify(tdlib, &chat, me)? else {
@@ -202,7 +207,7 @@ pub fn list<T: Tdlib>(
         if !settings.sections.contains(section) {
             continue;
         }
-        if chat["has_protected_content"] == true {
+        if chat.at("has_protected_content") == true {
             protected += 1;
             continue;
         }

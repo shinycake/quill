@@ -1,6 +1,7 @@
 //! Bot "request" keyboard buttons: which chats a bot may be offered and the
 //! confirmation text. Mirrors tdesktop `boxes/peers/choose_peer_box.cpp`
 //! (`ChoosePeerBoxController` filters and `MakeConfirmBox`).
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{RequestChatSpec, RequestUsersSpec};
 

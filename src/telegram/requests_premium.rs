@@ -33,7 +33,7 @@ pub fn get_star_transactions(
         "limit": limit,
     });
     if let Some(direction) = filter.direction_type() {
-        request["direction"] = json!({ "@type": direction });
+        crate::json_access::set(&mut request, "direction", json!({ "@type": direction }));
     }
     request.to_string()
 }

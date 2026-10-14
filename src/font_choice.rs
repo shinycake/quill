@@ -2,6 +2,7 @@
 //!
 //! The pure parts: which installed families to offer, and whether a stored
 //! family still exists. An empty stored family means the platform default.
+#![deny(clippy::indexing_slicing)]
 
 /// Longest family name kept from a prefs file.
 pub const MAX_FAMILY_LEN: usize = 120;

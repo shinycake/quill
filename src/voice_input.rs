@@ -2,6 +2,7 @@
 //! backend the app already plays sound through. The device's own format is
 //! down-mixed to mono and resampled to 48 kHz here, then handed to a worker
 //! that encodes it ([`crate::voice_opus`]).
+#![deny(clippy::indexing_slicing)]
 
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};

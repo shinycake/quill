@@ -1,6 +1,7 @@
 //! "Who reacted" on a reaction chip (tdesktop `Api::WhoReacted`,
 //! `ShowWhoReactedMenu`): the hover text and whether the chip can open the
 //! reactor list. Kept pure so it is unit tested.
+#![deny(clippy::indexing_slicing)]
 
 /// `lng_context_seen_reactions_count`: "1 Reaction" / "N Reactions".
 pub fn count_label(total: i32) -> String {

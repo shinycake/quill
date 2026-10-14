@@ -1,6 +1,7 @@
 //! Which full-width action replaces the composer, mirroring Telegram
 //! Desktop's `HistoryWidget::updateControlsVisibility` (`isBlocked`,
 //! `isJoinChannel`, `isMuteUnmute`, `isBotStart`, in that order).
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChannelMemberStatus;
 

@@ -7,6 +7,7 @@
 //! key-repeat as a fresh action, so a hold shows up here as a chain of
 //! presses with short gaps; this type tells the first press, the rest of the
 //! chain and the press that completes the hold apart.
+#![deny(clippy::indexing_slicing)]
 
 /// How long Cmd+Q must be held (Chromium's `kShowDuration` is 1.5 s).
 pub const HOLD_MS: u64 = 1_500;

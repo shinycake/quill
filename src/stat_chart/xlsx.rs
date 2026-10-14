@@ -169,8 +169,16 @@ fn numeric_columns(sheet: &Sheet) -> Vec<bool> {
         for (j, cell) in row.iter().enumerate() {
             match cell {
                 Cell::Empty => {}
-                Cell::Number(_) | Cell::Date(_) | Cell::DateTime(_) => filled[j] = true,
-                _ => numeric[j] = false,
+                Cell::Number(_) | Cell::Date(_) | Cell::DateTime(_) => {
+                    if let Some(f) = filled.get_mut(j) {
+                        *f = true;
+                    }
+                }
+                _ => {
+                    if let Some(n) = numeric.get_mut(j) {
+                        *n = false;
+                    }
+                }
             }
         }
     }
@@ -211,7 +219,9 @@ fn sheet_xml(sheet: &Sheet) -> String {
             widths.resize(row.len(), 0);
         }
         for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell_width(cell));
+            if let Some(w) = widths.get_mut(i) {
+                *w = (*w).max(cell_width(cell));
+            }
         }
     }
     if !widths.is_empty() {

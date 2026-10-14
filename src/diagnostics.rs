@@ -1,4 +1,5 @@
 //! Allowlisted diagnostics. Never record raw TDLib JSON, credentials, or message text.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use std::sync::{Arc, Mutex};

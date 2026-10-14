@@ -3,6 +3,7 @@
 //! `inputInvoiceTelegram` with `telegramPaymentPurposeStars`; Quill's
 //! checkout only handles invoices in messages, so the list is read-only
 //! here and the purchase happens in an official app or @PremiumBot.
+#![deny(clippy::indexing_slicing)]
 use serde_json::Value;
 
 /// One `starPaymentOption`.

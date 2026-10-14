@@ -1,6 +1,7 @@
 //! Headless live-connect smoke: credentials + tdjson → WaitPhoneNumber (or a
 //! clear blocker). No GPUI. Never prints api_hash, phone numbers, codes, or
 //! passwords.
+#![deny(clippy::indexing_slicing)]
 
 use crate::connect::{
     CLIENT_CLOSE_TIMEOUT, ConnectBlocker, ConnectDriver, JsonSender, LiveConnect,

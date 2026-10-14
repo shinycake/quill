@@ -405,7 +405,7 @@ pub fn edit_media_content(
             EditMediaKind::Photo | EditMediaKind::Video
         )
     {
-        content["has_spoiler"] = Value::Bool(true);
+        crate::json_access::set(&mut content, "has_spoiler", Value::Bool(true));
     }
     Some(content)
 }

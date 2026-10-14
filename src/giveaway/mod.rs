@@ -5,6 +5,7 @@
 //! Quill starts prepaid giveaways (`launchPrepaidGiveaway`). Paying for a
 //! new one needs the card checkout, which Quill only has for invoice
 //! messages, so a new giveaway stops at the price.
+#![deny(clippy::indexing_slicing)]
 
 mod about;
 mod award;

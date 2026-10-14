@@ -4,6 +4,7 @@
 //! (`option_ids:vector<int32>`, schema `td_api.tl:12932`) — not the string
 //! `pollOption.id`. `Poll::chosen_indexes` (in `telegram::envelope`) bridges
 //! the two.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::{Poll, PollVoteRestrictionReason};
 

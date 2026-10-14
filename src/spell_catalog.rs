@@ -15,6 +15,7 @@
 //!
 //! Everything here is pure or works on a directory passed in, so it is
 //! tested with temp dirs. The network part is `spell_download`.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::BTreeSet;
 use std::io;

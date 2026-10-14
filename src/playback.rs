@@ -5,6 +5,7 @@
 //! pause/resume and clamped seeking. There is no GPUI and no subprocess
 //! here — the UI layer (`src/ui/audio`) owns the in-process player, the
 //! `SliderState` entity, and the tick that re-renders while playing.
+#![deny(clippy::indexing_slicing)]
 
 use std::time::Instant;
 

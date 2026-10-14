@@ -9,6 +9,7 @@
 //! `InputInvoice` for all of them, and the same value goes into
 //! `getPaymentForm`, `validateOrderInfo` and `sendPaymentForm`, so the
 //! checkout keeps it next to the form it fetched.
+#![deny(clippy::indexing_slicing)]
 mod builders;
 
 pub use builders::*;

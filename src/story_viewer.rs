@@ -12,6 +12,7 @@
 //! are Phase 9.2 (viewer overlay actions); posting is out of scope here
 //! (it has its own composer module and overlay — see
 //! `src/story_composer.rs` and DECISIONS.md Phase 9.3).
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, FileId};
 use crate::telegram::envelope::{

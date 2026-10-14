@@ -8,6 +8,7 @@
 //! An effect is either an emoji reaction effect (a small select animation
 //! and a TGS drawn over the chat) or a Premium sticker effect (the
 //! sticker's own Premium animation).
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::{FileId, RequestId};
 use crate::telegram::envelope::{ParsedFile, StickerFormat, StickerItem, parse_sticker_value};

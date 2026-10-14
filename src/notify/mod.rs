@@ -23,6 +23,7 @@
 //! Command arguments are passed to the process without a shell, so message
 //! text can never inject shell syntax. The reducer never spawns processes;
 //! dispatch runs on UI-thread-spawned worker threads.
+#![deny(clippy::indexing_slicing)]
 
 pub mod avatar;
 pub mod custom;

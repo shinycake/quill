@@ -5,6 +5,7 @@
 //! the composer renders for. Mirrors `active_custom_keyboard` (state.rs),
 //! which covers `replyMarkupShowKeyboard`. The UI only renders what this
 //! returns; dismissal reuses the custom-keyboard `dismissed_keyboards` set.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::{BTreeMap, HashSet};
 

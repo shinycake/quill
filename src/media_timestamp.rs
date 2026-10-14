@@ -7,6 +7,7 @@
 //! `TimestampLinkBase`; `local_url_handlers.cpp`: `OpenMediaTimestamp`).
 //! TDLib already marks the timestamps in the text, so only the target is
 //! decided here.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{LinkPreview, LinkPreviewKind, MessageContent};
 

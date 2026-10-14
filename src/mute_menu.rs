@@ -3,6 +3,7 @@
 //! "Disable sound" (or "Enable sound") and "Mute forever" / "Unmute".
 //! Custom opens a time picker (`Ui::ChooseTimeWidget`) of days and hours
 //! that is applied as `mute_for` seconds.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::MUTE_FOREVER;
 

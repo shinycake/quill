@@ -2,6 +2,7 @@
 //! object. The worker thread pages raw JSON (like `account_export`), so
 //! nothing here depends on the UI session's parsed types.
 use super::settings::MediaKind;
+use crate::json_access::JsonExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -149,29 +150,33 @@ impl ExportMessage {
 }
 
 fn who_of(sender: &Value) -> Option<Who> {
-    match sender["@type"].as_str()? {
-        "messageSenderUser" => Some(Who::User(sender["user_id"].as_i64()?)),
-        "messageSenderChat" => Some(Who::Chat(sender["chat_id"].as_i64()?)),
+    match sender.at("@type").as_str()? {
+        "messageSenderUser" => Some(Who::User(sender.at("user_id").as_i64()?)),
+        "messageSenderChat" => Some(Who::Chat(sender.at("chat_id").as_i64()?)),
         _ => None,
     }
 }
 
 fn origin_of(info: &Value) -> Option<Origin> {
-    let origin = &info["origin"];
-    match origin["@type"].as_str()? {
-        "messageOriginUser" => Some(Origin::Who(Who::User(origin["sender_user_id"].as_i64()?))),
+    let origin = &info.at("origin");
+    match origin.at("@type").as_str()? {
+        "messageOriginUser" => Some(Origin::Who(Who::User(
+            origin.at("sender_user_id").as_i64()?,
+        ))),
         "messageOriginHiddenUser" => Some(Origin::Name(
-            origin["sender_name"].as_str().unwrap_or_default().into(),
+            origin.at("sender_name").as_str().unwrap_or_default().into(),
         )),
-        "messageOriginChat" => Some(Origin::Who(Who::Chat(origin["sender_chat_id"].as_i64()?))),
-        "messageOriginChannel" => Some(Origin::Who(Who::Chat(origin["chat_id"].as_i64()?))),
+        "messageOriginChat" => Some(Origin::Who(Who::Chat(
+            origin.at("sender_chat_id").as_i64()?,
+        ))),
+        "messageOriginChannel" => Some(Origin::Who(Who::Chat(origin.at("chat_id").as_i64()?))),
         _ => None,
     }
 }
 
 fn entity_kind(entity: &Value) -> Option<EntityKind> {
-    let kind = &entity["type"];
-    Some(match kind["@type"].as_str()? {
+    let kind = &entity.at("type");
+    Some(match kind.at("@type").as_str()? {
         "textEntityTypeBold" => EntityKind::Bold,
         "textEntityTypeItalic" => EntityKind::Italic,
         "textEntityTypeUnderline" => EntityKind::Underline,
@@ -182,22 +187,23 @@ fn entity_kind(entity: &Value) -> Option<EntityKind> {
         "textEntityTypeBlockQuote" | "textEntityTypeExpandableBlockQuote" => EntityKind::Quote,
         "textEntityTypeUrl" => EntityKind::Url,
         "textEntityTypeEmailAddress" => EntityKind::Email,
-        "textEntityTypeTextUrl" => EntityKind::Link(kind["url"].as_str()?.to_string()),
+        "textEntityTypeTextUrl" => EntityKind::Link(kind.at("url").as_str()?.to_string()),
         _ => return None,
     })
 }
 
 /// (text, entities) of a TDLib `formattedText`.
 pub(crate) fn formatted(value: &Value) -> (String, Vec<Entity>) {
-    let text = value["text"].as_str().unwrap_or_default().to_string();
-    let entities = value["entities"]
+    let text = value.at("text").as_str().unwrap_or_default().to_string();
+    let entities = value
+        .at("entities")
         .as_array()
         .map(|list| {
             list.iter()
                 .filter_map(|e| {
                     Some(Entity {
-                        offset: usize::try_from(e["offset"].as_i64()?).ok()?,
-                        length: usize::try_from(e["length"].as_i64()?).ok()?,
+                        offset: usize::try_from(e.at("offset").as_i64()?).ok()?,
+                        length: usize::try_from(e.at("length").as_i64()?).ok()?,
                         kind: entity_kind(e)?,
                     })
                 })
@@ -210,14 +216,16 @@ pub(crate) fn formatted(value: &Value) -> (String, Vec<Entity>) {
 /// (id, size) of a TDLib `file`. The size falls back to the expected one
 /// while the real size is still unknown.
 pub(crate) fn file_of(file: &Value) -> (i32, i64) {
-    let id = file["id"]
+    let id = file
+        .at("id")
         .as_i64()
         .and_then(|id| i32::try_from(id).ok())
         .unwrap_or(0);
-    let size = file["size"]
+    let size = file
+        .at("size")
         .as_i64()
         .filter(|s| *s > 0)
-        .or_else(|| file["expected_size"].as_i64())
+        .or_else(|| file.at("expected_size").as_i64())
         .unwrap_or(0);
     (id, size)
 }
@@ -232,10 +240,10 @@ pub(crate) fn int(value: &Value) -> i32 {
 /// The still-image thumbnail of a document, video or GIF, if it has one.
 pub fn thumb_of(thumbnail: &Value) -> Option<ThumbRef> {
     let still = matches!(
-        thumbnail["format"]["@type"].as_str(),
+        thumbnail.at("format").at("@type").as_str(),
         Some("thumbnailFormatJpeg" | "thumbnailFormatPng" | "thumbnailFormatWebp")
     );
-    let (file_id, size) = file_of(&thumbnail["file"]);
+    let (file_id, size) = file_of(thumbnail.at("file"));
     (still && file_id != 0).then_some(ThumbRef { file_id, size })
 }
 
@@ -245,13 +253,13 @@ fn media(kind: MediaKind, holder: &Value, file_key: &str) -> Body {
     // their album cover.
     let thumb = match kind {
         MediaKind::Sticker => None,
-        _ if holder["thumbnail"].is_object() => thumb_of(&holder["thumbnail"]),
-        _ => thumb_of(&holder["album_cover_thumbnail"]),
+        _ if holder.at("thumbnail").is_object() => thumb_of(holder.at("thumbnail")),
+        _ => thumb_of(holder.at("album_cover_thumbnail")),
     };
     // Video messages are square: TDLib gives one `length`.
-    let side = int(&holder["length"]);
-    let text = |key: &str| holder[key].as_str().unwrap_or_default().to_string();
-    let label = if holder["performer"].is_string() || holder["title"].is_string() {
+    let side = int(holder.at("length"));
+    let text = |key: &str| holder.at(key).as_str().unwrap_or_default().to_string();
+    let label = if holder.at("performer").is_string() || holder.at("title").is_string() {
         [text("performer"), text("title")]
             .iter()
             .filter(|s| !s.is_empty())
@@ -267,21 +275,21 @@ fn media(kind: MediaKind, holder: &Value, file_key: &str) -> Body {
         size,
         file_name: text("file_name"),
         mime: text("mime_type"),
-        duration: int(&holder["duration"]),
+        duration: int(holder.at("duration")),
         label,
-        width: int(&holder["width"]).max(side),
-        height: int(&holder["height"]).max(side),
+        width: int(holder.at("width")).max(side),
+        height: int(holder.at("height")).max(side),
         thumb,
     })
 }
 
 fn largest_photo(photo: &Value) -> Body {
-    let best = photo["sizes"].as_array().and_then(|sizes| {
-        sizes
-            .iter()
-            .max_by_key(|s| s["width"].as_i64().unwrap_or(0) * s["height"].as_i64().unwrap_or(0))
+    let best = photo.at("sizes").as_array().and_then(|sizes| {
+        sizes.iter().max_by_key(|s| {
+            s.at("width").as_i64().unwrap_or(0) * s.at("height").as_i64().unwrap_or(0)
+        })
     });
-    let (file_id, size) = best.map_or((0, 0), |s| file_of(&s["photo"]));
+    let (file_id, size) = best.map_or((0, 0), |s| file_of(s.at("photo")));
     Body::Media(MediaRef {
         kind: MediaKind::Photo,
         file_id,
@@ -290,8 +298,8 @@ fn largest_photo(photo: &Value) -> Body {
         mime: "image/jpeg".into(),
         duration: 0,
         label: String::new(),
-        width: best.map_or(0, |s| int(&s["width"])),
-        height: best.map_or(0, |s| int(&s["height"])),
+        width: best.map_or(0, |s| int(s.at("width"))),
+        height: best.map_or(0, |s| int(s.at("height"))),
         thumb: None,
     })
 }
@@ -312,16 +320,16 @@ fn user_ids(value: &Value) -> Vec<i64> {
 }
 
 fn call_line(content: &Value) -> String {
-    let kind = if content["is_video"] == true {
+    let kind = if content.at("is_video") == true {
         "Video call"
     } else {
         "Call"
     };
     let missed = matches!(
-        content["discard_reason"]["@type"].as_str(),
+        content.at("discard_reason").at("@type").as_str(),
         Some("callDiscardReasonMissed" | "callDiscardReasonDeclined")
     );
-    let duration = content["duration"].as_i64().unwrap_or(0);
+    let duration = content.at("duration").as_i64().unwrap_or(0);
     if missed {
         format!("{kind} (missed)")
     } else if duration > 0 {
@@ -333,61 +341,71 @@ fn call_line(content: &Value) -> String {
 
 /// The body, text and entities of a message's `content`.
 fn content(content: &Value) -> (Body, String, Vec<Entity>) {
-    let caption = |value: &Value| formatted(&value["caption"]);
+    let caption = |value: &Value| formatted(value.at("caption"));
     let with_caption = |body: Body| {
         let (text, entities) = caption(content);
         (body, text, entities)
     };
-    match content["@type"].as_str().unwrap_or_default() {
+    match content.at("@type").as_str().unwrap_or_default() {
         "messageText" => {
-            let (text, entities) = formatted(&content["text"]);
+            let (text, entities) = formatted(content.at("text"));
             (Body::Text, text, entities)
         }
-        "messagePhoto" => with_caption(largest_photo(&content["photo"])),
-        "messageVideo" => with_caption(media(MediaKind::Video, &content["video"], "video")),
+        "messagePhoto" => with_caption(largest_photo(content.at("photo"))),
+        "messageVideo" => with_caption(media(MediaKind::Video, content.at("video"), "video")),
         "messageAnimation" => {
-            with_caption(media(MediaKind::Gif, &content["animation"], "animation"))
+            with_caption(media(MediaKind::Gif, content.at("animation"), "animation"))
         }
         "messageVoiceNote" => with_caption(media(
             MediaKind::VoiceMessage,
-            &content["voice_note"],
+            content.at("voice_note"),
             "voice",
         )),
         "messageVideoNote" => {
-            let body = media(MediaKind::VideoMessage, &content["video_note"], "video");
+            let body = media(MediaKind::VideoMessage, content.at("video_note"), "video");
             (body, String::new(), Vec::new())
         }
         "messageSticker" => {
-            let body = media(MediaKind::Sticker, &content["sticker"], "sticker");
+            let body = media(MediaKind::Sticker, content.at("sticker"), "sticker");
             (body, String::new(), Vec::new())
         }
-        "messageDocument" => with_caption(media(MediaKind::File, &content["document"], "document")),
-        "messageAudio" => with_caption(media(MediaKind::File, &content["audio"], "audio")),
+        "messageDocument" => {
+            with_caption(media(MediaKind::File, content.at("document"), "document"))
+        }
+        "messageAudio" => with_caption(media(MediaKind::File, content.at("audio"), "audio")),
         "messageLocation" => (
             Body::Location {
-                latitude: content["location"]["latitude"].as_f64().unwrap_or(0.0),
-                longitude: content["location"]["longitude"].as_f64().unwrap_or(0.0),
+                latitude: content
+                    .at("location")
+                    .at("latitude")
+                    .as_f64()
+                    .unwrap_or(0.0),
+                longitude: content
+                    .at("location")
+                    .at("longitude")
+                    .as_f64()
+                    .unwrap_or(0.0),
             },
             String::new(),
             Vec::new(),
         ),
         "messageVenue" => {
-            let venue = &content["venue"];
-            let text = |key: &str| venue[key].as_str().unwrap_or_default().to_string();
+            let venue = &content.at("venue");
+            let text = |key: &str| venue.at(key).as_str().unwrap_or_default().to_string();
             (
                 Body::Venue {
                     title: text("title"),
                     address: text("address"),
-                    latitude: venue["location"]["latitude"].as_f64().unwrap_or(0.0),
-                    longitude: venue["location"]["longitude"].as_f64().unwrap_or(0.0),
+                    latitude: venue.at("location").at("latitude").as_f64().unwrap_or(0.0),
+                    longitude: venue.at("location").at("longitude").as_f64().unwrap_or(0.0),
                 },
                 String::new(),
                 Vec::new(),
             )
         }
         "messageContact" => {
-            let contact = &content["contact"];
-            let text = |key: &str| contact[key].as_str().unwrap_or_default().to_string();
+            let contact = &content.at("contact");
+            let text = |key: &str| contact.at(key).as_str().unwrap_or_default().to_string();
             let name = format!("{} {}", text("first_name"), text("last_name"));
             (
                 Body::Contact {
@@ -399,15 +417,20 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
             )
         }
         "messagePoll" => {
-            let poll = &content["poll"];
-            let options = poll["options"]
+            let poll = &content.at("poll");
+            let options = poll
+                .at("options")
                 .as_array()
                 .map(|list| {
                     list.iter()
                         .map(|o| {
                             (
-                                o["text"]["text"].as_str().unwrap_or_default().to_string(),
-                                o["voter_count"]
+                                o.at("text")
+                                    .at("text")
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                o.at("voter_count")
                                     .as_i64()
                                     .and_then(|v| i32::try_from(v).ok())
                                     .unwrap_or(0),
@@ -418,12 +441,15 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
                 .unwrap_or_default();
             (
                 Body::Poll {
-                    question: poll["question"]["text"]
+                    question: poll
+                        .at("question")
+                        .at("text")
                         .as_str()
                         .unwrap_or_default()
                         .to_string(),
                     options,
-                    total_voters: poll["total_voter_count"]
+                    total_voters: poll
+                        .at("total_voter_count")
                         .as_i64()
                         .and_then(|v| i32::try_from(v).ok())
                         .unwrap_or(0),
@@ -434,8 +460,9 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
         }
         "messageDice" => (
             Body::Dice {
-                emoji: content["emoji"].as_str().unwrap_or_default().to_string(),
-                value: content["value"]
+                emoji: content.at("emoji").as_str().unwrap_or_default().to_string(),
+                value: content
+                    .at("value")
                     .as_i64()
                     .and_then(|v| i32::try_from(v).ok())
                     .unwrap_or(0),
@@ -447,7 +474,7 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
             service(
                 &format!(
                     "{{from}} created group \"{}\"",
-                    content["title"].as_str().unwrap_or_default()
+                    content.at("title").as_str().unwrap_or_default()
                 ),
                 Vec::new(),
             ),
@@ -458,7 +485,7 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
             service(
                 &format!(
                     "{{from}} created \"{}\"",
-                    content["title"].as_str().unwrap_or_default()
+                    content.at("title").as_str().unwrap_or_default()
                 ),
                 Vec::new(),
             ),
@@ -469,7 +496,7 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
             service(
                 &format!(
                     "{{from}} changed group title to \"{}\"",
-                    content["title"].as_str().unwrap_or_default()
+                    content.at("title").as_str().unwrap_or_default()
                 ),
                 Vec::new(),
             ),
@@ -489,7 +516,7 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
         "messageChatAddMembers" => (
             service(
                 "{from} invited {users}",
-                user_ids(&content["member_user_ids"]),
+                user_ids(content.at("member_user_ids")),
             ),
             String::new(),
             Vec::new(),
@@ -497,7 +524,7 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
         "messageChatDeleteMember" => (
             service(
                 "{from} removed {users}",
-                content["user_id"].as_i64().into_iter().collect(),
+                content.at("user_id").as_i64().into_iter().collect(),
             ),
             String::new(),
             Vec::new(),
@@ -544,30 +571,32 @@ fn content(content: &Value) -> (Body, String, Vec<Entity>) {
 /// Parse one raw TDLib `message`. Returns `None` for messages that must not
 /// be exported: those that cannot be saved and self-destructing ones.
 pub fn parse_message(message: &Value) -> Option<ExportMessage> {
-    let id = message["id"].as_i64()?;
-    if message["can_be_saved"] == false || !message["self_destruct_type"].is_null() {
+    let id = message.at("id").as_i64()?;
+    if message.at("can_be_saved") == false || !message.at("self_destruct_type").is_null() {
         return None;
     }
-    let (body, text, entities) = content(&message["content"]);
-    let reply_to = (message["reply_to"]["@type"] == "messageReplyToMessage")
-        .then(|| message["reply_to"]["message_id"].as_i64())
+    let (body, text, entities) = content(message.at("content"));
+    let reply_to = (message.at("reply_to").at("@type") == "messageReplyToMessage")
+        .then(|| message.at("reply_to").at("message_id").as_i64())
         .flatten()
         .filter(|id| *id > 0);
     Some(ExportMessage {
         id,
-        date: message["date"]
+        date: message
+            .at("date")
             .as_i64()
             .and_then(|d| i32::try_from(d).ok())
             .unwrap_or(0),
-        edited: message["edit_date"]
+        edited: message
+            .at("edit_date")
             .as_i64()
             .and_then(|d| i32::try_from(d).ok())
             .unwrap_or(0),
-        outgoing: message["is_outgoing"] == true,
-        sender: who_of(&message["sender_id"]),
+        outgoing: message.at("is_outgoing") == true,
+        sender: who_of(message.at("sender_id")),
         from: None,
         reply_to,
-        forward: origin_of(&message["forward_info"]),
+        forward: origin_of(message.at("forward_info")),
         forwarded_from: None,
         text,
         entities,

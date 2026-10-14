@@ -1,6 +1,7 @@
 //! Load Telegram `api_id` / `api_hash` from process env or gitignored local files,
 //! falling back to credentials compiled into release builds.
 //! Never log or Debug-print the hash value.
+#![deny(clippy::indexing_slicing)]
 
 use crate::auth::credentials_ready;
 use std::collections::HashMap;
@@ -175,9 +176,9 @@ fn merge_dotenv(map: &mut HashMap<String, String>, text: &str) {
 
 fn strip_quotes(value: &str) -> &str {
     if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+        let (first, last) = (value.as_bytes().first(), value.as_bytes().last());
+        if (first == Some(&b'"') && last == Some(&b'"'))
+            || (first == Some(&b'\'') && last == Some(&b'\''))
         {
             return value.get(1..value.len() - 1).unwrap_or_default();
         }

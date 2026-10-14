@@ -1,6 +1,7 @@
 //! The app's version. Release builds are stamped with the release date in
 //! Cargo's version format, `YYYY.M.D` (`QUILL_RELEASE_VERSION`, set by
 //! `.github/workflows/release.yml`); local and CI builds use `Cargo.toml`'s.
+#![deny(clippy::indexing_slicing)]
 
 /// The version this binary reports, compares updates against and shows.
 pub const APP: &str = match option_env!("QUILL_RELEASE_VERSION") {

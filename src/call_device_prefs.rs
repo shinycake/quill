@@ -4,6 +4,7 @@
 //!
 //! tdesktop has a microphone level meter (Quill's `ui::call_audio_ui`) but
 //! no output "Test" playback, so Quill has none either.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ParsedSession;
 

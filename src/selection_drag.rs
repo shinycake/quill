@@ -7,6 +7,7 @@
 //! the pointer form a contiguous range. Whether the drag selects or
 //! deselects is decided once, by the press row's state, and the range is
 //! shown that way while the button is down and applied on release.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::MessageId;
 use crate::selection_pin::MAX_SELECTED;

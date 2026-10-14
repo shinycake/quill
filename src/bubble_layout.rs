@@ -8,6 +8,7 @@
 //! `reactions/history_view_reactions.cpp` and the constants in
 //! `ui/chat/chat.style`. Sizes are logical pixels at scale 100%.
 //! `docs/decisions/codex-bubble-layout.md` has the rules in words.
+#![deny(clippy::indexing_slicing)]
 
 /// `msgMaxWidth`: the widest a text bubble gets (padding included).
 pub const MSG_MAX_WIDTH: i32 = 430;

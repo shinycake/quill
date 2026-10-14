@@ -1,6 +1,7 @@
 //! The main window's title, after `Window::MainWindow::updateTitle`
 //! (`window/main_window.cpp`): the open chat's name with its own unread
 //! count in front, then the account-wide total.
+#![deny(clippy::indexing_slicing)]
 
 const APP_NAME: &str = "Quill";
 

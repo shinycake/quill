@@ -11,6 +11,7 @@
 //!
 //! The work runs on a worker thread ([`worker`]) that talks to TDLib through
 //! the connect driver ([`handle`]), so the UI thread only polls progress.
+#![deny(clippy::indexing_slicing)]
 pub mod account;
 pub mod assets;
 pub mod collect;

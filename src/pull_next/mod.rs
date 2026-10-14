@@ -13,6 +13,7 @@
 //! in as milliseconds, so every step is deterministic. The UI feeds it
 //! precise wheel events and frames, reads [`PullMachine::indicator`] and
 //! [`PullMachine::hint`], and does what the returned [`Step`] asks.
+#![deny(clippy::indexing_slicing)]
 
 // Metrics (`chat_helpers/chat_helpers.style`, `historyPullNext*`).
 

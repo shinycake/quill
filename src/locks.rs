@@ -7,6 +7,7 @@
 //! that stays usable after a writer died halfway, so the guard is taken
 //! back with `PoisonError::into_inner`. The panic itself is already in the
 //! crash log (`crate::crash_log`).
+#![deny(clippy::indexing_slicing)]
 
 use std::sync::{
     Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError,

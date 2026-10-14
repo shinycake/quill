@@ -6,6 +6,7 @@
 //! Colours are 0xRRGGBB. HSV and HSL follow Qt's integer conventions (hue
 //! 0-359 or -1 for greys, the other channels 0-255), because the
 //! colorizer's thresholds are written in them.
+#![deny(clippy::indexing_slicing)]
 
 /// Qt's integer HSV.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

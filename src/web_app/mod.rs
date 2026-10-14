@@ -17,6 +17,7 @@
 //!   (`theme_params`) get;
 //! - [`trust`]: which bots the person already agreed to open mini apps
 //!   for (tdesktop's `isPeerTrustedOpenWebView`).
+#![deny(clippy::indexing_slicing)]
 
 pub mod bridge;
 pub mod theme;

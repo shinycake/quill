@@ -9,6 +9,7 @@
 //! background account for the same reason; this module holds the pure
 //! decisions around them, the UI (`ui::background_accounts`) runs the
 //! clients.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::{AccountKey, ChatId};
 use crate::notify::{NotificationAction, QueuedNotification};

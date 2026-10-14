@@ -4,6 +4,7 @@
 //! (broadcast group conversion), `edit_peer_info_box.cpp` (delete copy) and
 //! the admin log filter in `history/admin_log/`. Pure, so it is unit tested
 //! without a session or a window.
+#![deny(clippy::indexing_slicing)]
 
 /// Longest admin title, in characters (`kRankLimit`; TDLib enforces the same
 /// bound in `setChatMemberTag`).

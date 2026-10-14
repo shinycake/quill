@@ -1,4 +1,5 @@
 //! Explicit binary updates: verify first, hand off after exit, retain rollback.
+#![deny(clippy::indexing_slicing)]
 // The self-update handoff is Unix-only for now (Windows needs an installer
 // handoff — see the cross-platform backlog), so its helpers go unused there.
 #![cfg_attr(not(unix), allow(dead_code))]
@@ -94,7 +95,7 @@ fn digest_file(path: &Path) -> std::io::Result<String> {
         if count == 0 {
             break;
         }
-        digest.update(&buffer[..count]);
+        digest.update(buffer.get(..count).unwrap_or_default());
     }
     Ok(format!("{:x}", digest.finalize()))
 }

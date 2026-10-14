@@ -8,6 +8,7 @@
 //! (`PeerColors::requiredLevelFor` and `LevelLimits` in tdesktop). Apply
 //! checks the chat's current level first; when it is too low, nothing is
 //! sent and the box asks for boosts ("Level N required").
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{ParsedBoostFeatures, ParsedBoostLevelFeatures};
 use crate::telegram::{NameAccentColor, ProfileAccentColor};

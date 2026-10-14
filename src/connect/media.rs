@@ -121,7 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self.session
                         .media
                         .avatar_downloads_due
-                        .extend(ids[index..].iter().map(|id| id.0));
+                        .extend(ids.get(index..).unwrap_or_default().iter().map(|id| id.0));
                     return Err(err);
                 }
             }
