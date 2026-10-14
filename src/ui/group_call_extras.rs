@@ -496,8 +496,13 @@ impl QuillApp {
 
 /// Human label for a GPUI key name.
 pub(super) fn ptt_key_label(key: &str) -> String {
-    let is_function_key =
-        key.len() > 1 && key.starts_with('f') && key[1..].chars().all(|c| c.is_ascii_digit());
+    let is_function_key = key.len() > 1
+        && key.starts_with('f')
+        && key
+            .get(1..)
+            .unwrap_or_default()
+            .chars()
+            .all(|c| c.is_ascii_digit());
     if key.chars().count() <= 1 || is_function_key {
         return key.to_uppercase();
     }

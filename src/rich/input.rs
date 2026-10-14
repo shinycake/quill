@@ -34,9 +34,9 @@ pub fn formatted_to_rich_text(text: &str, entities: &[ComposerEntity]) -> Value 
     let mut pos = 0;
     for (start, end, entity) in kept {
         if start > pos {
-            parts.push(json!({ "@type": "richTextPlain", "text": &text[pos..start] }));
+            parts.push(json!({ "@type": "richTextPlain", "text": text.get(pos..start).unwrap_or_default() }));
         }
-        let run = &text[start..end];
+        let run = text.get(start..end).unwrap_or_default();
         let node = match entity.kind {
             crate::composer::FormatKind::Bold => {
                 json!({ "@type": "richTextBold", "text": plain(run) })
@@ -76,7 +76,8 @@ pub fn formatted_to_rich_text(text: &str, entities: &[ComposerEntity]) -> Value 
         pos = end;
     }
     if pos < text.len() {
-        parts.push(json!({ "@type": "richTextPlain", "text": &text[pos..] }));
+        parts
+            .push(json!({ "@type": "richTextPlain", "text": text.get(pos..).unwrap_or_default() }));
     }
     json!({ "@type": "richTexts", "texts": parts })
 }

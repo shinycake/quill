@@ -93,10 +93,10 @@ blocks a `// SAFETY:` comment too.
 | --- | --- | --- |
 | A | `unwrap_used`, `panic`, `todo`, `unimplemented`, `unreachable`, `exit` (with an `expect` on `main`'s CLI paths) | **On** (`panic-lints`) |
 | B | `expect_used`, `undocumented_unsafe_blocks` | **On** (`panic-lints`) |
-| C | `string_slice`, `unchecked_time_subtraction` | 140 sites left (139 `string_slice`, 1 `unchecked_time_subtraction`; 152 at audit time) |
+| C | `string_slice`, `unchecked_time_subtraction` | **On** (`panic-lints-c`) |
 | D | `indexing_slicing`, per module, starting with `telegram/envelope`, `state`, `composer`, `composer_doc` | 621 sites left (640 at audit time) |
 
-Phase C and D counts are production code on macOS from
+Phase D counts are production code on macOS from
 `cargo clippy --features ui --bin quill`, which lints the library with the UI
 features on as well as the binary (the core-only library alone has 128
 `string_slice` and 437 `indexing_slicing`), counted on the `panic-lints`

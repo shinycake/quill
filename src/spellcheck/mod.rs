@@ -315,7 +315,7 @@ impl SpellChecker {
             if out.len() >= MAX_MISSPELLINGS {
                 break;
             }
-            let word = &text[range.clone()];
+            let word = text.get(range.clone()).unwrap_or_default();
             if !self.is_correct(word) {
                 out.push(Misspelling {
                     word: word.to_string(),
@@ -547,16 +547,18 @@ pub fn skip_ranges(text: &str) -> Vec<Range<usize>> {
 fn code_spans(text: &str) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let mut i = 0;
-    while let Some(off) = text[i..].find('`') {
+    while let Some(off) = text.get(i..).unwrap_or_default().find('`') {
         let start = i + off;
-        if text[start..].starts_with("```") {
+        if text.get(start..).unwrap_or_default().starts_with("```") {
             let body = start + 3;
-            let end = text[body..]
+            let end = text
+                .get(body..)
+                .unwrap_or_default()
                 .find("```")
                 .map_or(text.len(), |e| body + e + 3);
             out.push(start..end);
             i = end;
-        } else if let Some(e) = text[start + 1..].find('`') {
+        } else if let Some(e) = text.get(start + 1..).unwrap_or_default().find('`') {
             let end = start + 1 + e + 1;
             out.push(start..end);
             i = end;
@@ -572,10 +574,12 @@ fn code_spans(text: &str) -> Vec<Range<usize>> {
 
 /// Skips inside one whitespace-free run `text[start..end]`.
 fn run_skips(text: &str, start: usize, end: usize, out: &mut Vec<Range<usize>>) {
-    let run = &text[start..end];
+    let run = text.get(start..end).unwrap_or_default();
     // Scheme URLs: from the scheme to the end of the run.
     if let Some(pos) = run.find("://") {
-        let scheme_start = run[..pos]
+        let scheme_start = run
+            .get(..pos)
+            .unwrap_or_default()
             .char_indices()
             .rev()
             .take_while(|(_, c)| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
@@ -586,14 +590,24 @@ fn run_skips(text: &str, start: usize, end: usize, out: &mut Vec<Range<usize>>) 
     // `tg:`/`mailto:` style schemes without slashes.
     for scheme in ["mailto:", "tg:", "tel:"] {
         if let Some(pos) = find_ascii_ci(run, scheme)
-            && run[..pos].chars().last().is_none_or(|c| !is_word_char(c))
+            && run
+                .get(..pos)
+                .unwrap_or_default()
+                .chars()
+                .last()
+                .is_none_or(|c| !is_word_char(c))
         {
             out.push(start + pos..end);
         }
     }
     // `www.` hosts.
     if let Some(pos) = find_ascii_ci(run, "www.")
-        && run[..pos].chars().last().is_none_or(|c| !is_word_char(c))
+        && run
+            .get(..pos)
+            .unwrap_or_default()
+            .chars()
+            .last()
+            .is_none_or(|c| !is_word_char(c))
     {
         out.push(start + pos..end);
     }
@@ -613,7 +627,7 @@ fn run_skips(text: &str, start: usize, end: usize, out: &mut Vec<Range<usize>>) 
         })
         .map_or(core_start, |(ix, c)| ix + c.len_utf8());
     if core_start < core_end {
-        let core = &run[core_start..core_end];
+        let core = run.get(core_start..core_end).unwrap_or_default();
         if is_email(core) || is_domain(core) {
             out.push(start + core_start..start + core_end);
         }
@@ -621,7 +635,7 @@ fn run_skips(text: &str, start: usize, end: usize, out: &mut Vec<Range<usize>>) 
     // Entities: @mention, #hashtag, $cashtag, /command.
     let mut prev: Option<char> = None;
     for (ix, c) in run.char_indices() {
-        let after = &run[ix + c.len_utf8()..];
+        let after = run.get(ix + c.len_utf8()..).unwrap_or_default();
         let boundary = prev.is_none_or(|p| !is_word_char(p) && p != '@' && p != '#');
         let entity = match c {
             '@' | '#' => boundary,
@@ -706,11 +720,18 @@ pub fn shift_misspellings(old: &str, new: &str, list: &[Misspelling]) -> Vec<Mis
             };
             // Still the same, whole word: no letters glued onto either side.
             let same = new.get(start..end) == Some(m.word.as_str())
-                && new[..start]
+                && new
+                    .get(..start)
+                    .unwrap_or_default()
                     .chars()
                     .next_back()
                     .is_none_or(|c| !is_word_char(c))
-                && new[end..].chars().next().is_none_or(|c| !is_word_char(c));
+                && new
+                    .get(end..)
+                    .unwrap_or_default()
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !is_word_char(c));
             same.then(|| Misspelling {
                 word: m.word.clone(),
                 start,
@@ -726,7 +747,8 @@ pub fn shift_misspellings(old: &str, new: &str, list: &[Misspelling]) -> Vec<Mis
 /// paste ending in a separator) right away.
 pub fn is_typing_word(old: &str, new: &str) -> bool {
     let (prefix, _, new_end) = edit_window(old, new);
-    new[prefix..new_end]
+    new.get(prefix..new_end)
+        .unwrap_or_default()
         .chars()
         .next_back()
         .is_some_and(is_word_char)
@@ -763,9 +785,13 @@ pub fn match_capitalization(original: &str, suggestion: &str) -> String {
     if letters.next().is_some_and(char::is_uppercase)
         && let Some((start, first)) = suggestion.char_indices().find(|(_, c)| c.is_alphabetic())
     {
-        let mut result = suggestion[..start].to_string();
+        let mut result = suggestion.get(..start).unwrap_or_default().to_string();
         result.extend(first.to_uppercase());
-        result.push_str(&suggestion[start + first.len_utf8()..]);
+        result.push_str(
+            suggestion
+                .get(start + first.len_utf8()..)
+                .unwrap_or_default(),
+        );
         return result;
     }
     suggestion.to_string()

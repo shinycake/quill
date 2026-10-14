@@ -605,7 +605,7 @@ pub(super) fn format_phone(raw: &str) -> String {
         let mut at = 0;
         for len in groups {
             out.push(' ');
-            out.push_str(&rest[at..at + len]);
+            out.push_str(rest.get(at..at + len).unwrap_or_default());
             at += len;
         }
         return out;

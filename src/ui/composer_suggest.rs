@@ -89,7 +89,9 @@ pub(super) fn apply_suggestion(
     }
     let mut insert = item.insert.clone();
     if query.kind == SuggestKind::Hashtag
-        && !text[query.range.end..]
+        && !text
+            .get(query.range.end..)
+            .unwrap_or_default()
             .chars()
             .next()
             .is_some_and(char::is_whitespace)
@@ -98,9 +100,9 @@ pub(super) fn apply_suggestion(
     }
     let caret = query.range.start + insert.len();
     let mut out = String::with_capacity(text.len() + insert.len());
-    out.push_str(&text[..query.range.start]);
+    out.push_str(text.get(..query.range.start).unwrap_or_default());
     out.push_str(&insert);
-    out.push_str(&text[query.range.end..]);
+    out.push_str(text.get(query.range.end..).unwrap_or_default());
     Some((out, caret))
 }
 
@@ -261,7 +263,10 @@ impl QuillApp {
             return;
         };
         // A range edit keeps the formatting around it (codex:composer-input).
-        let insert = new_text[active.query.range.start..caret].to_string();
+        let insert = new_text
+            .get(active.query.range.start..caret)
+            .unwrap_or_default()
+            .to_string();
         self.replace_composer_text(active.query.range.clone(), &insert, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -397,6 +402,7 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::{SuggestItem, apply_suggestion, suggest_items};
     use quill::suggest::{RecentHashtags, SuggestKind, detect};
 

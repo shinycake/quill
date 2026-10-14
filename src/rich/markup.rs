@@ -355,8 +355,8 @@ fn parse_list_marker(trimmed: &str) -> Option<(RichListItem, bool)> {
             break;
         }
     }
-    if digits > 0 && trimmed[digits..].starts_with(". ") {
-        let rest = trimmed[digits + 2..].trim();
+    if digits > 0 && trimmed.get(digits..).unwrap_or_default().starts_with(". ") {
+        let rest = trimmed.get(digits + 2..).unwrap_or_default().trim();
         let (checked, text) = parse_checkbox(rest);
         return Some((
             RichListItem {

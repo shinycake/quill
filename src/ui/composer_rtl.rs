@@ -116,7 +116,9 @@ pub(super) mod tests {
             let mut glyphs = Vec::new();
             let mut x = px(0.);
             for run in visual {
-                let mut chars: Vec<(usize, char)> = text[run.clone()]
+                let mut chars: Vec<(usize, char)> = text
+                    .get(run.clone())
+                    .unwrap_or_default()
                     .char_indices()
                     .map(|(i, c)| (run.start + i, c))
                     .collect();
