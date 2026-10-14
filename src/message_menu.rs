@@ -179,6 +179,11 @@ pub struct MediaFacts {
     /// The song is among the current user's saved music (`None` until
     /// `isProfileAudio` answers; tdesktop treats that as not saved).
     pub in_profile: Option<bool>,
+    /// A set-less sticker may join one of the user's own sticker sets
+    /// (there is one, and the sticker is animated or larger than an emoji).
+    pub joins_sticker_set: bool,
+    /// ... or one of the user's own emoji sets (animated, or at most 100 px).
+    pub joins_emoji_set: bool,
 }
 
 /// How long, how big and how many notification tones Telegram accepts
@@ -224,6 +229,12 @@ pub enum MediaAction {
     ViewStickerSet {
         installed: bool,
     },
+    /// "Add to Sticker Set" / "Add to Emoji Set" for a sticker that
+    /// belongs to no set (tdesktop `AddAddToOwnedSetAction`): a page
+    /// listing the sets the user created.
+    AddToSet {
+        emoji: bool,
+    },
     ToggleFavorite {
         remove: bool,
     },
@@ -245,6 +256,9 @@ impl MediaAction {
             Self::SaveGif => "Add to GIFs",
             Self::ViewStickerSet { installed: true } => "View Sticker Set",
             Self::ViewStickerSet { installed: false } => "Add Stickers",
+            Self::AddToSet { emoji } => {
+                crate::sticker_set_box::SetKind::of(emoji).add_to_set_label()
+            }
             Self::ToggleFavorite { remove: false } => "Add to Favorites",
             Self::ToggleFavorite { remove: true } => "Remove from Favorites",
             Self::ShowInFolder if finder => "Show in Finder",
@@ -264,6 +278,8 @@ impl MediaAction {
             Self::OpenGif => "menu-open-gif",
             Self::SaveGif => "menu-save-gif",
             Self::ViewStickerSet { .. } => "menu-sticker-set",
+            Self::AddToSet { emoji: false } => "menu-add-to-sticker-set",
+            Self::AddToSet { emoji: true } => "menu-add-to-emoji-set",
             Self::ToggleFavorite { .. } => "menu-favorite-sticker",
             Self::ShowInFolder => "menu-show-in-folder",
             Self::SaveForNotifications => "menu-save-notification-tone",
@@ -303,6 +319,13 @@ pub fn media_actions(target: &MediaTarget, facts: &MediaFacts) -> Vec<MediaActio
             actions.push(MediaAction::ViewStickerSet {
                 installed: facts.set_installed,
             });
+        } else {
+            if facts.joins_sticker_set {
+                actions.push(MediaAction::AddToSet { emoji: false });
+            }
+            if facts.joins_emoji_set {
+                actions.push(MediaAction::AddToSet { emoji: true });
+            }
         }
         if let Some(favorite) = facts.favorite {
             actions.push(MediaAction::ToggleFavorite { remove: favorite });
@@ -597,6 +620,38 @@ mod tests {
             can_save: true,
             ..MediaFacts::default()
         }
+    }
+
+    #[test]
+    fn a_set_less_sticker_offers_the_owned_sets_it_fits() {
+        let sticker = target(MediaKind::Sticker);
+        let facts = MediaFacts {
+            joins_sticker_set: true,
+            joins_emoji_set: true,
+            favorite: Some(false),
+            ..local()
+        };
+        assert_eq!(
+            media_actions(&sticker, &facts),
+            vec![
+                MediaAction::AddToSet { emoji: false },
+                MediaAction::AddToSet { emoji: true },
+                MediaAction::ToggleFavorite { remove: false },
+                MediaAction::ShowInFolder,
+                MediaAction::SaveAs,
+                MediaAction::CopyFilename,
+            ]
+        );
+        assert_eq!(
+            MediaAction::AddToSet { emoji: true }.label(false),
+            "Add to Emoji Set"
+        );
+        // A sticker in a set shows the set instead.
+        let in_set = MediaTarget {
+            set_id: 77,
+            ..sticker
+        };
+        assert!(!media_actions(&in_set, &facts).contains(&MediaAction::AddToSet { emoji: false }));
     }
 
     #[test]

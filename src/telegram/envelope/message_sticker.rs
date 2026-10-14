@@ -79,6 +79,9 @@ pub struct StickerSetInfo {
     pub size: i32,
     pub is_installed: bool,
     pub is_official: bool,
+    /// `is_owned`: the current user created the set (tdesktop `AmCreator`),
+    /// so the set box offers editing.
+    pub is_owned: bool,
 }
 
 pub(crate) fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
@@ -234,6 +237,10 @@ pub(crate) fn parse_sticker_set_info(value: &Value) -> Option<StickerSetInfo> {
             .get("is_official")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        is_owned: value
+            .get("is_owned")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -277,6 +284,10 @@ pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
             .to_string(),
         is_installed: value
             .get("is_installed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_owned: value
+            .get("is_owned")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         is_custom_emoji: value.pointer("/sticker_type/@type").and_then(Value::as_str)

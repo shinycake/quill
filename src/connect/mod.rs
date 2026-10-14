@@ -75,6 +75,7 @@ mod share_content;
 mod stars_gift;
 mod stats;
 mod sticker_categories;
+mod sticker_creator;
 mod stickers;
 mod stories;
 mod story_insights;

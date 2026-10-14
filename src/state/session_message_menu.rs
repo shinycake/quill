@@ -104,6 +104,20 @@ pub struct StickerSetView {
     pub stage: StickerSetViewStage,
     /// The sticker files were asked to download.
     pub files_requested: bool,
+    /// Edits of an owned set in flight and their outcome.
+    pub edits: StickerSetEdits,
+}
+
+impl StickerSetView {
+    /// A view that is still loading its set.
+    pub fn loading(set_id: i64) -> Self {
+        Self {
+            set_id,
+            stage: StickerSetViewStage::Loading,
+            files_requested: false,
+            edits: StickerSetEdits::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +130,9 @@ pub enum StickerSetViewStage {
         installed: bool,
         /// The set holds custom emoji (`addemoji` link, no archive).
         is_emoji: bool,
+        /// The current user created the set (tdesktop `AmCreator`): the
+        /// box offers editing.
+        is_owned: bool,
         stickers: Vec<StickerItem>,
     },
     Failed,
@@ -175,26 +192,16 @@ impl Session {
         });
     }
 
-    /// The set's contents arrived.
-    pub(crate) fn accept_sticker_set_view(
-        &mut self,
-        set_id: i64,
-        title: String,
-        name: String,
-        installed: bool,
-        is_emoji: bool,
-        stickers: Vec<StickerItem>,
-    ) {
+    /// The set's contents arrived (`stage` is the `Ready` stage).
+    pub(crate) fn accept_sticker_set_view(&mut self, set_id: i64, stage: StickerSetViewStage) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
-            view.stage = StickerSetViewStage::Ready {
-                title,
-                name,
-                installed,
-                is_emoji,
-                stickers,
-            };
+            view.stage = stage;
+            // An edit still in flight (a move applied locally) may have
+            // changed the set after this answer was built: ask again once
+            // it is answered.
+            view.edits.refresh_needed = view.edits.busy();
         }
     }
 

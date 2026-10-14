@@ -148,6 +148,7 @@ impl QuillApp {
                 size: 1,
                 is_installed: true,
                 is_official: false,
+                is_owned: false,
             })
             .collect();
             session

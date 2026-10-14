@@ -442,11 +442,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView {
-            set_id,
-            stage: crate::state::StickerSetViewStage::Loading,
-            files_requested: false,
-        });
+        self.session.stickers.sticker_set_view =
+            Some(crate::state::StickerSetView::loading(set_id));
         let extra = self.session.request(
             RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id }),
             None,
@@ -547,6 +544,22 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .request(RequestPurpose::GetInstalledStickerSets, None);
             self.send_audience(extra, &get_installed_sticker_sets(extra))?;
+        }
+        // "Add to Emoji Set" lists the owned emoji sets, which only the
+        // media panel loaded so far.
+        if self.session.stickers.emoji.installed_sets.is_empty()
+            && !self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetInstalledEmojiSets)
+        {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetInstalledEmojiSets, None);
+            self.send_audience(
+                extra,
+                &crate::telegram::requests_emoji::get_installed_emoji_sets(extra),
+            )?;
         }
         self.fetch_editor_stickers()
     }

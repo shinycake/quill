@@ -277,6 +277,7 @@ impl QuillApp {
                 emoji_search_input,
                 reaction_search_input,
             ),
+            sticker_box: super::sticker_set_box::state::StickerSetBoxUi::new(window, cx),
             payments: super::payments_state::PaymentUi::new(window, cx),
             earn: super::earn_state::EarnUi::new(window, cx),
             auth_ui: super::auth_state::AuthUi::new(

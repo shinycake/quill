@@ -39,11 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.stickers.attached_answer = None;
-        self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView {
-            set_id: 0,
-            stage: crate::state::StickerSetViewStage::Loading,
-            files_requested: false,
-        });
+        self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(0));
         let extra = self.session.request(
             RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets {
                 file_id: file_id.0,

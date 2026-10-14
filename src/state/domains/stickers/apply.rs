@@ -183,6 +183,7 @@ impl Session {
                 title,
                 name,
                 is_installed,
+                is_owned,
                 is_custom_emoji,
                 ..
             } => {
@@ -208,11 +209,14 @@ impl Session {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(
                         set_id,
-                        title,
-                        name,
-                        is_installed,
-                        is_custom_emoji,
-                        stickers,
+                        StickerSetViewStage::Ready {
+                            title,
+                            name,
+                            installed: is_installed,
+                            is_emoji: is_custom_emoji,
+                            is_owned,
+                            stickers,
+                        },
                     );
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack {
                     emoji_id,

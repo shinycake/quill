@@ -25,6 +25,8 @@ pub enum StickersPayload {
         name: String,
         /// `stickerSet.is_installed`: the set is in the user's collection.
         is_installed: bool,
+        /// `stickerSet.is_owned`: the current user created the set.
+        is_owned: bool,
         /// `stickerSet.sticker_type` is `stickerTypeCustomEmoji`.
         is_custom_emoji: bool,
         stickers: Vec<StickerItem>,
