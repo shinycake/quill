@@ -11,6 +11,7 @@
 //!   and a grey counter when every unread chat is muted, as in tdesktop.
 //!
 //! Drawn at 44x44 px (22 pt at 2x, tdesktop's `side`).
+#![deny(clippy::indexing_slicing)]
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
@@ -79,7 +80,7 @@ fn glyph(mask: &[u8], dark: bool) -> Vec<u8> {
                 let mut sx = x0.floor() as usize;
                 while (sx as f64) < x1 && sx < src {
                     let wx = (x1.min(sx as f64 + 1.0) - x0.max(sx as f64)).max(0.0);
-                    sum += f64::from(mask[sy * src + sx]) * wx * wy;
+                    sum += f64::from(mask.get(sy * src + sx).copied().unwrap_or(0)) * wx * wy;
                     area += wx * wy;
                     sx += 1;
                 }
@@ -87,10 +88,10 @@ fn glyph(mask: &[u8], dark: bool) -> Vec<u8> {
             }
             let coverage = if area > 0.0 { sum / area / 255.0 } else { 0.0 };
             let i = (y * dst + x) * 4;
-            out[i] = rgb;
-            out[i + 1] = rgb;
-            out[i + 2] = rgb;
-            out[i + 3] = (coverage * max_alpha).round() as u8;
+            if let Some([pr, pg, pb, pa]) = out.get_mut(i..i + 4) {
+                (*pr, *pg, *pb) = (rgb, rgb, rgb);
+                *pa = (coverage * max_alpha).round() as u8;
+            }
         }
     }
     out
@@ -172,36 +173,47 @@ fn composite(glyph: &mut [u8], counter: &[u8]) {
     let mut near = vec![false; side * side];
     for y in 0..side {
         for x in 0..side {
-            if counter[(y * side + x) * 4 + 3] > 96 {
+            if counter
+                .get((y * side + x) * 4 + 3)
+                .is_some_and(|&alpha| alpha > 96)
+            {
                 for dy in -2i32..=2 {
                     for dx in -2i32..=2 {
                         let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                        if (0..side as i32).contains(&nx) && (0..side as i32).contains(&ny) {
-                            near[ny as usize * side + nx as usize] = true;
+                        if (0..side as i32).contains(&nx)
+                            && (0..side as i32).contains(&ny)
+                            && let Some(slot) = near.get_mut(ny as usize * side + nx as usize)
+                        {
+                            *slot = true;
                         }
                     }
                 }
             }
         }
     }
-    for (i, &near_px) in near.iter().enumerate().take(side * side) {
-        let p = i * 4;
+    let pixels = glyph
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(counter.as_chunks::<4>().0);
+    for ((g, c), &near_px) in pixels.zip(&near) {
+        let ([g0, g1, g2, g3], [c0, c1, c2, c3]) = (g, c);
         if near_px {
-            glyph[p + 3] = 0;
+            *g3 = 0;
         }
-        let ca = f64::from(counter[p + 3]) / 255.0;
+        let ca = f64::from(*c3) / 255.0;
         if ca <= 0.0 {
             continue;
         }
-        let ga = f64::from(glyph[p + 3]) / 255.0;
+        let ga = f64::from(*g3) / 255.0;
         let out_a = ca + ga * (1.0 - ca);
-        for c in 0..3 {
+        for (glyph_ch, counter_ch) in [(g0, *c0), (g1, *c1), (g2, *c2)] {
             // Counter is premultiplied; glyph is straight.
-            let premul = f64::from(counter[p + c]) / 255.0
-                + f64::from(glyph[p + c]) / 255.0 * ga * (1.0 - ca);
-            glyph[p + c] = ((premul / out_a).clamp(0.0, 1.0) * 255.0).round() as u8;
+            let premul =
+                f64::from(counter_ch) / 255.0 + f64::from(*glyph_ch) / 255.0 * ga * (1.0 - ca);
+            *glyph_ch = ((premul / out_a).clamp(0.0, 1.0) * 255.0).round() as u8;
         }
-        glyph[p + 3] = (out_a * 255.0).round() as u8;
+        *g3 = (out_a * 255.0).round() as u8;
     }
 }
 

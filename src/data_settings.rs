@@ -9,6 +9,7 @@
 //! seeded once from the presets (Wi-Fi ← high, mobile ← medium,
 //! roaming ← low, TGX-style) and every edit is pushed to TDLib via
 //! `setAutoDownloadSettings` at the same time.
+#![deny(clippy::indexing_slicing)]
 
 use crate::settings::AccountPaths;
 use serde::{Deserialize, Serialize};
@@ -209,7 +210,10 @@ pub fn next_size_cap(current: i64) -> i64 {
         .iter()
         .position(|&s| s == current)
         .unwrap_or(4);
-    SIZE_CAP_STEPS[(idx + 1) % SIZE_CAP_STEPS.len()]
+    SIZE_CAP_STEPS
+        .get((idx + 1) % SIZE_CAP_STEPS.len())
+        .copied()
+        .unwrap_or(current)
 }
 
 /// Slice S4: per-account per-network auto-download settings,

@@ -8,6 +8,8 @@
 //! itself (`addPendingPaidMessageReaction`); Quill only tracks the deadline
 //! and sends `commitPendingPaidMessageReactions` or
 //! `removePendingPaidMessageReactions`.
+#![deny(clippy::indexing_slicing)]
+
 use crate::telegram::envelope::MessageSender;
 use serde_json::Value;
 
@@ -253,8 +255,11 @@ impl PaidReactions {
             .iter()
             .position(|p| p.chat_id == chat_id && p.message_id == message_id)
         {
-            self.pending[ix].stars -= stars;
-            if self.pending[ix].stars <= 0 {
+            let spent = self.pending.get_mut(ix).is_some_and(|p| {
+                p.stars -= stars;
+                p.stars <= 0
+            });
+            if spent {
                 self.pending.remove(ix);
             }
         }
@@ -273,8 +278,8 @@ impl PaidReactions {
     pub fn take_due(&mut self, now_ms: u64) -> Vec<PendingPaid> {
         let mut due = Vec::new();
         let mut ix = 0;
-        while ix < self.pending.len() {
-            if self.pending[ix].commit_at_ms <= now_ms {
+        while let Some(next) = self.pending.get(ix) {
+            if next.commit_at_ms <= now_ms {
                 due.push(self.pending.remove(ix));
             } else {
                 ix += 1;

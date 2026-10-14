@@ -7,6 +7,7 @@
 //! Capture runs in-process on every platform: cpal reads the default
 //! microphone ([`crate::voice_input`]) and a pure-Rust Opus encoder writes
 //! the OGG ([`crate::voice_opus`]). No ffmpeg, no libopus.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use std::fs;
@@ -281,10 +282,11 @@ impl VoiceCapture {
                     };
                     encoder.push(&chunk)?;
                     samples.store(encoder.samples() as u64, Ordering::Relaxed);
-                    if encoder.levels().len() > sent
+                    if let Some(fresh) = encoder.levels().get(sent..)
+                        && !fresh.is_empty()
                         && let Ok(mut shared) = levels.lock()
                     {
-                        shared.extend_from_slice(&encoder.levels()[sent..]);
+                        shared.extend_from_slice(fresh);
                         sent = encoder.levels().len();
                     }
                 }

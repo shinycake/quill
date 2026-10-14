@@ -9,6 +9,7 @@
 //! are stored, everything else is deflated, and names are UTF-8. Entries
 //! stream through a data descriptor, so nothing is held in memory and the
 //! written size can be checked against the upload limit as it grows.
+#![deny(clippy::indexing_slicing)]
 
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Write};
@@ -342,6 +343,11 @@ pub fn write_zip<W: Write>(out: W, entries: &[Entry], limit: u64) -> Result<(), 
     write_zip_inner(out, entries, limit).map_err(classify_io)
 }
 
+/// `Read::read` claimed more bytes than the buffer holds.
+fn short_read() -> io::Error {
+    io::Error::other("read returned more than the buffer")
+}
+
 fn write_zip_inner<W: Write>(out: W, entries: &[Entry], limit: u64) -> io::Result<()> {
     let mut out = Counting {
         inner: out,
@@ -369,8 +375,9 @@ fn write_zip_inner<W: Write>(out: W, entries: &[Entry], limit: u64) -> io::Resul
                     if read == 0 {
                         break;
                     }
-                    crc_state.update(&buffer[..read]);
-                    out.write_all(&buffer[..read])?;
+                    let chunk = buffer.get(..read).ok_or_else(short_read)?;
+                    crc_state.update(chunk);
+                    out.write_all(chunk)?;
                     size += read as u64;
                 }
             } else {
@@ -380,8 +387,9 @@ fn write_zip_inner<W: Write>(out: W, entries: &[Entry], limit: u64) -> io::Resul
                     if read == 0 {
                         break;
                     }
-                    crc_state.update(&buffer[..read]);
-                    encoder.write_all(&buffer[..read])?;
+                    let chunk = buffer.get(..read).ok_or_else(short_read)?;
+                    crc_state.update(chunk);
+                    encoder.write_all(chunk)?;
                     size += read as u64;
                 }
                 encoder.finish()?;

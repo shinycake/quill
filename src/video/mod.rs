@@ -6,6 +6,7 @@
 //! with `ffmpeg` — the same approach as GIF frames — and loops those frames
 //! until Pause. Frames live under `quill-media-cache/{account}/video-frames/{file_id}`.
 //! That cache root is on the display allowlist; other temp paths stay blocked.
+#![deny(clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -243,14 +244,9 @@ fn probe_mp4_boxes(path: &Path, supports_streaming: bool) -> Option<VideoProbe> 
     let mut offset = 0usize;
     let mut movie: Option<(u32, u32)> = None;
     let mut track: Option<(i64, i64)> = None;
-    while offset + 8 <= bytes.len() {
-        let size = u32::from_be_bytes(bytes[offset..offset + 4].try_into().ok()?) as usize;
-        let kind = &bytes[offset + 4..offset + 8];
-        if size < 8 || offset + size > bytes.len() {
-            break;
-        }
+    while let Some((size, kind, body)) = read_box(&bytes, offset) {
         if kind == b"moov" {
-            walk_moov(&bytes[offset + 8..offset + size], &mut movie, &mut track);
+            walk_moov(body, &mut movie, &mut track);
         }
         offset += size;
     }
@@ -263,16 +259,29 @@ fn probe_mp4_boxes(path: &Path, supports_streaming: bool) -> Option<VideoProbe> 
     finish_probe(seconds, width, height, supports_streaming)
 }
 
+/// The ISO box at `offset`: its total size, type and body. `None` when the
+/// header is cut off or the size is below 8 or runs past the data.
+fn read_box(data: &[u8], offset: usize) -> Option<(usize, &[u8], &[u8])> {
+    let head = data.get(offset..offset.checked_add(8)?)?;
+    let (size_bytes, kind) = head.split_at(4);
+    let size = u32::from_be_bytes(size_bytes.try_into().ok()?) as usize;
+    if size < 8 {
+        return None;
+    }
+    let body = data.get(offset + 8..offset.checked_add(size)?)?;
+    Some((size, kind, body))
+}
+
+/// Four big-endian bytes at `at`.
+fn be_u32(data: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_be_bytes(
+        data.get(at..at.checked_add(4)?)?.try_into().ok()?,
+    ))
+}
+
 fn walk_moov(data: &[u8], movie: &mut Option<(u32, u32)>, track: &mut Option<(i64, i64)>) {
     let mut offset = 0usize;
-    while offset + 8 <= data.len() {
-        let size =
-            u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap_or([0; 4])) as usize;
-        if size < 8 || offset + size > data.len() {
-            break;
-        }
-        let kind = &data[offset + 4..offset + 8];
-        let body = &data[offset + 8..offset + size];
+    while let Some((size, kind, body)) = read_box(data, offset) {
         if kind == b"mvhd" {
             *movie = parse_mvhd(body);
         } else if kind == b"trak"
@@ -287,13 +296,7 @@ fn walk_moov(data: &[u8], movie: &mut Option<(u32, u32)>, track: &mut Option<(i6
 
 fn find_tkhd(data: &[u8]) -> Option<(i64, i64)> {
     let mut offset = 0usize;
-    while offset + 8 <= data.len() {
-        let size = u32::from_be_bytes(data[offset..offset + 4].try_into().ok()?) as usize;
-        if size < 8 || offset + size > data.len() {
-            break;
-        }
-        let kind = &data[offset + 4..offset + 8];
-        let body = &data[offset + 8..offset + size];
+    while let Some((size, kind, body)) = read_box(data, offset) {
         if kind == b"tkhd" {
             return parse_tkhd(body);
         }
@@ -310,12 +313,12 @@ fn find_tkhd(data: &[u8]) -> Option<(i64, i64)> {
 fn parse_mvhd(body: &[u8]) -> Option<(u32, u32)> {
     let version = *body.first()?;
     if version == 0 && body.len() >= 20 {
-        let timescale = u32::from_be_bytes(body[12..16].try_into().ok()?);
-        let duration = u32::from_be_bytes(body[16..20].try_into().ok()?);
+        let timescale = be_u32(body, 12)?;
+        let duration = be_u32(body, 16)?;
         Some((timescale, duration))
     } else if version == 1 && body.len() >= 32 {
-        let timescale = u32::from_be_bytes(body[20..24].try_into().ok()?);
-        let duration = u64::from_be_bytes(body[24..32].try_into().ok()?) as u32;
+        let timescale = be_u32(body, 20)?;
+        let duration = u64::from_be_bytes(body.get(24..32)?.try_into().ok()?) as u32;
         Some((timescale, duration))
     } else {
         None
@@ -325,14 +328,14 @@ fn parse_mvhd(body: &[u8]) -> Option<(u32, u32)> {
 fn parse_tkhd(body: &[u8]) -> Option<(i64, i64)> {
     let version = *body.first()?;
     let (width, height) = if version == 0 && body.len() >= 84 {
-        (&body[76..80], &body[80..84])
+        (be_u32(body, 76)?, be_u32(body, 80)?)
     } else if version == 1 && body.len() >= 96 {
-        (&body[88..92], &body[92..96])
+        (be_u32(body, 88)?, be_u32(body, 92)?)
     } else {
         return None;
     };
-    let width = i32::from_be_bytes(width.try_into().ok()?) as i64 >> 16;
-    let height = i32::from_be_bytes(height.try_into().ok()?) as i64 >> 16;
+    let width = i64::from(width as i32) >> 16;
+    let height = i64::from(height as i32) >> 16;
     if width <= 0 || height <= 0 {
         return None;
     }

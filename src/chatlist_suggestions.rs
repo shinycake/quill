@@ -7,6 +7,7 @@
 //! a dismiss cross. TDLib reports the account-level ones as suggested
 //! actions (`updateSuggestedActions`) and the birthdays as
 //! `updateContactCloseBirthdays` (yesterday, today and tomorrow).
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::BTreeSet;
 
@@ -151,7 +152,10 @@ pub fn birthday_label(b: &CloseBirthday, month: u8, day: u8) -> String {
     } else {
         format!(
             "{} {}",
-            MONTHS[usize::from(b.month.clamp(1, 12)) - 1],
+            MONTHS
+                .get(usize::from(b.month.clamp(1, 12)) - 1)
+                .copied()
+                .unwrap_or_default(),
             b.day
         )
     }
@@ -159,8 +163,16 @@ pub fn birthday_label(b: &CloseBirthday, month: u8, day: u8) -> String {
 
 const DAYS_IN_MONTH: [u8; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
+/// Days in `month` (1 to 12, clamped), February counted as 29.
+fn days_in(month: u8) -> u8 {
+    DAYS_IN_MONTH
+        .get(usize::from(month.clamp(1, 12)) - 1)
+        .copied()
+        .unwrap_or(31)
+}
+
 fn day_after(month: u8, day: u8) -> (u8, u8) {
-    let last = DAYS_IN_MONTH[usize::from(month.clamp(1, 12)) - 1];
+    let last = days_in(month);
     if day < last {
         (month, day + 1)
     } else {
@@ -172,8 +184,8 @@ fn day_before(month: u8, day: u8) -> (u8, u8) {
     if day > 1 {
         (month, day - 1)
     } else {
-        let prev = if month == 1 { 12 } else { month - 1 };
-        (prev, DAYS_IN_MONTH[usize::from(prev) - 1])
+        let prev = if month <= 1 { 12 } else { month - 1 };
+        (prev, days_in(prev))
     }
 }
 

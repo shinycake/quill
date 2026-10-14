@@ -186,3 +186,50 @@ Verified: plain clippy with the new `deny` passes for `--features ui`,
 `--no-default-features` and `ui,demo-capture` (all targets) and for the
 Windows and Linux core cross builds; `-W clippy::indexing_slicing` has zero
 hits in the denied modules; gate.sh.
+
+## Phase D, batch 3
+
+Branch `panic-lints-d3`. 28 more top-level non-UI modules start with
+`#![deny(clippy::indexing_slicing)]`: `video`, `calls` (with `engine`),
+`tray` (with `monochrome`), `tray_mac`, `tray_sni`, `profile_photo_gradient`,
+`suggest`, `business_hours_edit`, `share_box`, `power_saving`, `playlist`,
+`folder_archive`, `paid_reaction`, `inline_grid`, `chatlist_suggestions`,
+`selection_pin`, `privacy`, `pin_reorder`, `voice`, `schedule`,
+`profile_photo_sources`, `owned_bots`, `data_settings`, `contacts_index`,
+`business_info`, `business_bots`, `auto_delete`.
+
+Sites fixed (clippy lines on macOS `--features ui`, production code), 128 in
+all and no `#[expect]`:
+
+- File and pixel parsers: `video` 17 (the MP4 box walk now goes through one
+  `read_box` and `be_u32`; a cut-off or oversized box ends the walk, as the
+  old size check did), `calls` 15 (I420 to RGBA and the rotation copy, the
+  TURN server table), `tray_mac` 14 and `tray` 9 (icon glyph resampling and
+  compositing, now `as_chunks_mut::<4>` pairs instead of offsets),
+  `profile_photo_gradient` 16 (pixel reads, colour points), `folder_archive`
+  4 (zip copy loop; a `read` longer than the buffer is an I/O error).
+- Lists and tables: `suggest` 7 (hashtag bump, emoji alias words),
+  `business_hours_edit` 7, `playlist` 4, `power_saving` 4, `share_box` 5
+  (slice patterns), `paid_reaction` 3, `inline_grid` 3, `chatlist_suggestions`
+  3 (month tables), `selection_pin` 2, `pin_reorder` 2, `privacy` 2 and
+  `business_bots` 1 (JSON writes through `json_access::set`).
+- One site each: `voice`, `schedule`, `profile_photo_sources`, `owned_bots`,
+  `data_settings`, `contacts_index`, `business_info`, `auto_delete`.
+
+`tray_sni` is Linux only and does not build here; it has no indexing at all
+(checked by hand), so the deny only guards later edits. The core Linux and
+Windows cross clippy passes.
+
+Fallbacks, all on states that used to panic: a missing byte reads as 0 or
+transparent, a missing neighbour or track ends the loop (`break`), a missing
+list entry returns the input unchanged. Every loop that used to index still
+advances or leaves. One extra fix: `day_before` in `chatlist_suggestions`
+underflowed on month 0 and now treats it as January.
+
+Left for later: `media_viewer`, the sticker files, `video_edit`,
+`video_timeline`, `profile_photo_video` (other threads) and `src/ui/`.
+
+Verified: plain clippy with the new `deny` passes for `--features ui` and
+`--no-default-features` (all targets) and for the Linux and Windows core
+cross builds; `-W clippy::indexing_slicing` has zero hits in the denied
+modules; gate.sh.

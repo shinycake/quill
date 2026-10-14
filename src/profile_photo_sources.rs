@@ -6,6 +6,7 @@
 //! bodies for `inputChatPhotoAnimation` and `inputChatPhotoSticker`, the
 //! builder's gradient presets, the video limits and the ffmpeg command
 //! lines for the avatar clip, the preview frames and the snapshot.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::RequestId;
 use serde_json::{Value, json};
@@ -29,7 +30,10 @@ pub const PRESET_COUNT: usize = PALETTE.len();
 /// uses them: its list rotated by 180 degrees (first and third color
 /// swapped, second and fourth swapped).
 pub fn gradient_preset(index: usize) -> [u32; 4] {
-    let [a, b, c, d] = PALETTE[index % PALETTE.len()];
+    let [a, b, c, d] = PALETTE
+        .get(index % PALETTE.len())
+        .copied()
+        .unwrap_or_default();
     [c, d, a, b]
 }
 

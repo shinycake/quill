@@ -24,6 +24,7 @@
 //! it re-renders only when the count changes and silently no-ops when the OS
 //! has no system tray (a tray appearing later is picked up on the next sync —
 //! the handle is re-created until it succeeds).
+#![deny(clippy::indexing_slicing)]
 
 use crate::settings::BadgePrefs;
 use crate::state::Session;
@@ -236,7 +237,9 @@ pub fn render_tray_icon(unread: u32) -> (Vec<u8>, u32, u32) {
 pub fn render_tray_template(unread: u32) -> (Vec<u8>, u32, u32) {
     let mut px = Pixels::new(ICON_SIZE);
     for (i, alpha) in TEMPLATE_MASK.iter().enumerate() {
-        px.buf[i * 4 + 3] = *alpha;
+        if let Some(slot) = px.buf.get_mut(i * 4 + 3) {
+            *slot = *alpha;
+        }
     }
     if unread > 0 {
         draw_badge(
@@ -484,7 +487,9 @@ impl Pixels {
     fn set(&mut self, x: u32, y: u32, c: [u8; 4]) {
         if x < self.size && y < self.size {
             let i = ((y * self.size + x) * 4) as usize;
-            self.buf[i..i + 4].copy_from_slice(&c);
+            if let Some(slot) = self.buf.get_mut(i..i + 4) {
+                slot.copy_from_slice(&c);
+            }
         }
     }
 

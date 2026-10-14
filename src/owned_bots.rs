@@ -17,6 +17,7 @@
 //!
 //! This module holds the rules and request bodies; the dialogs live in
 //! `ui/bot_edit_dialog.rs` and `ui/bot_create_dialog.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use serde_json::json;
 
@@ -69,10 +70,9 @@ fn bot_overlap(value: &str) -> usize {
     (1..=BOT_SUFFIX.len().min(lower.len()))
         .rev()
         .find(|&k| {
-            lower[lower.len() - k..]
-                .iter()
-                .copied()
-                .eq(BOT_SUFFIX.chars().take(k))
+            lower
+                .get(lower.len() - k..)
+                .is_some_and(|tail| tail.iter().copied().eq(BOT_SUFFIX.chars().take(k)))
         })
         .unwrap_or(0)
 }

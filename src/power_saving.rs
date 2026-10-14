@@ -6,6 +6,7 @@
 //! The bits keep tdesktop's values so a future import of its settings maps
 //! one to one. The current set lives in a process-wide atomic: the views read
 //! it while rendering, and the Appearance dialog writes it.
+#![deny(clippy::indexing_slicing)]
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -179,9 +180,11 @@ pub fn isolate_for_tests() {
 
 pub(crate) fn slot_get(slot: usize) -> u32 {
     if ISOLATED.load(Ordering::Relaxed) {
-        LOCAL.with(|c| c.get()[slot])
+        LOCAL.with(|c| c.get().get(slot).copied().unwrap_or(0))
     } else {
-        GLOBAL[slot].load(Ordering::Relaxed)
+        GLOBAL
+            .get(slot)
+            .map_or(0, |value| value.load(Ordering::Relaxed))
     }
 }
 
@@ -189,11 +192,15 @@ pub(crate) fn slot_set(slot: usize, value: u32) {
     if ISOLATED.load(Ordering::Relaxed) {
         LOCAL.with(|c| {
             let mut all = c.get();
-            all[slot] = value;
+            if let Some(entry) = all.get_mut(slot) {
+                *entry = value;
+            }
             c.set(all);
         });
     } else {
-        GLOBAL[slot].store(value, Ordering::Relaxed);
+        if let Some(entry) = GLOBAL.get(slot) {
+            entry.store(value, Ordering::Relaxed);
+        }
     }
 }
 

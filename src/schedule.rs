@@ -5,6 +5,7 @@
 //! least ten seconds ahead and at most a year away, the picker opens ten
 //! minutes from now, and a chat with yourself says "reminder" instead of
 //! "schedule".
+#![deny(clippy::indexing_slicing)]
 
 use crate::local_time::{CivilTime, utc_offset_at};
 
@@ -51,11 +52,15 @@ pub fn repeat_choices(test_dc: bool) -> Vec<RepeatChoice> {
 /// last one when the period is longer than all (tdesktop `lower_bound`).
 pub fn repeat_choice_for(period: i32, test_dc: bool) -> RepeatChoice {
     let choices = repeat_choices(test_dc);
-    let last = choices[choices.len() - 1];
+    let last = choices.last().copied();
     choices
         .into_iter()
         .find(|choice| choice.period >= period)
-        .unwrap_or(last)
+        .or(last)
+        .unwrap_or(RepeatChoice {
+            period: 0,
+            label: "Never",
+        })
 }
 
 /// The word before a scheduled message's time (`SchedulePeriodText` in

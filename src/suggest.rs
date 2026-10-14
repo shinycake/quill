@@ -8,6 +8,7 @@
 //! (`chat_helpers/emoji_suggestions_widget.cpp`) for `:`; the hashtag
 //! list is `cRecentWriteHashtags` with `Local::incrementRecentHashtag`
 //! (`storage/localstorage.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use std::ops::Range;
 
@@ -159,8 +160,11 @@ impl RecentHashtags {
         let tags = &mut self.tags;
         let mut i = match tags.iter().position(|(t, _)| t == tag) {
             Some(i) => {
-                tags[i].1 = tags[i].1.saturating_add(1);
-                if tags[i].1 > RECENT_HASHTAG_HALVE {
+                let count = tags.get_mut(i).map_or(0, |entry| {
+                    entry.1 = entry.1.saturating_add(1);
+                    entry.1
+                });
+                if count > RECENT_HASHTAG_HALVE {
                     for (_, n) in tags.iter_mut() {
                         *n = if *n > 1 { *n / 2 } else { (*n).min(1) };
                     }
@@ -173,7 +177,7 @@ impl RecentHashtags {
                 tags.len() - 1
             }
         };
-        while i > 0 && tags[i - 1].1 <= tags[i].1 {
+        while i > 0 && i < tags.len() && tags.get(i - 1).map(|t| t.1) <= tags.get(i).map(|t| t.1) {
             tags.swap(i, i - 1);
             i -= 1;
         }
@@ -303,6 +307,13 @@ struct Indexed {
     name_words: usize,
 }
 
+impl Indexed {
+    /// The words after the name's own: the aliases and shortcodes.
+    fn alias_words(&self) -> &[String] {
+        self.words.get(self.name_words..).unwrap_or_default()
+    }
+}
+
 fn index() -> &'static [Indexed] {
     use std::sync::OnceLock;
     static INDEX: OnceLock<Vec<Indexed>> = OnceLock::new();
@@ -347,9 +358,7 @@ pub fn exact_emoji(query: &str) -> Option<&'static str> {
     }
     index()
         .iter()
-        .find(|item| {
-            item.name.to_lowercase() == wanted || item.words[item.name_words..].contains(&wanted)
-        })
+        .find(|item| item.name.to_lowercase() == wanted || item.alias_words().contains(&wanted))
         .map(|item| item.emoji)
 }
 
@@ -368,13 +377,13 @@ pub fn search_emoji(query: &str, limit: usize) -> Vec<EmojiHit> {
         let mut taken = vec![false; item.words.len()];
         let mut first_word = false;
         let all = wanted.iter().enumerate().all(|(n, word)| {
-            let found = item
-                .words
-                .iter()
-                .enumerate()
-                .position(|(i, w)| !taken[i] && w.starts_with(word.as_str()));
+            let found = item.words.iter().enumerate().position(|(i, w)| {
+                !taken.get(i).copied().unwrap_or(true) && w.starts_with(word.as_str())
+            });
             if let Some(i) = found {
-                taken[i] = true;
+                if let Some(slot) = taken.get_mut(i) {
+                    *slot = true;
+                }
                 if n == 0 && i == 0 {
                     first_word = true;
                 }
@@ -385,7 +394,7 @@ pub fn search_emoji(query: &str, limit: usize) -> Vec<EmojiHit> {
             continue;
         }
         let name = item.name.to_lowercase();
-        let alias_exact = item.words[item.name_words..].contains(&joined);
+        let alias_exact = item.alias_words().contains(&joined);
         let tier = if name == joined || alias_exact {
             0
         } else if name.starts_with(&joined) {

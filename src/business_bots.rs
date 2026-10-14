@@ -9,6 +9,7 @@
 //! always on; enabling gift, star or username rights shows a warning;
 //! "Remove Bot" disconnects it. Saved when the screen closes
 //! (`data_business_chatbots.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use crate::business_settings::{BusinessChats, BusinessRecipients, ChatTypes};
 use serde_json::{Value, json};
@@ -213,7 +214,11 @@ pub fn bot_recipients_from_value(value: &Value) -> BusinessRecipients {
 pub fn bot_recipients_to_json(recipients: &BusinessRecipients) -> Value {
     let mut value = recipients.to_json();
     if !recipients.all_but_excluded {
-        value["excluded_chat_ids"] = json!(recipients.excluded.chat_ids);
+        crate::json_access::set(
+            &mut value,
+            "excluded_chat_ids",
+            json!(recipients.excluded.chat_ids),
+        );
     }
     value
 }
