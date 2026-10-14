@@ -19,6 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_manage::{AvailableGift, SendGate};
+use quill::gift_market::{auction_tile, resale_tile_price};
 use quill::local_time::now_unix;
 use quill::state::Session;
 use std::cell::RefCell;
@@ -196,6 +197,15 @@ impl QuillApp {
     }
 }
 
+/// What a tile does besides sending: an auction or the resale list.
+enum TileMarket {
+    None,
+    /// Badge ("auction" / "soon") and line ("Join" / "View").
+    Auction(&'static str, &'static str),
+    /// Sold out with listings on resale: the lowest price line.
+    Resale(String),
+}
+
 fn gift_tile(
     session: &Session,
     ix: usize,
@@ -204,15 +214,76 @@ fn gift_tile(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let send = &session.payments.gifts_manage.send;
+    let now = now_unix();
     let gate = send
         .recipient
         .as_ref()
-        .map(|r| gift.gate(r, session.payments.premium_option == Some(true), now_unix()))
+        .map(|r| gift.gate(r, session.payments.premium_option == Some(true), now))
         .unwrap_or(SendGate::SoldOut);
+    let to_channel = send.recipient.as_ref().is_some_and(|r| r.is_channel);
+    let market = match gift.auction.as_ref() {
+        // Auction bids go to people only (`placeGiftAuctionBid.user_id`).
+        Some(info) if !to_channel => {
+            let (badge, line) = auction_tile(info.start_date, gift.sold_out(), now);
+            TileMarket::Auction(badge, line)
+        }
+        Some(_) => TileMarket::None,
+        None if gift.sold_out() && gift.resale_count > 0 => TileMarket::Resale(resale_tile_price(
+            gift.min_resale_star_count,
+            gift.resale_count,
+        )),
+        None => TileMarket::None,
+    };
     let ready = gate == SendGate::Ready;
+    let clickable = ready || !matches!(market, TileMarket::None);
     let id = gift.id;
+    let reason = match (&market, gate) {
+        (TileMarket::None, SendGate::Auction) => Some("Not for channels"),
+        (TileMarket::None, gate) => gate.reason(),
+        _ => None,
+    };
+    let (badge, price, line) = match &market {
+        TileMarket::Auction(badge, line) => (
+            Some((*badge, cx.theme().warning)),
+            div().text_sm().font_semibold().child(*line),
+            String::new(),
+        ),
+        TileMarket::Resale(price) => (
+            Some(("resale", super::chat_theme::success().into())),
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .text_sm()
+                .font_semibold()
+                .child(super::earn::star_icon(12.))
+                .child(price.clone()),
+            String::new(),
+        ),
+        TileMarket::None => (
+            None,
+            div()
+                .text_sm()
+                .font_semibold()
+                .child(stars(gift.star_count)),
+            reason
+                .map(str::to_string)
+                .or_else(|| gift.supply_label())
+                .unwrap_or_default(),
+        ),
+    };
+    let label = match &market {
+        TileMarket::Auction(badge, line) => format!("Gift auction, {badge}, {line}"),
+        TileMarket::Resale(price) => format!("Gift on resale from {price} Stars"),
+        TileMarket::None => format!(
+            "Gift for {}{}",
+            stars(gift.star_count),
+            reason.map(|r| format!(", {r}")).unwrap_or_default()
+        ),
+    };
     let tile = div()
         .id(("send-gift-tile", ix as u64))
+        .relative()
         .w(px(TILE_W))
         .p_2()
         .rounded_lg()
@@ -222,11 +293,20 @@ fn gift_tile(
         .items_center()
         .gap_1()
         .role(gpui_kit::Role::Button)
-        .aria_label(format!(
-            "Gift for {}{}",
-            stars(gift.star_count),
-            gate.reason().map(|r| format!(", {r}")).unwrap_or_default()
-        ))
+        .aria_label(label)
+        .children(badge.map(|(text, color)| {
+            div()
+                .absolute()
+                .top_1()
+                .right_1()
+                .px_1p5()
+                .rounded_full()
+                .bg(color)
+                .text_xs()
+                .font_semibold()
+                .text_color(gpui_kit::white())
+                .child(text)
+        }))
         .child(sticker_tile(
             ("send-gift-sticker", ix as u64),
             gift.sticker.as_ref(),
@@ -235,33 +315,31 @@ fn gift_tile(
             72.,
             "\u{1F381}",
         ))
-        .child(
-            div()
-                .text_sm()
-                .font_semibold()
-                .child(stars(gift.star_count)),
-        )
+        .child(price)
         .child(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(
-                    gate.reason()
-                        .map(str::to_string)
-                        .or_else(|| gift.supply_label())
-                        .unwrap_or_default(),
-                ),
+                .child(line),
         );
-    if ready {
-        tile.cursor_pointer()
-            .tab_index(0)
-            .on_click(
-                cx.listener(move |this, _, window, cx| this.pick_send_gift(Some(id), window, cx)),
-            )
-            .into_any_element()
-    } else {
-        tile.opacity(0.55).into_any_element()
+    if !clickable {
+        return tile.opacity(0.55).into_any_element();
     }
+    let auction_id = gift.auction.as_ref().map(|info| info.id.clone());
+    let title = gift.title.clone();
+    let resale = matches!(market, TileMarket::Resale(_));
+    tile.cursor_pointer()
+        .tab_index(0)
+        .on_click(cx.listener(move |this, _, window, cx| {
+            if let Some(auction_id) = auction_id.as_deref() {
+                this.open_gift_auction(id, auction_id, cx);
+            } else if resale {
+                this.open_gift_resale(id, &title, cx);
+            } else {
+                this.pick_send_gift(Some(id), window, cx);
+            }
+        }))
+        .into_any_element()
 }
 
 fn selected_gift_panel(
