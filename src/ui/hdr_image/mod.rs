@@ -19,11 +19,11 @@ mod probe_cache;
 mod tests;
 mod tone_map;
 mod viewer;
-#[cfg(windows)]
-mod windows;
 #[cfg(test)]
 #[cfg(all(target_os = "macos", feature = "demo-capture"))]
 mod viewer_tests;
+#[cfg(windows)]
+mod windows;
 
 pub(crate) use probe_cache::has_hdr;
 #[cfg(test)]

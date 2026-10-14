@@ -116,7 +116,10 @@ pub(super) fn target_size((width, height): (u32, u32), long_edge: u32) -> (u32, 
     } else {
         natural
     };
-    let edge = long_edge.min(by_area).min(MAX_TEXTURE_EDGE).clamp(1, natural);
+    let edge = long_edge
+        .min(by_area)
+        .min(MAX_TEXTURE_EDGE)
+        .clamp(1, natural);
     if edge == natural {
         return (width, height);
     }

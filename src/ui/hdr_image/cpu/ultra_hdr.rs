@@ -100,7 +100,13 @@ pub(super) struct GainMap {
 
 impl GainMap {
     fn valid(self) -> Option<Self> {
-        let all = [self.min, self.max, self.gamma, self.offset_sdr, self.offset_hdr];
+        let all = [
+            self.min,
+            self.max,
+            self.gamma,
+            self.offset_sdr,
+            self.offset_hdr,
+        ];
         let finite = all.iter().flatten().all(|value| value.is_finite());
         let ordered = (0..3).all(|channel| {
             self.max.get(channel) >= self.min.get(channel)
@@ -220,9 +226,7 @@ fn apply(base: &image::RgbImage, map: &DynamicImage, gain_map: GainMap) -> Linea
         (low, (low + 1).min(map_size - 1), position - low as f32)
     };
     let mut pixels = Vec::with_capacity((width as usize) * (height as usize));
-    let columns: Vec<(u32, u32, f32)> = (0..width)
-        .map(|x| sample(x, width, map_width))
-        .collect();
+    let columns: Vec<(u32, u32, f32)> = (0..width).map(|x| sample(x, width, map_width)).collect();
     let base_bytes = base.as_raw();
     for y in 0..height {
         let (y0, y1, fy) = sample(y, height, map_height);
@@ -355,7 +359,10 @@ fn mpf_entries(tiff: &[u8]) -> Vec<(u32, u32)> {
 /// bytes before the end as it and the items after it take.
 fn gcontainer_gain_map(xmp: &str, file_len: usize) -> Option<Range<usize>> {
     let mut items = Vec::new();
-    for (_, rest) in xmp.match_indices("<Container:Item").map(|(at, _)| xmp.split_at(at)) {
+    for (_, rest) in xmp
+        .match_indices("<Container:Item")
+        .map(|(at, _)| xmp.split_at(at))
+    {
         let tag = rest.split_once('>').map_or(rest, |(tag, _)| tag);
         let semantic = attribute(tag, "Item:Semantic").unwrap_or_default();
         let length = attribute(tag, "Item:Length")
