@@ -4,6 +4,7 @@
 //!
 //! tdesktop: `calls/group/calls_group_viewport.cpp` (pin) and
 //! `calls_group_viewport_tile.cpp` (paused overlay).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;

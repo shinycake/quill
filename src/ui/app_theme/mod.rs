@@ -7,6 +7,7 @@
 //! The palette of the applied theme is installed process-wide (like the
 //! light/dark flag in `chat_theme`); a chat's emoji theme still recolours
 //! its rows on top of it (`chat_palette`).
+#![deny(clippy::indexing_slicing)]
 
 mod chooser;
 mod editor;
@@ -32,9 +33,12 @@ mod installed_state {
         [const { AtomicU32::new(0) }; PaletteKey::COUNT];
 
     pub(super) fn get(key: PaletteKey) -> Option<u32> {
-        ACTIVE
-            .load(Ordering::Relaxed)
-            .then(|| COLORS[key.index()].load(Ordering::Relaxed))
+        if !ACTIVE.load(Ordering::Relaxed) {
+            return None;
+        }
+        COLORS
+            .get(key.index())
+            .map(|color| color.load(Ordering::Relaxed))
     }
 
     pub(super) fn set(colors: Option<&[u32; PaletteKey::COUNT]>) {

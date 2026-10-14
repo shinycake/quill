@@ -1,4 +1,5 @@
 //! Message menu, selection, links and per-message toggles in the history.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::*;

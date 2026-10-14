@@ -7,6 +7,7 @@
 //! `docs/decisions/codex-group-admin-toggles.md`). Every row is gated by
 //! `Session::group_admin_controls`, so a control shows only when the
 //! viewer's rights allow it.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::dialogs::{GroupSettingsAction, GroupSettingsDialog, GroupSettingsView};

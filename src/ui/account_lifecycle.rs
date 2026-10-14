@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -211,7 +212,9 @@ impl QuillApp {
                         .map(|(label, _)| Radio::new(format!("default-ttl-{label}")).label(*label)),
                 )
                 .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                    this.submit_default_auto_delete(PRESETS[ix].1, cx);
+                    if let Some(preset) = PRESETS.get(ix) {
+                        this.submit_default_auto_delete(preset.1, cx);
+                    }
                 })),
         )
     }
@@ -403,7 +406,9 @@ impl QuillApp {
                     Radio::new(format!("account-ttl-{months}m")).label(ttl_option_label(*months))
                 }))
                 .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                    this.submit_account_ttl(ACCOUNT_TTL_OPTIONS[ix].1, cx);
+                    if let Some(option) = ACCOUNT_TTL_OPTIONS.get(ix) {
+                        this.submit_account_ttl(option.1, cx);
+                    }
                 })),
         );
         if mutating {

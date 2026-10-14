@@ -4,6 +4,7 @@
 //! (security check, then the 2-step verification password). The password is
 //! typed into a masked field and sent only to TDLib; it is cleared from the
 //! field as soon as it is sent and never stored or logged.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::dialogs::{OwnershipDialog, OwnershipStage};

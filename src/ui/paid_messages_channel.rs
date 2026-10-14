@@ -2,6 +2,7 @@
 //! the owner lets people write to the channel and sets what each message
 //! costs. The row sits in the channel settings dialog; the box is its own
 //! dialog.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted};

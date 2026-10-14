@@ -2,6 +2,7 @@
 //! `boxes/gift_premium_box.cpp`), opened by the Learn more button under a
 //! giveaway card. It only reads: running or ended, whether the user takes
 //! part, whether they won.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::link_info_boxes::finish;

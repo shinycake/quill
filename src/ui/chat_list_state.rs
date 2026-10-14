@@ -1,4 +1,5 @@
 //! Chat list: rows, filter, menus, pinning, preview and side tabs.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::ChatListFilter;
 use super::chat_row::ChatListItem;

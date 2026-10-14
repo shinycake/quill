@@ -1,4 +1,5 @@
 //! voice/video-note recording.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::demo::demo_file_json;

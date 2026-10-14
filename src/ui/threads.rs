@@ -2,6 +2,7 @@
 //! the comments bar under a channel post, the replies link under a group
 //! message, and the thread view's chrome — header actions, the pinned root
 //! post bar, the loading / error pane and navigation.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_text::kit_avatar_element;

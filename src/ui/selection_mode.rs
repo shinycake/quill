@@ -3,6 +3,7 @@
 //! each row shows a check circle, and ⌘C copies the selected messages.
 //! Pressing and dragging over rows, and the keyboard, live in
 //! `selection_drag` and `shortcut_pack`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::motion;

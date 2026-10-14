@@ -17,6 +17,7 @@
 //!
 //! The palette is scoped: [`with_palette`] sets it for the duration of a
 //! closure, so only the chat's rows see it.
+#![deny(clippy::indexing_slicing)]
 
 use super::bubble_theme::OutgoingFill;
 use gpui_kit::{Hsla, Rgba};

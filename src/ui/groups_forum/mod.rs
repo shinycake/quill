@@ -1,4 +1,5 @@
 //! forum topics.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::app::pane_placeholder;
@@ -83,7 +84,10 @@ impl QuillApp {
             ),
             None => (
                 String::new(),
-                TOPIC_ICON_COLORS[topics.len() % TOPIC_ICON_COLORS.len()],
+                TOPIC_ICON_COLORS
+                    .get(topics.len() % TOPIC_ICON_COLORS.len())
+                    .copied()
+                    .unwrap_or_default(),
                 0,
             ),
         };
@@ -686,7 +690,10 @@ impl QuillApp {
 /// without the randomness, so a click always changes the color).
 fn next_topic_color(current: i32) -> i32 {
     let at = TOPIC_ICON_COLORS.iter().position(|c| *c == current);
-    TOPIC_ICON_COLORS[at.map_or(0, |i| (i + 1) % TOPIC_ICON_COLORS.len())]
+    TOPIC_ICON_COLORS
+        .get(at.map_or(0, |i| (i + 1) % TOPIC_ICON_COLORS.len()))
+        .copied()
+        .unwrap_or(current)
 }
 
 /// The first letter of a topic name for its round icon; "#" when the

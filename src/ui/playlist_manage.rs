@@ -9,6 +9,7 @@
 //! page belongs to Saved Messages' owner, so only "Save As..." is left. On
 //! someone else's playlist the track can go to your profile, to Saved
 //! Messages or to a file.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::folder_share::finish_dialog;

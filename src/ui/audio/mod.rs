@@ -7,6 +7,7 @@
 //! Ogg Vorbis and WAV/PCM; Ogg/Opus (every Telegram voice note) goes through
 //! the pure-Rust decoder in [`opus`]. Speed changes keep the pitch
 //! ([`tempo`]). See `docs/decisions/codex-audio-in-process.md`.
+#![deny(clippy::indexing_slicing)]
 
 mod opus;
 mod tempo;
@@ -42,7 +43,7 @@ pub(super) enum Codec {
 /// `.ogg` may hold Vorbis or Opus. MIME type and extension only hint the
 /// generic decoder (see [`format_hint`]).
 pub(super) fn choose_codec(header: &[u8]) -> Codec {
-    let head = &header[..header.len().min(64)];
+    let head = header.get(..64).unwrap_or(header);
     let is_ogg = head.starts_with(b"OggS");
     let has_opus_head = head.windows(8).any(|w| w == b"OpusHead");
     if is_ogg && has_opus_head {
@@ -106,7 +107,8 @@ fn open_source(path: &Path, speed: &SharedSpeed) -> Result<Box<dyn Source + Send
     file.seek(SeekFrom::Start(0))
         .map_err(|_| AudioError::Open)?;
     let reader = BufReader::new(file);
-    let source: Box<dyn Source + Send> = match choose_codec(&header[..read]) {
+    let source: Box<dyn Source + Send> = match choose_codec(header.get(..read).unwrap_or_default())
+    {
         Codec::Opus => {
             Box::new(opus::OpusSource::new(reader).map_err(|_| AudioError::Unsupported)?)
         }
@@ -128,7 +130,10 @@ fn open_source(path: &Path, speed: &SharedSpeed) -> Result<Box<dyn Source + Send
 fn read_prefix(file: &mut File, buf: &mut [u8]) -> usize {
     let mut filled = 0;
     while filled < buf.len() {
-        match file.read(&mut buf[filled..]) {
+        let Some(rest) = buf.get_mut(filled..) else {
+            break;
+        };
+        match file.read(rest) {
             Ok(0) | Err(_) => break,
             Ok(n) => filled += n,
         }

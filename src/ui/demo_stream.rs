@@ -9,6 +9,7 @@
 //! starts typing in another chat, an update Quill does not parse, the
 //! contact comes back online, the typing stops, the unread totals change,
 //! an automatic download progresses, another chat is read elsewhere.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

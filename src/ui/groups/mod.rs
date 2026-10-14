@@ -1,4 +1,5 @@
 //! group/channel management: create dialogs, info edit, admin helpers, group confirm.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_text::looks_like_emoji;

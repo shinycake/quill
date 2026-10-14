@@ -2,6 +2,7 @@
 //! (tdesktop `boxes/gift_credits_box.cpp`, opened by "Send Stars" on the
 //! Stars page). A pack opens the payment checkout
 //! (`ui/invoice_checkout.rs`); nothing is paid until Pay there.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::link_info_boxes::finish;

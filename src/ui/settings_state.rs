@@ -1,4 +1,5 @@
 //! Settings boxes: appearance, shortcuts, storage, proxy, translation and app updates.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::theme::ThemeMode;

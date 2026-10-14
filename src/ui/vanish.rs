@@ -12,6 +12,7 @@
 //! The real message stays on screen until the crumbling front passes it,
 //! cut away at that front (`CutLeft`), so the text is there until its dust
 //! takes over.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

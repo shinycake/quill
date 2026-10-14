@@ -1,6 +1,7 @@
 //! Shareable folders: the Share Folder dialog (invite links, tdesktop
 //! `boxes/filters/edit_filter_links.cpp`) and the "Add folder" dialog for an
 //! `addlist` link (tdesktop `ui/chatlist_box` / `boxes/filters`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

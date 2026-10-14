@@ -3,6 +3,7 @@
 //! `numberbuttons`. tdesktop reads the keys on the Settings list and on the
 //! settings page of the sign-in screen; Quill reads them on the Settings list
 //! and on the sign-in screen itself.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

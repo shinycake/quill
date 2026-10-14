@@ -1,4 +1,5 @@
 //! Message history: rows, window, scroll probes, highlights and pinned bar.
+#![deny(clippy::indexing_slicing)]
 
 use super::history::HistoryShared;
 use super::*;

@@ -2,6 +2,7 @@
 //! Desktop `HistoryView::SimilarChannels`): a bubble pointing at the notice
 //! with a row of channel tiles (avatar, subscriber badge, name), a locked
 //! "More Channels" tile without Premium, "View all" when the row overflows.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::{chat_avatar, compact_count};

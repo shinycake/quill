@@ -1,4 +1,5 @@
 //! Deep links and bot link confirmations.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use quill::ids::ChatId;

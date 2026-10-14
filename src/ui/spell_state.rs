@@ -1,4 +1,5 @@
 //! Spell checking: the engine, results and the dictionaries box.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;

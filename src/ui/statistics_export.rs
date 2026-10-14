@@ -1,5 +1,6 @@
 //! "Export to File" on the statistics pages: the page's numbers and
 //! charts as an Excel workbook (tdesktop `info_statistics_export.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

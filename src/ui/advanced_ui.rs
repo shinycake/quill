@@ -1,6 +1,7 @@
 //! Settings > Advanced and its Experimental settings page (tdesktop
 //! `settings_advanced.cpp`, `settings_experimental.cpp`), plus the "Install
 //! beta versions" switch of the update section.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

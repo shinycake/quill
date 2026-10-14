@@ -1,4 +1,5 @@
 //! Emoji, sticker and GIF panel and their search fields.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::input::TextareaState;

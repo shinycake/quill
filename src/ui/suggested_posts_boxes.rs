@@ -1,5 +1,6 @@
 //! The price and time boxes of suggested posts (Telegram Desktop
 //! `ChooseSuggestPriceBox`, `ChooseSuggestTimeBox`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

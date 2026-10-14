@@ -6,6 +6,7 @@
 //! control keeps the parent from recording it, which is what
 //! [`SwallowPress::swallow_press`] does. tdesktop does the same implicitly:
 //! a pressed `ClickHandler` suppresses the surrounding widget's press action.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::{InteractiveElement, MouseButton};
 

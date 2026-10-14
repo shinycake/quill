@@ -1,4 +1,5 @@
 //! secret-chat lifecycle: peer layer, TTL, close confirm, key verification.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::*;

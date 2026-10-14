@@ -1,5 +1,6 @@
 //! UI half of the voice chat, video chat and live stream links
 //! (`parity:deeplink-voice-chat`, see `quill::call_link`).
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::link_info_boxes::finish;
 use super::shell::{DialogKind, QuillShell};

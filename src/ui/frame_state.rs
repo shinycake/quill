@@ -1,4 +1,5 @@
 //! Window and per-frame bookkeeping: animation demand, focus restore, quit guard.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::*;

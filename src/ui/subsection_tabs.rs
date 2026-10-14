@@ -11,6 +11,7 @@
 //! "All" (the whole chat) comes first, then the topics in topic order.
 //! Clicking a tab opens that topic through the existing topic path;
 //! right-clicking one opens the topic's actions.
+#![deny(clippy::indexing_slicing)]
 
 use super::GroupConfirmAction;
 use super::app::QuillApp;

@@ -1,4 +1,5 @@
 //! restrict/permissions/promote/demote/rights-editor dialogs.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::groups::{ADMIN_RIGHT_LABELS, admin_right_get, admin_right_set};

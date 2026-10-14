@@ -6,6 +6,7 @@
 //! `QUILL_DEMO_SUGGEST` opens a box over it: `price` (Suggest a Message),
 //! `time`, `accept` (Accept Terms), `decline`, or `admin` (the price box as
 //! the channel's admin, countering).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::demo::seed_ready_chats_session;

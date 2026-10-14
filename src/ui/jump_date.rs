@@ -3,6 +3,7 @@
 //! search highlights the days that have such messages
 //! (`getChatMessageCalendar`); any day can be picked — the jump lands on
 //! that day's first message (`getChatMessageByDate`).
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use super::{DialogKind, QuillShell};

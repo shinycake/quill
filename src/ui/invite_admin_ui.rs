@@ -2,6 +2,7 @@
 //! section — who joined through a link, other admins' link counts, and
 //! the revoked-links list with delete (tdesktop `edit_peer_invite_links.cpp`
 //! and `edit_peer_invite_link.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

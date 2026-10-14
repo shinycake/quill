@@ -1,4 +1,5 @@
 //! security.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::demo::{demo_sessions, demo_storage_stats, demo_websites};

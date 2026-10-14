@@ -21,6 +21,7 @@
 //! The focused message is the selection's focus row (`selection_focus`),
 //! the same row Ctrl+Space toggles, as tdesktop shares
 //! `_accessibilityFocusedItem` between the two.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::history_row::HistoryRow;

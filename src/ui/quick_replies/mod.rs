@@ -1,6 +1,7 @@
 //! Quick replies (Telegram Business shortcuts): the Settings dialog that lists
 //! them and edits one shortcut's messages, and the composer `/` rows that
 //! send one. Rules and requests: `quill::quick_replies`.
+#![deny(clippy::indexing_slicing)]
 
 mod build;
 #[cfg(test)]

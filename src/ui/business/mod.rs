@@ -11,6 +11,7 @@
 //! Quick replies keep their own dialog: the greeting and away messages
 //! open it on the `hello` / `away` shortcut, above this one, and closing
 //! it comes back here.
+#![deny(clippy::indexing_slicing)]
 
 mod build;
 mod chat_links;

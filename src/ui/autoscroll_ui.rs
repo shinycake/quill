@@ -5,6 +5,7 @@
 //! the mode (the next click ends it), a press held past a fifth of a second
 //! scrolls only while held. The loop feeds the list ordinary wheel events,
 //! because the message scroller has no pixel offset of its own.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::*;

@@ -3,6 +3,7 @@
 //! end of the history, growing as drafts arrive. New text is revealed
 //! smoothly over a few frames (like Zed's streaming agent output)
 //! instead of jumping by whole draft chunks.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

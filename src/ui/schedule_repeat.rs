@@ -8,6 +8,7 @@
 //! `forwardMessages` of one message, so the row is not offered when an
 //! existing scheduled message is rescheduled (`editMessageSchedulingState`
 //! has no repeat) or when several messages are forwarded.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::scheduled::{ScheduleTarget, using_test_dc};

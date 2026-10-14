@@ -7,6 +7,7 @@
 //! list's scroll offset (no timer). As it leaves, a compact stack of up
 //! to three small avatars fades in beside the search field; tapping it
 //! scrolls back to the top, which expands the strip again.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

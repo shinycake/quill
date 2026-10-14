@@ -9,6 +9,7 @@
 //! springs back. Frames come from the frame clock, attributed to the chat
 //! list slice; the action itself fires from a short-lived timer that runs
 //! only while a swipe is active.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::accent_strong;

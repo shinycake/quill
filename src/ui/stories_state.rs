@@ -1,4 +1,5 @@
 //! Stories UI state: the strip, viewer, composer, story page and their boxes.
+#![deny(clippy::indexing_slicing)]
 
 use super::story_albums::StoryPrivacyEdit;
 use super::*;

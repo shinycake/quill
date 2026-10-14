@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;

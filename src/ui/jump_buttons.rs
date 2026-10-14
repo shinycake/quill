@@ -5,6 +5,7 @@
 //! right-click offers "Mark all as read". The buttons show whenever the
 //! chat has unread markers (they do not wait for a scroll), without a
 //! fade so nothing keeps the window redrawing.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::compact_count;

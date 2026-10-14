@@ -6,6 +6,7 @@
 //! freeform gradients, patterns, photos with Blur or Tile) is rendered once
 //! per area size on the wallpaper thread (`wallpaper_cache`) and painted
 //! as one image.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::bubble_theme::{OutgoingFill, note_history_area};
@@ -139,9 +140,13 @@ pub(super) fn rotate(wallpaper: &Wallpaper) -> bool {
 }
 
 fn fill_wallpaper(fill: &BackgroundFill) -> Wallpaper {
+    if let BackgroundFill::Freeform(colors) = fill
+        && let [only] = colors.as_slice()
+    {
+        return Wallpaper::Solid(*only);
+    }
     match fill {
         BackgroundFill::Solid(color) => Wallpaper::Solid(*color),
-        BackgroundFill::Freeform(colors) if colors.len() == 1 => Wallpaper::Solid(colors[0]),
         other => Wallpaper::Fill(other.clone(), 0),
     }
 }

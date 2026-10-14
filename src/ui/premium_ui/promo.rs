@@ -46,7 +46,10 @@ fn preview_stickers(
 }
 
 fn feature_icon(index: usize) -> Div {
-    let (from, to) = ICON_TINTS[index % ICON_TINTS.len()];
+    let (from, to) = ICON_TINTS
+        .get(index % ICON_TINTS.len())
+        .copied()
+        .unwrap_or_default();
     div()
         .flex_none()
         .size(px(30.))
@@ -532,7 +535,9 @@ impl QuillApp {
         };
         let count = info.features.len();
         let index = index.min(count - 1);
-        let feature = info.features[index];
+        let Some(&feature) = info.features.get(index) else {
+            return div();
+        };
         let clip = hub
             .premium_state
             .as_ref()

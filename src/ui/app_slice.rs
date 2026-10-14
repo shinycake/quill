@@ -25,6 +25,7 @@
 //! animated emoji, stickers, inline videos, spoiler specks and typing dots
 //! only report where they sit, and a tick redraws the layer while the slice
 //! replays its cached frame.
+#![deny(clippy::indexing_slicing)]
 
 use super::anim_layer::{AnimationLayer, Layer};
 use super::app::QuillApp;

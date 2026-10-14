@@ -507,9 +507,9 @@ impl QuillApp {
                         // is still the old, shorter list.
                         if following
                             && !newer_page
-                            && rows[prev_count.min(count)..count]
-                                .iter()
-                                .any(super::chat_palette::row_is_outgoing)
+                            && rows.get(prev_count.min(count)..count).is_some_and(|added| {
+                                added.iter().any(super::chat_palette::row_is_outgoing)
+                            })
                         {
                             self.rotate_wallpaper_on_send(cx);
                         }

@@ -10,6 +10,7 @@
 //! notes where it was painted, when all of it is on screen: the effect is
 //! centred on it, and a message that has not played its effect yet starts
 //! it the first time its badge shows.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::nested_click::SwallowPress;

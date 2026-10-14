@@ -1,4 +1,5 @@
 //! contacts list, import/add dialogs.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

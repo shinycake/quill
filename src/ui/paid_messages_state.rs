@@ -1,6 +1,7 @@
 //! Paid messages: the open boxes and the staged price
 //! (`paid_messages_privacy.rs`, `paid_messages_send.rs`,
 //! `paid_messages_channel.rs`).
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;

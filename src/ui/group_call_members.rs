@@ -1,5 +1,6 @@
 //! The member rows of the group-call window (split out of
 //! `group_call_panel.rs`): status line, mic icon and the per-member menu.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

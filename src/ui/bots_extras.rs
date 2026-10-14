@@ -2,6 +2,7 @@
 //! buttons) and adding a bot to a group or channel from its profile. Behaviour
 //! follows tdesktop's `FastButtonsBots`, `AddBotToGroupBoxController` and
 //! `InviteToChatButton` (see `docs/decisions/codex-bots-extras.md`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::dialogs::ProfileDialog;
@@ -374,7 +375,7 @@ impl QuillApp {
                         grid = grid.child(
                             Checkbox::new(format!("add-bot-right-{index}"))
                                 .checked(enabled)
-                                .label(ADMIN_RIGHT_LABELS[index])
+                                .label(ADMIN_RIGHT_LABELS.get(index).copied().unwrap_or_default())
                                 .on_click(cx.listener(move |this, &on: &bool, window, cx| {
                                     if let Some(ProfileDialog::AddBot { rights, .. }) =
                                         &mut this.dialogs.profile_dialog

@@ -10,6 +10,7 @@
 //! Each handler returns `false` when its command does not apply (tdesktop's
 //! `request->check` found no handler), so the key reaches whatever else
 //! wants it.
+#![deny(clippy::indexing_slicing)]
 
 use super::actions::{
     ArchiveOpenChat, JustSend, RecordRoundMessage, ReopenClosedWindow, ScheduleSend, SendSilently,

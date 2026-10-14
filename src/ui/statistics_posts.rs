@@ -3,6 +3,7 @@
 //! `info_statistics_inner_widget.cpp` `fillRecentPosts`, message and
 //! story statistics; `info_statistics_list_controllers.cpp` public
 //! forwards).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

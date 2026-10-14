@@ -3,6 +3,7 @@
 //! level for the voice chat window (read from the driver's level tap,
 //! `connect::call_audio`). The rules and numbers are in
 //! `quill::calls::audio_level`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::Button;

@@ -2,6 +2,7 @@
 //! `ReadyStoryAlbums` screenshot-demo seeder. Split out of `ui/mod.rs` per
 //! the file-size directive — `ui/mod.rs` keeps the `QuillApp` field, the
 //! `QuillApp` methods, and the render wiring.
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use gpui_kit::AppContext;

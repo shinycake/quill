@@ -7,6 +7,7 @@
 //! (`launchPrepaidGiveaway`, after an "are you sure" step). A new one opens
 //! the payment checkout with the chosen option's price
 //! (`ui/invoice_checkout.rs`); the giveaway is created when it is paid.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::giveaway_state::{GiveawayForm, GiveawayPage};

@@ -6,6 +6,7 @@
 //! (`Ui::DraggingScrollManager`). The rules are in
 //! [`quill::selection_drag`]; this module wires them to the pointer, the
 //! painted row bounds and the scroller.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::autoscroll_ui::scroll_history_by;
@@ -221,9 +222,9 @@ impl QuillApp {
             match self.share.pending_forward.as_mut() {
                 Some(draft) if draft.from_chat_id == chat => draft.message_ids = ids,
                 _ => {
-                    if let Some(mut draft) =
-                        quill::composer::ForwardDraft::from_message(chat, ids[0], false)
-                    {
+                    if let Some(mut draft) = ids.first().and_then(|&first| {
+                        quill::composer::ForwardDraft::from_message(chat, first, false)
+                    }) {
                         draft.message_ids = ids;
                         self.share.pending_forward = Some(draft);
                     }

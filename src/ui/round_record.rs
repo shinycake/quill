@@ -1,6 +1,7 @@
 //! The live camera circle while a video message records (tdesktop
 //! `RoundVideoRecorder`): the mirrored preview in a round frame over the
 //! chat, with a shadow and a ring filling toward the 60 s limit.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::ActiveTheme;

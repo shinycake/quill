@@ -10,6 +10,7 @@
 //! The text element only knows a click happened; [`QuillApp::queue_link`]
 //! parks it and [`QuillApp::run_pending_link`] (called from render, which
 //! owns the `Window`) acts on it.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

@@ -1,5 +1,6 @@
 //! Advanced settings state: the typed-code buffer, the debug mode confirm and
 //! the test environment flag (`ui/advanced_ui.rs`, `ui/secret_codes_ui.rs`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

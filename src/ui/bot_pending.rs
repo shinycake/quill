@@ -1,4 +1,5 @@
 //! Streaming bot reply display, using existing text and rich-block renderers.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;

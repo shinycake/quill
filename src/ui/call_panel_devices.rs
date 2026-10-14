@@ -6,6 +6,7 @@
 //! `select_call_device` that the main window's call card uses. The grouping
 //! and the open/close routing are plain functions so they can be tested
 //! without a window.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;

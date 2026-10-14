@@ -1,5 +1,6 @@
 //! A small count-capped least-recently-used map for thread-local render
 //! caches that would otherwise grow with every key ever seen.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::HashMap;
 use std::hash::Hash;

@@ -1,6 +1,7 @@
 //! The members block of the group info panel: which group it shows, the
 //! search box, paging as the list scrolls and refetching after membership
 //! changes. The drawing is in `inline_members_view.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

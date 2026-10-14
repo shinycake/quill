@@ -6,6 +6,7 @@
 //! its send-files dialog (`MainWidget::sendPaths`); Quill's counterpart of
 //! that dialog is the composer's attachment strip. See
 //! `docs/decisions/codex-platform-updates-bundle.md`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

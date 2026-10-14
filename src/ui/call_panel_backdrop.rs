@@ -1,5 +1,6 @@
 //! The call window backdrop (moved out of `call_panel.rs` to keep it under
 //! the file size limit).
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 use std::sync::Arc;
@@ -31,7 +32,9 @@ pub(super) fn backdrop(colors: &[u32]) -> Option<Arc<RenderImage>> {
         let scaled = t * (colors.len() - 1) as f32;
         let index = (scaled.floor() as usize).min(colors.len() - 2);
         let local = scaled - index as f32;
-        let (a, b) = (colors[index], colors[index + 1]);
+        let (Some(&a), Some(&b)) = (colors.get(index), colors.get(index + 1)) else {
+            continue;
+        };
         let mix = |shift| channel(a, shift) + (channel(b, shift) - channel(a, shift)) * local;
         // BGRA for GPUI.
         *pixel = image::Rgba([mix(0) as u8, mix(8) as u8, mix(16) as u8, 255]);

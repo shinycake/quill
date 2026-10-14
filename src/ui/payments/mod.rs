@@ -1,4 +1,5 @@
 //! buy buttons, payment dialogs, login-URL confirms.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_text::format_unix_date_time;
@@ -266,9 +267,10 @@ impl QuillApp {
                                 )
                             }))
                             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                                if let Some(live) = this.live.as_mut() {
-                                    live.driver.session.payments.shipping_id =
-                                        Some(shipping_ids[ix].clone());
+                                if let Some(live) = this.live.as_mut()
+                                    && let Some(id) = shipping_ids.get(ix)
+                                {
+                                    live.driver.session.payments.shipping_id = Some(id.clone());
                                 }
                                 cx.notify();
                             })),
@@ -309,8 +311,10 @@ impl QuillApp {
                             )),
                     )
                     .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                        if let Some(dialog) = this.payments.dialog.as_mut() {
-                            dialog.credential_choice = match &cred_ids[ix] {
+                        if let Some(dialog) = this.payments.dialog.as_mut()
+                            && let Some(choice) = cred_ids.get(ix)
+                        {
+                            dialog.credential_choice = match choice {
                                 Some(id) => PaymentCredentialChoice::Saved(id.clone()),
                                 None => PaymentCredentialChoice::NewToken,
                             };

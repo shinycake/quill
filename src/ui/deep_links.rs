@@ -6,6 +6,7 @@
 //! driver-facing half of the flow; the chat open itself happens in
 //! render via [`QuillApp::open_deep_link_chat`], which has the `Window`
 //! (same take-once pattern as `pending_story_open`).
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;

@@ -4,6 +4,7 @@
 //! per open chat redraws the window when the soonest label would change.
 //! That is once a minute for most of a share and once a second in its last
 //! minute, and the task ends with the last running share.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

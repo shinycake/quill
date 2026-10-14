@@ -1,6 +1,7 @@
 //! Progress of a running account export, shown in the "Export Telegram
 //! data" dialog (tdesktop `export/view/export_view_progress`): a bar, the
 //! current step and chat, Cancel; when it ends, a way to open the folder.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::DialogKind;

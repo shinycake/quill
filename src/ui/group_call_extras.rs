@@ -5,6 +5,7 @@
 //! `calls_group_common.cpp` (join-as box). The decisions live in the pure
 //! modules `quill::calls::{ptt, tile_pin}`; this file only wires them to
 //! the window and to the call driver.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;

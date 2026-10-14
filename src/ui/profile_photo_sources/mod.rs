@@ -5,6 +5,7 @@
 //! body; the video opens the full video editor over the dialog. The
 //! request bodies, the gradient drawing and the ffmpeg command lines are
 //! in `quill::profile_photo_*`.
+#![deny(clippy::indexing_slicing)]
 
 mod camera;
 mod emoji;

@@ -1,4 +1,5 @@
 //! member-management dialog.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::DialogKind;

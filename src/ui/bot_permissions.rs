@@ -3,6 +3,7 @@
 //! a bot the person let set their emoji status, to take that access back (or
 //! give it again). A mini app asks for it with
 //! `web_app_request_emoji_status_access` (`web_app_ui/emoji_status.rs`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::switch::Switch;

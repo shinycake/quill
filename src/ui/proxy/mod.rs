@@ -4,6 +4,7 @@
 //! `ProxiesBox`, `ProxyBox` and `ShowApplyConfirmation`
 //! (`boxes/connection_box.cpp`); the data lives in TDLib, so everything
 //! here is a view over `Session::proxy` plus driver calls.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -760,11 +761,9 @@ impl QuillApp {
                                         .label(format!("{secs} s"))
                                 }))
                                 .on_click(cx.listener(|this, &ix, _, cx| {
-                                    this.set_proxy_auto_switch(
-                                        None,
-                                        Some(AUTO_SWITCH_TIMEOUTS[ix]),
-                                        cx,
-                                    );
+                                    if let Some(&timeout) = AUTO_SWITCH_TIMEOUTS.get(ix) {
+                                        this.set_proxy_auto_switch(None, Some(timeout), cx);
+                                    }
                                 })),
                         )
                         .child(div().text_xs().text_color(text_muted()).child(

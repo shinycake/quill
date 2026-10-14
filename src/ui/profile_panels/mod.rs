@@ -3,6 +3,7 @@
 //! similar channels and the profile photo gallery. Behaviour follows
 //! tdesktop's `info_profile_actions.cpp`, `edit_contact_box.cpp` and
 //! `window_peer_menu.cpp` (see `docs/decisions/codex-profile-panels.md`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

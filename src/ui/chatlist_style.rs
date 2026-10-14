@@ -1,6 +1,7 @@
 //! Slice chatlist-list-style: the chat-list row preview line renderer.
 //! Pure style inputs (`icon`, `entities`) come from
 //! `quill::chatlist_style`; this module only paints them.
+#![deny(clippy::indexing_slicing)]
 
 use super::message_text::MONO_FONT;
 use super::*;

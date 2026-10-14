@@ -771,8 +771,10 @@ pub(super) fn corner_mask(
                 (false, false) => 2,
                 (false, true) => 3,
             };
-            let radius = radii[corner] as f32 * 2.0;
-            let color = bgra[corner];
+            let (Some(&corner_radius), Some(&color)) = (radii.get(corner), bgra.get(corner)) else {
+                continue;
+            };
+            let radius = corner_radius as f32 * 2.0;
             // Distance from this corner's edges.
             let dx = if left { px } else { w as f32 - px };
             let dy = if top { py } else { h as f32 - py };

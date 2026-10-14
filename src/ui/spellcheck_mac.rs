@@ -18,6 +18,7 @@
 //! "NSSpellServer findMisspelledWordInString timed out" and drop the
 //! answer. The worker is warmed up at startup so the first real check
 //! doesn't pay the dictionary load.
+#![deny(clippy::indexing_slicing)]
 
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Sender};

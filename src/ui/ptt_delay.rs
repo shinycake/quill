@@ -2,6 +2,7 @@
 //! `calls_group_settings.cpp`: a media slider with 201 positions, 0 to 2 s in
 //! 10 ms steps, and a "Release delay: N ms" label). The positions and the
 //! label text live in `quill::calls::ptt`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::ActiveTheme;

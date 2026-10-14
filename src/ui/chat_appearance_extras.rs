@@ -4,6 +4,7 @@
 //! in front of a boosted chat's wallpaper (`BackgroundPreviewBox::
 //! checkLevelForChannel`). The wallpaper itself is picked in the chat look
 //! dialog (`chat_look_ui`), which serves channels and supergroups too.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_look_ui::LookChange;

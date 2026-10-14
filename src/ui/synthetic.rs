@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 use super::chat_theme::*;
 use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::prelude::FluentBuilder;

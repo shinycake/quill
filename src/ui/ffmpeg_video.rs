@@ -6,6 +6,7 @@
 //! Every new picture becomes a new `RenderImage`; the one it replaces is
 //! retired to `image_budget`, which drops it from the GPU atlas once no
 //! frame can show it, so a playing clip holds a picture or two on the GPU.
+#![deny(clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

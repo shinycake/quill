@@ -2,6 +2,7 @@
 //! `boxes/sticker_set_box.cpp`): a small Premium-gradient disc in the
 //! sticker's bottom-right corner with a lock for an account without
 //! Premium and a star for one with it.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;

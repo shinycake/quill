@@ -1,4 +1,5 @@
 //! Notifications: OS clicks, sounds, mute and auto-delete menus, defaults.
+#![deny(clippy::indexing_slicing)]
 
 use super::notification_settings::SoundPickerTarget;
 use super::*;

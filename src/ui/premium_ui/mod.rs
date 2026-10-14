@@ -6,6 +6,7 @@
 //! dialog; pin, upgrade, transfer, resale and collections are in
 //! `ui/gift_manage_ui.rs`. Buying Stars and subscribing to Premium are
 //! never offered here.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{fill_muted, success};

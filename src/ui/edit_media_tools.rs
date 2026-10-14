@@ -2,6 +2,7 @@
 //! message (tdesktop `EditCaptionBox::showMenu`). The menu sits in the
 //! edit banner next to "Replace"; both tools stage their result and the
 //! edit sends it as one `editMessageMedia` when saved.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::photo_editor::PhotoEditor;

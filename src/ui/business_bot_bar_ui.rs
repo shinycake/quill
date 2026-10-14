@@ -2,6 +2,7 @@
 //! `BusinessBotStatus`): the bot's photo and name, a status line, a
 //! "Stop" / "Start" button and a menu with "Manage bot" and "Remove bot from
 //! this chat". The state and texts live in `quill::business_bot_bar`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

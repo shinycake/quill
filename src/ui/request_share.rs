@@ -2,6 +2,7 @@
 //! a chat with the bot. tdesktop shows a confirmation for the phone number
 //! (`lng_bot_share_phone`) and `ChoosePeerBox` with a send confirmation
 //! (`lng_request_peer_confirm`) for users and chats.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

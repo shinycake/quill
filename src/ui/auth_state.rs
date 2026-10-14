@@ -1,4 +1,5 @@
 //! Sign-in: inputs, registration, terms, recovery and the QR code.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::input::InputState;

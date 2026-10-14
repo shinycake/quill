@@ -59,7 +59,9 @@ impl QuillApp {
                     .map(|(label, _)| Radio::new(format!("ttl-set-{label}")).label(*label)),
             )
             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                let secs = presets[ix].1;
+                let Some(secs) = presets.get(ix).map(|preset| preset.1) else {
+                    return;
+                };
                 if let Some(chat_id) = open_chat {
                     this.apply_chat_ttl(chat_id, secs, cx);
                 }

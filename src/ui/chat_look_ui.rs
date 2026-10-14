@@ -8,6 +8,7 @@
 //! not covered. The wallpaper is set for the user only unless the account is
 //! Premium and chooses "also for the other person"
 //! (`setChatBackground.only_for_self`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::bubble_theme::{OutgoingFill, outgoing_bubble_color};

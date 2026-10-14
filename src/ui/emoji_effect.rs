@@ -17,6 +17,7 @@
 //! sticker is mirrored for messages on the left: its decoded frames are
 //! flipped once when the effect starts and kept for the next one. Effects
 //! past the fifth wait their turn (`may_start`, tdesktop `checkDelayed`).
+#![deny(clippy::indexing_slicing)]
 
 use super::anim_layer::LayeredClip;
 use super::app::QuillApp;

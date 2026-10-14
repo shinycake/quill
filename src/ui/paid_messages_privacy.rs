@@ -5,6 +5,7 @@
 //! Everybody and Contacts and Premium apply as soon as they are picked,
 //! like before. Charging asks for a price first and starts only with Save:
 //! nothing is charged by a stray click.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};

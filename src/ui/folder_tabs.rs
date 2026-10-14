@@ -1,6 +1,7 @@
 //! Folder tabs: the strip above the chat list and the column on its left
 //! ("Tabs on the left", tdesktop `window/window_filters_menu.cpp`), with the
 //! "Tabs appearance" choice (text, icons, both).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{ChatListFilter, QuillApp};
 use super::chat_theme::{accent, accent_strong, text_on_fill};

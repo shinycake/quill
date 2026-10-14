@@ -11,6 +11,7 @@
 //! Where the content is built inside a slice with an animation layer (the
 //! chat list, the conversation) the animation is drawn by that layer, so its
 //! frames never rebuild the slice. Anywhere else the status stays a still.
+#![deny(clippy::indexing_slicing)]
 
 use super::anim_layer::{self, LayeredClip};
 use super::app::QuillApp;
@@ -62,8 +63,10 @@ fn first_shown(key: Key, now: Instant) -> Instant {
         if shown.len() >= MAX_REMEMBERED && !shown.contains_key(&key) {
             let mut times: Vec<Instant> = shown.values().copied().collect();
             times.sort_unstable();
-            let cut = times[times.len() / 2];
-            shown.retain(|_, at| *at > cut);
+            match times.get(times.len() / 2) {
+                Some(&cut) => shown.retain(|_, at| *at > cut),
+                None => shown.clear(),
+            }
         }
         *shown.entry(key).or_insert(now)
     })

@@ -4,6 +4,7 @@
 //! another way: quick media versus documents, a folder's files versus one
 //! archive. GPUI delivers the same `ExternalPaths` drag on macOS, Windows
 //! and Linux.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp};
 use super::chat_theme::accent;

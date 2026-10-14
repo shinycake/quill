@@ -4,6 +4,7 @@
 //! tdesktop: `info/statistics/info_statistics_inner_widget.cpp` (story
 //! statistics: overview, two charts, "Public Shares" list), the story
 //! hashtag / location search, `info/profile` topic details.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;

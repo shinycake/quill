@@ -3,6 +3,7 @@
 //! follows tdesktop's `info_profile_actions.cpp` and
 //! `info_profile_phone_menu.cpp`; see
 //! `docs/decisions/codex-profile-business-rows.md`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
@@ -127,7 +128,11 @@ impl QuillApp {
         // the viewer's zone; otherwise expanded view lists every day.
         let timing = match until_open {
             Some(n) if n > 0 && !expanded => opens_in_text(n),
-            _ => format_day(&days[today]).replace('\n', ", "),
+            _ => days
+                .get(today)
+                .map(format_day)
+                .unwrap_or_default()
+                .replace('\n', ", "),
         };
         let theme = cx.theme();
         let (muted, hover, border) = (theme.muted_foreground, theme.secondary, theme.border);

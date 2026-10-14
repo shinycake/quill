@@ -4,6 +4,7 @@
 //! switches lines on and off. A click on a point zooms into its day, or
 //! into a pie on a percentage chart. The math lives in
 //! `quill::stat_chart`.
+#![deny(clippy::indexing_slicing)]
 
 mod footer;
 mod pie;

@@ -3,6 +3,7 @@
 //! and the tag colour picker (tdesktop `window/window_filters_menu.cpp`,
 //! `ui/chat/more_chats_bar.cpp`, `boxes/premium_limits_box.cpp`,
 //! `boxes/filters/edit_filter_box.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas, peer_name_color, text_menu};

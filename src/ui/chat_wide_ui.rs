@@ -1,6 +1,7 @@
 //! "Adaptive layout for wide screens", the UI half (`quill::chat_wide`):
 //! the history's width class measured at paint, the wide column for
 //! service rows and dates, and the Appearance checkbox.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::checkbox::Checkbox;

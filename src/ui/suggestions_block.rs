@@ -1,6 +1,7 @@
 //! The suggestions block on top of the chat list (tdesktop
 //! `Dialogs::TopBarSuggestionContent`); what it shows and says is decided
 //! in `quill::chatlist_suggestions`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;

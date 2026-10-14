@@ -3,6 +3,7 @@
 //! wallpaper behind two sample messages, offers Blur for photos and Share
 //! (copy the `bg/` link, not for local files), and Apply sets it as the
 //! account wallpaper for the current light or dark theme.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_look_ui::is_wallpaper_image;

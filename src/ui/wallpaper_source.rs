@@ -2,6 +2,7 @@
 //! [`Wallpaper`] at an exact pixel size (tdesktop `PrepareBackgroundImage`
 //! plus `CacheBackground`). Everything here runs off the UI thread; the
 //! pixel maths lives in `quill::wallpaper_raster`.
+#![deny(clippy::indexing_slicing)]
 
 use super::wallpaper::Wallpaper;
 use quill::wallpaper_raster::{

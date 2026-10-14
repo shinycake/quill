@@ -1,6 +1,7 @@
 //! The search-in-chat and forward-picker text fields and what typing in
 //! them does. One wiring for the main window's fields and every chat
 //! window's own (`chat_window::slot`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};

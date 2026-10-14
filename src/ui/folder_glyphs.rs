@@ -1,5 +1,6 @@
 //! Folder icons drawn from the bundled Lucide set (tdesktop draws its own
 //! `FilterIcon` bitmaps; the names are the schema's `chatFolderIcon` names).
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::assets::IconName;
 

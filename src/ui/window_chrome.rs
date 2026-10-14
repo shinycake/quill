@@ -1,6 +1,7 @@
 //! Keeps the native window title in step with the open chat and the unread
 //! total (`quill::window_title`). `Window::set_window_title` is backed on
 //! macOS, Linux and Windows, so this needs no per-platform code.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;
