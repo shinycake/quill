@@ -405,3 +405,43 @@ libheif loader were read by hand: they index nothing (only constant indices into
 
 Still without a deny: `ui/mod.rs`, `app`, `app_demo`, `gift_send_ui` and
 `app_render/frame_upkeep` (open PRs #786 and #789).
+
+## Phase D complete: `indexing_slicing` on for the workspace
+
+Branch `panic-lints-d-final`. `indexing_slicing = "deny"` is now in
+`[workspace.lints.clippy]` in `Cargo.toml`, so every module of the root
+package and the three member crates (`ntgcalls-sys`, `webview-protocol`,
+`webview-host`) is linted, including the files no batch had a `#![deny]` on:
+`lib.rs`, `main.rs`, `quill_assets`, `suggested_posts`, `suggested_posts_text`,
+`ui/mod.rs`, `ui/app`, `ui/app_demo` and `ui/gift_send_ui`. The vendored
+`third_party/gpui-base` bidi file that `lib.rs` compiles under `#[cfg(test)]`
+is test-only and covered by `allow-indexing-slicing-in-tests`.
+
+Sites fixed: none. Batches 1 to 7 had already cleaned these files, and with the
+lint on, the clean runs below found nothing. Nothing in any hotspot file
+changed (so no PR #786 or #789 conflicts and no `Hotspot-change:` trailer
+needed), and there are no `#[expect]`s.
+
+Checked by running clippy (no errors):
+
+- `cargo clippy --workspace --exclude quill-webview --features ui,demo-capture --all-targets -- -D warnings`
+- the same with `--no-default-features`
+- `cargo clippy -p quill-webview --all-targets -- -D warnings`
+- `--target x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` with
+  `--no-default-features` (only the lint was compared; the Windows target also
+  shows unrelated style warnings that this change does not touch).
+
+Checked by hand, because the UI feature does not cross-compile here: the
+`cfg(windows)`, `cfg(linux)` and `cfg(unix)` regions of the UI files without a
+per-module deny (`hdr_image/viewer`, `notifications/native_extras`,
+`notifications/spawn_call_notification`, `notify_windows/position`,
+`web_app_ui/spawn_mini_app_window`, `message_media/surfaces`,
+`image_decode/libheif`, `demos/composer`, `keybindings/pinned_chat_rows`). A
+pattern search for index and range expressions found none. Linux CI covers the
+Linux UI code. Nothing in CI runs clippy on Windows (the Windows job only builds
+and packages), so Windows-only code is checked by review until a Windows clippy
+job exists. Earlier batch notes above that list modules "still without a deny"
+describe the state at that batch; none are left.
+
+The per-module `#![deny(clippy::indexing_slicing)]` attributes stay; they are
+redundant but removing them would touch about 700 files.

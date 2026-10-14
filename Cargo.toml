@@ -16,6 +16,7 @@ exit = "deny"
 undocumented_unsafe_blocks = "deny"
 string_slice = "deny"
 unchecked_time_subtraction = "deny"
+indexing_slicing = "deny"
 
 [package]
 name = "quill"

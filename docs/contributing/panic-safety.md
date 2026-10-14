@@ -18,7 +18,8 @@ These rules apply to every PR, human or agent. Tests are exempt: `unwrap`,
    (`if let Some(live) = self.live.as_mut()`, not `is_some()` then `expect`).
 2. **No indexing or slicing that can go out of range.** Use `.get(i)`,
    `.get(a..b)`, `.first()`, `.last()`, `split_first()`, iterators, or
-   `chunks_exact`. Fixed-size arrays with constant indices are fine.
+   `chunks_exact`. Fixed-size arrays with constant indices are fine. Clippy
+   enforces this workspace-wide (`indexing_slicing`); test code is exempt.
 3. **Strings are sliced only on char boundaries.** Never slice with an offset
    that came from TDLib (UTF-16 entity offsets), the input engine, or
    arithmetic, without `str::get(a..b)` or `is_char_boundary`. Convert UTF-16
@@ -94,7 +95,7 @@ blocks a `// SAFETY:` comment too.
 | A | `unwrap_used`, `panic`, `todo`, `unimplemented`, `unreachable`, `exit` (with an `expect` on `main`'s CLI paths) | **On** (`panic-lints`) |
 | B | `expect_used`, `undocumented_unsafe_blocks` | **On** (`panic-lints`) |
 | C | `string_slice`, `unchecked_time_subtraction` | **On** (`panic-lints-c`) |
-| D | `indexing_slicing`, per module with `#![deny(clippy::indexing_slicing)]` | **On** for `telegram/envelope`, `state`, `composer`, `composer_doc` (`panic-lints-d1`) and 168 more non-UI modules, all of `src/telegram`, `export`, `stat_chart`, `wallpaper_raster`, `album`, `connect` among them (`panic-lints-d2`), and 28 more (`video`, `calls`, `tray`, `tray_mac`, `tray_sni`, `suggest`, `share_box`, `playlist`, `folder_archive`, `profile_photo_gradient` and 18 smaller ones, `panic-lints-d3`), 314 `src/ui/` modules (`panic-lints-d4`, all but the ones listed in docs/decisions/panic-lints.md), and 39 more UI roots with platform code (`panic-lints-d5`: `app_render`, `appearance`, `message_media`, `message_text`, `notifications`, `notify_windows`, `os_menus`, `keybindings`, `touch_bar`, `hdr_image`, `demo`, `native_video*`, `window_*` and the like), and 46 more roots (`panic-lints-d6`: the `sticker_*`, `video_edit`, `video_timeline`, `profile_photo_video` library modules, and the sticker, video editor, composer, `send_*`, `ton_wallet_*`, `earn*` UI plus the hotspots `shell`, `screenshot_demo`, `demos/mod.rs`), and `media_viewer`, `ui/media_viewer` and `ui/image_decode` (`panic-lints-d7`); `ui/mod.rs`, `app`, `app_demo`, `gift_send_ui` and `app_render/frame_upkeep` still open |
+| D | `indexing_slicing` | **On (workspace)** (`panic-lints-d-final`). Rolled out in batches `panic-lints-d1` to `d7`, each adding `#![deny(clippy::indexing_slicing)]` per module root; those attributes stay and now duplicate the workspace lint. Details in docs/decisions/panic-lints.md |
 
 Phase D counts are production code on macOS from
 `cargo clippy --features ui --bin quill`, which lints the library with the UI
