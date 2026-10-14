@@ -229,6 +229,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                         extra,
                     ))
             {
+                // Try again on the next poll.
+                self.session.stickers.creator_refetch_sets = true;
                 self.session.requests.take(extra);
                 return Err(err);
             }
@@ -247,6 +249,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         extra,
                     ))
             {
+                self.session.stickers.creator_refetch_sets = true;
                 self.session.requests.take(extra);
                 return Err(err);
             }

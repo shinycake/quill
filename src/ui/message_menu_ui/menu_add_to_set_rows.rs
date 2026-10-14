@@ -46,7 +46,8 @@ impl QuillApp {
                 order,
                 IconName::Sticker,
                 // The set id keeps the row's identity stable (one row per
-                // owned set, however many there are).
+                // owned set, however many there are). The cast only reads
+                // the id's bits; it cannot fail.
                 ("menu-add-to-set", set_id as u64),
                 title,
                 false,
