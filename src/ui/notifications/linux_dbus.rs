@@ -91,6 +91,45 @@ pub(super) fn notifier(
         .as_ref()
 }
 
+/// How often a missing notification daemon is looked for again.
+const REPROBE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What the notification daemon can do (tdesktop `Supported` and
+/// `ByDefault`), asked on a thread of its own: `Unknown` until it
+/// answers, `Missing` without a session bus or daemon. While missing it
+/// asks again every [`REPROBE`], as a daemon may start after Quill.
+pub(in crate::ui) fn linux_service_capabilities() -> quill::notify::custom::NativeService {
+    use quill::notify::custom::NativeService;
+    static PROBE: OnceLock<Arc<Mutex<NativeService>>> = OnceLock::new();
+    let slot = PROBE.get_or_init(|| {
+        let slot = Arc::new(Mutex::new(NativeService::Unknown));
+        let writer = slot.clone();
+        let spawned = quill::thread_guard::spawn_guarded("quill-notify-caps", move || {
+            loop {
+                let answer = Connection::session()
+                    .and_then(|connection| {
+                        Proxy::new(&connection, BUS_NAME, OBJECT_PATH, INTERFACE)?
+                            .call::<_, _, Vec<String>>("GetCapabilities", &())
+                    })
+                    .map(|list| NativeService::Present {
+                        full: quill::notify::dbus::full_parity(&list),
+                    })
+                    .unwrap_or(NativeService::Missing);
+                *lock(&writer) = answer;
+                if answer != NativeService::Missing {
+                    break;
+                }
+                std::thread::sleep(REPROBE);
+            }
+        });
+        if spawned.is_err() {
+            *lock(&slot) = NativeService::Missing;
+        }
+        slot
+    });
+    *lock(slot)
+}
+
 /// The text typed into the chat's notification, if it was answered inline.
 /// Taking it clears it. Only the account on screen offers the field.
 pub(super) fn take_reply_text(chat_id: ChatId) -> Option<String> {

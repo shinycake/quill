@@ -113,6 +113,7 @@ impl QuillApp {
         self.account.lifecycle.open = true;
         self.account.lifecycle.confirm_delete = false;
         self.account.lifecycle.confirm_logout = false;
+        self.close_all_notify_windows(cx);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.get_account_ttl();
             let _ = live.driver.get_default_auto_delete();

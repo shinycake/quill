@@ -87,6 +87,7 @@ mod tests {
         let prefs = ProxyPrefs {
             auto_switch: true,
             auto_switch_secs: 30,
+            ..ProxyPrefs::default()
         };
         let json = serde_json::to_string(&prefs).unwrap();
         assert_eq!(serde_json::from_str::<ProxyPrefs>(&json).unwrap(), prefs);

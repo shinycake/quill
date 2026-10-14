@@ -495,6 +495,9 @@ impl QuillApp {
         self.viewer.state.close();
         self.stories.viewer.close();
         self.close_context_menus(cx);
+        // Notification windows on screen show senders and text (tdesktop
+        // redraws them hidden on lock).
+        self.close_all_notify_windows(cx);
         cx.notify();
     }
 

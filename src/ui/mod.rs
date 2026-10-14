@@ -284,6 +284,7 @@ mod message_text;
 mod navigation;
 mod notification_settings;
 mod notifications;
+mod notify_windows;
 mod onboarding;
 mod os_menus;
 mod ownership;

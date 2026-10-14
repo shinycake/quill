@@ -329,7 +329,7 @@ impl QuillApp {
         if proxy.stale || proxy.mutating || proxy.loading {
             return None;
         }
-        Some((proxy.list.clone()?, proxy.prefer_ipv6))
+        Some((proxy.all_entries()?, proxy.prefer_ipv6))
     }
 
     fn poll_background(&mut self, cx: &mut Context<Self>) -> bool {

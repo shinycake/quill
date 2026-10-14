@@ -357,6 +357,7 @@ mod tests {
         let old = crate::proxy::ProxyPrefs {
             auto_switch: true,
             auto_switch_secs: 30,
+            ..crate::proxy::ProxyPrefs::default()
         };
         std::fs::write(
             primary.root.join(PROXY_PREFS),
@@ -369,6 +370,7 @@ mod tests {
         let new = crate::proxy::ProxyPrefs {
             auto_switch: false,
             auto_switch_secs: 15,
+            ..crate::proxy::ProxyPrefs::default()
         };
         save_proxy_prefs(&other, &new).unwrap();
         assert!(dir.join(PROXY_PREFS).exists());
