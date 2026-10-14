@@ -11,7 +11,7 @@ use super::actions::{
     SendSilently, ShowAdminLog, ShowChatMenu, ShowChatPreview, ShowScheduledMessages,
     StoryTogglePause, ToggleFullscreen, ToggleLinkPreview, ToggleMessageSelection, ToggleTheme,
     ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave,
-    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -767,6 +767,15 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("ctrl-w", "Close window", "General", CloseWindow),
         row("cmd-m", "Minimize window", "General", MinimizeWindow),
         row("ctrl-m", "Minimize window", "General", MinimizeWindow),
+        // A menu item shows its action's first binding: the macOS Window
+        // menu's "Toggle Full Screen" reads ⌃⌘F, as in Telegram Desktop.
+        #[cfg(target_os = "macos")]
+        row(
+            "cmd-ctrl-f",
+            "Toggle fullscreen",
+            "General",
+            ToggleFullscreen,
+        ),
         row("f11", "Toggle fullscreen", "General", ToggleFullscreen),
         row(
             primary!("shift-t"),
@@ -965,7 +974,9 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 93);
+        // macOS adds ⌃⌘F first, for the Window menu's Toggle Full Screen.
+        let expected = if cfg!(target_os = "macos") { 94 } else { 93 };
+        assert_eq!(defaults.len(), expected);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();

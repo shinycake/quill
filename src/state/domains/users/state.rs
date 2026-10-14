@@ -69,11 +69,27 @@ pub struct UsersState {
     /// fetch (e.g. a secret chat loaded from the local DB with no state
     /// seen yet). Drained by the driver's `maybe_fetch_secret_chat_states`.
     pub secret_chat_fetch_queue: Vec<i32>,
-    /// `getSupportUser` answer waiting for the driver to open the chat
-    /// (Settings > Ask a Question).
-    pub support_user_ready: Option<i64>,
+    /// A user whose private chat the driver opens on the next ingest:
+    /// the `getSupportUser` answer (Settings > Ask a Question) or a
+    /// contact just created by phone (New Contact).
+    pub user_chat_to_open: Option<i64>,
+    /// The answer to the New Contact box's `importContacts`, taken by the
+    /// box: tdesktop's `AddContactBox::save` opens the chat when the phone
+    /// belongs to a Telegram user and otherwise shows "not joined".
+    pub new_contact_outcome: Option<NewContactOutcome>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
+}
+
+/// How the New Contact box's import ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NewContactOutcome {
+    /// The phone belongs to this Telegram user; the chat opens.
+    Joined(i64),
+    /// No Telegram account has the phone.
+    NotJoined,
+    /// The request failed (TDLib error code).
+    Failed(i32),
 }
 
 impl UsersState {
@@ -97,7 +113,8 @@ impl UsersState {
             wearable_gifts_loaded: false,
             secret_chat_states: HashMap::new(),
             secret_chat_fetch_queue: Vec::new(),
-            support_user_ready: None,
+            user_chat_to_open: None,
+            new_contact_outcome: None,
             open_info_panel: None,
         }
     }

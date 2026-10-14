@@ -165,8 +165,8 @@ fn ui_main(args: &[String]) {
 
     // Single instance (tdesktop `Core::Sandbox`): a second launch hands its
     // links to the running Quill and exits before touching the account
-    // database or the media caches.
-    if forwarded_to_running_instance(args) {
+    // database or the media caches. `--quit` with no Quill running is done.
+    if forwarded_to_running_instance(args) || quill::start_files::quit_requested(args) {
         return;
     }
 

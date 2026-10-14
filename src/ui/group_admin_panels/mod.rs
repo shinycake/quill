@@ -350,6 +350,7 @@ impl QuillApp {
                         .child(
                             gpui_kit::component::switch::Switch::new(($id, 1u64))
                                 .checked($on)
+                                .accessibility_label($label)
                                 .small(),
                         )
                         .on_click(cx.listener(move |$this, _, $window, $cx| $action)),

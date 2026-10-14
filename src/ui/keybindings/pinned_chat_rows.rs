@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::ui::actions::ComposerEditDate;
+#[cfg(not(target_os = "macos"))]
+use crate::ui::actions::ZoomWindow;
 
 /// Cmd/Ctrl+1..8: the Nth pinned chat of the list on screen
 /// (`Command::ChatPinned1..8`).
@@ -160,6 +162,15 @@ pub(super) fn composer_extra_rows() -> Vec<ShortcutRow> {
 /// on macOS, and `GlobalState::set_app_menus` feeds kit's `AppMenuBar`,
 /// rendered in-window on Linux/Windows.
 pub(super) fn app_menus() -> Vec<Menu> {
+    app_menus_with(crate::ui::os_menus::WindowMenuState::default())
+}
+
+/// The application menus with the Window menu's enabled items for `state`
+/// (macOS; `os_menus` rebuilds the menu bar when the state changes).
+pub(in crate::ui) fn app_menus_with(
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    state: crate::ui::os_menus::WindowMenuState,
+) -> Vec<Menu> {
     // Local aliases: `Copy` would shadow the derive macro's `Copy` at
     // module scope.
     use gpui_kit::component::input::{
@@ -175,6 +186,35 @@ pub(super) fn app_menus() -> Vec<Menu> {
         MenuItem::separator(),
         MenuItem::action("Quit Quill", QuitApp),
     ];
+    // macOS: Telegram Desktop's Window menu (`os_menus::window_menu`), which
+    // carries Toggle Full Screen. Linux/Windows keep the in-window menu bar's
+    // own Window menu (tdesktop shows no menu bar there).
+    #[cfg(target_os = "macos")]
+    let (view_items, window_items) = (
+        vec![
+            MenuItem::action("Quick Switch", OpenSearch),
+            MenuItem::action("Find in Chat", OpenChatSearch),
+            MenuItem::separator(),
+            // kit Phase 8: light/dark switch for the whole app.
+            MenuItem::action("Toggle Theme", ToggleTheme),
+        ],
+        crate::ui::os_menus::window_menu_items(state),
+    );
+    #[cfg(not(target_os = "macos"))]
+    let (view_items, window_items) = (
+        vec![
+            MenuItem::action("Quick Switch", OpenSearch),
+            MenuItem::action("Find in Chat", OpenChatSearch),
+            MenuItem::separator(),
+            MenuItem::action("Enter Full Screen", ToggleFullscreen),
+            // kit Phase 8: light/dark switch for the whole app.
+            MenuItem::action("Toggle Theme", ToggleTheme),
+        ],
+        vec![
+            MenuItem::action("Minimize", MinimizeWindow),
+            MenuItem::action("Zoom", ZoomWindow),
+        ],
+    );
     let mut menus = Vec::new();
     // HIG: on macOS Quit lives in the app menu, not File.
     #[cfg(target_os = "macos")]
@@ -196,18 +236,8 @@ pub(super) fn app_menus() -> Vec<Menu> {
             MenuItem::separator(),
             MenuItem::os_action("Select All", SelectAllAction, OsAction::SelectAll),
         ]),
-        Menu::new("View").items([
-            MenuItem::action("Quick Switch", OpenSearch),
-            MenuItem::action("Find in Chat", OpenChatSearch),
-            MenuItem::separator(),
-            MenuItem::action("Enter Full Screen", ToggleFullscreen),
-            // kit Phase 8: light/dark switch for the whole app.
-            MenuItem::action("Toggle Theme", ToggleTheme),
-        ]),
-        Menu::new("Window").items([
-            MenuItem::action("Minimize", MinimizeWindow),
-            MenuItem::action("Zoom", ZoomWindow),
-        ]),
+        Menu::new("View").items(view_items),
+        Menu::new("Window").items(window_items),
         Menu::new("Help").items([
             MenuItem::action("Keyboard Shortcuts", OpenShortcuts),
             MenuItem::action("Quill on GitHub", OpenHelp),

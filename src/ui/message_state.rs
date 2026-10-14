@@ -40,6 +40,8 @@ pub(crate) struct MessageUi {
     /// drag moves focus here, so Space, Up and Down act on the rows and
     /// not on the composer (tdesktop focuses `HistoryInner`).
     pub(super) history_focus: FocusHandle,
+    /// Screen-reader focus among the history's messages (`history_a11y`).
+    pub(super) a11y: super::history_a11y::HistoryA11y,
     /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
     /// The message menu's reaction strip is expanded to every reaction.
     pub(super) reactions_expanded: bool,
@@ -98,6 +100,7 @@ impl MessageUi {
             selection_drag_loop: false,
             selection_focus: None,
             history_focus: cx.focus_handle(),
+            a11y: Default::default(),
             reactions_expanded: false,
             pending_delete: None,
             pending_stop_poll: None,

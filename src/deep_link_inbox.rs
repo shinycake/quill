@@ -68,11 +68,14 @@ pub fn sanitize_link(raw: &str) -> Option<String> {
 struct Inbox {
     links: VecDeque<String>,
     activate: bool,
+    /// A later launch asked this Quill to quit (`--quit`).
+    quit: bool,
 }
 
 static INBOX: Mutex<Inbox> = Mutex::new(Inbox {
     links: VecDeque::new(),
     activate: false,
+    quit: false,
 });
 
 fn inbox() -> std::sync::MutexGuard<'static, Inbox> {
@@ -100,6 +103,11 @@ pub fn push_external_link(raw: &str) -> bool {
 /// `--start-minimized` relaunch (autostart while already running) must not
 /// steal focus.
 pub fn handle_forwarded_launch(args: &[String]) {
+    // tdesktop `CMD:quit`: the jump list's or desktop action's "Quit".
+    if args.iter().any(|arg| arg == crate::start_files::QUIT_FLAG) {
+        inbox().quit = true;
+        return;
+    }
     let mut accepted = false;
     for arg in args {
         accepted |= push_external_link(arg);
@@ -120,6 +128,11 @@ pub fn take_activation() -> bool {
     std::mem::take(&mut inbox().activate)
 }
 
+/// Consumes the pending "quit" request of a later `--quit` launch.
+pub fn take_quit_request() -> bool {
+    std::mem::take(&mut inbox().quit)
+}
+
 /// Next queued link, oldest first.
 pub fn pop_link() -> Option<String> {
     inbox().links.pop_front()
@@ -127,7 +140,14 @@ pub fn pop_link() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{push_external_link, sanitize_link};
+    use super::{handle_forwarded_launch, push_external_link, sanitize_link, take_quit_request};
+
+    #[test]
+    fn a_forwarded_quit_is_taken_once() {
+        handle_forwarded_launch(&["--quit".to_string()]);
+        assert!(take_quit_request());
+        assert!(!take_quit_request());
+    }
 
     #[test]
     fn accepts_telegram_shapes() {

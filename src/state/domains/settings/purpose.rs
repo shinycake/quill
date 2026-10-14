@@ -93,7 +93,7 @@ pub enum SettingsPurpose {
     /// saved list refetches.
     AddSavedNotificationSound,
     /// `getSupportUser` (Settings > Ask a Question). Response is `user`;
-    /// the id is parked in `Session::support_user_ready` and the driver
+    /// the id is parked in `Session::user_chat_to_open` and the driver
     /// opens the chat.
     GetSupportUser,
     /// Slice S3: `getUserPrivacySettingRules` for a Privacy-screen key.

@@ -599,9 +599,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = created_chat {
             let _ = self.select_chat(chat_id);
         }
-        // Settings > Ask a Question: the support account arrived; open
-        // (or create) the private chat with it.
-        if let Some(user_id) = self.session.users_state.support_user_ready.take() {
+        // Settings > Ask a Question (the support account) or a contact
+        // just created by phone: open (or create) the private chat.
+        if let Some(user_id) = self.session.users_state.user_chat_to_open.take() {
             let _ = self.create_private_chat_for(user_id);
         }
         // Slice (communities backend core): resolve a just-created

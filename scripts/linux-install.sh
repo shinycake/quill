@@ -26,7 +26,9 @@ cp -a "$HERE" "$DEST.new"
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
 ln -sf "$DEST/quill" "$PREFIX/bin/quill"
-sed "s|^Exec=.*|Exec=$DEST/quill %u|" "$HERE/share/applications/quill.desktop" > "$APPS/quill.desktop"
+# The entry's own Exec takes links; its "Quit Quill" action passes --quit.
+sed -e "s|^Exec=quill --quit$|Exec=$DEST/quill --quit|" -e "s|^Exec=quill %u$|Exec=$DEST/quill %u|" \
+  "$HERE/share/applications/quill.desktop" > "$APPS/quill.desktop"
 for icon in "$HERE"/share/icons/hicolor/*/apps/quill.png; do
   size="$(basename "$(dirname "$(dirname "$icon")")")"
   mkdir -p "$ICONS/$size/apps"

@@ -85,6 +85,9 @@ impl Session {
                 self.users_state.contacts_notice =
                     Some(format!("could not import contacts (error {})", err.code));
             }
+            Some(RequestPurpose::AddContactByPhone) => {
+                self.users_state.new_contact_outcome = Some(NewContactOutcome::Failed(err.code));
+            }
             Some(RequestPurpose::ClearImportedContacts) => {
                 self.users_state.contacts_notice = Some(format!(
                     "could not delete synced contacts (error {})",

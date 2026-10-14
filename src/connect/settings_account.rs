@@ -5,7 +5,7 @@ use crate::telegram::requests::get_support_user;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Ask Telegram for the support account. The `user` answer parks its id
-    /// in `Session::support_user_ready` and `ingest` then opens the chat.
+    /// in `Session::user_chat_to_open` and `ingest` then opens the chat.
     /// `Ok(false)` means a request is already in flight.
     pub fn open_support_chat(&mut self) -> Result<bool, ConnectSendError> {
         if !self.chats_path_active() {

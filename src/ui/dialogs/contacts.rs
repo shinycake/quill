@@ -10,6 +10,12 @@ pub struct AddContactDialog {
     pub(crate) phone_input: Entity<TextareaState>,
     pub(crate) first_name_input: Entity<TextareaState>,
     pub(crate) last_name_input: Entity<TextareaState>,
+    /// New Contact box (`user_id == 0`): the first name of the import in
+    /// flight or answered.
+    pub(crate) sent_name: Option<String>,
+    /// New Contact box: the phone is not on Telegram (tdesktop's
+    /// `_retrying` state).
+    pub(crate) not_joined: bool,
 }
 
 /// Slice A6: vCard import dialog — the user pastes the file's text and
@@ -57,6 +63,8 @@ impl AddContactDialog {
             phone_input,
             first_name_input,
             last_name_input,
+            sent_name: None,
+            not_joined: false,
         }
     }
 

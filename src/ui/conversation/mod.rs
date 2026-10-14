@@ -548,10 +548,12 @@ impl QuillApp {
 /// Full-width "N Unread Messages" bar above the first unread message. In
 /// the wide layout the label is centred in the wide column while the bar
 /// stays full width (tdesktop `UnreadBar::paint`).
-fn unread_divider(count: i32, wide: bool, cx: &App) -> impl IntoElement {
+fn unread_divider(count: i32, wide: bool, a11y_focused: bool, cx: &App) -> impl IntoElement {
     let text = SharedString::from(quill::state::unread_bar_text(count));
     div()
         .id("unread-divider")
+        // Screen-reader focus on the bar (`history_a11y`).
+        .when(a11y_focused, |this| this.aria_active_descendant())
         .w_full()
         .my_2()
         .py_1()

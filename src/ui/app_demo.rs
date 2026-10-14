@@ -619,6 +619,8 @@ impl QuillApp {
             }
         })
         .detach();
+        super::os_menus::install(demo.is_some(), window, cx);
+        super::history_a11y::install(&app.message_ui.history_focus, window, cx);
         // The scroller notifies on every scroll: drives the floating date.
         cx.observe(&app.history.scroller, |this, _, cx| {
             this.note_history_scroll(cx);

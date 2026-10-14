@@ -50,6 +50,7 @@ mod message_effects;
 mod message_menu;
 mod message_ops;
 mod messaging;
+mod new_contact;
 mod owned_bots;
 mod paid_messages;
 mod paid_messages_guard;

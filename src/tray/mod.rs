@@ -776,8 +776,20 @@ pub fn tray_available() -> bool {
     TRAY.with(|cell| cell.borrow().available())
 }
 
-#[cfg(all(feature = "ui", not(target_os = "linux")))]
+/// What the tray menu asked for since the last call, plus "Quit" when a
+/// later `quill --quit` launch (Windows jump list, Linux desktop action)
+/// asked the running instance to quit.
+#[cfg(feature = "ui")]
 pub fn take_tray_actions() -> Vec<TrayAction> {
+    let mut actions = native_tray_actions();
+    if crate::deep_link_inbox::take_quit_request() {
+        actions.push(TrayAction::Quit);
+    }
+    actions
+}
+
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
+fn native_tray_actions() -> Vec<TrayAction> {
     tray_icon::menu::MenuEvent::receiver()
         .try_iter()
         .filter_map(|event| menu_action(event.id.as_ref()))
@@ -785,7 +797,7 @@ pub fn take_tray_actions() -> Vec<TrayAction> {
 }
 
 #[cfg(all(feature = "ui", target_os = "linux"))]
-pub fn take_tray_actions() -> Vec<TrayAction> {
+fn native_tray_actions() -> Vec<TrayAction> {
     crate::tray_sni::take_actions()
 }
 
