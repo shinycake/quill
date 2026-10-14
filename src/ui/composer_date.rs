@@ -8,6 +8,7 @@
 //!
 //! In the field the date is a link to `tg://time?unix=N`
 //! (`quill::composer::date_link`), sent as `textEntityTypeDateTime`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas};

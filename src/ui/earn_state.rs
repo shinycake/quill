@@ -1,6 +1,7 @@
 //! What the revenue and affiliate screens keep on the UI side (`ui/earn`):
 //! the text fields, the open boxes that hold no TDLib state, the setup
 //! sliders and the info-panel pages to go back to.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::input::InputState;

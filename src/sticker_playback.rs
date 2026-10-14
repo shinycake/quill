@@ -1,4 +1,5 @@
 //! Bounded sticker decoding; GPUI owns the display clock.
+#![deny(clippy::indexing_slicing)]
 use std::ffi::{CString, c_char, c_void};
 use std::io::Read;
 use std::path::{Path, PathBuf};

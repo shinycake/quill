@@ -2,6 +2,7 @@
 //! ffmpeg command line (Telegram Desktop `PrepareProfileVideo` with its
 //! video editor: a square crop, 1 to 9.6 s, 800 x 800 at 30 fps, no
 //! sound). The editor itself is the send-media one (`ui::video_editor`).
+#![deny(clippy::indexing_slicing)]
 
 use crate::video_edit::{VideoEdits, VideoSource, turn_filters, turned_size};
 use serde_json::Value;

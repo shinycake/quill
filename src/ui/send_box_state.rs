@@ -1,6 +1,7 @@
 //! State of the send box (the attachment tray above the composer): the
 //! "High quality" and paid media choices, the price box and the video
 //! editor. Behaviour is in `send_box_options.rs` and `video_editor.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

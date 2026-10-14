@@ -8,6 +8,7 @@
 //! (`schema/td_api.tl:14648`, builder in `telegram/requests.rs`); this
 //! module owns the mode enum, the page size, and the trailing-emoji
 //! detection. Rendering the suggestion row is the UI slice's job.
+#![deny(clippy::indexing_slicing)]
 
 use serde::{Deserialize, Serialize};
 

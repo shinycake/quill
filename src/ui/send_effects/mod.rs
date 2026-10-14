@@ -15,6 +15,7 @@
 //!
 //! The lists and the geometry are `quill::message_effects_picker`; the
 //! effects themselves come from `getMessageEffect` (`load_effect_picker`).
+#![deny(clippy::indexing_slicing)]
 
 mod demo;
 mod panel;

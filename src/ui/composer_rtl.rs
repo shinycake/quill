@@ -10,6 +10,7 @@
 //! kit `Textarea` through it. They need gpui-kit's `test-support`, which the
 //! `demo-capture` feature enables:
 //! `cargo test --features demo-capture --bin quill composer_rtl`.
+#![deny(clippy::indexing_slicing)]
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

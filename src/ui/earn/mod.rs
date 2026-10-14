@@ -2,6 +2,7 @@
 //! `info/channel_statistics/earn/*`, `info/bot/earn/*` and
 //! `info/bot/starref/*`), with their boxes. The data and the requests are
 //! `quill::earn`; withdrawals only open a Fragment page in the browser.
+#![deny(clippy::indexing_slicing)]
 
 mod boxes;
 mod chart;

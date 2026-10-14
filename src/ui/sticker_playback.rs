@@ -1,4 +1,5 @@
 //! Shared bounded animated sticker images for history and the picker.
+#![deny(clippy::indexing_slicing)]
 use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
 use gpui_kit::*;

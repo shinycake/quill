@@ -3,6 +3,7 @@
 //! Cmd/Ctrl+K link dialog that shares its chord with quick switch, the
 //! "Formatting" entries of the right-click menu, and Cmd/Ctrl+Shift+V
 //! plain-text paste.
+#![deny(clippy::indexing_slicing)]
 
 use super::actions::{
     ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, FormatBlockQuote, FormatBold,

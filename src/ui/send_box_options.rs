@@ -5,6 +5,7 @@
 //! The choices live in `SendBoxUi` (`send_box_state.rs`) and ride the
 //! snapshot as `MediaSendOptions`; covers and edits ride the attachment
 //! (`AttachmentExtras`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

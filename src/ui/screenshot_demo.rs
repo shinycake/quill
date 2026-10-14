@@ -4,6 +4,7 @@
 //! itself next to its setup code with [`register_demos!`] (a link-time
 //! `inventory` collection), so adding a demo touches no shared file. See
 //! docs/decisions/codex-refactor-1.md.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::connect_ui::ConnectUiStatus;

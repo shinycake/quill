@@ -1,5 +1,6 @@
 //! QuillShell, the dialog registry (DialogKind, `register_dialogs!`), title
 //! bar, kit-dialog sync.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp};
 use gpui_kit::assets::IconName;

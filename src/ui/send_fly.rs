@@ -16,6 +16,7 @@
 //!
 //! The overlay is drawn by the app, over the conversation, so its frames
 //! never rebuild the history (the slice stays cached).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

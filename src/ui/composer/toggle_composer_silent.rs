@@ -899,7 +899,10 @@ impl QuillApp {
             return false;
         }
         let index = self.composer_ui.command_menu_selected.min(items.len() - 1);
-        match items[index].quick_reply {
+        let Some(item) = items.get(index) else {
+            return false;
+        };
+        match item.quick_reply {
             Some(quill::quick_replies::EDIT_ROW) => {
                 self.send_quick_reply_row(quill::quick_replies::EDIT_ROW, window, cx)
             }
