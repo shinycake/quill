@@ -89,14 +89,9 @@ pub(in crate::ui) fn session_history_row(
             ),
         );
     }
-    // Slice G9: community service rows (`messageChatAddedToCommunity`,
-    // `messageChatRemovedFromCommunity`, `messageChatJoinFromCommunity`,
-    // schema 1.8.67 lines 5353–5363) — centered neutral notices, no
-    // bubble, no reply/react/edit/delete controls. Wording is TGX
-    // verbatim (strings.xml: ActionChatAddedToCommunity{,Unknown} /
-    // ActionChatRemovedFromCommunity / group_user_join_from_community*).
-    // The community name resolves from the session's `updateCommunity`
-    // cache; unknown communities fall back to the nameless TGX forms.
+    // Community service rows (`messageChatAddedToCommunity` and kin):
+    // centered notices in TGX's wording; the name comes from the
+    // `updateCommunity` cache, or TGX's nameless forms.
     let community_name = |community_id: i64| {
         session.and_then(|s| {
             s.groups
@@ -590,12 +585,9 @@ pub(in crate::ui) fn session_history_row(
             })
     });
     let keyboard = inline_keyboard(message, fast_buttons, cx);
-    // Phase B3: self-destruct timer badge (`message.self_destruct_type` /
-    // `message.self_destruct_in`, schema 1.8.67 lines 3146–3147). The
-    // countdown decays locally against `unix_ms_now()` (same pattern as
-    // the Phase A1 slow-mode countdown); TDLib removes the row via
-    // `updateDeleteMessages` when the timer fires. The 1-second render
-    // tick (see `ensure_self_destruct_tick`) keeps this fresh.
+    // Self-destruct badge: counts down locally against `unix_ms_now()` on
+    // the 1-second tick (`ensure_self_destruct_tick`); TDLib deletes the
+    // row when the timer fires.
     let outgoing = message.is_outgoing;
     let self_destruct_badge = message.self_destruct_badge(unix_ms_now()).map(|label| {
         div()

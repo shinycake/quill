@@ -73,8 +73,14 @@ HDR viewer (slice B) builds on the decoder added here.
 - "Open with" opens the file in the system's default app. Quill has no
   "Open With" app chooser.
 - In the chat, tdesktop shows a picture sent as a file as a file row with
-  its thumbnail, not as a photo bubble, and so does Quill. The full photo
-  experience (zoom, rotate, navigation, copy, save) is in the viewer.
+  its thumbnail. Quill shows it as a photo instead (owner's call): framed
+  like a compressed photo, with a pill in the top-left corner (a file glyph
+  and the format, `HEIC`) so it reads as a file, and the name and size
+  along the bottom (`src/ui/message_media/picture_file.rs`). Files without
+  a thumbnail, or of 64 MB and more, keep the thumbed or plain file row
+  (`quill::media_viewer::shows_as_photo`). A file that fails to decode
+  keeps showing its thumbnail. Picture files up to 10 MB download on their
+  own under the photo auto-download setting.
 - The upload rule checks the file extension, where tdesktop checks the
   MIME type it detected.
 - HEIC/AVIF on Windows need Microsoft's HEIF and AV1 codec extensions

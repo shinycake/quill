@@ -193,7 +193,7 @@ mod tests {
         let MessageContent::Document(mut doc) =
             document(1, "IMG_0001.HEIC", "image/heic", Some(91)).content
         else {
-            unreachable!()
+            panic!("a document")
         };
         assert!(shows_as_photo(&doc));
         assert_eq!(picture_format_label(&doc), "HEIC");
@@ -205,12 +205,12 @@ mod tests {
         let MessageContent::Document(pdf) =
             document(2, "report.pdf", "application/pdf", Some(92)).content
         else {
-            unreachable!()
+            panic!("a document")
         };
         assert!(!shows_as_photo(&pdf));
         let MessageContent::Document(unnamed) = document(3, "", "image/x-jxl", Some(93)).content
         else {
-            unreachable!()
+            panic!("a document")
         };
         assert_eq!(picture_format_label(&unnamed), "JXL");
     }
