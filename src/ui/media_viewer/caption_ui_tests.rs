@@ -112,4 +112,17 @@ fn a_long_caption_collapses_and_expands(cx: &mut TestAppContext) {
         assert!(app.close_media_viewer_on_escape(cx));
     });
     app.read_with(vcx, |app, _| assert!(!app.viewer.state.is_open()));
+    // Closed while expanded (the close button), the caption reopens
+    // collapsed.
+    app.update_in(vcx, |app, _, cx| {
+        app.open_media_viewer(ChatId(11), MessageId(8901), cx);
+    });
+    settle(vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.toggle_viewer_caption(cx);
+        app.close_media_viewer(cx);
+        app.open_media_viewer(ChatId(11), MessageId(8901), cx);
+    });
+    settle(vcx);
+    app.read_with(vcx, |app, _| assert!(!app.viewer.extra.caption.expanded()));
 }

@@ -26,7 +26,8 @@ expansion on top, as the owner asked:
   `Button` "Show more" sits under it on the right. It expands the box
   upward to the full text, or to the room between the top bar and the
   bottom controls, where it scrolls. "Show less" (or Escape) collapses it.
-  Another item always starts collapsed.
+  Another item, or the viewer opened again, starts collapsed. In video
+  full screen Escape leaves full screen first, as in tdesktop.
 - The height glides over 200 ms with sineInOut through `motion::Glide`, so
   an interrupted toggle reverses from where it is. Frames come from the
   frame clock (`request_animation_tick`), not `with_animation`. Reduced

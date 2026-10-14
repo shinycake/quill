@@ -220,6 +220,8 @@ impl QuillApp {
         self.viewer_leave_video_fullscreen();
         self.stop_viewer_video();
         self.viewer.extra.saved_toast = None;
+        // Reopening the same item starts with its caption collapsed.
+        self.viewer.extra.caption = Default::default();
         self.viewer.state.close();
         cx.notify();
     }

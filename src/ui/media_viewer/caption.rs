@@ -68,6 +68,9 @@ pub(in crate::ui) struct ViewerCaption {
     scroll: ScrollHandle,
     /// The content height the last render used.
     measured: f32,
+    /// Not laid out yet for this item: the handle still holds the
+    /// previous item's layout.
+    fresh: bool,
 }
 
 impl Default for ViewerCaption {
@@ -77,6 +80,7 @@ impl Default for ViewerCaption {
             glide: Glide::settled(0., Instant::now(), sine_in_out),
             scroll: ScrollHandle::new(),
             measured: 0.,
+            fresh: true,
         }
     }
 }
@@ -91,6 +95,7 @@ impl ViewerCaption {
         self.glide = Glide::settled(0., Instant::now(), sine_in_out);
         self.scroll.set_offset(point(px(0.), px(0.)));
         self.measured = 0.;
+        self.fresh = true;
     }
 
     /// Full height of the caption text from the last layout.
@@ -155,10 +160,13 @@ impl QuillApp {
 
         let now = Instant::now();
         let caption = &mut self.viewer.extra.caption;
-        let content_h = caption.content_height();
+        // Right after a reset the handle still describes the previous
+        // item: show this one collapsed, untoggled, until it is laid out.
+        let fresh = std::mem::take(&mut caption.fresh);
+        let content_h = if fresh { 0. } else { caption.content_height() };
         // The text box was laid out at another width or for another item:
         // draw again so the toggle and heights follow the new layout.
-        let remeasure = (content_h - caption.measured).abs() > 0.5;
+        let remeasure = fresh || (content_h - caption.measured).abs() > 0.5;
         caption.measured = content_h;
         let cut = overflows(content_h, collapsed_h);
         let shown = caption.glide.value(now).clamp(0., 1.);

@@ -113,12 +113,12 @@ impl QuillApp {
         if !self.viewer.state.is_open() {
             return false;
         }
-        if self.collapse_viewer_caption_on_escape(cx) {
-            return true;
-        }
         if self.viewer.extra.video_fullscreen {
             self.viewer_leave_video_fullscreen();
             cx.notify();
+            return true;
+        }
+        if self.collapse_viewer_caption_on_escape(cx) {
             return true;
         }
         self.close_media_viewer(cx);
