@@ -251,6 +251,7 @@ fn send_document_shape_matches_1_8_67() {
         ChatId(7),
         None,
         "/tmp/picked.txt",
+        None,
         "",
         None,
         false,
@@ -271,7 +272,34 @@ fn send_document_shape_matches_1_8_67() {
         false
     );
     assert_eq!(v["input_message_content"]["caption"]["text"], "");
+    assert_eq!(v["input_message_content"]["document"]["thumbnail"], Value::Null);
     assert!(!json.contains("CANARY"));
+}
+
+#[test]
+fn send_document_uploads_a_local_thumbnail() {
+    let thumb = VideoNoteThumbnailSend {
+        path: "/tmp/thumb.jpg".into(),
+        width: 320,
+        height: 240,
+    };
+    let json = send_document(
+        RequestId(12),
+        ChatId(7),
+        None,
+        "/tmp/IMG_0001.HEIC",
+        Some(&thumb),
+        "",
+        None,
+        false,
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let thumbnail = &v["input_message_content"]["document"]["thumbnail"];
+    assert_eq!(thumbnail["@type"], "inputThumbnail");
+    assert_eq!(thumbnail["thumbnail"]["@type"], "inputFileLocal");
+    assert_eq!(thumbnail["thumbnail"]["path"], "/tmp/thumb.jpg");
+    assert_eq!(thumbnail["width"], 320);
+    assert_eq!(thumbnail["height"], 240);
 }
 
 #[test]

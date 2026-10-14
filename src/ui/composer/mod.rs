@@ -119,6 +119,13 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    // A picture sent as a file is still getting its thumbnail.
+                    if self.tray_thumbnails_pending() {
+                        self.connection.status_note =
+                            "preparing the file… send again in a moment".into();
+                        cx.notify();
+                        return;
+                    }
                     let attachments = self.composer_ui.pending_attachments.clone();
                     // The viewer's own rights in a group: text needs the
                     // basic right, each attachment its media right.

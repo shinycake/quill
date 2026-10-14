@@ -3,7 +3,8 @@
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::message_media::{
-    MediaCorners, animation_attachment, document_chip, photo_attachment, video_attachment,
+    DocOrigin, MediaCorners, animation_attachment, document_chip, photo_attachment,
+    video_attachment,
 };
 use super::message_text::message_text_block;
 use super::*;
@@ -218,10 +219,11 @@ pub(super) fn sponsored_message_row(
             files,
             downloading,
             failed,
+            media_roots,
             // Sponsored rows don't expose the list-API pause toggle (the
             // manager panel does); `None` hides it.
             None,
-            Some((chat_id, message.message_id)),
+            DocOrigin::Sponsored(chat_id, message.message_id),
             false,
             cx,
         )),

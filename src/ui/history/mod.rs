@@ -11,7 +11,7 @@ use super::message_media::{
     video_attachment, video_note_attachment, voice_note_row,
 };
 use super::message_media::{
-    MediaCorners, file_is_downloading, media_content_width, photo_display_path, single_media_frame,
+    DocOrigin, MediaCorners, file_is_downloading, media_content_width, photo_display_path, single_media_frame,
     single_media_width, spoiler_cover,
 };
 use super::message_payments::{

@@ -313,6 +313,15 @@ impl Session {
                         ids.push(file_id);
                     }
                 }
+                // The picture of a thumbed file row (image files and the
+                // other documents that carry a thumbnail).
+                MessageContent::Document(doc) => {
+                    if let Some(thumb) = &doc.thumbnail
+                        && self.should_download(thumb.file_id)
+                    {
+                        ids.push(thumb.file_id);
+                    }
+                }
                 // The pictures beside poll options, and the custom emoji in
                 // their text.
                 MessageContent::Poll(poll) => {

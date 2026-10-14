@@ -393,12 +393,12 @@ pub(in crate::ui) fn session_history_row(
             files,
             downloading,
             failed,
-            // Slice media-downloads-pause: the pause toggle only appears
-            // for user-initiated (listed) downloads.
+            media_roots,
+            // The pause toggle is for user-initiated (listed) downloads.
             session
                 .filter(|s| s.media.user_downloads.contains(&doc.file_id.0))
                 .map(|s| s.media.paused_downloads.contains(&doc.file_id.0)),
-            None,
+            DocOrigin::Message(message.chat_id, message.id),
             look.plain,
             cx,
         )),

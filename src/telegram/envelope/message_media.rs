@@ -99,6 +99,12 @@ pub struct DocumentContent {
     /// Phase 4.1: entities for `caption` (same list as message text).
     pub caption_entities: Vec<TextEntity>,
     pub file_id: FileId,
+    /// `document.thumbnail` when it is a picture (JPEG, PNG or WebP): the
+    /// row draws it as tdesktop's thumbed file layout. `None` for the
+    /// other thumbnail formats and documents without one.
+    pub thumbnail: Option<AlbumCoverThumb>,
+    /// `document.minithumbnail`: blurred stand-in until the thumbnail lands.
+    pub minithumbnail: Option<MiniThumbnail>,
 }
 
 /// `minithumbnail` (TDLib 1.8.67): JPEG bytes, usually ≤ 40px.
@@ -223,14 +229,32 @@ pub(crate) fn parse_message_document(value: &Value) -> (MessageContent, Vec<Pars
         }
         None => FileId(0),
     };
-    if let Some(thumb) = document.and_then(|d| d.get("thumbnail"))
-        && let Ok(thumb_file) = parse_file(thumb.get("file"))
-    {
-        files.push(thumb_file);
-    }
+    let thumb_value = document.and_then(|d| d.get("thumbnail"));
+    let picture_thumb = thumb_value
+        .and_then(|thumb| thumb.get("format"))
+        .and_then(|format| format.get("@type"))
+        .and_then(Value::as_str)
+        .is_some_and(|format| {
+            matches!(
+                format,
+                "thumbnailFormatJpeg" | "thumbnailFormatPng" | "thumbnailFormatWebp"
+            )
+        });
+    let thumbnail = match thumb_value {
+        Some(thumb) if picture_thumb => parse_album_cover_thumb(thumb, &mut files),
+        Some(thumb) => {
+            if let Ok(thumb_file) = parse_file(thumb.get("file")) {
+                files.push(thumb_file);
+            }
+            None
+        }
+        None => None,
+    };
     let (caption, caption_entities) = parse_caption(value.get("caption"));
     (
         MessageContent::Document(DocumentContent {
+            thumbnail,
+            minithumbnail: document.and_then(|d| parse_minithumbnail(d.get("minithumbnail"))),
             file_name: document
                 .and_then(|d| d.get("file_name"))
                 .and_then(Value::as_str)

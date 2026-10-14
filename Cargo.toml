@@ -39,6 +39,7 @@ ui = [
     "dep:objc2-app-kit",
     "dep:raw-window-handle",
     "dep:image",
+    "dep:moxcms",
     "dep:smallvec",
     "dep:qrcode",
     "dep:tray-icon",
@@ -64,6 +65,10 @@ ui = [
     "dep:futures-channel",
     "dep:gpui_macos",
     "dep:gpui_windows",
+    "dep:objc2-image-io",
+    "dep:objc2-core-graphics",
+    "dep:objc2-core-foundation",
+    "dep:jxl-oxide",
 ]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
@@ -76,7 +81,15 @@ frame-profiler = ["ui", "gpui-kit/profiler"]
 base64 = "0.22"
 directories = "6"
 flate2 = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
+# Image files sent as documents: the formats tdesktop previews in-app
+# (core/mime_type.cpp DetectNameType). HEIC/HEIF/AVIF/JPEG XL decode through
+# the platform (src/ui/image_decode/).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif", "ico", "tiff", "qoi", "tga"], optional = true }
+# ICC colour management for decoded image files (already in the tree via `image`).
+moxcms = { version = "0.8", optional = true }
+# JPEG XL image files on Windows and Linux, and on macOS before ImageIO reads
+# them (pure Rust, colour-managed through moxcms).
+jxl-oxide = { version = "0.12", optional = true, default-features = false, features = ["rayon", "moxcms"] }
 libloading = "0.9"
 libc = "0.2"
 ntgcalls-sys = { path = "crates/ntgcalls-sys" }
@@ -164,6 +177,11 @@ objc2-core-media = { version = "0.3.2", optional = true, default-features = fals
 objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn"] }
 core-video = { version = "0.5.2", optional = true }
 core-foundation = { version = "0.10.1", optional = true }
+# Image files (HEIC, AVIF, JPEG XL and the rest) decoded and colour-managed
+# with ImageIO (src/ui/image_decode/macos.rs).
+objc2-image-io = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
+objc2-core-graphics = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImage", "CGContext", "CGBitmapContext", "CGColorSpace", "CGGeometry"] }
+objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString", "CFBase", "CFCGTypes"] }
 # Badge authorization (the Dock draws badges only for apps allowed to badge).
 objc2-user-notifications = { version = "0.3", optional = true }
 # OS notifications: the inline reply field and the sender picture ride beside
@@ -210,7 +228,7 @@ embed-resource = "3"
 # Local time zone offsets; secret chats kept out of screen capture.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Power", "Win32_System_Registry","Win32_System_Time", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_EnhancedStorage", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Media", "Media_Playback", "Foundation"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_EnhancedStorage", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Imaging", "Media", "Media_Playback", "Foundation"] }
 # OS notifications: the inline reply field and the sender picture ride beside
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same

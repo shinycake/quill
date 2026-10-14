@@ -2,6 +2,7 @@
 //! sender line, album pin, attached stickers and Show in Chat.
 
 use super::*;
+use crate::ui::image_decode::DecodeSize;
 
 impl QuillApp {
     /// MED1: rotate the viewer photo 90° clockwise (photos only).
@@ -30,7 +31,7 @@ impl QuillApp {
     ) {
         let item = self.viewer.state.current().cloned();
         let Some(item) = item else { return };
-        if item.kind != MediaViewerKind::Photo {
+        if !item.kind.is_picture() {
             return;
         }
         let previous = (self.viewer.orientation, self.viewer.rotated.clone());
@@ -71,9 +72,13 @@ impl QuillApp {
         path: &PathBuf,
         orientation: ViewerOrientation,
     ) -> Option<Arc<RenderImage>> {
-        let rgba = image::open(path).ok()?.to_rgba8();
-        let (pixels, width, height) =
+        let rgba = crate::ui::image_decode::decode_file(path, DecodeSize::FULL).ok()?;
+        let (mut pixels, width, height) =
             orient_rgba(rgba.as_raw(), rgba.width(), rgba.height(), orientation);
+        // GPUI's sprites are BGRA.
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
         let rotated = image::RgbaImage::from_raw(width, height, pixels)?;
         Some(Arc::new(RenderImage::new(SmallVec::from_buf([
             image::Frame::new(rotated),
@@ -126,6 +131,12 @@ impl QuillApp {
                 .and_then(|id| files.get(&id.0))
                 .and_then(|file| file.usable_path())
                 .map(PathBuf::from),
+            // A file saves its own bytes, never the thumbnail (an HDR or
+            // HEIC original stays as it was sent).
+            MediaViewerKind::ImageFile | MediaViewerKind::File => files
+                .get(&item.download_file_id.0)
+                .and_then(|file| file.usable_path())
+                .map(PathBuf::from),
         };
         // B13: "Ask where to save each file" opens a save dialog instead of
         // dropping the copy into the download folder.
@@ -138,7 +149,7 @@ impl QuillApp {
         match path {
             Some(path) => match save_media_to_downloads(&path) {
                 Ok(dest) => {
-                    self.show_saved_toast(dest, item.kind != MediaViewerKind::Photo, cx);
+                    self.show_saved_toast(dest, item.kind.is_playable(), cx);
                 }
                 Err(err) => {
                     self.connection.status_note = format!("couldn't save: {err}");
@@ -287,7 +298,7 @@ impl QuillApp {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
-        if item.kind != MediaViewerKind::Photo {
+        if !item.kind.is_picture() {
             self.connection.status_note = "only photos can be copied".into();
             cx.notify();
             return;
@@ -304,9 +315,8 @@ impl QuillApp {
         let png = viewer_display_path(&item, &files, &roots)
             .ok_or("download the photo first to copy it")
             .and_then(|path| {
-                let rgba = image::open(path)
-                    .map_err(|_| "couldn't copy this photo")?
-                    .to_rgba8();
+                let rgba = crate::ui::image_decode::decode_file(&path, DecodeSize::FULL)
+                    .map_err(|_| "couldn't copy this photo")?;
                 let (pixels, width, height) =
                     orient_rgba(rgba.as_raw(), rgba.width(), rgba.height(), orientation);
                 let oriented = image::RgbaImage::from_raw(width, height, pixels)

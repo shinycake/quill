@@ -20,6 +20,10 @@ pub(crate) struct SendBoxUi {
     /// those already read (tdesktop `hasAudio`).
     pub(super) sound_checking: HashSet<PathBuf>,
     pub(super) sound_checked: HashSet<PathBuf>,
+    /// Tray pictures sent as files whose thumbnail is being made, and
+    /// those done (`send_box_thumbnails.rs`).
+    pub(super) thumbnailing: HashSet<PathBuf>,
+    pub(super) thumbnailed: HashSet<PathBuf>,
     /// The "Paid Content" price box.
     pub(super) price: Option<PriceDialog>,
     /// The video editor opened from the tray or the edit box.
@@ -34,6 +38,8 @@ impl SendBoxUi {
             photo_sizes: RefCell::new(HashMap::new()),
             sound_checking: HashSet::new(),
             sound_checked: HashSet::new(),
+            thumbnailing: HashSet::new(),
+            thumbnailed: HashSet::new(),
             price: None,
             video_editor: None,
         }
@@ -46,6 +52,8 @@ impl SendBoxUi {
         self.photo_sizes.borrow_mut().clear();
         self.sound_checking.clear();
         self.sound_checked.clear();
+        self.thumbnailing.clear();
+        self.thumbnailed.clear();
     }
 }
 

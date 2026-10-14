@@ -363,7 +363,23 @@ impl<S: JsonSender> ConnectDriver<S> {
                     is_secret,
                 ),
                 AttachmentKind::Document => {
-                    send_document(extra, chat_id, topic_id, path, caption, reply_to, is_secret)
+                    let thumbnail = att.extras.file_thumbnail.as_ref().map(|thumb| {
+                        VideoNoteThumbnailSend {
+                            path: thumb.path.to_string_lossy().into_owned(),
+                            width: thumb.width,
+                            height: thumb.height,
+                        }
+                    });
+                    send_document(
+                        extra,
+                        chat_id,
+                        topic_id,
+                        path,
+                        thumbnail.as_ref(),
+                        caption,
+                        reply_to,
+                        is_secret,
+                    )
                 }
                 // A GIF keeps its caption as an animation.
                 AttachmentKind::Video if att.extras.gif => send_local_animation(

@@ -111,6 +111,8 @@ fn an_outgoing_message_reads_seen_me_and_delivery() {
 #[test]
 fn a_file_reads_its_kind_state_name_and_size() {
     let doc = DocumentContent {
+        thumbnail: None,
+        minithumbnail: None,
         file_name: "report.pdf".into(),
         mime_type: "application/pdf".into(),
         caption: "Q3".into(),

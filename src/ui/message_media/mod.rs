@@ -26,6 +26,7 @@ mod audio;
 mod call;
 mod cards;
 mod document;
+mod document_thumbed;
 mod fixtures;
 mod layout;
 mod location;
@@ -41,7 +42,7 @@ pub(super) use audio::{audio_row, transcription_row, voice_note_row, waveform_ro
 pub(super) use call::call_card;
 pub(super) use cards::{ContactCardState, contact_row, dice_row};
 pub(super) use document::{
-    action_disc, bubble_accent, document_chip, download_display_name, format_bytes, inline_link,
+    DocOrigin, action_disc, bubble_accent, document_chip, download_display_name, format_bytes, inline_link,
 };
 pub(super) use layout::{
     MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, media_content_width, media_disc,

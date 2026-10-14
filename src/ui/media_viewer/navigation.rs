@@ -123,10 +123,17 @@ impl QuillApp {
             .collect();
         let loaded = tab_state.items.len();
         let total = tab_state.total_count.max(0) as usize;
-        let items = collect_media_items(&messages);
+        let items = shared_tab_items(tab, &messages);
         let Some(index) = items.iter().position(|item| item.message_id == message_id) else {
             return false;
         };
+        // In Files, only a picture opens the viewer (tdesktop
+        // `ResolveDocument`); other files keep jumping to their message.
+        if tab == SharedMediaTab::Files
+            && items.get(index).map(|item| item.kind) != Some(MediaViewerKind::ImageFile)
+        {
+            return false;
+        }
         debug_assert!(items.iter().all(|item| item.chat_id == chat_id));
         self.viewer.state = MediaViewer::open_shared(items, index, total);
         self.viewer.extra.shared_tab = tab;
@@ -158,7 +165,7 @@ impl QuillApp {
                     .filter_map(|item| item.message.as_deref().cloned())
                     .collect();
                 (
-                    collect_media_items(&messages),
+                    shared_tab_items(tab, &messages),
                     state.total_count.max(0) as usize,
                     state.items.len(),
                 )
@@ -245,6 +252,26 @@ impl QuillApp {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
+        // A file downloads only when opened as a picture Quill shows (a
+        // thumbnail being local is not enough), and only under tdesktop's
+        // `kReadBytesLimit`; other files wait for the card's Download.
+        if matches!(
+            item.kind,
+            MediaViewerKind::ImageFile | MediaViewerKind::File
+        ) {
+            let file = self
+                .session()
+                .and_then(|s| s.media.files.get(&item.download_file_id.0));
+            let wanted = item.kind == MediaViewerKind::ImageFile
+                && file.is_none_or(|file| {
+                    file.usable_path().is_none()
+                        && file.display_size() < crate::ui::image_decode::READ_BYTES_LIMIT
+                });
+            if wanted {
+                self.request_media_download(item.download_file_id, None, cx);
+            }
+            return;
+        }
         let roots = self.media_display_roots();
         let local = self.session().is_some_and(|session| {
             item.display_file_ids.iter().any(|id| {
@@ -301,5 +328,15 @@ impl QuillApp {
             .then(|| std::fs::canonicalize(path).ok())
             .flatten()
             .filter(|path| path.is_file())
+    }
+}
+
+/// The viewer items of a Shared Media tab: the files of Files, the photos,
+/// videos and GIFs of the others.
+fn shared_tab_items(tab: SharedMediaTab, messages: &[HistoryMessage]) -> Vec<MediaViewerItem> {
+    if tab == SharedMediaTab::Files {
+        quill::media_viewer::collect_file_items(messages)
+    } else {
+        collect_media_items(messages)
     }
 }

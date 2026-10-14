@@ -217,7 +217,8 @@ pub fn input_message_video(
     })
 }
 
-/// `inputVideoNote.thumbnail` when a JPEG was written locally. `None` is JSON null
+/// `inputVideoNote.thumbnail` / `inputDocument.thumbnail` when a JPEG was
+/// written locally. `None` is JSON null
 /// (schema: pass null to skip thumbnail uploading).
 pub struct VideoNoteThumbnailSend {
     pub path: String,
@@ -334,7 +335,12 @@ pub fn send_message_album(
 }
 
 /// `inputMessageDocument` body (TDLib 1.8.67). Shared by `sendMessage` and `editMessageMedia`.
-pub fn input_message_document(path: &str, caption: &str, strip_blockquote: bool) -> Value {
+pub fn input_message_document(
+    path: &str,
+    thumbnail: Option<&VideoNoteThumbnailSend>,
+    caption: &str,
+    strip_blockquote: bool,
+) -> Value {
     json!({
         "@type": "inputMessageDocument",
         "document": {
@@ -343,7 +349,7 @@ pub fn input_message_document(path: &str, caption: &str, strip_blockquote: bool)
                 "@type": "inputFileLocal",
                 "path": path
             },
-            "thumbnail": Value::Null,
+            "thumbnail": input_video_note_thumbnail(thumbnail),
             "disable_content_type_detection": false
         },
         "caption": formatted_caption(caption, strip_blockquote)
@@ -390,7 +396,7 @@ pub fn edit_media_content(
         EditMediaKind::Video => {
             input_message_video(path, video?, caption, caption_above, strip_blockquote)
         }
-        EditMediaKind::Document => input_message_document(path, caption, strip_blockquote),
+        EditMediaKind::Document => input_message_document(path, None, caption, strip_blockquote),
         EditMediaKind::Audio => input_message_audio(path, caption, strip_blockquote),
     };
     if replacement.spoiler
@@ -427,11 +433,13 @@ pub fn edit_message_media(
 
 /// `sendMessage` + `inputMessageDocument` / `inputDocument` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
+#[allow(clippy::too_many_arguments)] // `strip_blockquote` is pure pass-through to `input_message_document`
 pub fn send_document(
     extra: RequestId,
     chat_id: ChatId,
     topic_id: Option<i32>,
     path: &str,
+    thumbnail: Option<&VideoNoteThumbnailSend>,
     caption: &str,
     reply_to: Option<SendReply>,
     strip_blockquote: bool,
@@ -444,7 +452,7 @@ pub fn send_document(
         "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": input_message_document(path, caption, strip_blockquote)
+        "input_message_content": input_message_document(path, thumbnail, caption, strip_blockquote)
     })
     .to_string()
 }

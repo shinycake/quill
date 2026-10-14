@@ -69,6 +69,7 @@ impl QuillApp {
             .current()
             .cloned()
             .unwrap_or_else(|| MediaViewerItem {
+                file_name: None,
                 chat_id: ChatId(0),
                 message_id: MessageId(0),
                 kind: MediaViewerKind::Photo,
@@ -242,7 +243,22 @@ impl QuillApp {
                 })
             })
             .flatten();
-        let content: AnyElement = if let Some(frame) = native_frame {
+        // A file that is not a picture (or too large to show as one) is a
+        // card; a picture file decodes through `image_decode` (HEIC, AVIF,
+        // JPEG XL, colour profiles), falling back to the card.
+        let file_card = self.viewer_file_card(&item, &files, &downloading);
+        let fallback_card = (item.kind == MediaViewerKind::ImageFile)
+            .then(|| files::FileCard::new(&item, &files, &downloading));
+        let card_view = cx.entity().downgrade();
+        let content: AnyElement = if let Some(card) = file_card {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(card.render(card_view))
+                .into_any_element()
+        } else if let Some(frame) = native_frame {
             frame.element(
                 px(zoom_w),
                 px(zoom_h),
@@ -255,7 +271,9 @@ impl QuillApp {
             // the thumbnail a path (async-loaded once, then cached). MED1:
             // a rotated photo renders from the eagerly-decoded
             // `viewer_rotated` cache (90°/180°/270° clockwise).
-            let rotated: Option<ImageSource> = (item.kind == MediaViewerKind::Photo)
+            let rotated: Option<ImageSource> = item
+                .kind
+                .is_picture()
                 .then_some(self.viewer.rotated.as_ref())
                 .flatten()
                 .filter(|(path, turns, _)| {
@@ -263,10 +281,15 @@ impl QuillApp {
                         && Some(path.as_path()) == thumb_path.as_deref()
                 })
                 .map(|(_, _, image)| ImageSource::from(image.clone()));
-            let source: Option<ImageSource> = frame
-                .map(ImageSource::from)
-                .or(rotated)
-                .or_else(|| thumb_path.clone().map(ImageSource::from));
+            let source: Option<ImageSource> = frame.map(ImageSource::from).or(rotated).or_else(|| {
+                thumb_path.as_deref().map(|path| {
+                    if item.kind == MediaViewerKind::ImageFile {
+                        crate::ui::image_budget::full_picture(path)
+                    } else {
+                        ImageSource::from(path.to_path_buf())
+                    }
+                })
+            });
             if let Some(source) = source {
                 img(source)
                     .id(("media-viewer-img", row_id))
@@ -275,6 +298,16 @@ impl QuillApp {
                     .aspect_ratio(px(zoom_w) / px(zoom_h))
                     .object_fit(ObjectFit::Contain)
                     .with_fallback(move || {
+                        if let Some(card) = fallback_card.clone() {
+                            return div()
+                                .w(px(zoom_w))
+                                .h(px(zoom_h))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(card.render(card_view.clone()))
+                                .into_any_element();
+                        }
                         div()
                             .w(px(zoom_w))
                             .h(px(zoom_h))
@@ -337,7 +370,7 @@ impl QuillApp {
                 VIEWER_TOP_BAR + (frame_h - media_h) / 2.0,
             );
             let menu_view = view;
-            let is_photo = item.kind == MediaViewerKind::Photo;
+            let is_photo = item.kind.is_picture();
             let menu_protected = protected;
             let menu_can_delete = can_delete;
             let menu_profile = profile_view;
@@ -633,7 +666,7 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .when(item.kind == MediaViewerKind::Photo, |this| {
+                    .when(item.kind.is_picture(), |this| {
                         this.child(
                             icon_action(
                                 ("media-viewer-rotate", row_id),

@@ -10,6 +10,7 @@ pub fn profile_photo_items(photos: &[crate::state::ProfilePhoto]) -> Vec<MediaVi
     photos
         .iter()
         .map(|photo| MediaViewerItem {
+            file_name: None,
             chat_id: ChatId(0),
             message_id: MessageId(photo.id),
             kind: MediaViewerKind::Photo,
@@ -83,6 +84,7 @@ fn photo_item(
         }
     }
     Some(MediaViewerItem {
+        file_name: None,
         chat_id,
         message_id,
         kind: MediaViewerKind::Photo,
@@ -143,6 +145,7 @@ pub fn poll_option_viewer_item(
                 return None;
             }
             Some(MediaViewerItem {
+                file_name: None,
                 chat_id,
                 message_id,
                 kind: MediaViewerKind::Video,
@@ -167,6 +170,7 @@ pub fn poll_option_viewer_item(
                 return None;
             }
             Some(MediaViewerItem {
+                file_name: None,
                 chat_id,
                 message_id,
                 kind: MediaViewerKind::Animation,
@@ -219,6 +223,7 @@ fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<Media
                 return None;
             }
             Some(MediaViewerItem {
+                file_name: None,
                 chat_id: message.chat_id,
                 message_id: message.id,
                 kind: MediaViewerKind::Video,
@@ -249,6 +254,7 @@ fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<Media
                 return None;
             }
             Some(MediaViewerItem {
+                file_name: None,
                 chat_id: message.chat_id,
                 message_id: message.id,
                 kind: MediaViewerKind::Animation,
@@ -273,6 +279,7 @@ fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<Media
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::media_viewer::test_support::test_message;
     use crate::telegram::envelope::{PhotoContent, PhotoSizeView, TextContent, VideoContent};
 
     fn photo_message(
@@ -330,32 +337,6 @@ mod tests {
                 alternatives: Vec::new(),
             }),
         )
-    }
-
-    /// `SearchMessageHit` construction in `media_viewer.rs` (test fixture).
-    fn test_message(chat: i64, id: i64, content: MessageContent) -> HistoryMessage {
-        HistoryMessage {
-            sender: None,
-            id: MessageId(id),
-            chat_id: ChatId(chat),
-            is_outgoing: false,
-            date: 0,
-            content,
-            pending: false,
-            reply_to: None,
-            forward_info: None,
-            extras: Default::default(),
-            interaction_info: None,
-            is_pinned: false,
-            media_album_id: 0,
-            reply_markup: None,
-            self_destruct: None,
-            auto_delete: None,
-            author_signature: None,
-            failed: false,
-            can_retry: false,
-            ephemeral: None,
-        }
     }
 
     #[test]
@@ -499,6 +480,8 @@ mod tests {
             7,
             8,
             MessageContent::Document(crate::telegram::envelope::DocumentContent {
+                thumbnail: None,
+                minithumbnail: None,
                 file_name: "notes.txt".to_string(),
                 mime_type: "text/plain".to_string(),
                 caption: String::new(),
