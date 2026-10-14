@@ -62,11 +62,14 @@ impl QuillApp {
             .iter()
             .position(|item| item.message_id == message_id)
             .map(|first| {
-                let run = items[first..]
-                    .iter()
-                    .take_while(|item| item.message_id == message_id)
-                    .count();
-                first + offset.min(run - 1)
+                // `first` came from `position`, so the tail is never empty
+                // and `run` is at least 1 (the 1 fallback is unreachable).
+                let run = items.get(first..).map_or(1, |tail| {
+                    tail.iter()
+                        .take_while(|item| item.message_id == message_id)
+                        .count()
+                });
+                first + offset.min(run.saturating_sub(1))
             });
         // The clicked message may not be viewer-openable (e.g. an album
         // tile for a non-photo/video part) — then stay closed instead of
@@ -113,7 +116,9 @@ impl QuillApp {
             return false;
         };
         let tab = state.active_tab;
-        let tab_state = &state.tabs[tab.index()];
+        let Some(tab_state) = state.tabs.get(tab.index()) else {
+            return false;
+        };
         // The panel lists newest first; the viewer pages oldest first.
         let messages: Vec<HistoryMessage> = tab_state
             .items
@@ -156,7 +161,7 @@ impl QuillApp {
         let tab = self.viewer.extra.shared_tab;
         let seen = self.viewer.extra.shared_seen;
         let grown = self.session().and_then(|session| {
-            let state = &session.media.shared_media.tabs[tab.index()];
+            let state = session.media.shared_media.tabs.get(tab.index())?;
             (state.items.len() != seen).then(|| {
                 let messages: Vec<HistoryMessage> = state
                     .items

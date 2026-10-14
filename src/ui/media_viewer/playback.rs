@@ -252,7 +252,7 @@ impl QuillApp {
         let next = SPEEDS
             .iter()
             .position(|s| (*s - self.playback.speed).abs() < 0.01)
-            .map(|i| SPEEDS[(i + 1) % SPEEDS.len()])
+            .and_then(|i| SPEEDS.get((i + 1) % SPEEDS.len()).copied())
             .unwrap_or(1.0);
         self.set_playback_speed(next, cx);
     }

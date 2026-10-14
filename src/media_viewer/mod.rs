@@ -12,6 +12,7 @@
 //! revealed. Secret media is left out of the chat's list, so paging never
 //! uncovers it; a photo or video with a self-destruct timer opens alone
 //! when it is clicked (`timed_viewer_item`), as in Telegram Desktop.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, FileId, MessageId};
 use crate::state::HistoryMessage;
@@ -255,7 +256,9 @@ impl MediaViewer {
             return 0;
         }
         self.total = total.max(self.items.len());
-        let first = self.items[0].message_id;
+        let Some(first) = self.items.first().map(|item| item.message_id) else {
+            return 0;
+        };
         let older: Vec<MediaViewerItem> = all_oldest_first
             .into_iter()
             .filter(|item| item.message_id < first)
