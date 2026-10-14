@@ -121,7 +121,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Code didn't arrive" and reset login email <!-- parity:auth-code-missing -->
 - [x] Dedicated box for banned phone numbers <!-- parity:auth-phone-banned-box -->
 - [x] Note about the maximum number of accounts <!-- parity:auth-max-accounts-note -->
-- [ ] Hidden test-server and debug log toggles (deferred: low impact) <!-- parity:auth-debug-toggles -->
+- [x] Hidden test-server and debug log toggles (deferred: low impact) <!-- parity:auth-debug-toggles -->
 
 ### Messaging core
 

@@ -1,2 +1,0 @@
-# Test mode sign-in test and Advanced/Experimental captures (revenue and affiliate pages still have open differences, see the decision doc)
-parity:auth-debug-toggles
