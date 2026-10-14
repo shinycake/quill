@@ -438,7 +438,10 @@ per-module deny (`hdr_image/viewer`, `notifications/native_extras`,
 `web_app_ui/spawn_mini_app_window`, `message_media/surfaces`,
 `image_decode/libheif`, `demos/composer`, `keybindings/pinned_chat_rows`). A
 pattern search for index and range expressions found none. Linux CI covers the
-Linux UI code.
+Linux UI code. Nothing in CI runs clippy on Windows (the Windows job only builds
+and packages), so Windows-only code is checked by review until a Windows clippy
+job exists. Earlier batch notes above that list modules "still without a deny"
+describe the state at that batch; none are left.
 
 The per-module `#![deny(clippy::indexing_slicing)]` attributes stay; they are
 redundant but removing them would touch about 700 files.
