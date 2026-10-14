@@ -127,7 +127,7 @@ define_class!(
             let fraction = sender.doubleValue();
             let command = match Tag::from_raw(sender.tag()) {
                 Some(Tag::PlayerSeek) => Command::PlayerSeek { fraction, done },
-                Some(Tag::ViewerSeek) => Command::ViewerSeek { fraction, done },
+                Some(Tag::ViewerSeek) => Command::ViewerSeek { fraction },
                 _ => return,
             };
             super::send(command);
@@ -143,6 +143,15 @@ define_class!(
             {
                 super::send(Command::Format(*format));
             }
+            let item = super::HOST.with(|host| {
+                host.try_borrow()
+                    .ok()
+                    .and_then(|host| host.as_ref().map(|host| host.format.clone()))
+            });
+            if let Some(item) = item {
+                // SAFETY: a main-thread call on a live popover item.
+                unsafe { item.dismissPopover(None) };
+            }
         }
 
         /// tdesktop `segmentClicked:`: open the stickers or the emoji.
@@ -156,6 +165,7 @@ define_class!(
             host.picker_bar.setDefaultItemIdentifiers(&NSArray::new());
             host.picker_bar
                 .setDefaultItemIdentifiers(&ids(&[if emoji { EMOJI } else { STICKERS }]));
+            host.fill_pending_picker();
             super::send(Command::PickerShown);
             // SAFETY: main-thread call on a live popover item.
             unsafe { host.picker.showPopover(None) };
@@ -198,8 +208,9 @@ fn custom_item(
 }
 
 fn button(image: &NSImage, tag: Tag, target: &Target, mtm: MainThreadMarker) -> Retained<NSButton> {
-    // SAFETY: `target` lives as long as the host that owns the button, and
-    // `buttonPressed:` takes the sender.
+    // SAFETY: AppKit holds a control's target weakly, so a dropped host
+    // leaves a nil target, never a dangling one; `buttonPressed:` takes the
+    // sender.
     let button = unsafe {
         NSButton::buttonWithImage_target_action(
             image,
@@ -269,6 +280,12 @@ struct State {
     viewer_items: Vec<&'static str>,
     /// The emoji list the scrubber shows.
     emoji: Option<Rc<Vec<PickerItem>>>,
+    /// The latest picker lists, shown when a segment is next tapped, as
+    /// tdesktop's `_waitingForUpdate` does, so nothing moves under a
+    /// finger.
+    pending: Option<PickerContents>,
+    /// Whether the scrubbers were ever filled.
+    filled: bool,
 }
 
 /// Everything built once per window. Cloning shares the same objects.
@@ -278,6 +295,7 @@ pub(super) struct Host {
     _target: Retained<Target>,
     main: Retained<NSTouchBar>,
     pinned: Retained<PinnedPanel>,
+    format: Retained<NSPopoverTouchBarItem>,
     pub(super) picker: Retained<NSPopoverTouchBarItem>,
     picker_bar: Retained<NSTouchBar>,
     stickers: Retained<PickerSource>,
@@ -416,6 +434,7 @@ impl Host {
             _target: target,
             main,
             pinned,
+            format,
             picker,
             picker_bar,
             stickers,
@@ -438,6 +457,8 @@ impl Host {
                 main_items: Vec::new(),
                 viewer_items: Vec::new(),
                 emoji: None,
+                pending: None,
+                filled: false,
             })),
         }
     }
@@ -457,19 +478,16 @@ impl Host {
     ) -> Vec<Vec<Retained<NSView>>> {
         let mut rows = Vec::new();
         self.apply(bar, picker, palette);
+        self.fill_pending_picker();
         let mut main = vec![Retained::into_super(Retained::into_super(
             Retained::into_super(self.pinned.clone()),
         ))];
         main.push(self.picker.collapsedRepresentation());
         rows.push(main);
         let view = self
-            .main
-            .itemForIdentifier(&NSString::from_str(FORMAT))
-            .and_then(|item| item.downcast::<NSPopoverTouchBarItem>().ok())
-            .and_then(|item| {
-                item.popoverTouchBar()
-                    .itemForIdentifier(&NSString::from_str(FORMATTER))
-            })
+            .format
+            .popoverTouchBar()
+            .itemForIdentifier(&NSString::from_str(FORMATTER))
             .and_then(|item| item.view());
         let formatter = view
             .and_then(|view| view.downcast::<NSScrollView>().ok())
@@ -530,7 +548,7 @@ impl Host {
                     Accessory::None => {}
                 }
                 if let Some(picker) = picker {
-                    self.fill_picker(picker);
+                    self.offer_picker(picker);
                 }
                 self.set_items(&self.main, items, |state| &mut state.main_items);
                 Shown::Main
@@ -579,6 +597,37 @@ impl Host {
         });
         if changed {
             bar.setDefaultItemIdentifiers(&ids(&items));
+        }
+    }
+
+    /// Keep new picker lists for the next tap. Sticker pictures that
+    /// finished downloading for the lists on screen show at once
+    /// (tdesktop's download handler).
+    fn offer_picker(&self, picker: &PickerContents) {
+        if self.stickers.shows(&picker.stickers)
+            && self.stickers.set_items(&picker.stickers, &picker.files)
+        {
+            self.stickers_scrubber.reloadData();
+        }
+        let first = self.state.try_borrow_mut().is_ok_and(|mut state| {
+            if state.pending.as_ref() != Some(picker) {
+                state.pending = Some(picker.clone());
+            }
+            !state.filled
+        });
+        if first {
+            self.fill_pending_picker();
+        }
+    }
+
+    /// Show the kept picker lists.
+    fn fill_pending_picker(&self) {
+        let pending = self.state.try_borrow_mut().ok().and_then(|mut state| {
+            state.filled = true;
+            state.pending.take()
+        });
+        if let Some(picker) = pending {
+            self.fill_picker(&picker);
         }
     }
 
@@ -697,7 +746,8 @@ fn format_popover(target: &Target, mtm: MainThreadMarker) -> Retained<NSPopoverT
     ))));
     let segment = NSSegmentedControl::new(mtm);
     segment.setSegmentStyle(NSSegmentStyle::Rounded);
-    // SAFETY: the target outlives the control; `formatClicked:` takes it.
+    // SAFETY: AppKit holds a control's target weakly, so a dropped host leaves a nil target, never a dangling one;
+    // `formatClicked:` takes the sender.
     unsafe {
         segment.setTarget(Some(any(target)));
         segment.setAction(Some(sel!(formatClicked:)));
@@ -760,7 +810,8 @@ fn picker_popover(target: &Target, icons: Icons, mtm: MainThreadMarker) -> Picke
     segment.setWidth_forSegment(SEGMENT_WIDTH, 0);
     segment.setWidth_forSegment(SEGMENT_WIDTH, 1);
     segment.setTrackingMode(NSSegmentSwitchTracking::Momentary);
-    // SAFETY: the target outlives the control; `pickerClicked:` takes it.
+    // SAFETY: AppKit holds a control's target weakly, so a dropped host leaves a nil target, never a dangling one;
+    // `pickerClicked:` takes the sender.
     unsafe {
         segment.setTarget(Some(any(target)));
         segment.setAction(Some(sel!(pickerClicked:)));

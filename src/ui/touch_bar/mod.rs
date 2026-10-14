@@ -290,8 +290,11 @@ impl QuillApp {
             },
             Command::ViewerFullscreen => self.viewer_toggle_fullscreen(window, cx),
             Command::ViewerPictureInPicture => self.open_video_pip(cx),
-            Command::ViewerSeek { fraction, done } => {
-                if done && let Some(clock) = self.viewer.clock.as_ref() {
+            // tdesktop seeks the viewer's video while the slider moves
+            // (`playbackControlsSeekProgress`), and the player only once
+            // it is let go.
+            Command::ViewerSeek { fraction, .. } => {
+                if let Some(clock) = self.viewer.clock.as_ref() {
                     let secs = fraction.clamp(0., 1.) * clock.duration_secs();
                     self.seek_viewer_to(secs, cx);
                 }

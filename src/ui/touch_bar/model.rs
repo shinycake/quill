@@ -443,7 +443,6 @@ pub(crate) enum Command {
     ViewerPictureInPicture,
     ViewerSeek {
         fraction: f64,
-        done: bool,
     },
 }
 

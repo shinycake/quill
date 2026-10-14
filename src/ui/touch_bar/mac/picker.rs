@@ -150,6 +150,14 @@ impl PickerSource {
         scrubber
     }
 
+    /// Whether these are the items shown now.
+    pub(super) fn shows(&self, items: &[PickerItem]) -> bool {
+        self.ivars()
+            .items
+            .try_borrow()
+            .is_ok_and(|current| current.as_slice() == items)
+    }
+
     /// New contents; true when they changed (the scrubber then reloads).
     pub(super) fn set_items(&self, items: &[PickerItem], files: &[(i32, PathBuf)]) -> bool {
         let files: HashMap<i32, PathBuf> = files.iter().cloned().collect();

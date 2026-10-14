@@ -103,8 +103,13 @@ impl Default for Values {
 
 /// Whether this Mac has a Touch Bar (tdesktop `Platform::HasTouchBar`):
 /// every Intel Mac is assumed to, and of the Apple silicon ones only the
-/// 13-inch MacBook Pro models `MacBookPro17,1` and `Mac14,7`.
+/// 13-inch MacBook Pro models `MacBookPro17,1` and `Mac14,7`. Asked once.
 pub fn has_touch_bar() -> bool {
+    static HAS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HAS.get_or_init(detect_touch_bar)
+}
+
+fn detect_touch_bar() -> bool {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         matches!(
@@ -319,7 +324,9 @@ pub fn set_fast_buttons_mode(on: bool) {
 
 /// Whether the Touch Bar is switched off (tdesktop `kOptionDisableTouchbar`).
 pub fn touchbar_disabled() -> bool {
-    stored().touchbar_disabled.unwrap_or(!has_touch_bar())
+    stored()
+        .touchbar_disabled
+        .unwrap_or_else(|| !has_touch_bar())
 }
 
 /// Switch the Touch Bar off or back on and keep it for the next launch.

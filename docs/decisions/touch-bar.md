@@ -26,10 +26,14 @@ tdesktop `platform/mac/touchbar` (`mac_touchbar_manager.mm`, `mac_touchbar_main.
   emoji goes into the composer and the popover stays open.
 - **Player.** Play/Pause, Previous, Next, a seek bar and Close, with Track Position available
   through "Customize Touch Bar…" (customization id `quill.touchbar`, allowed items as
-  tdesktop's). The seek bar seeks while dragged and commits when the touch ends, read from the
-  current event's ended touches as `CreateTouchBarSlider` does. It is left alone while touched.
+  tdesktop's). The seek bar seeks once the touch ends, read from the current event's
+  ended touches as `CreateTouchBarSlider` does, and is left alone while touched.
 - **Media viewer.** A photo shows Rotate. A video shows Rotate, Fullscreen, Picture-in-Picture,
-  Play/Pause, a seek bar and the position.
+  Play/Pause, a seek bar and the position. Its seek bar seeks while it moves
+  (`playbackControlsSeekProgress`).
+- **Popovers.** A formatting tap applies the format and closes the popover. New sticker or emoji
+  lists wait for the next segment tap (`_waitingForUpdate`), so nothing moves under a finger;
+  sticker pictures that finish downloading show at once.
 - **Option.** Settings › Advanced › Experimental settings › Interface › "Disable Touch Bar (macOS
   only).", tdesktop's `touchbar-disabled`. It defaults to on for Macs without a Touch Bar: Apple
   silicon models other than MacBookPro17,1 and Mac14,7, as tdesktop's `HasTouchBar` decides.
@@ -63,7 +67,9 @@ tdesktop `platform/mac/touchbar` (`mac_touchbar_manager.mm`, `mac_touchbar_main.
 None of the Macs Quill is built on has a Touch Bar, and Xcode no longer ships the Touch Bar
 simulator. With `demo-capture`, `QUILL_TOUCH_BAR_PREVIEW=out.png quill --screenshot-demo
 ready-stickers out/` builds every bar from the demo and renders their item views into a PNG. That
-is how the bars here were checked. `touch_bar/tests.rs` covers a launch crash this branch hit and
+is how the bars here were checked. Touches (tap, drag to reorder, popovers, scrubber picks, the
+slider's release) need a Mac with a Touch Bar, so `platform-touch-bar` stays open until one is
+tried. `touch_bar/tests.rs` covers a launch crash this branch hit and
 fixed: reading the app while it was still being built.
 
 ## VoiceOver
