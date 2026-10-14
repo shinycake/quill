@@ -4,7 +4,7 @@
 //! tdesktop builds it only where there is a Touch Bar, and its experimental
 //! option "Disable Touch Bar (macOS only)." switches it off
 //! (`quill::advanced::experimental::touchbar_disabled`). Windows and Linux
-//! have no Touch Bar, so nothing runs there; everything it offers is in the
+//! have no Touch Bar, so this module is built for macOS only; everything it offers is in the
 //! window on every platform.
 //!
 //! The app computes a [`model::Bar`] whenever it or the composer changes,
@@ -13,10 +13,8 @@
 
 pub(crate) mod model;
 
-#[cfg(target_os = "macos")]
 mod mac;
 #[cfg(test)]
-#[cfg(target_os = "macos")]
 #[cfg(feature = "demo-capture")]
 mod tests;
 
@@ -389,8 +387,5 @@ pub(crate) fn initials(title: &str) -> String {
 
 /// Start mirroring the app into the Touch Bar (macOS with a Touch Bar).
 pub(crate) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp>) {
-    #[cfg(target_os = "macos")]
     mac::install(demo, window, cx);
-    #[cfg(not(target_os = "macos"))]
-    let _ = (demo, window, cx);
 }
