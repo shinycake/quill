@@ -51,6 +51,9 @@ jobs:
         run: cargo test --features demo-capture --locked --bin quill
       # The panic lints (docs/contributing/panic-safety.md) over the UI and
       # the Linux-only code. quill-webview needs WebKitGTK, so it is left out.
+      # Clippy's in-tests allowances only see a plain `#[cfg(test)]`.
+      - name: test cfg form
+        run: "! grep -rn 'cfg(all(test' src crates --include='*.rs'"
       - name: clippy (UI)
         run: cargo clippy --features demo-capture --all-targets --locked -p quill -p ntgcalls-sys -p quill-webview-protocol -- -D warnings
       # The vendored X11 / Windows GPUI backends only build on their own OS;

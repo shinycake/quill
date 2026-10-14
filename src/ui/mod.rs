@@ -66,6 +66,8 @@ mod lru;
 mod message_state;
 mod motion;
 mod native_video;
+// The buffer turns serve the macOS AVPlayer path only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod native_video_rotate;
 mod nested_click;
 mod new_contact;
@@ -286,6 +288,8 @@ mod notification_settings;
 mod notifications;
 mod notify_windows;
 mod onboarding;
+// The Dock and Window menus are macOS-only; Windows uses part of this.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 mod os_menus;
 mod ownership;
 mod paid_messages_channel;
