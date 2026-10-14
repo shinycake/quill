@@ -169,30 +169,38 @@ impl QuillApp {
             ChatStatistics::Channel(s) => (s.period_start, s.period_end),
             ChatStatistics::Supergroup(s) => (s.period_start, s.period_end),
         };
-        let mut body = div().flex().flex_col().gap_4().child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .child(section_title("Overview"))
-                        .when(start > 0 && end > 0, |d| {
-                            d.child(div().text_xs().text_color(text_muted()).child(format!(
-                                "{} \u{2014} {}",
-                                day_month_year(i64::from(start)),
-                                day_month_year(i64::from(end))
-                            )))
-                        }),
-                )
-                .child(overview_grid(overview_cells(statistics, is_channel))),
-        );
-        if let ChatStatistics::Channel(stats) = statistics {
-            body = body.child(overview_grid(channel_story_cells(stats)));
+        // A screenshot demo can start the page at a later chart.
+        #[cfg(feature = "demo-capture")]
+        let first_chart = demo::first_chart();
+        #[cfg(not(feature = "demo-capture"))]
+        let first_chart = 0;
+        let mut body = div().flex().flex_col().gap_4();
+        if first_chart == 0 {
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(section_title("Overview"))
+                            .when(start > 0 && end > 0, |d| {
+                                d.child(div().text_xs().text_color(text_muted()).child(format!(
+                                    "{} \u{2014} {}",
+                                    day_month_year(i64::from(start)),
+                                    day_month_year(i64::from(end))
+                                )))
+                            }),
+                    )
+                    .child(overview_grid(overview_cells(statistics, is_channel))),
+            );
+            if let ChatStatistics::Channel(stats) = statistics {
+                body = body.child(overview_grid(channel_story_cells(stats)));
+            }
         }
-        for slot in chart_slots(statistics) {
+        for slot in chart_slots(statistics).into_iter().skip(first_chart) {
             let (id, title, graph, kind) = (slot.id, slot.title, slot.graph, slot.kind);
             if let Some(section) = self.stat_graph_section(
                 chat_id,
@@ -427,9 +435,14 @@ fn channel_story_cells(s: &ChannelStatistics) -> Vec<OverviewCell> {
     cells
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(feature = "demo-capture")]
+#[cfg_attr(not(test), allow(dead_code))]
 #[path = "statistics_fixture.rs"]
 pub(crate) mod fixture;
+
+#[cfg(feature = "demo-capture")]
+#[path = "statistics_demo.rs"]
+mod demo;
 
 #[cfg(all(test, feature = "demo-capture"))]
 #[path = "statistics_tests.rs"]
