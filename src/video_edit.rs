@@ -76,7 +76,7 @@ impl Crop {
     /// The same part of the frame after a clockwise quarter turn.
     pub fn turned_cw(self) -> Self {
         Self {
-            x: 1000 - self.y - self.h,
+            x: 1000u16.saturating_sub(self.y).saturating_sub(self.h),
             y: self.x,
             w: self.h,
             h: self.w,

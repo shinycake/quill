@@ -95,8 +95,10 @@ impl Timeline {
         let min_duration = min_duration.clamp(0, max_duration);
         let from = edits.from_ms.clamp(0, (duration - min_duration).max(0));
         let limit = (from + max_duration).min(duration);
+        // A restored range keeps at least the minimum (`from` above leaves
+        // room for it).
         let till = if edits.till_ms > from {
-            edits.till_ms.min(limit)
+            edits.till_ms.max(from + min_duration).min(limit)
         } else {
             limit
         };
@@ -349,7 +351,7 @@ impl CropArea {
 }
 
 /// What a press on the picture took hold of (the editor `Crop`'s edges).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CropGrab {
     pub left: bool,
     pub top: bool,
@@ -401,8 +403,8 @@ pub fn crop_dragged(
     let (dx, dy) = (dx / width, dy / height);
     if grab.moves() {
         return CropArea {
-            x: (start.x + dx).clamp(0.0, 1.0 - start.w),
-            y: (start.y + dy).clamp(0.0, 1.0 - start.h),
+            x: within(start.x + dx, 0.0, 1.0 - start.w),
+            y: within(start.y + dy, 0.0, 1.0 - start.h),
             ..start
         };
     }
@@ -413,16 +415,16 @@ pub fn crop_dragged(
     let (mut left, mut top) = (start.x, start.y);
     let (mut right, mut bottom) = (start.x + start.w, start.y + start.h);
     if grab.left {
-        left = (left + dx).clamp(0.0, right - min_w);
+        left = within(left + dx, 0.0, right - min_w);
     }
     if grab.right {
-        right = (right + dx).clamp(left + min_w, 1.0);
+        right = within(right + dx, left + min_w, 1.0);
     }
     if grab.top {
-        top = (top + dy).clamp(0.0, bottom - min_h);
+        top = within(top + dy, 0.0, bottom - min_h);
     }
     if grab.bottom {
-        bottom = (bottom + dy).clamp(top + min_h, 1.0);
+        bottom = within(bottom + dy, top + min_h, 1.0);
     }
     let Some(aspect) = square.filter(|aspect| *aspect > 0.0) else {
         return CropArea {
@@ -459,8 +461,8 @@ pub fn crop_dragged(
         (top + bottom - h) / 2.0
     };
     CropArea {
-        x: x.clamp(0.0, 1.0 - w),
-        y: y.clamp(0.0, 1.0 - h),
+        x: within(x, 0.0, 1.0 - w),
+        y: within(y, 0.0, 1.0 - h),
         w,
         h,
     }
@@ -525,3 +527,10 @@ pub fn estimated_size(edits: &VideoEdits, source: &VideoSource) -> Option<(u64, 
 #[cfg(test)]
 #[path = "video_timeline_tests.rs"]
 mod tests;
+
+/// `value` kept in `low..=high`, with `low` winning when the range is
+/// empty: `f32::clamp` panics on that, and a crop smaller than the
+/// minimum handle size (a tiny picture) makes it empty.
+fn within(value: f32, low: f32, high: f32) -> f32 {
+    value.min(high).max(low)
+}

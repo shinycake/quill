@@ -203,13 +203,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let serial = self
-            .composer_ui
-            .send_box
-            .video_editor
-            .as_ref()
-            .map_or(0, |editor| editor.serial)
-            + 1;
+        let serial = next_editor_serial();
         self.composer_ui.send_box.video_editor = Some(VideoEditorDialog {
             target,
             source: source.clone(),
@@ -575,6 +569,15 @@ impl QuillApp {
             .on_ok(on_ok)
             .on_close(on_close)
     }
+}
+
+/// A serial base no earlier editor used, so a probe, still or strip frame
+/// still running for a closed editor never matches a newly opened one.
+/// Each editor counts up from its base for its own requests.
+fn next_editor_serial() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static OPENED: AtomicU64 = AtomicU64::new(0);
+    (OPENED.fetch_add(1, Ordering::Relaxed) + 1) << 32
 }
 
 /// tdesktop `Mp4FileName`: an encoded copy is an mp4 file.

@@ -228,3 +228,39 @@ fn an_edited_file_is_estimated_from_its_bitrate() {
     let (bytes, _) = estimated_size(&small, &source()).unwrap();
     assert!(bytes < 500_000, "{bytes}");
 }
+
+#[test]
+fn a_crop_on_a_tiny_picture_never_inverts() {
+    // Shown 100 px wide, the 20 px minimum is a fifth of the frame: more
+    // than the crop's own width here, so every bound range is empty.
+    let start = CropArea {
+        x: 0.0,
+        y: 0.0,
+        w: 0.1,
+        h: 0.1,
+    };
+    let both = CropGrab {
+        left: true,
+        top: true,
+        right: true,
+        bottom: true,
+    };
+    for grab in [
+        CropGrab {
+            left: true,
+            ..CropGrab::default()
+        },
+        CropGrab {
+            right: true,
+            bottom: true,
+            ..CropGrab::default()
+        },
+        both,
+    ] {
+        for square in [None, Some(1.0)] {
+            let cut = crop_dragged(start, grab, (-30.0, 45.0), (100.0, 100.0), square);
+            assert!(cut.w >= 0.0 && cut.h >= 0.0);
+            assert!(cut.x >= 0.0 && cut.x + cut.w <= 1.0 + f32::EPSILON);
+        }
+    }
+}
