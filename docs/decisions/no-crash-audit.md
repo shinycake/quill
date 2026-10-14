@@ -1,5 +1,10 @@
 # No-crash audit
 
+> Status (2026-10-14): all four lint phases (A to D) are on for the whole
+> workspace. PRs: #763, #767, #768, #776, #780, #783, #785, #788, #790, #792
+> and `panic-lints-d-final` (this note's PR, which turns on `indexing_slicing`
+> workspace-wide). See `docs/decisions/panic-lints.md`.
+
 Branch `no-crash-audit`. Audit and policy, no parity item. Started after the
 emoji and sticker panel crash fixed in #747.
 
