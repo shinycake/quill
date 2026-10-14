@@ -132,7 +132,10 @@ gpui_kit::assets::icon_assets!(
         Coins,
         Gem,
         ChartColumn,
-        ArrowUpRight
+        ArrowUpRight,
+        // Video editor bar (`ui::video_editor_controls`).
+        RotateCwSquare,
+        FlipHorizontal2
     ]
 );
 

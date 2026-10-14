@@ -1,31 +1,34 @@
 //! "Edit Video" for a video that is about to be sent (tdesktop
-//! `Editor::OpenWithPreparedVideoFile`): trim the range, pick the cover
-//! frame, choose a quality and send the clip as a GIF. Opened from the
-//! tray and from the edit box for a staged replacement video.
+//! `Editor::VideoEditor` as opened by `OpenWithPreparedVideoFile`): a
+//! full-window layer that plays the kept range in a loop, with the crop on
+//! the picture, the frame strip with its trim handles and cover playhead,
+//! the quality dots and the Cancel / Rotate / Flip / GIF / Done bar. Opened
+//! from the tray, from the edit box for a staged replacement video, and for
+//! a video sticker (`video_editor_set.rs`).
 //!
-//! The picture is the frame at the last moved handle, cut by ffmpeg. "Done"
-//! encodes the edited copy off the UI thread (only when the file has to
-//! change: a new cover frame alone needs no encoding) and swaps it in as
-//! the file to send. The math and command lines are `quill::video_edit`.
+//! "Done" encodes the edited copy off the UI thread (only when the file has
+//! to change: a new cover frame alone needs no encoding) and swaps it in as
+//! the file to send. The numbers and command lines are `quill::video_edit`
+//! and `quill::video_timeline`; the picture and crop are
+//! `video_editor_tools.rs`, the strip and the cover bubble
+//! `video_editor_timeline.rs`, the quality dots and the bar
+//! `video_editor_controls.rs`.
 
 use super::app::QuillApp;
 use super::native_video::NativeVideo;
 use super::shell::{DialogKind, QuillShell};
-use gpui_kit::component::button::*;
+use super::video_editor_timeline::EditorMotion;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{AttachmentExtras, AttachmentKind, EditMediaKind};
 use quill::sticker_set_box::SetKind;
-use quill::video_edit::{
-    VideoEdits, VideoSource, format_clock, probe_source, quality_label, quality_levels,
-    render_edited, render_frame,
-};
+use quill::video_edit::{VideoEdits, VideoSource, probe_source, render_edited, render_frame};
+use quill::video_timeline::Timeline;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// What the edited copy replaces.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -39,12 +42,54 @@ pub(super) enum EditorTarget {
     Set { set_id: i64, kind: SetKind },
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Knob {
-    Range,
-    Cover,
-    CropX,
-    CropY,
+/// The layer's own colors: like tdesktop's editor it is dark in both
+/// themes (the `mediaview*` palette), so a picture is judged on black.
+pub(super) mod palette {
+    use gpui_kit::{Hsla, black, hsla, white};
+
+    /// The layer behind the picture.
+    pub fn layer() -> Hsla {
+        hsla(0.0, 0.0, 0.07, 1.0)
+    }
+    /// `mediaviewCaptionFg` / `mediaviewControlFg`: labels and handles.
+    pub fn text() -> Hsla {
+        white()
+    }
+    /// Secondary text (`videoEditorHint`), still AA on the layer.
+    pub fn muted() -> Hsla {
+        white().opacity(0.72)
+    }
+    /// `mediaviewCaptionBg`: the dim outside the kept range, the grips and
+    /// the playhead outline.
+    pub fn dim() -> Hsla {
+        black().opacity(0.55)
+    }
+    /// `mediaviewPipPlaybackInactive`: the strip before its frames load,
+    /// the quality line.
+    pub fn inactive() -> Hsla {
+        white().opacity(0.18)
+    }
+    /// `roundedBg` under the bar's buttons: darker than the layer, as in
+    /// tdesktop where the pill reads as a hole in the blurred backdrop.
+    pub fn bar() -> Hsla {
+        black().opacity(0.45)
+    }
+    /// `photoEditorEdgeButtonBg`: a hovered button of the bar.
+    pub fn hover() -> Hsla {
+        white().opacity(0.1)
+    }
+    /// `mediaviewTextLinkFg`: "Done".
+    pub fn link() -> Hsla {
+        hsla(201.0 / 360.0, 1.0, 0.78, 1.0)
+    }
+    /// `videoTimelineDotFg` and an active tool.
+    pub fn accent() -> Hsla {
+        hsla(210.0 / 360.0, 0.9, 0.62, 1.0)
+    }
+    /// `photoCropFadeBg`: outside the crop.
+    pub fn crop_fade() -> Hsla {
+        black().opacity(0.5)
+    }
 }
 
 pub(super) struct VideoEditorDialog {
@@ -54,20 +99,28 @@ pub(super) struct VideoEditorDialog {
     /// Probed size, length and sound; `None` while it is read.
     pub(super) info: Option<VideoSource>,
     pub(super) edits: VideoEdits,
-    /// The frame shown above the sliders.
+    /// The strip's selection; `None` until the video is read.
+    pub(super) timeline: Option<Timeline>,
+    /// The still frame (turned and mirrored like the edit) at the cover:
+    /// the picture when the video can't play here, and the cover bubble.
     pub(super) preview: Option<PathBuf>,
-    /// Bumped by every probe, frame and encode; late answers are dropped.
+    pub(super) still: Option<Arc<RenderImage>>,
+    /// A still is being cut; one more is wanted at this time after it.
+    pub(super) still_busy: bool,
+    pub(super) still_wanted: Option<i64>,
+    /// Bumped by every probe and encode; late answers are dropped.
     pub(super) serial: u64,
     /// The edited copy is being encoded.
     pub(super) busy: bool,
     pub(super) note: Option<String>,
-    range: Option<Entity<SliderState>>,
-    cover: Option<Entity<SliderState>>,
-    pub(super) crop_x: Option<Entity<SliderState>>,
-    pub(super) crop_y: Option<Entity<SliderState>>,
-    /// The preview player while the trimmed range plays.
+    /// The player looping the kept range, muted.
     pub(super) player: RefCell<Option<NativeVideo>>,
-    pub(super) playing: bool,
+    /// Paused by a click on the picture (tdesktop `_userPaused`).
+    pub(super) user_paused: bool,
+    /// Where the player is, for the playhead.
+    pub(super) playback_ms: Option<i64>,
+    /// Drags, animations and the measured layout.
+    pub(super) motion: EditorMotion,
     /// Set target: the emoji the sticker already had, for the "New
     /// Sticker" box.
     pub(super) set_emoji: Option<String>,
@@ -82,8 +135,10 @@ fn is_editor_copy(path: &Path) -> bool {
         .is_some_and(|dir| dir == "quill-video-edits")
 }
 
-fn slider_seconds(ms: i64) -> f32 {
-    ms as f32 / 1000.0
+/// A JPEG still as a GPUI picture, read off the UI thread.
+pub(super) fn load_still(path: &Path) -> Option<Arc<RenderImage>> {
+    let image = image::open(path).ok()?.to_rgba8();
+    Some(super::photo_editor::preview_of(&image))
 }
 
 impl QuillApp {
@@ -148,28 +203,24 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let serial = self
-            .composer_ui
-            .send_box
-            .video_editor
-            .as_ref()
-            .map_or(0, |editor| editor.serial)
-            + 1;
+        let serial = next_editor_serial();
         self.composer_ui.send_box.video_editor = Some(VideoEditorDialog {
             target,
             source: source.clone(),
             info: None,
             edits: VideoEdits::full(0),
+            timeline: None,
             preview: None,
+            still: None,
+            still_busy: false,
+            still_wanted: None,
             serial,
             busy: false,
             note: Some("Reading the video…".into()),
-            range: None,
-            cover: None,
-            crop_x: None,
-            crop_y: None,
             player: RefCell::new(None),
-            playing: false,
+            user_paused: false,
+            playback_ms: None,
+            motion: EditorMotion::default(),
             set_emoji: None,
         });
         let worker = cx.background_spawn(async move { probe_source(&source) });
@@ -228,180 +279,57 @@ impl QuillApp {
                     } else {
                         edits.till_ms
                     };
-                    VideoEdits { till_ms, ..edits }.clamped(info.duration_ms, true)
+                    VideoEdits { till_ms, ..edits }
                 })
                 .unwrap_or_else(|| VideoEdits::full(info.duration_ms))
         };
-        let crop_unit =
-            |start: u16, len: u16| (f32::from(start) / 1000.0, f32::from(start + len) / 1000.0);
-        let crop = edits.crop.unwrap_or(quill::video_edit::Crop::FULL);
-        let crop_x = self.video_editor_knob_slider(
-            Knob::CropX,
-            SliderState::new()
-                .min(0.0)
-                .max(1.0)
-                .step(0.01)
-                .default_value(crop_unit(crop.x, crop.w)),
-            window,
-            cx,
-        );
-        let crop_y = self.video_editor_knob_slider(
-            Knob::CropY,
-            SliderState::new()
-                .min(0.0)
-                .max(1.0)
-                .step(0.01)
-                .default_value(crop_unit(crop.y, crop.h)),
-            window,
-            cx,
-        );
-        let range = self.video_editor_knob_slider(
-            Knob::Range,
-            SliderState::new()
-                .min(0.0)
-                .max(slider_seconds(info.duration_ms))
-                .step(0.1)
-                .default_value((slider_seconds(edits.from_ms), slider_seconds(edits.till_ms))),
-            window,
-            cx,
-        );
-        let cover = self.video_editor_knob_slider(
-            Knob::Cover,
-            SliderState::new()
-                .min(0.0)
-                .max(1.0)
-                .step(0.001)
-                .default_value(cover_fraction(&edits)),
-            window,
-            cx,
-        );
+        // A sticker lasts three seconds at most (`VideoStickerEditorData`).
+        let (max, min) = if for_set {
+            (
+                quill::sticker_video::MAX_DURATION_MS,
+                quill::sticker_video::MIN_DURATION_MS,
+            )
+        } else {
+            (0, 0)
+        };
+        let timeline = Timeline::new(info.duration_ms, max, min, &edits);
+        let edits = VideoEdits {
+            from_ms: timeline.from,
+            till_ms: timeline.till,
+            cover_ms: timeline.cover,
+            ..edits
+        };
         let at = edits.cover_ms;
         if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
             editor.info = Some(info);
             editor.edits = edits;
-            editor.range = Some(range);
-            editor.cover = Some(cover);
-            editor.crop_x = Some(crop_x);
-            editor.crop_y = Some(crop_y);
+            editor.timeline = Some(timeline);
             editor.note = None;
         }
+        self.start_video_editor_player(cx);
         self.refresh_video_preview(at, cx);
     }
 
-    fn video_editor_knob_slider(
-        &mut self,
-        knob: Knob,
-        slider: SliderState,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Entity<SliderState> {
-        let entity = cx.new(|_| slider);
-        cx.subscribe_in(
-            &entity,
-            window,
-            move |this, _, event: &SliderEvent, window, cx| {
-                let (value, release) = match event {
-                    SliderEvent::Change(value) => (*value, false),
-                    SliderEvent::Release(value) => (*value, true),
-                };
-                this.video_editor_knob(knob, value.start(), value.end(), release, window, cx);
-            },
-        )
-        .detach();
-        entity
-    }
-
-    /// A slider moved. While dragging only the labels follow; on release
-    /// the range snaps to its limits and the picture is cut again.
-    fn video_editor_knob(
-        &mut self,
-        knob: Knob,
-        start: f32,
-        end: f32,
-        release: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if matches!(knob, Knob::CropX | Knob::CropY) {
-            self.video_editor_crop_knob(knob, start, end, release, window, cx);
-            return;
-        }
-        let for_set = self.video_editor_for_set();
-        let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
-            return;
-        };
-        let Some(duration) = editor.info.map(|info| info.duration_ms) else {
-            return;
-        };
-        let show_at = match knob {
-            Knob::Range => {
-                let from = (f64::from(start) * 1000.0).round() as i64;
-                let till = (f64::from(end) * 1000.0).round() as i64;
-                let moved_start = (from - editor.edits.from_ms).abs() > 1;
-                let edits = VideoEdits {
-                    from_ms: from,
-                    till_ms: till,
-                    ..editor.edits
-                };
-                editor.edits = if for_set {
-                    quill::sticker_video::clamp_range(edits, duration, moved_start)
-                } else {
-                    edits.clamped(duration, moved_start)
-                };
-                let show_at = if moved_start {
-                    editor.edits.from_ms
-                } else {
-                    (editor.edits.till_ms - 100).max(editor.edits.from_ms)
-                };
-                if release {
-                    let edits = editor.edits;
-                    if let Some(range) = editor.range.clone() {
-                        range.update(cx, |state, cx| {
-                            state.set_value(
-                                (slider_seconds(edits.from_ms), slider_seconds(edits.till_ms)),
-                                window,
-                                cx,
-                            )
-                        });
-                    }
-                    if let Some(cover) = editor.cover.clone() {
-                        cover.update(cx, |state, cx| {
-                            state.set_value(cover_fraction(&edits), window, cx)
-                        });
-                    }
-                }
-                if release && let Some(video) = editor.player.borrow_mut().as_mut() {
-                    video.seek(editor.edits.from_ms as f64 / 1000.0);
-                }
-                show_at
-            }
-            Knob::CropX | Knob::CropY => return,
-            Knob::Cover => {
-                let fraction = f64::from(end.clamp(0.0, 1.0));
-                let length = editor.edits.length_ms() as f64;
-                editor.edits.cover_ms =
-                    (editor.edits.from_ms as f64 + fraction * length).round() as i64;
-                editor.edits.cover_ms
-            }
-        };
-        if release {
-            self.refresh_video_preview(show_at, cx);
-        } else {
-            cx.notify();
-        }
-    }
-
-    /// Cut the frame at `at_ms` of the source for the picture.
+    /// Cut the frame at `at_ms` of the source for the still and the cover
+    /// bubble. One cut runs at a time; the latest wish follows it.
     pub(super) fn refresh_video_preview(&mut self, at_ms: i64, cx: &mut Context<Self>) {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        editor.serial += 1;
+        if editor.still_busy {
+            editor.still_wanted = Some(at_ms);
+            return;
+        }
+        editor.still_busy = true;
+        editor.still_wanted = None;
         let serial = editor.serial;
         let source = editor.source.clone();
         let (turns, flipped) = (editor.edits.turns, editor.edits.flipped);
-        let worker =
-            cx.background_spawn(async move { render_frame(&source, at_ms, turns, flipped) });
+        let worker = cx.background_spawn(async move {
+            let frame = render_frame(&source, at_ms, turns, flipped)?;
+            let still = load_still(&frame);
+            Ok::<_, String>((frame, still))
+        });
         cx.spawn(async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
@@ -412,45 +340,38 @@ impl QuillApp {
                     .as_mut()
                     .filter(|editor| editor.serial == serial)
                 else {
-                    if let Ok(frame) = result {
+                    if let Ok((frame, _)) = result {
                         let _ = std::fs::remove_file(frame);
                     }
                     return;
                 };
+                editor.still_busy = false;
                 match result {
-                    Ok(frame) => {
+                    Ok((frame, still)) => {
                         if let Some(old) = editor.preview.replace(frame) {
                             let _ = std::fs::remove_file(old);
                         }
+                        if still.is_some() {
+                            editor.still = still;
+                        }
                     }
                     Err(note) => editor.note = Some(note),
+                }
+                if let Some(next) = editor.still_wanted.take() {
+                    this.refresh_video_preview(next, cx);
                 }
                 cx.notify();
             });
         })
         .detach();
-        cx.notify();
-    }
-
-    fn set_video_editor_quality(&mut self, level: u32, cx: &mut Context<Self>) {
-        if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-            editor.edits.quality = level;
-            cx.notify();
-        }
-    }
-
-    fn toggle_video_editor_gif(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-            editor.edits.gif = !editor.edits.gif;
-            cx.notify();
-        }
     }
 
     pub(super) fn close_video_editor(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.composer_ui.send_box.video_editor.take()
-            && let Some(preview) = editor.preview
-        {
-            let _ = std::fs::remove_file(preview);
+        if let Some(editor) = self.composer_ui.send_box.video_editor.take() {
+            if let Some(preview) = editor.preview {
+                let _ = std::fs::remove_file(preview);
+            }
+            editor.motion.release_frames();
         }
         cx.notify();
     }
@@ -466,7 +387,11 @@ impl QuillApp {
 
     /// "Done": encode the edited copy when the file has to change, then
     /// swap it in.
-    fn finish_video_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub(super) fn finish_video_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return true;
         };
@@ -488,7 +413,6 @@ impl QuillApp {
             self.close_video_editor(cx);
             return true;
         }
-        editor.playing = false;
         *editor.player.borrow_mut() = None;
         editor.busy = true;
         editor.note = Some("Preparing the video…".into());
@@ -616,167 +540,44 @@ impl QuillApp {
             QuillShell::on_close_kind(app, shell, DialogKind::VideoEditor, |this, _, cx| {
                 this.close_video_editor(cx);
             });
-        app.update(cx, |this, cx| {
-            let Some(editor) = this.composer_ui.send_box.video_editor.as_ref() else {
-                return dialog.on_close(on_close);
-            };
-            let body = this.video_editor_body(editor, cx);
-            let body = Rc::new(RefCell::new(Some(body)));
-            dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title("Edit Video"))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    },
-                ))
-                .on_close(on_close)
-        })
-    }
-
-    fn video_editor_body(&self, editor: &VideoEditorDialog, cx: &mut Context<Self>) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        let this_stage = self.video_editor_stage(editor, cx);
-        let for_set = matches!(editor.target, EditorTarget::Set { .. });
-        let gif_allowed = editor.target != EditorTarget::MessageEdit && !for_set;
-        let picture = this_stage;
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(picture)
-            .child(self.video_editor_toolbar(editor, cx));
-        if let (Some(info), Some(range), Some(cover), Some(crop_x), Some(crop_y)) = (
-            editor.info,
-            &editor.range,
-            &editor.cover,
-            &editor.crop_x,
-            &editor.crop_y,
-        ) {
-            let edits = editor.edits;
-            body = body
-                .child(self.video_editor_slider_row(
-                    "Trim",
-                    format!(
-                        "{} to {} ({})",
-                        format_clock(edits.from_ms),
-                        format_clock(edits.till_ms),
-                        format_clock(edits.length_ms())
-                    ),
-                    range,
-                    cx,
-                ))
-                .child(self.video_editor_slider_row(
-                    "Cover frame",
-                    format_clock(edits.cover_ms),
-                    cover,
-                    cx,
-                ))
-                .child(self.video_editor_slider_row(
-                    "Crop left to right",
-                    crop_label(edits.crop.map(|crop| (crop.x, crop.w))),
-                    crop_x,
-                    cx,
-                ))
-                .child(self.video_editor_slider_row(
-                    "Crop top to bottom",
-                    crop_label(edits.crop.map(|crop| (crop.y, crop.h))),
-                    crop_y,
-                    cx,
-                ));
-            let (edited_w, edited_h) = edits.edited_size(&info);
-            let levels = quality_levels(edited_w, edited_h);
-            // A sticker is always encoded at the set's side.
-            if levels.len() > 1 && !for_set {
-                let mut choices = div().flex().flex_wrap().gap_1();
-                for level in levels {
-                    choices = choices.child(
-                        Button::new(("video-editor-quality", u64::from(level)))
-                            .label(quality_label(level))
-                            .small()
-                            .when(edits.quality == level, |button| button.primary())
-                            .when(edits.quality != level, |button| button.ghost())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_video_editor_quality(level, cx);
-                            })),
-                    );
-                }
-                body = body.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(div().text_xs().text_color(muted).child("Quality"))
-                        .child(choices),
-                );
-            }
-            if gif_allowed {
-                body = body.child(
-                    gpui_kit::component::checkbox::Checkbox::new("video-editor-gif")
-                        .label("Send as GIF (no sound)")
-                        .checked(edits.gif)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.toggle_video_editor_gif(cx);
-                        })),
-                );
-            }
-        }
-        if let Some(note) = &editor.note {
-            body = body.child(div().text_sm().text_color(muted).child(note.clone()));
-        }
-        let ready = editor.info.is_some() && !editor.busy;
-        body.child(
-            div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                    Button::new("video-editor-cancel")
-                        .label("Cancel")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_video_editor(cx);
-                            this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("video-editor-done")
-                        .label("Done")
-                        .primary()
-                        .disabled(!ready)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            if this.finish_video_editor(window, cx) {
-                                this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
-                            }
-                        })),
-                ),
-        )
-        .into_any_element()
+        // Enter is "Done" (tdesktop `keyPressEvent`); Esc is the kit's close.
+        let done_app = app.clone();
+        let on_ok = move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+            done_app.update(cx, |this, cx| this.finish_video_editor(window, cx))
+        };
+        let body = app.update(cx, |this, cx| this.video_editor_layer(cx));
+        let body = Rc::new(RefCell::new(Some(body)));
+        // Nearly the whole window, edge to edge inside the kit's margin, on
+        // the layer's own dark background.
+        dialog
+            .overlay(true)
+            .close_button(false)
+            .w(px(100_000.))
+            .margin_top(px(0.))
+            .p_0()
+            .bg(palette::layer())
+            .border_color(palette::layer())
+            .content(move |content, window, cx| {
+                let margin = cx.theme().spacing_tokens().lg;
+                let height = (window.viewport_size().height - margin * 2.).max(px(320.));
+                let body = body
+                    .borrow_mut()
+                    .take()
+                    .unwrap_or_else(|| div().into_any_element());
+                content.child(div().h(height).w_full().child(body))
+            })
+            .on_ok(on_ok)
+            .on_close(on_close)
     }
 }
 
-/// "20% to 80%" for a crop side, "Whole frame" without one.
-fn crop_label(side: Option<(u16, u16)>) -> String {
-    match side {
-        Some((start, len)) if len < 1000 => {
-            format!("{}% to {}%", start / 10, (start + len) / 10)
-        }
-        _ => "Whole frame".into(),
-    }
-}
-
-/// The cover frame as a share of the kept range (0 to 1).
-fn cover_fraction(edits: &VideoEdits) -> f32 {
-    let length = edits.length_ms();
-    if length <= 0 {
-        0.0
-    } else {
-        ((edits.cover_ms - edits.from_ms) as f64 / length as f64).clamp(0.0, 1.0) as f32
-    }
+/// A serial base no earlier editor used, so a probe, still or strip frame
+/// still running for a closed editor never matches a newly opened one.
+/// Each editor counts up from its base for its own requests.
+fn next_editor_serial() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static OPENED: AtomicU64 = AtomicU64::new(0);
+    (OPENED.fetch_add(1, Ordering::Relaxed) + 1) << 32
 }
 
 /// tdesktop `Mp4FileName`: an encoded copy is an mp4 file.
@@ -799,23 +600,8 @@ crate::ui::shell::register_dialogs! {
 
 #[cfg(test)]
 mod tests {
-    use super::{cover_fraction, is_editor_copy, mp4_name};
-    use quill::video_edit::VideoEdits;
+    use super::{is_editor_copy, mp4_name};
     use std::path::Path;
-
-    #[test]
-    fn the_cover_slider_follows_the_kept_range() {
-        let edits = VideoEdits {
-            from_ms: 2_000,
-            till_ms: 6_000,
-            cover_ms: 3_000,
-            quality: 0,
-            gif: false,
-            ..VideoEdits::full(0)
-        };
-        assert!((cover_fraction(&edits) - 0.25).abs() < 1e-6);
-        assert_eq!(cover_fraction(&VideoEdits::full(0)), 0.0);
-    }
 
     #[test]
     fn an_encoded_copy_is_an_mp4() {
