@@ -3,6 +3,7 @@
 //! `history/view/controls/history_view_compose_controls.cpp:788`): a
 //! `st::historyReplyPreview` (32 px) square of the replied-to or edited
 //! media, cropped to fill and rounded by `ImageRoundRadius::Small` (4 px).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_media::photo_display_path;

@@ -14,6 +14,7 @@
 //!
 //! While the rich editor is open the field holds raw block markup instead,
 //! so every helper here passes text through unchanged in that mode.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{accent_info, fill_muted, text_muted};

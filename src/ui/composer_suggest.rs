@@ -4,6 +4,7 @@
 //! The trigger rules and data live in `quill::suggest`; this file owns the
 //! popup state, keyboard stepping, insertion and drawing. Keys are routed
 //! from `app_demo.rs` next to the `@` mention menu.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::*;

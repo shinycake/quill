@@ -1,4 +1,5 @@
 //! Sticker collection picker and set management.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::pressable::PressableDiv;

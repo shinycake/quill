@@ -6,6 +6,7 @@
 //! (`ShowVideoEditorThenCreate` → `CreateMediaBox`). The numbers and the
 //! encoder are `quill::sticker_video`; the dialog itself is
 //! `video_editor.rs`, the box `sticker_set_box/video_create.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::sticker_set_box::state::CreateSticker;

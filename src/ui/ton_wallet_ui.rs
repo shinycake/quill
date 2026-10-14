@@ -6,6 +6,7 @@
 //! the wallet: no Send Money, no decrypting. A card click opens the
 //! transaction on the read-only Money page (`ton_wallet_money.rs`); the
 //! profile's wallet-address row lives here too.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::entity_links::LinkPopup;

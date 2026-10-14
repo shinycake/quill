@@ -5,6 +5,7 @@
 //! the picture into it when the head is let go (`VideoEditor::updateBubble`,
 //! `startCapture`). The rules are `quill::video_timeline`; the state shared
 //! by the layer's parts is [`EditorMotion`].
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::video_editor::{EditorTarget, VideoEditorDialog, palette};

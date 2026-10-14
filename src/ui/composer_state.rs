@@ -1,4 +1,5 @@
 //! Composer state: menus, attachments, send options, reply and edit drafts.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use quill::composer::ComposerAttachment;

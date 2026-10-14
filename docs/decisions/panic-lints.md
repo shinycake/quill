@@ -333,3 +333,42 @@ video editor, `video_timeline`, `profile_photo_video`, the `composer` and
 `composer_ui` send menu files, `send_*`, `ton_wallet_*`, `earn*`, and the
 hotspots `ui/mod.rs`, `app`, `app_demo`, `shell`, `screenshot_demo`,
 `demos/mod.rs`.
+
+## Phase D, batch 6: stickers, video editor, composer, send, TON wallet, earn
+
+Branch `panic-lints-d6`. 46 more roots start with
+`#![deny(clippy::indexing_slicing)]`:
+
+- Library: `sticker_image`, `sticker_playback`, `sticker_set_box`,
+  `sticker_suggest`, `sticker_video`, `video_edit`, `video_timeline`,
+  `profile_photo_video`.
+- UI: `premium_sticker_effect`, `premium_sticker_gate`, `sticker_mirror`,
+  `sticker_playback`, `stickers_ui`, `video_editor`, `video_editor_controls`,
+  `video_editor_set`, `video_editor_timeline`, `video_editor_tools`,
+  `composer_date`, `composer_events`, `composer_field`, `composer_rtl`,
+  `composer_shortcuts`, `composer_state`, `composer_suggest`, `composer_thumb`,
+  `composer_unicode`, `send_box_options`, `send_box_state`,
+  `send_box_thumbnails`, `send_button_ui`, `send_fly`, `send_limits`,
+  `ton_wallet_details`, `ton_wallet_money`, `ton_wallet_ui`, `earn_state`,
+  `story_composer`, and the directory roots `composer/mod.rs`,
+  `composer_ui/mod.rs`, `sticker_set_box/mod.rs`, `send_effects/mod.rs`,
+  `earn/mod.rs`.
+- Hotspots (deny line only): `shell`, `screenshot_demo`, `demos/mod.rs`.
+- Test-only files carry no attribute (`allow-indexing-slicing-in-tests`).
+
+Sites fixed, 4 and no `#[expect]`:
+
+- `sticker_mirror` 3: the identity lookup of a single image and the flipped
+  result used `src[0]`, `set[0]` and `flipped[0]`; they are now a one-element
+  slice pattern and `first()`, falling back to the unflipped image.
+- `composer/toggle_composer_silent` 1: the command menu's selected row is read
+  with `get`; a missing row closes nothing and returns `false`.
+
+The library modules had no sites left. Behaviour is unchanged for valid input.
+Windows `cfg` blocks in the batch (`composer_unicode::rtl_extensions`) were read
+by hand and already use `get`.
+
+Skipped: `media_viewer*`, `image_decode`, `hdr_image` as asked; `ui/mod.rs`,
+`app`, `app_demo`, `gift_send_ui` and `app_render/frame_upkeep` are touched by
+open PRs #786 and #789. Still without a deny: those, plus `media_viewer`
+(5 sites: `transform` 4, `mod` 1; `ui/media_viewer` navigation 3, playback 1).

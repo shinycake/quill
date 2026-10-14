@@ -7,6 +7,7 @@
 //! timestamp (`videoCoverOffset = cover - from`). This module holds the
 //! numbers and the ffmpeg command lines; the panel is `ui/video_editor.rs`
 //! and the controls' geometry is `video_timeline`.
+#![deny(clippy::indexing_slicing)]
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};

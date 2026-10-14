@@ -6,6 +6,7 @@
 //! "Delete sticker", and the ⋯ menu's "Edit name", "Reorder" and "Delete
 //! Pack". New sets are made with the @stickers bot, as in tdesktop.
 //! Decision: docs/decisions/sticker-set-creator.md.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

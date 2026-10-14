@@ -3,6 +3,7 @@
 //! (`VideoQualitySlider`) and the rounded bar with Cancel, Rotate, Flip,
 //! GIF and Done (`ControlsBar`, `BarTextButton`), each as wide as the
 //! photo editor's bar at most.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::DialogKind;

@@ -2,6 +2,7 @@
 //! replacements, the typing indicator, the draft, the `/`, `@`, `#` and
 //! `:emoji` menus, inline mode, spell check, sticker suggestions, and Enter.
 //! One wiring for the main window's composer and every chat window's.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};

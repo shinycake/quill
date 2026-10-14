@@ -6,6 +6,7 @@
 //! accepts. Quill drives the same external `ffmpeg` the video editor already
 //! uses; the numbers and the command lines live here so they are unit
 //! tested. The dialog is `ui/video_editor_set.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::sticker_set_box::SetKind;
 use crate::video_edit::{Crop, VideoEdits, VideoSource, turned_size};

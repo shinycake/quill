@@ -1,6 +1,7 @@
 //! Choosing a Premium sticker without Premium (tdesktop
 //! `Window::ShowSendPremiumError`): nothing is sent, the Premium stickers
 //! preview opens with that sticker first.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

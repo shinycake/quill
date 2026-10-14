@@ -1,4 +1,5 @@
 //! Composer command menus, quote/reply/edit banners, link previews and captions.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};

@@ -5,6 +5,7 @@
 //! Send, no Receive QR flow, no Add Funds, no Keys & Backup actions. The
 //! address, the backup status and a note saying where to send come in its
 //! place. The details views are in `ton_wallet_details.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::success;

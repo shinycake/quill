@@ -1,4 +1,5 @@
 //! composer submit/send/edit/reply/scheduling, command menu state, drafts consumption.
+#![deny(clippy::indexing_slicing)]
 
 use super::actions::{
     FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler,

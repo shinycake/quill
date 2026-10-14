@@ -4,6 +4,7 @@
 //! transparent square canvas, the result is fitted to the set's side, and a
 //! rounded-corner mask (Large / Medium / Small / None) is cut out of it.
 //! Pure pixels and numbers; the editor UI is `ui/photo_editor_set.rs`.
+#![deny(clippy::indexing_slicing)]
 
 #[cfg(feature = "ui")]
 use image::RgbaImage;

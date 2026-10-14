@@ -5,6 +5,7 @@
 //! range, the cover and the crop, and the size the edited file will have
 //! (`Media::Encode::EstimateTranscodedSize`). The drawing is
 //! `ui/video_editor_timeline.rs` and `ui/video_editor_tools.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::video_edit::{Crop, VideoEdits, VideoSource, scaled_size};
 

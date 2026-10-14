@@ -1,6 +1,7 @@
 //! Sticker set box menu (tdesktop `boxes/sticker_set_box.cpp`): the share
 //! link, its wording and which entries the three-dot menu offers. Kept
 //! pure so it is unit tested.
+#![deny(clippy::indexing_slicing)]
 
 /// Public host for `addstickers` / `addemoji` links.
 const LINK_BASE: &str = "https://t.me/";
