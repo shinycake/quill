@@ -394,6 +394,7 @@ mod ton_wallet_ui;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod ton_wallet_ui_tests;
+mod touch_bar;
 mod translate_ui;
 mod tray_settings;
 mod video_editor;

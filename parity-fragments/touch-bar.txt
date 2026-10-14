@@ -1,0 +1,4 @@
+# Touch Bar: pinned chats, sticker and emoji scrubbers, formatting, player and
+# media viewer controls (tdesktop platform/mac/touchbar). Drawn and checked
+# through the demo-capture preview; no Touch Bar hardware on the dev Macs.
+parity:platform-touch-bar

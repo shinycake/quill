@@ -259,6 +259,7 @@ pub(crate) fn dock_menu_items(entries: &[DockEntry]) -> Vec<MenuItem> {
 /// Register the menu actions and keep the macOS menus current. Demo windows
 /// (screenshots, tests) leave the OS menus alone.
 pub(crate) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp>) {
+    super::touch_bar::install(demo, window, cx);
     if demo {
         return;
     }

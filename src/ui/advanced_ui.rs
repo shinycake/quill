@@ -6,6 +6,7 @@ use super::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::advanced::experimental::{self, Category, Imported, OptionSpec, Values};
 use quill::advanced::update_channel;
@@ -46,6 +47,7 @@ impl QuillApp {
         Values {
             split_profile_media: self.chat_prefs.profile_media_tabs_expanded,
             fast_buttons_mode: experimental::fast_buttons_mode(),
+            touchbar_disabled: experimental::touchbar_disabled(),
         }
     }
 
@@ -62,6 +64,9 @@ impl QuillApp {
                 // or go on the next history refresh.
                 self.history.rows_key = None;
             }
+            // The Touch Bar follows on its next sync (`touch_bar`), so no
+            // restart is needed.
+            experimental::TOUCHBAR_DISABLED_ID => experimental::set_touchbar_disabled(on),
             _ => {}
         }
         cx.notify();
@@ -69,7 +74,11 @@ impl QuillApp {
 
     fn apply_experimental_values(&mut self, values: Values, cx: &mut Context<Self>) {
         let now = self.experimental_values();
-        for id in [experimental::SPLIT_MEDIA_ID, experimental::FAST_BUTTONS_ID] {
+        for id in [
+            experimental::SPLIT_MEDIA_ID,
+            experimental::FAST_BUTTONS_ID,
+            experimental::TOUCHBAR_DISABLED_ID,
+        ] {
             let wanted = values.get(id).unwrap_or(false);
             if now.get(id) != Some(wanted) {
                 self.set_experimental_option(id, wanted, cx);
@@ -91,12 +100,14 @@ impl QuillApp {
                     .flex_1()
                     .min_w_0()
                     .child(div().text_sm().child(spec.name))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(spec.description),
-                    ),
+                    .when(!spec.description.is_empty(), |column| {
+                        column.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(spec.description),
+                        )
+                    }),
             )
             .child(
                 Switch::new(SharedString::from(format!("experimental-{id}")))
@@ -164,6 +175,10 @@ impl QuillApp {
             );
         }
         page = page.child(self.experimental_category(experimental::PROFILE, values, cx));
+        // tdesktop scopes the Touch Bar option to macOS.
+        if cfg!(target_os = "macos") {
+            page = page.child(self.experimental_category(experimental::INTERFACE, values, cx));
+        }
         // Fast buttons mode is listed only while it is on (the
         // `numberbuttons` code turns it on).
         if values.fast_buttons_mode {
