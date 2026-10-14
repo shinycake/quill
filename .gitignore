@@ -28,3 +28,6 @@ db.sqlite
 db.sqlite-wal
 db.sqlite-shm
 .claude/worktrees/
+# Vendored crate sources that the crate itself names `vendor/` (not the
+# ntgcalls engine above).
+!third_party/*/vendor/
