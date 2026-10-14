@@ -15,20 +15,10 @@ use crate::telegram::requests::{
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// The short name of the open, owned set, if it is `set_id`.
+    /// The short name of an owned set: the open box's, or an installed
+    /// set the user created (the message menu adds to those).
     fn owned_set_name(&self, set_id: i64) -> Option<String> {
-        let view = self.session.stickers.sticker_set_view.as_ref()?;
-        if view.set_id != set_id {
-            return None;
-        }
-        match &view.stage {
-            StickerSetViewStage::Ready {
-                name,
-                is_owned: true,
-                ..
-            } if !name.is_empty() => Some(name.clone()),
-            _ => None,
-        }
+        self.session.owned_sticker_set_name(set_id)
     }
 
     fn creator_request(

@@ -14,6 +14,9 @@ pub struct StickersState {
     pub reaction_options_stale: bool,
     /// The sticker set the message menu's "View Sticker Set" opened.
     pub sticker_set_view: Option<StickerSetView>,
+    /// A one-shot toast after editing an owned set ("Sticker added.",
+    /// the error), whether or not the set box is open.
+    pub creator_note: Option<String>,
     /// The pack of the custom emoji the user just tapped in a message.
     pub custom_emoji_preview: Option<CustomEmojiPreview>,
     /// Titles of the emoji packs a message uses, by set id, for the menu's
@@ -42,6 +45,7 @@ impl StickersState {
             default_reaction: None,
             reaction_options_stale: false,
             sticker_set_view: None,
+            creator_note: None,
             custom_emoji_preview: None,
             emoji_pack_titles: HashMap::new(),
             stickers: StickerPanel::default(),

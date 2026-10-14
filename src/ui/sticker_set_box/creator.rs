@@ -1,0 +1,428 @@
+//! Editing an owned set from the box: reorder, rename, delete a sticker or
+//! the set, add a new image or an existing sticker (tdesktop
+//! `api/api_stickers_creator.cpp`). Live sessions go through the connect
+//! driver; the demo applies what it can to its own session.
+use super::state::{CreateSticker, PickExisting};
+use super::*;
+use quill::sticker_set_box::{
+    EMOJI_REQUIRED_NOTE, MAX_EMOJIS, OPEN_FAILED_NOTE, emoji_or_default, fitted_size,
+    joined_emojis, valid_set_name,
+};
+use quill::telegram::envelope::StickerFormat;
+use std::path::PathBuf;
+
+/// What the chooser says when a sticker cannot join the set
+/// (`lng_stickers_add_full`, `lng_emoji_add_full`, `lng_stickers_add_already`,
+/// `lng_emoji_add_already`).
+fn full_note(kind: SetKind) -> &'static str {
+    match kind {
+        SetKind::Stickers => "This Sticker Set is full.",
+        SetKind::Emoji => "This Emoji Set is full.",
+    }
+}
+
+fn already_note(kind: SetKind) -> &'static str {
+    match kind {
+        SetKind::Stickers => "This Sticker is already in the Set.",
+        SetKind::Emoji => "This Emoji is already in the Set.",
+    }
+}
+
+impl QuillApp {
+    /// "Edit Stickers" / "Reorder": cells drag to a new place.
+    pub(super) fn begin_edit_stickers(&mut self, cx: &mut Context<Self>) {
+        self.sticker_box.reordering = true;
+        cx.notify();
+    }
+
+    /// "Done" in reorder mode.
+    pub(super) fn finish_edit_stickers(&mut self, cx: &mut Context<Self>) {
+        self.sticker_box.reordering = false;
+        cx.notify();
+    }
+
+    /// A cell was dropped on the cell at `to`: the box reorders at once and
+    /// TDLib hears the new position.
+    pub(super) fn drop_sticker_in_set(
+        &mut self,
+        set_id: i64,
+        file_id: FileId,
+        to: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((_, _, _, stickers)) = self.viewed_set() else {
+            return;
+        };
+        let Some(from) = stickers.iter().position(|s| s.file_id == file_id) else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.move_sticker_in_set(set_id, from, to).is_err() {
+                self.connection.status_note = "Couldn't move the sticker.".into();
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.move_viewed_sticker(set_id, from, to);
+        }
+        cx.notify();
+    }
+
+    /// The ⋯ menu's "Edit name": the box with the current title.
+    pub(super) fn open_rename_set(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let title = self
+            .session()
+            .and_then(|s| s.stickers.sticker_set_view.as_ref())
+            .and_then(|view| match &view.stage {
+                StickerSetViewStage::Ready { title, .. } => Some(title.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        self.sticker_box
+            .rename_input
+            .update(cx, |input, cx| input.set_value(&title, window, cx));
+        self.sticker_box.rename_open = true;
+        cx.notify();
+    }
+
+    /// "Done" in the rename box; an empty or too long name is refused.
+    pub(super) fn confirm_rename_set(&mut self, set_id: i64, cx: &mut Context<Self>) -> bool {
+        let raw = self.sticker_box.rename_input.read(cx).value().to_string();
+        let Some(title) = valid_set_name(&raw) else {
+            return false;
+        };
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.rename_sticker_set(set_id, &title).is_err() {
+                self.connection.status_note = "Couldn't rename the set.".into();
+            }
+        } else if let Some(session) = self.demo_session.as_mut()
+            && let Some(view) = session.stickers.sticker_set_view.as_mut()
+            && let StickerSetViewStage::Ready { title: current, .. } = &mut view.stage
+        {
+            *current = title;
+        }
+        self.sticker_box.rename_open = false;
+        cx.notify();
+        true
+    }
+
+    /// A cell's "Delete sticker": the confirmation box.
+    pub(super) fn ask_delete_sticker(&mut self, item: StickerItem, cx: &mut Context<Self>) {
+        self.sticker_box.delete_sticker = Some(item);
+        cx.notify();
+    }
+
+    /// "Delete" in that box.
+    pub(super) fn confirm_delete_sticker(&mut self, set_id: i64, cx: &mut Context<Self>) {
+        let Some(item) = self.sticker_box.delete_sticker.take() else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.remove_sticker_from_set(set_id, item.file_id).is_err() {
+                self.connection.status_note = "Couldn't delete the sticker.".into();
+            }
+        } else if let Some(session) = self.demo_session.as_mut()
+            && let Some(view) = session.stickers.sticker_set_view.as_mut()
+            && let StickerSetViewStage::Ready { stickers, .. } = &mut view.stage
+        {
+            stickers.retain(|s| s.file_id != item.file_id);
+        }
+        cx.notify();
+    }
+
+    /// "Remove" in "Delete for Everyone": the set is gone for good.
+    pub(super) fn confirm_delete_set_everyone(&mut self, set_id: i64, cx: &mut Context<Self>) {
+        self.sticker_box.delete_set_open = false;
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.delete_owned_sticker_set(set_id).is_err() {
+                self.connection.status_note = "Couldn't delete the set.".into();
+            }
+        } else {
+            self.connection.status_note = "Sticker set deleted.".into();
+            self.close_sticker_set_dialog(cx);
+        }
+        cx.notify();
+    }
+
+    /// "Remove" in "Delete for Myself": the set is uninstalled.
+    pub(super) fn confirm_remove_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
+        self.sticker_box.remove_set_open = false;
+        self.toggle_viewed_sticker_set(set_id, false, cx);
+    }
+
+    /// "Create a New Sticker" / "Create a New Emoji": pick an image, then
+    /// the photo editor with a square crop.
+    pub(super) fn begin_create_sticker(&mut self, set_id: i64, kind: SetKind, cx: &mut Context<Self>) {
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Choose Image".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = picker.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update(cx, |this, cx| {
+                    this.edit_image_for_set(set_id, kind, &path, cx);
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Open `path` in the photo editor for the set (tdesktop's fixed square
+    /// crop at the set's side).
+    pub(super) fn edit_image_for_set(
+        &mut self,
+        set_id: i64,
+        kind: SetKind,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        match image::open(path) {
+            Ok(image) => {
+                self.viewer.photo_editor = Some(super::super::photo_editor::PhotoEditor::for_set(
+                    image.to_rgba8(),
+                    set_id,
+                    kind,
+                ));
+            }
+            Err(_) => self.connection.status_note = OPEN_FAILED_NOTE.into(),
+        }
+        cx.notify();
+    }
+
+    /// The editor's "Done" for a set image: fit it to the set's side, write
+    /// it, and ask for its emoji.
+    pub(in crate::ui) fn finish_set_image(
+        &mut self,
+        set_id: i64,
+        kind: SetKind,
+        edited: &image::RgbaImage,
+        cx: &mut Context<Self>,
+    ) {
+        let (width, height) = edited.dimensions();
+        let (fit_w, fit_h) = fitted_size(width, height, kind.image_side());
+        let fitted = if (fit_w, fit_h) == (width, height) {
+            edited.clone()
+        } else {
+            image::imageops::resize(edited, fit_w, fit_h, image::imageops::FilterType::Lanczos3)
+        };
+        match super::super::edit_media_tools::write_edited_png(&fitted) {
+            Some(path) => {
+                self.sticker_box.create = Some(CreateSticker {
+                    set_id,
+                    kind,
+                    path,
+                    emojis: Vec::new(),
+                });
+            }
+            None => self.connection.status_note = "Couldn't save the image.".into(),
+        }
+        cx.notify();
+    }
+
+    /// An emoji in the "New Sticker" box toggles on or off (at most seven).
+    pub(super) fn toggle_create_emoji(&mut self, emoji: &str, cx: &mut Context<Self>) {
+        if let Some(create) = self.sticker_box.create.as_mut() {
+            if let Some(index) = create.emojis.iter().position(|e| e == emoji) {
+                create.emojis.remove(index);
+            } else if create.emojis.len() < MAX_EMOJIS {
+                create.emojis.push(emoji.to_string());
+            }
+        }
+        cx.notify();
+    }
+
+    /// "Done" in the "New Sticker" box: upload and add.
+    pub(super) fn confirm_create_sticker(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(create) = self.sticker_box.create.clone() else {
+            return false;
+        };
+        if create.emojis.is_empty() {
+            self.connection.status_note = EMOJI_REQUIRED_NOTE.into();
+            cx.notify();
+            return false;
+        }
+        let emojis = joined_emojis(&create.emojis);
+        if let Some(live) = self.live.as_mut() {
+            let path = create.path.to_string_lossy().into_owned();
+            if live
+                .driver
+                .add_new_sticker_to_set(create.set_id, &path, &emojis)
+                .is_err()
+            {
+                self.connection.status_note =
+                    quill::sticker_set_box::UPLOAD_FAILED_NOTE.into();
+            }
+        } else {
+            self.connection.status_note = "demo — stickers upload with live TDLib".into();
+        }
+        self.sticker_box.create = None;
+        cx.notify();
+        true
+    }
+
+    /// "Add an Existing Sticker" / "Adapt from a Sticker": the chooser.
+    pub(super) fn open_pick_existing(
+        &mut self,
+        set_id: i64,
+        kind: SetKind,
+        adapt: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.sticker_box.pick = Some(PickExisting {
+            set_id,
+            kind,
+            adapt,
+        });
+        cx.notify();
+    }
+
+    /// The stickers the chooser offers: favorites, recent and the loaded
+    /// sets, without the set being edited.
+    pub(super) fn pick_candidates(&self, pick: PickExisting) -> Vec<StickerItem> {
+        let Some(session) = self.session() else {
+            return Vec::new();
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        let library = &session.media.media_library.set_stickers;
+        let sources: Vec<&StickerItem> = session
+            .stickers
+            .stickers
+            .favorites
+            .iter()
+            .chain(&session.stickers.stickers.recent)
+            .chain(library.iter().flat_map(|(_, items)| items.iter()))
+            .collect();
+        for item in sources {
+            if item.set_id == pick.set_id || !seen.insert(item.file_id) {
+                continue;
+            }
+            // Emoji sets take custom emoji; sticker sets take stickers;
+            // adapting takes stickers into an emoji set.
+            let is_emoji = item.custom_emoji_id.is_some();
+            let wanted = match (pick.kind, pick.adapt) {
+                (SetKind::Emoji, false) => is_emoji,
+                _ => !is_emoji,
+            };
+            if wanted {
+                out.push(item.clone());
+            }
+        }
+        out
+    }
+
+    /// A sticker was chosen: add it (or adapt it) to the set.
+    pub(super) fn pick_existing_sticker(&mut self, item: &StickerItem, cx: &mut Context<Self>) {
+        let Some(pick) = self.sticker_box.pick.take() else {
+            return;
+        };
+        if pick.adapt {
+            match item.format {
+                // Animated stickers become emoji as they are.
+                StickerFormat::Tgs => self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx),
+                StickerFormat::Webp | StickerFormat::Unknown => {
+                    let roots = self.media_display_roots();
+                    let path = self
+                        .session()
+                        .and_then(|s| s.media.files.get(&item.file_id.0)?.usable_path().map(str::to_string))
+                        .and_then(|p| quill::local_path::sandboxed_display_path(&p, &roots));
+                    match path.and_then(|p| {
+                        super::super::editor_art::sticker_pixels(std::path::Path::new(&p), item.format)
+                    }) {
+                        Some(pixels) => {
+                            self.viewer.photo_editor =
+                                Some(super::super::photo_editor::PhotoEditor::for_set(
+                                    pixels,
+                                    pick.set_id,
+                                    pick.kind,
+                                ));
+                        }
+                        None => self.connection.status_note = OPEN_FAILED_NOTE.into(),
+                    }
+                }
+                StickerFormat::Webm => {
+                    self.connection.status_note =
+                        "Video stickers can't be adapted into emoji yet.".into();
+                }
+            }
+            cx.notify();
+            return;
+        }
+        self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
+    }
+
+    /// Add a sticker that already exists to an owned set, refusing a full
+    /// set or a repeat (tdesktop `ChooseStickerSetToAdd` checks).
+    pub(in crate::ui) fn add_existing_to_owned_set(
+        &mut self,
+        set_id: i64,
+        kind: SetKind,
+        item: &StickerItem,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((viewed_id, _, _, stickers)) = self.viewed_set()
+            && viewed_id == set_id
+        {
+            if stickers.len() >= kind.owned_limit() {
+                self.connection.status_note = full_note(kind).into();
+                cx.notify();
+                return;
+            }
+            if stickers.iter().any(|s| s.file_id == item.file_id || s.id == item.id) {
+                self.connection.status_note = already_note(kind).into();
+                cx.notify();
+                return;
+            }
+        }
+        let emoji = emoji_or_default(&item.emoji).to_string();
+        if let Some(live) = self.live.as_mut() {
+            if live
+                .driver
+                .add_existing_sticker_to_set(set_id, item.file_id, item.format, &emoji)
+                .is_err()
+            {
+                self.connection.status_note = quill::sticker_set_box::ADD_EXISTING_FAILED_NOTE.into();
+            }
+        } else {
+            self.connection.status_note = "demo — stickers are added with live TDLib".into();
+        }
+        self.message_ui.menu = None;
+        cx.notify();
+    }
+
+    /// Each poll: an edit's toast, a confirmed deletion (the box closes),
+    /// and the refresh after an edit.
+    pub(in crate::ui) fn sticker_set_box_tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(live) = self.live.as_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        if let Some(note) = live.driver.session.take_sticker_set_edit_note() {
+            self.connection.status_note = note;
+            changed = true;
+        }
+        let deleted = live
+            .driver
+            .session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .is_some_and(|view| view.edits.deleted);
+        if deleted {
+            self.connection.status_note = "Sticker set deleted.".into();
+            self.close_sticker_set_dialog(cx);
+            return true;
+        }
+        if let Ok(Some(_)) = live.driver.sync_sticker_set_view() {
+            changed = true;
+        }
+        changed
+    }
+
+    /// The still picture of the image a "New Sticker" box shows.
+    pub(super) fn create_preview_path(&self) -> Option<PathBuf> {
+        self.sticker_box.create.as_ref().map(|c| c.path.clone())
+    }
+}

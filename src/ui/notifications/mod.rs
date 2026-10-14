@@ -538,6 +538,10 @@ impl QuillApp {
         if self.finish_ownership_transfer_ui(cx) {
             progressed = true;
         }
+        // The sticker set box: an edit's toast, refresh, or the set's end.
+        if self.sticker_set_box_tick(cx) {
+            progressed = true;
+        }
         // Slice CL3: a `reportChat` outcome arrived — surface it in the
         // status bar alongside the other async error drains.
         if let Some(note) = self

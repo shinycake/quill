@@ -75,6 +75,7 @@ mod tests_profile_panels;
 mod tests_send_as;
 #[cfg(test)]
 mod tests_sticker_creator;
+#[cfg(test)]
 mod tests_stickers;
 #[cfg(test)]
 mod tests_stories;

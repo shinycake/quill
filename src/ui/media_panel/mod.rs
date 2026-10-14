@@ -767,15 +767,24 @@ impl QuillApp {
         let element = match row {
             PanelRow::Header { label, set_id } => {
                 need_sets.extend(set_id);
+                // tdesktop's "edit" badge next to a set the user created.
+                let owned = set_id.is_some_and(|id| {
+                    self.session().is_some_and(|s| s.is_owned_sticker_set(id))
+                });
                 div()
                     .px_3()
                     .pt_3()
                     .pb_1()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
-                    .truncate()
-                    .child(label)
+                    .child(div().truncate().child(label))
+                    .when(owned, |row| {
+                        row.child(gpui_kit::component::tag::Tag::secondary().xsmall().child("edit"))
+                    })
                     .into_any_element()
             }
             PanelRow::Cells { cells, sticker } => {

@@ -36,6 +36,8 @@ pub struct QuillApp {
     pub(super) composer_ui: super::composer_state::ComposerUi,
     /// Emoji, sticker and GIF panel and their search fields (`ui/pickers_state.rs`).
     pub(super) pickers: super::pickers_state::PickerUi,
+    /// The sticker set box's editing flows (`ui/sticker_set_box/state.rs`).
+    pub(super) sticker_box: super::sticker_set_box::state::StickerSetBoxUi,
     /// Payments and the gift marketplace (`ui/payments_state.rs`).
     pub(super) payments: super::payments_state::PaymentUi,
     /// Revenue pages, withdrawals and affiliate programs (`ui/earn_state.rs`).

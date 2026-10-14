@@ -788,6 +788,9 @@ impl QuillApp {
                     "menu-back",
                     match sub {
                         MessageMenuPage::SaveTo => "Save to...",
+                        MessageMenuPage::AddToSet { emoji } => {
+                            quill::sticker_set_box::SetKind::of(emoji).add_to_set_label()
+                        }
                         _ => "Back",
                     },
                     false,
@@ -799,6 +802,9 @@ impl QuillApp {
                 )];
                 sub_rows.extend(match sub {
                     MessageMenuPage::SaveTo => self.menu_save_to_rows(chat_id, message_id, cx),
+                    MessageMenuPage::AddToSet { emoji } => {
+                        self.menu_add_to_set_rows(chat_id, message_id, emoji, cx)
+                    }
                     _ => self.menu_audience_page(chat_id, &message, cx),
                 });
                 sub_rows

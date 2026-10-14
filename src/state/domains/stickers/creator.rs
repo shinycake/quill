@@ -69,9 +69,6 @@ pub struct StickerSetEdits {
     pub refresh_needed: bool,
     /// `deleteStickerSet` was confirmed: the box closes.
     pub deleted: bool,
-    /// A one-shot toast for the UI: what tdesktop shows after an edit
-    /// ("Sticker added.", the error, ...).
-    pub note: Option<String>,
 }
 
 impl StickerSetEdits {
@@ -91,16 +88,16 @@ impl Session {
         }
     }
 
-    /// The one-shot toast of the open set's last edit.
+    /// The one-shot toast of the last edit of an owned set.
     pub fn take_sticker_set_edit_note(&mut self) -> Option<String> {
-        self.stickers
-            .sticker_set_view
-            .as_mut()
-            .and_then(|view| view.edits.note.take())
+        self.stickers.creator_note.take()
     }
 
     /// A creator request was answered (`ok` or an error).
     fn finish_sticker_set_edit(&mut self, set_id: i64, note: Option<String>, apply: bool) {
+        if note.is_some() {
+            self.stickers.creator_note = note;
+        }
         let Some(view) = self.stickers.sticker_set_view.as_mut() else {
             return;
         };
@@ -108,12 +105,60 @@ impl Session {
             return;
         }
         view.edits.pending = view.edits.pending.saturating_sub(1);
-        if note.is_some() {
-            view.edits.note = note;
-        }
         if apply {
             view.edits.refresh_needed = true;
         }
+    }
+
+    /// The current user created `set_id` (tdesktop `AmCreator`): the open
+    /// box says so, or the installed sticker or emoji lists do.
+    pub fn is_owned_sticker_set(&self, set_id: i64) -> bool {
+        self.owned_sticker_set_name(set_id).is_some()
+    }
+
+    /// The short name of an owned set, from the open box or the installed
+    /// lists; `None` when the set is not ours or unknown.
+    pub fn owned_sticker_set_name(&self, set_id: i64) -> Option<String> {
+        if let Some(view) = self.stickers.sticker_set_view.as_ref()
+            && view.set_id == set_id
+            && let StickerSetViewStage::Ready {
+                name,
+                is_owned: true,
+                ..
+            } = &view.stage
+            && !name.is_empty()
+        {
+            return Some(name.clone());
+        }
+        self.stickers
+            .stickers
+            .sets
+            .iter()
+            .chain(&self.stickers.emoji.installed_sets)
+            .find(|set| set.id == set_id && set.is_owned && !set.name.is_empty())
+            .map(|set| set.name.clone())
+    }
+
+    /// The installed sets the user created, of one kind, as `(id, title)`
+    /// (tdesktop `AddAddToOwnedSetAction` lists them under "Add to Sticker
+    /// Set" / "Add to Emoji Set").
+    pub fn owned_sticker_sets(&self, emoji: bool) -> Vec<(i64, String)> {
+        let sets = if emoji {
+            &self.stickers.emoji.installed_sets
+        } else {
+            &self.stickers.stickers.sets
+        };
+        sets.iter()
+            .filter(|set| set.is_owned)
+            .map(|set| {
+                let title = if set.title.is_empty() {
+                    set.name.clone()
+                } else {
+                    set.title.clone()
+                };
+                (set.id, title)
+            })
+            .collect()
     }
 
     /// Called by [`Session::apply_ok`]: an edit of an owned set succeeded.
@@ -221,7 +266,7 @@ impl Session {
     /// Reorder mode moved a sticker: apply it to the open view at once
     /// (tdesktop `base::reorder(_pack, ...)`), returning the sticker's new
     /// position in the set, or `None` when the move is a no-op.
-    pub(crate) fn move_viewed_sticker(&mut self, set_id: i64, from: usize, to: usize) -> Option<usize> {
+    pub fn move_viewed_sticker(&mut self, set_id: i64, from: usize, to: usize) -> Option<usize> {
         let view = self.stickers.sticker_set_view.as_mut()?;
         if view.set_id != set_id || from == to {
             return None;

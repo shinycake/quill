@@ -12,7 +12,6 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
-use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -21,10 +20,7 @@ use quill::message_menu::{
     MediaAction, MediaFacts, MediaKind, MediaTarget, SeenKind, media_actions, media_target, order,
     reacted_label, read_date_label, read_status_label, seen_kind, seen_label,
 };
-use quill::state::{Audience, MessageReportStage, Session, StickerSetViewStage};
-use quill::sticker_set_box::{
-    ARCHIVED_NOTE, SetKind, can_archive, copied_note, set_link, share_label,
-};
+use quill::state::{Audience, MessageReportStage, Session};
 use quill::telegram::envelope::{
     ChannelMemberStatus, MessageActions, MessageContent, MessageSender, ReactionType, ReportOption,
 };
@@ -39,6 +35,11 @@ pub(super) enum MessageMenuPage {
     Main,
     /// A song's "Save to..." destinations.
     SaveTo,
+    /// "Add to Sticker Set" / "Add to Emoji Set": the sets the user
+    /// created.
+    AddToSet {
+        emoji: bool,
+    },
     /// Who saw / reacted to the message.
     Audience,
 }
@@ -213,6 +214,22 @@ impl QuillApp {
             &message.content,
             message.ephemeral.as_ref(),
         );
+        // A set-less sticker may join one of the user's own sets (tdesktop
+        // `AddAddToOwnedSetAction`: lottie fits both, ≤100 px is an emoji).
+        let joins = match content {
+            MessageContent::Sticker(sticker) if sticker.set_id == 0 => {
+                let (to_stickers, to_emoji) = quill::sticker_set_box::joinable_kinds(
+                    sticker.format == quill::telegram::envelope::StickerFormat::Tgs,
+                    sticker.width,
+                    sticker.height,
+                );
+                (
+                    to_stickers && !session.owned_sticker_sets(false).is_empty(),
+                    to_emoji && !session.owned_sticker_sets(true).is_empty(),
+                )
+            }
+            _ => (false, false),
+        };
         MediaFacts {
             downloading,
             local: local_media_path(session, content, target).is_some(),
@@ -244,6 +261,8 @@ impl QuillApp {
             }),
             in_saved_messages: session.is_saved_messages(chat_id),
             in_profile: session.profile_audio_known(target.file_id),
+            joins_sticker_set: joins.0,
+            joins_emoji_set: joins.1,
             tone_ok: message.self_destruct.is_none()
                 && quill::message_menu::tone_offered(
                     target,
@@ -315,6 +334,11 @@ impl QuillApp {
                         }
                         MediaAction::SaveTo => {
                             this.message_ui.menu_ui.page = MessageMenuPage::SaveTo;
+                            cx.notify();
+                            return;
+                        }
+                        MediaAction::AddToSet { emoji } => {
+                            this.message_ui.menu_ui.page = MessageMenuPage::AddToSet { emoji };
                             cx.notify();
                             return;
                         }
@@ -484,7 +508,7 @@ impl QuillApp {
     }
 
     /// "Add to Favorites" / "Remove from Favorites".
-    fn favorite_message_sticker(
+    pub(in crate::ui) fn favorite_message_sticker(
         &mut self,
         file_id: FileId,
         favorite: bool,
@@ -501,284 +525,6 @@ impl QuillApp {
             self.connection.status_note = "demo — favorites change with live TDLib".into();
         }
         cx.notify();
-    }
-
-    /// "View Sticker Set" / "Add Stickers": the set in a dialog.
-    pub(super) fn view_message_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        self.message_ui.menu_ui.sticker_set_open = true;
-        if let Some(live) = self.live.as_mut()
-            && live.driver.view_sticker_set(set_id).is_err()
-        {
-            self.message_ui.menu_ui.sticker_set_open = false;
-            self.connection.status_note = "could not open the sticker set".into();
-        }
-        cx.notify();
-    }
-
-    /// Install or remove the set shown in the sticker set dialog.
-    fn toggle_viewed_sticker_set(&mut self, set_id: i64, install: bool, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let result = live.driver.manage_sticker_set(set_id, install, false);
-            if result.is_ok() {
-                // The dialog stays; the set's state follows TDLib's update.
-                live.driver.session.stickers.sticker_set_view = None;
-                self.message_ui.menu_ui.sticker_set_open = false;
-                self.connection.status_note = if install {
-                    "sticker set added".into()
-                } else {
-                    "sticker set removed".into()
-                };
-            } else {
-                self.connection.status_note = "could not change the sticker set".into();
-            }
-        } else {
-            self.connection.status_note = "demo — sticker sets change with live TDLib".into();
-        }
-        cx.notify();
-    }
-
-    /// The box menu's "Share Stickers": the link goes to the chat
-    /// chooser and lands in that chat's composer, unsent (tdesktop
-    /// `FastShareLink`).
-    pub(super) fn share_sticker_set_link(
-        &mut self,
-        link: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.close_sticker_set_dialog(cx);
-        self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
-        self.share.link_text = Some(link);
-        self.connection.status_note = "choose a chat to share to".into();
-        cx.notify();
-    }
-
-    /// The box menu's "Copy Link".
-    pub(super) fn copy_sticker_set_link(
-        &mut self,
-        link: String,
-        kind: SetKind,
-        cx: &mut Context<Self>,
-    ) {
-        cx.write_to_clipboard(ClipboardItem::new_string(link));
-        self.connection.status_note = copied_note(kind).into();
-        cx.notify();
-    }
-
-    /// The box menu's "Archive Stickers": the set leaves the installed
-    /// list and the box closes (tdesktop `archiveStickers`).
-    pub(super) fn archive_viewed_sticker_set(
-        &mut self,
-        set_id: i64,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(live) = self.live.as_mut() {
-            match live.driver.manage_sticker_set(set_id, false, true) {
-                Ok(_) => {
-                    live.driver.session.stickers.sticker_set_view = None;
-                    self.message_ui.menu_ui.sticker_set_open = false;
-                    self.connection.status_note = ARCHIVED_NOTE.into();
-                    self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
-                }
-                Err(_) => self.connection.status_note = "could not archive the sticker set".into(),
-            }
-        } else {
-            self.connection.status_note = "demo: sticker sets archive with live TDLib".into();
-        }
-        cx.notify();
-    }
-
-    pub(super) fn close_sticker_set_dialog(&mut self, cx: &mut Context<Self>) {
-        self.message_ui.menu_ui.sticker_set_open = false;
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.stickers.sticker_set_view = None;
-        }
-        cx.notify();
-    }
-
-    /// The sticker set dialog: its stickers, and Add/Remove.
-    pub(super) fn build_sticker_set_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::StickerSet, |this, _, cx| {
-                this.close_sticker_set_dialog(cx);
-            });
-        app.update(cx, |this, cx| {
-            let view = this
-                .session()
-                .and_then(|s| s.stickers.sticker_set_view.clone());
-            // The previews download once the set has arrived.
-            if let Some(live) = this.live.as_mut() {
-                let _ = live.driver.ensure_sticker_set_view_files();
-            }
-            let dialog = dialog.overlay(true);
-            let Some(view) = view else {
-                return dialog
-                    .title(shell::dialog_title("Sticker set"))
-                    .on_close(on_close);
-            };
-            let (title, body, footer): (String, AnyElement, Option<AnyElement>) = match view.stage {
-                StickerSetViewStage::Loading => (
-                    "Sticker set".into(),
-                    div()
-                        .text_sm()
-                        .text_color(text_muted())
-                        .child("Loading stickers…")
-                        .into_any_element(),
-                    None,
-                ),
-                StickerSetViewStage::Failed => (
-                    "Sticker set".into(),
-                    div()
-                        .text_sm()
-                        .text_color(danger())
-                        .child("Couldn't load this sticker set.")
-                        .into_any_element(),
-                    None,
-                ),
-                StickerSetViewStage::Ready {
-                    title,
-                    name,
-                    installed,
-                    is_emoji,
-                    is_owned: _,
-                    stickers,
-                } => {
-                    let count = stickers.len();
-                    let mut grid = div().flex().flex_wrap().gap_1().w(px(380.));
-                    for (index, item) in stickers.iter().enumerate() {
-                        let still = this.panel_still(item);
-                        grid = grid.child(
-                            div()
-                                .id(("sticker-set-cell", index as u64))
-                                .size(px(72.))
-                                .p_1()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(match still {
-                                    Some(path) => img(path)
-                                        .size_full()
-                                        .object_fit(ObjectFit::Contain)
-                                        .into_any_element(),
-                                    None => div()
-                                        .size_full()
-                                        .rounded_md()
-                                        .bg(cx.theme().muted.opacity(0.5))
-                                        .into_any_element(),
-                                }),
-                        );
-                    }
-                    let set_id = view.set_id;
-                    let kind = SetKind::of(is_emoji);
-                    let more = set_link(&name, kind).map(|link| {
-                        let owner = cx.entity().downgrade();
-                        let archivable = can_archive(installed, kind);
-                        Button::new("sticker-set-more")
-                            .icon(IconName::Ellipsis)
-                            .ghost()
-                            .tooltip("More")
-                            .accessibility_label("More")
-                            .dropdown_menu(move |menu, _, _| {
-                                let share = owner.clone();
-                                let copy = owner.clone();
-                                let archive = owner.clone();
-                                let (share_link, copy_link) = (link.clone(), link.clone());
-                                let menu = menu
-                                    .item(PopupMenuItem::new(share_label(kind)).on_click(
-                                        move |_, window, cx| {
-                                            let link = share_link.clone();
-                                            let _ = share.update(cx, |this, cx| {
-                                                this.share_sticker_set_link(link, window, cx);
-                                            });
-                                        },
-                                    ))
-                                    .item(PopupMenuItem::new("Copy Link").on_click(
-                                        move |_, _, cx| {
-                                            let link = copy_link.clone();
-                                            let _ = copy.update(cx, |this, cx| {
-                                                this.copy_sticker_set_link(link, kind, cx);
-                                            });
-                                        },
-                                    ));
-                                if archivable {
-                                    menu.item(PopupMenuItem::new("Archive Stickers").on_click(
-                                        move |_, window, cx| {
-                                            let _ = archive.update(cx, |this, cx| {
-                                                this.archive_viewed_sticker_set(set_id, window, cx);
-                                            });
-                                        },
-                                    ))
-                                } else {
-                                    menu
-                                }
-                            })
-                    });
-                    let footer = div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .children(more)
-                        .child(div().flex_1())
-                        .child(
-                            Button::new("sticker-set-close")
-                                .label("Close")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.close_sticker_set_dialog(cx);
-                                    this.close_kit_dialog_if_done(
-                                        DialogKind::StickerSet,
-                                        window,
-                                        cx,
-                                    );
-                                })),
-                        )
-                        .child(
-                            Button::new("sticker-set-toggle")
-                                .label(if installed {
-                                    "Remove Stickers".to_string()
-                                } else {
-                                    format!("Add {count} Stickers")
-                                })
-                                .when(installed, |button| button.danger())
-                                .when(!installed, |button| button.primary())
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.toggle_viewed_sticker_set(set_id, !installed, cx);
-                                    this.close_kit_dialog_if_done(
-                                        DialogKind::StickerSet,
-                                        window,
-                                        cx,
-                                    );
-                                })),
-                        )
-                        .into_any_element();
-                    (title, grid.into_any_element(), Some(footer))
-                }
-            };
-            let dialog =
-                dialog
-                    .title(shell::dialog_title(title))
-                    .content(shell::scrollable_dialog_content({
-                        let body = Rc::new(RefCell::new(Some(body)));
-                        move |content, _, _| {
-                            let body = body
-                                .borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element());
-                            content.child(body)
-                        }
-                    }));
-            match footer {
-                Some(footer) => dialog.footer(footer),
-                None => dialog,
-            }
-            .on_close(on_close)
-        })
     }
 
     /// "Cancel Upload" on a message still being sent.
@@ -825,7 +571,7 @@ fn media_action_icon(action: MediaAction) -> IconName {
         MediaAction::CancelDownload => IconName::X,
         MediaAction::OpenGif => IconName::ExternalLink,
         MediaAction::SaveGif => IconName::Plus,
-        MediaAction::ViewStickerSet { .. } => IconName::Sticker,
+        MediaAction::ViewStickerSet { .. } | MediaAction::AddToSet { .. } => IconName::Sticker,
         MediaAction::ToggleFavorite { remove: false } => IconName::Star,
         MediaAction::ToggleFavorite { remove: true } => IconName::StarOff,
         MediaAction::ShowInFolder => IconName::FolderOpen,
@@ -848,16 +594,10 @@ crate::ui::shell::register_dialogs! {
         |app| app.message_ui.menu_ui.report_open,
         QuillApp::build_message_report_dialog,
     ),
-
-    /// "View Sticker Set" / "Add Stickers" from a sticker message.
-    StickerSet => DialogSpec::new(
-        5700,
-        |app| app.message_ui.menu_ui.sticker_set_open,
-        QuillApp::build_sticker_set_dialog,
-    ),
 }
 
 mod delete_member_reaction;
+mod menu_add_to_set_rows;
 mod menu_save_to_rows;
 
 #[cfg(test)]
