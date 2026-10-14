@@ -5,6 +5,7 @@
 //! rounded-corner mask (Large / Medium / Small / None) is cut out of it.
 //! Pure pixels and numbers; the editor UI is `ui/photo_editor_set.rs`.
 
+#[cfg(feature = "ui")]
 use image::RgbaImage;
 
 /// Side of the editor's transparent canvas. tdesktop prepares the scene at
@@ -108,6 +109,7 @@ pub fn fitted_width(width: u32, height: u32) -> f32 {
 /// Cut a rounded rectangle out of the image's alpha (`ApplyShapeMask` with
 /// `RoundedRect`): radius = shorter side × `multiplier`, anti-aliased on the
 /// edge. A multiplier of 0 leaves the image as it is.
+#[cfg(feature = "ui")]
 pub fn apply_corner_mask(image: &mut RgbaImage, multiplier: f32) {
     let (width, height) = image.dimensions();
     if width == 0 || height == 0 || multiplier <= 0.0 {
@@ -150,6 +152,7 @@ pub fn apply_corner_mask(image: &mut RgbaImage, multiplier: f32) {
 
 /// The editor's result made ready for upload: fitted to `side` keeping its
 /// ratio (`FittedStickerSize`), then the corner mask.
+#[cfg(feature = "ui")]
 pub fn prepared_sticker_image(edited: &RgbaImage, side: u32, corners: Corners) -> RgbaImage {
     let (width, height) = edited.dimensions();
     let (fit_w, fit_h) = crate::sticker_set_box::fitted_size(width, height, side);
@@ -196,6 +199,7 @@ mod tests {
         assert_eq!(fitted_width(200, 400), 0.5);
     }
 
+    #[cfg(feature = "ui")]
     #[test]
     fn the_corner_mask_clears_corners_and_keeps_the_middle() {
         let mut image = RgbaImage::from_pixel(100, 100, image::Rgba([200, 100, 50, 255]));
@@ -213,6 +217,7 @@ mod tests {
         assert_eq!(plain.get_pixel(0, 0)[3], 255);
     }
 
+    #[cfg(feature = "ui")]
     #[test]
     fn prepared_images_fit_the_side_and_are_masked() {
         let edited = RgbaImage::from_pixel(512, 256, image::Rgba([9, 9, 9, 255]));

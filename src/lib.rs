@@ -170,7 +170,6 @@ pub mod stars_gift;
 pub mod start_files;
 pub mod stat_chart;
 pub mod state;
-#[cfg(feature = "ui")]
 pub mod sticker_image;
 pub mod sticker_playback;
 pub mod sticker_set_box;
