@@ -11,8 +11,8 @@ use crate::telegram::envelope::{
     AuthorizationState, EnvelopePayload, MessageContent, RichMessageContent, UsernameCheckResult,
 };
 use crate::telegram::envelope::{
-    CallsPayload, ChatsPayload, CommonPayload, GroupsPayload, MediaPayload, MessagesPayload,
-    SearchPayload, SettingsPayload, StickersPayload, UsersPayload,
+    BotsPayload, CallsPayload, ChatsPayload, CommonPayload, GroupsPayload, MediaPayload,
+    MessagesPayload, SearchPayload, SettingsPayload, StickersPayload, UsersPayload,
 };
 use crate::telegram::requests::{
     close_request, get_authorization_state, load_archive_chats, load_chats, log_out,
@@ -161,6 +161,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 | EnvelopePayload::Messages(MessagesPayload::UpdateMessageContent { .. })
                 | EnvelopePayload::Media(MediaPayload::UpdateFile(_))
                 | EnvelopePayload::Media(MediaPayload::File(_))
+                // The results panel's images: nothing else asks for them,
+                // so without this they waited for an unrelated update.
+                | EnvelopePayload::Bots(BotsPayload::InlineQueryResults(_))
         );
         // Only the first page jumps to its first hit; "older" pages append.
         let chat_search_hits = matches!(

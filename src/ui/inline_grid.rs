@@ -66,15 +66,17 @@ impl QuillApp {
 
     /// The current frame of an animation result's clip: it plays muted and
     /// looped on the history's native player, like a GIF in a chat, while
-    /// the panel shows it. The player slots live in the history's table
-    /// under a key no chat uses, so a panel that closes stops them.
+    /// the panel shows it. Until the full clip is downloaded, the result's
+    /// MP4 thumbnail loop plays in its place. The player slots live in the
+    /// history's table under a key no chat uses, so a panel that closes
+    /// stops them.
     fn inline_clip_picture(
         &self,
         result: &InlineQueryResultSummary,
         roots: &[PathBuf],
         cx: &mut Context<Self>,
     ) -> Option<super::native_video::VideoPicture> {
-        let (clip, media) = (result.clip?, result.media?);
+        let media = result.media?;
         if !super::native_video::supported()
             || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
@@ -85,7 +87,10 @@ impl QuillApp {
         if !prefs.autoplay_gifs || prefs.data_saver {
             return None;
         }
-        let path = self.inline_image_path(clip, roots)?;
+        let (clip, path) = [result.clip, result.preview_clip]
+            .into_iter()
+            .flatten()
+            .find_map(|clip| Some((clip, self.inline_image_path(clip, roots)?)))?;
         let tile = super::inline_video::InlineTile::media(
             super::message_media::MediaFrameKind::Gif,
             media.width,

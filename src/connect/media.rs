@@ -22,6 +22,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !effect_ids.is_empty() {
             extras.extend(self.load_message_effects(effect_ids)?);
         }
+        for file_id in self.session.inline_result_file_ids_to_download() {
+            if let Some(extra) = self.download_file(file_id, INLINE_RESULTS_DOWNLOAD_PRIORITY)? {
+                extras.push(extra);
+            }
+        }
         let ids = self.session.thumb_file_ids_to_download();
         for file_id in ids {
             if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {

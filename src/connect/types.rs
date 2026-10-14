@@ -41,6 +41,10 @@ pub const THUMB_DOWNLOAD_PRIORITY: i32 = 1;
 /// thumbs so enabled media actually arrives, far below explicit user
 /// downloads).
 pub const AUTO_MEDIA_DOWNLOAD_PRIORITY: i32 = 4;
+/// Images and clips of the inline results panel (`@gif cats`): above
+/// the open chat's thumbnails and auto-downloads, below a download the
+/// user asked for.
+pub const INLINE_RESULTS_DOWNLOAD_PRIORITY: i32 = 16;
 /// `downloadFile.priority` when the user opens media.
 pub const USER_DOWNLOAD_PRIORITY: i32 = 32;
 /// `searchChats.limit` / `searchMessages.limit` (Unigram messages page is 20).
