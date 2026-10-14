@@ -4,10 +4,9 @@
 use crate::state::*;
 
 pub struct SettingsState {
-    /// Phase 8.1: mirror of `settings::Preferences::hide_notification_previews`
-    /// (default true). There is no settings UI yet, so the value lives on the
-    /// session for the reducer to apply.
-    pub hide_notification_previews: bool,
+    /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
+    /// "Text"), loaded from `prefs.json` at connect time.
+    pub notify_view: crate::notify::NotifyView,
     /// Parity slice: mirror of
     /// `settings::Preferences::inapp_sounds_enabled` (default true) —
     /// tdesktop's "Play sounds" toggle. Loaded from `prefs.json` at
@@ -221,7 +220,7 @@ impl SettingsState {
             quick_replies: QuickRepliesState::default(),
             business: BusinessSettingsState::default(),
             business_extra: BusinessExtraState::default(),
-            hide_notification_previews: true,
+            notify_view: crate::notify::NotifyView::ShowPreview,
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),

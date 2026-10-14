@@ -42,8 +42,8 @@ fn input<'a>(
         open_chat,
         app_active,
         shown_in_active_window: false,
-        hide_previews: false,
-        chat_preview_allowed: true,
+        view: NotifyView::default(),
+        sender_name: None,
         pinned_allowed: true,
         contact_joined_allowed: true,
     }
@@ -116,22 +116,85 @@ fn unknown_chat_does_not_notify() {
 }
 
 #[test]
-fn hidden_previews_show_generic_body() {
+fn default_view_shows_name_and_text() {
+    // Regression: previews were hidden by default with no way to turn
+    // them on, so every toast read "New message".
+    assert_eq!(NotifyView::default(), NotifyView::ShowPreview);
+    let message = test_message(7, 42, false, "secret text");
+    let notification = decide_notify(&input(&message, false, None)).expect("notify");
+    assert_eq!(notification.body, "secret text");
+}
+
+#[test]
+fn name_only_view_shows_generic_body() {
     let message = test_message(7, 42, false, "secret text");
     let mut ctx = input(&message, false, None);
-    ctx.hide_previews = true;
+    ctx.view = NotifyView::ShowName;
     let notification = decide_notify(&ctx).expect("notify");
     assert_eq!(notification.title, "Ada");
     assert_eq!(notification.body, GENERIC_BODY);
 }
 
 #[test]
-fn per_chat_preview_disabled_shows_generic_body() {
+fn nothing_view_hides_chat_and_text() {
     let message = test_message(7, 42, false, "secret text");
     let mut ctx = input(&message, false, None);
-    ctx.chat_preview_allowed = false;
+    ctx.view = NotifyView::ShowNothing;
+    ctx.sender_name = Some("Grace");
     let notification = decide_notify(&ctx).expect("notify");
+    assert_eq!(notification.title, APP_TITLE);
     assert_eq!(notification.body, GENERIC_BODY);
+}
+
+#[test]
+fn group_sender_prefixes_the_text() {
+    let message = test_message(7, 42, false, "lunch?");
+    let mut ctx = input(&message, false, None);
+    ctx.sender_name = Some("Grace");
+    let notification = decide_notify(&ctx).expect("notify");
+    assert_eq!(notification.body, "Grace: lunch?");
+}
+
+#[test]
+fn view_switches_follow_tdesktop() {
+    assert_eq!(
+        NotifyView::from_switches(true, true),
+        NotifyView::ShowPreview
+    );
+    assert_eq!(NotifyView::from_switches(true, false), NotifyView::ShowName);
+    assert_eq!(
+        NotifyView::from_switches(false, false),
+        NotifyView::ShowNothing
+    );
+    // Text implies name.
+    assert_eq!(
+        NotifyView::from_switches(false, true),
+        NotifyView::ShowPreview
+    );
+    // Name off takes the text with it; text on brings the name back.
+    assert_eq!(
+        NotifyView::ShowPreview.toggled(true, false),
+        NotifyView::ShowNothing
+    );
+    assert_eq!(
+        NotifyView::ShowNothing.toggled(false, true),
+        NotifyView::ShowPreview
+    );
+    assert_eq!(
+        NotifyView::ShowPreview.toggled(false, false),
+        NotifyView::ShowName
+    );
+    assert_eq!(
+        NotifyView::ShowNothing.toggled(true, true),
+        NotifyView::ShowName
+    );
+}
+
+#[test]
+fn old_prefs_with_hidden_previews_load_showing_previews() {
+    let json = r#"{"version":1,"account":"primary","hide_notification_previews":true,"inapp_sounds_enabled":true}"#;
+    let prefs: crate::settings::Preferences = serde_json::from_str(json).expect("prefs");
+    assert_eq!(prefs.notify_view, NotifyView::ShowPreview);
 }
 
 #[test]

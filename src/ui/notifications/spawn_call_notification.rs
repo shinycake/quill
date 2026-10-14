@@ -176,8 +176,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // A locked app shows no sender or text (tdesktop hides the message
-        // preview while the passcode lock is up).
-        let locked = self.account.passcode.locked;
+        // preview while the passcode lock is up), and neither does the
+        // "Show sender name" switch when off: no picture, no buttons.
+        let locked = self.account.passcode.locked
+            || self
+                .session()
+                .is_some_and(|s| !s.settings.notify_view.shows_name());
         let notification = if locked {
             queued.for_locked_display()
         } else {

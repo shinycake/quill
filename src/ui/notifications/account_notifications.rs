@@ -14,7 +14,12 @@ impl QuillApp {
         queued: QueuedNotification,
         cx: &mut Context<Self>,
     ) {
-        let locked = self.account.passcode.locked;
+        let locked = self.account.passcode.locked
+            || self
+                .background
+                .client(account)
+                .and_then(|client| client.live.as_ref())
+                .is_some_and(|live| !live.driver.session.settings.notify_view.shows_name());
         let notification = if locked {
             queued.for_locked_display()
         } else {

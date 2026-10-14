@@ -219,6 +219,7 @@ fn open_prepared_client(
     let prefs = load_preferences(&prepared.paths);
     session.settings.inapp_sounds_enabled = prefs.inapp_sounds_enabled;
     session.settings.desktop_notifications = prefs.desktop_notifications;
+    session.settings.notify_view = prefs.notify_view;
     // Slice parity:settings-language: the app language tag load the same
     // way (defaults to "en" when unset).
     session.settings.language_prefs = load_language_prefs(&prepared.paths);

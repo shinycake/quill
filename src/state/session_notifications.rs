@@ -98,7 +98,13 @@ impl Session {
     pub(crate) fn notification_decision(&self, message: &ParsedMessage) -> Option<OsNotification> {
         let chat = self.chats.get(&message.chat_id.0)?;
         let chat_muted = self.effective_muted(chat);
-        let chat_preview_allowed = self.effective_preview_allowed(chat);
+        // tdesktop `notificationHeader`: the sender in groups, never in a
+        // private chat or for a post signed by the chat itself.
+        let sender_name = match (&chat.kind, message.sender) {
+            (ChatKind::Private { .. } | ChatKind::Secret { .. }, _) => None,
+            (_, Some(MessageSender::Chat { chat_id })) if chat_id == message.chat_id.0 => None,
+            (_, sender) => self.sender_name_and_accent(sender).0,
+        };
         notify::decide_notify(&notify::NotifyInput {
             message,
             chat_title: Some(&chat.title),
@@ -107,8 +113,8 @@ impl Session {
             open_chat: self.open_chat,
             app_active: self.app_active,
             shown_in_active_window: self.active_window_chats.contains(&message.chat_id),
-            hide_previews: self.settings.hide_notification_previews,
-            chat_preview_allowed,
+            view: self.settings.notify_view,
+            sender_name: sender_name.as_deref(),
             pinned_allowed: self.effective_pinned_allowed(chat),
             contact_joined_allowed: !self.settings.disable_contact_registered_notifications,
         })
@@ -183,7 +189,8 @@ impl Session {
         chat_id: ChatId,
         reaction: &crate::telegram::envelope::UnreadReaction,
     ) {
-        if !self.settings.desktop_notifications {
+        // tdesktop drops reaction toasts that may not name anyone.
+        if !self.settings.desktop_notifications || !self.settings.notify_view.shows_name() {
             return;
         }
         let (Some(settings), Some(chat)) = (
@@ -206,7 +213,7 @@ impl Session {
             sender_name: sender_name.as_deref(),
             sender_is_contact,
             emoji: reaction.reaction_type.emoji_text(),
-            show_preview: settings.show_preview && !self.settings.hide_notification_previews,
+            show_preview: settings.show_preview && self.settings.notify_view.shows_text(),
             chat_muted: self.effective_muted(chat),
             app_active: self.app_active,
             open_chat: self.open_chat,
