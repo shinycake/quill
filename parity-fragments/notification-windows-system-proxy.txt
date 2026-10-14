@@ -1,0 +1,4 @@
+# Quill's own notification windows (corner, count, display, native switch)
+# and "Use system proxy settings" (macOS, Windows, Linux detection)
+parity:notify-desktop-options
+parity:data-proxy-extras

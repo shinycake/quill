@@ -23,6 +23,7 @@ use quill::telegram::envelope::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
+mod desktop_options;
 mod fixtures;
 mod global;
 mod mute_menu;

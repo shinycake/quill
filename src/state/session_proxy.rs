@@ -24,7 +24,13 @@ impl Session {
         proxy
             .pings
             .retain(|id, _| *id == LINK_PING_ID || proxies.iter().any(|p| p.id == *id));
-        proxy.list = Some(proxies);
+        // The system proxy's entries stay out of the list (never listed,
+        // shared or rotated).
+        let (system, list) = proxies
+            .into_iter()
+            .partition(crate::system_proxy::is_system_entry);
+        proxy.system = system;
+        proxy.list = Some(list);
         proxy.loading = false;
         proxy.stale = false;
         proxy.error = None;

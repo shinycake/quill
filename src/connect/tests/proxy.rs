@@ -201,6 +201,7 @@ fn auto_switch_probes_then_enables_a_working_proxy() {
     rig.driver.session.settings.proxy.prefs = ProxyPrefs {
         auto_switch: true,
         auto_switch_secs: 10,
+        ..ProxyPrefs::default()
     };
     rig.driver.session.connection = ConnectionState::ConnectingToProxy;
     assert!(!rig.driver.proxy_tick(1_000));
@@ -273,4 +274,81 @@ fn a_background_account_takes_the_apps_proxy_list() {
         "in step: nothing more to send"
     );
     assert_eq!(rig.count("addProxy"), 1);
+}
+
+fn system_entry(id: i32, server: &str, enabled: bool) -> Value {
+    json!({"@type": "addedProxy", "id": id, "last_used_date": 0, "is_enabled": enabled,
+        "comment": crate::system_proxy::SYSTEM_PROXY_COMMENT,
+        "proxy": {"@type": "proxy", "server": server, "port": 1080,
+            "type": {"@type": "proxyTypeSocks5", "username": "", "password": ""}}})
+}
+
+fn detected(server: &str) -> crate::system_proxy::Detected {
+    let mut draft = crate::proxy::ProxyDraft::empty(crate::calls::proxy::ProxyKind::Socks5);
+    draft.server = server.into();
+    draft.port = 1080;
+    crate::system_proxy::Detected::Proxy(draft)
+}
+
+#[test]
+fn the_system_proxy_is_added_hidden_and_followed() {
+    let mut rig = Rig::new();
+    assert!(
+        !rig.driver.system_proxy_tick(&detected("sys.lan")),
+        "nothing before the list is known"
+    );
+    rig.load_list(&[(1, false)]);
+    assert!(rig.driver.system_proxy_tick(&detected("sys.lan")));
+    let add = sent_request(&rig.recorder, "addProxy");
+    assert_eq!(add["enable"], true);
+    assert_eq!(add["comment"], crate::system_proxy::SYSTEM_PROXY_COMMENT);
+    assert_eq!(add["proxy"]["server"], "sys.lan");
+    rig.answer("addProxy", system_entry(5, "sys.lan", true));
+    let mut list = proxies_json(&[(1, false)]);
+    list["proxies"]
+        .as_array_mut()
+        .unwrap()
+        .push(system_entry(5, "sys.lan", true));
+    rig.answer("getProxies", list);
+    let proxy = &rig.driver.session.settings.proxy;
+    assert_eq!(proxy.entries().len(), 1, "never in the visible list");
+    assert!(proxy.enabled().is_none() && !proxy.shield());
+    assert_eq!(proxy.mode(), crate::proxy::ProxyMode::System);
+    assert_eq!(proxy.all_entries().map(|all| all.len()), Some(2));
+    assert!(!rig.driver.system_proxy_tick(&detected("sys.lan")));
+    // The OS proxy changed: the entry follows.
+    assert!(rig.driver.system_proxy_tick(&detected("other.lan")));
+    let edit = sent_request(&rig.recorder, "editProxy");
+    assert_eq!(edit["proxy_id"], 5);
+    assert_eq!(edit["proxy"]["server"], "other.lan");
+}
+
+#[test]
+fn disabling_drops_the_system_proxy() {
+    let mut rig = Rig::new();
+    let mut list = proxies_json(&[]);
+    list["proxies"]
+        .as_array_mut()
+        .unwrap()
+        .push(system_entry(5, "sys.lan", true));
+    rig.driver.fetch_proxies().unwrap();
+    rig.answer("getProxies", list);
+    rig.driver.set_proxy_mode(false).unwrap();
+    assert_eq!(rig.count("disableProxy"), 1);
+    assert!(!rig.driver.session.settings.proxy.prefs.use_system);
+    assert_eq!(
+        rig.driver.session.settings.proxy.mode(),
+        crate::proxy::ProxyMode::Disabled
+    );
+    rig.answer("disableProxy", json!({"@type": "ok"}));
+    rig.answer("getProxies", {
+        let mut list = proxies_json(&[]);
+        list["proxies"]
+            .as_array_mut()
+            .unwrap()
+            .push(system_entry(5, "sys.lan", false));
+        list
+    });
+    assert!(rig.driver.system_proxy_tick(&detected("sys.lan")));
+    assert_eq!(sent_request(&rig.recorder, "removeProxy")["proxy_id"], 5);
 }

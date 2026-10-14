@@ -8,6 +8,7 @@ use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
 use crate::state::SettingsPurpose;
 use crate::state::{LINK_PING_ID, RequestPurpose, ShutdownPhase};
+use crate::system_proxy::{Detected, SYSTEM_PROXY_COMMENT, SystemProxyStep, plan_system_proxy};
 use crate::telegram::envelope::ConnectionState;
 use crate::telegram::requests::{
     add_proxy, disable_proxy, edit_proxy, enable_proxy, get_proxies, ping_proxy, remove_proxy,
@@ -229,10 +230,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return false;
         }
-        let Some(current) = proxy.list.as_deref() else {
+        let Some(current) = proxy.all_entries() else {
             return false;
         };
-        let step = plan_proxy_sync(target, current).into_iter().next();
+        let step = plan_proxy_sync(target, &current).into_iter().next();
         let ipv6_differs = proxy.prefer_ipv6 != prefer_ipv6
             && !self.session.requests.has_purpose(RequestPurpose::Settings(
                 SettingsPurpose::SetPreferIpv6 { on: prefer_ipv6 },
@@ -250,6 +251,62 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(ProxySyncStep::Disable) => self.disable_proxy().is_ok(),
         };
         sent
+    }
+
+    /// "Use system proxy settings" (`crate::system_proxy`): one step that
+    /// brings TDLib's list in line with the mode and what the OS reports
+    /// (`detected`, read off the UI thread). For the account on screen;
+    /// background accounts mirror its list. Returns whether a request
+    /// went out.
+    pub fn system_proxy_tick(&mut self, detected: &Detected) -> bool {
+        if !self.proxy_path_active() {
+            return false;
+        }
+        let proxy = &self.session.settings.proxy;
+        if proxy.list.is_none()
+            || proxy.mutating
+            || proxy.stale
+            || proxy.loading
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetProxies)
+        {
+            return false;
+        }
+        let step = plan_system_proxy(
+            proxy.prefs.use_system,
+            proxy.enabled().is_some(),
+            detected,
+            &proxy.system,
+        );
+        match step {
+            None => false,
+            Some(SystemProxyStep::Add(draft)) => {
+                self.add_proxy(&draft, true, SYSTEM_PROXY_COMMENT).is_ok()
+            }
+            Some(SystemProxyStep::Edit { id, proxy }) => self
+                .edit_proxy(id, &proxy, true, SYSTEM_PROXY_COMMENT)
+                .is_ok(),
+            Some(SystemProxyStep::Enable { id }) => self.enable_proxy(id).is_ok(),
+            Some(SystemProxyStep::Remove { id }) => self.remove_proxy(id).is_ok(),
+        }
+    }
+
+    /// Pick a proxy mode in the proxy box. "Disable proxy" and "Use system
+    /// proxy settings" turn a custom proxy off (TDLib then connects
+    /// directly until [`Self::system_proxy_tick`] enables the system
+    /// one); "Use custom proxy" is the caller's (it enables a list entry).
+    pub fn set_proxy_mode(&mut self, use_system: bool) -> Result<(), ConnectSendError> {
+        self.session.settings.proxy.prefs.use_system = use_system;
+        let _ = self.save_proxy_prefs();
+        let proxy = &self.session.settings.proxy;
+        let anything_on =
+            proxy.enabled().is_some() || (!use_system && proxy.system.iter().any(|p| p.is_enabled));
+        if anything_on {
+            self.disable_proxy()?;
+        }
+        Ok(())
     }
 
     /// Per-poll proxy work: the first `getProxies`, then the auto-switch

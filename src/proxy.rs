@@ -463,6 +463,10 @@ impl PingStatus {
 pub struct ProxyPrefs {
     pub auto_switch: bool,
     pub auto_switch_secs: u32,
+    /// "Use system proxy settings" while no custom proxy is enabled
+    /// (`crate::system_proxy`). tdesktop's default mode, so on unless
+    /// "Disable proxy" was picked.
+    pub use_system: bool,
 }
 
 /// tdesktop `kProxyRotationTimeouts`.
@@ -474,6 +478,7 @@ impl Default for ProxyPrefs {
         Self {
             auto_switch: false,
             auto_switch_secs: DEFAULT_AUTO_SWITCH_SECS,
+            use_system: true,
         }
     }
 }
@@ -486,6 +491,14 @@ impl ProxyPrefs {
             .min_by_key(|t| t.abs_diff(self.auto_switch_secs))
             .unwrap_or(&DEFAULT_AUTO_SWITCH_SECS)
     }
+}
+
+/// tdesktop's `ProxyData::Settings`, in the order of the box's radios.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyMode {
+    Disabled,
+    System,
+    Custom,
 }
 
 /// What the auto-switch machine wants done next.
@@ -501,8 +514,12 @@ pub enum RotationAction {
 /// Everything the proxy UI and driver cache (`Session::proxy`).
 #[derive(Debug, Clone, Default)]
 pub struct ProxyState {
-    /// `getProxies` answer; `None` until the first one arrives.
+    /// `getProxies` answer without the system proxy's entries; `None`
+    /// until the first one arrives.
     pub list: Option<Vec<ProxyEntry>>,
+    /// The system proxy's entries (`crate::system_proxy`), oldest first:
+    /// never listed, shared or rotated.
+    pub system: Vec<ProxyEntry>,
     pub loading: bool,
     /// The list changed under us (an add / edit / enable / remove
     /// succeeded): refetch the authoritative answer.
@@ -532,8 +549,32 @@ impl ProxyState {
         self.entries().iter().find(|p| p.is_enabled)
     }
 
+    /// A list entry or a system proxy entry by its TDLib id.
     pub fn find(&self, id: i32) -> Option<&ProxyEntry> {
-        self.entries().iter().find(|p| p.id == id)
+        self.entries()
+            .iter()
+            .chain(&self.system)
+            .find(|p| p.id == id)
+    }
+
+    /// TDLib's whole list, the system proxy's entries included: what the
+    /// background accounts mirror (`crate::proxy_sync`). `None` until the
+    /// first `getProxies` answer.
+    pub fn all_entries(&self) -> Option<Vec<ProxyEntry>> {
+        let mut all = self.list.clone()?;
+        all.extend(self.system.iter().cloned());
+        Some(all)
+    }
+
+    /// The radio choice of the proxy box (tdesktop `ProxyData::Settings`).
+    pub fn mode(&self) -> ProxyMode {
+        if self.enabled().is_some() {
+            ProxyMode::Custom
+        } else if self.prefs.use_system {
+            ProxyMode::System
+        } else {
+            ProxyMode::Disabled
+        }
     }
 
     /// Whether the call-media toggle applies: only a SOCKS5 proxy can
@@ -637,6 +678,7 @@ mod tests {
             prefs: ProxyPrefs {
                 auto_switch: auto,
                 auto_switch_secs: 10,
+                ..ProxyPrefs::default()
             },
             ..ProxyState::default()
         }
@@ -818,6 +860,7 @@ mod tests {
         let prefs = ProxyPrefs {
             auto_switch: true,
             auto_switch_secs: 0,
+            ..ProxyPrefs::default()
         };
         assert_eq!(prefs.timeout_secs(), 5);
         assert_eq!(ProxyPrefs::default().timeout_secs(), 10);

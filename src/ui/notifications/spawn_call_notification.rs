@@ -119,6 +119,8 @@ impl QuillApp {
         if account.is_none() {
             self.notify.reply_targets.remove(&chat_id);
         }
+        // Quill's own windows, whichever backend showed the rest.
+        self.clear_custom_notifications(account, chat_id, cx);
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
             let tag = match account {
                 Some(key) => quill::notify::notification_tag(&key.0, chat_id),
@@ -231,6 +233,17 @@ impl QuillApp {
                 Some(message_id) => self.notify.reply_targets.insert(chat_id, message_id),
                 None => self.notify.reply_targets.remove(&chat_id),
             };
+        }
+        if self.custom_notifications_active() {
+            // Quill's own windows (`notify_windows`); Windows' "Respect
+            // system Focus mode" skips them while Focus is on.
+            let skip = cfg!(windows)
+                && quill::notify_prefs::current().skip_in_focus
+                && quill::notify_focus::dnd_active();
+            if !skip {
+                self.show_custom_notification(account, notification, icon, locked, reply_field, cx);
+            }
+            return;
         }
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
             // macOS (UNUserNotificationCenter) and Windows (WinRT toast): the

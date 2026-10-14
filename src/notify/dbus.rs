@@ -42,6 +42,18 @@ impl Capabilities {
     }
 }
 
+/// tdesktop `ByDefault` on Linux: the daemon matches Quill's own
+/// notification windows (body, buttons, inline reply, and either a sound
+/// of its own or Do Not Disturb inhibitions), so its notifications are the
+/// default. Otherwise Quill's windows are (`crate::notify::custom`).
+pub fn full_parity<S: AsRef<str>>(list: &[S]) -> bool {
+    let has = |name: &str| list.iter().any(|entry| entry.as_ref() == name);
+    ["body", "actions", INLINE_REPLY_ACTION]
+        .iter()
+        .all(|name| has(name))
+        && (has("sound") || has("inhibitions"))
+}
+
 /// The `actions` argument of `Notify`: keys and labels alternating. Empty
 /// when the daemon has no buttons or the app is locked (a reply or read
 /// receipt must not bypass the passcode). The body click is `default`;
@@ -211,5 +223,19 @@ mod tests {
             Some(Signal::Closed { id: 4 })
         );
         assert_eq!(interpret_signal("ActivationToken", 4, Some("x")), None);
+    }
+
+    #[test]
+    fn full_parity_needs_reply_and_sound_or_inhibitions() {
+        use super::full_parity;
+        assert!(full_parity(&["body", "actions", "inline-reply", "sound"]));
+        assert!(full_parity(&[
+            "body",
+            "actions",
+            "inline-reply",
+            "inhibitions"
+        ]));
+        assert!(!full_parity(&["body", "actions", "sound"]), "GNOME Shell");
+        assert!(!full_parity(&["body", "actions", "inline-reply"]));
     }
 }

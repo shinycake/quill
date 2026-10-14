@@ -25,6 +25,7 @@
 //! dispatch runs on UI-thread-spawned worker threads.
 
 pub mod avatar;
+pub mod custom;
 pub mod dbus;
 
 use crate::ids::{ChatId, MessageId};

@@ -4,10 +4,10 @@
 //! `Track::playWithLooping`). Stored in `notify_prefs.json` under the app
 //! data root, next to `file_prefs.json`.
 //!
-//! tdesktop's other "Desktop notifications" options (screen corner,
-//! count, display) only drive its own custom notification widgets. Quill
-//! always hands notifications to the OS (see
-//! `docs/decisions/codex-notify-desktop-options.md`), so they do not exist.
+//! The other "Desktop notifications" options (use native notifications,
+//! screen corner, count, display, respect Focus mode) drive Quill's own
+//! notification windows where those are used (`crate::notify::custom`,
+//! `docs/decisions/notification-windows-system-proxy.md`).
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -23,11 +23,31 @@ pub const MAX_VOLUME: u8 = 100;
 pub struct NotifyPrefs {
     /// Notification sound volume in percent (0 = silent).
     pub volume: u8,
+    /// "Use native notifications" / "Use Windows notifications", once
+    /// set (tdesktop `_nativeNotifications`, unset means the platform's
+    /// default).
+    pub native: Option<bool>,
+    /// "Location on the screen" (tdesktop `notificationsCorner`).
+    pub corner: crate::notify::custom::ScreenCorner,
+    /// "Notifications count", 1-5 (tdesktop `notificationsCount`).
+    pub count: u8,
+    /// "Display for notifications": the display's checksum, 0 = Default
+    /// (tdesktop `notificationsDisplayChecksum`).
+    pub display: u64,
+    /// Windows "Respect system Focus mode" (tdesktop `skipToastsInFocus`).
+    pub skip_in_focus: bool,
 }
 
 impl Default for NotifyPrefs {
     fn default() -> Self {
-        Self { volume: MAX_VOLUME }
+        Self {
+            volume: MAX_VOLUME,
+            native: None,
+            corner: crate::notify::custom::ScreenCorner::default(),
+            count: crate::notify::custom::DEFAULT_COUNT,
+            display: 0,
+            skip_in_focus: false,
+        }
     }
 }
 
@@ -92,9 +112,14 @@ pub fn store(prefs: NotifyPrefs) {
 
 /// Save a new volume percent (clamped to 0-100).
 pub fn set_volume(percent: u8) {
-    store(NotifyPrefs {
-        volume: percent.min(MAX_VOLUME),
-    });
+    update(|prefs| prefs.volume = percent.min(MAX_VOLUME));
+}
+
+/// Change some preferences and save them.
+pub fn update(change: impl FnOnce(&mut NotifyPrefs)) {
+    let mut prefs = current();
+    change(&mut prefs);
+    store(prefs);
 }
 
 #[cfg(test)]
@@ -109,15 +134,52 @@ mod tests {
 
     #[test]
     fn gain_is_linear_and_clamped() {
-        assert_eq!(NotifyPrefs { volume: 0 }.gain(), 0.0);
-        assert!((NotifyPrefs { volume: 50 }.gain() - 0.5).abs() < f32::EPSILON);
-        assert!((NotifyPrefs { volume: 250 }.gain() - 1.0).abs() < f32::EPSILON);
-        assert_eq!(NotifyPrefs { volume: 250 }.volume_percent(), 100);
+        assert_eq!(
+            NotifyPrefs {
+                volume: 0,
+                ..NotifyPrefs::default()
+            }
+            .gain(),
+            0.0
+        );
+        assert!(
+            (NotifyPrefs {
+                volume: 50,
+                ..NotifyPrefs::default()
+            }
+            .gain()
+                - 0.5)
+                .abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (NotifyPrefs {
+                volume: 250,
+                ..NotifyPrefs::default()
+            }
+            .gain()
+                - 1.0)
+                .abs()
+                < f32::EPSILON
+        );
+        assert_eq!(
+            NotifyPrefs {
+                volume: 250,
+                ..NotifyPrefs::default()
+            }
+            .volume_percent(),
+            100
+        );
     }
 
     #[test]
     fn json_round_trips_and_tolerates_missing_fields() {
-        let prefs = NotifyPrefs { volume: 35 };
+        let prefs = NotifyPrefs {
+            volume: 35,
+            count: 5,
+            native: Some(false),
+            ..NotifyPrefs::default()
+        };
         let text = serde_json::to_string(&prefs).unwrap();
         assert_eq!(serde_json::from_str::<NotifyPrefs>(&text).unwrap(), prefs);
         assert_eq!(
