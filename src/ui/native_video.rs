@@ -102,19 +102,20 @@ impl VideoPicture {
 
 impl Turn {
     fn turn_image(&mut self, image: Arc<RenderImage>) -> Arc<RenderImage> {
-        if self.turns == 0 {
+        if self.turns == 0 && !self.mirrored {
             return image;
         }
         let source = Arc::as_ptr(&image) as usize;
-        if let Some((cached, turns, turned)) = &self.image
+        let orientation = (self.turns, self.mirrored);
+        if let Some((cached, made_for, turned)) = &self.image
             && *cached == source
-            && *turns == self.turns
+            && *made_for == orientation
         {
             return turned.clone();
         }
-        match super::native_video_rotate::turn_render_image(&image, self.turns) {
+        match super::native_video_rotate::turn_render_image(&image, self.turns, self.mirrored) {
             Some(turned) => {
-                self.image = Some((source, self.turns, turned.clone()));
+                self.image = Some((source, orientation, turned.clone()));
                 turned
             }
             None => image,
@@ -131,11 +132,13 @@ enum Backend {
 pub(super) struct NativeVideo(Backend, Turn);
 
 /// The clockwise quarter turns the picture is shown at (the viewer's
-/// Rotate), and the last decoded image turned for them.
+/// Rotate), whether it is then mirrored (the video editor's Flip), and the
+/// last decoded image turned for them.
 #[derive(Default)]
 struct Turn {
     turns: u8,
-    image: Option<(usize, u8, Arc<RenderImage>)>,
+    mirrored: bool,
+    image: Option<(usize, (u8, bool), Arc<RenderImage>)>,
 }
 
 impl NativeVideo {
@@ -232,10 +235,17 @@ impl NativeVideo {
 
     /// Show the picture turned by `turns` clockwise quarter turns.
     pub(super) fn set_rotation(&mut self, turns: u8) {
+        self.set_orientation(turns, false);
+    }
+
+    /// Show the picture turned by `turns` clockwise quarter turns, then
+    /// mirrored left to right when `mirrored`.
+    pub(super) fn set_orientation(&mut self, turns: u8, mirrored: bool) {
         self.1.turns = turns % 4;
+        self.1.mirrored = mirrored;
         #[cfg(target_os = "macos")]
         if let Backend::AvPlayer(v) = &mut self.0 {
-            v.set_rotation(self.1.turns);
+            v.set_orientation(self.1.turns, mirrored);
         }
     }
 
@@ -280,8 +290,10 @@ mod avplayer {
         /// render still has a picture.
         frame: Option<GpuiPixelBuffer>,
         playing: bool,
-        /// Quarter turns to show the picture at, and the last frame turned.
+        /// Quarter turns to show the picture at, whether it is mirrored after
+        /// them, and the last frame turned.
         turns: u8,
+        mirrored: bool,
         turned: Option<GpuiPixelBuffer>,
     }
 
@@ -315,6 +327,7 @@ mod avplayer {
                     frame: None,
                     playing: false,
                     turns: 0,
+                    mirrored: false,
                     turned: None,
                 })
             }
@@ -394,9 +407,10 @@ mod avplayer {
             }
         }
 
-        pub(super) fn set_rotation(&mut self, turns: u8) {
-            if self.turns != turns {
+        pub(super) fn set_orientation(&mut self, turns: u8, mirrored: bool) {
+            if (self.turns, self.mirrored) != (turns, mirrored) {
                 self.turns = turns;
+                self.mirrored = mirrored;
                 self.turned = None;
             }
         }
@@ -416,10 +430,14 @@ mod avplayer {
                     self.turned = None;
                 }
             }
-            if self.turns != 0 {
+            if self.turns != 0 || self.mirrored {
                 if self.turned.is_none() {
                     self.turned = self.frame.as_ref().and_then(|frame| {
-                        super::super::native_video_rotate::turn_surface(frame, self.turns)
+                        super::super::native_video_rotate::turn_surface(
+                            frame,
+                            self.turns,
+                            self.mirrored,
+                        )
                     });
                 }
                 if self.turned.is_some() {

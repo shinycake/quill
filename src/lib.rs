@@ -207,6 +207,7 @@ pub mod version;
 pub mod video;
 pub mod video_decode;
 pub mod video_edit;
+pub mod video_timeline;
 pub mod viewer_extras;
 pub mod voice;
 #[cfg(feature = "ui")]

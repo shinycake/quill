@@ -1,6 +1,7 @@
-//! Quarter turns for the pictures of the native video player.
+//! Quarter turns and mirroring for the pictures of the native video player.
 //!
-//! The viewer's Rotate turns the picture clockwise in 90 degree steps. The
+//! The viewer's Rotate turns the picture clockwise in 90 degree steps; the
+//! video editor also mirrors it left to right after the turns. The
 //! decoded-image path turns `RenderImage`s; the macOS AVPlayer path hands
 //! back GPU pixel buffers (bi-planar YUV 4:2:0) that GPUI draws as they are,
 //! so the buffer itself is turned here: the luma plane and the interleaved
@@ -31,8 +32,10 @@ pub(super) fn turned_position(
 }
 
 /// Turn a plane of `T` (one pixel, or one interleaved chroma pair) by
-/// `turns` clockwise quarter turns. Strides are in elements and may exceed
-/// the width; the destination must hold the turned plane.
+/// `turns` clockwise quarter turns, then mirror it left to right when
+/// `mirror` is set. Strides are in elements and may exceed the width; the
+/// destination must hold the turned plane. Pixels that would land outside
+/// it are skipped.
 pub(super) fn turn_plane<T: Copy>(
     src: &[T],
     (w, h): (usize, usize),
@@ -40,31 +43,42 @@ pub(super) fn turn_plane<T: Copy>(
     dst: &mut [T],
     dst_stride: usize,
     turns: u8,
+    mirror: bool,
 ) {
+    let (turned_w, _) = turned_size(w, h, turns);
     for y in 0..h {
-        let row = &src[y * src_stride..y * src_stride + w];
+        let Some(row) = src.get(y * src_stride..y * src_stride + w) else {
+            return;
+        };
         for (x, &value) in row.iter().enumerate() {
-            let (dx, dy) = turned_position((x, y), (w, h), turns);
-            dst[dy * dst_stride + dx] = value;
+            let (mut dx, dy) = turned_position((x, y), (w, h), turns);
+            if mirror {
+                dx = turned_w - 1 - dx;
+            }
+            if let Some(slot) = dst.get_mut(dy * dst_stride + dx) {
+                *slot = value;
+            }
         }
     }
 }
 
-/// Turn a decoded BGRA frame. Pixels move as four-byte units, so channel
-/// order does not matter.
+/// Turn (and mirror) a decoded BGRA frame. Pixels move as four-byte
+/// units, so channel order does not matter.
 pub(super) fn turn_render_image(
     frame: &gpui_kit::RenderImage,
     turns: u8,
+    mirror: bool,
 ) -> Option<std::sync::Arc<gpui_kit::RenderImage>> {
     let size = frame.size(0);
-    let bytes = frame.as_bytes(0)?;
-    let (pixels, w, h) = quill::media_viewer::rotate_rgba_quarter_turns(
-        bytes,
-        size.width.0 as u32,
-        size.height.0 as u32,
-        turns,
-    );
-    let image = image::RgbaImage::from_raw(w, h, pixels)?;
+    let (w, h) = (size.width.0 as usize, size.height.0 as usize);
+    let (pixels, _) = frame.as_bytes(0)?.as_chunks::<4>();
+    if pixels.len() < w * h {
+        return None;
+    }
+    let (tw, th) = turned_size(w, h, turns);
+    let mut turned = vec![[0u8; 4]; tw * th];
+    turn_plane(pixels, (w, h), w, &mut turned, tw, turns, mirror);
+    let image = image::RgbaImage::from_raw(tw as u32, th as u32, turned.into_flattened())?;
     Some(std::sync::Arc::new(gpui_kit::RenderImage::new(
         smallvec::SmallVec::from_buf([image::Frame::new(image)]),
     )))
@@ -76,6 +90,7 @@ pub(super) fn turn_render_image(
 pub(super) fn turn_surface(
     src: &core_video::pixel_buffer::CVPixelBuffer,
     turns: u8,
+    mirror: bool,
 ) -> Option<core_video::pixel_buffer::CVPixelBuffer> {
     use core_foundation::base::{CFType, TCFType};
     use core_foundation::boolean::CFBoolean;
@@ -129,13 +144,21 @@ pub(super) fn turn_surface(
             if plane == 0 {
                 let from = std::slice::from_raw_parts(src_base, src_stride * ph);
                 let to = std::slice::from_raw_parts_mut(dst_base, dst_stride * th);
-                turn_plane(from, (pw, ph), src_stride, to, dst_stride, turns);
+                turn_plane(from, (pw, ph), src_stride, to, dst_stride, turns, mirror);
             } else {
                 let from =
                     std::slice::from_raw_parts(src_base.cast::<[u8; 2]>(), src_stride / 2 * ph);
                 let to =
                     std::slice::from_raw_parts_mut(dst_base.cast::<[u8; 2]>(), dst_stride / 2 * th);
-                turn_plane(from, (pw, ph), src_stride / 2, to, dst_stride / 2, turns);
+                turn_plane(
+                    from,
+                    (pw, ph),
+                    src_stride / 2,
+                    to,
+                    dst_stride / 2,
+                    turns,
+                    mirror,
+                );
             }
             debug_assert!(tw <= dst_stride);
         }
@@ -171,7 +194,7 @@ mod tests {
     fn four_turns_are_the_identity() {
         let src: Vec<u8> = (0..6).collect();
         let mut once = vec![0u8; 6];
-        turn_plane(&src, (3, 2), 3, &mut once, 2, 1);
+        turn_plane(&src, (3, 2), 3, &mut once, 2, 1, false);
         // 3x2 turned clockwise: rows [3,0] and [4,1] and [5,2].
         assert_eq!(once, vec![3, 0, 4, 1, 5, 2]);
         let mut back = src.clone();
@@ -180,7 +203,7 @@ mod tests {
         for _ in 0..4 {
             let (nw, nh) = turned_size(w, h, 1);
             let mut next = vec![0u8; nw * nh];
-            turn_plane(&cur, (w, h), w, &mut next, nw, 1);
+            turn_plane(&cur, (w, h), w, &mut next, nw, 1, false);
             cur = next;
             (w, h) = (nw, nh);
         }
@@ -189,11 +212,26 @@ mod tests {
     }
 
     #[test]
+    fn a_mirror_follows_the_turn() {
+        // 2x1 [1 2] turned clockwise is the column [1; 2]; mirrored it
+        // stays, being one wide. Unturned, the mirror swaps the pixels.
+        let src = [1u8, 2];
+        let mut dst = [0u8; 2];
+        turn_plane(&src, (2, 1), 2, &mut dst, 2, 0, true);
+        assert_eq!(dst, [2, 1]);
+        // 2x2 [1 2; 3 4] turned clockwise is [3 1; 4 2], mirrored [1 3; 2 4].
+        let src = [1u8, 2, 3, 4];
+        let mut dst = [0u8; 4];
+        turn_plane(&src, (2, 2), 2, &mut dst, 2, 1, true);
+        assert_eq!(dst, [1, 3, 2, 4]);
+    }
+
+    #[test]
     fn strides_wider_than_the_picture_are_skipped() {
         // 2x2 picture inside rows of 4.
         let src = [1u8, 2, 9, 9, 3, 4, 9, 9];
         let mut dst = [0u8; 6];
-        turn_plane(&src, (2, 2), 4, &mut dst, 3, 1);
+        turn_plane(&src, (2, 2), 4, &mut dst, 3, 1, false);
         assert_eq!(&dst[0..2], &[3, 1]);
         assert_eq!(&dst[3..5], &[4, 2]);
     }
@@ -247,7 +285,7 @@ mod surface_tests {
             }
         }
         src.unlock_base_address(0);
-        let turned = turn_surface(&src, 1).expect("turns a bi-planar buffer");
+        let turned = turn_surface(&src, 1, false).expect("turns a bi-planar buffer");
         assert_eq!((turned.get_width(), turned.get_height()), (2, 4));
         turned.lock_base_address(kCVPixelBufferLock_ReadOnly);
         let luma = plane(&turned, 0, false);

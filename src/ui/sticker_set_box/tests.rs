@@ -369,6 +369,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
                 width: 640,
                 height: 480,
                 has_audio: true,
+                ..Default::default()
             };
             app.video_editor_probed(serial, Some(info), None, window, cx);
         });

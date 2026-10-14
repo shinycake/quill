@@ -154,16 +154,7 @@ pub fn webm_args(
         .collect();
     args.push(seconds(edits.length_ms().max(1)));
     args.extend(["-i".to_string(), input.to_string(), "-an".to_string()]);
-    let mut filters = Vec::new();
-    if edits.flipped {
-        filters.push("hflip".to_string());
-    }
-    match edits.turns % 4 {
-        1 => filters.push("transpose=1".into()),
-        2 => filters.push("hflip,vflip".into()),
-        3 => filters.push("transpose=2".into()),
-        _ => {}
-    }
+    let mut filters = crate::video_edit::turn_filters(edits.turns, edits.flipped);
     if let Some(crop) = edits.crop {
         let (turned_w, turned_h) = turned_size(source.width, source.height, edits.turns);
         let (x, y, w, h) = crop.pixels(turned_w, turned_h);
@@ -308,6 +299,7 @@ mod tests {
             width,
             height,
             has_audio: true,
+            ..Default::default()
         }
     }
 
@@ -425,7 +417,7 @@ mod tests {
             .position(|arg| arg == "-vf")
             .and_then(|at| args.get(at + 1))
             .expect("filters");
-        assert!(filters.starts_with("hflip,transpose=1,crop="));
+        assert!(filters.starts_with("transpose=1,hflip,crop="));
         assert!(
             filters
                 .contains(",scale=100:100:flags=lanczos,fps=min(source_fps\\,30),format=yuva420p")

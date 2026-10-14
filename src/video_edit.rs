@@ -5,8 +5,8 @@
 //! tdesktop transcodes the file when any of these changed
 //! (`Editor::VideoEdited`) and sends the cover frame as the video's start
 //! timestamp (`videoCoverOffset = cover - from`). This module holds the
-//! numbers and the ffmpeg command lines; the panel is `ui/video_editor.rs`.
-//! Crop, rotate and flip, which tdesktop's editor also has, are not here.
+//! numbers and the ffmpeg command lines; the panel is `ui/video_editor.rs`
+//! and the controls' geometry is `video_timeline`.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -32,9 +32,10 @@ pub struct VideoEdits {
     pub gif: bool,
     /// Clockwise quarter turns, 0 to 3 (tdesktop `PhotoModifications::angle`).
     pub turns: u8,
-    /// Mirrored left to right, before the turns.
+    /// Mirrored left to right on the screen, after the turns (tdesktop
+    /// rotates, then mirrors).
     pub flipped: bool,
-    /// The part of the turned frame that is kept.
+    /// The part of the turned, mirrored frame that is kept.
     pub crop: Option<Crop>,
 }
 
@@ -70,6 +71,26 @@ impl Crop {
             w,
             h,
         }
+    }
+
+    /// The same part of the frame after a clockwise quarter turn.
+    pub fn turned_cw(self) -> Self {
+        Self {
+            x: 1000 - self.y - self.h,
+            y: self.x,
+            w: self.h,
+            h: self.w,
+        }
+        .clamped()
+    }
+
+    /// The same part of the frame after a left-to-right mirror.
+    pub fn mirrored(self) -> Self {
+        Self {
+            x: 1000 - self.x - self.w,
+            ..self
+        }
+        .clamped()
     }
 
     /// Pixels `(x, y, w, h)` for a frame of `width` x `height`, with even
@@ -173,7 +194,8 @@ impl VideoEdits {
     }
 }
 
-/// A time for the editor's labels: `0:07.4`, or `1:02:03.0` past an hour.
+/// A time for the editor's labels (`FormatDurationText` plus tenths):
+/// `00:07.4`, or `1:02:03.0` past an hour.
 pub fn format_clock(ms: i64) -> String {
     let tenths = ms.max(0) / 100;
     let (secs, tenth) = (tenths / 10, tenths % 10);
@@ -181,7 +203,7 @@ pub fn format_clock(ms: i64) -> String {
     if hours > 0 {
         format!("{hours}:{minutes:02}:{seconds:02}.{tenth}")
     } else {
-        format!("{minutes}:{seconds:02}.{tenth}")
+        format!("{minutes:02}:{seconds:02}.{tenth}")
     }
 }
 
@@ -225,12 +247,50 @@ pub fn scaled_size(width: u32, height: u32, side: u32) -> (u32, u32) {
 }
 
 /// A probed clip.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct VideoSource {
     pub duration_ms: i64,
     pub width: u32,
     pub height: u32,
     pub has_audio: bool,
+    /// Bytes of the file; 0 when unknown.
+    pub file_size: u64,
+    /// Bits a second of the picture; 0 when unknown.
+    pub video_bitrate: u64,
+    /// Frames a thousand seconds (29.97 fps is 29_970), kept whole so a
+    /// probe compares exactly; 0 when unknown.
+    pub fps_milli: u32,
+}
+
+/// A number ffprobe wrote as JSON number or text.
+fn probe_number(value: Option<&Value>) -> Option<f64> {
+    let value = value?;
+    value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+        .filter(|number| number.is_finite() && *number > 0.0)
+}
+
+/// `30000/1001` as frames a second.
+fn probe_rate(value: Option<&Value>) -> u32 {
+    let Some(text) = value.and_then(Value::as_str) else {
+        return 0;
+    };
+    let mut parts = text.split('/');
+    let top: f64 = parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .unwrap_or(0.0);
+    let bottom: f64 = parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .unwrap_or(1.0);
+    if bottom > 0.0 && top.is_finite() && top > 0.0 {
+        // At most a million fps, so the cast never saturates in practice.
+        (top / bottom * 1000.0).round().clamp(0.0, 1e9) as u32
+    } else {
+        0
+    }
 }
 
 /// Read `ffprobe -of json` output with every stream listed.
@@ -254,11 +314,21 @@ pub fn parse_source(value: &Value) -> Option<VideoSource> {
     });
     let (seconds, width, height) = crate::profile_photo_video::parse_probe(&single)?;
     let duration_ms = (seconds * 1000.0).round() as i64;
+    let format = value.get("format");
+    let total_bitrate = probe_number(format.and_then(|f| f.get("bit_rate"))).unwrap_or(0.0);
+    let video_bitrate = probe_number(video.get("bit_rate")).unwrap_or(if has_audio {
+        (total_bitrate - 128_000.0).max(0.0)
+    } else {
+        total_bitrate
+    });
     (duration_ms > 0 && width > 0 && height > 0).then_some(VideoSource {
         duration_ms,
         width,
         height,
         has_audio,
+        file_size: probe_number(format.and_then(|f| f.get("size"))).unwrap_or(0.0) as u64,
+        video_bitrate: video_bitrate as u64,
+        fps_milli: probe_rate(video.get("avg_frame_rate")),
     })
 }
 
@@ -269,7 +339,7 @@ pub fn probe_source(path: &Path) -> Option<VideoSource> {
             "-v",
             "error",
             "-show_entries",
-            "stream=codec_type,width,height,duration:stream_tags=rotate:stream_side_data=rotation:format=duration",
+            "stream=codec_type,width,height,duration,bit_rate,avg_frame_rate:stream_tags=rotate:stream_side_data=rotation:format=duration,size,bit_rate",
             "-of",
             "json",
         ])
@@ -290,18 +360,18 @@ fn strings(list: &[&str]) -> Vec<String> {
     list.iter().map(|arg| (*arg).to_string()).collect()
 }
 
-/// The ffmpeg filters for flip and turns (tdesktop flips, then turns
-/// clockwise).
-fn turn_filters(turns: u8, flipped: bool) -> Vec<String> {
+/// The ffmpeg filters for turns and flip (tdesktop turns clockwise, then
+/// mirrors what is on the screen).
+pub fn turn_filters(turns: u8, flipped: bool) -> Vec<String> {
     let mut filters = Vec::new();
-    if flipped {
-        filters.push("hflip".to_string());
-    }
     match turns % 4 {
         1 => filters.push("transpose=1".into()),
         2 => filters.push("hflip,vflip".into()),
         3 => filters.push("transpose=2".into()),
         _ => {}
+    }
+    if flipped {
+        filters.push("hflip".to_string());
     }
     filters
 }
@@ -408,6 +478,25 @@ pub fn render_edited(
     crate::local_path::pick_send_path(&output).ok_or_else(|| "couldn't prepare the video".into())
 }
 
+/// Save the frame at `at_ms` of `source_path`, `height` px high, as a JPEG
+/// for the editor's frame strip (as recorded: the strip is not turned).
+/// Blocks; call it off the UI thread.
+pub fn render_strip_frame(source_path: &Path, at_ms: i64, height: u32) -> Result<PathBuf, String> {
+    let dir = work_dir();
+    std::fs::create_dir_all(&dir).map_err(|_| "couldn't read the video".to_string())?;
+    let output = dir.join(format!("strip-{}.jpg", stamp()));
+    let mut args = strings(&["-y", "-ss"]);
+    args.push(seconds(at_ms.max(0)));
+    args.extend(strings(&["-i"]));
+    args.push(source_path.to_string_lossy().into_owned());
+    args.extend(strings(&["-frames:v", "1", "-vf"]));
+    args.push(format!("scale=-2:{}", height.max(2) & !1));
+    args.extend(strings(&["-q:v", "4"]));
+    args.push(output.to_string_lossy().into_owned());
+    run_ffmpeg(&args)?;
+    Ok(output)
+}
+
 /// Save the frame at `at_ms` of `source_path` as a JPEG, for the editor's
 /// preview. Blocks; call it off the UI thread.
 pub fn render_frame(
@@ -440,6 +529,7 @@ mod tests {
             width: 1920,
             height: 1080,
             has_audio: true,
+            ..VideoSource::default()
         }
     }
 
@@ -493,11 +583,11 @@ mod tests {
 
     #[test]
     fn clock_labels_show_tenths_and_hours_only_when_needed() {
-        assert_eq!(format_clock(0), "0:00.0");
-        assert_eq!(format_clock(7_450), "0:07.4");
-        assert_eq!(format_clock(62_000), "1:02.0");
+        assert_eq!(format_clock(0), "00:00.0");
+        assert_eq!(format_clock(7_450), "00:07.4");
+        assert_eq!(format_clock(62_000), "01:02.0");
         assert_eq!(format_clock(3_723_900), "1:02:03.9");
-        assert_eq!(format_clock(-5), "0:00.0");
+        assert_eq!(format_clock(-5), "00:00.0");
     }
 
     #[test]
@@ -664,7 +754,7 @@ mod tests {
         let at = args.iter().position(|arg| arg == "-vf").unwrap();
         assert_eq!(
             args[at + 1],
-            "hflip,transpose=1,crop=540:1920:0:0,scale=360:-2,format=yuv420p"
+            "transpose=1,hflip,crop=540:1920:0:0,scale=360:-2,format=yuv420p"
         );
         assert_eq!(edits.edited_size(&source()), (540, 1920));
         assert!(edits.needs_transcode(20_000));
@@ -685,10 +775,31 @@ mod tests {
     }
 
     #[test]
+    fn a_crop_follows_turns_and_mirrors() {
+        let crop = Crop {
+            x: 100,
+            y: 200,
+            w: 300,
+            h: 400,
+        };
+        assert_eq!(
+            crop.turned_cw(),
+            Crop {
+                x: 400,
+                y: 100,
+                w: 400,
+                h: 300
+            }
+        );
+        assert_eq!(crop.turned_cw().turned_cw().turned_cw().turned_cw(), crop);
+        assert_eq!(crop.mirrored(), Crop { x: 600, ..crop });
+    }
+
+    #[test]
     fn the_preview_frame_is_turned_but_not_cropped() {
         let args = frame_args("in.mp4", 0, "f.jpg", 1, true);
         let at = args.iter().position(|arg| arg == "-vf").unwrap();
-        assert!(args[at + 1].starts_with("hflip,transpose=1,scale="));
+        assert!(args[at + 1].starts_with("transpose=1,hflip,scale="));
         assert!(!args[at + 1].contains("crop"));
     }
 
@@ -705,6 +816,15 @@ mod tests {
         assert_eq!(parsed.duration_ms, 12_500);
         assert_eq!((parsed.width, parsed.height), (1280, 720));
         assert!(parsed.has_audio);
+        assert_eq!(parsed.fps_milli, 0);
+        let rich = json!({
+            "streams": [{"codec_type": "video", "width": 64, "height": 48,
+                "bit_rate": "900000", "avg_frame_rate": "30000/1001"}],
+            "format": {"duration": "3.0", "size": "400000", "bit_rate": "1000000"}
+        });
+        let parsed = parse_source(&rich).unwrap();
+        assert_eq!((parsed.file_size, parsed.video_bitrate), (400_000, 900_000));
+        assert_eq!(parsed.fps_milli, 29_970);
         let silent = json!({
             "streams": [{"codec_type": "video", "width": 64, "height": 48}],
             "format": {"duration": "3.0"}

@@ -1,80 +1,113 @@
-//! Crop, rotate, flip and preview playback for the video editor (tdesktop
-//! `VideoEditor`: its crop, `_rotate`, `_flip` and the looping playback of
-//! the trimmed range). The dialog and the trim and cover controls are in
-//! `video_editor.rs`.
-//!
-//! The picture is the frame turned and flipped like the edit; the crop is a
-//! frame drawn over it, set with two range sliders. Playback shows the
-//! source through `NativeVideo`, turned for the Rotate choice; a flip shows
-//! in the still picture only.
+//! The video editor's picture (tdesktop `VideoEditor` with its `Crop`): the
+//! kept range playing in a loop, muted, turned and mirrored like the edit;
+//! the crop drawn on it with corner brackets, dragged by its edges or moved
+//! whole, with the thirds grid while it moves; a click pauses with the play
+//! badge in the middle (`setupTapToPause`, `paintPlayBadge`). Rotate and
+//! Flip live here too. The strip is `video_editor_timeline.rs`.
 
 use super::app::QuillApp;
-use super::native_video::{NativeVideo, Purpose, supported};
-use super::video_editor::{Knob, VideoEditorDialog};
-use gpui_kit::component::button::*;
-use gpui_kit::component::slider::{Slider, SliderState};
-use gpui_kit::component::*;
+use super::native_video::{NativeVideo, Purpose, VideoPicture, supported};
+use super::video_editor::{EditorTarget, VideoEditorDialog, palette};
+use super::video_editor_timeline::StagePress;
 use gpui_kit::*;
-use quill::sticker_video::{square_crop, squared_crop};
+use quill::sticker_video::square_crop;
 use quill::video_edit::{Crop, quality_levels, turned_size};
+use quill::video_timeline::{CropArea, crop_dragged, crop_grab_at};
+use std::time::Instant;
 
-/// The stage the picture is fitted into.
-const STAGE_W: f32 = 480.0;
-const STAGE_H: f32 = 240.0;
-
-/// The crop sliders' positions (0 to 1) for a crop.
-fn crop_ranges(crop: Option<Crop>) -> ((f32, f32), (f32, f32)) {
-    let crop = crop.unwrap_or(Crop::FULL);
-    let unit = |start: u16, len: u16| (f32::from(start) / 1000.0, f32::from(start + len) / 1000.0);
-    (unit(crop.x, crop.w), unit(crop.y, crop.h))
-}
+/// `photoEditorCropPointSize`: the corner brackets are twice this long.
+const BRACKET: f32 = 20.0;
+/// `st::lineWidth * 2` for the frame, `* 4` for the brackets.
+const FRAME_LINE: f32 = 2.0;
+const BRACKET_LINE: f32 = 4.0;
+/// `videoEditorPlayBadgeSize`.
+const BADGE: f32 = 68.0;
+/// How far a press may travel and still be a click
+/// (`QApplication::startDragDistance`).
+const DRAG_DISTANCE: f32 = 10.0;
+/// The grid fades in and out over this long.
+const GRID_MS: u64 = 200;
+/// Decoded pictures are kept at most this large on their longer side.
+const PLAYER_EDGE: u32 = 2048;
 
 impl QuillApp {
-    /// A crop slider moved: the crop follows while dragging and snaps to its
-    /// limits on release.
-    pub(super) fn video_editor_crop_knob(
-        &mut self,
-        knob: Knob,
-        start: f32,
-        end: f32,
-        release: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let for_set = self.video_editor_for_set();
+    /// Start the muted loop of the kept range (tdesktop `setupStreaming`):
+    /// it plays from the start of the range as soon as the video is read.
+    pub(super) fn start_video_editor_player(&mut self, cx: &mut Context<Self>) {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let to_thousandths = |value: f32| (value.clamp(0.0, 1.0) * 1000.0).round() as i32;
-        let (from, till) = (to_thousandths(start), to_thousandths(end));
-        let mut crop = editor.edits.crop.unwrap_or(Crop::FULL);
-        let (len, from16) = ((till - from).max(0) as u16, from as u16);
-        match knob {
-            Knob::CropX => {
-                crop.x = from16;
-                crop.w = len;
-            }
-            Knob::CropY => {
-                crop.y = from16;
-                crop.h = len;
-            }
-            _ => return,
+        if !supported() {
+            return;
         }
-        let mut crop = crop.clamped();
-        // A sticker's crop stays a square: the other side follows.
-        if for_set && let Some(info) = editor.info {
-            let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
-            crop = squared_crop(crop, width, height, knob == Knob::CropX);
-        }
-        editor.edits.crop = (crop != Crop::FULL).then_some(crop);
-        if release {
-            let ((x0, x1), (y0, y1)) = crop_ranges(editor.edits.crop);
-            let (sx, sy) = (editor.crop_x.clone(), editor.crop_y.clone());
-            if let (Some(sx), Some(sy)) = (sx, sy) {
-                sx.update(cx, |state, cx| state.set_value((x0, x1), window, cx));
-                sy.update(cx, |state, cx| state.set_value((y0, y1), window, cx));
+        match NativeVideo::open(
+            &editor.source,
+            Purpose::Inline {
+                max_edge: PLAYER_EDGE,
+            },
+        ) {
+            Ok(mut video) => {
+                video.set_volume(0.0);
+                video.set_orientation(editor.edits.turns, editor.edits.flipped);
+                video.seek(editor.edits.from_ms as f64 / 1000.0);
+                if !editor.user_paused {
+                    video.play();
+                }
+                editor.playback_ms = Some(editor.edits.from_ms);
+                *editor.player.borrow_mut() = Some(video);
             }
-            Self::fit_editor_quality(editor);
+            Err(_) => editor.note = Some("Quill can't play this video here.".into()),
+        }
+        cx.notify();
+    }
+
+    /// Keep the loop inside the range and the playhead on the player; asks
+    /// for the next frame while something moves.
+    pub(super) fn pump_video_editor(&mut self, cx: &mut Context<Self>) {
+        self.video_editor_tick_bubble(cx);
+        let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
+            return;
+        };
+        let held = editor.user_paused || editor.motion.grab.is_some() || editor.busy;
+        let (from, till) = (editor.edits.from_ms, editor.edits.till_ms);
+        let mut playing = false;
+        // A re-entrant borrow skips this frame instead of aborting.
+        if !held
+            && let Ok(mut slot) = editor.player.try_borrow_mut()
+            && let Some(video) = slot.as_mut().filter(|video| video.error().is_none())
+        {
+            let at = (video.position_secs() * 1000.0).round() as i64;
+            if at >= till || at < from - 250 {
+                video.seek(from as f64 / 1000.0);
+                editor.playback_ms = Some(from);
+            } else {
+                editor.playback_ms = Some(at.clamp(from, till));
+            }
+            if !video.is_playing() {
+                video.play();
+            }
+            playing = true;
+        }
+        if playing || editor.motion.animating(Instant::now()) {
+            self.request_animation_tick(60, cx);
+        }
+    }
+
+    /// A click on the picture pauses or resumes (`togglePause`).
+    fn toggle_video_editor_pause(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
+            return;
+        };
+        if editor.player.borrow().is_none() {
+            return;
+        }
+        editor.user_paused = !editor.user_paused;
+        if let Some(video) = editor.player.borrow_mut().as_mut() {
+            if editor.user_paused {
+                video.pause();
+            } else {
+                video.play();
+            }
         }
         cx.notify();
     }
@@ -89,231 +122,324 @@ impl QuillApp {
         }
     }
 
-    /// Turn the picture a quarter turn clockwise. The crop starts over, as
-    /// it belongs to the turned frame.
-    pub(super) fn rotate_video_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Turn the picture a quarter turn clockwise; the crop turns with it.
+    pub(super) fn rotate_video_editor(&mut self, cx: &mut Context<Self>) {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
         editor.edits.turns = (editor.edits.turns + 1) % 4;
-        // A sticker's crop starts over as the centered square of the
-        // turned frame.
-        editor.edits.crop = match (editor.target, editor.info) {
-            (super::video_editor::EditorTarget::Set { .. }, Some(info)) => {
+        editor.edits.crop = match (editor.target, editor.info, editor.edits.crop) {
+            (_, _, Some(crop)) => Some(crop.turned_cw()),
+            // A sticker's crop is always a square.
+            (EditorTarget::Set { .. }, Some(info), None) => {
                 let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
                 square_crop(width, height)
             }
             _ => None,
         };
-        let ((x0, x1), (y0, y1)) = crop_ranges(editor.edits.crop);
-        if let Some(slider) = editor.crop_x.clone() {
-            slider.update(cx, |state, cx| state.set_value((x0, x1), window, cx));
-        }
-        if let Some(slider) = editor.crop_y.clone() {
-            slider.update(cx, |state, cx| state.set_value((y0, y1), window, cx));
-        }
         Self::fit_editor_quality(editor);
-        if let Some(video) = editor.player.borrow_mut().as_mut() {
-            video.set_rotation(editor.edits.turns);
-        }
-        let at = editor.edits.cover_ms;
-        self.refresh_video_preview(at, cx);
+        self.video_editor_geometry_changed(cx);
     }
 
-    /// Mirror the picture left to right.
+    /// Mirror the picture left to right; the crop keeps what it held.
     pub(super) fn flip_video_editor(&mut self, cx: &mut Context<Self>) {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
         editor.edits.flipped = !editor.edits.flipped;
-        let at = editor.edits.cover_ms;
-        self.refresh_video_preview(at, cx);
+        editor.edits.crop = editor.edits.crop.map(Crop::mirrored);
+        self.video_editor_geometry_changed(cx);
     }
 
-    /// Play the trimmed range in a loop, or stop.
-    pub(super) fn toggle_video_editor_playback(&mut self, cx: &mut Context<Self>) {
+    fn video_editor_geometry_changed(&mut self, cx: &mut Context<Self>) {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        if editor.playing {
-            editor.playing = false;
-            *editor.player.borrow_mut() = None;
-            cx.notify();
-            return;
+        if let Some(video) = editor.player.borrow_mut().as_mut() {
+            video.set_orientation(editor.edits.turns, editor.edits.flipped);
         }
-        match NativeVideo::open(&editor.source, Purpose::Viewer) {
-            Ok(mut video) => {
-                video.set_rotation(editor.edits.turns);
-                video.seek(editor.edits.from_ms as f64 / 1000.0);
-                video.play();
-                *editor.player.borrow_mut() = Some(video);
-                editor.playing = true;
-            }
-            Err(_) => editor.note = Some("Quill can't play this video here.".into()),
-        }
+        let at = editor.edits.cover_ms;
+        self.refresh_video_preview(at, cx);
         cx.notify();
     }
 
-    /// Playback is available on this platform.
-    pub(super) fn video_editor_can_play() -> bool {
-        supported()
+    fn video_stage_press(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let reduce = cx.reduce_motion();
+        let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
+            return;
+        };
+        let Some(picture) = editor.motion.picture_bounds.get() else {
+            return;
+        };
+        let start = CropArea::of(editor.edits.crop);
+        let local = (
+            f32::from(at.x - picture.origin.x),
+            f32::from(at.y - picture.origin.y),
+        );
+        let shown = (
+            f32::from(picture.size.width),
+            f32::from(picture.size.height),
+        );
+        let grab = crop_grab_at(start, local, shown);
+        if grab.is_some() {
+            editor.motion.grid.start(1.0, GRID_MS, reduce);
+        }
+        editor.motion.press = Some(StagePress {
+            at,
+            grab,
+            start,
+            moved: false,
+        });
+        cx.notify();
     }
 
-    /// The stage: the picture (a playing frame or the still), with the crop
-    /// frame over it.
+    fn video_stage_drag(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
+            return;
+        };
+        let (Some(mut press), Some(picture)) =
+            (editor.motion.press, editor.motion.picture_bounds.get())
+        else {
+            return;
+        };
+        let (dx, dy) = (f32::from(at.x - press.at.x), f32::from(at.y - press.at.y));
+        if !press.moved && dx.abs() + dy.abs() >= DRAG_DISTANCE {
+            press.moved = true;
+        }
+        editor.motion.press = Some(press);
+        let Some(grab) = press.grab.filter(|_| press.moved) else {
+            return;
+        };
+        let shown = (
+            f32::from(picture.size.width),
+            f32::from(picture.size.height),
+        );
+        let square = match (editor.target, editor.info) {
+            (EditorTarget::Set { .. }, Some(info)) => {
+                let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
+                Some(width as f32 / height.max(1) as f32)
+            }
+            _ => None,
+        };
+        let area = crop_dragged(press.start, grab, (dx, dy), shown, square);
+        editor.edits.crop = area.to_crop();
+        cx.notify();
+    }
+
+    fn video_stage_release(&mut self, cx: &mut Context<Self>) {
+        let reduce = cx.reduce_motion();
+        let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
+            return;
+        };
+        let Some(press) = editor.motion.press.take() else {
+            return;
+        };
+        if press.grab.is_some() {
+            editor.motion.grid.start(0.0, GRID_MS, reduce);
+        }
+        if press.moved {
+            Self::fit_editor_quality(editor);
+            cx.notify();
+        } else {
+            self.toggle_video_editor_pause(cx);
+        }
+    }
+
+    /// The picture with the crop over it, fitted into the space above the
+    /// controls.
     pub(super) fn video_editor_stage(
         &self,
         editor: &VideoEditorDialog,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (stage_bg, accent) = (cx.theme().muted, cx.theme().primary);
+        let app = cx.entity().downgrade();
         let (width, height) = editor.info.map_or((16, 9), |info| {
             turned_size(info.width, info.height, editor.edits.turns)
         });
-        let scale = (STAGE_W / width as f32).min(STAGE_H / height as f32);
-        let (shown_w, shown_h) = (px(width as f32 * scale), px(height as f32 * scale));
-        let mut picture: Option<AnyElement> = None;
-        if editor.playing {
-            // The guard lives only for the player calls: it is dropped
-            // before the frame clock is asked for a tick, and a re-entrant
-            // borrow skips this frame (the still shows) instead of aborting.
-            let frame = editor.player.try_borrow_mut().ok().and_then(|mut slot| {
-                let video = slot.as_mut().filter(|video| video.error().is_none())?;
-                let from = editor.edits.from_ms as f64 / 1000.0;
-                let till = editor.edits.till_ms as f64 / 1000.0;
-                if video.position_secs() >= till {
-                    video.seek(from);
+        // The player's frame, else the still (cut turned and mirrored).
+        let frame = editor
+            .player
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut slot| slot.as_mut().and_then(NativeVideo::frame));
+        let still = editor.still.clone();
+        let crop = CropArea::of(editor.edits.crop);
+        let picture_cell = editor.motion.picture_bounds.clone();
+        let crop_cell = editor.motion.crop_bounds.clone();
+        let grid = editor.motion.grid.value(Instant::now());
+        let paused = editor.user_paused && editor.player.borrow().is_some();
+        canvas(
+            move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+            move |bounds, hitbox, window, _| {
+                // Fit, and scale small pictures up, like tdesktop.
+                let scale = (f32::from(bounds.size.width) / width.max(1) as f32)
+                    .min(f32::from(bounds.size.height) / height.max(1) as f32);
+                let fit = Bounds::centered_at(
+                    bounds.center(),
+                    size(px(width as f32 * scale), px(height as f32 * scale)),
+                );
+                picture_cell.set(Some(fit));
+                match frame {
+                    #[cfg(target_os = "macos")]
+                    Some(VideoPicture::Surface(buffer)) => window.paint_surface(fit, buffer),
+                    Some(VideoPicture::Image(image)) => {
+                        let _ = window.paint_image(fit, fit, Corners::default(), image, 0, false);
+                    }
+                    None => {
+                        if let Some(still) = still.clone() {
+                            let _ =
+                                window.paint_image(fit, fit, Corners::default(), still, 0, false);
+                        }
+                    }
                 }
-                if !video.is_playing() {
-                    video.play();
+                let at = |x: f32, y: f32| {
+                    point(
+                        fit.origin.x + fit.size.width * x,
+                        fit.origin.y + fit.size.height * y,
+                    )
+                };
+                let cut =
+                    Bounds::from_corners(at(crop.x, crop.y), at(crop.x + crop.w, crop.y + crop.h));
+                crop_cell.set(Some(cut));
+                paint_crop(fit, cut, grid, window);
+                if paused {
+                    paint_play_badge(cut.center(), window);
                 }
-                video.frame()
-            });
-            picture = frame
-                .map(|frame| frame.element(shown_w, shown_h, ObjectFit::Fill, Corners::default()));
-            self.request_animation_tick(30, cx);
-        }
-        let picture = picture.or_else(|| {
-            editor.preview.as_ref().map(|path| {
-                img(path.clone())
-                    .w(shown_w)
-                    .h(shown_h)
-                    .object_fit(ObjectFit::Fill)
-                    .into_any_element()
-            })
-        });
-        let mut frame = div().relative().w(shown_w).h(shown_h).children(picture);
-        if let Some(crop) = editor.edits.crop {
-            frame = frame.child(
-                div()
-                    .absolute()
-                    .left(relative(f32::from(crop.x) / 1000.0))
-                    .top(relative(f32::from(crop.y) / 1000.0))
-                    .w(relative(f32::from(crop.w) / 1000.0))
-                    .h(relative(f32::from(crop.h) / 1000.0))
-                    .border_2()
-                    .border_color(accent),
-            );
-        }
-        div()
-            .h(px(STAGE_H))
-            .w_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_md()
-            .bg(stage_bg)
-            .overflow_hidden()
-            .child(frame)
-            .into_any_element()
-    }
-
-    /// Play, Rotate and Flip.
-    pub(super) fn video_editor_toolbar(
-        &self,
-        editor: &VideoEditorDialog,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mut bar = div().flex().items_center().gap_1();
-        if Self::video_editor_can_play() {
-            bar = bar.child(
-                Button::new("video-editor-play")
-                    .icon(if editor.playing {
-                        gpui_kit::assets::IconName::Pause
-                    } else {
-                        gpui_kit::assets::IconName::Play
-                    })
-                    .label(if editor.playing { "Pause" } else { "Play" })
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_video_editor_playback(cx);
-                    })),
-            );
-        }
-        bar.child(
-            Button::new("video-editor-rotate")
-                .icon(gpui_kit::assets::IconName::RotateCw)
-                .label("Rotate")
-                .small()
-                .ghost()
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.rotate_video_editor(window, cx);
-                })),
+                let cursor = match crop_grab_at(
+                    crop,
+                    (
+                        f32::from(window.mouse_position().x - fit.origin.x),
+                        f32::from(window.mouse_position().y - fit.origin.y),
+                    ),
+                    (f32::from(fit.size.width), f32::from(fit.size.height)),
+                ) {
+                    Some(grab) if grab.moves() => CursorStyle::OpenHand,
+                    Some(grab) if (grab.left || grab.right) && !(grab.top || grab.bottom) => {
+                        CursorStyle::ResizeLeftRight
+                    }
+                    Some(grab) if (grab.top || grab.bottom) && !(grab.left || grab.right) => {
+                        CursorStyle::ResizeUpDown
+                    }
+                    Some(grab) if (grab.left && grab.top) || (grab.right && grab.bottom) => {
+                        CursorStyle::ResizeUpLeftDownRight
+                    }
+                    Some(_) => CursorStyle::ResizeUpRightDownLeft,
+                    None => CursorStyle::Arrow,
+                };
+                window.set_cursor_style(cursor, &hitbox);
+                let down_app = app.clone();
+                let down_hitbox = hitbox.clone();
+                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Bubble
+                        && event.button == MouseButton::Left
+                        && down_hitbox.is_hovered(window)
+                    {
+                        let at = event.position;
+                        let _ = down_app.update(cx, |this, cx| this.video_stage_press(at, cx));
+                    }
+                });
+                let move_app = app.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Bubble
+                        && event.pressed_button == Some(MouseButton::Left)
+                    {
+                        let at = event.position;
+                        let _ = move_app.update(cx, |this, cx| this.video_stage_drag(at, cx));
+                    }
+                });
+                let up_app = app.clone();
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                        let _ = up_app.update(cx, |this, cx| this.video_stage_release(cx));
+                    }
+                });
+            },
         )
-        .child(
-            Button::new("video-editor-flip")
-                .label("Flip")
-                .small()
-                .ghost()
-                .selected(editor.edits.flipped)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.flip_video_editor(cx);
-                })),
-        )
+        .size_full()
         .into_any_element()
-    }
-
-    /// A captioned slider row.
-    pub(super) fn video_editor_slider_row(
-        &self,
-        caption: &'static str,
-        value: String,
-        slider: &Entity<SliderState>,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let muted = cx.theme().muted_foreground;
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(caption)
-                    .child(value),
-            )
-            .child(Slider::new(slider))
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::crop_ranges;
-    use quill::video_edit::Crop;
-
-    #[test]
-    fn crop_sliders_start_on_the_whole_frame() {
-        assert_eq!(crop_ranges(None), ((0.0, 1.0), (0.0, 1.0)));
-        let crop = Crop {
-            x: 250,
-            y: 100,
-            w: 500,
-            h: 800,
+/// `Crop::paintFrame` and `paintGrid`: the fade outside, a thin frame,
+/// thick corner brackets and the thirds grid at `grid` opacity.
+fn paint_crop(fit: Bounds<Pixels>, cut: Bounds<Pixels>, grid: f32, window: &mut Window) {
+    for band in [
+        Bounds::from_corners(fit.origin, point(fit.right(), cut.top())),
+        Bounds::from_corners(point(fit.left(), cut.bottom()), fit.bottom_right()),
+        Bounds::from_corners(
+            point(fit.left(), cut.top()),
+            point(cut.left(), cut.bottom()),
+        ),
+        Bounds::from_corners(
+            point(cut.right(), cut.top()),
+            point(fit.right(), cut.bottom()),
+        ),
+    ] {
+        if band.size.width > px(0.) && band.size.height > px(0.) {
+            window.paint_quad(fill(band, palette::crop_fade()));
+        }
+    }
+    window.paint_quad(outline(
+        cut.dilate(px(FRAME_LINE / 2.0)),
+        palette::text().opacity(0.5),
+        BorderStyle::Solid,
+    ));
+    if grid > 0.0 {
+        let line = palette::text().opacity(0.5 * grid);
+        for third in [1.0 / 3.0, 2.0 / 3.0] {
+            let x = cut.left() + cut.size.width * third;
+            let y = cut.top() + cut.size.height * third;
+            window.paint_quad(fill(
+                Bounds::new(point(x, cut.top()), size(px(1.), cut.size.height)),
+                line,
+            ));
+            window.paint_quad(fill(
+                Bounds::new(point(cut.left(), y), size(cut.size.width, px(1.))),
+                line,
+            ));
+        }
+    }
+    let length = px(BRACKET).min(cut.size.width.min(cut.size.height) / 2.);
+    let thick = px(BRACKET_LINE);
+    let half = thick / 2.;
+    let white = palette::text();
+    for (corner, right, bottom) in [
+        (cut.origin, false, false),
+        (cut.top_right(), true, false),
+        (cut.bottom_left(), false, true),
+        (cut.bottom_right(), true, true),
+    ] {
+        let x = if right {
+            corner.x - length + half
+        } else {
+            corner.x - half
         };
-        assert_eq!(crop_ranges(Some(crop)), ((0.25, 0.75), (0.1, 0.9)));
+        // Each arm is centered on the frame line.
+        let y = corner.y - half;
+        window.paint_quad(fill(Bounds::new(point(x, y), size(length, thick)), white));
+        let x = corner.x - half;
+        let y = if bottom {
+            corner.y - length + half
+        } else {
+            corner.y - half
+        };
+        window.paint_quad(fill(Bounds::new(point(x, y), size(thick, length)), white));
+    }
+}
+
+/// `paintPlayBadge`: a dim circle with a play triangle.
+fn paint_play_badge(center: Point<Pixels>, window: &mut Window) {
+    let badge = Bounds::centered_at(center, size(px(BADGE), px(BADGE)));
+    window.paint_quad(fill(badge, palette::dim()).corner_radii(px(BADGE / 2.0)));
+    let side = BADGE * 0.36;
+    let mut path = PathBuilder::fill();
+    // Nudged right so the triangle looks centered.
+    let left = center.x - px(side * 0.38);
+    path.move_to(point(left, center.y - px(side / 2.0)));
+    path.line_to(point(left + px(side * 0.9), center.y));
+    path.line_to(point(left, center.y + px(side / 2.0)));
+    path.close();
+    if let Ok(path) = path.build() {
+        window.paint_path(path, palette::text());
     }
 }
