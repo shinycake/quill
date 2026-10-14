@@ -327,10 +327,50 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
 
 ## Deviations from tdesktop
 
-- Forge animation simplified (see above).
+- Split in two PRs. This one (`gift-auctions-craft-resale`) ships the
+  core for all three features (parsing, state, requests, driver) plus the
+  resale and auction UI. The crafting boxes (info, craft, select, result,
+  forge) follow in `gift-crafting`, which also ticks
+  `parity:premium-gift-auctions`. The whole thing passed ~6,000 lines.
+- Forge animation simplified (crafting PR).
 - The "Learn more about Telegram Gifts" link opens Quill's Premium
   features page (gifts section) like tdesktop's premium preview.
+- Resale listings load page by page with a "Show more" button under the
+  grid instead of tdesktop's load-on-scroll.
+- The chat-list "Active Auction" bar is drawn first by
+  `suggestion_card` (tdesktop gives it the top `Priority::GiftAuctions`)
+  rather than as a new `Suggestion` enum variant, which is a hotspot.
+- The auction box's "⋯" menu has "About" and "Copy Link"; "Share" (the
+  forward box) is left out.
+- "Custom Amount" opens inline in the bid box instead of a separate box.
+- "About shown" is stored once for the app (`gift_market.json`), not per
+  account.
+- Gift stickers that are not downloaded yet show the gift glyph; the demos
+  have no sticker files, so every capture shows it.
+- The attribute filter popups cannot be captured statically, so the
+  resale capture shows the pills with a model filter applied
+  ("2 Models").
 
 ## How verified
 
-(Filled in by the build.)
+- `quill-tools/gate.sh`: `GATE OK core=4368 0 ui=650 0` (fmt, clippy with
+  `-D warnings`, core and UI tests).
+- Unit tests in `src/gift_market/tests.rs` (filters, sort, attribute
+  counts, auction phases, bid rows, bid actions, slider steps round trip),
+  driver tests in `src/connect/tests/` (resale search, buy with price
+  change, auction state and bids: place vs increase for the same
+  recipient), deep link parse, and link preview button labels.
+- UI tests (`src/ui/gift_market_tests.rs`, `#[gpui_kit::test]`): resale
+  filters, sort and Back; listing to buy steps; the bid slider sets the
+  button label ("Add ★26,000 to Your Bid", the minimum-bid block → ★4,050);
+  About → Info; the chat-list bar shows while a bid runs.
+- `scripts/check-hotspots.sh origin/main` and `scripts/check-file-size.sh`
+  pass.
+- Captures in light and dark through the demo-capture build
+  (`ready-gift-resale`, `ready-gift-auction` with `QUILL_DEMO_MARKET` =
+  `bid`, `info`, `about`, `send`, `active`, `bought`, and the resale
+  `confirm` step). Looking at them found two bugs, both fixed: the about
+  box cut its lines off instead of wrapping, and the minimum-bid block
+  used a plain star instead of the gold Star icon.
+- Not verified against a live account: no bid, buy or resale request was
+  sent to Telegram.
