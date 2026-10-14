@@ -31,7 +31,8 @@ mod demo;
 mod dialogs;
 mod menu;
 pub(crate) mod state;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests;
 
 /// A sticker being dragged to a new place in reorder mode.
