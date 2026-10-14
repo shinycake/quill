@@ -644,6 +644,30 @@ impl QuillApp {
                         ),
                     ),
             );
+        // tdesktop's Settings phone row only explains that the number is
+        // changed in the phone apps.
+        let phone = me
+            .and_then(|me| self.session().and_then(|s| s.user(me)))
+            .map(|u| super::group_panels::format_phone(&u.phone_number))
+            .unwrap_or_default();
+        panel = panel.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(section("Phone number"))
+                .child(div().text_sm().child(phone))
+                .child(
+                    div().flex().gap_2().child(
+                        Button::new("edit-profile-change-phone")
+                            .label("Change number…")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_change_phone_dialog(cx);
+                            })),
+                    ),
+                ),
+        );
         // Name and profile colors live in their own box (tdesktop "Your
         // color"), which also covers the reply and profile icons.
         panel = panel.child(

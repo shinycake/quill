@@ -1,6 +1,7 @@
-//! The box behind your own phone row. tdesktop cannot change a number:
-//! tapping the row (Settings, or `tg://settings/edit/change-number`) only
-//! shows `lng_change_phone_error`, so Quill shows the same note.
+//! The note behind the Edit Profile phone row. tdesktop cannot change a
+//! number: its Settings phone row and `tg://settings/edit/change-number`
+//! only show `lng_change_phone_error`, so Quill shows the same note (with
+//! a title, which the kit dialog always renders).
 
 use super::*;
 
@@ -39,8 +40,10 @@ mod tests {
 
     #[test]
     fn note_matches_tdesktop_string() {
-        assert!(CHANGE_PHONE_ERROR.starts_with("You can only change your phone number"));
-        assert!(CHANGE_PHONE_ERROR.ends_with("to update your number."));
+        assert_eq!(
+            CHANGE_PHONE_ERROR,
+            "You can only change your phone number using mobile Telegram apps. Please use an official Telegram app on your phone to update your number."
+        );
     }
 }
 

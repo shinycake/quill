@@ -10,11 +10,11 @@ TDLib's schema marks `phoneNumberCodeTypeChange` "for official Android and iOS a
 
 ## What changed
 
-Tapping the phone row on your own profile opens a "Change phone number" box with that same note and an OK button (`src/ui/profile_panels/change_phone_dialog.rs`). Copying the number still works from the row's context menu. The existing backend (`sendPhoneNumberCode` with `phoneNumberCodeTypeChange`) is untouched and has no UI, matching tdesktop.
+Quill's counterpart of tdesktop's Settings > My Account is the Edit Profile dialog, so it gets a "Phone number" section (the formatted number and a "Change number…" button) that opens a "Change phone number" box with the same note and an OK button (`change_phone_dialog.rs`). The kit dialog always renders a title, so the box has one; tdesktop's inform box has only text and OK. `tg://settings/edit/change-number` (and `change_number`) opens the same box (`SettingsTarget::ChangePhone`). The profile panel's phone row is unchanged: it only copies, like `info_profile_actions.cpp`. The existing backend (`sendPhoneNumberCode` with `phoneNumberCodeTypeChange`) is untouched and has no UI, matching tdesktop.
 
 ## Verified
 
-- Unit test for the copy; a GPUI UI test opens and closes the box (`demo-capture`).
+- Unit tests for the exact string and the deep-link routing; a GPUI UI test opens and closes the box (`demo-capture`). The Edit Profile button and the OK click are not exercised by a test.
 - No request is sent by this change; nothing was submitted to the real account.
 
 ## Unverified / why the item is not ticked
