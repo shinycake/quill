@@ -1,4 +1,5 @@
 //! message media attachments: photo/video/voice/sticker/location/dice rendering.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::nested_click::SwallowPress;

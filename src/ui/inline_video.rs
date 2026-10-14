@@ -5,6 +5,7 @@
 //! Players live while their row renders and are dropped a couple of
 //! renders after it scrolls away (or the chat changes). A round video
 //! message plays once with sound when clicked, then loops muted again.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::native_video::{NativeVideo, Purpose, VideoPicture};

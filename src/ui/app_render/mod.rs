@@ -1,4 +1,5 @@
 //! impl Render for QuillApp (root view composition).
+#![deny(clippy::indexing_slicing)]
 
 use super::actions::{
     AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,

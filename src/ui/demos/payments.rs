@@ -1,4 +1,5 @@
 //! Screenshot demos: payments.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::demo::seed_ready_media_session;

@@ -22,6 +22,7 @@
 //! The vendored Windows platform parks a hidden window's frames
 //! (`third_party/gpui-pre-windows/src/events.rs`); on X11 an unmapped
 //! window stops drawing and the idle timer parks it on its own.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 #[allow(unused_imports)]

@@ -1,4 +1,5 @@
 //! Screenshot demos: media.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::audio_playback::{apply_ready_audio, apply_ready_voice};

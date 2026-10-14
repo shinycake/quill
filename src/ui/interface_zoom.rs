@@ -27,6 +27,7 @@
 //! default bodies (the vendored platforms override some of them, e.g.
 //! `frame_waker` for idle frames). `forwards_every_trait_method` checks
 //! this against the GPUI source after a GPUI upgrade.
+#![deny(clippy::indexing_slicing)]
 
 use std::cell::{Cell, RefCell};
 use std::ffi::OsString;

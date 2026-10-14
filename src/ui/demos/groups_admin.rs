@@ -1,4 +1,5 @@
 //! Screenshot demos: groups admin.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::groups::apply_ready_group_manage;

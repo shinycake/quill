@@ -11,6 +11,7 @@
 //!   clipboard whose text is a list of `file://` URIs (Dolphin, the
 //!   `x-special/gnome-copied-files` payload) or, on Linux, of absolute paths
 //!   of existing files (GNOME Files).
+#![deny(clippy::indexing_slicing)]
 
 use std::path::PathBuf;
 
