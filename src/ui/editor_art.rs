@@ -1,5 +1,6 @@
 //! Pictures to place on a photo in the editor: emoji drawn with the
 //! system's color emoji font, and stickers decoded to their first frame.
+#![deny(clippy::indexing_slicing)]
 
 use image::RgbaImage;
 use quill::telegram::envelope::StickerFormat;

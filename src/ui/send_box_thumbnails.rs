@@ -5,6 +5,7 @@
 //! it in the background when the file joins the tray: the picture decoded
 //! at 320 px on its long side, JPEG quality 87. The file itself is sent as
 //! it is.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::image_decode::{self, DecodeSize};

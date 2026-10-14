@@ -2,6 +2,7 @@
 //! "Your first Grams!" (iOS `WalletTransactionScreen`,
 //! `WalletNftScreen`, `WalletFirstGramsScreen`). All read-only: no Send,
 //! no Trade, no decrypting a comment.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_media::{MediaCorners, spoiler_surface};

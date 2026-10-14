@@ -1,4 +1,5 @@
 //! Screenshot demos: chat list.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::chat_list::apply_ready_chat_list_3;

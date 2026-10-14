@@ -7,6 +7,7 @@
 //! (`cpu`) and switches the swap chain to scRGB while one shows on an HDR
 //! display (`windows.rs`). Linux shows the SDR picture: GPUI's wgpu
 //! renderer has no HDR surface; every entry point here answers "SDR" there.
+#![deny(clippy::indexing_slicing)]
 
 #[cfg(any(windows, test))]
 mod cpu;

@@ -18,6 +18,7 @@
 //! natively. The clock is a task that wakes every frame while something
 //! animates and otherwise only for the next deadline, and stops when no
 //! window is left.
+#![deny(clippy::indexing_slicing)]
 
 mod position;
 mod view;

@@ -2,6 +2,7 @@
 //! area. Each file registers its demos with `register_demos!`; a demo for a
 //! feature with its own module belongs in that module instead (see
 //! docs/decisions/codex-refactor-1.md).
+#![deny(clippy::indexing_slicing)]
 
 mod bots_profile;
 mod chat_list;

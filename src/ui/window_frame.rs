@@ -10,6 +10,7 @@
 //! title and the caption buttons. The change applies at once to every open
 //! window, like tdesktop's `nativeWindowFrameChanges`. macOS always has its
 //! own frame and shows no switch.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::{ActiveTheme, TITLE_BAR_HEIGHT, TitleBar};
 use gpui_kit::prelude::FluentBuilder;

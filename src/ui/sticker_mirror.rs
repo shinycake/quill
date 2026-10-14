@@ -5,6 +5,7 @@
 //! same way as its (mirrored) effect. Here the decoded frames are flipped
 //! once, kept by the identity of the decoded frames, and drawn from then
 //! on without further work.
+#![deny(clippy::indexing_slicing)]
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -64,17 +65,17 @@ pub(super) fn mirrored(visual: AnimatedVisual) -> AnimatedVisual {
             ..clip
         }),
         AnimatedVisual::Image(image) => {
-            let set: Arc<[Arc<RenderImage>]> = Arc::from(vec![image]);
+            let set: Arc<[Arc<RenderImage>]> = Arc::from(vec![image.clone()]);
             // Keyed by the image itself, not the throwaway slice.
             let flipped = FLIPPED.with(|cache| {
                 cache
                     .borrow()
                     .iter()
-                    .find(|(src, _)| src.len() == 1 && Arc::ptr_eq(&src[0], &set[0]))
+                    .find(|(src, _)| matches!(&**src, [only] if Arc::ptr_eq(only, &image)))
                     .map(|(_, f)| f.clone())
             });
             let flipped = flipped.unwrap_or_else(|| flipped_set(&set));
-            AnimatedVisual::Image(flipped[0].clone())
+            AnimatedVisual::Image(flipped.first().cloned().unwrap_or(image))
         }
     }
 }

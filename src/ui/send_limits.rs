@@ -1,6 +1,7 @@
 //! The viewer's own sending rights in the open group: the sentence that
 //! replaces the composer when nothing can be sent, and the refusals for a
 //! single recording, attachment, sticker, GIF or poll (`quill::send_rights`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

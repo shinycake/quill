@@ -13,6 +13,7 @@
 //! `video_editor_tools.rs`, the strip and the cover bubble
 //! `video_editor_timeline.rs`, the quality dots and the bar
 //! `video_editor_controls.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::native_video::NativeVideo;

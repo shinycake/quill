@@ -14,6 +14,7 @@
 //! runs after the overlay is built, so the first note asks for one more frame;
 //! the overlay then turns what has not played yet into effects once the
 //! animation has downloaded and decoded.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::sticker_playback::PlaybackSize;

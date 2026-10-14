@@ -8,6 +8,7 @@
 //! (`QWindowsInputContext::hasRTLInputLanguage`: a layout whose locale's
 //! font signature has the right-to-left bit); on macOS and Linux it is never
 //! set, so the submenu is Windows-only, as there.
+#![deny(clippy::indexing_slicing)]
 
 use super::actions::ComposerInsertControlChar;
 use super::app::QuillApp;

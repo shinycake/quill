@@ -4,6 +4,7 @@
 //! whole, with the thirds grid while it moves; a click pauses with the play
 //! badge in the middle (`setupTapToPause`, `paintPlayBadge`). Rotate and
 //! Flip live here too. The strip is `video_editor_timeline.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::native_video::{NativeVideo, Purpose, VideoPicture, supported};

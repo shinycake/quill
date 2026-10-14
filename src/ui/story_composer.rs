@@ -1,4 +1,5 @@
 //! story composer overlay.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::pressable::PressableDiv;

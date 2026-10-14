@@ -294,3 +294,81 @@ Verified: plain clippy with the new `deny` passes for `--features ui`,
 `ui,demo-capture,frame-profiler` and `--no-default-features` (all targets);
 `-W clippy::indexing_slicing` shows only the open modules above; gate.sh. Not
 checked: Linux and Windows builds of the UI.
+
+## Phase D, batch 5: UI modules with platform code
+
+Branch `panic-lints-d5`. 39 more roots under `src/ui/` start with
+`#![deny(clippy::indexing_slicing)]`: `app_render`, `appearance`, `demo`,
+`hdr_image`, `keybindings`, `message_media`, `message_text`, `notifications`,
+`notify_windows`, `os_menus`, `touch_bar` (each in its `mod.rs`, which covers
+the children), the loose files `capture_access`, `capture_block`,
+`clipboard_files`, `editor_art`, `frame_profile`, `image_budget`,
+`inline_video`, `interface_zoom`, `native_video`, `native_video_rotate`,
+`pull_next_ui`, `spellcheck_ui`, `startup_failure`, `system_unlock`,
+`video_pip`, `window_control`, `window_frame`, and the twelve `demos/*.rs`
+children (`demos/mod.rs` is a hotspot, so each child carries its own deny).
+Test-only files are left alone (tests may index).
+
+Sites fixed, 1 and no `#[expect]`:
+
+- Windows, found by hand: `clipboard_files` drive-letter URIs
+  (`/C:/Users/a`) checked `bytes[0]` and `bytes[2]` behind a length test; it is
+  now `matches!(bytes, [b'/', _, b':', ..])`, same result.
+- macOS (`--features ui,demo-capture,frame-profiler --all-targets`) had no
+  open sites in these modules: batch 4 had already fixed `message_text`.
+- Linux: the CI linux-fmt-clippy-test job (see the PR) found no further sites.
+
+Behaviour is unchanged for valid input. Verified: plain clippy `-D warnings`
+on macOS with the denies, gate.sh, check-hotspots.sh. Windows could not be
+built here (`llvm-rc` and the MSVC headers are missing for a cross check), so
+every `cfg(windows)`/`cfg(target_os = "windows")` block in the batch's modules
+was read by hand: `capture_access`, `capture_block`, `clipboard_files`,
+`interface_zoom`, `spellcheck_ui`, `startup_failure`, `window_control`,
+`window_frame`, `notify_windows/position`, `notifications/native_extras`,
+`message_text` (font constant) and `os_menus` (dock menu). No Windows-only file
+exists in these directories.
+
+Still without a deny: `media_viewer*`, `image_decode`, the sticker UI, the
+video editor, `video_timeline`, `profile_photo_video`, the `composer` and
+`composer_ui` send menu files, `send_*`, `ton_wallet_*`, `earn*`, and the
+hotspots `ui/mod.rs`, `app`, `app_demo`, `shell`, `screenshot_demo`,
+`demos/mod.rs`.
+
+## Phase D, batch 6: stickers, video editor, composer, send, TON wallet, earn
+
+Branch `panic-lints-d6`. 46 more roots start with
+`#![deny(clippy::indexing_slicing)]`:
+
+- Library: `sticker_image`, `sticker_playback`, `sticker_set_box`,
+  `sticker_suggest`, `sticker_video`, `video_edit`, `video_timeline`,
+  `profile_photo_video`.
+- UI: `premium_sticker_effect`, `premium_sticker_gate`, `sticker_mirror`,
+  `sticker_playback`, `stickers_ui`, `video_editor`, `video_editor_controls`,
+  `video_editor_set`, `video_editor_timeline`, `video_editor_tools`,
+  `composer_date`, `composer_events`, `composer_field`, `composer_rtl`,
+  `composer_shortcuts`, `composer_state`, `composer_suggest`, `composer_thumb`,
+  `composer_unicode`, `send_box_options`, `send_box_state`,
+  `send_box_thumbnails`, `send_button_ui`, `send_fly`, `send_limits`,
+  `ton_wallet_details`, `ton_wallet_money`, `ton_wallet_ui`, `earn_state`,
+  `story_composer`, and the directory roots `composer/mod.rs`,
+  `composer_ui/mod.rs`, `sticker_set_box/mod.rs`, `send_effects/mod.rs`,
+  `earn/mod.rs`.
+- Hotspots (deny line only): `shell`, `screenshot_demo`, `demos/mod.rs`.
+- Test-only files carry no attribute (`allow-indexing-slicing-in-tests`).
+
+Sites fixed, 4 and no `#[expect]`:
+
+- `sticker_mirror` 3: the identity lookup of a single image and the flipped
+  result used `src[0]`, `set[0]` and `flipped[0]`; they are now a one-element
+  slice pattern and `first()`, falling back to the unflipped image.
+- `composer/toggle_composer_silent` 1: the command menu's selected row is read
+  with `get`; a missing row closes nothing and returns `false`.
+
+The library modules had no sites left. Behaviour is unchanged for valid input.
+Windows `cfg` blocks in the batch (`composer_unicode::rtl_extensions`) were read
+by hand and already use `get`.
+
+Skipped: `media_viewer*`, `image_decode`, `hdr_image` as asked; `ui/mod.rs`,
+`app`, `app_demo`, `gift_send_ui` and `app_render/frame_upkeep` are touched by
+open PRs #786 and #789. Still without a deny: those, plus `media_viewer`
+(5 sites: `transform` 4, `mod` 1; `ui/media_viewer` navigation 3, playback 1).

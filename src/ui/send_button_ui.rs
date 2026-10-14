@@ -7,6 +7,7 @@
 //! tested); this file only draws them. The fade is driven by a timestamp and
 //! `request_animation_tick`, which stops asking once the fade has settled,
 //! so an idle composer causes no redraws.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::recording::RecordMode;

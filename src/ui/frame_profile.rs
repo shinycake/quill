@@ -6,6 +6,7 @@
 //! present interval while animating) are written to `<path>` as percentile
 //! lines. Pair it with Instruments' Time Profiler on a release build with
 //! line tables to see which code a slow frame spent its time in.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;
