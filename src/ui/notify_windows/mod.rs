@@ -345,10 +345,19 @@ impl QuillApp {
         let limit = custom::clamp_count(quill::notify_prefs::current().count);
         let free = limit.saturating_sub(self.notify.windows.live());
         let display = self.notify_display(cx);
-        if let Some((display_id, area)) = display {
-            for (key, pending) in self.notify.windows.queue.take(free) {
-                self.open_notification(key, pending, display_id, area, cx);
+        match display {
+            Some((display_id, area)) => {
+                for (key, pending) in self.notify.windows.queue.take(free) {
+                    self.open_notification(key, pending, display_id, area, cx);
+                }
             }
+            // No display to show them on: drop them rather than keep a
+            // queue nothing drains.
+            None if !self.notify.windows.queue.is_empty() => {
+                eprintln!("quill: no display for notification windows");
+                self.notify.windows.queue.clear();
+            }
+            None => {}
         }
         self.notify_restack(cx);
         self.ensure_notify_clock(cx);
@@ -371,11 +380,13 @@ impl QuillApp {
             photo: pending.icon,
             hide_sender: pending.locked,
             can_reply: pending.reply && pending.notification.message_id.is_some(),
+            reply_inline: self.notify.windows.platform != NotifyPlatform::X11,
         };
         let corner = quill::notify_prefs::current().corner;
         let Some(popup) =
             self.open_popup(id, content, MIN_HEIGHT, 0.0, corner, display_id, area, cx)
         else {
+            eprintln!("quill: could not open a notification window");
             return;
         };
         let now = Instant::now();
@@ -603,6 +614,12 @@ impl QuillApp {
                 }
             }
             ViewEvent::Close => self.unlink_notification(id, cx),
+            ViewEvent::ReplyInApp => {
+                if let Some(key) = self.notify_key(id) {
+                    self.push_notification_click(&key, NotificationAction::Reply);
+                    self.clear_custom_notifications(key.0.as_ref(), key.1, cx);
+                }
+            }
             ViewEvent::ReplyOpened => {
                 if let Some(shown) = self.notify.windows.shown.iter_mut().find(|s| s.id == id) {
                     shown.replying = true;

@@ -32,10 +32,25 @@ mod tests;
 
 use crate::calls::proxy::ProxyKind;
 use crate::proxy::{ProxyDraft, ProxyEntry};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 /// The comment that marks the system proxy's entry in TDLib's list.
+/// How long a step TDLib refused waits before it is sent again.
+pub const RETRY: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// A step the connection driver sent, until its answer is known.
+#[derive(Debug, Clone)]
+pub struct SentStep {
+    pub step: SystemProxyStep,
+    pub at: std::time::Instant,
+    /// TDLib's answer came back as an error.
+    pub refused: bool,
+    /// The answer came back.
+    pub settled: bool,
+}
+
 pub const SYSTEM_PROXY_COMMENT: &str = "Quill: system proxy";
 
 /// How often the OS configuration is read again while Quill runs.
@@ -62,9 +77,19 @@ pub fn detect() -> Option<ProxyDraft> {
     platform::detect()
 }
 
-/// The last configuration read by the background reader, which starts on
-/// the first call and reads again every [`REFRESH`]. Never blocks.
-pub fn latest() -> Detected {
+/// Whether the background reader should read (the mode is "Use system
+/// proxy settings" and no custom proxy is on).
+static WANTED: AtomicBool = AtomicBool::new(false);
+
+/// The OS proxy configuration while `wanted`, as last read by the
+/// background reader (it starts on the first wanted call and reads every
+/// [`REFRESH`] while wanted). Not wanted: `Direct`, which drops the hidden
+/// entry, and nothing is read. Never blocks.
+pub fn latest(wanted: bool) -> Detected {
+    WANTED.store(wanted, Ordering::Relaxed);
+    if !wanted {
+        return Detected::Direct;
+    }
     static SLOT: OnceLock<Arc<Mutex<Detected>>> = OnceLock::new();
     let slot = SLOT.get_or_init(|| {
         let slot = Arc::new(Mutex::new(Detected::Unknown));
@@ -73,12 +98,14 @@ pub fn latest() -> Detected {
         // the slot at `Unknown`, which keeps the system mode inert.
         let _ = crate::thread_guard::spawn_guarded("quill-system-proxy", move || {
             loop {
-                let found = match detect() {
-                    Some(proxy) => Detected::Proxy(proxy),
-                    None => Detected::Direct,
-                };
-                if let Ok(mut guard) = writer.lock() {
-                    *guard = found;
+                if WANTED.load(Ordering::Relaxed) {
+                    let found = match detect() {
+                        Some(proxy) => Detected::Proxy(proxy),
+                        None => Detected::Direct,
+                    };
+                    if let Ok(mut guard) = writer.lock() {
+                        *guard = found;
+                    }
                 }
                 std::thread::sleep(REFRESH);
             }

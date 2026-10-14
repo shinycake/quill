@@ -325,9 +325,11 @@ impl QuillApp {
             need = RedrawNeed::Now;
         }
         // `parity:data-proxy-extras`: "Use system proxy settings".
+        let proxy = &live.driver.session.settings.proxy;
+        let wanted = proxy.prefs.use_system && proxy.enabled().is_none();
         if live
             .driver
-            .system_proxy_tick(&quill::system_proxy::latest())
+            .system_proxy_tick(&quill::system_proxy::latest(wanted))
         {
             progressed = true;
         }

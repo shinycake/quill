@@ -161,6 +161,8 @@ impl QuillApp {
         // Chat windows draw the account on screen: the outgoing account's
         // close (and come back when it is switched to again).
         self.close_chat_windows_for_switch(cx);
+        // Quill's notification windows point at the account on screen.
+        self.close_all_notify_windows(cx);
         // `parity:notify-all-accounts`: the outgoing account stays connected
         // in the background, and an account already running there comes
         // forward as it is instead of restarting.

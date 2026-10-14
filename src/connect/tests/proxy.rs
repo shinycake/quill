@@ -352,3 +352,23 @@ fn disabling_drops_the_system_proxy() {
     assert!(rig.driver.system_proxy_tick(&detected("sys.lan")));
     assert_eq!(sent_request(&rig.recorder, "removeProxy")["proxy_id"], 5);
 }
+
+#[test]
+fn a_refused_system_proxy_waits_and_stays_out_of_the_box() {
+    let mut rig = Rig::new();
+    rig.load_list(&[]);
+    assert!(rig.driver.system_proxy_tick(&detected("bad.lan")));
+    rig.answer(
+        "addProxy",
+        json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
+    );
+    assert!(
+        !rig.driver.system_proxy_tick(&detected("bad.lan")),
+        "not sent again"
+    );
+    assert_eq!(rig.count("addProxy"), 1);
+    assert!(rig.driver.session.settings.proxy.error.is_none());
+    // A new OS setting is tried at once.
+    assert!(rig.driver.system_proxy_tick(&detected("good.lan")));
+    assert_eq!(rig.count("addProxy"), 2);
+}

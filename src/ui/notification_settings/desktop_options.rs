@@ -67,6 +67,11 @@ impl QuillApp {
                 }),
             ));
         }
+        if !custom_active {
+            return section.into_any_element();
+        }
+        // Only the custom windows check Focus mode (tdesktop
+        // `advancedWrap`).
         if platform == NotifyPlatform::Windows {
             section = section.child(switch_row(
                 "notify-focus-toggle",
@@ -77,9 +82,6 @@ impl QuillApp {
                     cx.notify();
                 }),
             ));
-        }
-        if !custom_active {
-            return section.into_any_element();
         }
         section = section.children(self.notify_display_choice(prefs.display, cx));
         section

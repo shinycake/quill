@@ -56,9 +56,14 @@ custom windows are used.
 
 ### Platform notes
 
-- X11: GPUI reports one display covering the whole X screen, so the display
-  choice is hidden and positions are relative to that screen. Without a
-  compositor the transparent fade may show black.
+- X11: GPUI reports one display covering the whole X screen with no work
+  area, so the display choice is hidden, positions are relative to that
+  screen and a corner window can sit over a panel. Without a compositor the
+  transparent fade may show black. A pop-up window there never gets the
+  keyboard, so Reply opens the chat in the main window instead of a field.
+- Windows are closed on passcode lock, account switch and sign out: they
+  belong to the account on screen.
+- A Linux system without a notification daemon is asked again every 30 s.
 - Wayland and macOS (unforced) keep the system notifications, as tdesktop.
 - The display is identified by its UUID when the platform gives one, else
   by its id.
@@ -74,8 +79,11 @@ tagged "Quill: system proxy":
 - Windows: `HKCU\...\Internet Settings` `ProxyEnable` and `ProxyServer`.
 - Linux: `all_proxy`, `https_proxy`, `http_proxy`, then GNOME
   `org.gnome.system.proxy` in manual mode.
-- A background reader re-reads every 15 s; the connection driver adds,
-  edits, enables or removes the hidden entry one step at a time.
+- A background reader re-reads every 15 s, only while the mode is "Use
+  system proxy settings" and no custom proxy is on; the connection driver
+  adds, edits, enables or removes the hidden entry one step at a time. A
+  step TDLib refuses waits 5 minutes (or a new OS setting) and its error
+  stays out of the proxy box.
 - PAC scripts are not evaluated.
 - The entry is not in the list, has no QR or share, is not used for calls and
   is not in auto-switch, like tdesktop.

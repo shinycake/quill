@@ -34,6 +34,9 @@ pub(super) enum Content {
         photo: Option<PathBuf>,
         hide_sender: bool,
         can_reply: bool,
+        /// The reply field opens in the window; otherwise Reply opens the
+        /// chat (X11: a pop-up window there never gets the keyboard).
+        reply_inline: bool,
     },
     HideAll,
     Sample,
@@ -46,6 +49,8 @@ pub(super) enum ViewEvent {
     Activate,
     Close,
     ReplyOpened,
+    /// Reply where the window can't take typing: open the chat to answer.
+    ReplyInApp,
     ReplySent(String),
     ReplyHeight(f32),
     HideAll,
@@ -112,6 +117,16 @@ impl NotifyView {
 
     fn open_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.reply.is_some() || !self.can_reply() {
+            return;
+        }
+        if !matches!(
+            self.content,
+            Content::Message {
+                reply_inline: true,
+                ..
+            }
+        ) {
+            self.send(ViewEvent::ReplyInApp, cx);
             return;
         }
         let state = cx.new(|cx| {

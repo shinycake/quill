@@ -280,16 +280,44 @@ impl<S: JsonSender> ConnectDriver<S> {
             detected,
             &proxy.system,
         );
+        // The last step finished (nothing is mutating): an error means
+        // TDLib refused it. The user never asked for it, so the proxy box
+        // doesn't show that error, and the step waits `RETRY` before it is
+        // sent again.
+        if let Some(sent) = self.system_proxy_sent.as_mut()
+            && !sent.settled
+        {
+            sent.settled = true;
+            sent.refused = self.session.settings.proxy.error.take().is_some();
+        }
+        let Some(step) = step else {
+            self.system_proxy_sent = None;
+            return false;
+        };
+        let now = std::time::Instant::now();
+        if let Some(sent) = &self.system_proxy_sent
+            && sent.refused
+            && sent.step == step
+            && now.saturating_duration_since(sent.at) < crate::system_proxy::RETRY
+        {
+            return false;
+        }
+        self.session.settings.proxy.error = None;
+        self.system_proxy_sent = Some(crate::system_proxy::SentStep {
+            step: step.clone(),
+            at: now,
+            refused: false,
+            settled: false,
+        });
         match step {
-            None => false,
-            Some(SystemProxyStep::Add(draft)) => {
+            SystemProxyStep::Add(draft) => {
                 self.add_proxy(&draft, true, SYSTEM_PROXY_COMMENT).is_ok()
             }
-            Some(SystemProxyStep::Edit { id, proxy }) => self
+            SystemProxyStep::Edit { id, proxy } => self
                 .edit_proxy(id, &proxy, true, SYSTEM_PROXY_COMMENT)
                 .is_ok(),
-            Some(SystemProxyStep::Enable { id }) => self.enable_proxy(id).is_ok(),
-            Some(SystemProxyStep::Remove { id }) => self.remove_proxy(id).is_ok(),
+            SystemProxyStep::Enable { id } => self.enable_proxy(id).is_ok(),
+            SystemProxyStep::Remove { id } => self.remove_proxy(id).is_ok(),
         }
     }
 
