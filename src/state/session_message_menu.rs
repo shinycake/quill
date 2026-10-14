@@ -104,6 +104,20 @@ pub struct StickerSetView {
     pub stage: StickerSetViewStage,
     /// The sticker files were asked to download.
     pub files_requested: bool,
+    /// Edits of an owned set in flight and their outcome.
+    pub edits: StickerSetEdits,
+}
+
+impl StickerSetView {
+    /// A view that is still loading its set.
+    pub fn loading(set_id: i64) -> Self {
+        Self {
+            set_id,
+            stage: StickerSetViewStage::Loading,
+            files_requested: false,
+            edits: StickerSetEdits::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +130,9 @@ pub enum StickerSetViewStage {
         installed: bool,
         /// The set holds custom emoji (`addemoji` link, no archive).
         is_emoji: bool,
+        /// The current user created the set (tdesktop `AmCreator`): the
+        /// box offers editing.
+        is_owned: bool,
         stickers: Vec<StickerItem>,
     },
     Failed,
@@ -183,6 +200,7 @@ impl Session {
         name: String,
         installed: bool,
         is_emoji: bool,
+        is_owned: bool,
         stickers: Vec<StickerItem>,
     ) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
@@ -193,8 +211,10 @@ impl Session {
                 name,
                 installed,
                 is_emoji,
+                is_owned,
                 stickers,
             };
+            view.edits.refresh_needed = false;
         }
     }
 

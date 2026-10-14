@@ -183,6 +183,7 @@ impl Session {
                 title,
                 name,
                 is_installed,
+                is_owned,
                 is_custom_emoji,
                 ..
             } => {
@@ -212,6 +213,7 @@ impl Session {
                         name,
                         is_installed,
                         is_custom_emoji,
+                        is_owned,
                         stickers,
                     );
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack {

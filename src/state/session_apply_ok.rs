@@ -28,6 +28,7 @@ impl Session {
         self.apply_privacy_data_ok(pending);
         self.apply_business_ok(pending);
         self.apply_business_extra_ok(pending);
+        self.apply_sticker_creator_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme

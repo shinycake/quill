@@ -1,4 +1,5 @@
 //! Request purposes for stickers, custom emoji, emoji statuses, reactions, GIFs and the media library.
+use crate::state::StickerCreatorPurpose;
 use crate::state::request_purpose::flat_purposes;
 
 /// In-flight requests for stickers, custom emoji, emoji statuses, reactions, GIFs and the media library; wrapped as
@@ -173,6 +174,9 @@ pub enum StickersPurpose {
     /// Slice S9: `removeSavedAnimation` (schema 1.8.67, line 14772).
     /// Response is `ok`; same invalidation as add.
     RemoveSavedAnimation,
+    /// Edits of an owned sticker or emoji set (the set box's creator
+    /// tools); see `creator.rs`.
+    Creator(StickerCreatorPurpose),
 }
 
 flat_purposes!(Stickers(StickersPurpose) {

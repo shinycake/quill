@@ -646,6 +646,7 @@ impl QuillApp {
                     name,
                     installed,
                     is_emoji,
+                    is_owned: _,
                     stickers,
                 } => {
                     let count = stickers.len();

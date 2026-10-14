@@ -81,6 +81,7 @@ mod sponsored;
 mod stars_gift;
 mod stats;
 mod sticker_categories;
+mod sticker_creator;
 mod sticker_tabs;
 mod stories;
 mod story_insights;

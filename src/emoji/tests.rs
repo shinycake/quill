@@ -31,6 +31,7 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
         size: 1,
         is_installed: true,
         is_official: false,
+        is_owned: false,
     };
     session.stickers.emoji.installed_sets = vec![pack(1), pack(2), pack(3)];
     session.remember_emoji_pack_usage(&[10]);

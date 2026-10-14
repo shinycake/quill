@@ -235,6 +235,7 @@ mod tests {
                 size: 2,
                 is_installed: true,
                 is_official: true,
+                is_owned: false,
             },
             StickerSetInfo {
                 id: 78,
@@ -243,6 +244,7 @@ mod tests {
                 size: 1,
                 is_installed: true,
                 is_official: false,
+                is_owned: false,
             },
         ];
         let answer = |extra: u64| {

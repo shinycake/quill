@@ -39,6 +39,7 @@ mod send_as;
 mod send_media_options;
 mod send_options_json;
 mod share_content;
+mod sticker_creator;
 mod stickers;
 mod stories;
 mod story_reply_media;
@@ -73,6 +74,7 @@ mod tests_profile_panels;
 #[cfg(test)]
 mod tests_send_as;
 #[cfg(test)]
+mod tests_sticker_creator;
 mod tests_stickers;
 #[cfg(test)]
 mod tests_stories;
@@ -124,6 +126,7 @@ pub use send_as::*;
 pub use send_media_options::*;
 pub use send_options_json::*;
 pub use share_content::*;
+pub use sticker_creator::*;
 pub use stickers::*;
 pub use stories::*;
 pub use story_reply_media::*;
