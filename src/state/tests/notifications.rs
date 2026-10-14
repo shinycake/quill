@@ -94,7 +94,7 @@ fn scope_mute_default_suppresses_toast_and_sound() {
 }
 
 #[test]
-fn scope_show_preview_default_gates_preview_body() {
+fn scope_show_preview_does_not_hide_desktop_text() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     apply_json(
@@ -115,8 +115,8 @@ fn scope_show_preview_default_gates_preview_body() {
         &scope_settings_json(&extra.0.to_string(), 0, false),
     );
     session.app_active = false;
-    // Global previews enabled, but the scope default disables them.
-    session.settings.hide_notification_previews = false;
+    // The scope's `show_preview` governs mobile pushes; tdesktop's toast
+    // follows only its own Name/Text setting, so the text still shows.
     apply_json(
         &mut session,
         &seq,
@@ -126,7 +126,7 @@ fn scope_show_preview_default_gates_preview_body() {
     assert_eq!(session.settings.pending_notifications.len(), 1);
     assert_eq!(
         session.settings.pending_notifications[0].for_display().body,
-        "New message"
+        "secret text"
     );
     let chat = session.chats.get(&14).unwrap();
     assert!(!session.effective_preview_allowed(chat));
@@ -210,7 +210,7 @@ fn phase81_desktop_notification_replay() {
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
     );
     // App in background: incoming unread message queues a notification.
-    // `hide_notification_previews` defaults to true → generic body.
+    // Previews show by default, as in tdesktop.
     session.app_active = false;
     apply_json(
         &mut session,
@@ -223,11 +223,23 @@ fn phase81_desktop_notification_replay() {
     assert_eq!(queued.chat_id, ChatId(7));
     assert_eq!(queued.title, "Ada");
     assert_eq!(queued.count, 1);
-    assert_eq!(queued.for_display().body, "New message");
+    assert_eq!(queued.for_display().body, "hey you");
     session.settings.pending_notifications.clear();
 
-    // Previews enabled → body is the message preview.
-    session.settings.hide_notification_previews = false;
+    // Name only → generic body; text on again → the message preview.
+    session.settings.notify_view = crate::notify::NotifyView::ShowName;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey you","entities":[]}}}}"#,
+    );
+    assert_eq!(
+        session.settings.pending_notifications[0].for_display().body,
+        crate::notify::GENERIC_BODY
+    );
+    session.settings.pending_notifications.clear();
+    session.settings.notify_view = crate::notify::NotifyView::ShowPreview;
     apply_json(
         &mut session,
         &seq,
@@ -275,7 +287,6 @@ fn phase81_desktop_notification_suppressed_cases() {
         r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Noor","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
     );
     session.app_active = false;
-    session.settings.hide_notification_previews = false;
     let incoming = |id: i64, chat_id: i64| {
         format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}}}"#
@@ -786,7 +797,6 @@ fn a_new_reaction_notifies_when_the_setting_allows_it() {
     assert_eq!(session.chats[&14].unread_reaction_count, 1);
 
     apply_json(&mut session, &seq, &sink, REACTION_SETTINGS_ALL);
-    session.settings.hide_notification_previews = false;
     apply_json(&mut session, &seq, &sink, &reaction_update(2));
     let queued = &session.settings.pending_notifications;
     assert_eq!(queued.len(), 1);
@@ -885,4 +895,23 @@ fn default_auto_delete_roundtrip_and_failure() {
     );
     assert!(session.settings.default_auto_delete_error.is_some());
     assert!(!session.settings.default_auto_delete_busy);
+}
+
+#[test]
+fn group_notification_names_the_sender() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    apply_json(&mut session, &seq, &sink, REACTOR);
+    session.app_active = false;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":14,"sender_id":{"@type":"messageSenderUser","user_id":31},"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"lunch?","entities":[]}}}}"#,
+    );
+    let queued = &session.settings.pending_notifications;
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].title, "Crew");
+    assert_eq!(queued[0].body, "Ada Lovelace: lunch?");
 }

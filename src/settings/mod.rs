@@ -26,7 +26,13 @@ pub struct Preferences {
     pub version: u32,
     pub account: AccountKey,
     /// Application API credentials are never stored here. See env / local untracked file.
-    pub hide_notification_previews: bool,
+    ///
+    /// tdesktop "Name" / "Text" in Settings > Notifications. Replaces the
+    /// old `hide_notification_previews` key, which defaulted to on with no
+    /// switch to turn it off; serde skips that key in older files, so
+    /// every account starts showing previews, as tdesktop does.
+    #[serde(default)]
+    pub notify_view: crate::notify::NotifyView,
     /// Parity slice: tdesktop "Play sounds" — in-app notification sounds.
     /// Client-side (no TDLib setting exists; `in-app-sounds` is only a
     /// `SettingsSection` deep-link name, schema line 9322).
@@ -55,7 +61,7 @@ impl Default for Preferences {
         Self {
             version: PREFS_VERSION,
             account: AccountKey::primary(),
-            hide_notification_previews: true,
+            notify_view: crate::notify::NotifyView::ShowPreview,
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             custom_keybindings: Vec::new(),

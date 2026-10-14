@@ -125,6 +125,7 @@ impl QuillApp {
             // sounds") — the client-side toggle gating
             // `Session::notification_sound_for`.
             body = body.child(this.desktop_notifications_section(cx));
+            body = body.children(this.notify_view_section(cx));
             body = body.child(this.notify_options_section(cx));
             body = body.child(this.attention_section(cx));
             body = body.child(this.events_section(cx));

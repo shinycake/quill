@@ -31,9 +31,62 @@ pub mod dbus;
 use crate::ids::{ChatId, MessageId};
 use crate::telegram::envelope::{ParsedMessage, ReactionNotificationSource, effective_content};
 
-/// Generic body used when previews are hidden (user setting or per-chat
-/// `chatNotificationSettings`), or when the content has no preview text.
-pub const GENERIC_BODY: &str = "New message";
+/// Generic body used when the message text is hidden (the "Show message
+/// text" setting is off) or the content has no preview text: tdesktop's
+/// `lng_notification_preview`.
+pub const GENERIC_BODY: &str = "You have a new message";
+
+/// Title of a toast that hides the chat (passcode lock, or a view that
+/// hides the name): tdesktop shows its app name there.
+pub const APP_TITLE: &str = "Quill";
+
+/// What a message notification reveals: tdesktop's
+/// `Core::Settings::NotifyView` ("Name" and "Text" in Settings >
+/// Notifications). Text implies name, so there are three states, and the
+/// default shows both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifyView {
+    /// Chat name, sender and message text.
+    #[default]
+    ShowPreview,
+    /// Chat name and picture; the body is [`GENERIC_BODY`].
+    ShowName,
+    /// Neither: the toast reads "Quill" / [`GENERIC_BODY`], with no picture.
+    ShowNothing,
+}
+
+impl NotifyView {
+    /// From the two settings switches. Text without name is not a state
+    /// tdesktop offers: turning the text on turns the name on.
+    pub fn from_switches(show_name: bool, show_text: bool) -> Self {
+        if show_text {
+            Self::ShowPreview
+        } else if show_name {
+            Self::ShowName
+        } else {
+            Self::ShowNothing
+        }
+    }
+
+    /// The view after flipping one switch: tdesktop turns the text off
+    /// with the name, and the name on with the text.
+    pub fn toggled(self, name_switch: bool, on: bool) -> Self {
+        if name_switch {
+            Self::from_switches(on, on && self.shows_text())
+        } else {
+            Self::from_switches(on || self.shows_name(), on)
+        }
+    }
+
+    pub fn shows_name(self) -> bool {
+        self != Self::ShowNothing
+    }
+
+    pub fn shows_text(self) -> bool {
+        self == Self::ShowPreview
+    }
+}
 
 /// One notification the UI should show.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,11 +128,11 @@ impl QueuedNotification {
         OsNotification {
             chat_id: self.chat_id,
             message_id: self.message_id,
-            title: "Quill".to_string(),
+            title: APP_TITLE.to_string(),
             body: if self.count > 1 {
                 format!("{} new messages", self.count)
             } else {
-                "You have a new message".to_string()
+                GENERIC_BODY.to_string()
             },
         }
     }
@@ -154,12 +207,14 @@ pub struct NotifyInput<'a> {
     /// one (`Session::active_window_chats`): Telegram Desktop reads a
     /// message shown in an active window on arrival, so it never notifies.
     pub shown_in_active_window: bool,
-    /// `settings::Preferences::hide_notification_previews` (default true).
-    pub hide_previews: bool,
-    /// Effective preview allowance (`Session::effective_preview_allowed`):
-    /// the chat's `show_preview`, or the scope default's when the chat keeps
-    /// `use_default_show_preview`.
-    pub chat_preview_allowed: bool,
+    /// `settings::Preferences::notify_view`: how much the toast reveals.
+    /// The server's per-chat and per-scope `show_preview` is not consulted:
+    /// it governs mobile pushes, and tdesktop ignores it for desktop
+    /// message notifications too.
+    pub view: NotifyView,
+    /// The sender's name when it is not the chat itself (a group member),
+    /// shown before the text as tdesktop's `notificationHeader`.
+    pub sender_name: Option<&'a str>,
     /// Effective "notify about pinned messages" (the chat's
     /// `disable_pinned_message_notifications`, or the scope default's when
     /// the chat keeps `use_default_...`).
@@ -201,9 +256,10 @@ pub fn notify_event(content: &crate::telegram::envelope::MessageContent) -> Opti
 /// 4. The currently open chat does not notify *while the app is active*;
 ///    notify when the app is in the background or the chat isn't open.
 /// 5. Unknown chats (no title, no verified mute/read state) do not notify.
-/// 6. The body is the `MessageContent::preview()` unless previews are hidden
-///    by the user setting or the per-chat setting (or the preview is empty),
-///    in which case it is the generic "New message".
+/// 6. The body is the `MessageContent::preview()`, prefixed "Sender:" in
+///    groups, unless the view hides the text (or the preview is empty), in
+///    which case it is the generic "You have a new message". A view that
+///    hides the name also titles the toast "Quill".
 pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
     let message = input.message;
     if message.is_outgoing {
@@ -230,21 +286,30 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
         Some(NotifyEvent::ContactJoined) if !input.contact_joined_allowed => return None,
         _ => {}
     }
-    let body = if input.hide_previews || !input.chat_preview_allowed {
-        GENERIC_BODY.to_string()
-    } else {
+    let body = if input.view.shows_text() {
         let content = effective_content(&message.content, message.ephemeral.as_ref());
         let preview = wallet_transfer_body(content, chat_id).unwrap_or_else(|| content.preview());
         if preview.trim().is_empty() {
             GENERIC_BODY.to_string()
         } else {
-            preview
+            match input.sender_name.filter(|name| !name.trim().is_empty()) {
+                // tdesktop `lng_dialogs_text_with_from`: "{from}: {message}".
+                Some(sender) => format!("{sender}: {preview}"),
+                None => preview,
+            }
         }
+    } else {
+        GENERIC_BODY.to_string()
+    };
+    let title = if input.view.shows_name() {
+        title.to_string()
+    } else {
+        APP_TITLE.to_string()
     };
     Some(OsNotification {
         chat_id,
         message_id: Some(message.id),
-        title: title.to_string(),
+        title,
         body,
     })
 }

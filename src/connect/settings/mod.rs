@@ -274,6 +274,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Persist the desktop-notifications switch (tdesktop `desktopNotify`).
+    /// Persist the notification view (tdesktop "Name" / "Text") to
+    /// `prefs.json`, keeping the other prefs.
+    pub fn save_notify_view(&mut self) -> std::io::Result<()> {
+        let mut prefs = load_preferences(&self.paths);
+        prefs.notify_view = self.session.settings.notify_view;
+        save_preferences(&self.paths, &prefs)
+    }
+
     pub fn save_desktop_notifications(&mut self) -> std::io::Result<()> {
         let mut prefs = load_preferences(&self.paths);
         prefs.desktop_notifications = self.session.settings.desktop_notifications;

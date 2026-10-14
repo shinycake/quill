@@ -27,6 +27,10 @@ mod desktop_options;
 mod fixtures;
 mod global;
 mod mute_menu;
+mod notify_view;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod notify_view_tests;
 mod reactions;
 mod scope;
 mod sounds;
