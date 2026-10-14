@@ -80,6 +80,29 @@ fn the_toggle_shows_for_a_member_only_while_the_bar_is_down(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn the_toggle_takes_the_reply_s_place(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        app.set_suggest_bar(ChatId(CHAT), None, cx);
+        app.composer_ui.pending_reply = Some(quill::composer::ComposerReplyTo::new(
+            ChatId(CHAT),
+            MessageId(COUNTER),
+            "Our spring release",
+        ));
+        assert!(app.suggest_post_toggle(cx).is_some());
+        app.toggle_suggest_post(ChatId(CHAT), cx);
+        assert!(app.composer_ui.pending_reply.is_none());
+        let bar = app.session().and_then(|s| s.suggest_bar(ChatId(CHAT)));
+        assert_eq!(bar.map(|bar| bar.terms), Some(SuggestTerms::default()));
+        // No box opens: the bar's line asks for the terms.
+        assert!(app.suggested_posts.price.is_none());
+        assert!(app.suggest_post_toggle(cx).is_none());
+    });
+}
+
+#[gpui_kit::test]
 fn the_price_box_fills_the_bar_and_rejects_a_too_small_price(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

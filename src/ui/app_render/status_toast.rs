@@ -7,7 +7,7 @@ impl QuillApp {
     /// its timer and schedules the re-render that hides it; failures stay
     /// up longer than confirmations.
     pub(super) fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> bool {
-        self.drain_suggested_post_notes();
+        self.drain_suggested_post_notes(cx);
         // `QUILL_TRACE_STATUS=1`: print every status note (toasted or not)
         // to stderr, for diagnosing a live session.
         if self.connection.status_note != self.connection.status_traced {

@@ -259,6 +259,8 @@ pub(crate) fn parse_messages_payload(
                     can_get_statistics: flag("can_get_statistics"),
                     can_be_replied_in_another_chat: flag("can_be_replied_in_another_chat"),
                     can_set_fact_check: flag("can_set_fact_check"),
+                    can_add_offer: flag("can_add_offer"),
+                    can_edit_suggested_post_info: flag("can_edit_suggested_post_info"),
                 }),
             ))
         }

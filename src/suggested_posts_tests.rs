@@ -412,6 +412,18 @@ fn balance_shortfall() {
     assert_eq!(shortfall(stars, Some(10), None), None);
     assert_eq!(shortfall(stars, None, None), None);
     let grams = SuggestedPrice::TonCents(150);
-    assert_eq!(shortfall(grams, None, Some(1_400_000_000)), Some(grams));
+    // Grams give what is missing, in cents, rounded up.
+    assert_eq!(
+        shortfall(grams, None, Some(1_400_000_000)),
+        Some(SuggestedPrice::TonCents(10))
+    );
+    assert_eq!(
+        shortfall(grams, None, Some(1_399_999_999)),
+        Some(SuggestedPrice::TonCents(11))
+    );
+    assert_eq!(
+        shortfall(grams, None, Some(0)),
+        Some(SuggestedPrice::TonCents(150))
+    );
     assert_eq!(shortfall(grams, None, Some(1_500_000_000)), None);
 }

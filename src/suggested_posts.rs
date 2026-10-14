@@ -689,6 +689,9 @@ pub struct SuggestedPostsState {
     pub busy: HashSet<(i64, i64)>,
     /// One-shot errors the UI shows as toasts.
     pub notes: Vec<String>,
+    /// A request refused with `BALANCE_TOO_LOW`: the UI asks for a top-up
+    /// instead of a toast.
+    pub balance_low: Option<SuggestedPostPurpose>,
 }
 
 impl SuggestedPostsState {
@@ -765,11 +768,19 @@ pub enum SuggestedPostPurpose {
     /// `declineSuggestedPost`. Answer `ok`.
     Decline { chat_id: i64, message_id: i64 },
     /// `addOffer`: new terms for a suggestion, or an offer for a plain
-    /// message. Answer `message` (applied as a new message).
-    AddOffer { chat_id: i64, message_id: i64 },
-    /// `sendMessage` replying to a suggestion with changed content.
-    /// Answer `message`.
-    SendChange { chat_id: i64, message_id: i64 },
+    /// message, at `price`. Answer `message` (applied as a new message).
+    AddOffer {
+        chat_id: i64,
+        message_id: i64,
+        price: Option<SuggestedPrice>,
+    },
+    /// `sendMessage` replying to a suggestion with changed content, at
+    /// `price`. Answer `message`.
+    SendChange {
+        chat_id: i64,
+        message_id: i64,
+        price: Option<SuggestedPrice>,
+    },
 }
 
 impl SuggestedPostPurpose {
@@ -787,10 +798,12 @@ impl SuggestedPostPurpose {
             | Self::AddOffer {
                 chat_id,
                 message_id,
+                ..
             }
             | Self::SendChange {
                 chat_id,
                 message_id,
+                ..
             } => (chat_id, message_id),
         }
     }
@@ -831,9 +844,12 @@ pub fn edit_source(content: &crate::telegram::envelope::MessageContent) -> Optio
     }
 }
 
-/// What a member's balance lacks for paying `price`; `None` when the
-/// balance covers it or isn't known yet (no check without a balance,
-/// never a fake zero). Stars come as whole Stars, Grams as nano-Grams.
+/// Whether a member's balance falls short of `price`, and by what: Stars
+/// give the full price (the Stars note names it), Grams give the missing
+/// part in Gram cents, rounded up (tdesktop `InsufficientTonBox`:
+/// required minus balance). `None` when the balance covers it or isn't
+/// known yet (no check without a balance, never a fake zero). Stars come
+/// as whole Stars, Grams as nano-Grams.
 pub fn shortfall(
     price: SuggestedPrice,
     stars: Option<i64>,
@@ -845,8 +861,14 @@ pub fn shortfall(
             (have < count).then_some(price)
         }
         SuggestedPrice::TonCents(_) => {
-            let have = gram_nanos?;
-            (have < price.nanos()).then_some(price)
+            let missing = price.nanos().saturating_sub(gram_nanos?);
+            (missing > 0).then(|| {
+                let cents = missing
+                    .saturating_add(NANOS_PER_GRAM_CENT - 1)
+                    .checked_div(NANOS_PER_GRAM_CENT)
+                    .unwrap_or(0);
+                SuggestedPrice::TonCents(cents)
+            })
         }
     }
 }

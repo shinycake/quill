@@ -3,7 +3,7 @@
 //! content.
 use super::{SendReply, formatted_caption, message_send_options, send_reply_value};
 use crate::composer::SendOptions;
-use crate::ids::{ChatId, MessageId, RequestId};
+use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::suggested_posts::SuggestTerms;
 use serde_json::{Value, json};
 
@@ -75,11 +75,14 @@ pub fn add_offer(
 /// terms (tdesktop "Edit Message" of a suggestion: a new message, never an
 /// edit). Text goes as `inputMessageText`; media is copied from the
 /// suggestion with the new caption (`inputMessageForwarded` with
-/// `messageCopyOptions`). Answer `message`.
+/// `messageCopyOptions`). `topic_id` is the suggestion's direct messages
+/// topic (0: none), which the channel side must name. Answer `message`.
+#[allow(clippy::too_many_arguments)]
 pub fn send_suggested_change(
     extra: RequestId,
     chat_id: ChatId,
     message_id: MessageId,
+    topic_id: i64,
     text: &str,
     is_media: bool,
     terms: SuggestTerms,
@@ -121,7 +124,13 @@ pub fn send_suggested_change(
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
-        "topic_id": Value::Null,
+        "topic_id": if topic_id > 0 {
+            super::topic_id_json(&TopicId::DirectMessages {
+                direct_messages_chat_topic_id: topic_id,
+            })
+        } else {
+            Value::Null
+        },
         "reply_to": send_reply_value(Some(&reply)),
         "options": message_send_options(&options),
         "reply_markup": Value::Null,

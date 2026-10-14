@@ -144,8 +144,10 @@ Every message with `suggested_post_info` in a direct messages chat:
   - confirm button "Publish".
 - A member paying Stars is first checked against the balance (same
   top-up flow as the price box); TON short shows the Grams-needed box.
-- Then `approveSuggestedPost(chat_id, message_id, send_date)`. An error
-  toasts its text. The decision arrives as a service message
+- Then `approveSuggestedPost(chat_id, message_id, send_date)`, with
+  `send_date` 0 when the offer already names a time (the schema's rule,
+  tdesktop `ConfirmApproval`) and the picked time otherwise. An error
+  toasts its text; `BALANCE_TOO_LOW` asks for a top-up instead. The decision arrives as a service message
   (`messageSuggestedPostApproved` etc., already rendered by Quill) and
   `updateMessageSuggestedPostInfo` flips the state so the buttons go.
 
@@ -344,12 +346,28 @@ calls, all TDLib numbers via checked parsing.
   offer}: {reason}." Quill's `TdError` keeps only the error class, not
   TDLib's message, so the reason is the class text rather than tdesktop's
   server-specific strings.
-- Not enough Stars for an offer: tdesktop opens its Stars purchase box for
-  the missing amount. Quill shows a note and opens its Stars screen, where
-  the viewer buys Stars; the offer is not resent afterwards.
-- "Suggest Changes" > "Edit Message" from the channel side sends the
-  changed post with `topic_id` null. Telegram routes it by the reply to the
-  original suggestion; a direct messages topic id is not set yet.
+- Not enough Stars for an offer or an accept: tdesktop opens its Stars
+  purchase box for the missing amount. Quill shows "You need N Stars to
+  offer this price." (or "to accept this post.") and opens its Stars
+  screen, where the viewer buys Stars; the request is not resent
+  afterwards. Not enough Grams shows the Grams Needed box with the missing
+  amount (price minus balance, in Gram cents rounded up), as tdesktop's
+  `InsufficientTonBox` does. A `BALANCE_TOO_LOW` refusal from TDLib takes
+  the same path.
+- "Edit Message" from the channel side sends the changed post into the
+  suggestion's direct messages topic (`messageTopicDirectMessages` from
+  the message's `topic_id`), replying to it.
+- "Add Offer" in the message menu follows `messageProperties.can_add_offer`
+  once it arrives; Quill's own `CanAddOfferToMessage` check covers the
+  moment before. `can_edit_suggested_post_info` is parsed too but not used
+  yet: the decision buttons render before the menu loads the properties.
+- The decision rows come after the message's own inline keyboard rows,
+  with the bot keyboard's default button look (tdesktop appends them to
+  the reply markup). Quill draws keyboards inside the bubble everywhere;
+  moving them under the bubble is a separate gap.
+- The block's Price/Time labels use the full service-text color and step
+  back by weight only (12px text needs 4.5:1; measured 14.8:1 light,
+  15.2:1 dark).
 - "Maximum price is ...", "Enter a number." and the time box's "Pick a
   date and time." are Quill copy; tdesktop shakes the field instead of
   showing text.
@@ -366,14 +384,19 @@ calls, all TDLib numbers via checked parsing.
   reply, block titles, bar lines and labels, Accept/Decline and submit
   wording, commission and time range, date labels, balance shortfall, and
   the input terms and draft sync.
-- Driver tests (`src/connect/tests/suggested_posts.rs`, 8): the role from
-  the supergroup flags, approve with the date and no second request on a
-  double tap, decline with a reason and an error turning into a note, Add
-  Offer carrying complete terms, a changed post sent as a new reply with
-  media copied, a send with the bar up, the bar riding the draft both
-  ways, and info updates changing the loaded message.
-- UI tests (`src/ui/suggested_posts_tests.rs`, 7, `#[gpui_kit::test]` on
-  the `ready-suggested-posts` demo): toggle and bar per role, price box
+- Driver tests (`src/connect/tests/suggested_posts.rs`, 9): the role from
+  the supergroup flags, approve sending 0 for a dated offer and the picked
+  date otherwise with no second request on a double tap, decline with a
+  reason and an error turning into a note, `BALANCE_TOO_LOW` becoming a
+  top-up request instead of a note, Add Offer carrying complete terms, a
+  changed post sent as a new reply in the suggestion's direct messages
+  topic with media copied, a send with the bar up, the bar riding the
+  draft both ways, and info updates changing the loaded message.
+  `messageProperties.can_add_offer` is covered in
+  `src/connect/tests/message_menu.rs`.
+- UI tests (`src/ui/suggested_posts_tests.rs`, 8, `#[gpui_kit::test]` on
+  the `ready-suggested-posts` demo): toggle and bar per role, the toggle
+  clearing a pending reply and putting the bar up without a box, price box
   minimum error and filling the bar, time box "Anytime" answering the price
   box, buttons only on the counter-offer, Accept Terms text and Approved
   state, Decline with a reason and Declined state, Add Offer gating.

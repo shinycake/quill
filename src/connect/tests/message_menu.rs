@@ -560,7 +560,7 @@ fn message_properties_carry_the_new_rights() {
         &seq,
         &sink,
         &format!(
-            r#"{{"@type":"messageProperties","@extra":"{}","can_set_fact_check":true,"can_be_replied_in_another_chat":true}}"#,
+            r#"{{"@type":"messageProperties","@extra":"{}","can_set_fact_check":true,"can_be_replied_in_another_chat":true,"can_add_offer":true}}"#,
             extra.0
         ),
     );
@@ -571,5 +571,7 @@ fn message_properties_carry_the_new_rights() {
         .expect("properties");
     assert!(actions.can_set_fact_check);
     assert!(actions.can_be_replied_in_another_chat);
+    assert!(actions.can_add_offer);
+    assert!(!actions.can_edit_suggested_post_info);
     assert!(!actions.can_be_edited);
 }

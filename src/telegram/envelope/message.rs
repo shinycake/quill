@@ -67,6 +67,10 @@ pub struct MessageExtras {
     /// `message.is_paid_star_suggested_post` or
     /// `is_paid_gram_suggested_post`: a published post someone paid for.
     pub paid_suggested_post: Option<PaidSuggestedPost>,
+    /// `direct_messages_chat_topic_id` when `message.topic_id` is
+    /// `messageTopicDirectMessages` (schema line 3317); 0 otherwise. A
+    /// reply to a suggestion goes to the same topic.
+    pub direct_messages_topic_id: i64,
 }
 
 /// The currency a published suggested post was paid in.
@@ -601,6 +605,13 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
         suggested_post: crate::suggested_posts::SuggestedPostInfo::parse(
             value.get("suggested_post_info"),
         ),
+        direct_messages_topic_id: value
+            .get("topic_id")
+            .filter(|topic| {
+                topic.get("@type").and_then(Value::as_str) == Some("messageTopicDirectMessages")
+            })
+            .map(|topic| int53_or_zero(topic.get("direct_messages_chat_topic_id")))
+            .unwrap_or(0),
         paid_suggested_post: if flag(value, "is_paid_star_suggested_post") {
             Some(PaidSuggestedPost::Stars)
         } else if flag(value, "is_paid_gram_suggested_post") {

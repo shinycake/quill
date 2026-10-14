@@ -84,6 +84,15 @@ pub(crate) struct DeclineBox {
     pub(super) reason: Entity<InputState>,
 }
 
+/// What a missing balance was for: the Stars note names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BalanceFor {
+    /// Sending or changing an offer.
+    Offer,
+    /// Accepting a channel's counter-offer.
+    Accept,
+}
+
 pub(crate) struct SuggestedPostsUi {
     pub(super) price: Option<PriceBox>,
     pub(super) time: Option<TimeBox>,

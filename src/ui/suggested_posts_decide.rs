@@ -5,7 +5,7 @@
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
-use super::suggested_posts_state::{AcceptBox, DeclineBox, SuggestTarget, TimeTarget};
+use super::suggested_posts_state::{AcceptBox, BalanceFor, DeclineBox, SuggestTarget, TimeTarget};
 use super::suggested_posts_ui::{channel_name, sender_short_name};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -132,7 +132,7 @@ impl QuillApp {
         }
         if let Some(short) = accept.pays.and_then(|price| self.suggest_shortfall(price)) {
             self.suggested_posts.accept = None;
-            self.ask_for_balance(short, cx);
+            self.ask_for_balance(short, BalanceFor::Accept, cx);
             return;
         }
         self.suggested_posts.accept = None;
@@ -200,6 +200,8 @@ impl QuillApp {
             },
         )
         .detach();
+        // The reason field takes the keyboard (tdesktop focuses it).
+        reason.update(cx, |input, cx| input.focus(window, cx));
         self.suggested_posts.decline = Some(DeclineBox {
             chat_id,
             message_id,
@@ -295,7 +297,8 @@ impl QuillApp {
     /// Whether the message menu offers "Add Offer": for a member, a sent
     /// regular message without a suggestion, outside an album, that isn't
     /// a service message (tdesktop `CanAddOfferToMessage`; the forward
-    /// check is TDLib's on `addOffer`).
+    /// check is TDLib's on `addOffer`). The menu uses this only until
+    /// `messageProperties.can_add_offer` arrives.
     pub(super) fn can_add_offer(&self, chat_id: ChatId, message_id: MessageId) -> bool {
         let Some(session) = self.session() else {
             return false;
@@ -468,7 +471,12 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_sm().child(decline.text.clone()))
+                .child(
+                    div()
+                        .text_sm()
+                        .whitespace_normal()
+                        .child(decline.text.clone()),
+                )
                 .child(Input::new(&decline.reason).aria_label("Add a reason (optional)"))
                 .child(
                     div()

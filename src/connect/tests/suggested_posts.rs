@@ -111,6 +111,17 @@ fn supergroup_flags_give_the_role() {
 fn approve_sends_the_date_and_blocks_a_second_tap() {
     let mut f = Fixture::new();
     f.open_direct_messages(true);
+    // An offer that already names a time: the request sends 0.
+    f.ingest(&format!(
+        r#"{{"@type":"updateNewMessage","message":{{"@type":"message","id":{id},"chat_id":{chat},"sender_id":{{"@type":"messageSenderUser","user_id":5}},"is_outgoing":false,"date":1700000000,"topic_id":{{"@type":"messageTopicDirectMessages","direct_messages_chat_topic_id":42}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Post me","entities":[]}}}},"suggested_post_info":{{"@type":"suggestedPostInfo","price":null,"send_date":1900000000,"state":{{"@type":"suggestedPostStatePending"}},"can_be_approved":true,"can_be_declined":true}}}}}}"#,
+        id = 4 << 20,
+        chat = CHAT.0
+    ));
+    f.driver
+        .approve_suggested_post(CHAT, MessageId(4 << 20), 1_900_000_000)
+        .unwrap();
+    assert_eq!(f.last("approveSuggestedPost")["send_date"], 0);
+    // A post without a time sends the one picked in the time box.
     f.driver
         .approve_suggested_post(CHAT, MessageId(5 << 20), 1_900_000_000)
         .unwrap();
@@ -153,6 +164,31 @@ fn decline_sends_the_reason_and_an_error_becomes_a_note() {
 }
 
 #[test]
+fn a_low_balance_asks_for_a_top_up_instead_of_a_toast() {
+    let mut f = Fixture::new();
+    f.open_direct_messages(false);
+    f.driver
+        .add_offer(CHAT, MessageId(3 << 20), stars(900, 0))
+        .unwrap();
+    let extra = f.last("addOffer")["@extra"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    f.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BALANCE_TOO_LOW"}}"#
+    ));
+    assert!(f.driver.session.take_suggested_post_notes().is_empty());
+    assert_eq!(
+        f.driver.session.take_suggested_post_balance_low(),
+        Some(crate::suggested_posts::SuggestedPostPurpose::AddOffer {
+            chat_id: CHAT.0,
+            message_id: 3 << 20,
+            price: Some(SuggestedPrice::Stars(900)),
+        })
+    );
+}
+
+#[test]
 fn add_offer_carries_the_complete_terms() {
     let mut f = Fixture::new();
     f.open_direct_messages(false);
@@ -184,6 +220,12 @@ fn add_offer_carries_the_complete_terms() {
 fn changed_content_is_a_new_reply_and_media_is_copied() {
     let mut f = Fixture::new();
     f.open_direct_messages(true);
+    // The suggestion sits in a direct messages topic; the change goes there.
+    f.ingest(&format!(
+        r#"{{"@type":"updateNewMessage","message":{{"@type":"message","id":{id},"chat_id":{chat},"sender_id":{{"@type":"messageSenderUser","user_id":5}},"is_outgoing":false,"date":1700000000,"topic_id":{{"@type":"messageTopicDirectMessages","direct_messages_chat_topic_id":42}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Post me","entities":[]}}}},"suggested_post_info":{{"@type":"suggestedPostInfo","price":null,"send_date":0,"state":{{"@type":"suggestedPostStatePending"}},"can_be_approved":true,"can_be_declined":true}}}}}}"#,
+        id = 8 << 20,
+        chat = CHAT.0
+    ));
     f.driver
         .send_suggested_change(
             CHAT,
@@ -194,6 +236,8 @@ fn changed_content_is_a_new_reply_and_media_is_copied() {
         )
         .unwrap();
     let sent = f.last("sendMessage");
+    assert_eq!(sent["topic_id"]["@type"], "messageTopicDirectMessages");
+    assert_eq!(sent["topic_id"]["direct_messages_chat_topic_id"], 42);
     assert_eq!(sent["reply_to"]["message_id"], 8 << 20);
     assert_eq!(sent["input_message_content"]["@type"], "inputMessageText");
     assert_eq!(sent["input_message_content"]["text"]["text"], "New text");
@@ -246,9 +290,16 @@ fn a_send_with_the_bar_is_a_suggested_post() {
 fn the_bar_rides_the_draft_both_ways() {
     let mut f = Fixture::new();
     f.open_direct_messages(false);
+    // The UI puts the bar up in the session, then flushes the draft.
+    f.driver
+        .session
+        .payments
+        .suggested_posts
+        .bars
+        .insert(CHAT.0, SuggestBar::new(stars(30, 0)));
     let outcome = f
         .driver
-        .set_suggest_bar(CHAT, Some(SuggestBar::new(stars(30, 0))), "", None, 1_000)
+        .note_composer_draft_in(CHAT, DraftTopic::Chat, "", None, 1_000, false)
         .unwrap();
     assert_eq!(outcome, DraftSaveOutcome::Sent);
     let draft = f.last("setChatDraftMessage");
@@ -274,7 +325,13 @@ fn the_bar_rides_the_draft_both_ways() {
 
     // Closing the bar clears the suggestion from the draft.
     f.driver
-        .set_suggest_bar(CHAT, None, "hi", None, 2_000)
+        .session
+        .payments
+        .suggested_posts
+        .bars
+        .remove(&CHAT.0);
+    f.driver
+        .note_composer_draft_in(CHAT, DraftTopic::Chat, "hi", None, 2_000, false)
         .unwrap();
     let draft = f.last("setChatDraftMessage");
     assert!(draft["draft_message"]["suggested_post_info"].is_null());

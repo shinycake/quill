@@ -50,7 +50,11 @@ impl Session {
     ) {
         let posts = &mut self.payments.suggested_posts;
         posts.busy.remove(&purpose.key());
-        posts.notes.push(error_note(purpose, &error_reason(err)));
+        if err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow) {
+            posts.balance_low = Some(purpose);
+        } else {
+            posts.notes.push(error_note(purpose, &error_reason(err)));
+        }
     }
 
     pub(crate) fn set_direct_messages_role(
@@ -95,6 +99,11 @@ impl Session {
         self.edit_loaded_message(chat_id, message_id, |message| {
             edit(&mut message.extras.suggested_post);
         });
+    }
+
+    /// Takes the request refused for a low balance, if any.
+    pub fn take_suggested_post_balance_low(&mut self) -> Option<SuggestedPostPurpose> {
+        self.payments.suggested_posts.balance_low.take()
     }
 
     /// Takes the one-shot error notes for the UI's toasts.

@@ -3,7 +3,7 @@
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
-use super::suggested_posts_state::{PriceBox, SuggestTarget, TimeBox, TimeTarget};
+use super::suggested_posts_state::{BalanceFor, PriceBox, SuggestTarget, TimeBox, TimeTarget};
 use super::suggested_posts_ui::price_amount;
 use gpui_kit::component::button::*;
 use gpui_kit::component::date_picker::DatePicker;
@@ -107,12 +107,22 @@ impl QuillApp {
     }
 
     /// A member can't pay: Stars open the Stars screen (Quill can't buy
-    /// Stars in-app yet), Grams show the Grams Needed box.
-    pub(super) fn ask_for_balance(&mut self, price: SuggestedPrice, cx: &mut Context<Self>) {
+    /// Stars in-app yet), Grams show the Grams Needed box. `price` is the
+    /// full price in Stars and the missing part in Grams
+    /// (`quill::suggested_posts::shortfall`).
+    pub(super) fn ask_for_balance(
+        &mut self,
+        price: SuggestedPrice,
+        purpose: BalanceFor,
+        cx: &mut Context<Self>,
+    ) {
         match price {
             SuggestedPrice::Stars(_) => {
-                self.connection.status_note =
-                    format!("You need {} to offer this price.", price.label());
+                let what = match purpose {
+                    BalanceFor::Offer => "offer this price",
+                    BalanceFor::Accept => "accept this post",
+                };
+                self.connection.status_note = format!("You need {} to {what}.", price.label());
                 self.open_stars(cx);
             }
             SuggestedPrice::TonCents(_) => {
@@ -139,7 +149,7 @@ impl QuillApp {
                 };
                 let (target, mode, admin) = (price_box.target, price_box.mode, price_box.admin);
                 if !admin && let Some(short) = price.and_then(|p| self.suggest_shortfall(p)) {
-                    self.ask_for_balance(short, cx);
+                    self.ask_for_balance(short, BalanceFor::Offer, cx);
                     return false;
                 }
                 self.suggested_posts.price = None;

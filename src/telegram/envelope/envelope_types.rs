@@ -211,6 +211,10 @@ pub struct MessageActions {
     pub can_be_replied_in_another_chat: bool,
     /// An admin may add or edit a fact check (`setMessageFactCheck`).
     pub can_set_fact_check: bool,
+    /// `addOffer` works: "Add Offer" in a channel's direct messages.
+    pub can_add_offer: bool,
+    /// The suggestion's price and time may be changed with `addOffer`.
+    pub can_edit_suggested_post_info: bool,
 }
 
 impl MessageActions {

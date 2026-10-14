@@ -53,14 +53,16 @@ pub(in crate::ui) fn suggested_post_block(
     } else {
         "Anytime".to_string()
     };
+    // 12px text on the service background: labels keep the full
+    // foreground for contrast (WCAG AA 4.5:1) and step back by weight
+    // only; values are semibold.
     let fg = cx.theme().secondary_foreground;
-    let faded = fg.opacity(0.7);
     let row = |label: &'static str, value: String| {
         div()
             .flex()
             .justify_between()
             .gap_3()
-            .child(div().text_color(faded).child(label))
+            .child(div().child(label))
             .child(div().font_semibold().child(value))
     };
     Some(
@@ -95,22 +97,17 @@ pub(in crate::ui) fn suggested_post_block(
                     .child(row(price_title, price_label(info.price)))
                     .child(row(time_title, time))
                     .when(changes.is_some_and(|c| c.message), |this| {
-                        this.child(
-                            div()
-                                .pt_1()
-                                .text_center()
-                                .text_color(faded)
-                                .child(BLOCK_CHECK_BELOW),
-                        )
+                        this.child(div().pt_1().text_center().child(BLOCK_CHECK_BELOW))
                     }),
             )
             .into_any_element(),
     )
 }
 
-/// The decision buttons, laid out like an inline keyboard: [Decline |
-/// Accept] then [Suggest Changes]; [Decline] alone when that's all the
-/// viewer may do.
+/// The decision buttons as inline keyboard rows, styled like a bot's
+/// buttons: [Decline | Accept] then [Suggest Changes]; [Decline] alone
+/// when that's all the viewer may do. `inline_keyboard` places them after
+/// the message's own rows.
 pub(in crate::ui) fn suggestion_buttons(
     message: &HistoryMessage,
     cx: &mut Context<QuillApp>,
@@ -126,9 +123,7 @@ pub(in crate::ui) fn suggestion_buttons(
     let mut first = div().flex().gap_1();
     if buttons.decline {
         first = first.child(
-            Button::new(("suggest-decline", id))
-                .label("Decline")
-                .ghost()
+            keyboard_button(("suggest-decline", id), "Decline")
                 .flex_1()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_suggest_decline(chat_id, message_id, window, cx);
@@ -137,9 +132,7 @@ pub(in crate::ui) fn suggestion_buttons(
     }
     if buttons.accept {
         first = first.child(
-            Button::new(("suggest-accept", id))
-                .label("Accept")
-                .ghost()
+            keyboard_button(("suggest-accept", id), "Accept")
                 .flex_1()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.begin_suggest_accept(chat_id, message_id, window, cx);
@@ -148,9 +141,7 @@ pub(in crate::ui) fn suggestion_buttons(
     }
     let owner = cx.entity().downgrade();
     let change = buttons.change.then(|| {
-        Button::new(("suggest-change", id))
-            .label("Suggest Changes")
-            .ghost()
+        keyboard_button(("suggest-change", id), "Suggest Changes")
             .w_full()
             .dropdown_menu(move |mut menu, _, _| {
                 if can_edit {
@@ -193,9 +184,16 @@ pub(in crate::ui) fn suggestion_buttons(
             .flex()
             .flex_col()
             .gap_1()
-            .mt_2()
             .child(first)
             .children(change)
             .into_any_element(),
+    )
+}
+
+/// A decision button with the default inline keyboard look.
+fn keyboard_button(id: impl Into<ElementId>, label: &'static str) -> Button {
+    crate::ui::message_payments::inline_keyboard_style(
+        Button::new(id).label(label),
+        quill::telegram::envelope::InlineKeyboardButtonStyle::Default,
     )
 }

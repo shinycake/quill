@@ -1,22 +1,34 @@
 //! Connect driver: suggested posts in channel direct messages
 //! (`crate::suggested_posts`): accept, decline, counter-offers, offers on
-//! plain messages, changed content, and the composer's suggest bar.
+//! plain messages and changed content. The composer's suggest bar lives in
+//! the session (`payments.suggested_posts.bars`) and rides the draft.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{PaymentsPurpose, RequestPurpose};
-use crate::suggested_posts::{SuggestBar, SuggestMode, SuggestTerms, SuggestedPostPurpose};
+use crate::suggested_posts::{SuggestTerms, SuggestedPostPurpose};
 use crate::telegram::requests::{
     add_offer, approve_suggested_post, decline_suggested_post, send_suggested_change,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// `approveSuggestedPost` ("Publish" in the Accept Terms box).
+    /// `send_date` is the time picked for a post that had none; a post
+    /// whose offer already names a time sends 0, as the schema asks and
+    /// tdesktop's `ConfirmApproval` does.
     pub fn approve_suggested_post(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
         send_date: i32,
     ) -> Result<RequestId, ConnectSendError> {
+        let dated = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .and_then(|message| message.extras.suggested_post)
+            .is_some_and(|info| info.send_date > 0);
+        let send_date = if dated { 0 } else { send_date };
         let purpose = SuggestedPostPurpose::Approve {
             chat_id: chat_id.0,
             message_id: message_id.0,
@@ -53,6 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = SuggestedPostPurpose::AddOffer {
             chat_id: chat_id.0,
             message_id: message_id.0,
+            price: terms.price,
         };
         self.send_suggested(purpose, chat_id, message_id, |extra| {
             add_offer(extra, chat_id, message_id, terms)
@@ -72,9 +85,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = SuggestedPostPurpose::SendChange {
             chat_id: chat_id.0,
             message_id: message_id.0,
+            price: terms.price,
         };
+        let topic_id = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .map_or(0, |message| message.extras.direct_messages_topic_id);
         let result = self.send_suggested(purpose, chat_id, message_id, |extra| {
-            send_suggested_change(extra, chat_id, message_id, text, is_media, terms)
+            send_suggested_change(extra, chat_id, message_id, topic_id, text, is_media, terms)
         });
         if result.is_ok() {
             self.session
@@ -130,38 +150,5 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
-    }
-
-    /// Puts the suggest bar up (or changes its terms) and saves the draft
-    /// right away, as tdesktop's `applySuggestOptions` does. Returns
-    /// whether a draft request went out.
-    pub fn set_suggest_bar(
-        &mut self,
-        chat_id: ChatId,
-        bar: Option<SuggestBar>,
-        text: &str,
-        reply_to: Option<crate::telegram::requests::SendReply>,
-        now_ms: u64,
-    ) -> Result<DraftSaveOutcome, ConnectSendError> {
-        let bars = &mut self.session.payments.suggested_posts.bars;
-        match bar {
-            Some(bar) => {
-                bars.insert(chat_id.0, bar);
-            }
-            None => {
-                bars.remove(&chat_id.0);
-            }
-        }
-        if bar.is_some_and(|bar| bar.mode != SuggestMode::New || bar.edit_of.is_some()) {
-            return Ok(DraftSaveOutcome::Skipped);
-        }
-        self.note_composer_draft_in(
-            chat_id,
-            crate::composer::DraftTopic::Chat,
-            text,
-            reply_to,
-            now_ms,
-            false,
-        )
     }
 }

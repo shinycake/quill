@@ -6,7 +6,7 @@
 //! `suggested_posts_decide.rs`.
 
 use super::app::QuillApp;
-use super::suggested_posts_state::SuggestTarget;
+use super::suggested_posts_state::{BalanceFor, SuggestTarget};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -17,7 +17,7 @@ use quill::local_time::now_unix;
 use quill::state::Session;
 use quill::suggested_posts::{
     BAR_PRICED_TAIL, BAR_PROMPT, BarLine, DirectMessagesRole, SuggestBar, SuggestMode,
-    SuggestTerms, SuggestedPrice, bar_both_tail, bar_dated, time_value,
+    SuggestTerms, SuggestedPostPurpose, SuggestedPrice, bar_both_tail, bar_dated, time_value,
 };
 use quill::telegram::envelope::MessageSender;
 
@@ -148,15 +148,16 @@ impl QuillApp {
                 .tooltip("Suggest a post")
                 .accessibility_label("Suggest a post")
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    // tdesktop: the bar takes the reply's place.
-                    this.composer_ui.pending_reply = None;
-                    this.set_suggest_bar(
-                        chat_id,
-                        Some(SuggestBar::new(SuggestTerms::default())),
-                        cx,
-                    );
+                    this.toggle_suggest_post(chat_id, cx);
                 })),
         )
+    }
+
+    /// The toggle pressed: the bar goes up with empty terms, in the
+    /// reply's place (tdesktop clears the reply; the box doesn't open).
+    pub(super) fn toggle_suggest_post(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.composer_ui.pending_reply = None;
+        self.set_suggest_bar(chat_id, Some(SuggestBar::new(SuggestTerms::default())), cx);
     }
 
     /// The suggest bar above the field, in the reply bar's place.
@@ -365,14 +366,50 @@ impl QuillApp {
     }
 
     /// Errors of approve, decline and offers become status toasts.
-    pub(super) fn drain_suggested_post_notes(&mut self) {
-        let notes = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.session.take_suggested_post_notes())
-            .unwrap_or_default();
+    pub(super) fn drain_suggested_post_notes(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let notes = live.driver.session.take_suggested_post_notes();
+        let balance_low = live.driver.session.take_suggested_post_balance_low();
         if let Some(note) = notes.into_iter().last() {
             self.connection.status_note = note;
         }
+        if let Some(purpose) = balance_low {
+            self.ask_after_balance_error(purpose, cx);
+        }
+    }
+
+    /// TDLib refused a payment with `BALANCE_TOO_LOW` (the balance Quill
+    /// knew was stale or missing): ask for a top-up as the local check
+    /// would have.
+    fn ask_after_balance_error(&mut self, purpose: SuggestedPostPurpose, cx: &mut Context<Self>) {
+        let (price, purpose_for) = match purpose {
+            SuggestedPostPurpose::Approve {
+                chat_id,
+                message_id,
+            } => (
+                self.session().and_then(|session| {
+                    session
+                        .histories
+                        .get(&chat_id)?
+                        .messages
+                        .get(&message_id)?
+                        .extras
+                        .suggested_post?
+                        .price
+                }),
+                BalanceFor::Accept,
+            ),
+            SuggestedPostPurpose::AddOffer { price, .. }
+            | SuggestedPostPurpose::SendChange { price, .. } => (price, BalanceFor::Offer),
+            SuggestedPostPurpose::Decline { .. } => (None, BalanceFor::Offer),
+        };
+        let Some(price) = price else {
+            self.connection.status_note = "Couldn't pay for the post: balance too low.".into();
+            return;
+        };
+        let short = self.suggest_shortfall(price).unwrap_or(price);
+        self.ask_for_balance(short, purpose_for, cx);
     }
 }

@@ -457,7 +457,7 @@ impl QuillApp {
                 }
             );
         }
-        if self.can_add_offer(chat_id, message_id) {
+        if allows(self.can_add_offer(chat_id, message_id), |a| a.can_add_offer) {
             item!(
                 order::ADD_OFFER,
                 gpui_kit::assets::IconName::CircleDollarSign,
