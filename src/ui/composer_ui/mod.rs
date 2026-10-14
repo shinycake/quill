@@ -652,7 +652,7 @@ impl QuillApp {
             let image_file = attachment.kind == AttachmentKind::Document
                 && quill::composer::media_kind_for(&attachment.path) == Some(AttachmentKind::Photo);
             let file_thumbnail = (attachment.kind == AttachmentKind::Document)
-                .then(|| attachment.extras.file_thumbnail.as_ref())
+                .then_some(attachment.extras.file_thumbnail.as_ref())
                 .flatten();
             let media = match (attachment.kind, file_thumbnail) {
                 (AttachmentKind::Photo, _) => AttachmentMedia::new().src(attachment.path.clone()),

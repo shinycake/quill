@@ -97,9 +97,16 @@ impl DocOrigin {
 
     /// Open a downloaded document: in the viewer when it is a picture
     /// Quill can show, else in another app.
-    pub(in crate::ui) fn open(self, file_id: FileId, this: &mut QuillApp, cx: &mut Context<QuillApp>) {
+    pub(in crate::ui) fn open(
+        self,
+        file_id: FileId,
+        this: &mut QuillApp,
+        cx: &mut Context<QuillApp>,
+    ) {
         match self {
-            Self::Message(chat_id, message_id) => this.open_document(chat_id, message_id, file_id, cx),
+            Self::Message(chat_id, message_id) => {
+                this.open_document(chat_id, message_id, file_id, cx)
+            }
             Self::Sponsored(..) => this.open_downloaded_file(file_id, cx),
         }
     }

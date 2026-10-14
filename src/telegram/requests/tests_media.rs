@@ -272,7 +272,10 @@ fn send_document_shape_matches_1_8_67() {
         false
     );
     assert_eq!(v["input_message_content"]["caption"]["text"], "");
-    assert_eq!(v["input_message_content"]["document"]["thumbnail"], Value::Null);
+    assert_eq!(
+        v["input_message_content"]["document"]["thumbnail"],
+        Value::Null
+    );
     assert!(!json.contains("CANARY"));
 }
 

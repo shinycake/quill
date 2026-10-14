@@ -49,10 +49,10 @@ pub use markup::{
 };
 pub use media_options::{
     AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, MediaSendOptions, PAID_MEDIA_MAX_STARS,
-    PHOTO_SIDE_LARGE, file_thumbnail_upload_required,
-    PHOTO_SIDE_STANDARD, PriceInput, can_use_high_quality, fitted_photo_size, is_gif_path,
-    paid_media_fits, parse_paid_price, photo_for_send, photo_scale_args, photo_side_limit,
-    photo_size_of, session_allows_paid_media,
+    PHOTO_SIDE_LARGE, PHOTO_SIDE_STANDARD, PriceInput, can_use_high_quality,
+    file_thumbnail_upload_required, fitted_photo_size, is_gif_path, paid_media_fits,
+    parse_paid_price, photo_for_send, photo_scale_args, photo_side_limit, photo_size_of,
+    session_allows_paid_media,
 };
 pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
 pub use send::{

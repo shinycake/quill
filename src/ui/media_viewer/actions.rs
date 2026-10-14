@@ -69,7 +69,7 @@ impl QuillApp {
     /// MED1: decode `path` and orient it (flip, then rotate) into a
     /// `RenderImage` (the `decode_viewer_frames` construction pattern).
     pub(in crate::ui) fn rotated_render_image(
-        path: &PathBuf,
+        path: &std::path::Path,
         orientation: ViewerOrientation,
     ) -> Option<Arc<RenderImage>> {
         let rgba = crate::ui::image_decode::decode_file(path, DecodeSize::FULL).ok()?;

@@ -53,7 +53,10 @@ fn decode_size_shrinks_the_short_side_and_caps_the_long_one() {
     let (w, h) = DecodeSize::FULL.fit((30_000, 3_000));
     assert_eq!(w, MAX_TEXTURE_EDGE);
     assert_eq!(h, 819);
-    assert_eq!(DecodeSize::FULL.long_edge((30_000, 3_000)), MAX_TEXTURE_EDGE);
+    assert_eq!(
+        DecodeSize::FULL.long_edge((30_000, 3_000)),
+        MAX_TEXTURE_EDGE
+    );
     // The chat's sized decodes (avatars, thumbnails).
     let edge = |short_edge| DecodeSize { short_edge };
     assert_eq!(edge(92).fit((160, 160)), (92, 92));
@@ -77,7 +80,10 @@ fn jpeg_exif_orientation_is_applied() {
 #[test]
 fn jpeg_xl_decodes_on_every_platform() {
     let bytes = fixture("halves.jxl");
-    assert_halves(&decode_image(&bytes, None, DecodeSize::FULL).unwrap(), "jxl");
+    assert_halves(
+        &decode_image(&bytes, None, DecodeSize::FULL).unwrap(),
+        "jxl",
+    );
     assert_halves(
         &super::rust_codecs::decode_jxl(&bytes, DecodeSize::FULL).unwrap(),
         "jxl-oxide",
@@ -145,7 +151,13 @@ fn garbage_and_oversized_images_fail_cleanly() {
             .unwrap();
     }
     // IHDR width/height live at bytes 16..24; the CRC is not checked first.
-    png.splice(16..24, 20_000_u32.to_be_bytes().into_iter().chain(20_000_u32.to_be_bytes()));
+    png.splice(
+        16..24,
+        20_000_u32
+            .to_be_bytes()
+            .into_iter()
+            .chain(20_000_u32.to_be_bytes()),
+    );
     assert!(decode_image(&png, None, DecodeSize::FULL).is_err());
 }
 

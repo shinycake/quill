@@ -275,7 +275,10 @@ mod tests {
         assert!(!file_thumbnail_upload_required(Path::new("a.webp"), small));
         assert!(file_thumbnail_upload_required(Path::new("a.heic"), small));
         assert!(file_thumbnail_upload_required(Path::new("a.avif"), small));
-        assert!(file_thumbnail_upload_required(Path::new("a.png"), 6 * 1024 * 1024));
+        assert!(file_thumbnail_upload_required(
+            Path::new("a.png"),
+            6 * 1024 * 1024
+        ));
     }
 
     #[test]

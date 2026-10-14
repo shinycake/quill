@@ -350,81 +350,83 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         // Contains caption / path — do not log `json`.
         let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
-            (Some(att), Some(path)) => match att.kind {
-                AttachmentKind::Photo => send_photo(
-                    extra,
-                    chat_id,
-                    topic_id,
-                    path,
-                    caption,
-                    snapshot.caption_above_media,
-                    reply_to,
-                    self_destruct,
-                    is_secret,
-                ),
-                AttachmentKind::Document => {
-                    let thumbnail = att.extras.file_thumbnail.as_ref().map(|thumb| {
-                        VideoNoteThumbnailSend {
-                            path: thumb.path.to_string_lossy().into_owned(),
-                            width: thumb.width,
-                            height: thumb.height,
-                        }
-                    });
-                    send_document(
+            (Some(att), Some(path)) => {
+                match att.kind {
+                    AttachmentKind::Photo => send_photo(
                         extra,
                         chat_id,
                         topic_id,
                         path,
-                        thumbnail.as_ref(),
                         caption,
+                        snapshot.caption_above_media,
                         reply_to,
+                        self_destruct,
                         is_secret,
-                    )
-                }
-                // A GIF keeps its caption as an animation.
-                AttachmentKind::Video if att.extras.gif => send_local_animation(
-                    extra,
-                    chat_id,
-                    topic_id,
-                    path,
-                    &media_options::local_animation(&att.path),
-                    caption,
-                    snapshot.caption_above_media,
-                    reply_to,
-                    is_secret,
-                ),
-                AttachmentKind::Video => {
-                    let probe = video_probe.ok_or_else(|| {
-                        self.session.requests.take(extra);
-                        ConnectSendError::InvalidRequest
-                    })?;
-                    let json = send_video(
+                    ),
+                    AttachmentKind::Document => {
+                        let thumbnail = att.extras.file_thumbnail.as_ref().map(|thumb| {
+                            VideoNoteThumbnailSend {
+                                path: thumb.path.to_string_lossy().into_owned(),
+                                width: thumb.width,
+                                height: thumb.height,
+                            }
+                        });
+                        send_document(
+                            extra,
+                            chat_id,
+                            topic_id,
+                            path,
+                            thumbnail.as_ref(),
+                            caption,
+                            reply_to,
+                            is_secret,
+                        )
+                    }
+                    // A GIF keeps its caption as an animation.
+                    AttachmentKind::Video if att.extras.gif => send_local_animation(
                         extra,
                         chat_id,
                         topic_id,
                         path,
-                        &VideoSend {
-                            duration: probe.duration,
-                            width: probe.width,
-                            height: probe.height,
-                            supports_streaming: probe.supports_streaming,
-                            self_destruct,
-                        },
+                        &media_options::local_animation(&att.path),
                         caption,
                         snapshot.caption_above_media,
                         reply_to,
                         is_secret,
-                    );
-                    self.with_video_options_json(chat_id, att, json)
+                    ),
+                    AttachmentKind::Video => {
+                        let probe = video_probe.ok_or_else(|| {
+                            self.session.requests.take(extra);
+                            ConnectSendError::InvalidRequest
+                        })?;
+                        let json = send_video(
+                            extra,
+                            chat_id,
+                            topic_id,
+                            path,
+                            &VideoSend {
+                                duration: probe.duration,
+                                width: probe.width,
+                                height: probe.height,
+                                supports_streaming: probe.supports_streaming,
+                                self_destruct,
+                            },
+                            caption,
+                            snapshot.caption_above_media,
+                            reply_to,
+                            is_secret,
+                        );
+                        self.with_video_options_json(chat_id, att, json)
+                    }
+                    AttachmentKind::VideoNote => {
+                        let note = video_note.ok_or_else(|| {
+                            self.session.requests.take(extra);
+                            ConnectSendError::InvalidRequest
+                        })?;
+                        send_video_note(extra, chat_id, topic_id, path, &note, reply_to)
+                    }
                 }
-                AttachmentKind::VideoNote => {
-                    let note = video_note.ok_or_else(|| {
-                        self.session.requests.take(extra);
-                        ConnectSendError::InvalidRequest
-                    })?;
-                    send_video_note(extra, chat_id, topic_id, path, &note, reply_to)
-                }
-            },
+            }
             (None, None) => {
                 // Phase S1: secret chats never get link previews (TGX
                 // default-off; previews are generated on Telegram servers,

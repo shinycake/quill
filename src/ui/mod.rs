@@ -339,10 +339,10 @@ mod security;
 mod security_recovery;
 mod send_box_options;
 mod send_box_state;
-mod send_box_thumbnails;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod send_box_tests;
+mod send_box_thumbnails;
 mod send_button_ui;
 mod send_effects;
 mod send_fly;

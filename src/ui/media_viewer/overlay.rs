@@ -281,15 +281,16 @@ impl QuillApp {
                         && Some(path.as_path()) == thumb_path.as_deref()
                 })
                 .map(|(_, _, image)| ImageSource::from(image.clone()));
-            let source: Option<ImageSource> = frame.map(ImageSource::from).or(rotated).or_else(|| {
-                thumb_path.as_deref().map(|path| {
-                    if item.kind == MediaViewerKind::ImageFile {
-                        crate::ui::image_budget::full_picture(path)
-                    } else {
-                        ImageSource::from(path.to_path_buf())
-                    }
-                })
-            });
+            let source: Option<ImageSource> =
+                frame.map(ImageSource::from).or(rotated).or_else(|| {
+                    thumb_path.as_deref().map(|path| {
+                        if item.kind == MediaViewerKind::ImageFile {
+                            crate::ui::image_budget::full_picture(path)
+                        } else {
+                            ImageSource::from(path.to_path_buf())
+                        }
+                    })
+                });
             if let Some(source) = source {
                 img(source)
                     .id(("media-viewer-img", row_id))

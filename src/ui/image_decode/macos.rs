@@ -15,8 +15,8 @@ use objc2_core_foundation::{
     CGSize,
 };
 use objc2_core_graphics::{
-    CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo, CGImageByteOrderInfo,
-    kCGColorSpaceSRGB,
+    CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
+    CGImageByteOrderInfo, kCGColorSpaceSRGB,
 };
 use objc2_image_io::{
     CGImageSource, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
@@ -27,7 +27,8 @@ use objc2_image_io::{
 pub(super) fn decode(bytes: &[u8], size: DecodeSize) -> Result<image::RgbaImage, DecodeError> {
     let data = CFData::from_bytes(bytes);
     // SAFETY: `data` is a live CFData; no options dictionary is passed.
-    let source = unsafe { CGImageSource::with_data(&data, None) }.ok_or(DecodeError::Unsupported)?;
+    let source =
+        unsafe { CGImageSource::with_data(&data, None) }.ok_or(DecodeError::Unsupported)?;
     // SAFETY: `source` is a live image source.
     if unsafe { source.count() } == 0 {
         return Err(DecodeError::Unsupported);
@@ -40,7 +41,8 @@ pub(super) fn decode(bytes: &[u8], size: DecodeSize) -> Result<image::RgbaImage,
     // SAFETY: ImageIO's property dictionaries have CFString keys.
     let properties = unsafe { properties.cast_unchecked::<CFString, CFType>() };
     // SAFETY: reading framework constants.
-    let (width_key, height_key) = unsafe { (kCGImagePropertyPixelWidth, kCGImagePropertyPixelHeight) };
+    let (width_key, height_key) =
+        unsafe { (kCGImagePropertyPixelWidth, kCGImagePropertyPixelHeight) };
     let width = pixel_count(properties, width_key);
     let height = pixel_count(properties, height_key);
     area_allowed(width, height)?;
@@ -56,7 +58,12 @@ pub(super) fn decode(bytes: &[u8], size: DecodeSize) -> Result<image::RgbaImage,
             kCGImageSourceThumbnailMaxPixelSize,
         ]
     };
-    let values: [&CFType; 4] = [yes.as_ref(), yes.as_ref(), yes.as_ref(), max_pixels.as_ref()];
+    let values: [&CFType; 4] = [
+        yes.as_ref(),
+        yes.as_ref(),
+        yes.as_ref(),
+        max_pixels.as_ref(),
+    ];
     let options = CFDictionary::<CFString, CFType>::from_slices(&keys, &values);
     // SAFETY: `options` has the CFString keys and CFBoolean / CFNumber values
     // the thumbnail call documents.

@@ -52,7 +52,8 @@ const PROFILE_NCLX: c_int = i32::from_be_bytes(*b"nclx");
 struct Api {
     context_alloc: unsafe extern "C" fn() -> *mut Context,
     context_free: unsafe extern "C" fn(*mut Context),
-    read_from_memory: unsafe extern "C" fn(*mut Context, *const c_void, usize, *const c_void) -> HeifError,
+    read_from_memory:
+        unsafe extern "C" fn(*mut Context, *const c_void, usize, *const c_void) -> HeifError,
     primary_handle: unsafe extern "C" fn(*mut Context, *mut *mut Handle) -> HeifError,
     handle_release: unsafe extern "C" fn(*const Handle),
     handle_width: unsafe extern "C" fn(*const Handle) -> c_int,
@@ -62,7 +63,13 @@ struct Api {
     raw_profile: unsafe extern "C" fn(*const Handle, *mut c_void) -> HeifError,
     nclx_profile: unsafe extern "C" fn(*const Handle, *mut *mut NclxProfile) -> HeifError,
     nclx_free: unsafe extern "C" fn(*mut NclxProfile),
-    decode_image: unsafe extern "C" fn(*const Handle, *mut *mut Image, c_int, c_int, *const c_void) -> HeifError,
+    decode_image: unsafe extern "C" fn(
+        *const Handle,
+        *mut *mut Image,
+        c_int,
+        c_int,
+        *const c_void,
+    ) -> HeifError,
     image_release: unsafe extern "C" fn(*const Image),
     image_width: unsafe extern "C" fn(*const Image, c_int) -> c_int,
     image_height: unsafe extern "C" fn(*const Image, c_int) -> c_int,
@@ -172,7 +179,12 @@ pub(super) fn decode(bytes: &[u8], size: DecodeSize) -> Result<image::RgbaImage,
     // SAFETY: the context holds a parsed file; the handle lands in `owned`.
     unsafe { (api.primary_handle)(owned.context, &mut owned.handle) }.check()?;
     // SAFETY: `owned.handle` is a live handle.
-    let (width, height) = unsafe { ((api.handle_width)(owned.handle), (api.handle_height)(owned.handle)) };
+    let (width, height) = unsafe {
+        (
+            (api.handle_width)(owned.handle),
+            (api.handle_height)(owned.handle),
+        )
+    };
     area_allowed(
         u32::try_from(width).unwrap_or(0),
         u32::try_from(height).unwrap_or(0),
@@ -287,7 +299,11 @@ fn colour_profile(api: &Api, handle: *mut Handle) -> Profile {
     }
     let mut nclx: *mut NclxProfile = std::ptr::null_mut();
     // SAFETY: as above; the profile is freed below.
-    if unsafe { (api.nclx_profile)(handle, &mut nclx) }.check().is_err() || nclx.is_null() {
+    if unsafe { (api.nclx_profile)(handle, &mut nclx) }
+        .check()
+        .is_err()
+        || nclx.is_null()
+    {
         return Profile::Srgb;
     }
     // SAFETY: libheif returned a live profile; its first fields match

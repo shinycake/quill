@@ -143,7 +143,9 @@ pub(crate) fn sniff(bytes: &[u8], name: Option<&Path>) -> Sniffed {
         };
     }
     if bytes.starts_with(&[0xFF, 0x0A])
-        || bytes.starts_with(&[0, 0, 0, 0x0C, b'J', b'X', b'L', b' ', 0x0D, 0x0A, 0x87, 0x0A])
+        || bytes.starts_with(&[
+            0, 0, 0, 0x0C, b'J', b'X', b'L', b' ', 0x0D, 0x0A, 0x87, 0x0A,
+        ])
     {
         return Sniffed::JpegXl;
     }
@@ -176,7 +178,9 @@ fn iso_bmff_brand(bytes: &[u8]) -> Option<&[u8; 4]> {
     let major: &[u8; 4] = bytes.get(8..12)?.try_into().ok()?;
     let compatible = bytes.get(16..size.min(bytes.len()))?;
     let lists_avif = compatible
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .any(|brand| brand == b"avif" || brand == b"avis");
     if lists_avif && major != b"avif" && major != b"avis" {
         return Some(b"avif");

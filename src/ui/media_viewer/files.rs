@@ -82,8 +82,10 @@ impl QuillApp {
         let size = file.map(ParsedFile::display_size).unwrap_or(0);
         let too_large = size >= READ_BYTES_LIMIT;
         let shown_as_picture = item.kind == MediaViewerKind::ImageFile && !too_large;
-        if !matches!(item.kind, MediaViewerKind::ImageFile | MediaViewerKind::File)
-            || shown_as_picture
+        if !matches!(
+            item.kind,
+            MediaViewerKind::ImageFile | MediaViewerKind::File
+        ) || shown_as_picture
         {
             return None;
         }
@@ -98,7 +100,8 @@ fn picture_opens_in_app(path: &Path, doc: &DocumentContent) -> bool {
     if !opens_as_picture(&doc.file_name, &doc.mime_type) {
         return false;
     }
-    let small_enough = std::fs::metadata(path).is_ok_and(|meta| meta.len() < READ_BYTES_LIMIT as u64);
+    let small_enough =
+        std::fs::metadata(path).is_ok_and(|meta| meta.len() < READ_BYTES_LIMIT as u64);
     if !small_enough {
         return false;
     }
