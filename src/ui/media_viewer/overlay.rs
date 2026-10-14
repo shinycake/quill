@@ -553,6 +553,10 @@ impl QuillApp {
                 cx,
             )
         });
+        let caption = caption.map(|caption| {
+            let plate = media_w.max(240.).min(fit.0);
+            self.viewer_caption_plate(&item, caption, plate, window, cx)
+        });
         let sender_profile = self.viewer_sender_profile(&item);
         let saved_toast: Option<AnyElement> = self.viewer_saved_toast(cx);
         let icon_action =
@@ -865,19 +869,7 @@ impl QuillApp {
                     .flex_col()
                     .items_center()
                     .gap_2()
-                    .when_some(caption, |this, caption| {
-                        let plate = media_w.max(240.).min(fit.0);
-                        this.child(
-                            div()
-                                .w(px(plate))
-                                .max_w_full()
-                                .px_3()
-                                .py_2()
-                                .bg(gpui_kit::black().opacity(0.55))
-                                .text_color(gpui_kit::white())
-                                .child(caption),
-                        )
-                    })
+                    .children(caption)
                     // MED1: honest playback error (unsupported format /
                     // player failure) instead of a silent stall.
                     .when_some(self.playback.error.clone(), |this, err| {
