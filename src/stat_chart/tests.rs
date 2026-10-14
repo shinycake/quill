@@ -77,7 +77,6 @@ fn parses_columns_names_colors_and_hidden_lines() {
     assert!(chart.lines[1].hidden_on_start);
     assert!(chart.has_percentages);
     assert!(chart.week_format);
-    assert_eq!((chart.min, chart.max), (1, 6));
     assert_eq!(chart.default_zoom, (0, 2));
 }
 
@@ -126,14 +125,6 @@ fn bad_json_is_an_error() {
         parse_chart(r#"{"columns":[["y0",1]]}"#),
         Err(ChartError::Mismatched)
     );
-}
-
-#[test]
-fn flat_series_still_has_a_span() {
-    let chart = parse_chart(r#"{"columns":[["x",1,2],["y0",5,5]]}"#).unwrap();
-    assert_eq!((chart.min, chart.max), (0, 5));
-    let chart = parse_chart(r#"{"columns":[["x",1,2],["y0",0,0]]}"#).unwrap();
-    assert_eq!((chart.min, chart.max), (0, 1));
 }
 
 #[test]
@@ -239,7 +230,7 @@ fn percentages_add_up_to_one_hundred() {
 }
 
 #[test]
-fn a_pie_zooms_over_eight_days_around_the_point() {
+fn a_pie_zooms_over_the_days_around_the_point() {
     assert_eq!(local_zoom_window(60, 30), (26, 35));
     assert_eq!(local_zoom_window(60, 1), (0, 9));
     assert_eq!(local_zoom_window(60, 59), (51, 59));

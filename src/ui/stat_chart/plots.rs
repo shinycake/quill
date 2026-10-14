@@ -6,7 +6,10 @@
 use super::series::{Point, VALUE_INTERVALS, value_domain, value_extent, zoomable_point};
 use super::stacked_bars::StackedBars;
 use super::tooltip;
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::chart::{AreaChart, LineChart};
+use gpui_kit::component::plot::axis_gutter;
+use gpui_kit::component::plot::label::{TEXT_GAP, TEXT_SIZE};
 use gpui_kit::*;
 use quill::stat_chart::{ChartKind, StatChart, axis_caption, nice_domain};
 use std::cell::Cell;
@@ -16,6 +19,8 @@ use std::rc::Rc;
 const DATE_TICKS: usize = 5;
 /// Gap between the two plots of a two-scale chart.
 const DOUBLE_GAP: f32 = 16.;
+/// Width of a two-scale chart's value labels, wide enough for "12.5K".
+const LABEL_COLUMN: f32 = 44.;
 /// Rulers of each plot of a two-scale chart (half the height, half the
 /// rulers).
 const DOUBLE_INTERVALS: u32 = 3;
@@ -57,10 +62,10 @@ impl PlotInput {
         let enabled = self.enabled.clone();
         let hovered = self.hovered.clone();
         let (shares, zoomable) = (self.shares(), self.zoomable);
-        move |point: &Point, _: &mut Window, cx: &mut App| {
+        move |point: &Point, _: &mut Window, _: &mut App| {
             hovered.set(Some(point.index));
             let zoom = zoomable && zoomable_point(point);
-            tooltip::body(&chart, point, &enabled, shares, zoom, cx).into_any_element()
+            tooltip::body(&chart, point, &enabled, shares, zoom).into_any_element()
         }
     }
 }
@@ -74,10 +79,10 @@ fn caption(kind: ChartKind) -> impl Fn(f64) -> String + 'static {
 }
 
 /// The plot of `input`.
-pub(super) fn plot(input: PlotInput) -> AnyElement {
+pub(super) fn plot(input: PlotInput, cx: &App) -> AnyElement {
     match input.kind {
         ChartKind::StackBar => stacked_bars(input),
-        ChartKind::DoubleLinear if input.shown().len() == 2 => two_scales(input),
+        ChartKind::DoubleLinear if input.shown().len() == 2 => two_scales(input, cx),
         _ => areas(input),
     }
 }
@@ -127,32 +132,65 @@ fn areas(input: PlotInput) -> AnyElement {
     chart.into_any_element()
 }
 
-/// A two-scale chart: each line on its own plot and axis.
-fn two_scales(input: PlotInput) -> AnyElement {
+/// A two-scale chart: each line on its own plot and axis. The kit sizes
+/// a chart's value-label column from its own labels, so two plots on
+/// different scales would start at different x and their days would not
+/// line up; the labels sit in one fixed column here instead.
+fn two_scales(input: PlotInput, cx: &App) -> AnyElement {
     let shown = input.shown();
     let height = (input.height - DOUBLE_GAP) / 2.;
     let last = shown.len().saturating_sub(1);
+    let muted = cx.theme().muted_foreground;
     let mut column = div().flex().flex_col().gap(px(DOUBLE_GAP)).size_full();
     for (row, (k, color)) in shown.into_iter().enumerate() {
         let (min, max) = value_extent(&input.points, &input.enabled, k..k + 1)
             .map_or((0.0, 1.0), |(min, max)| {
                 nice_domain(min, max, DOUBLE_INTERVALS)
             });
+        let dates = row == last;
         let chart = LineChart::new(input.points.clone())
-            .id(ElementId::Name(format!("{}-line-{k}", input.id).into()))
+            .id(ElementId::Name(format!("{}-scale-{k}", input.id).into()))
             .x(|p: &Point| p.label.clone())
-            .x_axis(row == last)
+            .x_axis(dates)
             .x_tick_count(DATE_TICKS)
             .y(move |p: &Point| p.value(k))
             .stroke(color)
             .linear()
-            .y_axis(true)
+            .y_axis(false)
             .y_domain(min, max)
             .y_padding(0., 0.)
             .y_tick_count(DOUBLE_INTERVALS as usize + 1)
-            .y_tick_format(axis_caption)
             .tooltip_content(input.tooltip());
-        column = column.child(div().w_full().h(px(height)).child(chart));
+        // The rulers run over the plot, above the dates on the lower one.
+        let plot_height = if dates {
+            (height - axis_gutter(px(TEXT_SIZE))).max(0.)
+        } else {
+            height
+        };
+        let mut labels = div().relative().flex_none().w(px(LABEL_COLUMN)).h_full();
+        for i in 0..=DOUBLE_INTERVALS {
+            let share = f64::from(i) / f64::from(DOUBLE_INTERVALS);
+            let y = plot_height * share as f32;
+            let top = (y - TEXT_SIZE / 2.).clamp(0., (plot_height - TEXT_SIZE).max(0.));
+            labels = labels.child(
+                div()
+                    .absolute()
+                    .top(px(top))
+                    .right(px(TEXT_GAP * 2.))
+                    .text_size(px(TEXT_SIZE))
+                    .line_height(px(TEXT_SIZE))
+                    .text_color(muted)
+                    .child(axis_caption(max - (max - min) * share)),
+            );
+        }
+        column = column.child(
+            div()
+                .flex()
+                .w_full()
+                .h(px(height))
+                .child(labels)
+                .child(div().flex_1().min_w_0().h_full().child(chart)),
+        );
     }
     column.into_any_element()
 }

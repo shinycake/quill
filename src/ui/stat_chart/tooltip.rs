@@ -5,6 +5,7 @@
 //! the header for the point picked with the arrow keys.
 
 use super::series::Point;
+use crate::ui::chat_theme::text_muted;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -18,9 +19,7 @@ pub(super) fn body(
     enabled: &[bool],
     shares: bool,
     zoomable: bool,
-    cx: &App,
 ) -> Div {
-    let theme = cx.theme();
     let offset = quill::local_time::utc_offset_at(quill::local_time::now_unix());
     let title = chart.point_title(point.index, offset);
     let raw: Vec<i64> = chart
@@ -39,7 +38,7 @@ pub(super) fn body(
         header = header.child(
             Icon::new(IconName::ChevronRight)
                 .size(px(12.))
-                .text_color(theme.muted_foreground),
+                .text_color(text_muted()),
         );
     }
     let mut body = div()
@@ -74,7 +73,7 @@ pub(super) fn body(
         name = name.child(
             div()
                 .truncate()
-                .text_color(theme.muted_foreground)
+                .text_color(text_muted())
                 .child(line.name.clone()),
         );
         body = body.child(

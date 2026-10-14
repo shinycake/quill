@@ -36,8 +36,11 @@ impl QuillApp {
 /// The chart the page starts at (`QUILL_DEMO_FIRST_CHART`), 0 for the
 /// whole page.
 pub(super) fn first_chart() -> usize {
-    std::env::var("QUILL_DEMO_FIRST_CHART")
-        .ok()
-        .and_then(|n| n.parse().ok())
-        .unwrap_or(0)
+    static FIRST: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *FIRST.get_or_init(|| {
+        std::env::var("QUILL_DEMO_FIRST_CHART")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    })
 }

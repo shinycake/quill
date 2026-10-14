@@ -34,7 +34,10 @@ pub(super) fn footer(
         ChartKind::DoubleLinear => (0., 1.),
         _ => value_domain(&points, ChartKind::Linear, enabled, lines),
     };
-    let points_for_scale = points.clone();
+    // Each line's own extent, for a two-scale preview.
+    let extents: Vec<(f64, f64)> = (0..enabled.len())
+        .map(|k| value_extent(&points, enabled, k..k + 1).unwrap_or((0., 1.)))
+        .collect();
     let stacked = matches!(kind, ChartKind::StackBar | ChartKind::StackLinear);
     let mut preview = AreaChart::new(points)
         .id(ElementId::Name(format!("{id}-preview").into()))
@@ -55,8 +58,7 @@ pub(super) fn footer(
         }
     } else if kind == ChartKind::DoubleLinear {
         for (k, color) in shown {
-            let (low, high) =
-                value_extent(&points_for_scale, enabled, k..k + 1).unwrap_or((0., 1.));
+            let (low, high) = extents.get(k).copied().unwrap_or((0., 1.));
             let span = (high - low).max(f64::EPSILON);
             preview = preview
                 .y(move |p: &Point| (p.value(k) - low) / span)

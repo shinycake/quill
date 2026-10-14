@@ -86,8 +86,8 @@ fn every_chart_kind_draws_and_failed_graphs_stay_out(cx: &mut TestAppContext) {
         assert!(plot.size.width > px(200.), "{id} has the panel's width");
     }
     // The growth chart has one line: no legend. Two lines: a legend.
-    assert!(find(vcx, &format!("stats-{CHANNEL}-growth-line-0")).is_none());
-    assert!(find(vcx, &format!("stats-{CHANNEL}-followers-line-1")).is_some());
+    assert!(find(vcx, &format!("stats-{CHANNEL}-growth-line-y0")).is_none());
+    assert!(find(vcx, &format!("stats-{CHANNEL}-followers-line-y1")).is_some());
     // A graph the server could not build is left out.
     assert!(find(vcx, &format!("stats-{CHANNEL}-join-sources-plot")).is_none());
     assert!(find(vcx, &format!("stats-{CHANNEL}-iv-plot")).is_none());
@@ -130,7 +130,7 @@ fn arrow_keys_read_out_a_point_and_the_legend_and_range_respond(cx: &mut TestApp
         "escape leaves the panel open"
     );
     // Switching a line off keeps the chart drawing.
-    let chip = bounds(vcx, &format!("stats-{CHANNEL}-followers-line-0"));
+    let chip = bounds(vcx, &format!("stats-{CHANNEL}-followers-line-y0"));
     vcx.simulate_click(chip.center(), Modifiers::default());
     frames(vcx);
     bounds(vcx, &format!("stats-{CHANNEL}-followers-plot"));

@@ -105,8 +105,6 @@ pub struct ChartLine {
     /// The JSON's own color, `0xRRGGBB`.
     pub rgb: Option<u32>,
     pub y: Vec<i64>,
-    pub min: i64,
-    pub max: i64,
     /// Listed in the JSON's `hidden`: starts switched off in the legend.
     pub hidden_on_start: bool,
 }
@@ -140,8 +138,6 @@ pub struct StatChart {
     /// The tooltip names a week, not a day (`xTooltipFormatter` with
     /// `'week'`).
     pub week_format: bool,
-    pub min: i64,
-    pub max: i64,
     /// The currency the `yTickFormatter` names (revenue graphs).
     pub currency: ChartCurrency,
 }
@@ -192,8 +188,6 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
                 name: String::new(),
                 color_key: None,
                 rgb: None,
-                min: y.iter().copied().min().unwrap_or(i64::MAX),
-                max: y.iter().copied().max().unwrap_or(0).max(0),
                 y,
                 hidden_on_start: hidden.contains(&id),
             });
@@ -215,15 +209,6 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
         }
         if let Some(name) = names.and_then(|n| n.get(&line.key)).and_then(Value::as_str) {
             line.name = name.replace('-', "\u{2014}");
-        }
-    }
-    let mut min = lines.iter().map(|l| l.min).min().unwrap_or(i64::MAX);
-    let mut max = lines.iter().map(|l| l.max).max().unwrap_or(0);
-    if min == max {
-        if min != 0 {
-            min = 0;
-        } else {
-            max = 1;
         }
     }
     let subchart = root.get("subchart").and_then(Value::as_object);
@@ -251,8 +236,6 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
             .get("xTooltipFormatter")
             .and_then(Value::as_str)
             .is_some_and(|f| f.contains("'week'")),
-        min,
-        max,
         currency: currency_of(root),
     })
 }

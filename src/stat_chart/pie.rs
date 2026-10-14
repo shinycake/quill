@@ -51,8 +51,9 @@ pub fn pie_parts(sums: &[f64], round: bool) -> Vec<PiePart> {
 }
 
 /// The days a percentage chart's pie zooms over around point `index`
-/// of `len` (tdesktop `processLocalZoom`: eight days, the clicked one
-/// in the middle where the data allows), as inclusive x indices.
+/// of `len` (tdesktop `processLocalZoom`: `kLimitLength / 2` points
+/// before it and one more after, so ten points where the data allows,
+/// fewer at the edges), as inclusive x indices.
 pub fn local_zoom_window(len: usize, index: usize) -> (usize, usize) {
     let Some(back) = len.checked_sub(1) else {
         return (0, 0);

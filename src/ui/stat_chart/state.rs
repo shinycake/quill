@@ -4,11 +4,40 @@
 //! point the pointer or the keyboard is on, and the pie a percentage
 //! chart zooms into (tdesktop `ChartWidget`, `processLocalZoom`).
 
+use super::series::{Point, points};
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::*;
 use quill::stat_chart::{ChartKind, StatChart, local_zoom_window, toggle_line};
 use std::cell::Cell;
 use std::rc::Rc;
+
+/// Points built for one set of lines and one range.
+#[derive(Default)]
+struct PointsCache {
+    key: Option<(Vec<bool>, usize, usize)>,
+    points: Rc<Vec<Point>>,
+}
+
+impl PointsCache {
+    fn get(
+        &mut self,
+        chart: &StatChart,
+        kind: ChartKind,
+        enabled: &[bool],
+        first: usize,
+        last: usize,
+    ) -> Rc<Vec<Point>> {
+        let fresh = self
+            .key
+            .as_ref()
+            .is_some_and(|(on, a, b)| on.as_slice() == enabled && *a == first && *b == last);
+        if !fresh {
+            self.points = Rc::new(points(chart, kind, enabled, first, last));
+            self.key = Some((enabled.to_vec(), first, last));
+        }
+        self.points.clone()
+    }
+}
 
 /// A percentage chart zoomed into a pie of a few days.
 pub(super) struct PieZoom {
@@ -32,6 +61,10 @@ pub(super) struct ChartState {
     pub(super) key_point: Option<usize>,
     pub(super) pie: Option<PieZoom>,
     pub(super) focus: FocusHandle,
+    /// The visible points and the whole period's, built once per change
+    /// of lines or range rather than on every hover frame.
+    shown_points: PointsCache,
+    all_points: PointsCache,
     _range_changes: Option<Subscription>,
     _pie_changes: Option<Subscription>,
 }
@@ -81,6 +114,8 @@ impl ChartState {
             key_point: None,
             pie: None,
             focus: cx.focus_handle(),
+            shown_points: PointsCache::default(),
+            all_points: PointsCache::default(),
             _range_changes: None,
             _pie_changes: None,
         };
@@ -122,6 +157,21 @@ impl ChartState {
             self._pie_changes = None;
             self.reset_range(cx);
         }
+        self.shown_points = PointsCache::default();
+        self.all_points = PointsCache::default();
+    }
+
+    /// The points from `first` to `last` with the current lines.
+    pub(super) fn shown_points(&mut self, first: usize, last: usize) -> Rc<Vec<Point>> {
+        self.shown_points
+            .get(&self.chart, self.kind, &self.enabled, first, last)
+    }
+
+    /// The whole period's points with the current lines.
+    pub(super) fn all_points(&mut self) -> Rc<Vec<Point>> {
+        let back = self.chart.x.len().saturating_sub(1);
+        self.all_points
+            .get(&self.chart, self.kind, &self.enabled, 0, back)
     }
 
     /// The first and last point shown.

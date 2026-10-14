@@ -202,12 +202,14 @@ fn zoom_into(
     if !positive {
         return;
     }
-    if let Some(on_zoom) = on_zoom {
-        if let Some(x) = chart.x.get(index) {
-            on_zoom(*x as i64, window, cx);
-        }
-    } else if state.read(cx).zooms_locally() {
+    // A percentage chart zooms into its own pie before asking the server
+    // (tdesktop `ChartWidget::processLocalZoom` comes first).
+    if state.read(cx).zooms_locally() {
         state.update(cx, |s, cx| s.enter_pie(index, cx));
+    } else if let Some(on_zoom) = on_zoom
+        && let Some(x) = chart.x.get(index)
+    {
+        on_zoom(*x as i64, window, cx);
     }
 }
 
@@ -235,6 +237,10 @@ impl StatChartView {
                 s.zooms_locally(),
             )
         };
+        let (shown_points, all_points) = state.update(cx, |s, _| {
+            let all = s.range.is_some().then(|| s.all_points());
+            (s.shown_points(visible.0, visible.1), all)
+        });
         let zoomable = self.on_zoom.is_some() || local;
         let subtitle: SharedString = match (pie_days, self.day_title.clone()) {
             (Some((first, last)), _) => chart.range_title(first, last).into(),
@@ -265,16 +271,19 @@ impl StatChartView {
 
         let plot = match pie_days {
             Some(days) => pie::pie(&self.id, &chart, &enabled, days),
-            None => plots::plot(PlotInput {
-                id: self.id.clone(),
-                chart: chart.clone(),
-                kind,
-                points: points(&chart, kind, &enabled, visible.0, visible.1),
-                enabled: enabled.clone(),
-                hovered: hovered.clone(),
-                zoomable,
-                height: PLOT_HEIGHT,
-            }),
+            None => plots::plot(
+                PlotInput {
+                    id: self.id.clone(),
+                    chart: chart.clone(),
+                    kind,
+                    points: shown_points.as_ref().clone(),
+                    enabled: enabled.clone(),
+                    hovered: hovered.clone(),
+                    zoomable,
+                    height: PLOT_HEIGHT,
+                },
+                cx,
+            ),
         };
         let id = self.id.clone();
         let mut section = div()
@@ -289,7 +298,7 @@ impl StatChartView {
         }
         if let Some(slider) = pie_slider {
             section = section.child(Slider::new(&slider));
-        } else if let Some(range) = range {
+        } else if let (Some(range), Some(all_points)) = (range, all_points) {
             let shown = chart
                 .lines
                 .iter()
@@ -297,11 +306,10 @@ impl StatChartView {
                 .filter(|(k, _)| enabled.get(*k).copied().unwrap_or(true))
                 .map(|(k, line)| (k, rgb(line.color()).into()))
                 .collect();
-            let back = chart.x.len().saturating_sub(1);
             section = section.child(footer::footer(
                 &id,
                 kind,
-                points(&chart, kind, &enabled, 0, back),
+                all_points.as_ref().clone(),
                 &enabled,
                 shown,
                 visible,
@@ -351,6 +359,13 @@ impl StatChartView {
                         hovered.set(None);
                     }
                 }
+            })
+            // Every move redraws the plot, whose tooltip sets the point
+            // again; over the dates or rulers there is none, so a click
+            // there zooms nowhere.
+            .on_mouse_move({
+                let hovered = hovered.clone();
+                move |_, _, _| hovered.set(None)
             })
             .on_mouse_down(MouseButton::Left, {
                 let focus = focus.clone();
@@ -430,9 +445,11 @@ impl StatChartView {
             .border_color(theme.border)
             .bg(theme.popover)
             .text_color(theme.popover_foreground)
-            .children(point.first().map(|p| {
-                tooltip::body(chart, p, enabled, shares, zoomable && zoomable_point(p), cx)
-            }))
+            .children(
+                point.first().map(|p| {
+                    tooltip::body(chart, p, enabled, shares, zoomable && zoomable_point(p))
+                }),
+            )
     }
 }
 
@@ -458,10 +475,10 @@ fn legend(
             .border_2()
             .border_color(color)
             .when(on, |d| d.bg(color));
-        let item_id = format!("{id}-line-{index}");
+        let item_id = format!("{id}-line-{}", line.key);
         row = row.child(
             div().debug_selector(move || item_id.clone()).child(
-                Toggle::new(SharedString::from(format!("{id}-line-{index}")))
+                Toggle::new(SharedString::from(format!("{id}-line-{}", line.key)))
                     .small()
                     .outline()
                     .checked(on)
