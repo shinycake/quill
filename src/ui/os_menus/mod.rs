@@ -14,7 +14,6 @@
 //! show changes: a once-a-second check reads the account registry off the UI
 //! thread and compares the result with what is installed.
 #![deny(clippy::indexing_slicing)]
-
 // The Dock and Window menus are macOS-only; Windows uses part of this.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 

@@ -85,7 +85,7 @@ fn path_from_line(line: &str) -> Option<PathBuf> {
         let decoded = {
             // `/C:/Users/a` -> `C:/Users/a`.
             let bytes = decoded.as_bytes();
-            if bytes.len() > 2 && bytes[0] == b'/' && bytes[2] == b':' {
+            if matches!(bytes, [b'/', _, b':', ..]) {
                 decoded.get(1..).unwrap_or_default().to_string()
             } else {
                 decoded

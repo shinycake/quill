@@ -8,7 +8,6 @@
 //! chroma plane, each as a plain transpose, into a new buffer of the turned
 //! size.
 #![deny(clippy::indexing_slicing)]
-
 // The buffer turns serve the macOS AVPlayer path only.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
