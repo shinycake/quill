@@ -1,6 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
 // drawing returns an error instead of panicking when device-loss recovery
-// failed, and every recovery attempt keeps DirectComposition. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// failed, and every recovery attempt keeps DirectComposition; HDR stills and the scRGB
+// swap chain (`hdr_surfaces`). See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
     sync::{Arc, OnceLock},
@@ -23,6 +24,7 @@ use windows::{
 };
 
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
+use hdr_surfaces::{HdrSurfaces, OutputMode};
 use crate::*;
 use gpui::*;
 
@@ -31,6 +33,9 @@ const RENDER_TARGET_FORMAT: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
 // This configuration is used for MSAA rendering on paths only, and it's guaranteed to be supported by DirectX 11.
 const PATH_MULTISAMPLE_COUNT: u32 = 4;
 const MAX_INSTANCE_BUFFER_SIZE: usize = 256 * 1024 * 1024;
+
+#[path = "hdr_surfaces.rs"]
+mod hdr_surfaces;
 
 pub(crate) struct FontInfo {
     pub gamma_ratios: [f32; 4],
@@ -51,6 +56,11 @@ pub(crate) struct DirectXRenderer {
     /// device-loss attempt, so every retry after a failed one lost DirectComposition.
     disable_direct_composition: bool,
     font_info: &'static FontInfo,
+    /// Quill: what the swap chain holds (see `hdr_surfaces`).
+    output: OutputMode,
+    /// Quill: switching to HDR output failed; not retried until the window
+    /// releases it.
+    hdr_failed: bool,
 
     width: u32,
     height: u32,
@@ -98,6 +108,7 @@ struct DirectXRenderPipelines {
     mono_sprites: PipelineState<MonochromeSprite>,
     subpixel_sprites: PipelineState<SubpixelSprite>,
     poly_sprites: PipelineState<PolychromeSprite>,
+    hdr_surfaces: HdrSurfaces,
 }
 
 struct DirectXGlobalElements {
@@ -202,6 +213,8 @@ impl DirectXRenderer {
             direct_composition,
             disable_direct_composition,
             font_info: Self::get_font_info(),
+            output: OutputMode::SDR,
+            hdr_failed: false,
             width: 1,
             height: 1,
             skip_draws: false,
@@ -233,7 +246,9 @@ impl DirectXRenderer {
                 grayscale_enhanced_contrast: self.font_info.grayscale_enhanced_contrast,
                 subpixel_enhanced_contrast: self.font_info.subpixel_enhanced_contrast,
                 is_bgr: self.font_info.is_bgr as u32,
-                _pad: [0; 3],
+                hdr_output: self.output.hdr as u32,
+                output_scale: self.output.scale,
+                _pad: 0,
             }],
         )?;
         unsafe {
@@ -339,6 +354,8 @@ impl DirectXRenderer {
         self.globals = globals;
         self.pipelines = pipelines;
         self.direct_composition = direct_composition;
+        // The new swap chain is 8-bit; the next frame switches again if needed.
+        self.output = OutputMode::SDR;
         self.skip_draws = true;
         Ok(())
     }
@@ -353,6 +370,7 @@ impl DirectXRenderer {
             // and so likely do not have the textures anymore that are required for drawing
             return Ok(());
         }
+        self.sync_output_mode();
         self.render(scene, background_appearance)?;
         self.present()
     }
@@ -368,7 +386,7 @@ impl DirectXRenderer {
         background_appearance: WindowBackgroundAppearance,
     ) -> Result<()> {
         self.pre_draw(&match background_appearance {
-            WindowBackgroundAppearance::Opaque => [1.0f32; 4],
+            WindowBackgroundAppearance::Opaque => self.output.opaque_clear(),
             _ => [0.0f32; 4],
         })?;
         self.upload_scene_buffers(scene)?;
@@ -417,6 +435,11 @@ impl DirectXRenderer {
                 )
             })?;
         }
+        // Quill: a frame without HDR stills frees their textures (the viewer
+        // closed), so they never outlive what's on screen.
+        if scene.surfaces.is_empty() {
+            self.pipelines.hdr_surfaces.release();
+        }
         Ok(())
     }
 
@@ -437,6 +460,11 @@ impl DirectXRenderer {
         anyhow::ensure!(
             !self.skip_draws,
             "render_to_image unavailable while recovering from a lost device"
+        );
+        // Quill: the readback below is 8-bit only.
+        anyhow::ensure!(
+            !self.output.hdr,
+            "render_to_image unavailable while the swap chain is HDR"
         );
         self.render(scene, background_appearance)?;
 
@@ -525,7 +553,7 @@ impl DirectXRenderer {
                     BUFFER_COUNT as u32,
                     width,
                     height,
-                    RENDER_TARGET_FORMAT,
+                    self.output.format(),
                     DXGI_SWAP_CHAIN_FLAG(0),
                 )
                 .context("Failed to resize swap chain")?;
@@ -833,7 +861,8 @@ impl DirectXRenderer {
         if surfaces.is_empty() {
             return Ok(());
         }
-        Ok(())
+        let devices = self.devices.as_ref().context("devices missing")?;
+        self.pipelines.hdr_surfaces.draw(devices, surfaces)
     }
 
     pub(crate) fn gpu_specs(&self) -> Result<GpuSpecs> {
@@ -1013,6 +1042,7 @@ impl DirectXRenderPipelines {
             16,
             create_blend_state(device)?,
         )?;
+        let hdr_surfaces = HdrSurfaces::new(device)?;
 
         Ok(Self {
             shadow_pipeline,
@@ -1023,6 +1053,7 @@ impl DirectXRenderPipelines {
             mono_sprites,
             subpixel_sprites,
             poly_sprites,
+            hdr_surfaces,
         })
     }
 }
@@ -1089,7 +1120,10 @@ struct GlobalParams {
     grayscale_enhanced_contrast: f32,
     subpixel_enhanced_contrast: f32,
     is_bgr: u32,
-    _pad: [u32; 3],
+    // Quill: see `GlobalParams` in shaders.hlsl.
+    hdr_output: u32,
+    output_scale: f32,
+    _pad: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1299,6 +1333,8 @@ struct PathSprite {
 
 impl Drop for DirectXRenderer {
     fn drop(&mut self) {
+        // Quill: a later window reusing the handle starts in SDR.
+        crate::hdr_output::forget(self.hwnd);
         #[cfg(debug_assertions)]
         if let Some(devices) = &self.devices {
             report_live_objects(&devices.device).ok();
@@ -1733,6 +1769,7 @@ pub(crate) mod shader_resources {
         SubpixelSprite,
         PolychromeSprite,
         EmojiRasterization,
+        HdrSurface,
     }
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1809,6 +1846,10 @@ pub(crate) mod shader_resources {
                 ShaderModule::EmojiRasterization => match target {
                     ShaderTarget::Vertex => EMOJI_RASTERIZATION_VERTEX_BYTES,
                     ShaderTarget::Fragment => EMOJI_RASTERIZATION_FRAGMENT_BYTES,
+                },
+                ShaderModule::HdrSurface => match target {
+                    ShaderTarget::Vertex => HDR_SURFACE_VERTEX_BYTES,
+                    ShaderTarget::Fragment => HDR_SURFACE_FRAGMENT_BYTES,
                 },
             };
             Self { inner: bytes }
@@ -1897,6 +1938,7 @@ pub(crate) mod shader_resources {
                 ShaderModule::SubpixelSprite => "subpixel_sprite",
                 ShaderModule::PolychromeSprite => "polychrome_sprite",
                 ShaderModule::EmojiRasterization => "emoji_rasterization",
+                ShaderModule::HdrSurface => "hdr_surface",
             }
         }
     }

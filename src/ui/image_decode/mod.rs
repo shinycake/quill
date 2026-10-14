@@ -30,6 +30,8 @@
 use std::path::Path;
 
 mod rust_codecs;
+#[cfg(any(windows, test))]
+pub(crate) use rust_codecs::to_srgb;
 
 #[cfg(not(windows))]
 mod libheif;

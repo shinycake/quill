@@ -1,5 +1,6 @@
 //! The HDR still tone map, a twin of `hdr_tone_map` in the vendored Metal
-//! shader (`third_party/gpui-pre-apple/src/shaders.metal`). The GPU runs the
+//! and DirectX shaders (`third_party/gpui-pre-apple/src/shaders.metal`,
+//! `third_party/gpui-pre-windows/src/shaders.hlsl`). The GPU runs the
 //! shader; this copy pins the curve's shape in tests, so a change to one
 //! side shows up as a failing test when the other is updated to match.
 

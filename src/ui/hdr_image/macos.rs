@@ -305,22 +305,7 @@ pub(super) fn peak_channel(halves: &[u16], row_len: usize, width: usize) -> f32 
     half_to_f32(peak)
 }
 
-/// IEEE 754 binary16 to f32.
-pub(super) fn half_to_f32(bits: u16) -> f32 {
-    let exponent = (bits >> 10) & 0x1f;
-    let mantissa = f32::from(bits & 0x3ff);
-    let magnitude = match exponent {
-        0 => mantissa * 2.0_f32.powi(-24),
-        0x1f if mantissa == 0.0 => f32::INFINITY,
-        0x1f => f32::NAN,
-        _ => (1.0 + mantissa / 1024.0) * 2.0_f32.powi(i32::from(exponent) - 15),
-    };
-    if bits & 0x8000 != 0 {
-        -magnitude
-    } else {
-        magnitude
-    }
-}
+pub(super) use super::half_float::half_to_f32;
 
 /// The display headroom of the screen the window is on: what it shows
 /// now and what it could show.

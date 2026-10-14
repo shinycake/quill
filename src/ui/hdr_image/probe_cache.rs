@@ -30,7 +30,7 @@ static PROBED: LazyLock<Mutex<HashMap<PathBuf, Entry>>> =
 /// background probe and answers `false`; the bubble repaints when it
 /// lands.
 pub(crate) fn has_hdr(path: &Path, cx: &mut Context<QuillApp>) -> bool {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(any(target_os = "macos", windows)) {
         return false;
     }
     let Ok(mut probed) = PROBED.lock() else {

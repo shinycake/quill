@@ -130,3 +130,39 @@ DirectX start no longer crashes the app (step 7 of
 
 Type-checked with `cargo check --target x86_64-pc-windows-msvc` on macOS;
 not built or run on Windows. See `docs/decisions/gpui-fork-panics.md`.
+
+The Quill project changed it in 2026 to draw HDR stills (CPU pixels in a
+`SurfaceFrame`, from the vendored gpui-pre core) in HDR on displays with
+Windows HDR on (`docs/decisions/hdr-viewer-windows.md`):
+
+- `src/hdr_output.rs` (new): `set_hdr_output(hwnd, on)` records that a
+  window wants HDR output; `display_info(hwnd)` reads whether its display is
+  in HDR mode (`IDXGIOutput6::GetDesc1`, colour space
+  `RGB_FULL_G2084_NONE_P2020`), its peak (`MaxLuminance`) and the user's SDR
+  white (`DisplayConfigGetDeviceInfo`, `DISPLAYCONFIG_SDR_WHITE_LEVEL`),
+  cached for a second.
+- `src/hdr_surfaces.rs` (new, a child module of `directx_renderer`): uploads
+  each `SurfaceFrame` into an `R16G16B16A16_FLOAT` texture with a mip chain
+  (cached by frame id, last two), draws it with the `hdr_surface` shaders,
+  and switches the swap chain to `R16G16B16A16_FLOAT` +
+  `DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709` (scRGB) while the window wants
+  HDR output and its display is in HDR mode, and back to 8-bit sRGB
+  otherwise. A failed switch is logged and not retried until the window
+  releases HDR output.
+- `src/directx_renderer.rs`: `draw_surfaces` draws through
+  `hdr_surfaces`; `draw` syncs the output mode first; `GlobalParams` carries
+  `hdr_output` and `output_scale` (SDR white in scRGB units); resizing keeps
+  the current format; device loss resets to 8-bit; the opaque clear colour
+  is SDR white in either mode; `render_to_image` refuses an HDR swap chain.
+- `src/shaders.hlsl`: every pixel shader that writes the swap chain ends
+  with `to_output` (exact sRGB decode times `output_scale` in scRGB, the
+  colour unchanged otherwise), so the UI looks the same in both modes; path
+  rasterization into the 8-bit intermediate is unchanged. New
+  `hdr_surface_vertex` / `hdr_surface_fragment`: unpremultiply, tone-map to
+  the frame's headroom (the curve of the Metal shader) and write scRGB, or
+  clip to SDR white on an 8-bit swap chain.
+- `build.rs` compiles the `hdr_surface` module; `Cargo.toml` adds the
+  `Win32_Devices_Display` feature.
+
+Type-checked and linted with `cargo clippy --target x86_64-pc-windows-msvc`
+on macOS and the HLSL validated with glslang; not run on Windows.

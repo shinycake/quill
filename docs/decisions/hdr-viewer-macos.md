@@ -7,7 +7,7 @@ MacBooks, Pro Display XDR, HDR external screens) the viewer now shows the
 HDR rendition: highlights go brighter than UI white, the way Photos shows
 them. Everything else in the window looks the same.
 
-Design: `quill-tools/designs/hdr-viewer.md`. Windows is the next PR.
+Design: `quill-tools/designs/hdr-viewer.md`. Windows: `hdr-viewer-windows.md`.
 Linux keeps the SDR picture for now (below).
 
 ## What the user sees
@@ -112,9 +112,9 @@ an answer is "yes". A file it couldn't open is asked again after 30 s.
 
 ## Other platforms
 
-- **Windows**: next PR. GPUI's `PaintSurface` carries a macOS-only payload
-  today; it needs a cross-platform one, a DirectX HDR surface pipeline and
-  an scRGB float swapchain while Windows HDR is on.
+- **Windows**: gain-map JPEG and HDR JPEG XL, through a cross-platform
+  surface payload, a DirectX HDR surface pipeline and an scRGB swap chain
+  while Windows HDR is on (`hdr-viewer-windows.md`).
 - **Linux**: shows the SDR rendition. Wayland and X11 compositors don't
   offer one extended-range surface path Quill can rely on yet. Every
   `hdr_image` entry point answers "SDR" off macOS, so nothing else changes.

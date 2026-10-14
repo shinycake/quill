@@ -309,7 +309,18 @@ fn frame_element(frame: &super::Frame, (w, h): (f32, f32)) -> Option<AnyElement>
     )
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn frame_element(frame: &super::Frame, (w, h): (f32, f32)) -> Option<AnyElement> {
+    Some(
+        gpui_kit::surface(frame.surface())
+            .w(px(w))
+            .h(px(h))
+            .object_fit(ObjectFit::Contain)
+            .into_any_element(),
+    )
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn frame_element(frame: &super::Frame, _fit: (f32, f32)) -> Option<AnyElement> {
     match *frame {}
 }

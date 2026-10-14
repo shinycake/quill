@@ -67,7 +67,7 @@ fn finish(
 /// Convert pixels in the colour space of `icc` to sRGB in place. A profile
 /// moxcms cannot use (damaged, or CMYK / gray for RGB pixels) leaves the
 /// pixels as they are, which is what other apps show for such files too.
-pub(super) fn to_srgb(pixels: &mut [u8], layout: moxcms::Layout, icc: &[u8]) {
+pub(crate) fn to_srgb(pixels: &mut [u8], layout: moxcms::Layout, icc: &[u8]) {
     let Ok(source) = moxcms::ColorProfile::new_from_slice(icc) else {
         return;
     };
